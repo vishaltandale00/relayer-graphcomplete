@@ -224,7 +224,14 @@ describe("simulated-user MCP server", () => {
         layerId: "layer-1",
         nodeId: "node-1",
         evidence: { context: ["shot-node"], detail: ["shot-node"] },
-        score: { nodeId: "node-1", content: 4, actionAllocation: 2, actionDelivery: null, recursiveQuality: null },
+        score: {
+          nodeId: "node-1",
+          content: { score: 6, reason: "Useful concise result.", evidence: ["shot-node"] },
+          actionAllocation: { score: 4, reason: "A material expansion is absent.", evidence: ["shot-node"] },
+          actionDelivery: { score: null, reason: "There is no authored destination.", evidence: ["shot-node"] },
+          recursiveQuality: { score: null, reason: "There is no authored expansion.", evidence: ["shot-node"] },
+          polish: { score: 8, reason: "The node renders cleanly.", evidence: ["shot-node"] },
+        },
         semantic: {
           nodeId: "node-1",
           meaning: "The node reports a completed repair.",

@@ -15,7 +15,7 @@ import {
   type JudgeThreadStartRequest,
 } from "../src/simulated-user/judge-runner.js";
 import { inventoryReviewSubjects } from "../src/simulated-user/inventory.js";
-import { GRAPH_PRESENTATION_RUBRIC_V5 } from "../src/simulated-user/rubric.js";
+import { GRAPH_PRESENTATION_RUBRIC_V10 } from "../src/simulated-user/rubric.js";
 import { IncrementalReviewStore } from "../src/simulated-user/review-store.js";
 import type { LayerReview, NodeReview, TurnReview } from "../src/simulated-user/contracts.js";
 
@@ -28,7 +28,7 @@ describe("simulated-user Codex judge runner", () => {
     });
     const prompt = buildRecursivePresentationJudgePrompt(
       "Explain the completed repair.",
-      GRAPH_PRESENTATION_RUBRIC_V5,
+      GRAPH_PRESENTATION_RUBRIC_V10,
       inventory,
     );
 
@@ -36,7 +36,25 @@ describe("simulated-user Codex judge runner", () => {
     expect(prompt).toContain("missingActionOpportunity");
     expect(prompt).toContain("distinct unanswered user question");
     expect(prompt).toContain("Generic requests for more detail");
-    expect(prompt).toContain("caps final recursive_coherence at 3");
+    expect(prompt).toContain("caps final recursive_coherence, navigation_value, and presentation_quality at 6");
+    expect(prompt).toContain("Read-only shell and filesystem inspection are available");
+    expect(prompt).toContain("what would a user reasonably want to inspect next");
+    expect(prompt).toContain("what would a user reasonably want to do next");
+    expect(prompt).toContain("Do not impose a minimum number of actions");
+    expect(prompt).toContain("a visually arbitrary row, line, ring, or hub");
+    expect(prompt).toContain("Embedded screenshots and image banners are not currently supported");
+    expect(prompt).toContain("This is the human-experience judge, not the function or task-outcome judge");
+    expect(prompt).toContain("can neither earn nor remove human-experience credit");
+    expect(prompt).toContain("deserves little relationship_clarity credit");
+    expect(prompt).toContain("Never lower the ceiling for artifact defects");
+    expect(prompt).toContain("Score polish as a separate basic rendered-integrity dimension");
+    expect(prompt).toContain("A default renderer may be polished while the graph remains semantically weak");
+    expect(prompt).toContain("Never use polish to raise or offset content");
+    expect(prompt).toContain("erase polish-only observations from the evidence");
+    expect(prompt).toContain("A clean textual handoff split across static cards earns no semantic or interactive credit merely for polish");
+    expect(prompt).toContain("Do not treat adjacency or reading order as relational evidence");
+    expect(prompt).toContain("Two or more material missing opportunities cap all three at 4");
+    expect(prompt).not.toContain("Shell, filesystem, web, network, graph mutation, and invoke execution are unavailable");
   });
 
   it("starts a locked-down injected Codex thread and records an immutable audit artifact", async () => {
@@ -132,7 +150,7 @@ describe("simulated-user Codex judge runner", () => {
       schemaVersion: 1,
       executionId: "execution-1",
       judge: { model: "gpt-test", modelReasoningEffort: "high" },
-      prompt: { version: "simulated-user-judge-prompt-v4" },
+      prompt: { version: "simulated-user-judge-prompt-v10" },
       rubric: { rubricVersion: "simulated-user-rubric-v1" },
       codexThreadId: "codex-thread-1",
       finalResponse: "Review submitted.",

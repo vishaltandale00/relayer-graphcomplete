@@ -10,12 +10,14 @@ import {
   OFETCH_RETRY_METHODS_CASE_ID,
   SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
   TRUE_MYTH_INSPECT_BOTH_CASE_ID,
+  calibrationAutonomousCaseIds,
 } from "@relayer/eval-runner";
 
 import {
   EvalService,
   judgeArtifactEvidenceForExecution,
   judgeArtifactForExecution,
+  presentationGradeFromTurns,
   resolveH3PermissionProfile,
 } from "../desktop/eval-main/eval-service.mjs";
 
@@ -30,6 +32,46 @@ afterEach(async () => {
 });
 
 describe("EvalService simulated-user result persistence", () => {
+  it("normalizes each selected recursive review by its own schema in a mixed-history projection", () => {
+    const legacy = {
+      status: "completed",
+      review: {
+        schemaVersion: 4,
+        contractId: "recursive-presentation-judge-v4",
+        turn: {
+          ratings: { presentation_quality: 3, answer_quality: 4 },
+          scoreCeiling: { maximum: 4 },
+        },
+      },
+    };
+    const reasoned = {
+      status: "completed",
+      review: {
+        schemaVersion: 5,
+        contractId: "recursive-presentation-judge-v5",
+        turn: {
+          criterionJudgments: {
+            presentation_quality: { score: 4 },
+            answer_quality: { score: 6 },
+          },
+          scoreCeiling: { maximum: 8 },
+        },
+      },
+    };
+
+    expect(presentationGradeFromTurns([
+      { status: "accepted", judgeResults: [legacy] },
+      { status: "accepted", judgeResults: [reasoned] },
+    ], true)).toMatchObject({
+      status: "completed",
+      score: 5,
+      rawScore: 5,
+      comprehensionScore: 7,
+      scoreCeiling: 8,
+      scoreScaleMaximum: 8,
+    });
+  });
+
   it("bounds the host-authored artifact evidence packet", () => {
     const evidence = judgeArtifactEvidenceForExecution({
       checks: Array.from({ length: 70 }, (_, index) => ({
@@ -63,6 +105,35 @@ describe("EvalService simulated-user result persistence", () => {
       baseRevision: "seeded-task-base",
     });
     expect(judgeArtifactForExecution({})).toBeUndefined();
+  });
+
+  it("pins a connected default model when a Claude matrix cell creates its thread", async () => {
+    const { stateFile } = await testPaths();
+    const requests = [];
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      const parsed = new URL(url);
+      requests.push({ parsed, options });
+      if (parsed.pathname === "/api/model-selection/default") {
+        expect(parsed.searchParams.get("harnessId")).toBe("claude-basic");
+        return jsonResponse({ familyId: 7, providerId: "claude-work", modelId: "sonnet" });
+      }
+      if (parsed.pathname === "/api/threads" && options.method === "POST") return jsonResponse({ error: "stop after model assertion" }, 500);
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [join(repositoryRoot, "harnesses", "claude-basic.yaml")],
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: ["empty-project.task-system.single-turn"],
+      harnessConfigurationNames: ["claude-basic"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    await waitForCompletedRun(service, created.id);
+    const threadRequest = requests.find(({ parsed, options }) => parsed.pathname === "/api/threads" && options.method === "POST");
+    expect(JSON.parse(threadRequest.options.body).modelSelection).toEqual({ familyId: 7, providerId: "claude-work", modelId: "sonnet" });
   });
 
   it("runs after deterministic checks and reloads the immutable completed artifact", async () => {
@@ -104,6 +175,7 @@ describe("EvalService simulated-user result persistence", () => {
       TRUE_MYTH_INSPECT_BOTH_CASE_ID,
       SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
       HTTPX_PROXY_AUTH_REPORT_CASE_ID,
+      ...calibrationAutonomousCaseIds,
     ]);
     const created = await service.createRun(simulatedUserSelection());
     const completed = await waitForCompletedRun(service, created.id);
@@ -126,7 +198,7 @@ describe("EvalService simulated-user result persistence", () => {
         status: "accepted",
       },
       request: { followUp: false },
-      rubric: { rubricVersion: "graph-presentation-rubric-v5" },
+      rubric: { rubricVersion: "graph-presentation-rubric-v10" },
       judgeConfiguration: { name: "simulated-user" },
     });
     expect(calls[0].request.text).toContain("incoming queue");
@@ -140,7 +212,7 @@ describe("EvalService simulated-user result persistence", () => {
         judge: "simulated-user",
         status: "completed",
         passed: null,
-        rubricVersion: "graph-presentation-rubric-v5",
+        rubricVersion: "graph-presentation-rubric-v10",
         judgeConfiguration: { name: "simulated-user" },
         artifactAuthority: "references",
         references: {

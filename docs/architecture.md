@@ -148,12 +148,14 @@ The default and opt-in live evals start from an empty temporary folder and run t
 1. deterministic graph-contract checks; and
 2. a fresh structured Codex judge that scores six declared task-system facts plus graph and detail usefulness.
 
-Project-case presentation judging runs in a read-only, network-disabled workspace
-with shell, filesystem, and non-review MCP capabilities disabled. The host supplies
-the original request plus a size-bounded packet of verifier and task-outcome facts;
-candidate workspace paths and source access are not judge capabilities. Artifact
-evidence establishes what work matters, while captured production-workspace
-screenshots are the sole evidence for what the graph communicates.
+Project-case presentation judging runs in an immutable, network-disabled artifact
+snapshot with read-only shell and filesystem inspection enabled. The judge may use
+non-mutating Git, search, and file-reading commands to discover what work matters;
+file mutation, graph mutation, invoke execution, and non-review MCP capabilities
+remain disabled. The host supplies the original request and may include a compact,
+size-bounded receipt of verifier and task-outcome facts as a starting point rather
+than a substitute for artifact investigation. Captured production-workspace
+screenshots remain the sole evidence for what the graph communicates.
 
 The presentation judge builds a recursive semantic result tree bottom-up. Expansion
 actions consume finalized child `LayerResult`s; references reuse results without
@@ -167,8 +169,32 @@ inspectable evidence and are not arithmetically reaggregated. Explicit critical-
 omission ceilings apply to that model-authored root judgment. Judge lifecycle
 completion remains independent from both task-outcome qualification and graph-
 presentation score, and historical rubric records retain their legacy projection.
+The active human-experience rubric judges the accepted output only as a graph-native
+interface: it values discoverable inspect-or-act choices and layouts whose edges
+and placement communicate real relationships, while penalizing missing obvious
+paths, semantically empty geometry, and action spam. Artifact inspection may reveal
+useful presentation opportunities, but implementation correctness, verifier results,
+and task-outcome contradictions can neither raise nor lower this independent grade.
+The rubric does not require media capabilities that the graph contract and renderer
+do not yet support. Recursive review contract v5 records basic rendered integrity
+as a separate node-level `polish` score. Polish covers clipping, readability,
+density, alignment, and control rendering only; it is inspectable in the score
+vector and cannot raise or offset semantic, interaction, navigation, layer, turn,
+or task-outcome grades. The v10 human-experience rubric requires an independent
+reason and screenshot evidence for every scored criterion on its ordered 1-8 scale;
+the integers intentionally have no canned meanings. Only action delivery, recursive
+quality, and inapplicable follow-up progress may be null; the node criteria require
+no assessable destination or expansion child respectively. A material missing action caps affected turn-level
+criteria at 6; repeated material omissions or one critical omission cap them at 4.
+Historical recursive reviews retain their original scale when projected alone and
+are proportionally normalized only when a multi-turn grade contains mixed scales.
 
 The Eval application's deterministic graph-contract judge scores only durable graph structure; it does not use phrase matching as a semantic proxy. A separate hierarchical-overview case checks for a useful node-level navigate action so navigation capability is measured without requiring artificial child layers in every answer.
+Judge-only calibration reruns reuse the immutable accepted candidate turn, append a
+new judgment result, and write each attempt under its own artifact directory so
+historical judgments and screenshots are never overwritten.
+
+Deep calibration cases sit behind one manifest-driven fixture module. They form a graph-presentation calibration corpus for recursive-judge tuning and human labels, not the full verifiable-work benchmark. The module owns generated baseline files, immutable source identity, materialization, evaluator-only reference expectations, and lightweight deterministic completion checks through a small materialize/grade interface. Seven coding cases expose behavioral contracts that are red in the seeded workspace. Five noncoding cases begin without curated research content and deterministically check only artifact presence, source-ledger shape, and task-specific consistency; semantic outcome criteria remain partial until scoped review. Completion checks confirm that inspectable work exists but do not qualify its substantive quality. This prevents structural checks from masquerading as implementation, historical, creative, travel, technology, or sports expertise.
 
 The runner input is a test-run ID, selected test-case IDs, selected harness-configuration names, and one judge configuration. At the CLI boundary, configuration names resolve to validated snapshots. The runner expands their Cartesian product into executions identified by `(testRunId, testCaseId, harnessConfigurationName)` and passes each resolved `HarnessConfiguration` into case execution. Every execution artifact stores that exact snapshot and its canonical SHA-256 digest. Two configurations may select the same implementation; that is ordinary run selection, not a harness-specific case or matrix.
 

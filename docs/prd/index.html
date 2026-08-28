@@ -2134,7 +2134,7 @@ npm run eval:web
 <p>The first project suite adds one <strong>simulated-user judge</strong>. The judge opens the completed turn in the exact read-only production workspace, explores the response through visible controls, and grades what the product actually communicates. It does not substitute raw graph JSON, database records, or hidden node text for the rendered experience. Every qualitative rating is supported by screenshots captured during that review session.</p>
 <p>Configuration comparison and blind pairwise judging are later evaluation-runner capabilities. When added, the judge model/version, prompt version, rubric version, repeat count, thresholds, and tie policy are recorded with the run. Human review in the real graph UX remains required before product promotion.</p>
 <h4>13.4.1 Simulated-user tool contract</h4>
-<p>The simulated-user judge receives the original request, a versioned rubric, the read-only production review window, and six tools:</p>
+<p>The simulated-user judge receives the original request, a versioned rubric, and the read-only production review window. It also receives six graph-review tools and read-only shell access to the immutable task artifact. Shell access exists to discover facts needed to apply the rubric; only the rendered graph can prove what the user experience communicates.</p>
 <table>
 <thead><tr><th>Tool</th><th>Contract</th></tr></thead>
 <tbody>
@@ -2144,11 +2144,12 @@ npm run eval:web
 <tr><td><code>reviewLayer(review)</code></td><td>Write or revise one screenshot-grounded layer assessment while the judge is exploring.</td></tr>
 <tr><td><code>reviewNode(review)</code></td><td>Write or revise one screenshot-grounded node assessment, including reviews of actions visible on that node.</td></tr>
 <tr><td><code>submitReview(review)</code></td><td>Write the overall turn assessment and finalize only after required layer and node coverage is complete.</td></tr>
+<tr><td>Read-only shell</td><td>Inspect the task artifact with non-mutating Git, search, and file-reading commands. Network access, arbitrary non-review tools, and workspace mutation remain disabled.</td></tr>
 </tbody></table>
 <p>There is no scroll tool and no graph-specific <code>openLayer</code> or <code>selectNode</code> shortcut. A visible viewport capture preserves the actual first impression. A full-element capture exposes an entire node-detail panel without shrinking long content into one unreadable image; tall captures return ordered tiles under one screenshot ID. Element references permit interaction but are not rubric evidence.</p>
 <p>The runner, not the judge, binds each screenshot to immutable state. This state includes execution, thread, turn, layer, selected node, activated action, navigation path, viewport, capture target, tile count, and content digest. A review cannot cite a screenshot whose recorded state does not match its claimed subject.</p>
 <h4>13.4.2 Literal recursive rubric</h4>
-<p>The rubric is a versioned manifest. Every layer uses the same criteria; the contract does not distinguish root and child layers. Node count is observable context, not a threshold. The judge decides from the rendered screenshot whether a layer is sparse, crowded, fragmented, balanced, or otherwise well organized.</p>
+<p>The rubric is a versioned manifest. Active recursive contract v5 uses human-experience rubric v10. Every layer uses the same criteria; the contract does not distinguish root and child layers. Node count is observable context, not a threshold. The judge decides from the rendered screenshot whether a layer is sparse, crowded, fragmented, balanced, or otherwise well organized.</p>
 <table>
 <thead><tr><th>Subject</th><th>Required criteria</th><th>Required screenshot context</th></tr></thead>
 <tbody>
@@ -2158,20 +2159,15 @@ npm run eval:web
 <tr><td>Invoke action inside its source node review</td><td>Placement, label expectation, apparent value</td><td>Visible source; invocation remains disabled in immutable review</td></tr>
 <tr><td>Turn</td><td>Answer quality, recursive coherence, navigation value, presentation quality, and follow-up progress when applicable</td><td>Representative evidence from completed layer, node, and action reviews</td></tr>
 </tbody></table>
-<p>Each criterion uses one anchored four-point scale:</p>
-<ul>
-<li><code>4</code> clearly succeeds.</li>
-<li><code>3</code> succeeds with minor weaknesses.</li>
-<li><code>2</code> has material problems.</li>
-<li><code>1</code> fails its intended role.</li>
-<li><code>null</code> means the criterion is genuinely not assessable from available UI evidence.</li>
-</ul>
-<p>A judge must capture more evidence when the UI can expose it rather than using <code>null</code> as a shortcut.</p>
+<p>Each criterion uses an ordered integer from 1 through 8, where higher is better. The integers intentionally have no canned meanings. The judge chooses a score from the criterion definition and observed graph, then records a criterion-specific reason and screenshot evidence explaining that exact judgment. Node <code>actionDelivery</code> may be <code>null</code> only when no destination is assessable. Node <code>recursiveQuality</code> may be <code>null</code> only when no expansion child exists. Turn <code>follow_up_progress</code> may be <code>null</code> when the request is not a follow-up. Every other occupied node, layer, and turn criterion requires a score.</p>
+<p><code>polish</code> is a separate node vector dimension for basic rendered integrity: clipping, readability, density, alignment, and control rendering. Polish provides no credit to content, action allocation, destination delivery, recursive quality, layer quality, turn quality, or task outcome.</p>
 <h4>13.4.3 Incremental screenshot-grounded review records</h4>
-<p>The judge writes reviews as it explores. <code>reviewLayer</code> persists one layer record. <code>reviewNode</code> persists one node record and the actions visible on that node. Calling either tool again revises that subject's current record while preserving the prior calls in the interaction trace. Applicable rating keys come from the rubric manifest.</p>
-<pre><code class="language-typescript">reviewLayer({ layerId, evidence, ratings, summary, findings });
-reviewNode({ nodeId, layerId, evidence, ratings, actions, summary, findings });
-submitReview({ turnId, evidence, ratings, summary, findings });
+<p>The judge writes reviews as it explores. <code>reviewLayer</code> persists one finalized layer result after its nodes and expansion children have been reviewed.</p>
+<p><code>reviewNode</code> persists one node record and its sequential expand/reference/invoke/stop allocation decisions. The record also contains missing-action opportunities and visible actions.</p>
+<p>Calling either tool again revises that subject's current record while preserving prior calls in the interaction trace. Applicable criterion keys come from the rubric manifest.</p>
+<pre><code class="language-typescript">reviewNode({ layerId, nodeId, evidence, score, semantic, allocationSteps, missingActionOpportunities, actions, findings });
+reviewLayer({ layerId, depth, nodeScores, nodeSemantics, criterionJudgments, materiallyMisleading, layerSummary, evidence });
+submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, findings, scoreCeiling });
 </code></pre>
 <pre><code class="language-json">{
   "nodeId": "node-22",
@@ -2180,51 +2176,64 @@ submitReview({ turnId, evidence, ratings, summary, findings });
     "context": ["shot-16"],
     "detail": ["shot-17"]
   },
-  "ratings": {
-    "layer_fit": 4,
-    "title_detail_alignment": 3,
-    "substance": 4,
-    "detail_presentation": 2
+  "score": {
+    "nodeId": "node-22",
+    "content": { "score": 6, "reason": "The visible explanation answers the main question but omits one important decision.", "evidence": ["shot-17"] },
+    "actionAllocation": { "score": 3, "reason": "A material inspect path is missing.", "evidence": ["shot-17"] },
+    "actionDelivery": { "score": null, "reason": "No destination action was authored.", "evidence": ["shot-17"] },
+    "recursiveQuality": { "score": null, "reason": "No expansion child exists.", "evidence": ["shot-17"] },
+    "polish": { "score": 7, "reason": "The node renders cleanly without clipping or broken controls.", "evidence": ["shot-17"] }
   },
-  "actions": [
-    {
-      "actionId": "action-6",
-      "kind": "navigate",
-      "evidence": {
-        "source": ["shot-17"],
-        "destination": ["shot-21"]
-      },
-      "ratings": {
-        "placement": 4,
-        "label_expectation": 3,
-        "destination_delivery": 4,
-        "added_value": 4
-      },
-      "summary": "The destination adds useful detail, but the label is vague."
-    }
-  ],
-  "summary": "The node belongs here and contains useful evidence, but its detail layout is difficult to scan.",
+  "allocationSteps": [{
+    "step": 0,
+    "ranking": [{ "choice": "expand", "rank": 1 }, { "choice": "reference", "rank": 2 }, { "choice": "invoke", "rank": 3 }, { "choice": "stop", "rank": 4 }],
+    "preferredChoice": "expand",
+    "authoredChoice": "stop",
+    "authoredActionId": null,
+    "margin": "clearly_better",
+    "selectionFinding": "Expansion would expose a material decision that the visible node omits.",
+    "evidence": ["shot-17"]
+  }],
+  "missingActionOpportunities": [{
+    "allocationStep": 0,
+    "preferredChoice": "expand",
+    "importance": "material",
+    "unansweredQuestion": "Why was this implementation chosen?",
+    "expectedContribution": "Expose the decision and its tradeoffs.",
+    "artifactEvidence": ["src/implementation.ts:42"],
+    "evidence": ["shot-17"]
+  }],
+  "semantic": {
+    "nodeId": "node-22",
+    "meaning": "Implementation result",
+    "delivered": "The visible outcome",
+    "limitations": "The rationale is absent",
+    "effectOnLayer": "Useful but shallow",
+    "evidence": ["shot-17"]
+  },
+  "actions": [],
   "findings": [
     {
       "type": "issue",
       "severity": "material",
-      "text": "The final table column is unreadable.",
+      "text": "The graph stops where an implementation-rationale expansion would materially help.",
       "evidence": ["shot-17"]
     }
   ]
 }
 </code></pre>
-<p>Ratings do not require repetitive prose. One summary explains the subject judgment. Specific strengths and problems appear as screenshot-backed findings.</p>
+<p>Each criterion requires its own reason; one generic rationale copied across criteria is invalid. Semantic summaries preserve what a node means, delivers, omits, and contributes to its layer. Specific strengths and problems remain screenshot-backed findings.</p>
 <p>An expand action requires source and destination screenshots. The destination screenshot path must contain that action.</p>
 <p>A reference review covers the source node, action, and destination-layer inclusion. It does not regrade destination nodes individually.</p>
 <p>An invoke action stays inside its source-node review and uses only visible source evidence.</p>
-<p><code>submitReview</code> does not accept new layer or node assessments. It receives the overall turn ratings, representative screenshot references, summary, and findings. It finalizes the already persisted review set as one immutable judge result.</p>
+<p><code>submitReview</code> does not accept new layer or node assessments. It consumes the current root <code>LayerResult</code>, overall turn criterion judgments, representative screenshot references, summary, findings, and an explicit score ceiling. It finalizes the already persisted review set as one immutable judge result.</p>
 <h4>13.4.4 Coverage and completion</h4>
-<p>The review-writing tools reject unrelated evidence, unknown rubric keys, mismatched screenshot state, and an unjustified <code>null</code> rating immediately.</p>
+<p>The review-writing tools reject unrelated evidence, unknown rubric keys, mismatched screenshot state, invalid nullability, incomplete action rankings, and missing recursive dependencies immediately.</p>
 <p><code>submitReview</code> lists missing subjects when coverage is incomplete. Expansion coverage includes every layer, node, visible action, and the overall turn.</p>
 <p>Reference traversal processes each unique layer once and follows reference actions transitively. It does not activate inherited expand, invoke, or resolved-invoke actions.</p>
 <p>The judge still grades those visible inherited actions in their reference context.</p>
 <p>The final artifact preserves traces, screenshots, metadata, incremental reviews, rubric version, judge configuration, and completion coverage.</p>
+<p>When the judge finds one material missing action, affected turn criteria and the overall presentation ceiling cannot exceed 6. Repeated material omissions or one critical omission cap them at 4. These are maximums, not assigned scores: the judge still chooses and explains the score warranted by the visible experience. Historical reviews retain their native scale when viewed alone; mixed-scale multi-turn projections normalize legacy scores proportionally before aggregation.</p>
 <p>The simulated-user judge grades only what the product made visible. Separate deterministic graders remain authoritative for graph integrity, mutation policy, repository diff, protected-file hashes, public and hidden tests, build results, and commit history. A visually strong graph cannot compensate for broken code, and correct hidden work cannot compensate for an unusable visible response.</p>
 <h3>13.5 Evaluation ladder</h3>
 <table>

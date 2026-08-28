@@ -10,6 +10,16 @@ function current(record) {
 
 function presentationReview(review, kind) {
   if (!review || typeof review !== "object") return review;
+  if ((kind === "layer" || kind === "turn") && review.criterionJudgments) {
+    return {
+      ...review,
+      ratings: Object.fromEntries(Object.entries(review.criterionJudgments).map(([key, judgment]) => [key, judgment?.score ?? null])),
+      criterionJudgments: review.criterionJudgments,
+      summary: review.layerSummary ?? review.summary ?? "",
+      evidence: kind === "layer" ? { viewport: asArray(review.evidence) } : review.evidence,
+      findings: asArray(review.findings),
+    };
+  }
   if (kind === "layer" && review.layerRatings) {
     return {
       ...review,
@@ -20,10 +30,15 @@ function presentationReview(review, kind) {
     };
   }
   if (kind === "node" && review.score) {
-    const { nodeId: _nodeId, ...ratings } = review.score;
+    const { nodeId: _nodeId, ...judgments } = review.score;
+    const reasoned = Object.values(judgments).some((value) => value && typeof value === "object" && "score" in value);
+    const ratings = reasoned
+      ? Object.fromEntries(Object.entries(judgments).map(([key, judgment]) => [key, judgment?.score ?? null]))
+      : judgments;
     return {
       ...review,
       ratings,
+      ...(reasoned ? { criterionJudgments: judgments } : {}),
       summary: review.semantic?.effectOnLayer || review.semantic?.delivered || "",
       findings: asArray(review.findings),
     };
@@ -223,8 +238,8 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
     ]),
   ];
 
-  const recursive = [2, 3].includes(review?.schemaVersion)
-    || ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3"].includes(review?.contractId);
+  const recursive = [2, 3, 4, 5].includes(review?.schemaVersion)
+    || ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5"].includes(review?.contractId);
   if (recursive) layers.sort((left, right) => right.depth - left.depth || left.position - right.position);
   return {
     kind: "turn",

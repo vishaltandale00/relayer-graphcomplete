@@ -2,11 +2,10 @@ import { MissingReviewSubjectsError, computeReviewCoverage, nodeSubjectKey, type
 import type {
   Finding,
   NodeEvidence,
-  PresentationScoreCeiling,
   ScreenshotEvidenceRef,
   TurnEvidence,
 } from "./contracts.js";
-import type { LayerRatings, TurnRatings } from "./rubric.js";
+import type { LayerCriterionKey, TurnCriterionKey } from "./rubric.js";
 import type {
   ActionReviewSubject,
   LayerReviewSubject,
@@ -14,19 +13,27 @@ import type {
   ReviewSubjectInventory,
 } from "./inventory.js";
 
-export const RECURSIVE_PRESENTATION_CONTRACT_VERSION = 3 as const;
-export const RECURSIVE_PRESENTATION_CONTRACT_ID = "recursive-presentation-judge-v3" as const;
+export const RECURSIVE_PRESENTATION_CONTRACT_VERSION = 5 as const;
+export const RECURSIVE_PRESENTATION_CONTRACT_ID = "recursive-presentation-judge-v5" as const;
 
-export type RecursivePresentationRating = 1 | 2 | 3 | 4;
+export type RecursivePresentationRating = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export interface RecursiveCriterionJudgment {
+  readonly score: RecursivePresentationRating | null;
+  readonly reason: string;
+  readonly evidence: readonly ScreenshotEvidenceRef[];
+}
+export type RecursiveCriterionJudgments<Key extends string> = Readonly<Record<Key, RecursiveCriterionJudgment>>;
 export type AllocationChoice = "expand" | "reference" | "invoke" | "stop";
 export type AllocationMargin = "close" | "clearly_better" | "necessary";
 
 export interface RecursiveNodeScore {
   readonly nodeId: string;
-  readonly content: RecursivePresentationRating;
-  readonly actionAllocation: RecursivePresentationRating;
-  readonly actionDelivery: RecursivePresentationRating | null;
-  readonly recursiveQuality: RecursivePresentationRating | null;
+  readonly content: RecursiveCriterionJudgment;
+  readonly actionAllocation: RecursiveCriterionJudgment;
+  readonly actionDelivery: RecursiveCriterionJudgment;
+  readonly recursiveQuality: RecursiveCriterionJudgment;
+  /** Basic rendered integrity only; never semantic, navigational, or task-quality credit. */
+  readonly polish: RecursiveCriterionJudgment;
 }
 
 export interface RecursiveNodeSemanticSummary {
@@ -104,8 +111,7 @@ export interface RecursiveLayerResult {
   readonly depth: number;
   readonly nodeScores: EightSlots<RecursiveNodeScore>;
   readonly nodeSemantics: EightSlots<RecursiveNodeSemanticSummary>;
-  readonly layerRatings: LayerRatings;
-  readonly nullRatingJustifications?: Readonly<Partial<Record<keyof LayerRatings, string>>>;
+  readonly criterionJudgments: RecursiveCriterionJudgments<LayerCriterionKey>;
   readonly materiallyMisleading: boolean;
   readonly layerSummary: string;
   readonly evidence: readonly ScreenshotEvidenceRef[];
@@ -115,11 +121,14 @@ export interface RecursiveTurnReview {
   readonly turnId: string;
   readonly rootLayerResult: RecursiveLayerResult;
   readonly evidence: TurnEvidence;
-  readonly ratings: TurnRatings;
-  readonly nullRatingJustifications?: Readonly<Partial<Record<keyof TurnRatings, string>>>;
+  readonly criterionJudgments: RecursiveCriterionJudgments<TurnCriterionKey>;
   readonly summary: string;
   readonly findings: readonly Finding[];
-  readonly scoreCeiling: PresentationScoreCeiling;
+  readonly scoreCeiling: {
+    readonly maximum: RecursivePresentationRating;
+    readonly reason: string;
+    readonly evidence: readonly ScreenshotEvidenceRef[];
+  };
 }
 
 export interface RecursiveReviewRevision<Review> {
@@ -153,7 +162,7 @@ export type RecursiveReviewTraceEntry = {
 };
 
 export interface RecursiveReviewSnapshot {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 5;
   readonly contractId: typeof RECURSIVE_PRESENTATION_CONTRACT_ID;
   readonly inventory: ReviewSubjectInventory;
   readonly layers: readonly RecursiveLayerReviewState[];
@@ -297,7 +306,7 @@ export class RecursivePresentationReviewStore {
 
   snapshot(): RecursiveReviewSnapshot {
     return immutable({
-      schemaVersion: 3 as const,
+      schemaVersion: 5 as const,
       contractId: RECURSIVE_PRESENTATION_CONTRACT_ID,
       inventory: this.inventory,
       layers: this.inventory.layers.flatMap((subject) => {
@@ -330,17 +339,29 @@ export class RecursivePresentationReviewStore {
       ({ current }) => current.missingActionOpportunities ?? [],
     );
     const criticalOpportunity = missingOpportunities.some(({ importance }) => importance === "critical");
-    const materialOpportunity = missingOpportunities.some(({ importance }) => importance === "material");
-    const recursiveCeiling = criticalOpportunity ? 2 : materialOpportunity ? 3 : 4;
+    const materialOpportunityCount = missingOpportunities.filter(({ importance }) => importance === "material").length;
+    const materialOpportunity = materialOpportunityCount > 0;
+    const repeatedMaterialOpportunity = materialOpportunityCount >= 2;
+    const recursiveCeiling = criticalOpportunity || repeatedMaterialOpportunity ? 4 : materialOpportunity ? 6 : 8;
     if (missingOpportunities.length > 0 && (
-      review.ratings.recursive_coherence === null || review.ratings.recursive_coherence > recursiveCeiling
+      review.criterionJudgments.recursive_coherence.score === null || review.criterionJudgments.recursive_coherence.score > recursiveCeiling
     )) {
       const importance = criticalOpportunity ? "critical" : "material";
       throw new Error(`${importance} missing-action opportunity caps recursive_coherence at ${recursiveCeiling}`);
     }
-    if (criticalOpportunity && review.scoreCeiling.maximum > 2) {
-      throw new Error("Critical missing-action opportunity caps the presentation score at 2");
+    const experienceCeiling = criticalOpportunity || repeatedMaterialOpportunity ? 4 : materialOpportunity ? 6 : 8;
+    if (missingOpportunities.length > 0) {
+      for (const criterion of ["navigation_value", "presentation_quality"] as const) {
+        const rating = review.criterionJudgments[criterion].score;
+        if (rating === null || rating > experienceCeiling) {
+          throw new Error(`${missingOpportunities.length} missing-action opportunity(s) cap ${criterion} at ${experienceCeiling}`);
+        }
+      }
     }
+    if (criticalOpportunity && review.scoreCeiling.maximum > 4) {
+      throw new Error("Critical missing-action opportunity caps the presentation score at 4");
+    }
+    validateCriterionJudgments(review.criterionJudgments, "Turn", new Set(["follow_up_progress"]));
     const saved = immutable(review);
     this.#validateEvidence?.({
       kind: "turn",
@@ -513,8 +534,8 @@ function validateNodeReview(
   }
   const criticalOpportunity = missingOpportunities.some(({ importance }) => importance === "critical");
   const materialOpportunity = missingOpportunities.some(({ importance }) => importance === "material");
-  const allocationCeiling = criticalOpportunity ? 1 : materialOpportunity ? 2 : 4;
-  if (review.score.actionAllocation > allocationCeiling) {
+  const allocationCeiling = criticalOpportunity ? 2 : materialOpportunity ? 4 : 8;
+  if (review.score.actionAllocation.score === null || review.score.actionAllocation.score > allocationCeiling) {
     const importance = criticalOpportunity ? "critical" : "material";
     throw new Error(`Node ${review.nodeId} ${importance} missing-action opportunity caps actionAllocation at ${allocationCeiling}`);
   }
@@ -526,10 +547,10 @@ function validateNodeReview(
 
   const hasDelivery = expectedActions.some(({ kind }) => kind === "expand" || kind === "reference");
   const hasExpansion = expectedActions.some(({ kind }) => kind === "expand");
-  if ((review.score.actionDelivery === null) === hasDelivery) {
+  if ((review.score.actionDelivery.score === null) === hasDelivery) {
     throw new Error(`Node ${review.nodeId} actionDelivery nullability does not match assessable destinations`);
   }
-  if ((review.score.recursiveQuality === null) === hasExpansion) {
+  if ((review.score.recursiveQuality.score === null) === hasExpansion) {
     throw new Error(`Node ${review.nodeId} recursiveQuality nullability does not match expansion children`);
   }
 }
@@ -564,18 +585,19 @@ function validateLayerResult(
   }
   requireText(review.layerSummary, `Layer ${review.layerId} summary`);
   requireEvidence(review.evidence, `Layer ${review.layerId} evidence`);
-  requireNullRatingJustifications(review.layerRatings, review.nullRatingJustifications, `Layer ${review.layerId}`);
+  validateCriterionJudgments(review.criterionJudgments, `Layer ${review.layerId}`);
 }
 
-function requireNullRatingJustifications(
-  ratings: Readonly<Record<string, unknown>>,
-  justifications: Readonly<Record<string, string | undefined>> | undefined,
+function validateCriterionJudgments(
+  judgments: Readonly<Record<string, RecursiveCriterionJudgment>>,
   label: string,
+  nullableCriteria: ReadonlySet<string> = new Set(),
 ): void {
-  for (const [criterion, rating] of Object.entries(ratings)) {
-    if (rating === null && !justifications?.[criterion]?.trim()) {
-      throw new Error(`${label} null ${criterion} rating requires justification`);
+  for (const [criterion, judgment] of Object.entries(judgments)) {
+    if (judgment.score === null && !nullableCriteria.has(criterion)) {
+      throw new Error(`${label} ${criterion} must have a score`);
     }
+    validateCriterionJudgment(judgment, `${label} ${criterion}`);
   }
 }
 
@@ -591,9 +613,21 @@ function validateRanking(step: AllocationStepReview, nodeId: string): void {
 
 function validateScore(score: RecursiveNodeScore): void {
   for (const [key, value] of Object.entries(score)) {
-    if (key === "nodeId" || value === null) continue;
-    if (![1, 2, 3, 4].includes(value as number)) throw new Error(`Node ${score.nodeId} has invalid ${key} score`);
+    if (key === "nodeId") continue;
+    const judgment = value as RecursiveCriterionJudgment;
+    if (judgment.score === null && key !== "actionDelivery" && key !== "recursiveQuality") {
+      throw new Error(`Node ${score.nodeId} ${key} must have a score`);
+    }
+    validateCriterionJudgment(judgment, `Node ${score.nodeId} ${key}`);
   }
+}
+
+function validateCriterionJudgment(judgment: RecursiveCriterionJudgment, label: string): void {
+  if (judgment.score !== null && ![1, 2, 3, 4, 5, 6, 7, 8].includes(judgment.score)) {
+    throw new Error(`${label} has an invalid score`);
+  }
+  requireText(judgment.reason, `${label} reason`);
+  requireEvidence(judgment.evidence, `${label} evidence`);
 }
 
 function appendRevision<Review>(
