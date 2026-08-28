@@ -6,6 +6,7 @@ export function registerDesktopIpc({
   shell,
   nativeTheme,
   credentials,
+  accountChannel = credentials,
   modelCatalog,
   providerDefinitions = null,
   validateProviderOnboarding = null,
@@ -26,7 +27,9 @@ export function registerDesktopIpc({
     ipcMain.handle("relayer:account-login", async () => {
       const result = await credentials.login();
       if (result?.authUrl) await shell.openExternal(result.authUrl);
-      return { status: "pending", loginId: result?.loginId ?? null };
+      return result?.authUrl
+        ? { status: "pending", loginId: result?.loginId ?? null }
+        : result;
     });
     ipcMain.handle("relayer:account-logout", () => credentials.logout());
   }
@@ -147,6 +150,7 @@ export function registerDesktopIpc({
   });
   ipcMain.handle("relayer:update-channel", async (_event, channel) => {
     const state = updater.setChannel(channel);
+    await accountChannel?.setChannel(channel);
     await settings.update((current) => ({ ...current, updateChannel: channel }));
     return state;
   });

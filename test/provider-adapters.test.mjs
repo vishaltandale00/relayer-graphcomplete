@@ -46,7 +46,7 @@ const codexRuntime = Object.freeze({
   runtimeId: "codex", version: "0.150.1", executable: "/managed/codex",
 });
 const claudeRuntime = Object.freeze({
-  runtimeId: "claude", version: "0.3.247", executable: "/managed/claude",
+  runtimeId: "claude", version: "0.3.250", executable: "/managed/claude",
   moduleUrl: "file:///managed/claude/sdk.mjs",
 });
 
@@ -250,22 +250,105 @@ describe("secret-backed API adapters", () => {
     });
   }
 
+  it("carries OpenRouter's exact per-model token capabilities into execution access", async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [
+        {
+          id: "z-ai/glm-5.3",
+          name: "GLM 5.3",
+          context_length: 202_752,
+          top_provider: { context_length: 196_608, max_completion_tokens: 131_072 },
+        },
+        {
+          id: "small-output-model",
+          name: "Small output model",
+          context_length: 32_768,
+          top_provider: { context_length: 32_768, max_completion_tokens: 2_048 },
+        },
+        { id: "unknown-limits", name: "Unknown limits" },
+      ] }),
+    }));
+    const descriptor = productionProviderAdapterRegistry.get("openrouter");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", descriptor.defaultEndpoint),
+      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
+    );
+
+    await adapter.connect();
+
+    expect(adapter.executionAccess()).toMatchObject({
+      modelCapabilities: {
+        "z-ai/glm-5.3": { contextWindow: 196_608, maxOutputTokens: 131_072 },
+        "small-output-model": { contextWindow: 32_768, maxOutputTokens: 2_048 },
+      },
+    });
+    expect(adapter.executionAccess().modelCapabilities).not.toHaveProperty("unknown-limits");
+  });
+
+  it("refreshes OpenRouter discovery before execution when startup did not populate capabilities", async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{
+        id: "z-ai/glm-5.3",
+        context_length: 202_752,
+        top_provider: { context_length: 196_608, max_completion_tokens: 131_072 },
+      }] }),
+    }));
+    const descriptor = productionProviderAdapterRegistry.get("openrouter");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", descriptor.defaultEndpoint),
+      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
+    );
+
+    const access = await adapter.executionAccess();
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(access.modelCapabilities["z-ai/glm-5.3"]).toEqual({
+      contextWindow: 196_608,
+      maxOutputTokens: 131_072,
+    });
+  });
+
+  it("fails one bounded OpenRouter rediscovery when credentials are rejected", async () => {
+    const fetch = vi.fn(async () => ({ ok: false, status: 401 }));
+    const descriptor = productionProviderAdapterRegistry.get("openrouter");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", descriptor.defaultEndpoint),
+      { fetch, secrets: { "api-key": "rejected" }, managedRuntime: codexRuntime, environment: {} },
+    );
+
+    await expect(adapter.executionAccess()).rejects.toThrow("credentials were rejected");
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["openai-api", codexRuntime],
     ["openrouter", codexRuntime],
     ["vercel-ai-router", codexRuntime],
     ["anthropic-api", claudeRuntime],
-  ])("%s carries its provisioned runtime into secret execution access", (adapterId, managedRuntime) => {
+  ])("%s carries its provisioned runtime into secret execution access", async (adapterId, managedRuntime) => {
     const descriptor = productionProviderAdapterRegistry.get(adapterId);
     const environment = managedRuntime.runtimeId === "codex"
       ? { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: managedRuntime.executable }
       : { CLAUDE_CONFIG_DIR: "/isolated/claude" };
     const adapter = productionProviderAdapterRegistry.create(
       definition(adapterId, descriptor.defaultEndpoint),
-      { fetch: vi.fn(), secrets: { "api-key": "secret" }, managedRuntime, environment },
+      {
+        fetch: vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [{ id: "model", context_length: 32_768, top_provider: { context_length: 32_768, max_completion_tokens: 8_192 } }] }),
+        })),
+        secrets: { "api-key": "secret" },
+        managedRuntime,
+        environment,
+      },
     );
 
-    expect(adapter.executionAccess()).toEqual({
+    expect(await adapter.executionAccess()).toMatchObject({
       kind: "secret",
       endpoint: descriptor.defaultEndpoint,
       fields: { "api-key": "secret" },

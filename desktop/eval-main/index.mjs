@@ -19,6 +19,7 @@ import {
   resolveLocalSimulatedUserAutorun,
 } from "./simulated-user-judge.mjs";
 import { GraphCompleteRuntimeService } from "../main/services/graphcomplete-runtime.mjs";
+import { inspectCodexBrowserMcpRuntime } from "../main/services/codex-browser-mcp-runtime.mjs";
 import { RelayerAppServerService } from "../main/services/relayer-app-server.mjs";
 import { claimPrimaryDesktopInstance } from "../main/single-instance.mjs";
 import { confirmManagedRuntimeQuit } from "../main/managed-runtimes/quit-guard.mjs";
@@ -52,6 +53,19 @@ if (!app.isPackaged) {
 const graphClientModuleUrl = app.isPackaged
   ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
   : undefined;
+const codexBrowserMcpInspection = await inspectCodexBrowserMcpRuntime({
+  executable: process.execPath,
+  packageRoot: app.isPackaged
+    ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "chrome-devtools-mcp")
+    : join(repositoryRoot, "node_modules", "chrome-devtools-mcp"),
+});
+if (!codexBrowserMcpInspection.available) {
+  console.error("Codex browser helper unavailable", {
+    code: codexBrowserMcpInspection.code,
+    message: codexBrowserMcpInspection.message,
+    diagnostics: codexBrowserMcpInspection.diagnostics,
+  });
+}
 const developmentCodexBinary = !app.isPackaged && process.env.RELAYER_CODEX_BINARY
   ? resolve(process.env.RELAYER_CODEX_BINARY)
   : undefined;
@@ -77,6 +91,7 @@ const graphRuntime = new GraphCompleteRuntimeService({
   configurationPaths,
   additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
   codexBasicClientModuleUrl: graphClientModuleUrl,
+  ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
   resolveCodexRuntime: () => managedCodexRuntime.resolve(),
   candidateTrace: {
     directory: join(userDataDirectory, "eval-data", "candidate-trace-spool"),
@@ -398,6 +413,9 @@ function registerEvalIpc() {
   });
   ipcMain.handle("relayer-eval:judge-imported-conversation", (_event, executionId, judgeConfigurationName) => (
     evalService.judgeImportedConversation(executionId, judgeConfigurationName)
+  ));
+  ipcMain.handle("relayer-eval:rejudge-execution", (_event, executionId, judgeConfigurationName) => (
+    evalService.rejudgeExecution(executionId, judgeConfigurationName)
   ));
   ipcMain.handle("relayer-eval:open-review", async (_event, executionId) => {
     await createReviewWindow(executionId);

@@ -23,6 +23,7 @@ describe("Eval harness configuration availability", () => {
       "codex-basic-high.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
+      "claude-basic.yaml",
       "prime-agent-basic.yaml",
       "prime-agent-deep.yaml",
       "prime-agent-layered-navigation-luna.yaml",
@@ -41,6 +42,7 @@ describe("Eval harness configuration availability", () => {
       "codex-basic-high.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
+      "claude-basic.yaml",
     ]);
   });
 
@@ -57,6 +59,7 @@ describe("Eval harness configuration availability", () => {
       "codex-basic-high.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
+      "claude-basic.yaml",
     ]);
     expect(packageAvailable).not.toHaveBeenCalled();
   });
@@ -68,6 +71,10 @@ describe("Eval harness configuration availability", () => {
     }));
 
     expect([...catalog.keys()]).toContain("codex-layered-navigation-luna");
+    expect(catalog.get("claude-basic")).toMatchObject({
+      name: "claude-basic",
+      implementation: "claude.basic",
+    });
     expect(catalog.get("codex-multi-agent-layered-navigation")).toMatchObject({
       name: "codex-multi-agent-layered-navigation",
       implementation: "codex.basic",

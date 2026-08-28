@@ -277,7 +277,7 @@ export function createLocalSimulatedUserJudgeRunner({
         rootLayerId,
       });
       const controller = createReviewSessionController(opened.session, screenshots);
-      const recursiveContract = ["graph-presentation-rubric-v4", "graph-presentation-rubric-v5"]
+      const recursiveContract = ["graph-presentation-rubric-v4", "graph-presentation-rubric-v5", "graph-presentation-rubric-v6", "graph-presentation-rubric-v7", "graph-presentation-rubric-v8", "graph-presentation-rubric-v9", "graph-presentation-rubric-v10"]
         .includes(context.rubric?.rubricVersion);
       const evidenceOptions = {
         executionId: String(context.execution.id),

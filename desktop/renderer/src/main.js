@@ -44,6 +44,11 @@ import {
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
 import { assertRelayerIconRendererReady } from "./product-workspace/icons.js";
+import {
+  initializeDesktopAccountUi,
+  refreshDesktopAccountUi,
+  revealDesktopWorkspace,
+} from "./desktop-account.js";
 
 function applyPlatformCopy() {
   const isMac = desktop?.platform === "darwin";
@@ -291,6 +296,7 @@ async function boot() {
     resetNewThreadModelPicker();
     updateCreateThreadAvailability();
     updateTutorialAvailability();
+    await refreshDesktopAccountUi({ offerOnboarding: true });
   });
   const account = await refreshAccount();
   await initializeProviderSettings();
@@ -311,6 +317,15 @@ async function boot() {
   }
   updateCreateThreadAvailability();
   await refreshState(viewState.currentThreadId);
+  await initializeDesktopAccountUi({
+    desktop,
+    offerOnboarding: account?.status === "connected",
+    showWorkspace: () => revealDesktopWorkspace(showApplication),
+    openSettings: () => {
+      setSettingsTab("account");
+      $("#settingsButton").click();
+    },
+  });
   if (desktop?.tutorial && !evalReview) {
     installOnboardingTutorialController({
       lifecycle: desktop.tutorial,
@@ -344,6 +359,6 @@ async function boot() {
 }
 
 void boot().catch((error) => {
-  showApplication();
+  revealDesktopWorkspace(showApplication);
   toast(error.message);
 });

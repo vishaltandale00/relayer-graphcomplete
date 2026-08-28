@@ -53,7 +53,18 @@ function modelArray(payload) {
 }
 
 export class SecretApiProviderAdapter extends ModelCatalogAdapter {
-  constructor({ definition, fetch: fetchImplementation = globalThis.fetch, credentials, headers, modelsPath = "/models", managedRuntime, runtimeId, environment }) {
+  constructor({
+    definition,
+    fetch: fetchImplementation = globalThis.fetch,
+    credentials,
+    headers,
+    modelsPath = "/models",
+    modelCapabilities = () => null,
+    requireCatalogBeforeExecution = false,
+    managedRuntime,
+    runtimeId,
+    environment,
+  }) {
     super({ providerId: definition.id, providerLabel: definition.label });
     if (typeof fetchImplementation !== "function") throw new Error("API provider adapter requires fetch().");
     this.definition = definition;
@@ -61,6 +72,10 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     this.credentials = Object.freeze({ ...credentials });
     this.headers = headers;
     this.modelsPath = modelsPath;
+    this.readModelCapabilities = modelCapabilities;
+    this.modelCapabilities = Object.freeze({});
+    this.requireCatalogBeforeExecution = requireCatalogBeforeExecution;
+    this.catalogDiscovered = false;
     this.managedRuntime = requireManagedRuntime(managedRuntime, runtimeId);
     this.runtimeExecution = managedRuntimeExecutionDetails(this.managedRuntime, environment);
   }
@@ -102,26 +117,43 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     } catch {
       throw new Error("Provider returned a malformed model catalog.");
     }
-    const models = modelArray(payload).map(normalizeModel);
+    const providerModels = modelArray(payload);
+    const models = providerModels.map(normalizeModel);
     if (!models.some(({ visible }) => visible)) throw new Error("Provider did not report any visible models.");
-    return sanitizeModelCatalogSnapshot({
+    const snapshot = sanitizeModelCatalogSnapshot({
       provider: { id: this.providerId, label: this.providerLabel, status: "available", unavailableReason: null },
       models,
       // Families are product-owned. This compatibility field remains empty until
       // the catalog transport no longer carries the legacy system-family shape.
       systemFamily: { id: this.providerId, label: this.providerLabel, modelIds: [] },
     });
+    this.modelCapabilities = Object.freeze(Object.fromEntries(providerModels.flatMap((model) => {
+      const capabilities = this.readModelCapabilities(model);
+      if (capabilities === null) return [];
+      return [[model.id, Object.freeze({ ...capabilities })]];
+    })));
+    this.catalogDiscovered = true;
+    return snapshot;
   }
 
   async connect(options) {
     return this.discover(options);
   }
 
-  executionAccess() {
+  executionAccess({ signal } = {}) {
+    if (this.requireCatalogBeforeExecution && !this.catalogDiscovered) {
+      return this.discover({ signal }).then((snapshot) => {
+        if (snapshot.provider.status !== "available") {
+          throw new Error(snapshot.provider.unavailableReason ?? "Provider catalog is unavailable for execution.");
+        }
+        return this.executionAccess({ signal });
+      });
+    }
     return Object.freeze({
       kind: "secret",
       endpoint: this.definition.endpoint,
       fields: Object.freeze({ "api-key": this.credentials.apiKey }),
+      ...(Object.keys(this.modelCapabilities).length === 0 ? {} : { modelCapabilities: this.modelCapabilities }),
       runtime: this.runtimeExecution,
     });
   }

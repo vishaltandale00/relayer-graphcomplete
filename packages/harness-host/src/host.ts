@@ -1706,7 +1706,16 @@ function validateExecutionAccess(
 
 function freezeExecutionAccess(access: HarnessExecutionAccess): HarnessExecutionAccess {
   if (access.kind === "secret") {
-    return Object.freeze({ ...access, fields: Object.freeze({ ...access.fields }) });
+    const modelCapabilities = access.modelCapabilities === undefined
+      ? undefined
+      : Object.freeze(Object.fromEntries(Object.entries(access.modelCapabilities).map(([modelId, capabilities]) => (
+        [modelId, Object.freeze({ ...capabilities })]
+      ))));
+    return Object.freeze({
+      ...access,
+      fields: Object.freeze({ ...access.fields }),
+      ...(modelCapabilities === undefined ? {} : { modelCapabilities }),
+    });
   }
   return Object.freeze({ ...access, environment: Object.freeze({ ...access.environment }) });
 }

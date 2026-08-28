@@ -1,0 +1,559 @@
+import { describe, expect, it, vi } from "vitest";
+import { runInNewContext } from "node:vm";
+import { z } from "zod";
+import {
+  CLAUDE_BROWSER_TOOL,
+  createClaudeBasicBrowserServer,
+  type ClaudeBrowserSdk,
+  type ClaudeBrowserToolResult,
+} from "../src/implementations/claude-basic-browser.js";
+
+type ToolHandler = (input: {
+  target?: Record<string, unknown>;
+  operations: readonly Record<string, unknown>[];
+}, extra: unknown) => Promise<ClaudeBrowserToolResult>;
+
+class FakeSocket {
+  readonly sent: Record<string, unknown>[] = [];
+  closed = false;
+  respond = true;
+  stallNavigate = false;
+  navigateErrorText: string | undefined;
+  navigationCompletion: "cross-document" | "same-document" | "unrelated-load" = "cross-document";
+  evaluateExpression: ((expression: string) => { readonly value?: unknown; readonly exception?: boolean }) | undefined;
+  private readonly listeners = new Map<string, Set<(event: { data?: unknown }) => void>>();
+
+  constructor(readonly readyState = 1) {}
+
+  addEventListener(type: string, listener: (event: { data?: unknown }) => void): void {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: (event: { data?: unknown }) => void): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  send(data: string): void {
+    const request = JSON.parse(data) as { id: number; method: string; params?: Record<string, unknown> };
+    this.sent.push(request);
+    if (!this.respond) return;
+    if (request.method === "Page.navigate") {
+      if (this.stallNavigate) return;
+      if (this.navigationCompletion === "same-document") {
+        this.emit("message", { data: JSON.stringify({
+          method: "Page.navigatedWithinDocument",
+          params: { frameId: "frame", url: request.params?.url, navigationType: "fragment" },
+        }) });
+        this.emit("message", { data: JSON.stringify({ id: request.id, result: { frameId: "frame" } }) });
+        return;
+      }
+      if (this.navigationCompletion === "unrelated-load") {
+        this.emitProtocol("Page.lifecycleEvent", { frameId: "frame", loaderId: "old-loader", name: "load" });
+      }
+      this.emit("message", { data: JSON.stringify({
+        id: request.id,
+        result: { frameId: "frame", loaderId: "new-loader", ...(this.navigateErrorText === undefined ? {} : { errorText: this.navigateErrorText }) },
+      }) });
+      if (this.navigationCompletion === "cross-document") {
+        queueMicrotask(() => this.emitProtocol("Page.lifecycleEvent", { frameId: "frame", loaderId: "new-loader", name: "load" }));
+      }
+      return;
+    }
+    if (request.method === "Runtime.evaluate") {
+      const expression = String(request.params?.expression);
+      const evaluated = this.evaluateExpression?.(expression);
+      const marker = "existing-session-marker";
+      const result = {
+        result: {
+          value: evaluated?.value ?? (expression.includes("textContent")
+            ? { text: marker, originalLength: marker.length }
+            : true),
+        },
+        ...(evaluated?.exception ? { exceptionDetails: {} } : {}),
+      };
+      this.emit("message", { data: JSON.stringify({ id: request.id, result }) });
+      return;
+    }
+    const result = {};
+    this.emit("message", { data: JSON.stringify({ id: request.id, result }) });
+  }
+
+  close(): void {
+    this.closed = true;
+    this.emit("close", {});
+  }
+
+  emitProtocol(method: string, params: Record<string, unknown>): void {
+    this.emit("message", { data: JSON.stringify({ method, params }) });
+  }
+
+  private emit(type: string, event: { data?: unknown }): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
+class DomHTMLElement {
+  disabled = false;
+  readOnly = false;
+  ariaDisabled = false;
+  textContent: string | null = null;
+  clickCount = 0;
+  readonly events: string[] = [];
+  onDispatch: ((type: string) => void) | undefined;
+
+  matches(selector: string): boolean {
+    return selector === ":disabled" && this.disabled;
+  }
+
+  getAttribute(name: string): string | null {
+    return name === "aria-disabled" && this.ariaDisabled ? "true" : null;
+  }
+
+  click(): void { this.clickCount += 1; }
+  focus(): void {}
+  dispatchEvent(event: { readonly type: string }): boolean {
+    this.events.push(event.type);
+    this.onDispatch?.(event.type);
+    return true;
+  }
+}
+
+class DomInputElement extends DomHTMLElement {
+  private currentValue = "";
+  type = "text";
+  get value(): string { return this.currentValue; }
+  set value(value: string) {
+    this.currentValue = this.type === "number" && value !== "" && !Number.isFinite(Number(value)) ? "" : value;
+  }
+}
+
+class DomTextAreaElement extends DomInputElement {}
+
+class DomEvent {
+  constructor(readonly type: string, readonly options: unknown) {}
+}
+
+function evaluateInDom(expression: string, element: DomHTMLElement): { readonly value?: unknown; readonly exception?: boolean } {
+  try {
+    return {
+      value: runInNewContext(expression, {
+        document: { querySelector: () => element },
+        HTMLElement: DomHTMLElement,
+        HTMLInputElement: DomInputElement,
+        HTMLTextAreaElement: DomTextAreaElement,
+        Event: DomEvent,
+      }),
+    };
+  } catch {
+    return { exception: true };
+  }
+}
+
+function fixture(options: {
+  endpoint?: string;
+  socket?: FakeSocket;
+  targets?: readonly Record<string, unknown>[];
+  fetch?: typeof globalThis.fetch;
+  createWebSocket?: (url: string, socket: FakeSocket) => FakeSocket;
+  timeoutMs?: number;
+} = {}): {
+  handler: ToolHandler;
+  socket: FakeSocket;
+  socketUrls: string[];
+  server: unknown;
+  inputSchema: Parameters<ClaudeBrowserSdk["tool"]>[2];
+} {
+  let handler: ToolHandler | undefined;
+  let inputSchema: Parameters<ClaudeBrowserSdk["tool"]>[2] | undefined;
+  let fullName = "";
+  const sdk: ClaudeBrowserSdk = {
+    tool: ((name: string, _description: string, schema: Parameters<ClaudeBrowserSdk["tool"]>[2], candidate: ToolHandler) => {
+      fullName = `mcp__relayer_browser__${name}`;
+      inputSchema = schema;
+      handler = candidate;
+      return { name };
+    }) as ClaudeBrowserSdk["tool"],
+    createSdkMcpServer: ((input: unknown) => input) as ClaudeBrowserSdk["createSdkMcpServer"],
+  };
+  const socket = options.socket ?? new FakeSocket();
+  const socketUrls: string[] = [];
+  const endpoint = options.endpoint ?? "http://127.0.0.1:9333";
+  const server = createClaudeBasicBrowserServer(sdk, {
+    cdpEndpoint: endpoint,
+    fetch: options.fetch ?? vi.fn(async () => new Response(JSON.stringify(options.targets ?? [{
+      id: "existing-page",
+      type: "page",
+      title: "Existing page",
+      url: "https://existing.test/marker",
+      webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/existing-page",
+    }]), { status: 200 })),
+    createWebSocket: (url) => { socketUrls.push(url); return options.createWebSocket?.(url, socket) ?? socket; },
+    timeoutMs: options.timeoutMs ?? 100,
+  });
+  expect(fullName).toBe(CLAUDE_BROWSER_TOOL);
+  if (!handler) throw new Error("tool handler was not registered");
+  if (!inputSchema) throw new Error("tool input schema was not registered");
+  return { handler, socket, socketUrls, server, inputSchema };
+}
+
+describe("claude.basic browser MCP tool", () => {
+  it("attaches to an existing page and executes a bounded batch without launching or stopping Chrome", async () => {
+    const { handler, socket, server } = fixture();
+    const result = await handler({ operations: [
+      { type: "read_text", selector: "#marker" },
+      { type: "navigate", url: "https://example.test/next" },
+      { type: "click", selector: "#continue" },
+    ] }, {});
+
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ operations: [
+      { type: "read_text", text: "existing-session-marker", truncated: false },
+      { type: "navigate", url: "https://example.test/next" },
+      { type: "click", clicked: true },
+    ] });
+    expect(socket.sent.map((entry) => entry.method)).toEqual([
+      "Runtime.evaluate", "Page.enable", "Page.setLifecycleEventsEnabled", "Page.navigate", "Runtime.evaluate",
+    ]);
+    expect(socket.closed).toBe(true);
+    expect(server).toMatchObject({
+      name: "relayer_browser",
+      version: "1.0.0",
+      instructions: expect.stringContaining("Click and fill must be final"),
+    });
+  });
+
+  it("rejects a non-loopback dependency override before creating a tool", () => {
+    expect(() => fixture({ endpoint: "http://example.test:9222" })).toThrow(/invalid-endpoint/);
+  });
+
+  it("reports a CDP navigation error instead of claiming the page was reached", async () => {
+    const socket = new FakeSocket();
+    socket.navigateErrorText = "net::ERR_CONNECTION_REFUSED private-upstream.test";
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "navigate", url: "https://unavailable.test/" }] }, {});
+
+    expect(result).toMatchObject({ isError: true, content: [{ text: "Chrome could not reach the requested page." }] });
+    expect(result.content[0]!.text).not.toContain("private-upstream");
+    expect(socket.closed).toBe(true);
+  });
+
+  it("completes a same-document navigation without waiting for a page load", async () => {
+    const socket = new FakeSocket();
+    socket.navigationCompletion = "same-document";
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [
+      { type: "navigate", url: "https://existing.test/marker#details" },
+      { type: "read_text", selector: "body" },
+    ] }, {});
+
+    expect(result.isError).toBeUndefined();
+    expect(socket.sent.map((entry) => entry.method)).toEqual([
+      "Page.enable", "Page.setLifecycleEventsEnabled", "Page.navigate", "Runtime.evaluate",
+    ]);
+    expect(socket.closed).toBe(true);
+  });
+
+  it("ignores an unrelated load until the requested navigation loader completes", async () => {
+    const socket = new FakeSocket();
+    socket.navigationCompletion = "unrelated-load";
+    const { handler } = fixture({ socket, timeoutMs: 1_000 });
+    const operation = handler({ operations: [
+      { type: "navigate", url: "https://example.test/requested" },
+      { type: "read_text", selector: "body" },
+    ] }, {});
+
+    await vi.waitFor(() => expect(socket.sent.map((entry) => entry.method)).toContain("Page.navigate"));
+    await Promise.resolve();
+    expect(socket.sent.map((entry) => entry.method)).not.toContain("Runtime.evaluate");
+
+    socket.emitProtocol("Page.lifecycleEvent", { frameId: "frame", loaderId: "new-loader", name: "load" });
+    await expect(operation).resolves.not.toHaveProperty("isError");
+    expect(socket.sent.map((entry) => entry.method)).toContain("Runtime.evaluate");
+    expect(socket.closed).toBe(true);
+  });
+
+  it("requires click to be terminal so later work reattaches in a new native tool call", async () => {
+    const { handler, inputSchema, socket } = fixture();
+    const request = {
+      operations: [
+        { type: "click", selector: "#continue" },
+        { type: "read_text", selector: "body" },
+      ],
+    };
+
+    expect(z.object(inputSchema).safeParse(request)).toMatchObject({ success: false });
+    await expect(handler(request, {})).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "The browser request is not supported." }],
+    });
+    expect(socket.sent).toHaveLength(0);
+  });
+
+  it("requires fill to be terminal and sends no later command when its DOM events navigate", async () => {
+    const socket = new FakeSocket();
+    const input = new DomInputElement();
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, input);
+    const { handler, inputSchema } = fixture({ socket });
+    const request = {
+      operations: [
+        { type: "fill", selector: "#name", value: "Ada" },
+        { type: "read_text", selector: "body" },
+      ],
+    };
+
+    expect(z.object(inputSchema).safeParse(request)).toMatchObject({ success: false });
+    await expect(handler(request, {})).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "The browser request is not supported." }],
+    });
+    expect(socket.sent).toHaveLength(0);
+
+    const navigatingSocket = new FakeSocket();
+    const navigatingInput = new DomInputElement();
+    let navigationTriggered = false;
+    navigatingInput.onDispatch = () => {
+      navigationTriggered = true;
+      navigatingSocket.emitProtocol("Page.frameNavigated", { frame: { id: "replacement-frame" } });
+    };
+    navigatingSocket.evaluateExpression = (expression) => evaluateInDom(expression, navigatingInput);
+    const navigating = fixture({ socket: navigatingSocket });
+
+    await expect(navigating.handler({
+      operations: [{ type: "fill", selector: "#name", value: "Ada" }],
+    }, {})).resolves.not.toHaveProperty("isError");
+    expect(navigationTriggered).toBe(true);
+    expect(navigatingSocket.sent.map((entry) => entry.method)).toEqual(["Runtime.evaluate"]);
+    expect(navigatingSocket.closed).toBe(true);
+  });
+
+  it("truncates highly escaped page text before CDP serializes the response", async () => {
+    const socket = new FakeSocket();
+    const element = new DomHTMLElement();
+    element.textContent = "\u0000\"\\\n".repeat(100_000);
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, element);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "read_text", selector: "#large" }] }, {});
+
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0]!.text)).toEqual({ operations: [{
+      type: "read_text",
+      text: element.textContent.slice(0, 20_000),
+      truncated: true,
+    }] });
+    expect(socket.closed).toBe(true);
+  });
+
+  it("fails honestly instead of clicking a disabled control", async () => {
+    const socket = new FakeSocket();
+    const button = new DomHTMLElement();
+    button.disabled = true;
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, button);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "click", selector: "#disabled" }] }, {});
+
+    expect(result).toMatchObject({ isError: true, content: [{ text: "The browser operation failed." }] });
+    expect(button.clickCount).toBe(0);
+    expect(socket.closed).toBe(true);
+  });
+
+  it("uses the native value setter and verifies the resulting fill value", async () => {
+    const socket = new FakeSocket();
+    const input = new DomInputElement();
+    let interceptedAssignments = 0;
+    Object.defineProperty(input, "value", {
+      configurable: true,
+      get() { return Reflect.get(DomInputElement.prototype, "value", this); },
+      set() { interceptedAssignments += 1; },
+    });
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, input);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "fill", selector: "#name", value: "Ada" }] }, {});
+
+    expect(result.isError).toBeUndefined();
+    expect(input.value).toBe("Ada");
+    expect(interceptedAssignments).toBe(0);
+    expect(input.events).toEqual(["input", "change"]);
+  });
+
+  it("fails honestly when framework handling changes the requested fill value", async () => {
+    const socket = new FakeSocket();
+    const input = new DomInputElement();
+    input.onDispatch = (type) => { if (type === "input") input.value = "framework-normalized"; };
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, input);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "fill", selector: "#name", value: "Ada" }] }, {});
+
+    expect(result).toMatchObject({ isError: true, content: [{ text: "The browser operation failed." }] });
+    expect(input.value).toBe("framework-normalized");
+    expect(result.content[0]!.text).not.toContain("framework-normalized");
+    expect(socket.closed).toBe(true);
+  });
+
+  it("fails honestly when a number input's native setter sanitizes the requested value", async () => {
+    const socket = new FakeSocket();
+    const input = new DomInputElement();
+    input.type = "number";
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, input);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "fill", selector: "#age", value: "not-a-number" }] }, {});
+
+    expect(result).toMatchObject({ isError: true, content: [{ text: "The browser operation failed." }] });
+    expect(input.value).toBe("");
+    expect(result.content[0]!.text).not.toContain("not-a-number");
+    expect(socket.closed).toBe(true);
+  });
+
+  it("requires a unique explicit target when Chrome exposes multiple pages", async () => {
+    const targets = [
+      { id: "private", type: "page", title: "Private", url: "https://private.test/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/private" },
+      { id: "marker", type: "page", title: "Benign marker", url: "https://example.test/marker", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/marker" },
+    ];
+    const ambiguous = fixture({ targets });
+    await expect(ambiguous.handler({ operations: [{ type: "read_text" }] }, {})).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "More than one Chrome page matches the browser target selection." }],
+    });
+    expect(ambiguous.socket.sent).toHaveLength(0);
+
+    const selected = fixture({ targets });
+    await expect(selected.handler({
+      target: { targetId: "marker" },
+      operations: [{ type: "read_text", selector: "#marker" }],
+    }, {})).resolves.not.toHaveProperty("isError");
+    expect(selected.socket.sent).toHaveLength(1);
+    expect(selected.socketUrls).toEqual(["ws://127.0.0.1:9333/devtools/page/marker"]);
+
+    const absent = fixture({ targets });
+    await expect(absent.handler({
+      target: { urlContains: "missing.test" },
+      operations: [{ type: "read_text" }],
+    }, {})).resolves.toMatchObject({ isError: true, content: [{ text: "No attachable Chrome page is available." }] });
+  });
+
+  it("binds selected discovery metadata to the exact page socket", async () => {
+    const { handler, socket, socketUrls } = fixture({
+      targets: [{
+        id: "marker",
+        type: "page",
+        title: "Benign marker",
+        url: "https://example.test/marker",
+        webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/private",
+      }],
+    });
+
+    await expect(handler({
+      target: { targetId: "marker" },
+      operations: [{ type: "read_text" }],
+    }, {})).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "No attachable Chrome page is available." }],
+    });
+    expect(socketUrls).toHaveLength(0);
+    expect(socket.sent).toHaveLength(0);
+  });
+
+  it("closes its CDP socket when the SDK cancels the enclosing native tool", async () => {
+    const socket = new FakeSocket();
+    socket.respond = false;
+    const { handler } = fixture({ socket });
+    const controller = new AbortController();
+    const operation = handler({ operations: [{ type: "read_text", selector: "body" }] }, { signal: controller.signal });
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+    controller.abort(new Error("stop"));
+
+    await expect(operation).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "Browser operation cancelled." }],
+    });
+    expect(socket.closed).toBe(true);
+  });
+
+  it("reports prompt cancellation when the signal aborts during socket creation", async () => {
+    const controller = new AbortController();
+    const socket = new FakeSocket(0);
+    const { handler } = fixture({
+      socket,
+      createWebSocket: (_url, created) => {
+        controller.abort(new Error("cancel during socket construction"));
+        return created;
+      },
+    });
+
+    await expect(handler({ operations: [{ type: "read_text" }] }, { signal: controller.signal })).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "Browser operation cancelled." }],
+    });
+    expect(socket.closed).toBe(true);
+    expect(socket.sent).toHaveLength(0);
+  });
+
+  it("observes both navigation waiters and closes the socket when navigation is cancelled", async () => {
+    const socket = new FakeSocket();
+    socket.stallNavigate = true;
+    const { handler } = fixture({ socket });
+    const controller = new AbortController();
+    const operation = handler({ operations: [{ type: "navigate", url: "https://example.test/slow" }] }, { signal: controller.signal });
+    await vi.waitFor(() => expect(socket.sent.map((entry) => entry.method)).toContain("Page.navigate"));
+    controller.abort(new Error("cancel navigation"));
+
+    await expect(operation).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "Browser operation cancelled." }],
+    });
+    expect(socket.closed).toBe(true);
+  });
+
+  it("reports Chrome discovery failures without returning endpoint or response details", async () => {
+    let handler: ToolHandler | undefined;
+    const sdk: ClaudeBrowserSdk = {
+      tool: ((_name: string, _description: string, _schema: unknown, candidate: ToolHandler) => {
+        handler = candidate;
+        return {};
+      }) as ClaudeBrowserSdk["tool"],
+      createSdkMcpServer: ((input: unknown) => input) as ClaudeBrowserSdk["createSdkMcpServer"],
+    };
+    createClaudeBasicBrowserServer(sdk, {
+      fetch: vi.fn(async () => new Response("private browser details", { status: 503 })),
+    });
+    if (!handler) throw new Error("tool handler was not registered");
+
+    const result = await handler({ operations: [{ type: "read_text" }] }, {});
+    expect(result).toMatchObject({ isError: true, content: [{ text: "Chrome is not available at the browser helper endpoint." }] });
+    expect(result.content[0]!.text).not.toContain("private browser details");
+    expect(result.content[0]!.text).not.toContain("9222");
+  });
+
+  it("aborts a chunked discovery response as soon as it crosses the byte cap", async () => {
+    let discoverySignal: AbortSignal | undefined;
+    const chunk = new Uint8Array(600_000);
+    const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      discoverySignal = init?.signal instanceof AbortSignal ? init.signal : undefined;
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(chunk);
+          controller.enqueue(chunk);
+          controller.close();
+        },
+      }));
+    }) as typeof globalThis.fetch;
+    const { handler, socket } = fixture({ fetch: fetchImpl });
+
+    const result = await handler({ operations: [{ type: "read_text" }] }, {});
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ text: "Chrome returned an invalid browser discovery response." }],
+    });
+    expect(discoverySignal?.aborted).toBe(true);
+    expect(socket.sent).toHaveLength(0);
+  });
+});

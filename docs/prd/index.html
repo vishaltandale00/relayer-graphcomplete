@@ -194,7 +194,7 @@
 <body>
   <main><h1>Relayer Desktop and Relayer Harness: Product Requirements</h1>
 <p><strong>Document status:</strong> Draft for product review.<br>
-<strong>Last updated:</strong> 2026-08-24.<br>
+<strong>Last updated:</strong> 2026-08-28.<br>
 <strong>Application-state baseline:</strong> Commit <code>38286cb</code>.</p>
 <section class="reading-map" aria-labelledby="reading-map-title">
 <span class="reading-map-eyebrow">Start here</span>
@@ -738,7 +738,7 @@ type CompleteResult =
 <p><strong>Acceptance:</strong> A new desktop process recognizes the saved connection.</p>
 </section>
 <h3>2.1 First launch</h3>
-<p>Relayer has no product account in V1. It uses one implicit local profile. First launch opens Agent setup and, after a valid configuration is saved, opens the normal New thread window. Folder and project choice are not onboarding steps.</p>
+<p>Relayer uses one implicit local profile. First launch opens Agent setup and, after a valid configuration is saved, opens the normal New thread window. An optional Relayer account offer may appear only after that local workspace is usable. Folder, project, and account choice are not blocking onboarding steps.</p>
 <p>The setup surface is one focused <strong>Agent login</strong> card. Codex and API key are presented as horizontal login-method choices, followed by the credential and model controls for the selected method. The form should not split setup into equal Harness and Agent login columns or stack alternative methods into a long vertical option list.</p>
 <p>Agent setup does not require a harness choice. After connection, the New Thread composer presents Model as the primary execution control. Its Advanced tab contains compatible harness configurations.</p>
 <p>The packaged application includes <code>codex-basic</code> as its Codex product harness. <code>codex-basic-high</code> remains available only to internal Eval and code workflows. Prime Agent configurations remain development targets until a clean installation can load the upstream package.</p>
@@ -770,7 +770,18 @@ type CompleteResult =
 <li>Harnesses Settings lists only harnesses usable now. Provider and model diagnostics remain in their owning Settings surfaces.</li>
 <li>Existing UI-authored harness rule overrides reset once to catalog defaults when their editor is removed.</li>
 </ul>
-<h3>2.4 Configuration schema</h3>
+<h3>2.4 Optional Relayer account</h3>
+<p>The Relayer account is separate from every agent-provider credential. Stable and Preview open the branded <code>app.relayerlabs.ai/desktop/login</code> launcher and authenticate directly with the Auth0 Native Application using Authorization Code and PKCE. No Relayer authentication API, custom desktop session, database row, or Relayer user UUID participates.</p>
+<ul>
+<li>The final onboarding offer explains that privacy-filtered error reports may use a pseudonymous Auth0 subject.</li>
+<li><strong>Sign in</strong> opens the browser flow. <strong>Continue without an account</strong> durably suppresses later automatic offers.</li>
+<li>The bottom-right <strong>Sign in</strong> control starts the browser flow directly while signed out.</li>
+<li>For an existing account, the same control opens a minimal Account panel with status and the applicable action.</li>
+<li>Signed-out, signing-in, uncertain, error, offline, cancellation, and refresh failure never gate local product use.</li>
+<li>Logout disables the current telemetry generation and clears the encrypted local refresh credential before best-effort Auth0 revocation. It does not sign the browser out.</li>
+</ul>
+<p>Electron main owns state and PKCE generation, loopback binding, callback validation, direct token operations, OIDC verification, encrypted refresh-token custody, and account generation. Stable can bind only ports 49152 through 49154. Preview can bind only ports 49155 through 49157. The renderer receives only a closed presentation state, the selected channel, a pseudonymous subject where useful, and safe reason codes.</p>
+<h3>2.5 Configuration schema</h3>
 <pre><code class="language-ts">type AgentConfiguration = {
   harnessId: string;
   harnessVersion: string;
@@ -795,9 +806,9 @@ type InteractionModelBinding = {
 };
 </code></pre>
 <p>The harness binding is written when the thread&#39;s root interaction is created and is inherited by every interaction in that thread. The model picker remains available in the composer and may change before any interaction. Every submitted interaction records the exact provider, credential reference, and model used for that call.</p>
-<h3>2.5 Product requirements</h3>
+<h3>2.6 Product requirements</h3>
 <ul>
-<li><strong>AGT-001:</strong> No Relayer sign-up, sign-in, avatar, cloud-sync promise, or Sign out action appears in V1.</li>
+<li><strong>AGT-001:</strong> Agent-provider login remains independent from the optional Relayer account. No avatar or cloud-sync promise appears in V1.</li>
 <li><strong>AGT-002:</strong> Agent login is the primary setup task. Harness selection does not compete with credential setup.</li>
 <li><strong>AGT-003:</strong> Model is the primary composer choice. Advanced selects a compatible harness before thread creation. A harness change applies only to new threads.</li>
 <li><strong>AGT-004:</strong> Codex and API key are the enabled V1 login methods.</li>
@@ -807,9 +818,26 @@ type InteractionModelBinding = {
 <li><strong>AGT-008:</strong> Continue is disabled until the preselected or advanced-selected harness, credential, provider, and initial model form a valid configuration.</li>
 <li><strong>AGT-009:</strong> The composer exposes the model for the next interaction. Changing it affects that interaction and later defaults, never prior interaction records.</li>
 <li><strong>AGT-010:</strong> An existing thread cannot switch harnesses in place. To use a different harness, the user starts or forks into a new thread.</li>
+<li><strong>ACC-001:</strong> Optional account login is direct Auth0 Authorization Code plus PKCE with no Relayer API or database dependency.</li>
+<li><strong>ACC-002:</strong> Main binds the channel-specific loopback listener before browser launch and fails closed for invalid, duplicate, late, mismatched, timed-out, cancelled, or stale callbacks.</li>
+<li><strong>ACC-003:</strong> Main validates the Auth0 signature, issuer, audience, authorized party, expiry, subject, and nonce whenever requested.</li>
+<li><strong>ACC-004:</strong> Only a verified signed-in generation supplies a telemetry identity. Uncertain and error states pause authenticated telemetry without affecting local features.</li>
+<li><strong>ACC-005:</strong> The renderer never receives codes, state, PKCE material, tokens, Auth0 configuration, email, profile data, network authority, or the telemetry generation.</li>
+<li><strong>ACC-006:</strong> Refresh rotation and logout cannot resurrect stale credentials after generation invalidation.</li>
+<li><strong>ACC-007:</strong> Optional account sign-in is a dedicated onboarding step after provider setup and before projects, chats, threads, or the desktop workspace are revealed. Sign in and Continue without an account both resolve the step, and account failure cannot trap local use.</li>
+<li><strong>ACC-008:</strong> The bottom-right control starts sign-in directly while signed out and opens minimal settings for an existing account. Account UX never shows Stable or Preview.</li>
 </ul>
-<h3>2.6 Verification</h3>
+<h3>2.7 Verification</h3>
 <p>Deterministic UI tests cover each selector transition, conditional field, validation error, and disabled state. They also cover secure storage and secret removal. Credential-adapter integration tests use fake Codex and provider servers.</p>
+<table>
+<thead><tr><th>Optional-account checkpoint</th><th>Deterministic proof</th></tr></thead>
+<tbody>
+<tr><td><code>ACC-001</code> and <code>ACC-003</code></td><td><code>test/desktop-account-session.test.mjs</code> drives local fake Auth0 token and JWKS endpoints, PKCE exchange, claim rejection, refresh, and revocation. Production Auth0 is never contacted.</td></tr>
+<tr><td><code>ACC-002</code></td><td>The same suite occupies callback ports, switches Stable and Preview pools, races concurrent controls, and verifies exact callback failure and listener closure.</td></tr>
+<tr><td><code>ACC-004</code> and <code>ACC-006</code></td><td>Generation tests cover unverifiable restart, logout ordering, stale exchange completion, and a paused credential commit followed by deletion.</td></tr>
+<tr><td><code>ACC-005</code>, <code>ACC-007</code>, and <code>ACC-008</code></td><td><code>test/desktop-account-ui.test.mjs</code> verifies the startup gate, direct account control, minimal settings, action coalescing, and contained failures.</td></tr>
+</tbody>
+</table>
 <p>One optional authentication smoke test runs before a signed release. It is not in the default test suite. It does not make a paid Complete call.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15.1">15A. Agent connection evidence</h2>
 <p><code>PROV-001</code> is one product requirement with several observable subrequirements, not a collection of independent setup features:</p>
@@ -1674,7 +1702,8 @@ type NodeAction =
 <p>The engine rejects unreachable current-interaction layers. One atomic operation accepts the valid reachable drafts. A focused flat root remains valid.</p>
 <p>The accepted return value is a <code>ResolvedGraphLayer</code> containing full node objects, exact visible edges, and node actions for the root layer. This is the immediate display payload returned by Complete. The persisted layer reference remains the source for later navigation and reload.</p>
 <h3>11.6 Local server and token contract</h3>
-<p>The Rust graph router is exposed on loopback HTTP; a Unix-domain-socket transport may replace loopback only if the Codex sandbox cannot reach it. Harnesses do not use MCP, do not open SQLite directly, and do not treat a CLI as the primary API. Prime Agent calls the Python client from its IPython kernel; Node/Codex harnesses call the TypeScript client or execute a small TypeScript program.</p>
+<p>The Rust graph router is exposed on loopback HTTP; a Unix-domain-socket transport may replace loopback only if the Codex sandbox cannot reach it. Harnesses do not use MCP as the graph transport, do not open SQLite directly, and do not treat a CLI as the primary graph API. They access graph state through typed TypeScript or Python clients and the loopback Rust API. A selected harness may still use implementation-owned native tools or MCP for non-graph capabilities such as browser use. Those mechanisms do not carry GraphComplete authority.</p>
+<p>For <code>claude.basic</code>, Auto remains bound to SDK <code>acceptEdits</code>. Its harness binding pre-approves one code-owned coarse browser MCP unit through <code>allowedTools</code>. SDK 0.3.250 runs that unit without a user prompt or a separate model or Relayer reviewer. Ask leaves the unit unlisted. Full keeps <code>bypassPermissions</code>. Relayer does not inspect or classify inner browser actions. This harness-specific automatic approval is the settled issue #250 contract, not a browser permission mode.</p>
 <pre><code class="language-text">POST /api/control/capabilities  (trusted remint after restart)
 POST /api/graph/nodes
 POST /api/graph/edges
@@ -2159,7 +2188,7 @@ npm run eval:web
 <p>The first project suite adds one <strong>simulated-user judge</strong>. The judge opens the completed turn in the exact read-only production workspace, explores the response through visible controls, and grades what the product actually communicates. It does not substitute raw graph JSON, database records, or hidden node text for the rendered experience. Every qualitative rating is supported by screenshots captured during that review session.</p>
 <p>Configuration comparison and blind pairwise judging are later evaluation-runner capabilities. When added, the judge model/version, prompt version, rubric version, repeat count, thresholds, and tie policy are recorded with the run. Human review in the real graph UX remains required before product promotion.</p>
 <h4>13.4.1 Simulated-user tool contract</h4>
-<p>The simulated-user judge receives the original request, a versioned rubric, the read-only production review window, and six tools:</p>
+<p>The simulated-user judge receives the original request, a versioned rubric, and the read-only production review window. It also receives six graph-review tools and read-only shell access to the immutable task artifact. Shell access exists to discover facts needed to apply the rubric; only the rendered graph can prove what the user experience communicates.</p>
 <table>
 <thead><tr><th>Tool</th><th>Contract</th></tr></thead>
 <tbody>
@@ -2169,11 +2198,12 @@ npm run eval:web
 <tr><td><code>reviewLayer(review)</code></td><td>Write or revise one screenshot-grounded layer assessment while the judge is exploring.</td></tr>
 <tr><td><code>reviewNode(review)</code></td><td>Write or revise one screenshot-grounded node assessment, including reviews of actions visible on that node.</td></tr>
 <tr><td><code>submitReview(review)</code></td><td>Write the overall turn assessment and finalize only after required layer and node coverage is complete.</td></tr>
+<tr><td>Read-only shell</td><td>Inspect the task artifact with non-mutating Git, search, and file-reading commands. Network access, arbitrary non-review tools, and workspace mutation remain disabled.</td></tr>
 </tbody></table>
 <p>There is no scroll tool and no graph-specific <code>openLayer</code> or <code>selectNode</code> shortcut. A visible viewport capture preserves the actual first impression. A full-element capture exposes an entire node-detail panel without shrinking long content into one unreadable image; tall captures return ordered tiles under one screenshot ID. Element references permit interaction but are not rubric evidence.</p>
 <p>The runner, not the judge, binds each screenshot to immutable state. This state includes execution, thread, turn, layer, selected node, activated action, navigation path, viewport, capture target, tile count, and content digest. A review cannot cite a screenshot whose recorded state does not match its claimed subject.</p>
 <h4>13.4.2 Literal recursive rubric</h4>
-<p>The rubric is a versioned manifest. Every layer uses the same criteria; the contract does not distinguish root and child layers. Node count is observable context, not a threshold. The judge decides from the rendered screenshot whether a layer is sparse, crowded, fragmented, balanced, or otherwise well organized.</p>
+<p>The rubric is a versioned manifest. Active recursive contract v5 uses human-experience rubric v10. Every layer uses the same criteria; the contract does not distinguish root and child layers. Node count is observable context, not a threshold. The judge decides from the rendered screenshot whether a layer is sparse, crowded, fragmented, balanced, or otherwise well organized.</p>
 <table>
 <thead><tr><th>Subject</th><th>Required criteria</th><th>Required screenshot context</th></tr></thead>
 <tbody>
@@ -2183,20 +2213,15 @@ npm run eval:web
 <tr><td>Invoke action inside its source node review</td><td>Placement, label expectation, apparent value</td><td>Visible source; invocation remains disabled in immutable review</td></tr>
 <tr><td>Turn</td><td>Answer quality, recursive coherence, navigation value, presentation quality, and follow-up progress when applicable</td><td>Representative evidence from completed layer, node, and action reviews</td></tr>
 </tbody></table>
-<p>Each criterion uses one anchored four-point scale:</p>
-<ul>
-<li><code>4</code> clearly succeeds.</li>
-<li><code>3</code> succeeds with minor weaknesses.</li>
-<li><code>2</code> has material problems.</li>
-<li><code>1</code> fails its intended role.</li>
-<li><code>null</code> means the criterion is genuinely not assessable from available UI evidence.</li>
-</ul>
-<p>A judge must capture more evidence when the UI can expose it rather than using <code>null</code> as a shortcut.</p>
+<p>Each criterion uses an ordered integer from 1 through 8, where higher is better. The integers intentionally have no canned meanings. The judge chooses a score from the criterion definition and observed graph, then records a criterion-specific reason and screenshot evidence explaining that exact judgment. Node <code>actionDelivery</code> may be <code>null</code> only when no destination is assessable. Node <code>recursiveQuality</code> may be <code>null</code> only when no expansion child exists. Turn <code>follow_up_progress</code> may be <code>null</code> when the request is not a follow-up. Every other occupied node, layer, and turn criterion requires a score.</p>
+<p><code>polish</code> is a separate node vector dimension for basic rendered integrity: clipping, readability, density, alignment, and control rendering. Polish provides no credit to content, action allocation, destination delivery, recursive quality, layer quality, turn quality, or task outcome.</p>
 <h4>13.4.3 Incremental screenshot-grounded review records</h4>
-<p>The judge writes reviews as it explores. <code>reviewLayer</code> persists one layer record. <code>reviewNode</code> persists one node record and the actions visible on that node. Calling either tool again revises that subject's current record while preserving the prior calls in the interaction trace. Applicable rating keys come from the rubric manifest.</p>
-<pre><code class="language-typescript">reviewLayer({ layerId, evidence, ratings, summary, findings });
-reviewNode({ nodeId, layerId, evidence, ratings, actions, summary, findings });
-submitReview({ turnId, evidence, ratings, summary, findings });
+<p>The judge writes reviews as it explores. <code>reviewLayer</code> persists one finalized layer result after its nodes and expansion children have been reviewed.</p>
+<p><code>reviewNode</code> persists one node record and its sequential expand/reference/invoke/stop allocation decisions. The record also contains missing-action opportunities and visible actions.</p>
+<p>Calling either tool again revises that subject's current record while preserving prior calls in the interaction trace. Applicable criterion keys come from the rubric manifest.</p>
+<pre><code class="language-typescript">reviewNode({ layerId, nodeId, evidence, score, semantic, allocationSteps, missingActionOpportunities, actions, findings });
+reviewLayer({ layerId, depth, nodeScores, nodeSemantics, criterionJudgments, materiallyMisleading, layerSummary, evidence });
+submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, findings, scoreCeiling });
 </code></pre>
 <pre><code class="language-json">{
   "nodeId": "node-22",
@@ -2205,51 +2230,64 @@ submitReview({ turnId, evidence, ratings, summary, findings });
     "context": ["shot-16"],
     "detail": ["shot-17"]
   },
-  "ratings": {
-    "layer_fit": 4,
-    "title_detail_alignment": 3,
-    "substance": 4,
-    "detail_presentation": 2
+  "score": {
+    "nodeId": "node-22",
+    "content": { "score": 6, "reason": "The visible explanation answers the main question but omits one important decision.", "evidence": ["shot-17"] },
+    "actionAllocation": { "score": 3, "reason": "A material inspect path is missing.", "evidence": ["shot-17"] },
+    "actionDelivery": { "score": null, "reason": "No destination action was authored.", "evidence": ["shot-17"] },
+    "recursiveQuality": { "score": null, "reason": "No expansion child exists.", "evidence": ["shot-17"] },
+    "polish": { "score": 7, "reason": "The node renders cleanly without clipping or broken controls.", "evidence": ["shot-17"] }
   },
-  "actions": [
-    {
-      "actionId": "action-6",
-      "kind": "navigate",
-      "evidence": {
-        "source": ["shot-17"],
-        "destination": ["shot-21"]
-      },
-      "ratings": {
-        "placement": 4,
-        "label_expectation": 3,
-        "destination_delivery": 4,
-        "added_value": 4
-      },
-      "summary": "The destination adds useful detail, but the label is vague."
-    }
-  ],
-  "summary": "The node belongs here and contains useful evidence, but its detail layout is difficult to scan.",
+  "allocationSteps": [{
+    "step": 0,
+    "ranking": [{ "choice": "expand", "rank": 1 }, { "choice": "reference", "rank": 2 }, { "choice": "invoke", "rank": 3 }, { "choice": "stop", "rank": 4 }],
+    "preferredChoice": "expand",
+    "authoredChoice": "stop",
+    "authoredActionId": null,
+    "margin": "clearly_better",
+    "selectionFinding": "Expansion would expose a material decision that the visible node omits.",
+    "evidence": ["shot-17"]
+  }],
+  "missingActionOpportunities": [{
+    "allocationStep": 0,
+    "preferredChoice": "expand",
+    "importance": "material",
+    "unansweredQuestion": "Why was this implementation chosen?",
+    "expectedContribution": "Expose the decision and its tradeoffs.",
+    "artifactEvidence": ["src/implementation.ts:42"],
+    "evidence": ["shot-17"]
+  }],
+  "semantic": {
+    "nodeId": "node-22",
+    "meaning": "Implementation result",
+    "delivered": "The visible outcome",
+    "limitations": "The rationale is absent",
+    "effectOnLayer": "Useful but shallow",
+    "evidence": ["shot-17"]
+  },
+  "actions": [],
   "findings": [
     {
       "type": "issue",
       "severity": "material",
-      "text": "The final table column is unreadable.",
+      "text": "The graph stops where an implementation-rationale expansion would materially help.",
       "evidence": ["shot-17"]
     }
   ]
 }
 </code></pre>
-<p>Ratings do not require repetitive prose. One summary explains the subject judgment. Specific strengths and problems appear as screenshot-backed findings.</p>
+<p>Each criterion requires its own reason; one generic rationale copied across criteria is invalid. Semantic summaries preserve what a node means, delivers, omits, and contributes to its layer. Specific strengths and problems remain screenshot-backed findings.</p>
 <p>An expand action requires source and destination screenshots. The destination screenshot path must contain that action.</p>
 <p>A reference review covers the source node, action, and destination-layer inclusion. It does not regrade destination nodes individually.</p>
 <p>An invoke action stays inside its source-node review and uses only visible source evidence.</p>
-<p><code>submitReview</code> does not accept new layer or node assessments. It receives the overall turn ratings, representative screenshot references, summary, and findings. It finalizes the already persisted review set as one immutable judge result.</p>
+<p><code>submitReview</code> does not accept new layer or node assessments. It consumes the current root <code>LayerResult</code>, overall turn criterion judgments, representative screenshot references, summary, findings, and an explicit score ceiling. It finalizes the already persisted review set as one immutable judge result.</p>
 <h4>13.4.4 Coverage and completion</h4>
-<p>The review-writing tools reject unrelated evidence, unknown rubric keys, mismatched screenshot state, and an unjustified <code>null</code> rating immediately.</p>
+<p>The review-writing tools reject unrelated evidence, unknown rubric keys, mismatched screenshot state, invalid nullability, incomplete action rankings, and missing recursive dependencies immediately.</p>
 <p><code>submitReview</code> lists missing subjects when coverage is incomplete. Expansion coverage includes every layer, node, visible action, and the overall turn.</p>
 <p>Reference traversal processes each unique layer once and follows reference actions transitively. It does not activate inherited expand, invoke, or resolved-invoke actions.</p>
 <p>The judge still grades those visible inherited actions in their reference context.</p>
 <p>The final artifact preserves traces, screenshots, metadata, incremental reviews, rubric version, judge configuration, and completion coverage.</p>
+<p>When the judge finds one material missing action, affected turn criteria and the overall presentation ceiling cannot exceed 6. Repeated material omissions or one critical omission cap them at 4. These are maximums, not assigned scores: the judge still chooses and explains the score warranted by the visible experience. Historical reviews retain their native scale when viewed alone; mixed-scale multi-turn projections normalize legacy scores proportionally before aggregation.</p>
 <p>The simulated-user judge grades only what the product made visible. Separate deterministic graders remain authoritative for graph integrity, mutation policy, repository diff, protected-file hashes, public and hidden tests, build results, and commit history. A visually strong graph cannot compensate for broken code, and correct hidden work cannot compensate for an unusable visible response.</p>
 <h3>13.5 Evaluation ladder</h3>
 <table>
@@ -2607,6 +2645,7 @@ submitReview({ turnId, evidence, ratings, summary, findings });
 <h3>17.1 Included in V1</h3>
 <ul>
 <li>local profile with Codex or API-key agent login;</li>
+<li>optional direct Auth0 desktop account with a pseudonymous subject and no cloud-workspace promise;</li>
 <li>one OSS monorepo containing graph-engine crates, typed clients, Node harness host, harness implementations, eval runner, Rust Relayer app server, and Electron desktop packages;</li>
 <li>a harness- and provider-agnostic product contract behind the Relayer Complete interface;</li>
 <li>no-folder and project-backed threads;</li>
@@ -2621,7 +2660,7 @@ submitReview({ turnId, evidence, ratings, summary, findings });
 </ul>
 <h3>17.2 Excluded or deferred</h3>
 <ul>
-<li>Relayer accounts, cloud sync, remote hosting, teams, and enterprise workspace administration;</li>
+<li>account-backed cloud sync, remote hosting, teams, profiles, and enterprise workspace administration;</li>
 <li>mandatory up-front workspace graph construction;</li>
 <li>continuous background stale-node propagation;</li>
 <li>self-assessment as a separate product algorithm before Complete is stable;</li>

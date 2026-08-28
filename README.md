@@ -69,6 +69,18 @@ configurations as unavailable.
 
 Prime Agent is one optional recursive harness implementation, not the product runtime. See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), [ADR 0006](docs/decisions/0006-harness-provider-agnostic-product-boundary.md), and the adapter-specific [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
+## Harness-owned browser use
+
+The shipped Codex, Claude, and Prime harnesses can each attach to an already-running Chrome instance at `http://127.0.0.1:9222`. Start Chrome yourself with remote debugging enabled and a dedicated, non-default persistent profile; Chrome 136 and later do not honor remote-debugging switches for the default data directory. Relayer does not launch, stop, authenticate, or coordinate Chrome, and it has no shared browser service or browser setting.
+
+- `codex.basic` uses Codex's native MCP support with the packaged `chrome-devtools-mcp@1.8.0` helper. Its helper process follows the Codex app-server lifecycle; Chrome does not. If the exact packaged helper is missing or incompatible, only this Codex browser route is omitted and Desktop continues normally.
+- `claude.basic` supplies one bounded in-process Claude SDK MCP tool for navigation, text reads, clicks, and fills. With one page it can attach implicitly; with multiple pages the agent must provide a unique target ID, URL substring, or title substring. The helper closes only its own fetch/WebSocket connections.
+- `prime.agent` discovers Prime Agent's bundled dependency-free Python browser skill. The skill uses in-process loopback CDP inside Prime's existing kernel confinement and closes only its own connections. Prime Ask and Auto retain their current macOS confinement requirements.
+
+Browser use stays inside each harness's existing native approval unit. Ask, Approve for me, and Full access remain the same `ask`, `auto`, and `full` product profiles described below; Relayer does not classify or approve individual actions inside a native browser tool or cell. For `claude.basic`, Ask leaves the coarse browser MCP tool unlisted, Auto keeps SDK `acceptEdits` and pre-approves that one code-owned tool through `allowedTools`, and Full keeps `bypassPermissions`. SDK 0.3.250 therefore runs the Auto unit without a user prompt or a separate model or Relayer reviewer. Codex and Prime retain their existing native enclosing-tool or cell approval. No browser-specific permission mode or inner-action review is added.
+
+Unsupported setup fails as an ordinary harness limitation: Codex reports its native MCP connection or packaged-helper failure, Claude returns a sanitized unavailable/no-page/ambiguous-target/timeout error, and Prime raises its browser skill's loopback CDP failure. None of these paths may claim unread content or an action that did not execute. Site behavior, authenticated access, prompts, downloads, CAPTCHA handling, and compatibility are harness- and site-specific rather than a cross-harness guarantee. The sanitized delivery ledger is in [issue #257 evidence](docs/evidence/issue-257-browser-harnesses/README.md).
+
 ## Run the GraphComplete runtime eval
 
 The default run is deterministic and makes no inference calls. It launches the Rust graph server and Node host, completes two interactions through one live harness object with separately scoped graph capabilities, exercises the real TypeScript client, and saves `result.json` plus an interactive turn-navigable `index.html` under `.relayer/evals/runtime/<test-run-id>/<test-case-id>/<harness-configuration-name>/`:
@@ -180,6 +192,8 @@ npm run eval-app:dev
 ```
 
 The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
+
+The candidate catalog includes twelve deep calibration cases: seven coding cases, including three evaluator-owned greenfield products, and five research, planning, creative, and forecasting cases. They are a graph-presentation calibration corpus for recursive-judge tuning and human labeling, not the full verifiable-work benchmark. Each materializes an isolated Git workspace and records a sealed reference, lightweight deterministic completion gates, and an outcome rubric separately from graph-presentation judgment. Coding fixtures begin with a failing behavioral contract; open-research fixtures provide no curated source bundle and require the candidate to leave a durable deliverable and source trail. A passing completion gate does not claim that the implementation or artifact is substantively good. Candidate cases remain calibration-only until human review promotes them.
 
 The public Relayer and internal Relayer Eval builds use distinct application identifiers, entry points, data profiles, and dashboard assets. They share the graph runtime, harness host, app server, product records, API contracts, and production workspace. See [ADR 0003](docs/decisions/0003-shared-product-eval-workspace.md).
 

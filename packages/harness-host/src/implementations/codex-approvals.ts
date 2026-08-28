@@ -717,9 +717,13 @@ function approvalOptionLabels(value: unknown): { readonly accept: string; readon
     const label = string(optionalRecord(option)?.label);
     if (label === undefined) return undefined;
     switch (label.trim().toLowerCase()) {
-      case "accept": accept = label; break;
+      case "accept":
+      case "allow": accept = label; break;
       case "decline": decline = label; break;
-      case "cancel": cancel = label; break;
+      case "cancel":
+        cancel = label;
+        decline ??= label;
+        break;
       default: break;
     }
   }

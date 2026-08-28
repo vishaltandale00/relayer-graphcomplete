@@ -18,6 +18,7 @@ import {
 } from "./providers/provider-definition-store.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { createConversationExportService } from "./services/conversation-export.mjs";
+import { inspectCodexBrowserMcpRuntime } from "./services/codex-browser-mcp-runtime.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
@@ -25,6 +26,11 @@ import { inspectPrimeAgentRuntime, requirePrimeAgentRuntime } from "./services/p
 import { resolveDesktopHarnessConfiguration } from "./services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createTutorialLifecycle } from "./services/tutorial-lifecycle.mjs";
+import {
+  createDesktopAccountService,
+  GRAPHCOMPLETE_AUTH0,
+  GRAPHCOMPLETE_LOGIN_URL,
+} from "./services/desktop-account-service.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { createManagedRuntimeInstaller } from "./managed-runtimes/installer.mjs";
 import { createManagedRuntimeResolver } from "./managed-runtimes/resolver.mjs";
@@ -80,6 +86,19 @@ const permissionCatalogPath = app.isPackaged
 const graphClientModuleUrl = app.isPackaged
   ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
   : undefined;
+const codexBrowserMcpInspection = await inspectCodexBrowserMcpRuntime({
+  executable: process.execPath,
+  packageRoot: app.isPackaged
+    ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "chrome-devtools-mcp")
+    : join(repositoryRoot, "node_modules", "chrome-devtools-mcp"),
+});
+if (!codexBrowserMcpInspection.available) {
+  console.error("Codex browser helper unavailable", {
+    code: codexBrowserMcpInspection.code,
+    message: codexBrowserMcpInspection.message,
+    diagnostics: codexBrowserMcpInspection.diagnostics,
+  });
+}
 const primePythonClientRoot = app.isPackaged
   ? join(process.resourcesPath, "python", "relayer-graph", "src")
   : join(repositoryRoot, "python", "relayer-graph", "src");
@@ -138,6 +157,7 @@ if (primaryInstance) {
       diagnostics: primeAgentRuntime.diagnostics,
     })),
     codexBasicClientModuleUrl: graphClientModuleUrl,
+    ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
     acquireProviderExecution: (providerId) => {
       if (!providerSetup) throw new Error("Provider execution broker is not ready.");
       return providerSetup.acquireExecution(providerId);
@@ -154,6 +174,22 @@ if (primaryInstance) {
   let modelCatalog;
   let providerSetup;
   let providerComposition;
+  const accountService = createDesktopAccountService({
+    channel: "stable",
+    credentialPath: join(userDataPath, "account-credentials.json"),
+    auth0: GRAPHCOMPLETE_AUTH0,
+    launcherUrl: GRAPHCOMPLETE_LOGIN_URL,
+    encrypt: async (value) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error("Operating-system credential encryption is unavailable.");
+      return safeStorage.encryptString(value).toString("base64");
+    },
+    decrypt: async (value) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error("Operating-system credential encryption is unavailable.");
+      return safeStorage.decryptString(Buffer.from(value, "base64"));
+    },
+    openExternal: (url) => shell.openExternal(url),
+    emit: (state) => mainWindow?.webContents.send("relayer:account-changed", state),
+  });
 
   const managedRuntimeDescriptor = (runtime) => Object.freeze({
     runtimeId: runtime.runtimeId,
@@ -227,6 +263,7 @@ if (primaryInstance) {
         results.push({ status: "rejected", reason: error });
       }
       results.push(...await Promise.allSettled([
+        accountService.close(),
         providerComposition?.close(),
         graphRuntime.close(),
       ]));
@@ -244,6 +281,8 @@ if (primaryInstance) {
     nativeTheme.themeSource = appearance;
     const channel = resolveUpdateChannel(saved.updateChannel);
     if (channel === "preview") updater.setChannel("preview");
+    await accountService.setChannel(channel);
+    void accountService.start().catch((error) => console.error("Optional desktop account initialization failed:", error));
     const activation = await managedRuntimeInstaller.activatePendingAppUpdate(app.getVersion());
     if (activation.failures.length) {
       console.error("Managed runtime update activation failed:", new AggregateError(
@@ -337,6 +376,8 @@ if (primaryInstance) {
       dialog,
       shell,
       nativeTheme,
+      credentials: accountService,
+      accountChannel: accountService,
       modelCatalog,
       providerDefinitions: providerSetup,
       validateProviderOnboarding: () => productServer.validateProviderOnboarding(),

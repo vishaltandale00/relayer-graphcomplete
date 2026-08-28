@@ -9,6 +9,13 @@ import type {
   HarnessTraceSupport,
 } from "../types.js";
 import { buildLayeredNavigationPrompt } from "./codex-basic.js";
+import {
+  CLAUDE_BROWSER_SERVER_NAME,
+  CLAUDE_BROWSER_TOOL,
+  createClaudeBasicBrowserServer,
+  type ClaudeBasicBrowserDependencies,
+  type ClaudeBrowserSdk,
+} from "./claude-basic-browser.js";
 
 export const CLAUDE_BASIC_KEY = "claude.basic";
 
@@ -25,6 +32,7 @@ export interface ClaudeSdkQueryOptions {
   readonly env: Readonly<Record<string, string>>;
   readonly model: string;
   readonly allowedTools: readonly string[];
+  readonly mcpServers: Readonly<Record<string, unknown>>;
   readonly permissionMode: "default" | "acceptEdits" | "bypassPermissions";
   readonly allowDangerouslySkipPermissions?: boolean;
   readonly pathToClaudeCodeExecutable: string;
@@ -38,12 +46,14 @@ export type ClaudeSdkQuery = (input: {
   readonly options: ClaudeSdkQueryOptions;
 }) => AsyncIterable<unknown>;
 
-export interface ClaudeSdkModule {
+export interface ClaudeSdkModule extends ClaudeBrowserSdk {
   readonly query: ClaudeSdkQuery;
 }
 
 export interface ClaudeBasicDependencies {
   readonly query?: ClaudeSdkQuery;
+  readonly browserSdk?: ClaudeBrowserSdk;
+  readonly browser?: ClaudeBasicBrowserDependencies;
   readonly loadSdk?: (moduleUrl: string) => Promise<ClaudeSdkModule>;
   readonly clientModuleUrl?: string;
   readonly platform?: NodeJS.Platform;
@@ -133,14 +143,20 @@ export class ClaudeBasicHarness implements Harness {
     if (signal?.aborted) abort();
     else signal?.addEventListener("abort", abort, { once: true });
     try {
-      const query = this.dependencies.query ?? (await (this.dependencies.loadSdk ?? loadClaudeSdk)(runtime.moduleUrl)).query;
+      const loadedSdk = this.dependencies.browserSdk === undefined || this.dependencies.query === undefined
+        ? await (this.dependencies.loadSdk ?? loadClaudeSdk)(runtime.moduleUrl)
+        : undefined;
+      const query = this.dependencies.query ?? loadedSdk!.query;
+      const browserSdk = this.dependencies.browserSdk ?? loadedSdk!;
+      const browserServer = createClaudeBasicBrowserServer(browserSdk, this.dependencies.browser);
       const messages = query({
         prompt,
         options: {
           cwd: this.context.workingDirectory,
           env: environment,
           model,
-          allowedTools: ["Bash"],
+          allowedTools: permissionMode === "acceptEdits" ? ["Bash", CLAUDE_BROWSER_TOOL] : ["Bash"],
+          mcpServers: { [CLAUDE_BROWSER_SERVER_NAME]: browserServer },
           permissionMode,
           ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
           pathToClaudeCodeExecutable: runtime.executable,
@@ -183,10 +199,17 @@ export function claudePermissionMode(value: unknown): "default" | "acceptEdits" 
 
 async function loadClaudeSdk(moduleUrl: string): Promise<ClaudeSdkModule> {
   const loaded: unknown = await import(moduleUrl);
-  if (!isRecord(loaded) || typeof loaded.query !== "function") {
-    throw new Error("Managed Claude Agent SDK module does not export query().");
+  if (!isRecord(loaded)
+    || typeof loaded.query !== "function"
+    || typeof loaded.tool !== "function"
+    || typeof loaded.createSdkMcpServer !== "function") {
+    throw new Error("Managed Claude Agent SDK module does not export its query and in-process MCP boundaries.");
   }
-  return { query: loaded.query as ClaudeSdkQuery };
+  return {
+    query: loaded.query as ClaudeSdkQuery,
+    tool: loaded.tool as ClaudeSdkModule["tool"],
+    createSdkMcpServer: loaded.createSdkMcpServer as ClaudeSdkModule["createSdkMcpServer"],
+  };
 }
 
 function claudeRuntime(access: HarnessExecutionAccess): ClaudeRuntimeDescriptor {
