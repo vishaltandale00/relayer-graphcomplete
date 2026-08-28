@@ -72,7 +72,7 @@ describe("Prime Agent packaged runtime", () => {
     const lockfile = JSON.parse(await readFile(join(repositoryRoot, "package-lock.json"), "utf8"));
     const desktopManifest = JSON.parse(await readFile(join(repositoryRoot, "desktop", "package.json"), "utf8"));
 
-    expect(manifest.source.commit).toBe("e8769419e84f8357cab19e1aa6ee4af458796005");
+    expect(manifest.source.commit).toBe("f6130839ad3043f1cd3d5294fe03023035bfcd5c");
     expect(manifest.runtimeContract.modelScopeAccess).toBe("upfront-request-access@1");
     expect(manifest.packages).toHaveLength(4);
     for (const entry of manifest.packages) {
@@ -123,6 +123,12 @@ describe("Prime Agent packaged runtime", () => {
     expect(helper).toContain('element.matches(":disabled")');
     expect(helper).toContain('element.getAttribute("aria-disabled") === "true"');
     expect(helper).toContain("HTMLElement.prototype.click.call(element)");
+    expect(helper).toContain("return {{ previous, current: String(element.value) }};");
+    expect(helper).toContain("if current != value:");
+    expect(helper).toContain("page rejected or sanitized the requested fill value");
+    expect(helper).toContain("Replace and verify an input value, then disconnect this terminal page action.");
+    expect(helper).toContain("Click one matching element, then disconnect this terminal page action.");
+    expect(helper.match(/await asyncio\.shield\(self\.close\(\)\)/g)).toHaveLength(4);
     expect(helper).toContain('"Page.lifecycleEvent",');
     expect(helper).toContain('"Page.navigatedWithinDocument",');
     expect(helper).toContain('params.get("loaderId") == loader_id');
@@ -140,7 +146,7 @@ describe("Prime Agent packaged runtime", () => {
       architecture: "arm64",
     })).resolves.toMatchObject({
       available: true,
-      sourceCommit: "e8769419e84f8357cab19e1aa6ee4af458796005",
+      sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
       configurationNames: ["prime-agent-basic", "prime-agent-deep"],
     });
 
@@ -162,7 +168,7 @@ describe("Prime Agent packaged runtime", () => {
       code: "prime_agent_api_incompatible",
       message: "This Relayer build cannot use the packaged Prime Agent API. Update Relayer.",
       diagnostics: {
-        sourceCommit: "e8769419e84f8357cab19e1aa6ee4af458796005",
+        sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
         packages: expect.arrayContaining([{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }]),
       },
     });
