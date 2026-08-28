@@ -14,7 +14,7 @@ const receipt = JSON.parse(await readFile(path.join(root, "docs/evidence/issue-2
 
 assert.equal(receipt.issue, 261);
 assert.equal(receipt.engine, "lbug");
-assert.equal(receipt.version, "0.19.1");
+assert.equal(receipt.version, "0.18.0");
 const evidenceRoot = path.join(root, "docs/evidence/issue-261-ladybug-contract-probe");
 for (const [relativePath, expected] of Object.entries(receipt.sha256)) {
   const bytes = await readFile(path.join(evidenceRoot, relativePath));
@@ -29,9 +29,9 @@ assert.equal(
 
 assert.equal(coverage.issue, 261);
 assert.equal(coverage.engine, "lbug");
-assert.equal(coverage.version, "0.19.1");
+assert.equal(coverage.version, "0.18.0");
 assert.deepEqual(coverage.extensions, []);
-assert.match(lock, /name = "lbug"\nversion = "0\.19\.1"/);
+assert.match(lock, /name = "lbug"\nversion = "0\.18\.0"/);
 
 const positive = await fixture("positive.json");
 assert.deepEqual(coverage.requiredPositiveCases, positive.cases.map(({ id }) => id));
@@ -71,7 +71,7 @@ for (const line of [
   "EXACT_ENVELOPES=passed", "VALUES=passed", "NORMALIZATION_FALSIFIERS=passed",
   "PARSED_READ_ONLY_GATE=passed", "WALL_TIME_FALSIFIER=passed",
   "CANCELLATION_FALSIFIER=passed", "TRANSACTION_ROLLBACK_REOPEN=passed",
-  "EXTENSIONS=[]", "LBUG_STORAGE_VERSION=43",
+  "EXTENSIONS=[]", "LBUG_STORAGE_VERSION=42",
 ]) assert.ok(output.split("\n").includes(line), `captured output lacks ${line}`);
 assert.doesNotMatch(source, /INSTALL\s|LOAD EXTENSION/i);
 console.log(`Ladybug contract probe receipt covers ${positive.cases.length} positive, ${negative.cases.length} negative, ${values.cases.length + values.normalizationErrors.length} value, and ${limits.cases.length + 1} limit/budget cases.`);

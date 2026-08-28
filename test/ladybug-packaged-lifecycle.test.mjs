@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
 import {
   captureLadybugPackagedLifecycle,
+  parseLadybugLockContention,
   parseDynamicLibraries,
   parseMinimumMacOSVersion,
   validatePreparedLadybugSource,
@@ -24,6 +25,15 @@ import {
 const execFileAsync = promisify(execFile);
 
 describe("Ladybug packaged lifecycle qualification", () => {
+  it("recognizes lock contention across the pinned Ladybug message variants", () => {
+    expect(parseLadybugLockContention(
+      "IO exception: Could not set lock on file : /tmp/db (Lock is held by PID 42)",
+    )).toContain("Lock is held by PID 42");
+    expect(parseLadybugLockContention(
+      "IO exception: Could not set lock on file : /tmp/db: Resource temporarily unavailable",
+    )).toContain("Resource temporarily unavailable");
+    expect(() => parseLadybugLockContention("permission denied")).toThrow("not Ladybug lock contention");
+  });
   it("requires a full immutable source commit before preparing a package", async () => {
     await expect(captureLadybugPackagedLifecycle({
       sourceOutput: "/tmp/not-read-for-invalid-commit",
@@ -105,6 +115,7 @@ describe("Ladybug packaged lifecycle qualification", () => {
       environment: {
         RELAYER_DESKTOP_TARGET: "macos-arm64",
         RELAYER_LADYBUG_QUALIFICATION: "1",
+        OPENSSL_DIR: "/tmp/prepared-openssl",
       },
       execute: async (command, args, options) => calls.push({ command, args, options }),
       repositoryRoot: "/tmp/exact-source",
@@ -118,9 +129,45 @@ describe("Ladybug packaged lifecycle qualification", () => {
       "--target", "aarch64-apple-darwin",
       "--locked", "--offline",
     ]);
-    expect(calls[0].options.env.RUSTFLAGS).toBe("--cfg ladybug_qualification");
+    expect(calls[0].options.env.RUSTFLAGS).toBeUndefined();
+    expect(calls[0].options.env.CARGO_ENCODED_RUSTFLAGS.split("\u001f")).toEqual([
+      "--cfg", "ladybug_qualification",
+      "-L", "native=/tmp/prepared-openssl/lib",
+      "-l", "static=ssl",
+      "-l", "static=crypto",
+    ]);
     expect(calls[0].options.cwd).toBe("/tmp/exact-source");
     expect(calls[1].args[0]).toBe("/tmp/dependencies/node_modules/electron-builder/out/cli/cli.js");
+  });
+
+  it("maps the prepared OpenSSL archives to MSVC static library names", async () => {
+    const calls = [];
+    await buildDevelopmentDesktop({
+      environment: {
+        RELAYER_DESKTOP_TARGET: "windows-x64",
+        RELAYER_LADYBUG_QUALIFICATION: "1",
+        OPENSSL_DIR: "/tmp/prepared-openssl",
+      },
+      execute: async (command, args, options) => calls.push({ command, args, options }),
+      repositoryRoot: "/tmp/exact-source",
+      dependencyRoot: "/tmp/dependencies",
+    });
+    expect(calls[0].options.env.CARGO_ENCODED_RUSTFLAGS.split("\u001f")).toEqual([
+      "--cfg", "ladybug_qualification",
+      "-L", "native=/tmp/prepared-openssl/lib",
+      "-l", "static=libssl",
+      "-l", "static=libcrypto",
+    ]);
+  });
+
+  it("rejects qualification without the prepared static OpenSSL prefix", async () => {
+    await expect(buildDevelopmentDesktop({
+      environment: {
+        RELAYER_DESKTOP_TARGET: "macos-arm64",
+        RELAYER_LADYBUG_QUALIFICATION: "1",
+      },
+      execute: async () => {},
+    })).rejects.toThrow("requires the prepared static OPENSSL_DIR");
   });
 
   it("rejects prepared environments or static archives that differ from recomputed inputs", async () => {

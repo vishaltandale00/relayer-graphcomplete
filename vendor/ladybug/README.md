@@ -1,7 +1,7 @@
 # Ladybug source-build inputs
 
 `source-build-manifest.json` is the authority for the native graph-search dependency inputs. It
-pins the exact crates.io `lbug` archive, the reviewed Ladybug 0.19.1 core embedded in that archive,
+pins the exact crates.io `lbug` archive, the reviewed Ladybug 0.18.0 core embedded in that archive,
 OpenSSL 3.5.8 source, the zero-extension v1 profile, and the no-fork build mode.
 
 Source acquisition and source preparation are deliberately separate:
@@ -22,13 +22,13 @@ fetch the workspace's locked Rust dependency closure. The subsequent Rust build 
 use an operating-system or CI network-denial boundary for release evidence. In particular, ambient
 `LBUG_LIBRARY_DIR`/`LBUG_INCLUDE_DIR` values would otherwise bypass the reviewed source build.
 
-The emitted environment asks the unmodified `lbug` 0.19.1 binding to build its embedded core in
-static mode. Upstream 0.19.1 describes the OpenSSL link to Cargo as `dylib`, which becomes ordinary
-`-lssl -lcrypto` arguments on macOS. `LIBRARY_PATH` is therefore pinned to the static-only OpenSSL
-prefix so the linker resolves those names to the reviewed archives. The result carries Ladybug and
-OpenSSL inside the Rust executable; no Ladybug/OpenSSL dylib or Ladybug rpath is packaged. Final
-packaging must still verify each target's imports rather than inferring this result from the build
-configuration.
+The emitted environment asks the unmodified `lbug` 0.18.0 binding to build its embedded core in
+static mode. That binding does not emit OpenSSL link directives. Relayer therefore owns the narrow,
+target-specific adapter frozen in the manifest: `ssl`/`crypto` on Apple targets and
+`libssl`/`libcrypto` on MSVC, all resolved from `openssl-prefix/lib`. The adapter changes no Ladybug
+source and admits no extensions. The result carries Ladybug and OpenSSL inside the Rust executable;
+no Ladybug/OpenSSL dylib or Ladybug rpath is packaged. Final packaging must still verify each
+target's imports rather than inferring this result from the build configuration.
 
 The source receipt also remains explicitly incomplete for distribution licensing. The crates.io
 binding archive declares MIT but contains no binding license file. The core, OpenSSL, and

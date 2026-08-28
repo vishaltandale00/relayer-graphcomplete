@@ -54,22 +54,22 @@ export async function verifyLadybugNativeReceipts({
 } = {}) {
   const inventory = JSON.parse(await readFile(inventoryPath, "utf8"));
   assert.equal(inventory.schemaVersion, 1);
-  assert.equal(inventory.componentSet, "ladybug-native-v0.19.1");
+  assert.equal(inventory.componentSet, "ladybug-native-v0.18.0");
   assert.deepEqual(inventory.extensions, []);
   assert.deepEqual(inventory.binding, {
     crate: "lbug",
-    version: "0.19.1",
-    crateSha256: "a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172",
-    sourceBasisCommit: "2e89afb712e6e26f2465f486b153e4aea1176130",
+    version: "0.18.0",
+    crateSha256: "f52ee74966e323212747aa22fa8c01f73f1cbbb996187c3b08cbf96ff9f67562",
+    sourceBasisCommit: "ea283cd1bf5473cd5c233944e3b281eb0d758a45",
     sourceTreeSha256: "58ab1da5ce17d2ca6ae0a6d835b2384c6fd8c8627703bf93e77685419f7142ba",
     spdx: "MIT",
     licensePath: null,
     receiptStatus: "blocked-missing-upstream-license-file",
   });
   assert.deepEqual(inventory.core, {
-    version: "0.19.1",
-    commit: "554c1e71158564c37a30c541a92bfc9eddc96430",
-    sourceTreeSha256: "ef17999177f4c3e72c51f2fa1ca076e46d1a40eae68c056739043d219526682d",
+    version: "0.18.0",
+    commit: "0cda4fffcebb4a52cc24198462901ad28e2d5b66",
+    sourceTreeSha256: "c90c2bd925e72dcc6c9e51c17b1a150589e719c949d364ded4a98389f0aabe62",
     spdx: "MIT",
     licensePath: "vendor/ladybug/notices/ladybug-core-LICENSE",
   });

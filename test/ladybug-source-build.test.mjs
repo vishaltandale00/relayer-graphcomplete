@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,13 +34,13 @@ describe("pinned Ladybug source build", () => {
 
     expect(manifest).toMatchObject({
       core: {
-        version: "0.19.1",
-        commit: "554c1e71158564c37a30c541a92bfc9eddc96430",
+        version: "0.18.0",
+        commit: "0cda4fffcebb4a52cc24198462901ad28e2d5b66",
       },
       rustBinding: {
         crate: "lbug",
-        version: "0.19.1",
-        sha256: "a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172",
+        version: "0.18.0",
+        sha256: "f52ee74966e323212747aa22fa8c01f73f1cbbb996187c3b08cbf96ff9f67562",
       },
       openssl: {
         version: "3.5.8",
@@ -62,6 +61,15 @@ describe("pinned Ladybug source build", () => {
         ],
         bindingPatch: null,
         corePatch: null,
+        platformLinkAdapter: {
+          ownership: "relayer",
+          ladybugSourcePatched: false,
+          targets: [
+            { rustTarget: "aarch64-apple-darwin", libraryDirectory: "openssl-prefix/lib", staticLibraries: ["ssl", "crypto"] },
+            { rustTarget: "x86_64-apple-darwin", libraryDirectory: "openssl-prefix/lib", staticLibraries: ["ssl", "crypto"] },
+            { rustTarget: "x86_64-pc-windows-msvc", libraryDirectory: "openssl-prefix/lib", staticLibraries: ["libssl", "libcrypto"] },
+          ],
+        },
       },
       runtime: {
         ladybugLibraryKind: "static",
@@ -69,16 +77,8 @@ describe("pinned Ladybug source build", () => {
         requiredPackagedRpath: null,
         externalOpenSSLLibraries: false,
       },
-      evidence: {
-        macOSArm64Observation: "docs/evidence/issue-261-ladybug-source-arm64.txt",
-        macOSArm64ObservationSha256: "ec0832b0f17faca44a61aebe518b490dc58c301187fc668eb548604971864d7e",
-      },
       licenseReceipt: { completeForDistribution: false },
     });
-
-    const observation = await readFile(manifest.evidence.macOSArm64Observation);
-    expect(createHash("sha256").update(observation).digest("hex"))
-      .toBe(manifest.evidence.macOSArm64ObservationSha256);
 
     const environment = createLadybugCargoEnvironment({
       manifest,
@@ -88,7 +88,7 @@ describe("pinned Ladybug source build", () => {
     expect(environment).toMatchObject({
       CARGO_NET_OFFLINE: "true",
       LBUG_BUILD_FROM_SOURCE: "1",
-      LBUG_VERSION: "0.19.1",
+      LBUG_VERSION: "0.18.0",
       LIBRARY_PATH: "/tmp/reviewed-ladybug-stage/openssl-prefix/lib",
       MACOSX_DEPLOYMENT_TARGET: "13.3",
       OPENSSL_STATIC: "1",
@@ -96,11 +96,14 @@ describe("pinned Ladybug source build", () => {
     });
     expect(environment).not.toHaveProperty("LBUG_SHARED");
     expect(environment).not.toHaveProperty("LBUG_OPENSSL_STATIC_ROOT");
-    expect(() => createLadybugCargoEnvironment({
+    expect(createLadybugCargoEnvironment({
       manifest,
       outputDirectory: "/tmp/reviewed-ladybug-stage",
       target: "x86_64-pc-windows-msvc",
-    })).toThrow(/blocked.*unmodified lbug 0\.19\.1/u);
+    })).toMatchObject({
+      LBUG_VERSION: "0.18.0",
+      LIBRARY_PATH: "/tmp/reviewed-ladybug-stage/openssl-prefix/lib",
+    });
   });
 
   it("rejects source cache bytes that do not match the frozen checksums", async () => {
@@ -110,7 +113,7 @@ describe("pinned Ladybug source build", () => {
     await writeFile(join(cacheDirectory, manifest.openssl.archive), "wrong OpenSSL bytes");
 
     await expect(verifyLadybugSourceCache({ cacheDirectory, manifest })).rejects.toThrow(
-      /lbug-0\.19\.1\.crate SHA-256 mismatch/u,
+      /lbug-0\.18\.0\.crate SHA-256 mismatch/u,
     );
   });
 
@@ -119,7 +122,7 @@ describe("pinned Ladybug source build", () => {
     const cacheDirectory = join(root, "cache");
     const fixtureDirectory = join(root, "fixture");
     const outputDirectory = join(root, "output");
-    const bindingRoot = join(fixtureDirectory, "lbug-0.19.1");
+    const bindingRoot = join(fixtureDirectory, "lbug-0.18.0");
     const opensslRoot = join(fixtureDirectory, "openssl-3.5.8");
     await mkdir(join(bindingRoot, "lbug-src", "src"), { recursive: true });
     await mkdir(opensslRoot, { recursive: true });
@@ -136,7 +139,7 @@ describe("pinned Ladybug source build", () => {
       cwd: fixtureDirectory,
       file: join(cacheDirectory, manifest.rustBinding.archive),
       gzip: true,
-    }, ["lbug-0.19.1"]);
+    }, ["lbug-0.18.0"]);
     await createTar({
       cwd: fixtureDirectory,
       file: join(cacheDirectory, manifest.openssl.archive),
@@ -147,8 +150,8 @@ describe("pinned Ladybug source build", () => {
 
     const staged = await stageLadybugSources({ cacheDirectory, outputDirectory, manifest });
     expect(staged.receipt).toMatchObject({
-      core: { version: "0.19.1", embeddedTreeSha256: manifest.core.embeddedTreeSha256 },
-      rustBinding: { crate: "lbug", version: "0.19.1", patched: false },
+      core: { version: "0.18.0", embeddedTreeSha256: manifest.core.embeddedTreeSha256 },
+      rustBinding: { crate: "lbug", version: "0.18.0", patched: false },
       openssl: { version: "3.5.8", sha256: manifest.openssl.sha256 },
       extensions: [],
       nativeMode: "fully-static-ladybug-and-openssl",
@@ -168,7 +171,9 @@ describe("pinned Ladybug source build", () => {
       (manifest) => { manifest.build.cargoNetworkMode = "online"; },
       (manifest) => { manifest.build.nativeMode = "shared-ladybug-with-static-openssl"; },
       (manifest) => { manifest.build.environmentMustBeUnset = []; },
-      (manifest) => { manifest.build.targets["x86_64-pc-windows-msvc"].supported = true; },
+      (manifest) => { manifest.build.platformLinkAdapter.ownership = "ladybug"; },
+      (manifest) => { manifest.build.platformLinkAdapter.targets[2].staticLibraries = ["ssl", "crypto"]; },
+      (manifest) => { manifest.build.targets["x86_64-pc-windows-msvc"].supported = false; },
     ]) {
       const manifest = structuredClone(original);
       mutate(manifest);

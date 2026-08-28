@@ -2,38 +2,40 @@
 
 Decision date: 2026-08-28
 
-Decision: **UPSTREAM ARTIFACTS NO-GO; PINNED SOURCE ROUTE LOCALLY VIABLE; OVERALL GATE BLOCKED**
+Decision: **UPSTREAM ARTIFACTS NO-GO; PINNED 0.18.0 SOURCE ROUTE PASSES MACOS LOCALLY; OVERALL GATE BLOCKED**
 
 Contract under test: `relayer.graph-query` version 1 from Issue #260
 
 This is a feasibility-gate result, not a change to the graph-search product contract. Ladybug
 remains the required engine from the first enabled graph-search path, SQLite remains canonical,
 and no SQLite search fallback is permitted. Production projection work must not begin until the
-remaining packaged-lifecycle, cross-target, and binding-license boundaries below are resolved and
+remaining Windows runtime and binding-license boundaries below are resolved and
 this gate is rerun.
 
 ## Exact candidate
 
 | Component | Pin | Receipt |
 | --- | --- | --- |
-| Ladybug core | `v0.19.1`, commit `554c1e71158564c37a30c541a92bfc9eddc96430` | official release artifacts and the source embedded in the crate |
-| Rust binding | crates.io `lbug = "=0.19.1"` | crate SHA-256 `a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172` |
+| Ladybug core | `v0.18.0`, commit `0cda4fffcebb4a52cc24198462901ad28e2d5b66` | exact source embedded in the pinned crate |
+| Rust binding | crates.io `lbug = "=0.18.0"` | crate SHA-256 `f52ee74966e323212747aa22fa8c01f73f1cbbb996187c3b08cbf96ff9f67562` |
 | Extensions | none | structural v1 needs no Ladybug extension |
 | OpenSSL source candidate | `3.5.8` LTS | source SHA-256 `a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2`; Apache-2.0; supported through 2030-04-08 |
 
-The machine-readable artifact names and upstream SHA-256 digests are frozen in
-`fixtures/ladybug-v0.19.1-qualification.json`. The crate embeds the official core source and can
+The rejected 0.19.1 release artifacts remain frozen in
+`fixtures/ladybug-v0.19.1-qualification.json`. The active 0.18.0 source pin is frozen in
+`vendor/ladybug/source-build-manifest.json`. The crate embeds the official core source and can
 build it with `LBUG_BUILD_FROM_SOURCE=1`. Its default build path is unsuitable for Relayer: absent
 `LBUG_VERSION`, the included downloader selects the latest release. If that script is removed, a
 fallback fetches a replacement from upstream `main`. Any future integration must force checked,
 application-owned inputs and must fail if a build attempts network access.
 The crate is the exact binding pin. Its metadata names source-basis commit
-`2e89afb712e6e26f2465f486b153e4aea1176130` with `dirty: true`; the version bump and vendored core
+`ea283cd1bf5473cd5c233944e3b281eb0d758a45` with `dirty: true`; the version bump and vendored core
 mean that commit alone is not an exact substitute for the crate bytes.
 
 ## What passed
 
-- The exact unmodified 0.19.1 binding and core build from reviewed source bytes on macOS arm64 with
+- The exact unmodified 0.18.0 binding and core build from reviewed source bytes on macOS arm64 and
+  Intel with
   pinned static-only OpenSSL 3.5.8, Cargo offline, and operating-system network access denied. The
   resulting binary targets macOS 13.3 and imports only system `libiconv`, libc++, and libSystem; it
   has no undefined OpenSSL symbols and needs no Ladybug/OpenSSL dylib or rpath.
@@ -47,7 +49,8 @@ mean that commit alone is not an exact substitute for the crate bytes.
 - The allowed two-hop probe demonstrates both a one-millisecond timeout and explicit interrupt.
   Relayer still owns deterministic traversal, expansion, intermediate-row, output, and process
   deadlines at the #263 wrapper boundary.
-- No binding patch, core fork, or extension is required for the structural v1 seam found so far.
+- No binding patch, core fork, or extension is required. Relayer supplies only target-specific
+  static OpenSSL search paths and library names that 0.18.0 omits from its Cargo build metadata.
 
 The dialect needs contract-private lowering: Ladybug emits both orientations for an undirected
 relationship match, rejects `NULLS FIRST` and `NULLS LAST`, and has no v1 `IS ABSENT` spelling.
@@ -84,42 +87,41 @@ The official native artifacts are not self-contained application-owned runtime b
 - The upstream macOS libraries are only linker ad-hoc signed. Bundling the shared form would require
   install-name rewriting followed by Relayer's authenticated signing and verification.
 
-The pinned source-build experiment explains and resolves the compatibility boundary. OpenSSL 3.5.8
+The pinned source-build experiment explains the compatibility boundary. OpenSSL 3.5.8
 built as only `libssl.a` and `libcrypto.a` for macOS 13.0, but Ladybug 0.19.1 could not compile at
 that floor because Apple makes its C++20 floating-point `std::to_chars` path available only from
 macOS 13.3. After the approved floor change, the exact unmodified `lbug` crate linked against the
 pinned static-only OpenSSL prefix with `LIBRARY_PATH`; no binding or core patch is required.
 
-The failure and successful 13.3 replay were observed natively on macOS arm64. The macOS Intel
-consequence is inferred from the shared Apple SDK and libc++ availability boundary; it still needs
-a native Intel replay. The final unmodified source probe built with network denied, imported only
-system `libiconv`, libc++, and libSystem, embedded OpenSSL 3.5.8, and had SHA-256
-`a3e98e731252fc43cfaceafc6bee8fc997d24cccf2d22ef8952c83e716c6822a`.
+Ladybug 0.18.0 predates the Apple-Clang AVX2 runtime check that made 0.19.1 reference unavailable
+`___cpu_model` bytes on Intel. The exact 0.18.0 source route links and runs on both macOS targets at
+the approved 13.3 floor. Both binaries import only system `libiconv`, libc++, and libSystem.
 
 The checked-in source manifest and preparation utility now own and receipt the OpenSSL source and
-emit a static-only prefix plus offline Cargo environment. That resolves the native dependency
-design locally. The actual packaged graph-server lifecycle now passes on macOS arm64. The Intel
-source route reaches the final link but fails on Ladybug's unavailable `___cpu_model` reference.
-Windows has the separate static-link blocker below.
+emit a static-only prefix plus offline Cargo environment. The packaging build adds deterministic,
+target-specific static OpenSSL link metadata without changing Ladybug source bytes. The graph-server
+lifecycle passes locally on arm64 and under Rosetta for Intel.
 
-The unmodified Windows binding emits `ssl` and `crypto` link names, while the pinned OpenSSL MSVC
-build installs `libssl.lib` and `libcrypto.lib` and supplies no verified static-library search path.
-The source preparation manifest therefore marks Windows x64 unsupported and fails closed rather
-than pretending that the macOS `LIBRARY_PATH` strategy transfers to MSVC.
+The same Relayer-owned adapter maps the Windows target to the prepared `libssl.lib` and
+`libcrypto.lib` archives. Upstream has independently merged the Windows discovery/naming fix in
+LadybugDB/ladybug-rust#26, but crates.io 0.19.1 predates it. The adapter is deterministically tested;
+its native Windows build and lifecycle remain unverified until the hosted runner can test this exact
+source snapshot.
 
 The native receipt now inventories all 27 core subtrees and 22 compiled components, pins exact
 source-tree and notice digests, and covers the core, OpenSSL, and transitive native notices. One
-external distribution blocker remains: the crates.io `lbug` 0.19.1 archive declares MIT but neither
+external distribution blocker remains: the crates.io `lbug` 0.18.0 archive declares MIT but neither
 it nor its source-basis repository ships a binding license file. The fail-closed release-ready
-receipt must continue to reject packaging until reviewed upstream license bytes are available.
+receipt must continue to reject release readiness until reviewed upstream license bytes are
+available. The focused upstream request is LadybugDB/ladybug-rust#29.
 
 ## Evidence commands and limits
 
 The exact checks used for this decision were:
 
 ```sh
-cargo info lbug@0.19.1
-LBUG_VERSION=0.19.1 cargo run --release
+cargo info lbug@0.18.0
+LBUG_VERSION=0.18.0 cargo run --release
 otool -L target/release/ladybug-probe
 otool -L liblbug.0.19.1.dylib
 llvm-objdump -p lbug_shared.dll
@@ -141,25 +143,21 @@ Windows shared archives. The pinned source build and full contract probe were ex
 arm64. Cross-target packaged launch, signing, and release evidence remain unproven; source and API
 inspection are not substitutes for those runtime boundaries.
 
-The Intel attempt is retained in `issue-261-ladybug-intel-link-blocker.txt`. It used an exact clean
+The superseded 0.19.1 Intel attempt is retained in `issue-261-ladybug-intel-link-blocker.txt`. It used an exact clean
 checkout, offline lockfile install, empty Cargo target, x86_64 static OpenSSL, and Rosetta. Ladybug's
 `base_csv_reader.cpp` selects `__builtin_cpu_supports("avx2")` for Apple Clang, producing an unresolved
-`___cpu_model` reference. Resolving it requires an upstream source fix or an approved equivalent shim.
+`___cpu_model` reference. Upstream now tracks that defect in LadybugDB/ladybug#848. The 0.18.0 pin
+avoids the regression without a fork.
 
 The original focused probe and historical cancellation falsifier are in
-`issue-261-ladybug-probe/`. The exact-envelope corpus probe, captured output, lockfile, coverage,
-and digest receipt are in `issue-261-ladybug-contract-probe/`. The source-build observation is in
-`issue-261-ladybug-source-arm64.txt` and is bound by the source-build manifest/test. The fresh
-packaged graph-server lifecycle receipt is `issue-261-ladybug-packaged-arm64.json`; it binds the selected
-checked-in qualification inputs and packaged binary digest to exact commit `77934418e355f2207fb59605cc3b0b39f42dfcd0`.
-The capture used a clean detached checkout, empty Cargo target, exact lockfile installed offline, and regenerated
-workspace assets before electron-builder ran. The replay used macOS 26.6.1, Xcode SDK 26.2, Apple clang
-17.0.0, Rust 1.94.0, Cargo 1.94.0, CMake 4.3.1, and macOS
-arm64. The temporary executable and full compiler log are not checked in; their digests and exact
-proof limit are retained in the observation.
+`issue-261-ladybug-probe/`. The 0.18.0 exact-envelope corpus probe, captured output, lockfile,
+coverage, and digest receipt are in `issue-261-ladybug-contract-probe/`. The checked-in arm64 source
+and package observations still describe the preceding 0.19.1 qualification and remain historical
+until the clean detached 0.18.0 captures replace them. Current local arm64 and Intel results are
+non-certifying until those receipts bind an exact commit.
 
 Source identity was checked with recursive diffs. The crate's packaged
-`lbug-src/{src,cmake,third_party,CMakeLists.txt,tools/CMakeLists.txt}` bytes match core tag v0.19.1.
+`lbug-src/{src,cmake,third_party,CMakeLists.txt,tools/CMakeLists.txt}` bytes match core tag v0.18.0.
 Binding sources excluding Cargo manifests and the added vendored core match the source-basis commit.
 
 ## Acceptance ledger
@@ -168,25 +166,24 @@ Binding sources excluding Cargo manifests and the added vendored core match the 
 | --- | --- | --- |
 | Golden corpus or approved lowering | Passed locally | All 20 positive cases deep-compare exactly through documented contract-private lowerings. |
 | Lossless v1 value round-trip | Passed locally | Exact tagged envelopes cover scalar, null, list, record, node, layer, relationship, and path values. |
-| Application-owned offline load | Passed arm64 | Exact unmodified source and static OpenSSL build/run with network denied, then travel inside the bundled graph server without non-system dylibs. |
-| Three packaged development targets | Blocked | The exact-source macOS arm64 lifecycle passes; Intel fails on Ladybug's unresolved `___cpu_model`; Windows fails on the MSVC static-library name/search-path gap. Distribution is also blocked by missing binding license bytes. |
-| Pinned source build at product floor | Passed arm64 | Exact Ladybug 0.19.1 and OpenSSL 3.5.8 build at the approved macOS 13.3 floor with no fork or external dylib. |
-| Packaged launch, restart, lock, shutdown | Passed arm64 | The bundled `relayer-graph-server` creates a clean store, rejects a bounded competing lock, exits cleanly, and reopens its persisted marker. |
+| Application-owned offline load | Passed on macOS | Exact unmodified source and static OpenSSL build/run on arm64 and Intel without non-system dylibs. |
+| Three packaged development targets | Blocked | Both macOS targets link and pass the local lifecycle; the deterministic Windows adapter lacks native hosted-runner proof. Distribution is also blocked by missing binding license bytes. |
+| Pinned source build at product floor | Passed on macOS | Exact Ladybug 0.18.0 and OpenSSL 3.5.8 build at the approved macOS 13.3 floor with no fork or external dylib. |
+| Packaged launch, restart, lock, shutdown | Passed on macOS | The graph server creates a clean store, rejects a bounded competing lock, exits cleanly, and reopens its persisted marker on arm64 and Intel/Rosetta. |
 | Cancellation and budgets | Partial pass | Allowed two-hop timeout/interrupt pass; #263 still owns deterministic budget counters and an outer process deadline. |
 | Complete license receipts | Blocked externally | Core/OpenSSL/transitive native inventory passes; upstream binding license bytes are absent. |
-| No permanent Ladybug fork | Passed locally | The exact unmodified binding/core plus static OpenSSL route works with `extensions=[]`. |
+| No permanent Ladybug fork | Passed locally | Exact unmodified 0.18.0 plus Relayer-owned link metadata works with `extensions=[]`. |
 | Explicit go/no-go before projection | Passed | Upstream artifacts are NO-GO and the source route is not yet fully qualified; dependent DAG nodes remain blocked. |
 
 ## Remaining gate work
 
 Keep the product contract unchanged and hold Issues #262 onward. Pinned static OpenSSL and the
 macOS 13.3 product floor are settled; deterministic updater tests preserve the last compatible
-release for macOS 13.0–13.2. The actual packaged graph-server lifecycle passes locally on macOS
-arm64. Intel needs an upstream Apple-Clang CPU-detection fix or an explicitly approved equivalent.
-Windows needs a narrow upstream binding link-resolution hook or an explicitly approved equivalent.
+release for macOS 13.0–13.2. The 0.18.0 graph-server lifecycle passes locally on both macOS targets.
+Windows still needs a native build and lifecycle replay of the checked-in link adapter.
 
 The repository already has macOS arm64, macOS Intel, and Windows x64 hosted package runners in
 `.github/workflows/ci.yml`. They cannot certify this unpushed worktree. Windows Authenticode is
-also disabled in the signed workflow, independently of the static-link blocker. Finally, obtain reviewed upstream license bytes for the
+also disabled in the signed workflow, independently of this qualification. Finally, obtain reviewed upstream license bytes for the
 `lbug` binding or an explicit legal disposition; the fail-closed release-ready receipt must remain
 red until then. These are proof limits, not reasons to weaken packaging, signing, or license gates.

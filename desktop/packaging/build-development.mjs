@@ -33,11 +33,23 @@ export async function buildDevelopmentDesktop({
     if (environment.RUSTFLAGS || environment.CARGO_ENCODED_RUSTFLAGS) {
       throw new Error("Ladybug qualification rejects ambient Rust compiler flags.");
     }
+    if (!environment.OPENSSL_DIR) {
+      throw new Error("Ladybug qualification requires the prepared static OPENSSL_DIR.");
+    }
+    const opensslLibraryDirectory = resolve(environment.OPENSSL_DIR, "lib");
+    const opensslLibraries = target.platform === "win32"
+      ? ["libssl", "libcrypto"]
+      : ["ssl", "crypto"];
+    const encodedRustFlags = [
+      "--cfg", "ladybug_qualification",
+      "-L", `native=${opensslLibraryDirectory}`,
+      ...opensslLibraries.flatMap((library) => ["-l", `static=${library}`]),
+    ].join("\u001f");
     environment = {
       ...environment,
-      RUSTFLAGS: "--cfg ladybug_qualification",
+      CARGO_ENCODED_RUSTFLAGS: encodedRustFlags,
     };
-    delete environment.CARGO_ENCODED_RUSTFLAGS;
+    delete environment.RUSTFLAGS;
     cargoArguments.push("--locked", "--offline");
   }
   await execute("cargo", cargoArguments, { cwd: repositoryRoot, env: environment });

@@ -13,7 +13,7 @@ const POSITIVE_CASES: &[(&str, &str, &[&str], usize)] = &[
     ("two-hop-connected", "MATCH (a:Content)-[r1:CONNECTED]-(b:Content)-[r2:CONNECTED]-(c:Content) WHERE r1.p7 AND r2.p7 AND r1.id <> r2.id AND a.title = 'Queue' RETURN c.title AS title LIMIT 6", &["title"], 5),
     ("layer-action-path", "MATCH p=(l:Layer)-[m:CONTAINS]->(n:Content)-[a:EXPANDS]->(child:Layer) WHERE m.t41 AND a.t41 AND l.state = 'accepted' AND a.source_layer_id = l.id RETURN p AS path LIMIT 6", &["path"], 5),
     ("reused-content-occurrence", "MATCH (l:Layer)-[m:CONTAINS]->(n:Content)-[a:REFERENCES]->(target:Layer) WHERE m.t41 AND a.t41 AND l.layout_version = 1 AND a.source_layer_id = l.id RETURN l AS source, a AS action LIMIT 6", &["source", "action"], 5),
-    ("membership-placement", "MATCH (l:Layer)-[m:CONTAINS]->(n:Content) WHERE m.t41 AND n.title = 'Queue' RETURN m.member_order AS member_order, m.x AS x, m.y AS y ORDER BY member_order LIMIT 6", &["order", "x", "y"], 5),
+    ("membership-placement", "MATCH (l:Layer)-[m:CONTAINS]->(n:Content) WHERE m.t41 AND n.title = 'Queue' RETURN m.member_order AS member_order, m.x AS x, m.y AS y ORDER BY member_order, x, y, l.id, m.id, n.id LIMIT 6", &["order", "x", "y"], 5),
     ("connected-no-double-count", "MATCH (a:Content)-[r:CONNECTED]-(b:Content) WHERE r.p7 AND a.id < b.id RETURN count(r) AS count LIMIT 6", &["count"], 5),
     ("explicit-order-null-last", "MATCH (l:Layer) WHERE l.p7 RETURN l.layout_version AS version ORDER BY l.has_layout DESC, version ASC LIMIT 6", &["version"], 5),
     ("implicit-canonical-order", "MATCH (n:Content) WHERE n.t41 RETURN n.title AS title ORDER BY title LIMIT 6", &["title"], 5),
@@ -680,9 +680,15 @@ fn prove_cancellation_falsifier(conn: &Connection<'_>) -> ProbeResult {
     }
     std::thread::scope(|scope| -> ProbeResult {
         let mut interrupted = conn.prepare(ALLOWED_TWO_HOP)?;
-        let interrupter = scope.spawn(|| {
-            std::thread::sleep(std::time::Duration::from_millis(1));
-            conn.interrupt()
+        let interrupter = scope.spawn(|| -> Result<(), String> {
+            // A single delayed interrupt races a fast or already-warmed query. Keep the
+            // cancellation request asserted for a bounded window so this falsifies the
+            // production interrupt seam instead of scheduler timing.
+            for _ in 0..100 {
+                conn.interrupt().map_err(|error| error.to_string())?;
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Ok(())
         });
         let result = conn.execute(&mut interrupted, params());
         interrupter

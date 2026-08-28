@@ -2,20 +2,20 @@
   "schemaVersion": 1,
   "core": {
     "name": "LadybugDB",
-    "version": "0.19.1",
-    "tag": "v0.19.1",
-    "commit": "554c1e71158564c37a30c541a92bfc9eddc96430",
+    "version": "0.18.0",
+    "tag": "v0.18.0",
+    "commit": "0cda4fffcebb4a52cc24198462901ad28e2d5b66",
     "source": "rust-binding-crate/lbug-src",
-    "embeddedTreeSha256": "ef17999177f4c3e72c51f2fa1ca076e46d1a40eae68c056739043d219526682d"
+    "embeddedTreeSha256": "c90c2bd925e72dcc6c9e51c17b1a150589e719c949d364ded4a98389f0aabe62"
   },
   "rustBinding": {
     "crate": "lbug",
-    "version": "0.19.1",
-    "archive": "lbug-0.19.1.crate",
-    "url": "https://static.crates.io/crates/lbug/lbug-0.19.1.crate",
-    "sha256": "a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172",
-    "buildScriptSha256": "e9344becabb4760c2a641da976542d1c938ce45d2d87c3b7963f9c93a145c968",
-    "sourceBasisCommit": "2e89afb712e6e26f2465f486b153e4aea1176130",
+    "version": "0.18.0",
+    "archive": "lbug-0.18.0.crate",
+    "url": "https://static.crates.io/crates/lbug/lbug-0.18.0.crate",
+    "sha256": "f52ee74966e323212747aa22fa8c01f73f1cbbb996187c3b08cbf96ff9f67562",
+    "buildScriptSha256": "e315b80ae287c6679609dbf44bbe67bfe3b864f90c0be279380edba3ac936064",
+    "sourceBasisCommit": "ea283cd1bf5473cd5c233944e3b281eb0d758a45",
     "sourceBasisDirty": true
   },
   "openssl": {
@@ -41,6 +41,27 @@
     ],
     "bindingPatch": null,
     "corePatch": null,
+    "platformLinkAdapter": {
+      "ownership": "relayer",
+      "ladybugSourcePatched": false,
+      "targets": [
+        {
+          "rustTarget": "aarch64-apple-darwin",
+          "libraryDirectory": "openssl-prefix/lib",
+          "staticLibraries": ["ssl", "crypto"]
+        },
+        {
+          "rustTarget": "x86_64-apple-darwin",
+          "libraryDirectory": "openssl-prefix/lib",
+          "staticLibraries": ["ssl", "crypto"]
+        },
+        {
+          "rustTarget": "x86_64-pc-windows-msvc",
+          "libraryDirectory": "openssl-prefix/lib",
+          "staticLibraries": ["libssl", "libcrypto"]
+        }
+      ]
+    },
     "targets": {
       "aarch64-apple-darwin": {
         "supported": true,
@@ -53,8 +74,7 @@
         "buildTool": "make"
       },
       "x86_64-pc-windows-msvc": {
-        "supported": false,
-        "blocker": "The unmodified lbug 0.19.1 build emits ssl/crypto link names while pinned OpenSSL installs libssl.lib/libcrypto.lib, and it supplies no verified MSVC static-library search path.",
+        "supported": true,
         "opensslConfigureTarget": "VC-WIN64A",
         "buildTool": "nmake"
       }
@@ -65,10 +85,6 @@
     "packagedLadybugLibrary": null,
     "requiredPackagedRpath": null,
     "externalOpenSSLLibraries": false
-  },
-  "evidence": {
-    "macOSArm64Observation": "docs/evidence/issue-261-ladybug-source-arm64.txt",
-    "macOSArm64ObservationSha256": "ec0832b0f17faca44a61aebe518b490dc58c301187fc668eb548604971864d7e"
   },
   "licenseReceipt": {
     "bindingManifestDeclares": "MIT",

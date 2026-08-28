@@ -47,6 +47,14 @@ export function verifyNoRuntimePaths(output) {
   }
 }
 
+export function parseLadybugLockContention(output) {
+  const match = String(output).match(/Could not set lock on file[^\r\n]*/u);
+  if (!match || !/(?:Resource temporarily unavailable|Lock is held by PID \d+)/u.test(match[0])) {
+    throw new Error(`failure was not Ladybug lock contention: ${output}`);
+  }
+  return match[0];
+}
+
 function parseArguments(arguments_) {
   const options = {};
   for (let index = 0; index < arguments_.length; index += 2) {
@@ -290,9 +298,7 @@ export async function provePackagedLadybugLifecycle(
       lockFailure = `${error.stderr || ""}\n${error.message || ""}`.trim();
     }
     if (!lockFailure) throw new Error("a second packaged graph server opened the locked Ladybug profile");
-    if (!/Could not set lock on file[\s\S]*Resource temporarily unavailable/u.test(lockFailure)) {
-      throw new Error(`second packaged graph-server failure was not Ladybug lock contention: ${lockFailure}`);
-    }
+    const lockContention = parseLadybugLockContention(lockFailure);
 
     holder.stdin.end();
     const [shutdown] = await Promise.all([
@@ -317,7 +323,7 @@ export async function provePackagedLadybugLifecycle(
       cleanShutdown: true,
       restartReopenedPersistedMarker: true,
       storageVersion: reopened.storageVersion,
-      lockFailure: lockFailure.match(/Could not set lock on file[^\r\n]*/u)?.[0],
+      lockFailure: lockContention,
     };
   } finally {
     holderLines?.close();
@@ -351,8 +357,8 @@ export async function captureLadybugPackagedLifecycle({
     manifest,
     target: target.rustTarget,
   });
-  if (manifest.rustBinding.version !== "0.19.1" || manifest.extensions.length !== 0) {
-    throw new Error("Ladybug source manifest is not the exact extension-free 0.19.1 contract");
+  if (manifest.rustBinding.version !== "0.18.0" || manifest.extensions.length !== 0) {
+    throw new Error("Ladybug source manifest is not the exact extension-free 0.18.0 contract");
   }
   if (
     sourceReceipt.sources?.find((source) => source.id === "rust-binding")?.sha256 !== manifest.rustBinding.sha256

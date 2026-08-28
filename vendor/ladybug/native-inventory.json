@@ -1,21 +1,21 @@
 {
   "schemaVersion": 1,
-  "componentSet": "ladybug-native-v0.19.1",
+  "componentSet": "ladybug-native-v0.18.0",
   "extensions": [],
   "binding": {
     "crate": "lbug",
-    "version": "0.19.1",
-    "crateSha256": "a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172",
-    "sourceBasisCommit": "2e89afb712e6e26f2465f486b153e4aea1176130",
+    "version": "0.18.0",
+    "crateSha256": "f52ee74966e323212747aa22fa8c01f73f1cbbb996187c3b08cbf96ff9f67562",
+    "sourceBasisCommit": "ea283cd1bf5473cd5c233944e3b281eb0d758a45",
     "sourceTreeSha256": "58ab1da5ce17d2ca6ae0a6d835b2384c6fd8c8627703bf93e77685419f7142ba",
     "spdx": "MIT",
     "licensePath": null,
     "receiptStatus": "blocked-missing-upstream-license-file"
   },
   "core": {
-    "version": "0.19.1",
-    "commit": "554c1e71158564c37a30c541a92bfc9eddc96430",
-    "sourceTreeSha256": "ef17999177f4c3e72c51f2fa1ca076e46d1a40eae68c056739043d219526682d",
+    "version": "0.18.0",
+    "commit": "0cda4fffcebb4a52cc24198462901ad28e2d5b66",
+    "sourceTreeSha256": "c90c2bd925e72dcc6c9e51c17b1a150589e719c949d364ded4a98389f0aabe62",
     "spdx": "MIT",
     "licensePath": "vendor/ladybug/notices/ladybug-core-LICENSE"
   },
@@ -38,7 +38,7 @@
   ],
   "nativeComponents": [
     { "name": "alp", "embeddedVersion": "unknown-upstream-version", "sourceTreeSha256": "f2ac2f56af662d96dde1e96ecbf1b4c374bb4dab5197a84da0bb7d2132d0fb7f", "disposition": "compiled", "spdx": "MIT", "licenseSource": { "path": "LICENSE" }, "licensePath": "vendor/ladybug/notices/third-party/alp-LICENSE" },
-    { "name": "antlr4_cypher", "embeddedVersion": "4.13.1-generated", "sourceTreeSha256": "f376078e03567839e6dbb40daed20a29205bbb3d683058cd65d2f036e0c11e4e", "disposition": "compiled", "spdx": "MIT", "licenseSource": null, "licensePath": "vendor/ladybug/notices/ladybug-core-LICENSE", "noticeProvenance": "generated from the MIT-licensed Ladybug core Cypher.g4 at core commit 554c1e71158564c37a30c541a92bfc9eddc96430" },
+    { "name": "antlr4_cypher", "embeddedVersion": "4.13.1-generated", "sourceTreeSha256": "c2f3bba128ed35a0559925a013f033fc6560def6fc5684357435de986a27b796", "disposition": "compiled", "spdx": "MIT", "licenseSource": null, "licensePath": "vendor/ladybug/notices/ladybug-core-LICENSE", "noticeProvenance": "generated from the MIT-licensed Ladybug core Cypher.g4 at core commit 0cda4fffcebb4a52cc24198462901ad28e2d5b66" },
     { "name": "antlr4_runtime", "embeddedVersion": "4.13.1", "sourceTreeSha256": "1e01751ff7083bc79a9d8e07b84b58a7789de39545a6e19e1035b82243e9bf98", "disposition": "compiled", "spdx": "BSD-3-Clause", "licenseSource": { "path": "LICENSE" }, "licensePath": "vendor/ladybug/notices/third-party/antlr4_runtime-LICENSE" },
     { "name": "brotli", "embeddedVersion": "1.1.0", "sourceTreeSha256": "c1431109e08e1e44857a0d9100a752cb0fa6637736a2248818e9b5a358a3ae0e", "disposition": "compiled", "spdx": "MIT", "licenseSource": { "path": "LICENSE" }, "licensePath": "vendor/ladybug/notices/third-party/brotli-LICENSE" },
     { "name": "cppjieba", "embeddedVersion": "5.6.0", "sourceTreeSha256": "f59be68439e8d2000542d801ea6ee703d07deb77cf93471205129c7e14659376", "disposition": "configured-not-linked", "spdx": "MIT", "licenseSource": { "path": "LICENSE" }, "licensePath": "vendor/ladybug/notices/third-party/cppjieba-LICENSE" },

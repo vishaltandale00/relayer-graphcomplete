@@ -1,7 +1,7 @@
 {
   "issue": 261,
   "engine": "lbug",
-  "version": "0.19.1",
+  "version": "0.18.0",
   "extensions": [],
   "positiveDisposition": "engine-executed-approved-lowering",
   "negativeDispositionByPhase": {

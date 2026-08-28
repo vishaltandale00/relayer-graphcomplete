@@ -1,7 +1,7 @@
-# Ladybug 0.19.1 graph-query-v1 contract probe
+# Ladybug 0.18.0 graph-query-v1 contract probe
 
 This deterministic Issue #261 probe qualifies the frozen fixture corpus against exact `lbug
-0.19.1`; it is not the Issue #262 production projection or the Issue #263 parser/executor.
+0.18.0`; it is not the Issue #262 production projection or the Issue #263 parser/executor.
 
 The probe loads the frozen supergraph topology into one shared temporary Ladybug database. Its
 private query lowerings preserve the v1 semantics while accounting for known dialect differences:
@@ -32,5 +32,6 @@ Issue #261 source-build receipt:
 ```sh
 OPENSSL_DIR=/absolute/pinned/openssl-prefix OPENSSL_STATIC=1 \
   LIBRARY_PATH=/absolute/pinned/openssl-prefix/lib MACOSX_DEPLOYMENT_TARGET=13.3 \
+  RUSTFLAGS='-L native=/absolute/pinned/openssl-prefix/lib -l static=ssl -l static=crypto' \
   cargo run --locked --manifest-path docs/evidence/issue-261-ladybug-contract-probe/Cargo.toml
 ```

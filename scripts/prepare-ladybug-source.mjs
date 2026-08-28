@@ -36,12 +36,12 @@ function assertHexDigest(value, label) {
 
 export function validateLadybugSourceManifest(manifest) {
   if (manifest.schemaVersion !== 1) throw new Error("unsupported Ladybug source manifest");
-  if (manifest.core.version !== "0.19.1") throw new Error("Ladybug core must remain 0.19.1");
-  if (manifest.core.commit !== "554c1e71158564c37a30c541a92bfc9eddc96430") {
+  if (manifest.core.version !== "0.18.0") throw new Error("Ladybug core must remain 0.18.0");
+  if (manifest.core.commit !== "0cda4fffcebb4a52cc24198462901ad28e2d5b66") {
     throw new Error("unexpected Ladybug core commit");
   }
-  if (manifest.rustBinding.crate !== "lbug" || manifest.rustBinding.version !== "0.19.1") {
-    throw new Error("Rust binding must remain lbug 0.19.1");
+  if (manifest.rustBinding.crate !== "lbug" || manifest.rustBinding.version !== "0.18.0") {
+    throw new Error("Rust binding must remain lbug 0.18.0");
   }
   if (manifest.openssl.version !== "3.5.8") throw new Error("OpenSSL must remain 3.5.8");
   if (!Array.isArray(manifest.extensions) || manifest.extensions.length !== 0) {
@@ -53,21 +53,29 @@ export function validateLadybugSourceManifest(manifest) {
   if (manifest.build.bindingPatch !== null || manifest.build.corePatch !== null) {
     throw new Error("Ladybug source build does not admit binding or core patches");
   }
+  const expectedLinkAdapter = {
+    ownership: "relayer",
+    ladybugSourcePatched: false,
+    targets: [
+      { rustTarget: "aarch64-apple-darwin", libraryDirectory: "openssl-prefix/lib", staticLibraries: ["ssl", "crypto"] },
+      { rustTarget: "x86_64-apple-darwin", libraryDirectory: "openssl-prefix/lib", staticLibraries: ["ssl", "crypto"] },
+      { rustTarget: "x86_64-pc-windows-msvc", libraryDirectory: "openssl-prefix/lib", staticLibraries: ["libssl", "libcrypto"] },
+    ],
+  };
+  if (JSON.stringify(manifest.build.platformLinkAdapter) !== JSON.stringify(expectedLinkAdapter)) {
+    throw new Error("Ladybug 0.18.0 requires the reviewed Relayer-owned OpenSSL link adapter");
+  }
   if (manifest.build.cargoNetworkMode !== "offline") {
     throw new Error("Ladybug Cargo builds must be offline");
   }
-  for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+  for (const target of [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+  ]) {
     if (manifest.build.targets[target]?.supported !== true) {
       throw new Error(`Ladybug source build must support ${target}`);
     }
-  }
-  const windows = manifest.build.targets["x86_64-pc-windows-msvc"];
-  if (
-    windows?.supported !== false
-    || !windows.blocker?.includes("unmodified lbug 0.19.1")
-    || !windows.blocker.includes("libssl.lib/libcrypto.lib")
-  ) {
-    throw new Error("Windows Ladybug source build must preserve the verified static-link blocker");
   }
   const forbiddenEnvironment = [
     "LBUG_GITHUB_REPOSITORY",
@@ -85,7 +93,6 @@ export function validateLadybugSourceManifest(manifest) {
     [manifest.rustBinding.sha256, "lbug crate"],
     [manifest.rustBinding.buildScriptSha256, "lbug build script"],
     [manifest.openssl.sha256, "OpenSSL source"],
-    [manifest.evidence.macOSArm64ObservationSha256, "macOS arm64 observation"],
   ]) assertHexDigest(value, label);
   for (const source of [manifest.rustBinding, manifest.openssl]) {
     if (basename(source.archive) !== source.archive) {
@@ -210,7 +217,7 @@ export async function digestLadybugSourceTree(root) {
 export async function stageLadybugSources({ cacheDirectory, outputDirectory, manifest }) {
   const sourceReceipts = await verifyLadybugSourceCache({ cacheDirectory, manifest });
   await requireEmptyDirectory(outputDirectory);
-  const bindingDirectory = resolve(outputDirectory, "lbug-0.19.1");
+  const bindingDirectory = resolve(outputDirectory, "lbug-0.18.0");
   const opensslDirectory = resolve(outputDirectory, "openssl-3.5.8");
   await mkdir(bindingDirectory);
   await mkdir(opensslDirectory);
@@ -235,7 +242,7 @@ export async function stageLadybugSources({ cacheDirectory, outputDirectory, man
   }
   const embeddedTreeSha256 = await digestLadybugSourceTree(resolve(bindingDirectory, "lbug-src"));
   if (embeddedTreeSha256 !== manifest.core.embeddedTreeSha256) {
-    throw new Error("staged embedded Ladybug core differs from the reviewed 0.19.1 tree");
+    throw new Error("staged embedded Ladybug core differs from the reviewed 0.18.0 tree");
   }
 
   const receipt = {
@@ -274,7 +281,7 @@ function targetConfiguration(manifest, target) {
 
 export function createLadybugCargoEnvironment({ manifest, outputDirectory, target }) {
   targetConfiguration(manifest, target);
-  const bindingDirectory = resolve(outputDirectory, "lbug-0.19.1");
+  const bindingDirectory = resolve(outputDirectory, "lbug-0.18.0");
   const opensslPrefix = resolve(outputDirectory, "openssl-prefix");
   const libraryDirectory = resolve(opensslPrefix, "lib");
   const environment = {
