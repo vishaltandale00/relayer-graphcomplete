@@ -120,6 +120,8 @@ pub enum ExportInputControl {
     Text,
     SingleSelect,
     MultiSelect,
+    #[serde(other)]
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1307,6 +1309,13 @@ fn validate_submitted_inputs(
                 "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
             ));
         }
+        if submitted.action.control == ExportInputControl::Unsupported {
+            return Err(ExportValidationError::new(
+                "input_action_control_unsupported",
+                format!("{submitted_path}.action.control"),
+                "Use text, single_select, or multi_select.",
+            ));
+        }
         if submitted.action.prompt.trim().is_empty() {
             return Err(ExportValidationError::new(
                 "input_action_prompt_required",
@@ -1483,6 +1492,7 @@ fn validate_submitted_inputs(
                         .minimum_selections
                         .is_none_or(|minimum| selected.len() >= minimum as usize),
                     ExportInputControl::Text => unreachable!(),
+                    ExportInputControl::Unsupported => unreachable!(),
                 };
                 if !count_valid {
                     return Err(ExportValidationError::new(
@@ -1492,6 +1502,7 @@ fn validate_submitted_inputs(
                     ));
                 }
             }
+            ExportInputControl::Unsupported => unreachable!(),
         }
     }
     Ok(())
