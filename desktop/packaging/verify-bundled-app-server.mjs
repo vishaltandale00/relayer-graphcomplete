@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
-import { access, readFile, stat } from "node:fs/promises";
+import { access, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import * as tar from "tar";
@@ -17,11 +17,13 @@ import {
   digestFileEntries,
   digestFilesystemTree,
   dependencyInstallCandidates,
+  createSignedDependencyClosureSnapshot,
   primeRuntimeSourcePathIsPackaged,
   runtimeDependencyRequirements,
   runtimeDependencyFileIsPackaged,
   runtimePackageMetadataDigest,
   sha256,
+  verifySignedDependencyClosureSnapshot,
 } from "../shared/prime-runtime-integrity.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -44,6 +46,7 @@ export async function verifyBundledAppServer(
     listPackageEntries = listPackage,
     verifyPrimeAgent = verifyPackagedPrimeAgent,
     primeAgentTargetKey = `${platform}-${expectedArchitecture === "x86_64" ? "x64" : expectedArchitecture}`,
+    primeAgentIntegrityPhase = "unsigned",
   } = {},
 ) {
   const resourcesPath = platform === "darwin" ? join(appPath, "Contents", "Resources") : join(appPath, "resources");
@@ -66,7 +69,10 @@ export async function verifyBundledAppServer(
     if (!packagedEntries.has(entry)) throw new Error(`Bundled Relayer runtime is missing ${entry}.`);
   }
   await verifyPackagedCodexBrowserMcp(resourcesPath);
-  await verifyPrimeAgent(resourcesPath, packagedEntries, { targetKey: primeAgentTargetKey });
+  await verifyPrimeAgent(resourcesPath, packagedEntries, {
+    integrityPhase: primeAgentIntegrityPhase,
+    targetKey: primeAgentTargetKey,
+  });
   let architectures = null;
   if (platform === "darwin") {
     for (const [label, executable] of [["app server", binaryPath], ["graph server", graphBinaryPath]]) {
@@ -113,9 +119,16 @@ export async function verifyPackagedPrimeAgent(
     extractPackageFile = (archivePath, entry) => extractFile(archivePath, asarEntryPath(entry)),
     vendorDirectory = resolve(import.meta.dirname, "../../vendor/prime-agent"),
     verifyDependencyClosure = digestAsarDependencyClosure,
+    collectDependencyClosure = collectAsarDependencyClosureEntries,
+    readSignedClosureSnapshot = () => readFile(join(resourcesPath, "prime-agent", "signing-closure.json"), "utf8")
+      .then((bytes) => JSON.parse(bytes)),
     targetKey = `${process.platform}-${process.arch}`,
+    integrityPhase = "unsigned",
   } = {},
 ) {
+  if (integrityPhase !== "unsigned" && integrityPhase !== "signed") {
+    throw new Error(`Unsupported bundled Prime Agent integrity phase: ${integrityPhase}.`);
+  }
   const manifest = JSON.parse(await readFile(join(resourcesPath, "prime-agent", "manifest.json"), "utf8"));
   validatePrimeAgentManifest(manifest);
   const requiredResources = [
@@ -171,16 +184,25 @@ export async function verifyPackagedPrimeAgent(
       throw new Error(`Bundled Prime Agent package bytes mismatch for ${entry.name}.`);
     }
   }
-  const dependencyClosureDigest = verifyDependencyClosure(
+  const closureArguments = [
     asarPath,
     manifest.packages.map((entry) => `node_modules/${entry.name}`),
     packagedFileEntries,
     packagedEntries,
     extractPackageFile,
-  );
-  const expectedClosureDigest = manifest.dependencyClosureSha256ByTarget[targetKey];
-  if (!expectedClosureDigest || dependencyClosureDigest !== expectedClosureDigest) {
-    throw new Error("Bundled Prime Agent dependency closure mismatch.");
+  ];
+  if (integrityPhase === "unsigned") {
+    const dependencyClosureDigest = verifyDependencyClosure(...closureArguments);
+    const expectedClosureDigest = manifest.dependencyClosureSha256ByTarget[targetKey];
+    if (!expectedClosureDigest || dependencyClosureDigest !== expectedClosureDigest) {
+      throw new Error("Bundled Prime Agent dependency closure mismatch.");
+    }
+  } else {
+    verifySignedDependencyClosureSnapshot(
+      collectDependencyClosure(...closureArguments),
+      await readSignedClosureSnapshot(),
+      targetKey,
+    );
   }
   const requiredEntries = [
     "node_modules/@earendil-works/pi-coding-agent/dist/index.js",
@@ -213,7 +235,7 @@ export async function verifyPackagedPrimeAgent(
   return { sourceCommit: manifest.source.commit, packages: manifest.packages.length };
 }
 
-export function digestAsarDependencyClosure(asarPath, rootInstallPaths, fileEntries, allEntries, extractPackageFile) {
+export function collectAsarDependencyClosureEntries(asarPath, rootInstallPaths, fileEntries, allEntries, extractPackageFile) {
   const queue = [...rootInstallPaths];
   const visited = new Set();
   const digestEntries = [];
@@ -239,7 +261,44 @@ export function digestAsarDependencyClosure(asarPath, rootInstallPaths, fileEntr
       digestEntries.push({ path: absolutePath, bytes: extractPackageFile(asarPath, absolutePath) });
     }
   }
-  return digestFileEntries(digestEntries);
+  return digestEntries;
+}
+
+export function digestAsarDependencyClosure(asarPath, rootInstallPaths, fileEntries, allEntries, extractPackageFile) {
+  return digestFileEntries(collectAsarDependencyClosureEntries(
+    asarPath,
+    rootInstallPaths,
+    fileEntries,
+    allEntries,
+    extractPackageFile,
+  ));
+}
+
+export async function writePrimeAgentSigningClosureSnapshot(resourcesPath, targetKey) {
+  const asarPath = join(resourcesPath, "app.asar");
+  const packagedEntries = new Set(listPackage(asarPath).map(normalizeAsarEntry));
+  const directoryEntries = new Set();
+  for (const path of packagedEntries) {
+    const segments = path.split("/");
+    for (let index = 1; index < segments.length; index += 1) {
+      directoryEntries.add(segments.slice(0, index).join("/"));
+    }
+  }
+  const packagedFileEntries = [...packagedEntries].filter((path) => !directoryEntries.has(path));
+  const manifest = JSON.parse(await readFile(join(resourcesPath, "prime-agent", "manifest.json"), "utf8"));
+  const entries = collectAsarDependencyClosureEntries(
+    asarPath,
+    manifest.packages.map((entry) => `node_modules/${entry.name}`),
+    packagedFileEntries,
+    packagedEntries,
+    (archivePath, entry) => extractFile(archivePath, asarEntryPath(entry)),
+  );
+  const snapshot = createSignedDependencyClosureSnapshot(entries, targetKey);
+  await writeFile(
+    join(resourcesPath, "prime-agent", "signing-closure.json"),
+    `${JSON.stringify(snapshot, null, 2)}\n`,
+  );
+  return snapshot;
 }
 
 async function digestPrimeArchive(path) {
@@ -284,5 +343,10 @@ export default async function verifyElectronBuilderBundledAppServer(context) {
   const target = desktopTargetFromEnvironment(process.env);
   const expectedArchitecture = target.architecture === "x64" ? "x86_64" : target.architecture;
   const appPath = target.platform === "darwin" ? join(appOutDir, `${productFilename}.app`) : appOutDir;
-  return verifyBundledAppServer(appPath, { platform: target.platform, expectedArchitecture });
+  const result = await verifyBundledAppServer(appPath, { platform: target.platform, expectedArchitecture });
+  if (target.platform === "darwin") {
+    const resourcesPath = join(appPath, "Contents", "Resources");
+    await writePrimeAgentSigningClosureSnapshot(resourcesPath, `${target.platform}-${target.architecture}`);
+  }
+  return result;
 }
