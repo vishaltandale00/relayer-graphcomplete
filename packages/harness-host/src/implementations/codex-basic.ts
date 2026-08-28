@@ -272,6 +272,12 @@ export class CodexBasicHarness implements Harness {
           required: false,
           startup_timeout_sec: 20,
           tool_timeout_sec: 20,
+          // In pinned Codex 0.147, `prompt` marks the MCP tool as requiring
+          // approval; the thread policy then routes that approval. Ask emits
+          // item/tool/requestUserInput, Auto uses its native auto_review
+          // reviewer, and unrestricted Full with approvalPolicy=never is
+          // approved before a server request. Using `approve` here for Auto or
+          // Full would bypass that native policy instead of preserving it.
           default_tools_approval_mode: "prompt",
         },
       };

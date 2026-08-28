@@ -423,10 +423,15 @@ describe("CodexBasicHarness", () => {
     expect(configuration.modelCompatibility?.[0]).not.toHaveProperty("preferredModelId");
   });
 
-  it.each(["codex-basic", "codex-basic-high"])("configures an optional shipped native browser MCP for %s without changing product profiles", async (name) => {
+  it.each(["codex-basic", "codex-basic-high"])("leaves browser MCP approval routing to each %s product profile", async (name) => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
     expect(Object.keys(configuration.permissionBindings)).toEqual(["ask", "auto", "full"]);
-    for (const permissionProfileId of ["ask", "auto", "full"] as const) {
+    const cases = [
+      ["ask", { approvalPolicy: "on-request", approvalsReviewer: "user" }],
+      ["auto", { approvalPolicy: "on-request", approvalsReviewer: "auto_review" }],
+      ["full", { approvalPolicy: "never" }],
+    ] as const;
+    for (const [permissionProfileId, nativeApproval] of cases) {
       let submitted: CodexAppServerTurnOptions | undefined;
       const harness = new CodexBasicHarness({
         threadId: 1,
@@ -446,6 +451,10 @@ describe("CodexBasicHarness", () => {
 
       await harness.complete({ ...runContext(1, "token"), access: codexAccess() });
 
+      expect(submitted?.threadParams).toMatchObject(nativeApproval);
+      if (permissionProfileId === "full") {
+        expect(submitted?.threadParams).not.toHaveProperty("approvalsReviewer");
+      }
       expect(submitted?.threadParams.config).toEqual({
         skip_git_repo_check: true,
         features: { tool_call_mcp_elicitation: false },

@@ -237,6 +237,72 @@ describe("Codex app-server transport", () => {
     });
   });
 
+  it.each([
+    ["Auto", { approvalPolicy: "on-request", approvalsReviewer: "auto_review" }],
+    ["Full", { approvalPolicy: "never" }],
+  ] as const)("does not invent a Relayer MCP prompt from an event-only %s lifecycle", async (_profile, nativeApproval) => {
+    const request = vi.fn(async () => { throw new Error("unexpected Relayer approval"); });
+    const onServerRequest = vi.fn();
+    const fake = new FakeCodexProcess((message) => {
+      handshake(fake, message);
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+        queueMicrotask(() => {
+          fake.notify("item/started", {
+            threadId: "thread-new",
+            turnId: "turn-1",
+            item: {
+              type: "mcpToolCall",
+              id: "tool-1",
+              server: "chrome-devtools",
+              tool: "evaluate_script",
+              arguments: { function: "() => document.title" },
+              readOnlyHint: false,
+            },
+          });
+          fake.notify("item/completed", {
+            threadId: "thread-new",
+            turnId: "turn-1",
+            item: {
+              type: "mcpToolCall",
+              id: "tool-1",
+              server: "chrome-devtools",
+              tool: "evaluate_script",
+              arguments: { function: "() => document.title" },
+              status: "completed",
+            },
+          });
+          completeTurn(fake);
+        });
+      }
+    });
+
+    await runCodexAppServerTurn(options(fake, {
+      approvals: { request },
+      onServerRequest,
+      threadParams: {
+        cwd: "/workspace",
+        ...nativeApproval,
+        config: {
+          mcp_servers: {
+            "chrome-devtools": { default_tools_approval_mode: "prompt" },
+          },
+        },
+      },
+    }));
+
+    expect(request).not.toHaveBeenCalled();
+    expect(onServerRequest).not.toHaveBeenCalled();
+    expect(fake.messages.find(({ method }) => method === "thread/start")?.params).toMatchObject({
+      ...nativeApproval,
+      config: {
+        mcp_servers: {
+          "chrome-devtools": { default_tools_approval_mode: "prompt" },
+        },
+      },
+    });
+  });
+
   it("bridges a permission approval without item/started and completes the same turn", async () => {
     const request = vi.fn(async () => ({
       requestId: "request-1",
