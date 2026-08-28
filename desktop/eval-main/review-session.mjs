@@ -140,9 +140,11 @@ export class ReviewSession {
     const initialState = validateState(this.executionId, await this.#rendererCommand("snapshot"));
     let plan;
     let state;
+    let ownsCapture = false;
     const tileArtifacts = [];
     try {
       plan = await this.#rendererCommand("capturePlan", { target, mode });
+      ownsCapture = target.kind === "element";
       state = validateState(this.executionId, await this.#rendererCommand("snapshot"));
       if (presentationKey(state) !== presentationKey(initialState)) {
         throw new Error("The production workspace changed presentation while preparing the screenshot.");
@@ -170,7 +172,7 @@ export class ReviewSession {
         });
       }
     } finally {
-      if (target.kind !== "viewport") await this.#rendererCommand("restoreCapture");
+      if (ownsCapture) await this.#rendererCommand("restoreCapture");
     }
 
     const screenshotId = `shot-${randomUUID()}`;

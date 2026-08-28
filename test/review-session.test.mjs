@@ -232,6 +232,64 @@ describe("ReviewSession", () => {
     expect(electron.captures).toHaveLength(1);
   });
 
+  it("does not restore an element capture owned by an overlapping request", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
+    directories.push(directory);
+    let captureActive = false;
+    let restorations = 0;
+    let releaseFirstPlan;
+    let markFirstPlanActive;
+    const firstPlanActive = new Promise((resolve) => { markFirstPlanActive = resolve; });
+    const firstPlanRelease = new Promise((resolve) => { releaseFirstPlan = resolve; });
+    const plan = {
+      target: { kind: "element", elementRef: "node-detail" },
+      mode: "visible",
+      clip: { x: 20, y: 40, width: 300, height: 200 },
+      tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
+    };
+    const electron = fakeElectron({
+      snapshot: async () => reviewState({ selectedNodeId: "node-2" }),
+      capturePlan: async () => {
+        if (captureActive) throw new Error("A review capture is already active.");
+        captureActive = true;
+        markFirstPlanActive();
+        await firstPlanRelease;
+        return plan;
+      },
+      prepareCaptureTile: async ({ index }) => ({ index, clip: plan.clip }),
+      restoreCapture: async () => {
+        captureActive = false;
+        restorations += 1;
+      },
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: directory,
+      ipc: electron.ipc,
+    });
+    await session.open();
+
+    const first = session.screenshot({
+      target: { kind: "element", elementRef: "node-detail" },
+      label: "winning capture",
+    });
+    await firstPlanActive;
+    await expect(session.screenshot({
+      target: { kind: "element", elementRef: "node-detail" },
+      label: "overlapping capture",
+    })).rejects.toThrow("A review capture is already active");
+    expect(captureActive).toBe(true);
+    expect(restorations).toBe(0);
+
+    releaseFirstPlan();
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(captureActive).toBe(false);
+    expect(restorations).toBe(1);
+    expect(electron.captures).toHaveLength(1);
+  });
+
   it("activates only current controls and delegates arbitrary signed history deltas to the workspace", async () => {
     let state = reviewState({
       controls: [{
