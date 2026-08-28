@@ -1,0 +1,100 @@
+{
+  "queryContractVersion": 1,
+  "defaultRows": 5,
+  "hardRows": 8,
+  "encodedResultBytes": 16384,
+  "cases": [
+    {
+      "id": "default-five",
+      "explicitLimit": null,
+      "matchedRows": 6,
+      "returnedRows": 5,
+      "truncated": true,
+      "expectedError": null
+    },
+    {
+      "id": "hard-eight",
+      "explicitLimit": 8,
+      "matchedRows": 8,
+      "returnedRows": 8,
+      "truncated": false,
+      "expectedError": null
+    },
+    {
+      "id": "reject-limit-nine",
+      "explicitLimit": 9,
+      "matchedRows": 0,
+      "returnedRows": 0,
+      "truncated": false,
+      "expectedError": { "code": "row_limit_exceeded", "phase": "plan" }
+    },
+    {
+      "id": "limit-zero",
+      "explicitLimit": 0,
+      "matchedRows": 1,
+      "returnedRows": 0,
+      "truncated": true,
+      "expectedError": null
+    },
+    {
+      "id": "exact-byte-cap",
+      "explicitLimit": 5,
+      "matchedRows": 1,
+      "returnedRows": 1,
+      "canonicalEnvelopeRecipe": { "column": "value", "fillerAsciiBytes": [16280], "truncated": false },
+      "expectedCanonicalEncodedBytes": 16384,
+      "truncated": false,
+      "expectedError": null
+    },
+    {
+      "id": "byte-prefix-truncation",
+      "explicitLimit": 5,
+      "matchedRows": 3,
+      "returnedRows": 2,
+      "canonicalEnvelopeRecipe": { "column": "value", "fillerAsciiBytes": [7933, 7933], "truncated": true },
+      "nextRowFillerAsciiBytes": 1200,
+      "expectedCanonicalEncodedBytes": 16000,
+      "expectedWithNextRowEncodedBytes": 17231,
+      "truncated": true,
+      "expectedError": null
+    },
+    {
+      "id": "oversized-single-row",
+      "explicitLimit": 5,
+      "matchedRows": 1,
+      "returnedRows": 0,
+      "singleRowEnvelopeRecipe": { "column": "value", "fillerAsciiBytes": [16281], "truncated": false },
+      "expectedSingleRowEnvelopeBytes": 16385,
+      "truncated": false,
+      "expectedError": { "code": "result_row_too_large", "phase": "encode" }
+    },
+    {
+      "id": "candidate-beyond-row-cap-not-inspected",
+      "explicitLimit": 1,
+      "matchedRows": 2,
+      "returnedRows": 1,
+      "secondCandidateSingleRowEnvelopeBytes": 20000,
+      "truncated": true,
+      "expectedError": null
+    }
+  ],
+  "budgetContract": {
+    "id": "all-budget-dimensions",
+    "dimensions": [
+      { "name": "query_bytes", "failureCode": "query_bytes_exceeded", "phase": "envelope" },
+      { "name": "ast_depth", "failureCode": "ast_depth_exceeded", "phase": "plan" },
+      { "name": "variables", "failureCode": "variable_limit_exceeded", "phase": "plan" },
+      { "name": "pattern_parts", "failureCode": "pattern_part_limit_exceeded", "phase": "plan" },
+      { "name": "traversal_hops", "failureCode": "traversal_limit_exceeded", "phase": "plan" },
+      { "name": "examined_expansions", "failureCode": "examined_expansions_exceeded", "phase": "execute" },
+      { "name": "intermediate_rows", "failureCode": "intermediate_rows_exceeded", "phase": "execute" },
+      { "name": "wall_time_ms", "failureCode": "wall_time_exceeded", "phase": "execute" },
+      { "name": "cancellation", "failureCode": "query_cancelled", "phase": "execute" },
+      { "name": "result_rows", "failureCode": "row_limit_exceeded", "phase": "plan" },
+      { "name": "encoded_result_bytes", "failureCode": "result_row_too_large", "phase": "encode" }
+    ],
+    "callerMayLower": true,
+    "callerMayRaise": false,
+    "limitAffectsWorkBudgets": false
+  }
+}

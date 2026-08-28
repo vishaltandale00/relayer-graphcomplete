@@ -1,0 +1,159 @@
+{
+  "queryContractVersion": 1,
+  "cases": [
+    {
+      "id": "reject-non-count-star",
+      "query": "MATCH (n:Content) RETURN min(*) AS value",
+      "expectedError": { "code": "invalid_aggregate", "phase": "plan", "path": "query.return[0]" }
+    },
+    {
+      "id": "reject-count-distinct-star",
+      "query": "MATCH (n:Content) RETURN count(DISTINCT *) AS value",
+      "expectedError": { "code": "invalid_aggregate", "phase": "plan", "path": "query.return[0]" }
+    },
+    {
+      "id": "reject-nested-aggregate",
+      "query": "MATCH (l:Layer)-[m:CONTAINS]->(n:Content) RETURN sum(count(m)) AS value",
+      "expectedError": { "code": "invalid_aggregate", "phase": "plan", "path": "query.return[0]" }
+    },
+    {
+      "id": "reject-version-two",
+      "requestVersion": 2,
+      "query": "MATCH (n:Content) RETURN n",
+      "expectedError": { "code": "unsupported_query_contract_version", "phase": "envelope", "path": "queryContractVersion" }
+    },
+    {
+      "id": "reject-variable-length",
+      "query": "MATCH (a:Content)-[:CONNECTED*1..2]-(b:Content) RETURN b",
+      "expectedError": { "code": "query_construct_forbidden", "phase": "parse", "path": "query" }
+    },
+    {
+      "id": "reject-three-hop",
+      "query": "MATCH (a:Content)-[:CONNECTED]-(b:Content)-[:CONNECTED]-(c:Content)-[:CONNECTED]-(d:Content) RETURN d",
+      "expectedError": { "code": "traversal_limit_exceeded", "phase": "plan", "path": "query.match[0]" }
+    },
+    {
+      "id": "reject-split-three-hop",
+      "query": "MATCH (a:Content)-[:CONNECTED]-(b:Content), (b)-[:CONNECTED]-(c:Content), (c)-[:CONNECTED]-(d:Content) RETURN d",
+      "expectedError": { "code": "traversal_limit_exceeded", "phase": "plan", "path": "query.match" }
+    },
+    {
+      "id": "reject-dynamic-label",
+      "query": "MATCH (n:$label) RETURN n",
+      "parameters": { "label": { "type": "string", "value": "Content" } },
+      "expectedError": { "code": "dynamic_schema_forbidden", "phase": "parse", "path": "query.match[0].label" }
+    },
+    {
+      "id": "reject-dynamic-field",
+      "query": "MATCH (n:Content) RETURN n[$field] AS value",
+      "parameters": { "field": { "type": "string", "value": "title" } },
+      "expectedError": { "code": "dynamic_schema_forbidden", "phase": "parse", "path": "query.return[0]" }
+    },
+    {
+      "id": "reject-unlabeled-zero-hop",
+      "query": "MATCH (n) RETURN n",
+      "expectedError": { "code": "query_type_mismatch", "phase": "plan", "path": "query.match[0].nodes[0]" }
+    },
+    {
+      "id": "reject-untyped-empty-list",
+      "query": "MATCH (n:Content) RETURN [] AS values",
+      "expectedError": { "code": "query_type_mismatch", "phase": "plan", "path": "query.return[0]" }
+    },
+    {
+      "id": "reject-mutation",
+      "query": "MATCH (n:Content) SET n.title = $title RETURN n",
+      "parameters": { "title": { "type": "string", "value": "Changed" } },
+      "expectedError": { "code": "query_construct_forbidden", "phase": "parse", "path": "query" }
+    },
+    {
+      "id": "reject-ddl",
+      "query": "CREATE NODE TABLE Secret(id INT64, PRIMARY KEY(id))",
+      "expectedError": { "code": "query_construct_forbidden", "phase": "parse", "path": "query" }
+    },
+    {
+      "id": "reject-procedure",
+      "query": "CALL show_tables() RETURN *",
+      "expectedError": { "code": "query_construct_forbidden", "phase": "parse", "path": "query" }
+    },
+    {
+      "id": "reject-extension-load",
+      "query": "INSTALL HTTPFS; LOAD EXTENSION HTTPFS",
+      "expectedError": { "code": "query_construct_forbidden", "phase": "parse", "path": "query" }
+    },
+    {
+      "id": "reject-vector-syntax",
+      "query": "MATCH (n:Content) WHERE vector_similarity(n.embedding, $query) > $score RETURN n",
+      "parameters": { "query": { "type": "list", "elementType": { "kind": "float" }, "values": [{ "type": "float", "value": 0.1 }] }, "score": { "type": "float", "value": 0.8 } },
+      "expectedError": { "code": "query_construct_unsupported", "phase": "parse", "path": "query.where" }
+    },
+    {
+      "id": "typed-numeric-no-coercion",
+      "query": "MATCH (l:Layer)-[m:CONTAINS]->(n:Content) WHERE m.order = $order RETURN n",
+      "parameters": { "order": { "type": "float", "value": 0.0 } },
+      "expectedError": { "code": "query_type_mismatch", "phase": "plan", "path": "parameters.order" }
+    },
+    {
+      "id": "reject-duplicate-column",
+      "query": "MATCH (n:Content) RETURN n.title AS value, n.kind AS value",
+      "expectedError": { "code": "duplicate_output_column", "phase": "plan", "path": "query.return[1]" }
+    },
+    {
+      "id": "reject-inaccessible-target",
+      "target": { "scope": "thread", "id": 404 },
+      "query": "MATCH (n:Content) RETURN n",
+      "expectedError": { "code": "inaccessible_or_missing", "phase": "authorize", "path": "target" },
+      "sameErrorFor": ["missing target", "existing but inaccessible target"]
+    },
+    {
+      "id": "reject-foreign-draft",
+      "target": { "scope": "project", "id": 7 },
+      "query": "MATCH (n:Content) RETURN n",
+      "authorityFixture": { "permitAttemptsForeignDraftEligibility": true },
+      "expectedError": { "code": "foreign_draft", "phase": "authorize", "path": "readPermit" }
+    },
+    {
+      "id": "reject-query-limit-nine",
+      "query": "MATCH (n:Content) RETURN n LIMIT 9",
+      "expectedError": { "code": "row_limit_exceeded", "phase": "plan", "path": "query.limit" }
+    },
+    {
+      "id": "parse-before-authorize",
+      "target": { "scope": "thread", "id": 404 },
+      "query": "MATCH (n:Content RETURN n",
+      "competingFailures": ["query_syntax_invalid", "inaccessible_or_missing"],
+      "expectedError": { "code": "query_syntax_invalid", "phase": "parse", "path": "query" }
+    },
+    {
+      "id": "plan-before-authorize",
+      "target": { "scope": "thread", "id": 404 },
+      "query": "MATCH (n:Secret) RETURN n",
+      "competingFailures": ["unknown_label", "inaccessible_or_missing"],
+      "expectedError": { "code": "unknown_label", "phase": "plan", "path": "query.match[0].nodes[0].label" }
+    },
+    {
+      "id": "cancel-before-time",
+      "query": "MATCH (n:Content) RETURN n",
+      "executionFixture": { "cancelled": true, "wallTimeExceeded": true },
+      "competingFailures": ["query_cancelled", "wall_time_exceeded"],
+      "expectedError": { "code": "query_cancelled", "phase": "execute", "path": "budget.cancellation" }
+    },
+    {
+      "id": "time-before-expansions",
+      "query": "MATCH (a:Content)-[:CONNECTED]-(b:Content) RETURN b",
+      "executionFixture": { "wallTimeExceeded": true, "examinedExpansionsExceeded": true },
+      "competingFailures": ["wall_time_exceeded", "examined_expansions_exceeded"],
+      "expectedError": { "code": "wall_time_exceeded", "phase": "execute", "path": "budget.wall_time_ms" }
+    },
+    {
+      "id": "limit-does-not-bound-work",
+      "query": "MATCH (a:Content)-[:CONNECTED]-(b:Content) RETURN b LIMIT 1",
+      "executionFixture": { "intermediateRowsExceededBeforeFinalLimit": true },
+      "expectedError": { "code": "intermediate_rows_exceeded", "phase": "execute", "path": "budget.intermediate_rows" }
+    },
+    {
+      "id": "reject-heterogeneous-list",
+      "query": "MATCH (n:Content) RETURN [n.title, n] AS values",
+      "expectedError": { "code": "query_type_mismatch", "phase": "plan", "path": "query.return[0]" }
+    }
+  ]
+}

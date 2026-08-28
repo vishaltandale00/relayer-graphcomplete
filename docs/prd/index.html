@@ -1771,6 +1771,31 @@ GET  /api/graph/nodes/:id/output
 <li>#56 owns chronological Back and Forward behavior. #36 does not define navigation history.</li>
 <li>Prime Agent owns recursive agent execution. Other harnesses execute directly. GraphComplete owns graph semantics and acceptance.</li>
 </ul>
+<h3>11.9 Graph search v1 contract</h3>
+<p><strong>Goal:</strong> Let authorized agents query accepted graph structure without known record identifiers.</p>
+<p><strong>Primary issue:</strong> <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/52">#52 Add graph search functionality</a>.</p>
+<p><strong>Current status:</strong> The product contract is settled. Runtime, packaging, recovery, and release evidence remain unverified.</p>
+<h4>Product requirements</h4>
+<ul>
+<li>Graph search uses Ladybug from its first enabled product path. SQLite search fallback is forbidden.</li>
+<li>SQLite remains the canonical typed write store initially. Ladybug is one shared derived search store.</li>
+<li>Projection order and readiness are independent for each project or standalone thread.</li>
+<li>A successful submission is acknowledged only after its complete Ladybug projection is searchable.</li>
+<li>This is acknowledgement-level freshness. The product does not claim cross-database physical ACID.</li>
+<li>Queries select a thread or project dataset. Rust intersects that selector with the completion-bound read permit.</li>
+<li>The public language is a bounded read-only GQL/Cypher-shaped profile, not full Cypher or ISO GQL.</li>
+<li>V1 supports whole-target scans plus fixed one-hop and two-hop patterns.</li>
+<li>Content, layers, connections, membership, expansions, and references form one searchable supergraph.</li>
+<li>Drafts, <code>interaction.context</code>, and unresolved invokes never enter the searchable topology.</li>
+<li>Queries return typed scalar, graph, list, record, and path values with deterministic ordering.</li>
+<li>The default result cap is five rows. The hard cap is eight rows and 16 KiB.</li>
+<li>Rows are never partially truncated. A single oversized row returns a typed error.</li>
+<li>Output limits do not replace traversal, expansion, intermediate-row, time, or cancellation budgets.</li>
+<li>Incompatible Ladybug stores rebuild from SQLite before an atomic validated swap.</li>
+<li>V1 uses pinned official Ladybug components and narrow hooks. It does not require a permanent fork.</li>
+<li>Vector retrieval and making Ladybug canonical for writes are deferred.</li>
+</ul>
+<p>The <a href="../graph-query-v1.md">versioned graph-query contract</a> freezes grammar, values, topology, limits, errors, and compatibility.</p>
 <h2 data-prd-layer="Contracts" data-prd-order="12">12. Complete and harness-host contract</h2>
 <h3>12.1 Canonical input and accepted output</h3>
 <pre><code class="language-ts">type CompleteInputGraph = NodeReference;
@@ -2587,6 +2612,7 @@ submitReview({ turnId, evidence, ratings, summary, findings });
 <li>no-folder and project-backed threads;</li>
 <li>non-Git folders, local Git checkout, new worktree, and fork-to-worktree;</li>
 <li>graph messages, corrective or explanatory annotations through attached context, authored node actions, recursive subthreads, turn navigation, stop, retry, and local persistence;</li>
+<li>bounded read-only graph search over accepted content, layers, relationships, and paths through one shared Ladybug store;</li>
 <li>Rust graph core/API, opaque session-token enforcement, and TypeScript/Python graph clients;</li>
 <li>persistent Node harness host, packaged <code>codex.basic</code> configurations, and explicit compatibility for each supported provider and harness;</li>
 <li>exact empty-project Complete evaluation, followed by multi-turn, interaction, grounding, recursive-work, and hard-task capability suites;</li>
@@ -2610,7 +2636,7 @@ submitReview({ turnId, evidence, ratings, summary, findings });
 <ul>
 <li>engine indexing and compaction implementation behind the stable read/write contract;</li>
 <li>whether loopback HTTP is reachable from every supported Codex sandbox or the packaged product needs HTTP over a Unix-domain socket;</li>
-<li>graph search/retrieval policy and when embeddings are worth adding;</li>
+<li>whether a later vector candidate source provides enough value to extend the structural search contract;</li>
 <li>thresholds and calibration examples beyond the fixed first six-fact LLM-judge rubric;</li>
 <li>when multiple real harness ablations justify a generalized signed configuration manifest;</li>
 <li>default maximum number of Relayer-managed worktrees, whether the limit is global or per project, and the limit-reached cleanup flow;</li>
