@@ -19,8 +19,9 @@ export async function buildDevelopmentDesktop({
   evalApplication = false,
   environment = process.env,
   execute = run,
+  repositoryRoot = resolve(import.meta.dirname, "../.."),
+  dependencyRoot = repositoryRoot,
 } = {}) {
-  const repositoryRoot = resolve(import.meta.dirname, "../..");
   const target = desktopTargetFromEnvironment(environment);
   const cargoArguments = [
     "build", "--release",
@@ -45,7 +46,7 @@ export async function buildDevelopmentDesktop({
     : "desktop/packaging/electron-builder.mjs";
   const platform = target.platform === "darwin" ? "--mac" : "--win";
   await execute(process.execPath, [
-    resolve(repositoryRoot, "node_modules", "electron-builder", "out", "cli", "cli.js"),
+    resolve(dependencyRoot, "node_modules", "electron-builder", "out", "cli", "cli.js"),
     "--config", configuration,
     "--dir",
     platform,

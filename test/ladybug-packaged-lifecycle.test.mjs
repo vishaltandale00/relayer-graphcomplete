@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
 import {
+  captureLadybugPackagedLifecycle,
   parseDynamicLibraries,
   parseMinimumMacOSVersion,
   validatePreparedLadybugSource,
@@ -18,17 +21,32 @@ import {
   sha256File,
 } from "../scripts/prepare-ladybug-source.mjs";
 
+const execFileAsync = promisify(execFile);
+
 describe("Ladybug packaged lifecycle qualification", () => {
-  it("binds the captured packaged result to the exact qualification inputs", async () => {
+  it("requires a full immutable source commit before preparing a package", async () => {
+    await expect(captureLadybugPackagedLifecycle({
+      sourceOutput: "/tmp/not-read-for-invalid-commit",
+      sourceCommit: "61ee3b3",
+    })).rejects.toThrow("exact 40-character source commit");
+  });
+
+  it("retains the historical capture's selected committed input hashes", async () => {
     const receipt = JSON.parse(await readFile("docs/evidence/issue-261-ladybug-packaged-arm64.json", "utf8"));
+    expect(receipt.sourceCommit).toMatch(/^[0-9a-f]{40}$/u);
     for (const [path, expected] of Object.entries(receipt.inputSha256)) {
-      expect(createHash("sha256").update(await readFile(path)).digest("hex"), path).toBe(expected);
+      const { stdout } = await execFileAsync("git", ["show", `${receipt.sourceCommit}:${path}`], {
+        encoding: "buffer",
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      expect(createHash("sha256").update(stdout).digest("hex"), path).toBe(expected);
     }
     for (const expected of Object.values(receipt.preparedReceiptSha256)) {
       expect(expected).toMatch(/^[0-9a-f]{64}$/u);
     }
     expect(receipt).toMatchObject({
       target: "macos-arm64",
+      buildIsolation: "shared-cargo-target-not-exact-source-proof",
       nativeMode: "fully-static-ladybug-and-openssl",
       minimumMacOSVersion: "13.3",
       cleanProfileCreated: true,
@@ -88,6 +106,8 @@ describe("Ladybug packaged lifecycle qualification", () => {
         RELAYER_LADYBUG_QUALIFICATION: "1",
       },
       execute: async (command, args, options) => calls.push({ command, args, options }),
+      repositoryRoot: "/tmp/exact-source",
+      dependencyRoot: "/tmp/dependencies",
     });
     expect(calls[0].command).toBe("cargo");
     expect(calls[0].args).toEqual([
@@ -98,6 +118,8 @@ describe("Ladybug packaged lifecycle qualification", () => {
       "--locked", "--offline",
     ]);
     expect(calls[0].options.env.RUSTFLAGS).toBe("--cfg ladybug_qualification");
+    expect(calls[0].options.cwd).toBe("/tmp/exact-source");
+    expect(calls[1].args[0]).toBe("/tmp/dependencies/node_modules/electron-builder/out/cli/cli.js");
   });
 
   it("rejects prepared environments or static archives that differ from recomputed inputs", async () => {

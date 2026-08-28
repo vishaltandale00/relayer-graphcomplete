@@ -262,7 +262,7 @@ describe("desktop skeleton", () => {
     expect(vitestConfiguration).toContain('"**/.relayer/**"');
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
-    expect(packaging).toContain('target/${serverTarget}/release/relayer-app-server');
+    expect(packaging).toContain('resolve(cargoTargetRoot, `${serverTarget}/release/relayer-app-server');
     expect(packaging).toContain('afterPack: "desktop/packaging/verify-bundled-app-server.mjs"');
     expect(packaging).toContain('win: {\n      icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg")');
     expect(desktopPreload).toContain("platform: process.platform");
@@ -2142,6 +2142,17 @@ describe("desktop skeleton", () => {
       channelName: "development",
       signingMode: "unsigned",
       sourceCommit: null,
+    });
+    const isolatedTarget = createDesktopBuilderConfig(development, {
+      environment: {
+        RELAYER_DESKTOP_TARGET: "macos-arm64",
+        RELAYER_CARGO_TARGET_DIR: "/tmp/isolated-cargo-target",
+      },
+      argv: ["--dir"],
+    });
+    expect(isolatedTarget.extraResources).toContainEqual({
+      from: "/tmp/isolated-cargo-target/aarch64-apple-darwin/release/relayer-graph-server",
+      to: "bin/relayer-graph-server",
     });
     expect(resolveDesktopReleaseContract({
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },

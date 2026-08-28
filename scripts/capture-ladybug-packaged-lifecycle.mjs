@@ -80,6 +80,21 @@ async function packagedApplicationBuiltAfter(directory, startedAt) {
   return current[0];
 }
 
+async function removeQualificationCheckout({ checkout, qualificationRoot, checkoutAdded }) {
+  if (!checkoutAdded) {
+    await rm(qualificationRoot, { recursive: true, force: true });
+    return;
+  }
+  try {
+    await execFileAsync("git", ["worktree", "remove", "--force", checkout]);
+    await rm(qualificationRoot, { recursive: true, force: true });
+  } catch (error) {
+    await rm(qualificationRoot, { recursive: true, force: true });
+    await execFileAsync("git", ["worktree", "prune"]);
+    throw new Error(`qualification worktree cleanup failed: ${error.message}`, { cause: error });
+  }
+}
+
 async function nextJsonLine(iterator, label) {
   const result = await iterator.next();
   if (result.done) throw new Error(`${label} exited before its expected JSON line`);
@@ -313,10 +328,15 @@ export async function provePackagedLadybugLifecycle(
 
 export async function captureLadybugPackagedLifecycle({
   sourceOutput,
+  sourceCommit,
   environment = process.env,
   buildDesktop = buildDevelopmentDesktop,
 } = {}) {
   if (!sourceOutput) throw new Error("Ladybug packaged capture requires a prepared source directory");
+  if (!/^[0-9a-f]{40}$/u.test(sourceCommit || "")) {
+    throw new Error("Ladybug packaged capture requires an exact 40-character source commit");
+  }
+  await execFileAsync("git", ["cat-file", "-e", `${sourceCommit}^{commit}`]);
   const target = desktopTargetFromEnvironment(environment);
   if (target.platform !== "darwin" || target.architecture !== "arm64") {
     throw new Error("the local #261 packaged Ladybug proof supports only macOS arm64");
@@ -358,9 +378,48 @@ export async function captureLadybugPackagedLifecycle({
   };
   for (const name of manifest.build.environmentMustBeUnset) delete buildEnvironment[name];
   buildEnvironment.LBUG_BUILD_FROM_SOURCE = "1";
-  const startedAt = Date.now() - 1_000;
-  await buildDesktop({ environment: buildEnvironment });
-  const appPath = await packagedApplicationBuiltAfter(resolve("desktop/dist"), startedAt);
+  const qualificationRoot = await mkdtemp(join(tmpdir(), "relayer-ladybug-clean-build-"));
+  const checkout = join(qualificationRoot, "source");
+  const cargoTarget = join(qualificationRoot, "cargo-target");
+  let checkoutAdded = false;
+  let primaryError;
+  try {
+    await execFileAsync("git", ["worktree", "add", "--detach", checkout, sourceCommit]);
+    checkoutAdded = true;
+    const { stdout: checkoutStatus } = await execFileAsync("git", ["status", "--porcelain"], { cwd: checkout });
+    if (checkoutStatus !== "") throw new Error("detached qualification checkout is not clean");
+    for (const path of [
+      "scripts/capture-ladybug-packaged-lifecycle.mjs",
+      "scripts/prepare-ladybug-source.mjs",
+      "vendor/ladybug/source-build-manifest.json",
+    ]) {
+      const { stdout: committed } = await execFileAsync("git", ["show", `${sourceCommit}:${path}`], {
+        encoding: "buffer",
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      assert.equal(
+        createHash("sha256").update(await readFile(resolve(path))).digest("hex"),
+        createHash("sha256").update(committed).digest("hex"),
+        `${path} differs from the exact source commit`,
+      );
+    }
+    await execFileAsync("npm", ["ci", "--ignore-scripts", "--offline"], {
+      cwd: checkout,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    await execFileAsync("npm", ["run", "prepare:renderer"], { cwd: checkout, maxBuffer: 10 * 1024 * 1024 });
+    await execFileAsync("npm", ["run", "build:packages"], { cwd: checkout, maxBuffer: 10 * 1024 * 1024 });
+    const startedAt = Date.now() - 1_000;
+    await buildDesktop({
+      environment: {
+        ...buildEnvironment,
+        CARGO_TARGET_DIR: cargoTarget,
+        RELAYER_CARGO_TARGET_DIR: cargoTarget,
+      },
+      repositoryRoot: checkout,
+      dependencyRoot: checkout,
+    });
+    const appPath = await packagedApplicationBuiltAfter(join(checkout, "desktop", "dist"), startedAt);
   const executable = join(appPath, "Contents", "Resources", "bin", "relayer-graph-server");
   const binarySha256 = createHash("sha256").update(await readFile(executable)).digest("hex");
   const libraries = parseDynamicLibraries((await execFileAsync("/usr/bin/otool", ["-L", executable])).stdout);
@@ -383,13 +442,20 @@ export async function captureLadybugPackagedLifecycle({
     "scripts/prepare-ladybug-source.mjs",
     "vendor/ladybug/source-build-manifest.json",
   ];
-  const inputSha256 = Object.fromEntries(await Promise.all(inputPaths.map(
-    async (path) => [path, await sha256File(resolve(path))],
-  )));
-  return {
+  const inputSha256 = Object.fromEntries(await Promise.all(inputPaths.map(async (path) => {
+    const { stdout } = await execFileAsync("git", ["show", `${sourceCommit}:${path}`], {
+      encoding: "buffer",
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return [path, createHash("sha256").update(stdout).digest("hex")];
+  })));
+  const result = {
     schemaVersion: 1,
     scope: "issue-261-local-packaged-qualification",
     capturedOn: new Date().toISOString().slice(0, 10),
+    sourceCommit,
+    buildIsolation: "clean-detached-worktree-and-empty-cargo-target",
+    dependencyIsolation: "locked-offline-npm-ci-and-generated-assets",
     target: target.key,
     rustTarget: target.rustTarget,
     application: basename(appPath),
@@ -404,17 +470,32 @@ export async function captureLadybugPackagedLifecycle({
     ...lifecycle,
     limitations: ["local macOS arm64 only", "unsigned development package", "not release-ready licensing evidence"],
   };
+    return result;
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    try {
+      await removeQualificationCheckout({ checkout, qualificationRoot, checkoutAdded });
+    } catch (cleanupError) {
+      if (primaryError) throw new AggregateError([primaryError, cleanupError], "qualification capture and cleanup failed");
+      throw cleanupError;
+    }
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
   const options = parseArguments(process.argv.slice(2));
-  if (!options["source-output"]) {
-    throw new Error("usage: capture-ladybug-packaged-lifecycle.mjs --source-output <prepared-directory>");
+  if (!options["source-output"] || !options["source-commit"]) {
+    throw new Error(
+      "usage: capture-ladybug-packaged-lifecycle.mjs --source-output <prepared-directory> --source-commit <40-hex>",
+    );
   }
   if (options.application) {
     throw new Error("packaged Ladybug evidence must build a fresh application; --application is not supported");
   }
   console.log(JSON.stringify(await captureLadybugPackagedLifecycle({
     sourceOutput: options["source-output"],
+    sourceCommit: options["source-commit"],
   }), null, 2));
 }

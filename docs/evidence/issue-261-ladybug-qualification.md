@@ -144,9 +144,12 @@ The original focused probe and historical cancellation falsifier are in
 `issue-261-ladybug-probe/`. The exact-envelope corpus probe, captured output, lockfile, coverage,
 and digest receipt are in `issue-261-ladybug-contract-probe/`. The source-build observation is in
 `issue-261-ladybug-source-arm64.txt` and is bound by the source-build manifest/test. The fresh
-packaged graph-server lifecycle receipt is `issue-261-ladybug-packaged-arm64.json`; it binds the
-captured result to the exact checked-in qualification inputs and packaged binary digest. The replay used
-macOS 26.6.1, Xcode SDK 26.2, Apple clang 17.0.0, Rust 1.94.0, Cargo 1.94.0, CMake 4.3.1, and macOS
+packaged graph-server lifecycle receipt is `issue-261-ladybug-packaged-arm64.json`; it records selected
+checked-in qualification inputs and the packaged binary digest. The current receipt predates the clean
+detached-checkout and empty Cargo-target capture boundary, so it is not exact-source proof. The replacement
+capture also installs the exact lockfile offline and regenerates packaged workspace assets inside that detached
+checkout before electron-builder runs. The historical replay used macOS 26.6.1, Xcode SDK 26.2, Apple clang
+17.0.0, Rust 1.94.0, Cargo 1.94.0, CMake 4.3.1, and macOS
 arm64. The temporary executable and full compiler log are not checked in; their digests and exact
 proof limit are retained in the observation.
 
@@ -161,7 +164,7 @@ Binding sources excluding Cargo manifests and the added vendored core match the 
 | Golden corpus or approved lowering | Passed locally | All 20 positive cases deep-compare exactly through documented contract-private lowerings. |
 | Lossless v1 value round-trip | Passed locally | Exact tagged envelopes cover scalar, null, list, record, node, layer, relationship, and path values. |
 | Application-owned offline load | Passed arm64 | Exact unmodified source and static OpenSSL build/run with network denied, then travel inside the bundled graph server without non-system dylibs. |
-| Three packaged development targets | Blocked | Fresh macOS arm64 package passes; Intel needs native replay; unmodified lbug has a concrete MSVC static-library name/search-path blocker. Distribution is also blocked by missing binding license bytes. |
+| Three packaged development targets | Blocked | The macOS arm64 lifecycle passes, but exact-source recapture and Intel native replay remain; unmodified lbug has a concrete MSVC static-library name/search-path blocker. Distribution is also blocked by missing binding license bytes. |
 | Pinned source build at product floor | Passed arm64 | Exact Ladybug 0.19.1 and OpenSSL 3.5.8 build at the approved macOS 13.3 floor with no fork or external dylib. |
 | Packaged launch, restart, lock, shutdown | Passed arm64 | The bundled `relayer-graph-server` creates a clean store, rejects a bounded competing lock, exits cleanly, and reopens its persisted marker. |
 | Cancellation and budgets | Partial pass | Allowed two-hop timeout/interrupt pass; #263 still owns deterministic budget counters and an outer process deadline. |
