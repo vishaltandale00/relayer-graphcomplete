@@ -193,7 +193,7 @@ fn validate_value(
                 InputControl::MultiSelect => action
                     .minimum_selections
                     .is_none_or(|minimum| selected.len() >= minimum),
-                InputControl::Text => unreachable!(),
+                InputControl::Text | InputControl::Unsupported => unreachable!(),
             };
             if !count_valid {
                 return Err(GraphError::validation(

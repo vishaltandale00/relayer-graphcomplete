@@ -9,7 +9,7 @@ use crate::{
     conversation_export::{
         ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
         EXPORT_VERSION_V1, ExportAcceptedView, ExportAction, ExportActionKind, ExportActionVariant,
-        ExportAdmittedExecutionModelPlan, ExportAdmittedExecutionModelRoute,
+        ExportAdmittedExecutionModelPlan, ExportAdmittedExecutionModelRoute, ExportAttemptOutcome,
         ExportCompletionReceipt, ExportCompletionStatus, ExportContextSource,
         ExportContextTargetSnapshot, ExportConversation, ExportEdge, ExportInputActionSnapshot,
         ExportInputControl, ExportInputOption, ExportInputSource, ExportInteractionContext,
@@ -411,6 +411,12 @@ fn export_turn(
         origin,
         completion: ExportCompletionReceipt {
             status,
+            attempt_outcome: interaction
+                .latest_attempt
+                .as_ref()
+                .map(|attempt| attempt_outcome(&attempt.outcome))
+                .transpose()?
+                .or_else(|| imported_completion.and_then(|completion| completion.attempt_outcome)),
             harness_configuration_name: interaction.harness_configuration_name.clone(),
             harness_configuration_digest: interaction.harness_configuration_digest.clone(),
             model_selection: interaction
@@ -669,6 +675,12 @@ fn export_submitted_inputs(
                     }
                     relayer_graph_core::InputControl::MultiSelect => {
                         ExportInputControl::MultiSelect
+                    }
+                    relayer_graph_core::InputControl::Unsupported => {
+                        return Err(ConversationExportBuildError::Invalid(format!(
+                            "interaction {} has an unsupported accepted input control",
+                            interaction.id
+                        )));
                     }
                 },
                 prompt: redactor.text(&input.action.prompt),
@@ -994,6 +1006,19 @@ fn completion_status(value: &str) -> Result<ExportCompletionStatus, Conversation
         "stopped" => Ok(ExportCompletionStatus::Stopped),
         other => Err(ConversationExportBuildError::Invalid(format!(
             "unknown completion status {other}"
+        ))),
+    }
+}
+
+fn attempt_outcome(value: &str) -> Result<ExportAttemptOutcome, ConversationExportBuildError> {
+    match value {
+        "running" => Ok(ExportAttemptOutcome::Running),
+        "accepted" => Ok(ExportAttemptOutcome::Accepted),
+        "model_failed" => Ok(ExportAttemptOutcome::ModelFailed),
+        "execution_failed" => Ok(ExportAttemptOutcome::ExecutionFailed),
+        "cancelled" => Ok(ExportAttemptOutcome::Cancelled),
+        other => Err(ConversationExportBuildError::Invalid(format!(
+            "unknown attempt outcome {other}"
         ))),
     }
 }

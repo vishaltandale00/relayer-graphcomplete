@@ -2049,18 +2049,25 @@ settings:
   sourceNodeId: string;
   sourceLayerId?: string; // required for node-level authoring; hidden from users
   label: string;
-  kind: &quot;navigate&quot; | &quot;invoke&quot;;
+  kind: &quot;navigate&quot; | &quot;invoke&quot; | &quot;input&quot;;
   relation?: &quot;expand&quot; | &quot;reference&quot;; // required for navigate
   targetLayerId?: string; // required for navigate; a layer may contain one node
   interactionTemplate?: {
     kind: &quot;message&quot; | &quot;node-action&quot;;
     text?: string;
   };
+  input?: {
+    control: &quot;text&quot; | &quot;single_select&quot; | &quot;multi_select&quot;;
+    prompt: string;
+    options?: Array&lt;{ key: string; label: string }&gt;;
+    minimumSelections?: number;
+  };
 };
 </code></pre>
 <ul>
 <li><code>navigate</code> opens an accepted layer without Complete. An expand relation develops the answer. A reference relation supplies context.</li>
 <li><code>invoke</code> creates one user-interaction node referring to the selected node and action, then calls Complete once.</li>
+<li><code>input</code> embeds a bounded text, single-select, or multi-select control in the node detail grammar. It is neither navigation nor an independent invocation.</li>
 <li>The product does not expose navigate relations or authoring provenance. These fields enforce graph semantics.</li>
 <li>Expand paths are recursive without a fixed depth. Reference paths do not increase expansion depth.</li>
 </ul>
@@ -2078,6 +2085,16 @@ settings:
 <li>An accepted action remains immutable. A successful invoke can gain an append-only resolution that projects navigation to its accepted result.</li>
 </ol>
 <p>The root output is exactly one interaction-authored expand action. The desktop follows it after acceptance. Later selections use ordinary local navigation.</p>
+<h4>Node-authored interaction input</h4>
+<ul>
+<li>An accepted input action is immutable, node-owned, and occurrence-scoped by presenting interaction, layer, and action IDs. Reuse of the same action in another accepted occurrence is a distinct attachment choice.</li>
+<li>The user may commit multiple input actions from one or more nodes before Send. Committed values are durable thread-draft attachments, remain visible while navigating, and can be detached explicitly.</li>
+<li>Send is the only execution boundary. It atomically creates a new root interaction and snapshots every committed attachment into one immutable submitted-input attempt.</li>
+<li>No input action is required. An empty message is valid when at least one attachment is submitted.</li>
+<li>Text values preserve authored text. Select values persist stable option keys plus their accepted labels, with multi-select keys canonically ordered. The harness receives unordered prompt/control/value snapshots without product-assigned priority.</li>
+<li>Failure or stop restores the attempt's attachments to the draft unless a newer commit already owns the same occurrence. The immutable attempt cannot be retried in place; the next Send creates a new root.</li>
+<li>Accepted and terminal submitted input remains readable in compact history, safe diagnostics, and V1 conversation export. Import assigns fresh local identities, strips execution authority and digests, and keeps imported input read-only and inert.</li>
+</ul>
 <h3>7.3 Current proof boundary</h3>
 <ul>
 <li>Navigate actions open accepted descendant layers in Relayer Desktop and read-only Eval review.</li>

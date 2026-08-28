@@ -259,11 +259,32 @@ async fn reconcile_interrupted_interaction(
                     interaction.id
                 )));
             }
-        } else if durable_input.is_some() {
-            storage.recover_identified_interaction_submitted(
-                interaction.id,
-                "Identified interaction input was recovered after restart and is ready to resume.",
-            ).await.map_err(StartupReconciliationError::retryable)?;
+        } else if let Some(durable_input) = durable_input.as_ref() {
+            if durable_input.submitted_inputs.is_empty() {
+                storage.recover_identified_interaction_submitted(
+                    interaction.id,
+                    "Identified interaction input was recovered after restart and is ready to resume.",
+                ).await.map_err(StartupReconciliationError::retryable)?;
+            } else {
+                let harness = interaction
+                    .harness_configuration_name
+                    .as_deref()
+                    .unwrap_or("unknown");
+                if !storage
+                    .fail_interrupted_submitted_input(
+                        interaction.id,
+                        harness,
+                        "Submitted interaction input was interrupted before graph acceptance. The input draft was restored; send it again to create a new attempt.",
+                    )
+                    .await
+                    .map_err(StartupReconciliationError::retryable)?
+                {
+                    return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                        "could not terminally recover interrupted submitted input {}",
+                        interaction.id
+                    )));
+                }
+            }
         }
     }
     Ok(())
@@ -514,9 +535,18 @@ impl RelayerAppServer {
                     let graph_lease_recoverable = storage
                         .invocation_requires_graph_lease(interaction.id)
                         .await?;
-                    let identified = storage.interaction_input(interaction.id).await?.is_some();
-                    if error.is_retryable() && (graph_lease_recoverable || identified) {
-                        if identified {
+                    let durable_input = storage.interaction_input(interaction.id).await?;
+                    let has_submitted_inputs = durable_input
+                        .as_ref()
+                        .is_some_and(|input| !input.submitted_inputs.is_empty());
+                    let context_only_identified = durable_input
+                        .as_ref()
+                        .is_some_and(|input| input.submitted_inputs.is_empty());
+                    if error.is_retryable()
+                        && !has_submitted_inputs
+                        && (graph_lease_recoverable || context_only_identified)
+                    {
+                        if context_only_identified {
                             storage
                                 .recover_identified_interaction_submitted(
                                     interaction.id,
@@ -524,11 +554,10 @@ impl RelayerAppServer {
                                 )
                                 .await?;
                         }
-                        // Strict invokes and identified inputs have durable replay identities.
-                        // Preserve that recovery path here: the restart recovery passes below will
-                        // abort any stale approval receipt, and identified interactions are
-                        // normalized to `submitted` before the post-open resume pass. Quarantining
-                        // would make the only interaction allowed to consume its identity terminal.
+                        // Strict invokes and context-only identified inputs have durable replay
+                        // identities. Submitted child input is intentionally excluded: provider
+                        // execution may already have produced effects, so its immutable attempt is
+                        // failed and its draft restored instead of being replayed automatically.
                         eprintln!(
                             "preserving interrupted recoverable interaction {} after transient startup reconciliation failure: {error}",
                             interaction.id
@@ -545,13 +574,29 @@ impl RelayerAppServer {
                         .map(|thread| thread.harness_configuration_name)
                         .or(interaction.harness_configuration_name.clone())
                         .unwrap_or_else(|| "unknown".into());
-                    storage
-                        .fail_interaction_completion(
-                            interaction.id,
-                            &harness,
-                            &format!("{} {error}", crate::product::RECONCILIATION_PENDING_PREFIX),
-                        )
-                        .await?;
+                    if has_submitted_inputs {
+                        storage
+                            .fail_interrupted_submitted_input(
+                                interaction.id,
+                                &harness,
+                                &format!(
+                                    "{} {error}",
+                                    crate::product::RECONCILIATION_PENDING_PREFIX
+                                ),
+                            )
+                            .await?;
+                    } else {
+                        storage
+                            .fail_interaction_completion(
+                                interaction.id,
+                                &harness,
+                                &format!(
+                                    "{} {error}",
+                                    crate::product::RECONCILIATION_PENDING_PREFIX
+                                ),
+                            )
+                            .await?;
+                    }
                 }
             }
         }

@@ -86,6 +86,26 @@ BEGIN
     ON CONFLICT(thread_id,presenting_interaction_node_id,presenting_layer_id,action_id)
     DO NOTHING;
 
+    UPDATE interactions
+    SET completion_error=COALESCE(completion_error,'Submitted input was restored after the attempt ended before graph acceptance.')
+        || ' A newer committed value was preserved instead of restoring this attempt''s earlier value.'
+    WHERE id=NEW.id AND EXISTS(
+        SELECT 1
+        FROM interaction_submitted_input_attempts attempt
+        JOIN interaction_submitted_input_attachments snapshot
+          ON snapshot.interaction_id=attempt.interaction_id
+        JOIN action_input_attachments current
+          ON current.thread_id=attempt.thread_id
+         AND current.presenting_interaction_node_id=snapshot.presenting_interaction_node_id
+         AND current.presenting_layer_id=snapshot.presenting_layer_id
+         AND current.action_id=snapshot.action_id
+        WHERE attempt.interaction_id=NEW.id
+          AND (current.source_node_id!=snapshot.source_node_id
+               OR current.action_json!=snapshot.action_json
+               OR current.value_json!=snapshot.value_json
+               OR current.committed_at!=snapshot.committed_at)
+    );
+
     UPDATE action_input_drafts
     SET revision=revision+1
     WHERE thread_id=(

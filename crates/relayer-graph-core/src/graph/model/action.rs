@@ -12,12 +12,27 @@ pub enum ActionKind {
     InteractionContext,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InputControl {
     Text,
     SingleSelect,
     MultiSelect,
+    Unsupported,
+}
+
+impl<'de> Deserialize<'de> for InputControl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(match String::deserialize(deserializer)?.as_str() {
+            "text" => Self::Text,
+            "single_select" => Self::SingleSelect,
+            "multi_select" => Self::MultiSelect,
+            _ => Self::Unsupported,
+        })
+    }
 }
 
 impl InputControl {
@@ -26,6 +41,7 @@ impl InputControl {
             Self::Text => "text",
             Self::SingleSelect => "single_select",
             Self::MultiSelect => "multi_select",
+            Self::Unsupported => "unsupported",
         }
     }
 
@@ -473,5 +489,10 @@ fn validate_input_action(input: &InputAction, issues: &mut Vec<ValidationIssue>)
                 _ => {}
             }
         }
+        InputControl::Unsupported => issues.push(ValidationIssue::new(
+            "input_action_control_unsupported",
+            "control",
+            "Use text, single_select, or multi_select.",
+        )),
     }
 }

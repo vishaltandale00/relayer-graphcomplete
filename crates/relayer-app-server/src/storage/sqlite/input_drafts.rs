@@ -555,14 +555,18 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(immutable_state, "failed");
-        assert_eq!(
-            store
-                .get_interaction(interaction.id)
-                .await
+        let failed = store
+            .get_interaction(interaction.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed.completion_status, "failed");
+        assert!(
+            failed
+                .completion_error
+                .as_deref()
                 .unwrap()
-                .unwrap()
-                .completion_status,
-            "failed"
+                .contains("A newer committed value was preserved")
         );
 
         let second = store
