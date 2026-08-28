@@ -47,6 +47,21 @@ const currentSave = (draft) => draft?.operation?.kind === "saving"
   ? draft.operation.promise
   : null;
 
+function draftSnapshot(draft) {
+  return Object.freeze({
+    id: draft.id,
+    threadId: draft.threadId,
+    target: Object.freeze({ ...draft.target }),
+    targetNode: Object.freeze({ ...draft.targetNode }),
+    text: draft.text,
+    revision: draft.revision,
+    status: draft.status,
+    error: draft.error,
+    createdAt: draft.createdAt,
+    updatedAt: draft.updatedAt,
+  });
+}
+
 export function createNodeContextDraftController({
   api,
   createId = () => globalThis.crypto.randomUUID(),
@@ -158,6 +173,24 @@ export function createNodeContextDraftController({
     },
     draftForNode(threadId, nodeId) {
       return threadDrafts(threadId).get(nodeKey(nodeId)) || null;
+    },
+    draftsForThread(threadId) {
+      return Object.freeze([...threadDrafts(threadId).values()].map(draftSnapshot));
+    },
+    async persistAll(threadId) {
+      const drafts = controller.draftsForThread(threadId);
+      await Promise.all(drafts
+        .filter((draft) => draft.status !== "saved" || draft.revision == null)
+        .map((draft) => controller.flush(threadId, draft.target.nodeId)));
+      const unresolved = controller.draftsForThread(threadId).filter((draft) => (
+        draft.status !== "saved" || draft.revision == null
+      ));
+      if (unresolved.length > 0) {
+        throw new Error(
+          `${unresolved.length} annotation ${unresolved.length === 1 ? "draft is" : "drafts are"} not saved yet. Retry before sending without drafts.`,
+        );
+      }
+      return controller.draftsForThread(threadId);
     },
     open(threadId, target, targetNode) {
       const drafts = threadDrafts(threadId);

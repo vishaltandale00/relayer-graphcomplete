@@ -39,6 +39,7 @@
     "check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && tsc --noEmit && npm run check --workspaces --if-present && vitest run && PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests && npm run prd:check-readability",
     "test": "cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && vitest run",
     "test:desktop:first-message": "npm run build && electron scripts/test-desktop-first-message.mjs",
+    "test:desktop:context-draft-warning": "npm run build && electron scripts/test-desktop-context-draft-warning.mjs",
     "evidence:model-selector": "RELAYER_CAPTURE_MODEL_SELECTOR_EVIDENCE=1 electron scripts/capture-model-selector-evidence.mjs",
     "evidence:provider-ux": "node scripts/capture-provider-ux-video.mjs",
     "evidence:prime-family:packaged": "node scripts/capture-packaged-prime-family-evidence.mjs",

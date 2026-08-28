@@ -686,6 +686,9 @@ const server = createServer(async (request, response) => {
       response.end();
       return;
     }
+    if (/^\/api\/threads\/[^/]+\/context-drafts$/.test(url.pathname)) {
+      return json(response, { drafts: [] });
+    }
     if (url.pathname.endsWith("/retry") && request.method === "POST") {
       flowState.retryRequest = await requestJson(request);
       flowState.retrySubmitted = true;

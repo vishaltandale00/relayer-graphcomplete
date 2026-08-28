@@ -19,6 +19,7 @@ import {
   composerSubmissionReady,
   composerStatusForThread,
   contextDraftHasAnnotation,
+  contextDraftSendWarningPresentation,
   contextAnnotationCountLabel,
   contextDetachNeedsConfirmation,
   contextEditorCanConfirm,
@@ -36,9 +37,12 @@ import {
   resizeContextEditorTextarea,
   syncMountedContextEditorControls,
   interactionContextPayload,
+  interactionSendIntent,
   interactionContextDraftTransition,
   removeContextAnnotation,
   resolveInteractionContextNode,
+  sendIntentIsCurrentThread,
+  sendAttemptBlocksThread,
   transitionComposerDraftScope,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
@@ -49,6 +53,74 @@ describe("product workspace keyboard behavior", () => {
       className: "composer-context-draft-status status-error",
       text: "Not saved: disk full",
     });
+  });
+
+  it("presents every unconfirmed draft with stable accessible identity", () => {
+    const drafts = Array.from({ length: 12 }, (_, index) => ({
+      id: `draft-${index}`,
+      targetNode: { title: index === 11 ? "" : `Node ${index}` },
+    }));
+    const presentation = contextDraftSendWarningPresentation(drafts);
+
+    expect(presentation.countLabel).toBe("12 unconfirmed drafts");
+    expect(presentation.items).toHaveLength(12);
+    expect(presentation.items[0]).toEqual({ id: "draft-0", title: "Node 0" });
+    expect(presentation.items[11]).toEqual({ id: "draft-11", title: "Untitled node" });
+    expect(contextDraftSendWarningPresentation([drafts[0]]).countLabel)
+      .toBe("1 unconfirmed draft");
+  });
+
+  it("mounts the exact two-choice modal warning at the composer boundary", () => {
+    const markup = productWorkspaceMarkup();
+    const warning = markup.slice(
+      markup.indexOf('id="contextDraftSendWarning"'),
+      markup.indexOf("</dialog>") + "</dialog>".length,
+    );
+
+    expect(warning).toContain('role="dialog" aria-modal="true"');
+    expect(warning).toContain('tabindex="-1"');
+    expect(warning).toContain('data-context-draft-warning-list tabindex="0"');
+    expect(warning.match(/<button/g)).toHaveLength(2);
+    expect(warning).toContain(">Go back</button>");
+    expect(warning).toContain(">Send without drafts</button>");
+  });
+
+  it("drops a pending send intent when draft loading outlives its thread", () => {
+    expect(sendIntentIsCurrentThread("thread-a", "thread-a")).toBe(true);
+    expect(sendIntentIsCurrentThread("thread-b", "thread-a")).toBe(false);
+    expect(sendIntentIsCurrentThread(null, "thread-a")).toBe(false);
+  });
+
+  it("scopes an asynchronous send lock to the thread that owns it", () => {
+    expect(sendAttemptBlocksThread("thread-a", "thread-a")).toBe(true);
+    expect(sendAttemptBlocksThread("thread-a", "thread-b")).toBe(false);
+    expect(sendAttemptBlocksThread(null, "thread-a")).toBe(false);
+  });
+
+  it("snapshots the submitted composer payload before asynchronous draft restoration", () => {
+    const contexts = [{
+      target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
+      annotations: ["Original context"],
+    }];
+    const intent = interactionSendIntent({
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:none",
+      promptValue: "  Original prompt  ",
+      contexts,
+      modelSelection: { providerId: "fixture", modelId: "deterministic" },
+    });
+    contexts[0].annotations[0] = "Edited while loading";
+
+    expect(intent).toMatchObject({
+      threadId: "thread-a",
+      promptValue: "  Original prompt  ",
+      text: "Original prompt",
+      contextPayload: [{
+        target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
+        annotations: ["Original context"],
+      }],
+    });
+    expect(Object.isFrozen(intent)).toBe(true);
   });
 
   it("locks already-mounted draft controls and rejects a racing input event", () => {

@@ -501,6 +501,44 @@ export function contextDraftHasAnnotation(contexts = []) {
   ));
 }
 
+export function contextDraftSendWarningPresentation(drafts = []) {
+  const count = drafts.length;
+  return Object.freeze({
+    count,
+    countLabel: `${count} unconfirmed ${count === 1 ? "draft" : "drafts"}`,
+    items: Object.freeze(drafts.map((draft) => Object.freeze({
+      id: String(draft.id),
+      title: String(draft.targetNode?.title || "Untitled node"),
+    }))),
+  });
+}
+
+export function sendIntentIsCurrentThread(currentThreadId, attemptedThreadId) {
+  return String(currentThreadId) === String(attemptedThreadId);
+}
+
+export function sendAttemptBlocksThread(pendingThreadId, currentThreadId) {
+  return pendingThreadId != null && String(pendingThreadId) === String(currentThreadId);
+}
+
+export function interactionSendIntent({
+  threadId,
+  draftScopeKey,
+  promptValue,
+  contexts,
+  modelSelection,
+}) {
+  return Object.freeze({
+    threadId,
+    draftScopeKey,
+    promptValue,
+    text: String(promptValue).trim(),
+    contexts,
+    contextPayload: Object.freeze(interactionContextPayload(contexts)),
+    modelSelection,
+  });
+}
+
 export function composerSubmissionReady(
   value,
   disabled = false,
@@ -888,8 +926,20 @@ export function createProductWorkspace({
       onChange: () => renderContextDraftStatus(),
     })
     : null;
-  const loadedContextDraftThreads = new Set();
+  const contextDraftLoads = new Map();
   const deferredContextConfirmations = new Map();
+
+  const ensureContextDraftsLoaded = (threadId) => {
+    if (!contextDraftController || threadId == null) return Promise.resolve();
+    const key = String(threadId);
+    if (contextDraftLoads.has(key)) return contextDraftLoads.get(key);
+    const load = contextDraftController.load(threadId).catch((error) => {
+      contextDraftLoads.delete(key);
+      throw error;
+    });
+    contextDraftLoads.set(key, load);
+    return load;
+  };
 
   const $ = (selector) => root.querySelector(selector);
   const $$ = (selector) => [...root.querySelectorAll(selector)];
@@ -1577,6 +1627,11 @@ export function createProductWorkspace({
   };
   const prompt = $("#threadPrompt");
   const send = $("#sendInteraction");
+  const contextDraftSendWarning = $("#contextDraftSendWarning");
+  const cancelContextDraftSend = $("#cancelContextDraftSend");
+  const confirmContextDraftSend = $("#confirmContextDraftSend");
+  let sendAttempt = null;
+  let sendWarningIntent = null;
   let pickerInheritanceKey = null;
   let composerDraftScopeState = createComposerDraftScopeState();
   let restoredDraftActive = false;
@@ -2031,34 +2086,81 @@ export function createProductWorkspace({
       ? "Send"
       : "Choose an available model in Settings before sending";
   };
-  if (capabilities.canCompose) {
-    modelPicker = createModelPicker({
-      root: root.querySelector('[data-model-picker="ongoing"]'),
-      mode: "ongoing",
-      settings: getState().modelSettings,
-      onSelectionChange: syncComposer,
-      onOpenSettings,
-    });
-  }
-  prompt.oninput = syncComposer;
-  bindComposerKeydown(prompt, () => {
-    if (!modelPicker?.isReady()) modelPicker?.open("model");
-    else send.click();
+  const releaseSendAttempt = () => {
+    sendAttempt = null;
+    send.removeAttribute("aria-busy");
+    confirmContextDraftSend.disabled = false;
+    syncComposer();
+  };
+  const closeContextDraftSendWarning = ({ focusSend = true, cancelAttempt = true } = {}) => {
+    sendWarningIntent = null;
+    if (cancelAttempt) releaseSendAttempt();
+    if (contextDraftSendWarning.open) contextDraftSendWarning.close();
+    if (focusSend) send.focus({ preventScroll: true });
+  };
+  const positionContextDraftSendWarning = () => {
+    const window = graphDocument.defaultView;
+    const sendBounds = send.getBoundingClientRect();
+    contextDraftSendWarning.style.setProperty(
+      "--context-draft-send-warning-right",
+      `${Math.max(12, window.innerWidth - sendBounds.right)}px`,
+    );
+    const anchoredBottom = Math.max(64, window.innerHeight - sendBounds.top + 8);
+    contextDraftSendWarning.style.setProperty(
+      "--context-draft-send-warning-bottom",
+      `${anchoredBottom}px`,
+    );
+    if (contextDraftSendWarning.open) {
+      const dialogHeight = contextDraftSendWarning.getBoundingClientRect().height;
+      const fittedBottom = Math.max(12, window.innerHeight - dialogHeight - 12);
+      contextDraftSendWarning.style.setProperty(
+        "--context-draft-send-warning-bottom",
+        `${Math.min(anchoredBottom, fittedBottom)}px`,
+      );
+    }
+  };
+  const openContextDraftSendWarning = (drafts, intent) => {
+    const presentation = contextDraftSendWarningPresentation(drafts);
+    const list = $("#contextDraftSendWarningList");
+    list.replaceChildren(...presentation.items.map((item) => {
+      const row = graphDocument.createElement("li");
+      const marker = graphDocument.createElement("span");
+      marker.setAttribute("aria-hidden", "true");
+      marker.textContent = "⌘";
+      const title = graphDocument.createElement("strong");
+      title.textContent = item.title;
+      row.append(marker, title);
+      return row;
+    }));
+    $("#contextDraftSendWarningCount").textContent = presentation.countLabel;
+    list.setAttribute("aria-label", presentation.countLabel);
+    sendWarningIntent = intent;
+    positionContextDraftSendWarning();
+    contextDraftSendWarning.showModal();
+    positionContextDraftSendWarning();
+    cancelContextDraftSend.focus({ preventScroll: true });
+  };
+  const repositionContextDraftSendWarning = () => {
+    if (contextDraftSendWarning.open) positionContextDraftSendWarning();
+  };
+  graphDocument.defaultView.addEventListener("resize", repositionContextDraftSendWarning);
+  contextDraftSendWarning.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeContextDraftSendWarning();
   });
-  send.onclick = async () => {
-    const text = prompt.value.trim();
-    if (send.disabled) return;
-    const submittedThreadId = getThread()?.id;
-    const submittedDraftScopeKey = composerDraftScopeState.activeScopeKey;
-    const submittedPromptValue = prompt.value;
-    const submittedContexts = composerContexts;
+  cancelContextDraftSend.onclick = () => closeContextDraftSendWarning();
+
+  const submitInteraction = async (intent) => {
+    const submittedThreadId = intent.threadId;
+    const submittedDraftScopeKey = intent.draftScopeKey;
+    const submittedPromptValue = intent.promptValue;
+    const submittedContexts = intent.contexts;
     prompt.disabled = true;
     send.disabled = true;
     renderComposerContexts();
     updateAttachContextControl();
     try {
-      const modelSelection = pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection;
-      await onSubmitInteraction(text, modelSelection, interactionContextPayload(submittedContexts));
+      await onSubmitInteraction(intent.text, intent.modelSelection, intent.contextPayload);
       composerDraftScopeState = clearSubmittedComposerDraft(
         composerDraftScopeState,
         submittedDraftScopeKey,
@@ -2095,6 +2197,70 @@ export function createProductWorkspace({
       syncComposer();
     }
   };
+  const requestInteractionSend = async ({ draftOverride = false } = {}) => {
+    if (!draftOverride && (send.disabled || contextDraftSendWarning.open)) return;
+    if (draftOverride && (
+      !contextDraftSendWarning.open
+      || !sendIntentIsCurrentThread(getThread()?.id, sendWarningIntent?.threadId)
+    )) return;
+    const threadId = getThread()?.id;
+    if (sendAttemptBlocksThread(sendAttempt?.threadId, threadId)) return;
+    const intent = draftOverride
+      ? sendWarningIntent
+      : interactionSendIntent({
+        threadId,
+        draftScopeKey: composerDraftScopeState.activeScopeKey,
+        promptValue: prompt.value,
+        contexts: composerContexts,
+        modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
+      });
+    if (!intent || !sendIntentIsCurrentThread(threadId, intent.threadId)) return;
+    const attempt = { threadId: String(threadId) };
+    sendAttempt = attempt;
+    send.setAttribute("aria-busy", "true");
+    try {
+      if (!draftOverride && contextDraftController) {
+        await ensureContextDraftsLoaded(threadId);
+        if (!sendIntentIsCurrentThread(getThread()?.id, threadId) || sendAttempt !== attempt) return;
+        const drafts = contextDraftController.draftsForThread(threadId);
+        if (drafts.length > 0) {
+          openContextDraftSendWarning(drafts, intent);
+          return;
+        }
+      }
+      if (draftOverride && contextDraftController) {
+        await contextDraftController.persistAll(threadId);
+        if (!sendIntentIsCurrentThread(getThread()?.id, threadId) || sendAttempt !== attempt) return;
+      }
+      if (draftOverride) {
+        closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
+      }
+      await submitInteraction(intent);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      if (sendAttempt === attempt) releaseSendAttempt();
+    }
+  };
+  confirmContextDraftSend.onclick = () => {
+    confirmContextDraftSend.disabled = true;
+    void requestInteractionSend({ draftOverride: true });
+  };
+  if (capabilities.canCompose) {
+    modelPicker = createModelPicker({
+      root: root.querySelector('[data-model-picker="ongoing"]'),
+      mode: "ongoing",
+      settings: getState().modelSettings,
+      onSelectionChange: syncComposer,
+      onOpenSettings,
+    });
+  }
+  prompt.oninput = syncComposer;
+  bindComposerKeydown(prompt, () => {
+    if (!modelPicker?.isReady()) modelPicker?.open("model");
+    else send.click();
+  });
+  send.onclick = () => { void requestInteractionSend(); };
   $("#attachNodeContext").onclick = () => {
     const node = resolveInteractionContextNode(
       selection.selectedNodeId,
@@ -2317,18 +2483,24 @@ export function createProductWorkspace({
     const state = getState();
     const thread = getThread();
     if (!thread) {
+      releaseSendAttempt();
+      if (contextDraftSendWarning.open) {
+        closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
+      }
       showEmpty();
       return;
     }
     const threadId = String(thread.id);
-    if (contextDraftController && !loadedContextDraftThreads.has(threadId)) {
-      loadedContextDraftThreads.add(threadId);
-      void contextDraftController.load(thread.id).catch((error) => {
-        loadedContextDraftThreads.delete(threadId);
+    if (contextDraftController && !contextDraftLoads.has(threadId)) {
+      void ensureContextDraftsLoaded(thread.id).catch((error) => {
         toast(`Annotation drafts could not be restored: ${error.message}`);
       });
     }
     if (renderedThreadId !== null && renderedThreadId !== threadId) {
+      releaseSendAttempt();
+      if (contextDraftSendWarning.open) {
+        closeContextDraftSendWarning({ focusSend: false });
+      }
       annotationSubject = null;
       annotationThreadId = null;
       resetAnnotationComposer();
@@ -3094,7 +3266,12 @@ export function createProductWorkspace({
   }
 
   function dispose() {
+    releaseSendAttempt();
+    if (contextDraftSendWarning.open) {
+      closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
+    }
     modelPicker?.dispose();
+    graphDocument.defaultView.removeEventListener("resize", repositionContextDraftSendWarning);
     cancelInspectorFit();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
