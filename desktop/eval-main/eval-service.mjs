@@ -1523,16 +1523,28 @@ export class EvalService {
 
   async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {} }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
-    if (execution.harnessConfiguration.implementation === "codex.basic") await this.ensureModelCatalog();
-    const modelSettings = await this.#productRequest("/api/model-settings");
-    const selectedModel = firstAvailableSelection(modelSettings, execution.harnessConfigurationName);
-    const productModelSelection = !harnessUsesConfigurationModel(
-      modelSettings,
-      execution.harnessConfigurationName,
-    );
-    const modelLessEvalFixture = execution.harnessConfiguration.implementation === "fixture.task-system";
-    if (productModelSelection && selectedModel === null && !modelLessEvalFixture) {
-      throw new Error(`Eval has no available model for ${execution.harnessConfigurationName}.`);
+    let selectedModel;
+    let productModelSelection;
+    if (execution.harnessConfiguration.implementation === "claude.basic") {
+      selectedModel = await this.#productRequest(
+        `/api/model-selection/default?harnessId=${encodeURIComponent(execution.harnessConfigurationName)}`,
+      );
+      productModelSelection = true;
+      if (selectedModel === null) {
+        throw new Error("claude-basic has no connected compatible model; connect Claude or Anthropic before running this matrix cell.");
+      }
+    } else {
+      if (execution.harnessConfiguration.implementation === "codex.basic") await this.ensureModelCatalog();
+      const modelSettings = await this.#productRequest("/api/model-settings");
+      selectedModel = firstAvailableSelection(modelSettings, execution.harnessConfigurationName);
+      productModelSelection = !harnessUsesConfigurationModel(
+        modelSettings,
+        execution.harnessConfigurationName,
+      );
+      const modelLessEvalFixture = execution.harnessConfiguration.implementation === "fixture.task-system";
+      if (productModelSelection && selectedModel === null && !modelLessEvalFixture) {
+        throw new Error(`Eval has no available model for ${execution.harnessConfigurationName}.`);
+      }
     }
     const thread = await this.#productRequest("/api/threads", {
       method: "POST",
