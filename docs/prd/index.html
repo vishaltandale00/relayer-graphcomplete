@@ -1701,7 +1701,7 @@ type NodeAction =
 <p>The engine rejects unreachable current-interaction layers. One atomic operation accepts the valid reachable drafts. A focused flat root remains valid.</p>
 <p>The accepted return value is a <code>ResolvedGraphLayer</code> containing full node objects, exact visible edges, and node actions for the root layer. This is the immediate display payload returned by Complete. The persisted layer reference remains the source for later navigation and reload.</p>
 <h3>11.6 Local server and token contract</h3>
-<p>The Rust graph router is exposed on loopback HTTP; a Unix-domain-socket transport may replace loopback only if the Codex sandbox cannot reach it. Harnesses do not use MCP, do not open SQLite directly, and do not treat a CLI as the primary API. Prime Agent calls the Python client from its IPython kernel; Node/Codex harnesses call the TypeScript client or execute a small TypeScript program.</p>
+<p>The Rust graph router is exposed on loopback HTTP; a Unix-domain-socket transport may replace loopback only if the Codex sandbox cannot reach it. Harnesses do not use MCP as the graph transport, do not open SQLite directly, and do not treat a CLI as the primary graph API. They access graph state through typed TypeScript or Python clients and the loopback Rust API. A selected harness may still use implementation-owned native tools or MCP for non-graph capabilities such as browser use. Those mechanisms do not carry GraphComplete authority.</p>
 <pre><code class="language-text">POST /api/control/capabilities  (trusted remint after restart)
 POST /api/graph/nodes
 POST /api/graph/edges

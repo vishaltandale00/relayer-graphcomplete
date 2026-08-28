@@ -269,7 +269,7 @@ export class CodexBasicHarness implements Harness {
           args: [browserMcpRuntime.script, ...browserMcpRuntime.connectionArgs],
           env: { ELECTRON_RUN_AS_NODE: "1" },
           enabled: true,
-          required: true,
+          required: false,
           startup_timeout_sec: 20,
           tool_timeout_sec: 20,
           default_tools_approval_mode: "prompt",

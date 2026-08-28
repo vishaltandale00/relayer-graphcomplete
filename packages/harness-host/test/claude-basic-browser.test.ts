@@ -17,6 +17,7 @@ class FakeSocket {
   respond = true;
   stallNavigate = false;
   navigateErrorText: string | undefined;
+  navigationCompletion: "cross-document" | "same-document" | "unrelated-load" = "cross-document";
   private readonly listeners = new Map<string, Set<(event: { data?: unknown }) => void>>();
 
   constructor(readonly readyState = 1) {}
@@ -37,11 +38,24 @@ class FakeSocket {
     if (!this.respond) return;
     if (request.method === "Page.navigate") {
       if (this.stallNavigate) return;
+      if (this.navigationCompletion === "same-document") {
+        this.emit("message", { data: JSON.stringify({
+          method: "Page.navigatedWithinDocument",
+          params: { frameId: "frame", url: request.params?.url, navigationType: "fragment" },
+        }) });
+        this.emit("message", { data: JSON.stringify({ id: request.id, result: { frameId: "frame" } }) });
+        return;
+      }
+      if (this.navigationCompletion === "unrelated-load") {
+        this.emitProtocol("Page.lifecycleEvent", { frameId: "frame", loaderId: "old-loader", name: "load" });
+      }
       this.emit("message", { data: JSON.stringify({
         id: request.id,
-        result: { frameId: "frame", ...(this.navigateErrorText === undefined ? {} : { errorText: this.navigateErrorText }) },
+        result: { frameId: "frame", loaderId: "new-loader", ...(this.navigateErrorText === undefined ? {} : { errorText: this.navigateErrorText }) },
       }) });
-      queueMicrotask(() => this.emit("message", { data: JSON.stringify({ method: "Page.loadEventFired", result: {} }) }));
+      if (this.navigationCompletion === "cross-document") {
+        queueMicrotask(() => this.emitProtocol("Page.lifecycleEvent", { frameId: "frame", loaderId: "new-loader", name: "load" }));
+      }
       return;
     }
     const result = request.method === "Runtime.evaluate"
@@ -55,6 +69,10 @@ class FakeSocket {
     this.emit("close", {});
   }
 
+  emitProtocol(method: string, params: Record<string, unknown>): void {
+    this.emit("message", { data: JSON.stringify({ method, params }) });
+  }
+
   private emit(type: string, event: { data?: unknown }): void {
     for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
@@ -66,6 +84,7 @@ function fixture(options: {
   targets?: readonly Record<string, unknown>[];
   fetch?: typeof globalThis.fetch;
   createWebSocket?: (url: string, socket: FakeSocket) => FakeSocket;
+  timeoutMs?: number;
 } = {}): {
   handler: ToolHandler;
   socket: FakeSocket;
@@ -95,7 +114,7 @@ function fixture(options: {
       webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/existing-page",
     }]), { status: 200 })),
     createWebSocket: (url) => { socketUrls.push(url); return options.createWebSocket?.(url, socket) ?? socket; },
-    timeoutMs: 100,
+    timeoutMs: options.timeoutMs ?? 100,
   });
   expect(fullName).toBe(CLAUDE_BROWSER_TOOL);
   if (!handler) throw new Error("tool handler was not registered");
@@ -120,7 +139,7 @@ describe("claude.basic browser MCP tool", () => {
       { type: "fill", filled: true },
     ] });
     expect(socket.sent.map((entry) => entry.method)).toEqual([
-      "Runtime.evaluate", "Page.enable", "Page.navigate", "Runtime.evaluate", "Runtime.evaluate",
+      "Runtime.evaluate", "Page.enable", "Page.setLifecycleEventsEnabled", "Page.navigate", "Runtime.evaluate", "Runtime.evaluate",
     ]);
     expect(socket.closed).toBe(true);
     expect(server).toMatchObject({ name: "relayer_browser", version: "1.0.0" });
@@ -139,6 +158,42 @@ describe("claude.basic browser MCP tool", () => {
 
     expect(result).toMatchObject({ isError: true, content: [{ text: "Chrome could not reach the requested page." }] });
     expect(result.content[0]!.text).not.toContain("private-upstream");
+    expect(socket.closed).toBe(true);
+  });
+
+  it("completes a same-document navigation without waiting for a page load", async () => {
+    const socket = new FakeSocket();
+    socket.navigationCompletion = "same-document";
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [
+      { type: "navigate", url: "https://existing.test/marker#details" },
+      { type: "read_text", selector: "body" },
+    ] }, {});
+
+    expect(result.isError).toBeUndefined();
+    expect(socket.sent.map((entry) => entry.method)).toEqual([
+      "Page.enable", "Page.setLifecycleEventsEnabled", "Page.navigate", "Runtime.evaluate",
+    ]);
+    expect(socket.closed).toBe(true);
+  });
+
+  it("ignores an unrelated load until the requested navigation loader completes", async () => {
+    const socket = new FakeSocket();
+    socket.navigationCompletion = "unrelated-load";
+    const { handler } = fixture({ socket, timeoutMs: 1_000 });
+    const operation = handler({ operations: [
+      { type: "navigate", url: "https://example.test/requested" },
+      { type: "read_text", selector: "body" },
+    ] }, {});
+
+    await vi.waitFor(() => expect(socket.sent.map((entry) => entry.method)).toContain("Page.navigate"));
+    await Promise.resolve();
+    expect(socket.sent.map((entry) => entry.method)).not.toContain("Runtime.evaluate");
+
+    socket.emitProtocol("Page.lifecycleEvent", { frameId: "frame", loaderId: "new-loader", name: "load" });
+    await expect(operation).resolves.not.toHaveProperty("isError");
+    expect(socket.sent.map((entry) => entry.method)).toContain("Runtime.evaluate");
     expect(socket.closed).toBe(true);
   });
 

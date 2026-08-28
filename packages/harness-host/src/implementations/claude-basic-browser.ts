@@ -9,6 +9,7 @@ const MAX_OPERATIONS = 8;
 const MAX_TEXT_LENGTH = 20_000;
 const MAX_VALUE_LENGTH = 10_000;
 const MAX_PROTOCOL_MESSAGE_LENGTH = 1_000_000;
+const MAX_BUFFERED_CDP_EVENTS = 64;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 const selector = z.string().trim().min(1).max(1_000);
@@ -79,6 +80,7 @@ interface CdpResponse {
   readonly id?: number;
   readonly method?: string;
   readonly result?: unknown;
+  readonly params?: unknown;
   readonly error?: unknown;
 }
 
@@ -135,18 +137,31 @@ async function runBrowserOperations(
         case "navigate": {
           const url = validateNavigationUrl(current.url);
           await client.command("Page.enable");
-          const loaded = client.waitForEvent("Page.loadEventFired");
+          await client.command("Page.setLifecycleEventsEnabled", { enabled: true });
+          const sameDocument = client.captureEvents("Page.navigatedWithinDocument");
+          const loaded = client.captureEvents("Page.lifecycleEvent", isLoadLifecycleEvent);
           try {
             const navigation = await client.command("Page.navigate", { url });
             if (isRecord(navigation) && typeof navigation.errorText === "string" && navigation.errorText !== "") {
               throw new BrowserFailure("navigation-failed");
             }
-            const loadOutcome = await loaded.promise;
-            if (!loadOutcome.ok) throw loadOutcome.error;
+            if (!isRecord(navigation) || typeof navigation.frameId !== "string") {
+              throw new BrowserFailure("operation-failed");
+            }
+            const frameId = navigation.frameId;
+            const loaderId = navigation.loaderId;
+            const completion = typeof loaderId === "string"
+              ? loaded.waitFor((event) => isMatchingLoadEvent(event, frameId, loaderId))
+              : sameDocument.waitFor((event) => isMatchingSameDocumentEvent(event, frameId, url));
+            const outcome = await completion;
+            if (!outcome.ok) throw outcome.error;
           } catch (error) {
+            sameDocument.cancel();
             loaded.cancel();
             throw error;
           }
+          sameDocument.cancel();
+          loaded.cancel();
           results.push({ type: current.type, url });
           break;
         }
@@ -219,7 +234,11 @@ class CdpClient {
   private readonly socket: BrowserSocket;
   private nextId = 1;
   private readonly pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
-  private readonly events = new Map<string, Set<{ resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>>();
+  private readonly events = new Map<string, Set<{
+    accept(value: unknown): boolean;
+    reject(error: Error): void;
+    timer: ReturnType<typeof setTimeout>;
+  }>>();
   private readonly abort = () => this.failAll(abortFailure(this.signal));
   private listening = false;
 
@@ -267,17 +286,43 @@ class CdpClient {
     return response.result.value;
   }
 
-  waitForEvent(method: string): {
-    readonly promise: Promise<{ readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: Error }>;
+  captureEvents(method: string, isCandidate: (value: unknown) => boolean = () => true): {
+    waitFor(matches: (value: unknown) => boolean): Promise<{ readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: Error }>;
     cancel(): void;
   } {
+    let matches: ((value: unknown) => boolean) | undefined;
+    const buffered: unknown[] = [];
     let cancel = () => {};
+    let waiter: {
+      accept(value: unknown): boolean;
+      reject(error: Error): void;
+      timer: ReturnType<typeof setTimeout>;
+    };
     const pending = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.events.get(method)?.delete(waiter);
         reject(new BrowserFailure("timeout"));
       }, this.timeoutMs);
-      const waiter = { resolve, reject, timer };
+      waiter = {
+        accept: (value: unknown) => {
+          if (!isCandidate(value)) return false;
+          if (matches === undefined) {
+            if (buffered.length >= MAX_BUFFERED_CDP_EVENTS) {
+              clearTimeout(timer);
+              reject(new BrowserFailure("invalid-response"));
+              return true;
+            }
+            buffered.push(value);
+            return false;
+          }
+          if (!matches(value)) return false;
+          clearTimeout(timer);
+          resolve(value);
+          return true;
+        },
+        reject,
+        timer,
+      };
       const current = this.events.get(method) ?? new Set();
       current.add(waiter);
       this.events.set(method, current);
@@ -294,7 +339,19 @@ class CdpClient {
       (value) => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, error: error instanceof Error ? error : new BrowserFailure("disconnected") }),
     );
-    return { promise, cancel };
+    return {
+      waitFor: (candidate) => {
+        matches = candidate;
+        const bufferedMatch = buffered.findIndex(candidate);
+        const value = buffered[bufferedMatch];
+        buffered.length = 0;
+        if (bufferedMatch >= 0 && waiter.accept(value)) {
+          this.events.get(method)?.delete(waiter);
+        }
+        return promise;
+      },
+      cancel,
+    };
   }
 
   close(): void {
@@ -342,8 +399,10 @@ class CdpClient {
       } else if (typeof message.method === "string") {
         const waiters = this.events.get(message.method);
         if (!waiters) return;
-        this.events.delete(message.method);
-        for (const waiter of waiters) { clearTimeout(waiter.timer); waiter.resolve(message.result); }
+        for (const waiter of [...waiters]) {
+          if (waiter.accept(message.params)) waiters.delete(waiter);
+        }
+        if (waiters.size === 0) this.events.delete(message.method);
       }
     });
     const disconnected = () => this.failAll(new BrowserFailure("disconnected"));
@@ -383,6 +442,18 @@ function validateNavigationUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new BrowserFailure("invalid-request");
   return url.href;
+}
+
+function isLoadLifecycleEvent(value: unknown): boolean {
+  return isRecord(value) && value.name === "load";
+}
+
+function isMatchingLoadEvent(value: unknown, frameId: string, loaderId: string): boolean {
+  return isRecord(value) && value.name === "load" && value.frameId === frameId && value.loaderId === loaderId;
+}
+
+function isMatchingSameDocumentEvent(value: unknown, frameId: string, url: string): boolean {
+  return isRecord(value) && value.frameId === frameId && value.url === url;
 }
 
 function isAllowedSocketUrl(value: unknown, endpoint: URL, targetId: string): value is string {

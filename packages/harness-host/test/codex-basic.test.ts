@@ -423,7 +423,7 @@ describe("CodexBasicHarness", () => {
     expect(configuration.modelCompatibility?.[0]).not.toHaveProperty("preferredModelId");
   });
 
-  it.each(["codex-basic", "codex-basic-high"])("configures the shipped native browser MCP for %s without changing product profiles", async (name) => {
+  it.each(["codex-basic", "codex-basic-high"])("configures an optional shipped native browser MCP for %s without changing product profiles", async (name) => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
     expect(Object.keys(configuration.permissionBindings)).toEqual(["ask", "auto", "full"]);
     for (const permissionProfileId of ["ask", "auto", "full"] as const) {
@@ -455,7 +455,7 @@ describe("CodexBasicHarness", () => {
             args: [browserMcpRuntime.script, ...browserMcpRuntime.connectionArgs],
             env: { ELECTRON_RUN_AS_NODE: "1" },
             enabled: true,
-            required: true,
+            required: false,
             startup_timeout_sec: 20,
             tool_timeout_sec: 20,
             default_tools_approval_mode: "prompt",

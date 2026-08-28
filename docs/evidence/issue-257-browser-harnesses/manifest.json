@@ -5,7 +5,7 @@
   "assemblyMergeBase": "9188a8123b7c40436f0100d124c24103a768d32d",
   "integratedSource": {
     "algorithm": "sha256-of-sorted-path-nul-file-sha256-lf",
-    "sha256": "e4d40c5a9b81345fad33e85da75879b164e3b2bab46a950a330e1faa06102208",
+    "sha256": "0cec65b8f1a2fd4c4fa9d69414a7166c8902cea82a47627c2ae9f585304bd8ec",
     "files": [
       "README.md",
       "crates/relayer-app-server/src/runtime.rs",
@@ -19,6 +19,7 @@
       "desktop/packaging/eval-electron-builder.mjs",
       "desktop/packaging/verify-bundled-app-server.mjs",
       "docs/evidence/issue-257-browser-harnesses/README.md",
+      "docs/prd/index.html",
       "package-lock.json",
       "packages/harness-host/package.json",
       "packages/harness-host/src/implementations/claude-basic-browser.ts",
@@ -77,7 +78,7 @@
       "configurationSha256": {
         "claude-basic.yaml": "05fbc6f5c50337595f020b1b2171fbd7a52ae58047a0166878573ea0cd8775da"
       },
-      "browserRuntimeSourceSha256": "d405d7483ecab62647363023bbf58c4e39de1844e32f469039957cca1051c57a",
+      "browserRuntimeSourceSha256": "1274a51d1ee4812969180d3f303b063649231f5b3c39515f454153ac2d232ced",
       "mechanismProof": {
         "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5448833579",
         "commentBodyPlusLfSha256": "9e70d873e30660bfc9ac37d1a851a283fa0c2d1dd783980543af0401e61087c4"
