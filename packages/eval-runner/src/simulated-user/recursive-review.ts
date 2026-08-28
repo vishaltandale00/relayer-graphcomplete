@@ -361,7 +361,7 @@ export class RecursivePresentationReviewStore {
     if (criticalOpportunity && review.scoreCeiling.maximum > 4) {
       throw new Error("Critical missing-action opportunity caps the presentation score at 4");
     }
-    validateCriterionJudgments(review.criterionJudgments, "Turn");
+    validateCriterionJudgments(review.criterionJudgments, "Turn", new Set(["follow_up_progress"]));
     const saved = immutable(review);
     this.#validateEvidence?.({
       kind: "turn",
@@ -591,8 +591,12 @@ function validateLayerResult(
 function validateCriterionJudgments(
   judgments: Readonly<Record<string, RecursiveCriterionJudgment>>,
   label: string,
+  nullableCriteria: ReadonlySet<string> = new Set(),
 ): void {
   for (const [criterion, judgment] of Object.entries(judgments)) {
+    if (judgment.score === null && !nullableCriteria.has(criterion)) {
+      throw new Error(`${label} ${criterion} must have a score`);
+    }
     validateCriterionJudgment(judgment, `${label} ${criterion}`);
   }
 }
@@ -610,7 +614,11 @@ function validateRanking(step: AllocationStepReview, nodeId: string): void {
 function validateScore(score: RecursiveNodeScore): void {
   for (const [key, value] of Object.entries(score)) {
     if (key === "nodeId") continue;
-    validateCriterionJudgment(value as RecursiveCriterionJudgment, `Node ${score.nodeId} ${key}`);
+    const judgment = value as RecursiveCriterionJudgment;
+    if (judgment.score === null && key !== "actionDelivery" && key !== "recursiveQuality") {
+      throw new Error(`Node ${score.nodeId} ${key} must have a score`);
+    }
+    validateCriterionJudgment(judgment, `Node ${score.nodeId} ${key}`);
   }
 }
 

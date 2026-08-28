@@ -266,6 +266,34 @@ describe("recursive semantic presentation review", () => {
     expect(() => store.reviewNode(duplicateRanks)).toThrow("must rank each choice exactly once");
   });
 
+  it("requires scores for occupied node, layer, and turn criteria except inapplicable node destinations", () => {
+    const nodeStore = new RecursivePresentationReviewStore({ inventory: inventoryReviewSubjects(topology) });
+    const baseNode = leafNodeReview();
+    const invalidNode = { ...baseNode, score: { ...baseNode.score, content: judgment(null) } };
+    expect(() => nodeStore.reviewNode(invalidNode)).toThrow("Node child-node content must have a score");
+
+    const store = new RecursivePresentationReviewStore({ inventory: inventoryReviewSubjects(topology) });
+    const child = leafNodeReview();
+    store.reviewNode(child);
+    const childLayer = layerResult("child", 1, child);
+    const invalidLayer = {
+      ...childLayer,
+      criterionJudgments: { ...childLayer.criterionJudgments, cohesion: judgment(null) },
+    };
+    expect(() => store.reviewLayer(invalidLayer)).toThrow("Layer child cohesion must have a score");
+
+    store.reviewLayer(childLayer);
+    const rootNode = rootNodeReview();
+    store.reviewNode(rootNode);
+    const root = store.reviewLayer(layerResult("root", 0, rootNode)).review;
+    const baseTurn = turnReview(root);
+    const invalidTurn = {
+      ...baseTurn,
+      criterionJudgments: { ...baseTurn.criterionJudgments, answer_quality: judgment(null) },
+    };
+    expect(() => store.submitReview(invalidTurn)).toThrow("Turn answer_quality must have a score");
+  });
+
   it("requires both source and traversed destination evidence for navigate delivery", () => {
     const inventory = inventoryReviewSubjects(topology);
     const source = screenshotMetadata("shot-root", "root", "root-node", null);
@@ -456,7 +484,7 @@ describe("recursive semantic presentation review", () => {
     expect(store.reviewLayer(layerResult("child", 1, child)).review.layerId).toBe("child");
   });
 
-  it("requires a reason for each null recursive layer judgment", () => {
+  it("rejects null recursive layer judgments even when they have a reason", () => {
     const store = new RecursivePresentationReviewStore({ inventory: inventoryReviewSubjects({
       turnId: "flat-turn",
       rootLayerId: "flat-layer",
@@ -466,8 +494,8 @@ describe("recursive semantic presentation review", () => {
     store.reviewNode(node);
     const result = layerResult("flat-layer", 0, node);
     const nullable = { ...result, criterionJudgments: { ...ratings, coverage: { score: null, reason: "", evidence: ["shot-flat"] } } } as RecursiveLayerResult;
-    expect(() => store.reviewLayer(nullable)).toThrow("coverage reason must not be empty");
-    expect(store.reviewLayer({ ...nullable, criterionJudgments: { ...nullable.criterionJudgments, coverage: judgment(null, ["shot-flat"]) } }).review.layerId).toBe("flat-layer");
+    expect(() => store.reviewLayer(nullable)).toThrow("coverage must have a score");
+    expect(() => store.reviewLayer({ ...nullable, criterionJudgments: { ...nullable.criterionJudgments, coverage: judgment(null, ["shot-flat"]) } })).toThrow("coverage must have a score");
   });
 
   it("rejects misaligned vectors and final turn judgments that do not consume the current root result", () => {

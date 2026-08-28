@@ -17,6 +17,7 @@ import {
   EvalService,
   judgeArtifactEvidenceForExecution,
   judgeArtifactForExecution,
+  presentationGradeFromTurns,
   resolveH3PermissionProfile,
 } from "../desktop/eval-main/eval-service.mjs";
 
@@ -31,6 +32,46 @@ afterEach(async () => {
 });
 
 describe("EvalService simulated-user result persistence", () => {
+  it("normalizes each selected recursive review by its own schema in a mixed-history projection", () => {
+    const legacy = {
+      status: "completed",
+      review: {
+        schemaVersion: 4,
+        contractId: "recursive-presentation-judge-v4",
+        turn: {
+          ratings: { presentation_quality: 3, answer_quality: 4 },
+          scoreCeiling: { maximum: 4 },
+        },
+      },
+    };
+    const reasoned = {
+      status: "completed",
+      review: {
+        schemaVersion: 5,
+        contractId: "recursive-presentation-judge-v5",
+        turn: {
+          criterionJudgments: {
+            presentation_quality: { score: 4 },
+            answer_quality: { score: 6 },
+          },
+          scoreCeiling: { maximum: 8 },
+        },
+      },
+    };
+
+    expect(presentationGradeFromTurns([
+      { status: "accepted", judgeResults: [legacy] },
+      { status: "accepted", judgeResults: [reasoned] },
+    ], true)).toMatchObject({
+      status: "completed",
+      score: 5,
+      rawScore: 5,
+      comprehensionScore: 7,
+      scoreCeiling: 8,
+      scoreScaleMaximum: 8,
+    });
+  });
+
   it("bounds the host-authored artifact evidence packet", () => {
     const evidence = judgeArtifactEvidenceForExecution({
       checks: Array.from({ length: 70 }, (_, index) => ({

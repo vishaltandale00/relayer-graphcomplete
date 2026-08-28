@@ -48,7 +48,7 @@ describe("simulated-user Codex judge runner", () => {
     expect(prompt).toContain("deserves little relationship_clarity credit");
     expect(prompt).toContain("Never lower the ceiling for artifact defects");
     expect(prompt).toContain("Score polish as a separate basic rendered-integrity dimension");
-    expect(prompt).toContain("A default renderer can earn polish 4 while the graph remains semantically weak");
+    expect(prompt).toContain("A default renderer may be polished while the graph remains semantically weak");
     expect(prompt).toContain("Never use polish to raise or offset content");
     expect(prompt).toContain("erase polish-only observations from the evidence");
     expect(prompt).toContain("A clean textual handoff split across static cards earns no semantic or interactive credit merely for polish");

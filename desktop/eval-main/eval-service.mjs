@@ -174,7 +174,7 @@ function mandatoryGateReceipt(gate, checks) {
   };
 }
 
-function presentationGradeFromTurns(turns, requested) {
+export function presentationGradeFromTurns(turns, requested) {
   if (!requested) {
     return buildGraphPresentationGrade({ status: "unjudged" });
   }
@@ -199,20 +199,34 @@ function presentationGradeFromTurns(turns, requested) {
     && ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5"].includes(result.review?.contractId)
   ));
   if (recursive) {
-    const reasoned = completed.every((result) => result.review?.schemaVersion === 5);
-    const turnScore = (result, criterion) => reasoned
-      ? result.review?.turn?.criterionJudgments?.[criterion]?.score ?? null
-      : result.review?.turn?.ratings?.[criterion] ?? null;
+    const scales = completed.map((result) => result.review?.schemaVersion === 5 ? 8 : 4);
+    const scoreScaleMaximum = scales.includes(8) ? 8 : 4;
+    const turnScore = (result, criterion) => {
+      const scale = result.review?.schemaVersion === 5 ? 8 : 4;
+      const score = scale === 8
+        ? result.review?.turn?.criterionJudgments?.[criterion]?.score ?? null
+        : result.review?.turn?.ratings?.[criterion] ?? null;
+      return score !== null && scale !== scoreScaleMaximum
+        ? score * (scoreScaleMaximum / scale)
+        : score;
+    };
+    const scoreCeiling = (result) => {
+      const maximum = result.review?.turn?.scoreCeiling?.maximum;
+      const scale = result.review?.schemaVersion === 5 ? 8 : 4;
+      return [1, 2, 3, 4, 5, 6, 7, 8].includes(maximum)
+        ? maximum * (scoreScaleMaximum / scale)
+        : null;
+    };
     return buildRecursiveGraphPresentationGrade({
       status,
       layers: presentationLayers(completed),
       presentationRatings: completed.map((result) => turnScore(result, "presentation_quality")),
       comprehensionRatings: completed.map((result) => turnScore(result, "answer_quality")),
       scoreCeilings: completed.flatMap((result) => {
-        const maximum = result.review?.turn?.scoreCeiling?.maximum;
-        return [1, 2, 3, 4, 5, 6, 7, 8].includes(maximum) ? [maximum] : [];
+        const maximum = scoreCeiling(result);
+        return maximum === null ? [] : [maximum];
       }),
-      scoreScaleMaximum: reasoned ? 8 : 4,
+      scoreScaleMaximum,
       rootLayerResultIds: completed.flatMap((result) => {
         const layerId = result.review?.rootLayerResult?.layerId;
         return typeof layerId === "string" && layerId ? [layerId] : [];

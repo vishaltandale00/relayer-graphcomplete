@@ -227,16 +227,19 @@ const scoreValueSchema = z.union([
 ]);
 const allocationRankSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
 const criterionJudgmentSchema = z.object({
-  score: scoreValueSchema.nullable(),
+  score: scoreValueSchema,
   reason: z.string().min(1),
   evidence: z.array(screenshotReferenceSchema).min(1),
+}).strict();
+const nullableCriterionJudgmentSchema = criterionJudgmentSchema.extend({
+  score: scoreValueSchema.nullable(),
 }).strict();
 const recursiveScoreSchema = z.object({
   nodeId: z.string().min(1),
   content: criterionJudgmentSchema,
   actionAllocation: criterionJudgmentSchema,
-  actionDelivery: criterionJudgmentSchema,
-  recursiveQuality: criterionJudgmentSchema,
+  actionDelivery: nullableCriterionJudgmentSchema,
+  recursiveQuality: nullableCriterionJudgmentSchema,
   polish: criterionJudgmentSchema,
 }).strict();
 const recursiveSemanticSchema = z.object({
@@ -308,9 +311,13 @@ const recursiveTurnReviewSchema = z.object({
   turnId: z.string().min(1),
   rootLayerResult: recursiveLayerResultSchema,
   evidence: z.object({ representative: z.array(screenshotReferenceSchema).min(1) }).strict(),
-  criterionJudgments: z.object(Object.fromEntries(
-    Object.keys(turnRatingsSchema.shape).map((key) => [key, criterionJudgmentSchema]),
-  ) as Record<keyof typeof turnRatingsSchema.shape, typeof criterionJudgmentSchema>).strict(),
+  criterionJudgments: z.object({
+    answer_quality: criterionJudgmentSchema,
+    recursive_coherence: criterionJudgmentSchema,
+    navigation_value: criterionJudgmentSchema,
+    presentation_quality: criterionJudgmentSchema,
+    follow_up_progress: nullableCriterionJudgmentSchema,
+  }).strict(),
   summary: z.string().min(1),
   findings: z.array(findingSchema),
   scoreCeiling: z.object({
