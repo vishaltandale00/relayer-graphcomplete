@@ -529,10 +529,12 @@ export function contextEditorCanConfirm(editor) {
   return Boolean(editor) && (editor.attaching || Boolean(String(editor.value).trim()));
 }
 
-export function contextEditorPresentation(editor, stagingDisabled = false) {
+export function contextEditorPresentation(editor, stagingDisabled = false, resolving = false) {
+  const locked = stagingDisabled || resolving;
   return {
-    textareaDisabled: stagingDisabled,
-    confirmDisabled: stagingDisabled || !contextEditorCanConfirm(editor),
+    textareaDisabled: locked,
+    controlsDisabled: locked,
+    confirmDisabled: locked || !contextEditorCanConfirm(editor),
   };
 }
 
@@ -1654,9 +1656,13 @@ export function createProductWorkspace({
     if (!openContext) openComposerContextNodeId = null;
 
     const createEditorBody = (node) => {
+      const durableDraft = contextEditor?.durable
+        ? contextDraftController.draftForNode(getThread()?.id, node.id)
+        : null;
       const editorPresentation = contextEditorPresentation(
         contextEditor,
         contextStagingDisabled(),
+        Boolean(durableDraft?.resolving),
       );
       const body = graphDocument.createElement("div");
       body.className = "composer-context-inline-editor";
@@ -1677,6 +1683,7 @@ export function createProductWorkspace({
       cancel.title = "Cancel";
       cancel.setAttribute("aria-label", "Cancel annotation edit");
       cancel.onclick = closeContextEditor;
+      cancel.disabled = editorPresentation.controlsDisabled;
       const remove = graphDocument.createElement("button");
       remove.type = "button";
       remove.textContent = "🗑";
@@ -1687,9 +1694,10 @@ export function createProductWorkspace({
       remove.onclick = async () => {
         if (contextStagingDisabled()) return;
         if (contextEditor?.durable) {
+          const discardingEditor = contextEditor;
           try {
             await contextDraftController.discard(getThread()?.id, node.id);
-            contextEditor = null;
+            if (contextEditor === discardingEditor) contextEditor = null;
             renderComposerContexts();
           } catch (error) {
             toast(error.message);
@@ -1706,7 +1714,7 @@ export function createProductWorkspace({
           renderComposerContexts();
         }
       };
-      remove.disabled = contextStagingDisabled()
+      remove.disabled = editorPresentation.controlsDisabled
         || (!contextEditor.durable && contextEditor?.annotationIndex == null);
       const confirm = graphDocument.createElement("button");
       confirm.type = "button";
@@ -1718,6 +1726,7 @@ export function createProductWorkspace({
       confirm.onclick = async () => {
         if (contextStagingDisabled()) return;
         if (contextEditor.durable) {
+          const confirmingEditor = contextEditor;
           const confirmingThreadId = String(getThread()?.id);
           confirm.disabled = true;
           try {
@@ -1731,7 +1740,7 @@ export function createProductWorkspace({
             }
             if (contextConfirmationDestination(getThread()?.id, confirmingThreadId) === "current") {
               applyConfirmedContextDraft(confirmation);
-              contextEditor = null;
+              if (contextEditor === confirmingEditor) contextEditor = null;
               renderComposerContexts();
             } else {
               const pending = deferredContextConfirmations.get(confirmingThreadId) || [];

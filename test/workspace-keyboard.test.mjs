@@ -279,11 +279,18 @@ describe("product workspace keyboard behavior", () => {
     expect(contextStagingDisabledFor("failed", true, false)).toBe(false);
     expect(contextEditorPresentation({ attaching: true, value: "" }, true)).toEqual({
       textareaDisabled: true,
+      controlsDisabled: true,
       confirmDisabled: true,
     });
     expect(contextEditorPresentation({ attaching: true, value: "" }, false)).toEqual({
       textareaDisabled: false,
+      controlsDisabled: false,
       confirmDisabled: false,
+    });
+    expect(contextEditorPresentation({ attaching: false, value: "note" }, false, true)).toEqual({
+      textareaDisabled: true,
+      controlsDisabled: true,
+      confirmDisabled: true,
     });
     expect(composerStatusForThread({
       status: "accepted",

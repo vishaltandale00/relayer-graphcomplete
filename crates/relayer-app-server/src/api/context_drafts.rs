@@ -148,19 +148,9 @@ pub(super) async fn confirm(
 ) -> Result<Json<NodeContextDraftConfirmationResponse>, ApiError> {
     authorize_write(&state, &headers)?;
     let thread_id = ThreadId::try_from(thread_id)?;
-    let service = state
+    let confirmation = state
         .context_draft_confirmation
-        .as_ref()
-        .ok_or_else(unavailable_target)?;
-    let confirmation = service
         .confirm(thread_id, &draft_id, query.expected_revision)
         .await?;
     Ok(Json(confirmation.into()))
-}
-
-fn unavailable_target() -> ApiError {
-    ApiError::conflict(
-        "context_draft_target_unavailable",
-        "The saved node occurrence is no longer available. The draft was preserved.",
-    )
 }

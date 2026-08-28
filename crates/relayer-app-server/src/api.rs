@@ -39,7 +39,7 @@ pub(crate) struct ApiState {
     pub(crate) authenticator: DesktopSessionAuthenticator,
     pub(crate) runtime: Option<RuntimeClient>,
     pub(crate) interaction_execution: Option<InteractionExecutionService>,
-    pub(crate) context_draft_confirmation: Option<NodeContextDraftConfirmationService>,
+    pub(crate) context_draft_confirmation: NodeContextDraftConfirmationService,
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
@@ -82,9 +82,8 @@ pub(crate) fn router(
             runtime.execution_lease_reconciler.clone(),
         )
     });
-    let context_draft_confirmation = runtime.runtime.as_ref().map(|runtime_client| {
-        NodeContextDraftConfirmationService::new(product.clone(), runtime_client.clone())
-    });
+    let context_draft_confirmation =
+        NodeContextDraftConfirmationService::new(product.clone(), runtime.runtime.clone());
     let state = ApiState {
         product,
         authenticator: DesktopSessionAuthenticator::new(control_token, read_only_control_token),

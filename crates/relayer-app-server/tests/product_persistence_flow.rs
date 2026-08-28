@@ -366,15 +366,25 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
     pool.close().await;
 
     let graph = Router::new().route(
-        "/api/control/interactions/3/layers/5",
+        "/api/control/interactions/3/accepted-closure",
         axum::routing::get(|| async {
             axum::Json(json!({
-                "layer": { "id": 5, "nodes": [7], "edges": [], "layout": null, "state": "accepted" },
-                "nodes": [{
-                    "id": 7, "kind": "concept", "icon": "list", "title": "Incoming queue",
-                    "detail": "Tasks wait here while workers are busy.", "state": "accepted"
-                }],
-                "edges": [], "actions": []
+                "nodeId": 3,
+                "rootAction": {
+                    "id": 4, "sourceNodeId": 3, "sourceLayerId": null,
+                    "kind": "navigate", "relation": "expand", "label": "Response",
+                    "variant": "pill", "icon": null, "description": null,
+                    "targetLayerId": 5, "interactionText": null, "state": "accepted"
+                },
+                "rootLayerId": 5,
+                "layers": [{
+                    "layer": { "id": 5, "nodes": [7], "edges": [], "layout": null, "state": "accepted" },
+                    "nodes": [{
+                        "id": 7, "kind": "concept", "icon": "list", "title": "Incoming queue",
+                        "detail": "Tasks wait here while workers are busy.", "state": "accepted"
+                    }],
+                    "edges": [], "actions": []
+                }]
             }))
         }),
     );
@@ -446,6 +456,41 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
     assert!(preserved["drafts"].as_array().unwrap().iter().any(|draft| {
         draft["id"] == "draft-unavailable" && draft["text"] == "Preserve this recovery note."
     }));
+    let unreachable_uri = format!("/api/threads/{thread_id}/context-drafts/draft-unreachable");
+    response_json(
+        app.clone()
+            .oneshot(api_request(
+                "PUT",
+                &unreachable_uri,
+                Some(json!({
+                    "target": { "nodeId": 9, "sourceInteractionNodeId": 3, "sourceLayerId": 6 },
+                    "targetNode": {
+                        "id": 9, "kind": "concept", "icon": "archive", "title": "Unreachable queue",
+                        "detail": "This accepted layer is outside the source completion.", "state": "accepted"
+                    },
+                    "text": "Keep this unreachable note.", "expectedRevision": null
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let unreachable = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("{unreachable_uri}/confirm?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unreachable.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(unreachable).await["code"],
+        "context_draft_target_unavailable"
+    );
     let confirm_uri = format!("{draft_uri}/confirm?expectedRevision=1");
     let confirmed = response_json(
         app.clone()
@@ -459,9 +504,7 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
     assert_eq!(confirmed["target"]["nodeId"], 7);
     drop(app);
 
-    let reopened =
-        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
-            .await;
+    let reopened = open_app(&database, &root).await;
     let replayed = response_json(
         reopened
             .clone()
@@ -483,8 +526,21 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
             .unwrap(),
     )
     .await;
-    assert_eq!(drafts["drafts"].as_array().unwrap().len(), 1);
-    assert_eq!(drafts["drafts"][0]["id"], "draft-unavailable");
+    assert_eq!(drafts["drafts"].as_array().unwrap().len(), 2);
+    assert!(
+        drafts["drafts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|draft| { draft["id"] == "draft-unavailable" })
+    );
+    assert!(
+        drafts["drafts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|draft| { draft["id"] == "draft-unreachable" })
+    );
     graph_task.abort();
     harness_task.abort();
 }

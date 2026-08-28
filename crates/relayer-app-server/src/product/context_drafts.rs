@@ -13,11 +13,11 @@ pub(crate) enum NodeContextDraftConfirmationError {
 #[derive(Clone)]
 pub(crate) struct NodeContextDraftConfirmationService {
     product: ProductService,
-    runtime: RuntimeClient,
+    runtime: Option<RuntimeClient>,
 }
 
 impl NodeContextDraftConfirmationService {
-    pub(crate) fn new(product: ProductService, runtime: RuntimeClient) -> Self {
+    pub(crate) fn new(product: ProductService, runtime: Option<RuntimeClient>) -> Self {
         Self { product, runtime }
     }
 
@@ -34,6 +34,10 @@ impl NodeContextDraftConfirmationService {
         {
             return Ok(confirmation);
         }
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or(NodeContextDraftConfirmationError::TargetUnavailable)?;
         let draft = self.product.node_context_draft(thread_id, draft_id).await?;
         if draft.text.trim().is_empty() {
             return Err(ProductError::Invalid(
@@ -49,18 +53,18 @@ impl NodeContextDraftConfirmationService {
         if source.thread_id != thread_id || source.completion_status != "accepted" {
             return Err(NodeContextDraftConfirmationError::TargetUnavailable);
         }
-        let layer: relayer_graph_core::ResolvedLayer = self
-            .runtime
-            .get_layer(
-                draft.target.source_interaction_node_id,
-                draft.target.source_layer_id,
-            )
+        let closure = runtime
+            .accepted_graph_closure(draft.target.source_interaction_node_id)
             .await
-            .map_err(|_| NodeContextDraftConfirmationError::TargetUnavailable)
-            .and_then(|value| {
-                serde_json::from_value(value)
-                    .map_err(|_| NodeContextDraftConfirmationError::TargetUnavailable)
-            })?;
+            .map_err(|_| NodeContextDraftConfirmationError::TargetUnavailable)?;
+        if closure.node_id.value() != draft.target.source_interaction_node_id {
+            return Err(NodeContextDraftConfirmationError::TargetUnavailable);
+        }
+        let layer = closure
+            .layers
+            .into_iter()
+            .find(|layer| layer.layer.id.value() == draft.target.source_layer_id)
+            .ok_or(NodeContextDraftConfirmationError::TargetUnavailable)?;
         let current_target = layer
             .nodes
             .into_iter()
