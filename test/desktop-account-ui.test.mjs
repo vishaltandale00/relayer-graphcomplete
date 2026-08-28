@@ -6,6 +6,7 @@ import {
   ACCOUNT_ONBOARDING_PREFERENCE_KEY,
   createDesktopAccountController,
   normalizeDesktopAccountState,
+  revealDesktopWorkspace,
 } from "../desktop/renderer/src/desktop-account.js";
 
 function classList(...initial) {
@@ -76,6 +77,16 @@ function fixture() {
 }
 
 describe("desktop account presentation", () => {
+  it("releases the startup visibility gate before showing the workspace during recovery", () => {
+    const body = { classList: classList("desktop-account-pending") };
+    const showApplication = vi.fn();
+
+    revealDesktopWorkspace(showApplication, body);
+
+    expect(body.classList.contains("desktop-account-pending")).toBe(false);
+    expect(showApplication).toHaveBeenCalledOnce();
+  });
+
   it("holds the workspace behind a standalone optional account step until the user continues", async () => {
     const { controller, elements, storage, showWorkspace } = fixture();
 
@@ -180,6 +191,29 @@ describe("desktop account presentation", () => {
     expect(elements.onboarding.classList.contains("hidden")).toBe(false);
     expect(showWorkspace).not.toHaveBeenCalled();
     elements.onboardingNotNow.onclick();
+    expect(showWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the optional startup gate when the post-provider account refresh fails", async () => {
+    const { controller, elements, api, showWorkspace } = fixture();
+    await controller.start();
+    api.read.mockRejectedValueOnce(new Error("private refresh failure"));
+
+    await controller.refresh({ offerOnboarding: true });
+
+    expect(elements.onboarding.classList.contains("hidden")).toBe(false);
+    expect(showWorkspace).not.toHaveBeenCalled();
+    elements.onboardingNotNow.onclick();
+    expect(showWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it("continues into the workspace when onboarding preference storage is unavailable", async () => {
+    const { controller, elements, storage, showWorkspace } = fixture();
+    await controller.start({ offerOnboarding: true });
+    storage.setItem.mockImplementationOnce(() => { throw new Error("storage unavailable"); });
+
+    expect(() => elements.onboardingNotNow.onclick()).not.toThrow();
+    expect(elements.onboarding.classList.contains("hidden")).toBe(true);
     expect(showWorkspace).toHaveBeenCalledOnce();
   });
 

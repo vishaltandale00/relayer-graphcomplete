@@ -115,8 +115,8 @@ function showProviderForm(adapterId, { showErrors = false } = {}) {
 
 async function completeOnboarding() {
   await desktop.providers.completeOnboarding();
-  const applicationDisplayHandled = await refreshProductAfterOnboarding();
-  if (applicationDisplayHandled !== true) showApplication();
+  await refreshProductAfterOnboarding();
+  showApplication();
 }
 
 function chosenHarness() {

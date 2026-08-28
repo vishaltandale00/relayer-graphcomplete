@@ -44,7 +44,11 @@ import {
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
 import { assertRelayerIconRendererReady } from "./product-workspace/icons.js";
-import { initializeDesktopAccountUi, refreshDesktopAccountUi } from "./desktop-account.js";
+import {
+  initializeDesktopAccountUi,
+  refreshDesktopAccountUi,
+  revealDesktopWorkspace,
+} from "./desktop-account.js";
 
 function applyPlatformCopy() {
   const isMac = desktop?.platform === "darwin";
@@ -293,7 +297,6 @@ async function boot() {
     updateCreateThreadAvailability();
     updateTutorialAvailability();
     await refreshDesktopAccountUi({ offerOnboarding: true });
-    return true;
   });
   const account = await refreshAccount();
   await initializeProviderSettings();
@@ -317,10 +320,7 @@ async function boot() {
   await initializeDesktopAccountUi({
     desktop,
     offerOnboarding: account?.status === "connected",
-    showWorkspace: () => {
-      document.body.classList.remove("desktop-account-pending");
-      showApplication();
-    },
+    showWorkspace: () => revealDesktopWorkspace(showApplication),
     openSettings: () => {
       setSettingsTab("account");
       $("#settingsButton").click();
@@ -359,6 +359,6 @@ async function boot() {
 }
 
 void boot().catch((error) => {
-  showApplication();
+  revealDesktopWorkspace(showApplication);
   toast(error.message);
 });

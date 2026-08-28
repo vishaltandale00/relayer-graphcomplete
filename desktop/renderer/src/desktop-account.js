@@ -1,5 +1,10 @@
 export const ACCOUNT_ONBOARDING_PREFERENCE_KEY = "relayerDesktopAccountOnboardingV1";
 
+export function revealDesktopWorkspace(showApplication, body = document.body) {
+  body.classList.remove("desktop-account-pending");
+  showApplication();
+}
+
 const STATUSES = new Set(["signed-out", "signing-in", "signed-in", "uncertain", "error"]);
 const REASONS = new Set(["offline", "unverifiable", "authentication-failed", "storage-unavailable"]);
 
@@ -71,6 +76,22 @@ export function createDesktopAccountController({ api, elements, storage, openSet
   let bound = false;
   let workspaceShown = false;
 
+  function onboardingPreference() {
+    try {
+      return storage.getItem(ACCOUNT_ONBOARDING_PREFERENCE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  function rememberOnboardingPreference(value) {
+    try {
+      storage.setItem(ACCOUNT_ONBOARDING_PREFERENCE_KEY, value);
+    } catch {
+      // Preference persistence is best effort and must never block local use.
+    }
+  }
+
   function finishOnboarding() {
     elements.onboarding.classList.add("hidden");
     elements.accountButton.classList.remove("hidden");
@@ -102,14 +123,14 @@ export function createDesktopAccountController({ api, elements, storage, openSet
     elements.onboardingSignIn.disabled = current.status === "signing-in";
     const automaticOffer = offerOnboarding
       && (current.status === "signed-out" || current.status === "error")
-      && storage.getItem(ACCOUNT_ONBOARDING_PREFERENCE_KEY) === null;
+      && onboardingPreference() === null;
     if (automaticOffer) {
       offerStandaloneOnboarding();
     } else if (offerOnboarding) {
       finishOnboarding();
     }
     if (current.status === "signed-in" && !elements.onboarding.classList.contains("hidden")) {
-      storage.setItem(ACCOUNT_ONBOARDING_PREFERENCE_KEY, "completed");
+      rememberOnboardingPreference("completed");
       finishOnboarding();
     }
     return current;
@@ -128,7 +149,7 @@ export function createDesktopAccountController({ api, elements, storage, openSet
     bound = true;
     elements.accountButton.onclick = () => openSettings();
     elements.onboardingNotNow.onclick = () => {
-      storage.setItem(ACCOUNT_ONBOARDING_PREFERENCE_KEY, "dismissed");
+      rememberOnboardingPreference("dismissed");
       finishOnboarding();
     };
     elements.onboardingSignIn.onclick = () => void invoke(api.login);
@@ -150,7 +171,7 @@ export function createDesktopAccountController({ api, elements, storage, openSet
       try {
         return render(await api.read(), options);
       } catch {
-        return render({ status: "error", channel: current.channel, reason: "authentication-failed" });
+        return render({ status: "error", channel: current.channel, reason: "authentication-failed" }, options);
       }
     },
   };

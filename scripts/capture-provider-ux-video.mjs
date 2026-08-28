@@ -290,10 +290,30 @@ async function recordBrowserFlow(url, directory, profile) {
       await click('[data-onboarding-family-kind="create"]');
       await click('[data-onboarding-member-model="gpt-5.2-mini"]');
       await click("#finishProviderSetup");
-      await waitFor("!document.querySelector('#desktopAccountOnboarding').classList.contains('hidden')", "optional account step");
+      await waitFor(`(() => {
+        const accountStep = document.querySelector('#desktopAccountOnboarding');
+        return !accountStep.classList.contains('hidden')
+          && document.querySelector('#authScreen').classList.contains('hidden')
+          && !document.querySelector('#appShell').classList.contains('hidden')
+          && document.body.classList.contains('desktop-account-pending');
+      })()`, "isolated optional account step");
       await caption("3 · Choose optional Relayer account sign-in before entering the workspace");
       await click("#desktopAccountOnboardingNotNow");
       await waitFor("!document.querySelector('#appShell').classList.contains('hidden') && !document.body.classList.contains('desktop-account-pending')", "desktop application");
+      await evaluate(`(() => {
+        const control = document.querySelector('#desktopAccountButton');
+        const rect = control.getBoundingClientRect();
+        const style = getComputedStyle(control);
+        const rightGap = window.innerWidth - rect.right;
+        const bottomGap = window.innerHeight - rect.bottom;
+        if (style.position !== 'fixed' || Math.abs(rightGap - 16) > 1 || Math.abs(bottomGap - 14) > 1) {
+          throw new Error('Account control is not anchored to the viewport bottom-right corner.');
+        }
+        if (control.closest('.sidebar') || /preview|stable/i.test(control.textContent)) {
+          throw new Error('Everyday account control leaked sidebar or release-channel presentation.');
+        }
+        return true;
+      })()`);
       await click('[data-model-picker="new"] [data-model-picker-trigger]');
       await waitFor(`(() => {
         const picker = document.querySelector('[data-model-picker="new"]');
