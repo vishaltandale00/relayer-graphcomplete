@@ -30,13 +30,10 @@ function reasonLabel(reason) {
 }
 
 function presentation(state) {
-  const channel = state.channel === "preview" ? "Preview" : "Stable";
   if (state.status === "signed-in") {
     return {
       accountButton: "Account",
       status: "Signed in",
-      detail: `Pseudonymous account ID: ${state.subject ?? "Unavailable"}. Privacy-filtered error reports may be associated with this ID.`,
-      channel,
       canSignIn: false,
       canLogout: true,
     };
@@ -45,18 +42,14 @@ function presentation(state) {
     return {
       accountButton: "Signing in…",
       status: "Finish signing in in your browser",
-      detail: "Relayer remains fully usable while sign-in is in progress.",
-      channel,
       canSignIn: false,
       canLogout: false,
     };
   }
   if (state.status === "uncertain" || state.status === "error") {
     return {
-      accountButton: "Account",
+      accountButton: state.status === "error" ? "Sign in" : "Account",
       status: reasonLabel(state.reason),
-      detail: "Local features remain available. Error reporting is paused until the account can be verified.",
-      channel,
       canSignIn: state.status === "error",
       canLogout: state.status === "uncertain",
     };
@@ -64,8 +57,6 @@ function presentation(state) {
   return {
     accountButton: "Sign in",
     status: "Signed out",
-    detail: "Sign in to associate privacy-filtered error reports with a pseudonymous account ID. Relayer's local features do not require an account.",
-    channel,
     canSignIn: true,
     canLogout: false,
   };
@@ -75,6 +66,7 @@ export function createDesktopAccountController({ api, elements, storage, openSet
   let current = normalizeDesktopAccountState(null);
   let bound = false;
   let workspaceShown = false;
+  let loginInFlight = false;
 
   function onboardingPreference() {
     try {
@@ -109,18 +101,23 @@ export function createDesktopAccountController({ api, elements, storage, openSet
   function render(value, { offerOnboarding = false } = {}) {
     current = normalizeDesktopAccountState(value);
     const copy = presentation(current);
+    const directSignIn = current.status === "signed-out" || current.status === "error";
     elements.accountButton.textContent = copy.accountButton;
-    elements.accountButton.setAttribute("aria-label", `${copy.accountButton}. Open Account settings.`);
+    elements.accountButton.setAttribute("aria-label", directSignIn
+      ? "Sign in to Relayer."
+      : `${copy.accountButton}. Open Account settings.`);
+    elements.accountButton.setAttribute("title", current.status === "signing-in"
+      ? "Signing in…"
+      : directSignIn ? "Sign in" : "Account");
+    elements.accountButton.disabled = loginInFlight || current.status === "signing-in";
     elements.settingsStatus.textContent = copy.status;
-    elements.settingsDetail.textContent = copy.detail;
-    elements.settingsChannel.textContent = copy.channel;
     elements.settingsSignIn.classList.toggle("hidden", !copy.canSignIn);
     elements.settingsLogout.classList.toggle("hidden", !copy.canLogout);
-    elements.settingsSignIn.disabled = current.status === "signing-in";
+    elements.settingsSignIn.disabled = loginInFlight || current.status === "signing-in";
     elements.settingsLogout.disabled = current.status === "signing-in";
     elements.onboardingChannel.textContent = "Optional account";
     elements.onboardingStatus.textContent = "Sign in to connect privacy-filtered error reports to a pseudonymous account. Your projects and conversations stay local, and you can continue without an account.";
-    elements.onboardingSignIn.disabled = current.status === "signing-in";
+    elements.onboardingSignIn.disabled = loginInFlight || current.status === "signing-in";
     const automaticOffer = offerOnboarding
       && (current.status === "signed-out" || current.status === "error")
       && onboardingPreference() === null;
@@ -144,16 +141,36 @@ export function createDesktopAccountController({ api, elements, storage, openSet
     }
   }
 
+  async function signIn() {
+    if (loginInFlight) return current;
+    loginInFlight = true;
+    render({ status: "signing-in", channel: current.channel });
+    let result;
+    try {
+      result = await api.login();
+    } catch {
+      result = { status: "error", channel: current.channel, reason: "authentication-failed" };
+    }
+    loginInFlight = false;
+    return render(result);
+  }
+
   function bind() {
     if (bound) return;
     bound = true;
-    elements.accountButton.onclick = () => openSettings();
+    elements.accountButton.onclick = () => {
+      if (current.status === "signed-out" || current.status === "error") {
+        void signIn();
+      } else {
+        openSettings();
+      }
+    };
     elements.onboardingNotNow.onclick = () => {
       rememberOnboardingPreference("dismissed");
       finishOnboarding();
     };
-    elements.onboardingSignIn.onclick = () => void invoke(api.login);
-    elements.settingsSignIn.onclick = () => void invoke(api.login);
+    elements.onboardingSignIn.onclick = () => void signIn();
+    elements.settingsSignIn.onclick = () => void signIn();
     elements.settingsLogout.onclick = () => void invoke(api.logout);
     api.onChanged((value) => render(value));
   }
@@ -189,8 +206,6 @@ function accountElements() {
     onboardingSignIn: byId("desktopAccountOnboardingSignIn"),
     onboardingNotNow: byId("desktopAccountOnboardingNotNow"),
     settingsStatus: byId("desktopAccountStatus"),
-    settingsDetail: byId("desktopAccountDetail"),
-    settingsChannel: byId("desktopAccountChannel"),
     settingsSignIn: byId("desktopAccountSignIn"),
     settingsLogout: byId("desktopAccountLogout"),
   };

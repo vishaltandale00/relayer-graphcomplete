@@ -58,6 +58,8 @@ if (scene === "removed") {
   definitions[0].lifecycleState = "removal_pending";
 }
 window.__providerEvidence = { get definitions() { return definitions; } };
+let accountLoginCalls = 0;
+Object.defineProperty(window.__providerEvidence, "accountLoginCalls", { get: () => accountLoginCalls });
 const listeners = new Set();
 const noopSubscription = (callback) => {
   listeners.add(callback);
@@ -67,8 +69,11 @@ const noopSubscription = (callback) => {
 window.relayerDesktop = {
   platform: "darwin",
   account: {
-    read: async () => ({ status: "disconnected" }),
-    login: async () => ({}),
+    read: async () => ({ status: "signed-out", channel: "stable" }),
+    login: async () => {
+      accountLoginCalls += 1;
+      return { status: "signing-in", channel: "stable" };
+    },
     logout: async () => ({}),
     onChanged: noopSubscription,
   },

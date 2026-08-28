@@ -774,8 +774,9 @@ type CompleteResult =
 <p>The Relayer account is separate from every agent-provider credential. Stable and Preview open the branded <code>app.relayerlabs.ai/desktop/login</code> launcher and authenticate directly with the Auth0 Native Application using Authorization Code and PKCE. No Relayer authentication API, custom desktop session, database row, or Relayer user UUID participates.</p>
 <ul>
 <li>The final onboarding offer explains that privacy-filtered error reports may use a pseudonymous Auth0 subject.</li>
-<li><strong>Sign in</strong> opens the browser flow. <strong>Not now</strong> durably suppresses later automatic offers.</li>
-<li>A quiet sidebar control and Account settings keep manual sign-in, logout, channel diagnostics, and the privacy explanation available.</li>
+<li><strong>Sign in</strong> opens the browser flow. <strong>Continue without an account</strong> durably suppresses later automatic offers.</li>
+<li>The bottom-right <strong>Sign in</strong> control starts the browser flow directly while signed out.</li>
+<li>For an existing account, the same control opens a minimal Account panel with status and the applicable action.</li>
 <li>Signed-out, signing-in, uncertain, error, offline, cancellation, and refresh failure never gate local product use.</li>
 <li>Logout disables the current telemetry generation and clears the encrypted local refresh credential before best-effort Auth0 revocation. It does not sign the browser out.</li>
 </ul>
@@ -824,7 +825,7 @@ type InteractionModelBinding = {
 <li><strong>ACC-005:</strong> The renderer never receives codes, state, PKCE material, tokens, Auth0 configuration, email, profile data, network authority, or the telemetry generation.</li>
 <li><strong>ACC-006:</strong> Refresh rotation and logout cannot resurrect stale credentials after generation invalidation.</li>
 <li><strong>ACC-007:</strong> Optional account sign-in is a dedicated onboarding step after provider setup and before projects, chats, threads, or the desktop workspace are revealed. Sign in and Continue without an account both resolve the step, and account failure cannot trap local use.</li>
-<li><strong>ACC-008:</strong> After onboarding, the account control is anchored to the application viewport's bottom-right corner and never shows Stable or Preview. Release channel appears only in Account settings and diagnostics.</li>
+<li><strong>ACC-008:</strong> The bottom-right control starts sign-in directly while signed out and opens minimal settings for an existing account. Account UX never shows Stable or Preview.</li>
 </ul>
 <h3>2.7 Verification</h3>
 <p>Deterministic UI tests cover each selector transition, conditional field, validation error, and disabled state. They also cover secure storage and secret removal. Credential-adapter integration tests use fake Codex and provider servers.</p>
@@ -834,7 +835,7 @@ type InteractionModelBinding = {
 <tr><td><code>ACC-001</code> and <code>ACC-003</code></td><td><code>test/desktop-account-session.test.mjs</code> drives local fake Auth0 token and JWKS endpoints, PKCE exchange, claim rejection, refresh, and revocation. Production Auth0 is never contacted.</td></tr>
 <tr><td><code>ACC-002</code></td><td>The same suite occupies callback ports, switches Stable and Preview pools, races concurrent controls, and verifies exact callback failure and listener closure.</td></tr>
 <tr><td><code>ACC-004</code> and <code>ACC-006</code></td><td>Generation tests cover unverifiable restart, logout ordering, stale exchange completion, and a paused credential commit followed by deletion.</td></tr>
-<tr><td><code>ACC-005</code>, <code>ACC-007</code>, and <code>ACC-008</code></td><td><code>test/desktop-account-ui.test.mjs</code> verifies the optional startup gate, viewport account control, channel-neutral label, settings diagnostics, actions, and contained failures.</td></tr>
+<tr><td><code>ACC-005</code>, <code>ACC-007</code>, and <code>ACC-008</code></td><td><code>test/desktop-account-ui.test.mjs</code> verifies the startup gate, direct account control, minimal settings, action coalescing, and contained failures.</td></tr>
 </tbody>
 </table>
 <p>One optional authentication smoke test runs before a signed release. It is not in the default test suite. It does not make a paid Complete call.</p>

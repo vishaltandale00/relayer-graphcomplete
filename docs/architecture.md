@@ -258,9 +258,10 @@ effort remote revocation, without signing the browser out. See
 After provider setup, the optional account decision is a dedicated full-screen
 onboarding step. The desktop workspace is not revealed until the user signs in or
 explicitly continues without an account. Once resolved, a viewport-anchored
-bottom-right account control provides manual access; its everyday label is
-channel-neutral. Stable or Preview remains visible only in Account settings and
-diagnostics.
+bottom-right control starts sign-in directly while signed out and opens Account
+settings for an existing account. The Account panel contains only concise status
+and the applicable sign-in or logout action. Stable or Preview is not part of the
+account UX; callback-pool diagnostics remain main-owned.
 
 ## Desktop release boundary
 
