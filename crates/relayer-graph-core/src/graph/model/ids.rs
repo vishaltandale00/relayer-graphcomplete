@@ -49,3 +49,43 @@ integer_id!(NodeId);
 integer_id!(EdgeId);
 integer_id!(LayerId);
 integer_id!(ActionId);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InteractionInputChildId(i64);
+
+impl InteractionInputChildId {
+    pub fn new(value: i64) -> Option<Self> {
+        (value > 0).then_some(Self(value))
+    }
+}
+
+impl fmt::Display for InteractionInputChildId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "interaction-input-child:{}", self.0)
+    }
+}
+
+impl Serialize for InteractionInputChildId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for InteractionInputChildId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        let raw = value
+            .strip_prefix("interaction-input-child:")
+            .ok_or_else(|| D::Error::custom("InteractionInputChildId has an invalid namespace"))?
+            .parse::<i64>()
+            .map_err(D::Error::custom)?;
+        Self::new(raw)
+            .ok_or_else(|| D::Error::custom("InteractionInputChildId must be a positive integer"))
+    }
+}

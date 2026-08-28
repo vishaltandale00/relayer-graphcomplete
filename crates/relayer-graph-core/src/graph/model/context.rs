@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{ActionId, GraphNode, LayerId, NodeId, RecordState};
+use crate::{ActionId, GraphNode, LayerId, NodeId, RecordState, SubmittedInput};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +55,8 @@ pub struct InteractionContextAction {
 pub struct InteractionInput {
     pub interaction: InteractionInputNode,
     pub contexts: Vec<InteractionContext>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub submitted_inputs: Vec<SubmittedInput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -3106,6 +3106,244 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
 }
 
 #[tokio::test]
+async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
+    let (database, presenting) = setup(Some(project(90)), thread(90)).await;
+    let writer = database.writer_for_subgraph(presenting.id).await.unwrap();
+    let source = node(&writer, "input-source").await;
+    let layer = single_node_layer(&writer, "input-layer", &source).await;
+    for (key, input) in [
+        (
+            "text",
+            InputAction {
+                control: InputControl::Text,
+                prompt: "Explain the tradeoff".into(),
+                options: vec![],
+                minimum_selections: None,
+            },
+        ),
+        (
+            "select",
+            InputAction {
+                control: InputControl::MultiSelect,
+                prompt: "Choose evidence".into(),
+                options: vec![
+                    InputOption {
+                        key: "logs".into(),
+                        label: "Logs".into(),
+                    },
+                    InputOption {
+                        key: "traces".into(),
+                        label: "Traces".into(),
+                    },
+                ],
+                minimum_selections: Some(1),
+            },
+        ),
+    ] {
+        writer
+            .add_action(&ActionDraft {
+                client_key: key.into(),
+                source_node_id: source.id,
+                source_layer_id: Some(layer.id),
+                kind: ActionKind::Input,
+                relation: None,
+                label: key.into(),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: None,
+                input: Some(input),
+            })
+            .await
+            .unwrap();
+    }
+    root_expand(&writer, &presenting, &layer).await;
+    writer.complete(presenting.id).await.unwrap();
+    let accepted = writer.get_layer(layer.id).await.unwrap();
+    let text_action = accepted
+        .actions
+        .iter()
+        .find(|action| action.label == "text")
+        .unwrap();
+    let select_action = accepted
+        .actions
+        .iter()
+        .find(|action| action.label == "select")
+        .unwrap();
+    let text = SubmittedInputDraft {
+        occurrence: PresentingInputOccurrence {
+            presenting_interaction_node_id: presenting.id,
+            presenting_layer_id: layer.id,
+            action_id: text_action.id,
+        },
+        action: text_action.input.clone().unwrap(),
+        value: SubmittedInputValue::Text {
+            text: "  Preserve this exactly.  ".into(),
+        },
+    };
+    let select = SubmittedInputDraft {
+        occurrence: PresentingInputOccurrence {
+            presenting_interaction_node_id: presenting.id,
+            presenting_layer_id: layer.id,
+            action_id: select_action.id,
+        },
+        action: select_action.input.clone().unwrap(),
+        value: SubmittedInputValue::Selected {
+            selected: vec![
+                InputOption {
+                    key: "traces".into(),
+                    label: "Traces".into(),
+                },
+                InputOption {
+                    key: "logs".into(),
+                    label: "Logs".into(),
+                },
+            ],
+        },
+    };
+    let first_order = vec![select.clone(), text.clone()];
+    let second_order = vec![text, select];
+    let digest = interaction_input_authority_digest("", &first_order).unwrap();
+    assert_eq!(
+        digest,
+        interaction_input_authority_digest("", &second_order).unwrap()
+    );
+
+    let (root, children) = database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(91),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:90",
+                authority_digest: &digest,
+                contexts: &[],
+                submitted_inputs: &first_order,
+            },
+        )
+        .await
+        .unwrap();
+    let (replayed, replayed_children) = database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(91),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:90",
+                authority_digest: &digest,
+                contexts: &[],
+                submitted_inputs: &second_order,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(replayed.id, root.id);
+    assert_eq!(replayed_children, children);
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0].parent_interaction_node_id, root.id);
+    assert_eq!(children[0].source_node_id, source.id);
+    let child_id = serde_json::to_value(children[0].id).unwrap();
+    assert!(
+        child_id
+            .as_str()
+            .unwrap()
+            .starts_with("interaction-input-child:")
+    );
+    assert!(serde_json::from_value::<NodeId>(child_id).is_err());
+
+    let normalized = database
+        .writer_for_subgraph(root.id)
+        .await
+        .unwrap()
+        .interaction_input()
+        .await
+        .unwrap();
+    assert_eq!(normalized.interaction.detail, "");
+    assert_eq!(normalized.submitted_inputs.len(), 2);
+    let visible = serde_json::to_value(&normalized.submitted_inputs).unwrap();
+    assert!(!visible.to_string().contains("actionId"));
+    assert!(!visible.to_string().contains("presentingLayerId"));
+    assert!(!visible.to_string().contains("attempt"));
+    assert!(visible.to_string().contains("Preserve this exactly"));
+
+    let changed_inputs = [second_order[0].clone()];
+    let changed_digest = interaction_input_authority_digest("", &changed_inputs).unwrap();
+    let conflict = database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(91),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:90",
+                authority_digest: &changed_digest,
+                contexts: &[],
+                submitted_inputs: &changed_inputs,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        conflict,
+        GraphError::Validation {
+            code: "interaction_input_attempt_conflict",
+            ..
+        }
+    ));
+
+    let malformed = SubmittedInputDraft {
+        occurrence: second_order[1].occurrence.clone(),
+        action: second_order[1].action.clone(),
+        value: SubmittedInputValue::Selected {
+            selected: vec![InputOption {
+                key: "unknown".into(),
+                label: "Forged".into(),
+            }],
+        },
+    };
+    let malformed_digest =
+        interaction_input_authority_digest("", std::slice::from_ref(&malformed)).unwrap();
+    let malformed_inputs = [malformed];
+    let error = database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(92),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:bad",
+                authority_digest: &malformed_digest,
+                contexts: &[],
+                submitted_inputs: &malformed_inputs,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "input_option_unknown",
+            ..
+        }
+    ));
+    let repaired_inputs = [second_order[1].clone()];
+    let repaired_digest = interaction_input_authority_digest("", &repaired_inputs).unwrap();
+    database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(92),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:bad",
+                authority_digest: &repaired_digest,
+                contexts: &[],
+                submitted_inputs: &repaired_inputs,
+            },
+        )
+        .await
+        .expect("invalid child preparation must roll back the root and exact child set atomically");
+}
+
+#[tokio::test]
 async fn action_presentation_errors_are_repairable() {
     let (database, interaction) = setup(Some(project(1)), thread(1)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();

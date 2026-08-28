@@ -3,15 +3,17 @@ use std::path::Path;
 use crate::{
     AcceptedGraphClosure, CompletionState, CurrentProjectionEvent, CurrentProjectionPage,
     CurrentTransitionReceipt, GraphError, GraphNode, GraphWriter, InteractionContextAction,
-    InteractionContextDraft, InteractionContextTarget, InteractionInputNode, InteractionInvocation,
-    NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
+    InteractionContextDraft, InteractionContextTarget, InteractionInputChild, InteractionInputNode,
+    InteractionInputPreparation, InteractionInvocation, NodeId, PresentingInputOccurrence,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, SubmittedInputDraft,
     TemporalFeatureConfig, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
-    interaction_input_digest,
+    interaction_input_authority_digest, interaction_input_digest,
     storage::{
         SqliteGraphStore,
         sqlite::{
-            actions::ActionTable, contexts::ContextTable, currents::CurrentTable, nodes::NodeTable,
+            actions::ActionTable, contexts::ContextTable, currents::CurrentTable,
+            input_children::InputChildTable, nodes::NodeTable,
         },
     },
 };
@@ -261,6 +263,127 @@ impl GraphDatabase {
             .await?;
         transaction.commit().await?;
         Ok((node, actions))
+    }
+
+    pub async fn create_identified_interaction_with_inputs(
+        &self,
+        project_id: Option<ProjectId>,
+        thread_id: ThreadId,
+        text: &str,
+        input: InteractionInputPreparation<'_>,
+    ) -> Result<(GraphNode, Vec<InteractionInputChild>), GraphError> {
+        let InteractionInputPreparation {
+            attempt_key: input_identity,
+            authority_digest,
+            contexts,
+            submitted_inputs: attachments,
+        } = input;
+        require_nonempty(input_identity, "attemptKey")?;
+        require_nonempty(authority_digest, "authorityDigest")?;
+        let computed_digest =
+            interaction_input_authority_digest(text, attachments).map_err(|error| {
+                GraphError::Internal(format!("could not digest submitted input: {error}"))
+            })?;
+        if authority_digest != computed_digest {
+            return Err(GraphError::validation(
+                "interaction_input_digest_mismatch",
+                "authorityDigest",
+                "The supplied authority digest does not match the exact message and submitted inputs.",
+            ));
+        }
+        if text.trim().is_empty()
+            && attachments.is_empty()
+            && !contexts
+                .iter()
+                .flat_map(|context| &context.annotations)
+                .any(|annotation| !annotation.trim().is_empty())
+        {
+            return Err(GraphError::validation(
+                "interaction_input_required",
+                "interaction",
+                "Supply nonempty root text or at least one valid child.",
+            ));
+        }
+
+        let mut transaction = self.storage.begin_write().await?;
+        let mut nodes = NodeTable::new(&mut transaction);
+        let identified = nodes
+            .identified_interaction(thread_id, input_identity, authority_digest)
+            .await
+            .map_err(|error| match error {
+                GraphError::Validation {
+                    code: "interaction_input_conflict",
+                    ..
+                } => GraphError::validation(
+                    "interaction_input_attempt_conflict",
+                    "attemptKey",
+                    "Recover the existing attempt instead of reusing its key with different input.",
+                ),
+                other => other,
+            })?;
+        if let Some(node) = identified {
+            let scope = InteractionScope {
+                project_id,
+                thread_id,
+                root_node_id: node.id,
+                read_only: false,
+            };
+            let persisted_contexts = ContextTable::new(&mut transaction)
+                .actions(&scope)
+                .await?
+                .into_iter()
+                .map(|action| InteractionContextDraft {
+                    target: action.target,
+                    annotations: action.annotations,
+                })
+                .collect::<Vec<_>>();
+            let children = InputChildTable::new(&mut transaction)
+                .children(node.id)
+                .await?;
+            let persisted_attachments = children
+                .iter()
+                .map(|child| SubmittedInputDraft {
+                    occurrence: child.occurrence.clone(),
+                    action: child.action.clone(),
+                    value: child.value.clone(),
+                })
+                .collect::<Vec<_>>();
+            let mut supplied = attachments.to_vec();
+            for attachment in &mut supplied {
+                attachment.value = attachment.value.canonicalized();
+            }
+            supplied.sort_by_key(|attachment| attachment.occurrence.clone());
+            if persisted_contexts != contexts || persisted_attachments != supplied {
+                return Err(GraphError::validation(
+                    "interaction_input_attempt_conflict",
+                    "attemptKey",
+                    "Recover the existing attempt instead of reusing its key with different input.",
+                ));
+            }
+            transaction.commit().await?;
+            return Ok((node, children));
+        }
+
+        let node = nodes
+            .insert_interaction(project_id, thread_id, text, None)
+            .await?;
+        nodes
+            .set_input_identity(node.id, input_identity, authority_digest)
+            .await?;
+        let scope = InteractionScope {
+            project_id,
+            thread_id,
+            root_node_id: node.id,
+            read_only: false,
+        };
+        ContextTable::new(&mut transaction)
+            .insert_all(&scope, contexts)
+            .await?;
+        let children = InputChildTable::new(&mut transaction)
+            .validate_and_insert_all(&scope, text, input_identity, authority_digest, attachments)
+            .await?;
+        transaction.commit().await?;
+        Ok((node, children))
     }
 
     pub async fn writer_for_subgraph(&self, node_id: NodeId) -> Result<GraphWriter, GraphError> {

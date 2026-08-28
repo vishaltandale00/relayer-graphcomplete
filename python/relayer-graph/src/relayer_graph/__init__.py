@@ -2,7 +2,7 @@
 
 from .authoring import (ActionVariant, CompletionInputGraph, EdgeObject, GraphAuthoringClient, GraphEdge,
                         GraphLayer, GraphNode, InteractionContext, InteractionInput,
-                        InteractionInputNode,
+                        InteractionInputNode, SubmittedInput,
                         LayerLayout, LayerLayoutObject,
                         InputControl, InputOption, LayerObject, NavigateRelation, NodeObject, NodePlacement,
                         NodePlacementObject, RelayerGraphClient)
@@ -23,7 +23,7 @@ __all__ = [
     "Client", "GraphClient", "RelayerGraphClient", "GraphAuthoringClient",
     "GraphSession",
     "NodeObject", "EdgeObject", "LayerObject", "NodePlacementObject", "LayerLayoutObject",
-    "GraphNode", "GraphEdge", "GraphLayer", "InteractionContext", "InteractionInput", "InteractionInputNode",
+    "GraphNode", "GraphEdge", "GraphLayer", "InteractionContext", "InteractionInput", "InteractionInputNode", "SubmittedInput",
     "NodePlacement", "LayerLayout",
     "ActionVariant", "NavigateRelation", "InputControl", "InputOption",
     "CompletionInputGraph",

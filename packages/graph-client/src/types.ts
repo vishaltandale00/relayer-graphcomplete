@@ -146,6 +146,22 @@ export interface InteractionContext {
 export interface InteractionInput {
   readonly interaction: InteractionInputNode;
   readonly contexts: readonly InteractionContext[];
+  readonly submittedInputs?: readonly SubmittedInput[];
+}
+
+export type SubmittedInputAction =
+  | { readonly control: "text"; readonly prompt: string }
+  | { readonly control: "single_select"; readonly prompt: string; readonly options: readonly InputOption[] }
+  | { readonly control: "multi_select"; readonly prompt: string; readonly options: readonly InputOption[]; readonly minimumSelections?: number };
+
+export type SubmittedInputValue =
+  | { readonly text: string }
+  | { readonly selected: readonly InputOption[] };
+
+/** Authority-free semantic snapshot of one immutable direct interaction input child. */
+export interface SubmittedInput {
+  readonly action: SubmittedInputAction;
+  readonly value: SubmittedInputValue;
 }
 
 /** Model-visible node contents without invocation or occurrence authority. */
