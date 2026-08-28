@@ -338,8 +338,8 @@ export async function captureLadybugPackagedLifecycle({
   }
   await execFileAsync("git", ["cat-file", "-e", `${sourceCommit}^{commit}`]);
   const target = desktopTargetFromEnvironment(environment);
-  if (target.platform !== "darwin" || target.architecture !== "arm64") {
-    throw new Error("the local #261 packaged Ladybug proof supports only macOS arm64");
+  if (target.platform !== "darwin") {
+    throw new Error("the local #261 packaged Ladybug proof supports only macOS targets");
   }
   const manifest = await loadLadybugSourceManifest();
   const {
@@ -458,6 +458,8 @@ export async function captureLadybugPackagedLifecycle({
     dependencyIsolation: "locked-offline-npm-ci-and-generated-assets",
     target: target.key,
     rustTarget: target.rustTarget,
+    hostArchitecture: process.arch,
+    executionMode: process.arch === target.architecture ? "native" : "rosetta",
     application: basename(appPath),
     binary: "Contents/Resources/bin/relayer-graph-server",
     binarySha256,
@@ -468,7 +470,11 @@ export async function captureLadybugPackagedLifecycle({
     inputSha256,
     preparedReceiptSha256,
     ...lifecycle,
-    limitations: ["local macOS arm64 only", "unsigned development package", "not release-ready licensing evidence"],
+    limitations: [
+      `local ${target.key} ${process.arch === target.architecture ? "native" : "Rosetta"} execution only`,
+      "unsigned development package",
+      "not release-ready licensing evidence",
+    ],
   };
     return result;
   } catch (error) {
