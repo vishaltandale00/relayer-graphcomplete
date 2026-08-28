@@ -133,6 +133,9 @@ describe("ClaudeBasicHarness", () => {
       const { prompt, options } = calls[0]!;
       expect(prompt).toContain("sourceLayer");
       expect(prompt).toContain("clientKey");
+      expect(prompt).toContain("Use the harness's ordinary workspace tools and reasoning as needed");
+      expect(prompt).not.toContain("Codex");
+      expect(prompt).not.toContain("native delegation");
       expectGraphPresentationGuidance(prompt);
       expect(options).toMatchObject({
         cwd: "/tmp",
