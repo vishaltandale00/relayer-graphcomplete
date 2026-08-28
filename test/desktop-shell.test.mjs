@@ -784,7 +784,7 @@ describe("desktop skeleton", () => {
           message: "Prime Agent Ask and Auto require macOS. Choose another available harness on this device.",
         },
         diagnostics: {
-          sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326",
+          sourceCommit: "dcf944527913245e3d4937f2143081894db8eaeb",
           packages: [{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }],
         },
       }],
@@ -808,7 +808,7 @@ describe("desktop skeleton", () => {
       expect(catalog.unavailableConfigurations).toEqual([expect.objectContaining({
         name: "prime-agent-basic",
         reason: expect.objectContaining({ code: "prime_agent_boundary_unsupported" }),
-        diagnostics: expect.objectContaining({ sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326" }),
+        diagnostics: expect.objectContaining({ sourceCommit: "dcf944527913245e3d4937f2143081894db8eaeb" }),
       })]);
       expect(suppliedToken).toBe(`${session.graphControlToken}\n`);
       expect(invocations[0].args).not.toContain("--control-token");

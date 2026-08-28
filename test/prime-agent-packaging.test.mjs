@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import * as tar from "tar";
 import { describe, expect, it } from "vitest";
 
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
@@ -36,6 +37,23 @@ async function packageFileEntries(root, relativeRoot, output = []) {
   return output;
 }
 
+async function readArchiveFiles(archivePath, wantedPaths) {
+  const files = new Map();
+  await tar.t({
+    file: archivePath,
+    onentry(entry) {
+      if (!wantedPaths.has(entry.path)) {
+        entry.resume();
+        return;
+      }
+      const chunks = [];
+      entry.on("data", (chunk) => chunks.push(chunk));
+      entry.on("end", () => files.set(entry.path, Buffer.concat(chunks)));
+    },
+  });
+  return files;
+}
+
 describe("Prime Agent packaged runtime", () => {
   it("keeps integrity-bound source assets byte-stable across host checkouts", async () => {
     const attributes = await readFile(join(repositoryRoot, ".gitattributes"), "utf8");
@@ -54,7 +72,7 @@ describe("Prime Agent packaged runtime", () => {
     const lockfile = JSON.parse(await readFile(join(repositoryRoot, "package-lock.json"), "utf8"));
     const desktopManifest = JSON.parse(await readFile(join(repositoryRoot, "desktop", "package.json"), "utf8"));
 
-    expect(manifest.source.commit).toBe("bfd41d7786a9177aed5f609f9db3fec2f308a326");
+    expect(manifest.source.commit).toBe("dcf944527913245e3d4937f2143081894db8eaeb");
     expect(manifest.runtimeContract.modelScopeAccess).toBe("upfront-request-access@1");
     expect(manifest.packages).toHaveLength(4);
     for (const entry of manifest.packages) {
@@ -90,6 +108,27 @@ describe("Prime Agent packaged runtime", () => {
     }
   });
 
+  it("ships the tested browser helper at both production skill paths", async () => {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const codingAgent = manifest.packages.find(({ name }) => name === "@earendil-works/pi-coding-agent");
+    const sourcePath = "package/skills/browser/src/browser/__init__.py";
+    const distPath = "package/dist/skills/browser/src/browser/__init__.py";
+    const archiveFiles = await readArchiveFiles(
+      join(repositoryRoot, "vendor", "prime-agent", codingAgent.file),
+      new Set([sourcePath, distPath]),
+    );
+    expect(archiveFiles.get(sourcePath)).toEqual(archiveFiles.get(distPath));
+
+    const helper = archiveFiles.get(sourcePath)?.toString("utf8") ?? "";
+    expect(helper).toContain('element.matches(":disabled")');
+    expect(helper).toContain('element.getAttribute("aria-disabled") === "true"');
+    expect(helper).toContain("HTMLElement.prototype.click.call(element)");
+    expect(helper).toContain('"Page.lifecycleEvent",');
+    expect(helper).toContain('"Page.navigatedWithinDocument",');
+    expect(helper).toContain('params.get("loaderId") == loader_id');
+    expect(helper).toContain('params.get("frameId") == frame_id');
+  });
+
   it("admits only the exact runtime API, production configs, and Python client", async () => {
     await expect(inspectPrimeAgentRuntime({
       appPath: repositoryRoot,
@@ -100,7 +139,7 @@ describe("Prime Agent packaged runtime", () => {
       architecture: "arm64",
     })).resolves.toMatchObject({
       available: true,
-      sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326",
+      sourceCommit: "dcf944527913245e3d4937f2143081894db8eaeb",
       configurationNames: ["prime-agent-basic", "prime-agent-deep"],
     });
 
@@ -122,7 +161,7 @@ describe("Prime Agent packaged runtime", () => {
       code: "prime_agent_api_incompatible",
       message: "This Relayer build cannot use the packaged Prime Agent API. Update Relayer.",
       diagnostics: {
-        sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326",
+        sourceCommit: "dcf944527913245e3d4937f2143081894db8eaeb",
         packages: expect.arrayContaining([{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }]),
       },
     });
