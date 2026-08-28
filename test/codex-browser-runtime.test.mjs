@@ -10,7 +10,6 @@ import {
   inspectCodexBrowserMcpRuntime,
 } from "../desktop/main/services/codex-browser-mcp-runtime.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
-import evalBuilderConfig from "../desktop/packaging/eval-electron-builder.mjs";
 import { resolveDesktopReleaseContract } from "../desktop/release/contract.mjs";
 
 const temporaryDirectories = [];
@@ -84,6 +83,20 @@ describe("Codex browser MCP runtime", () => {
   });
 
   it("pins and unpacks the helper in product and Eval desktop packages", async () => {
+    const previousTarget = process.env.RELAYER_DESKTOP_TARGET;
+    let evalBuilderConfig;
+    try {
+      process.env.RELAYER_DESKTOP_TARGET = "macos-arm64";
+      evalBuilderConfig = await import("../desktop/packaging/eval-electron-builder.mjs").then(
+        ({ default: config }) => config,
+      );
+    } finally {
+      if (previousTarget === undefined) {
+        delete process.env.RELAYER_DESKTOP_TARGET;
+      } else {
+        process.env.RELAYER_DESKTOP_TARGET = previousTarget;
+      }
+    }
     const desktopManifest = JSON.parse(await readFile(new URL("../desktop/package.json", import.meta.url), "utf8"));
     const contract = resolveDesktopReleaseContract({
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },
