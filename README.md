@@ -32,7 +32,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 - The selected harness owns model execution and any provider-native delegation it uses. Codex may use native subagents and Prime Agent may use its native RLM children; GraphComplete does not add another scheduler.
 - GraphComplete owns graph records, active-interaction write authority, validation, accepted-history integrity, and explicit submission. Accepted records are immutable except for ADR 0005's exact one-shot leased-invoke target transition.
-- Relayer owns a hidden, versioned personal-presentation profile. Each execution atomically pins one accepted profile completion through a control-only attachment; the harness renders it without adding preference records to visible response topology or exports. See [ADR 0008](docs/decisions/0008-personal-presentation-graph-attachments.md).
+- Relayer owns a hidden, versioned personal-presentation profile. Each execution atomically pins one accepted profile completion through a control-only attachment; the harness renders it without adding preference records to visible response topology or exports. See [ADR 0009](docs/decisions/0009-personal-presentation-graph-attachments.md).
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
 - Provider adapters own authentication, model discovery, and provider-specific execution details. Product records use stable provider, model, harness, and permission identifiers.
