@@ -255,6 +255,13 @@ invalidates that generation and clears encrypted local credentials before best-
 effort remote revocation, without signing the browser out. See
 [ADR 0008](decisions/0008-direct-auth0-desktop-account.md).
 
+After provider setup, the optional account decision is a dedicated full-screen
+onboarding step. The desktop workspace is not revealed until the user signs in or
+explicitly continues without an account. Once resolved, a viewport-anchored
+bottom-right account control provides manual access; its everyday label is
+channel-neutral. Stable or Preview remains visible only in Account settings and
+diagnostics.
+
 ## Desktop release boundary
 
 Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13 or newer plus Windows x64 and begin at version `0.2.0`.

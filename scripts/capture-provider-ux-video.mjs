@@ -290,7 +290,10 @@ async function recordBrowserFlow(url, directory, profile) {
       await click('[data-onboarding-family-kind="create"]');
       await click('[data-onboarding-member-model="gpt-5.2-mini"]');
       await click("#finishProviderSetup");
-      await waitFor("!document.querySelector('#appShell').classList.contains('hidden')", "desktop application");
+      await waitFor("!document.querySelector('#desktopAccountOnboarding').classList.contains('hidden')", "optional account step");
+      await caption("3 · Choose optional Relayer account sign-in before entering the workspace");
+      await click("#desktopAccountOnboardingNotNow");
+      await waitFor("!document.querySelector('#appShell').classList.contains('hidden') && !document.body.classList.contains('desktop-account-pending')", "desktop application");
       await click('[data-model-picker="new"] [data-model-picker-trigger]');
       await waitFor(`(() => {
         const picker = document.querySelector('[data-model-picker="new"]');
@@ -298,7 +301,7 @@ async function recordBrowserFlow(url, directory, profile) {
           && picker.querySelector('[data-model-option][data-provider-id="openai-work"][data-model-id="gpt-5.2-mini"]')?.getAttribute('aria-checked') === 'true';
       })()`, "onboarded family available in chat before opening Settings");
 
-      await caption("3 · Add and sign out a managed subscription");
+      await caption("4 · Add and sign out a managed subscription");
       await click("#settingsButton");
       await waitFor("document.querySelector('[data-provider-definition=\"openai-work\"]')", "provider settings");
       await click('[data-settings-tab="providers"]');
@@ -314,7 +317,7 @@ async function recordBrowserFlow(url, directory, profile) {
       await click("#refreshProviderCatalogs");
       await waitFor("document.querySelector('#providerSettingsStatus')?.textContent.includes('refreshed')", "manual provider refresh");
 
-      await caption("4 · Confirm the currently usable harnesses");
+      await caption("5 · Confirm the currently usable harnesses");
       await click('[data-settings-tab="harnesses"]');
       await waitFor(`(() => {
         const list = document.querySelector('#harnessConfigurationList');
@@ -325,7 +328,7 @@ async function recordBrowserFlow(url, directory, profile) {
       })()`, "read-only usable harness list");
       await capture(8);
 
-      await caption("5 · Edit, reselect, and retry the same unsent turn");
+      await caption("6 · Edit, reselect, and retry the same unsent turn");
       await click("#settingsBackButton");
       await click('[data-thread="1"]');
       await waitFor("document.querySelector('#composerRetryMessage:not(.hidden)') && !document.querySelector('#threadPrompt').disabled", "editable restored draft");

@@ -10,7 +10,7 @@
   <script src="./theme-bootstrap.js"></script>
   <link rel="stylesheet" href="./styles.css" />
 </head>
-<body>
+<body class="desktop-account-pending">
   <section class="auth-screen hidden" id="authScreen" aria-labelledby="authTitle">
     <div class="auth-card provider-setup-card" aria-busy="false">
       <div class="logo large" role="img" aria-label="Relayer"></div>
@@ -65,7 +65,6 @@
         </div>
       </div>
       <div class="sidebar-footer">
-        <button class="footer-button account-footer-button" id="desktopAccountButton" title="Account">◎<span>Sign in</span></button>
         <button class="footer-button" id="settingsButton" title="Settings">⚙<span>Settings</span></button>
         <button class="update-button hidden" id="updateButton" title="Application update available">↓</button>
       </div>
@@ -196,6 +195,7 @@
         </div>
       </section>
     </main>
+    <button class="desktop-account-corner-control hidden" id="desktopAccountButton" type="button" title="Account">Sign in</button>
   </div>
 
   <dialog class="provider-dialog" id="providerDialog" aria-labelledby="providerDialogTitle">
@@ -205,18 +205,18 @@
       <div class="auth-status" id="providerDialogStatus" role="status" aria-live="polite"></div>
     </form>
   </dialog>
-  <dialog class="desktop-account-onboarding" id="desktopAccountOnboarding" aria-labelledby="desktopAccountOnboardingTitle" aria-describedby="desktopAccountOnboardingStatus">
+  <section class="desktop-account-onboarding hidden" id="desktopAccountOnboarding" aria-labelledby="desktopAccountOnboardingTitle" aria-describedby="desktopAccountOnboardingStatus">
     <div class="desktop-account-onboarding-card">
       <div class="logo large" role="img" aria-label="Relayer"></div>
-      <small id="desktopAccountOnboardingChannel">GraphComplete Desktop</small>
-      <h2 id="desktopAccountOnboardingTitle">Keep error reports connected</h2>
-      <p id="desktopAccountOnboardingStatus">Sign in to associate privacy-filtered error reports with a pseudonymous account ID. All local features work without an account.</p>
+      <small id="desktopAccountOnboardingChannel">Optional account</small>
+      <h2 id="desktopAccountOnboardingTitle">Sign in to Relayer</h2>
+      <p id="desktopAccountOnboardingStatus">Sign in to connect privacy-filtered error reports to a pseudonymous account. Your projects and conversations stay local, and you can continue without an account.</p>
       <div class="desktop-account-onboarding-actions">
-        <button type="button" class="secondary" id="desktopAccountOnboardingNotNow">Not now</button>
+        <button type="button" class="secondary" id="desktopAccountOnboardingNotNow">Continue without an account</button>
         <button type="button" class="primary" id="desktopAccountOnboardingSignIn">Sign in</button>
       </div>
     </div>
-  </dialog>
+  </section>
   <div class="update-popover hidden" id="updatePopover"><button class="icon-button close-popover" id="closeUpdate">×</button><small>Relayer update</small><h3 id="updateTitle">Update available</h3><p id="updateDetail"></p><button class="primary wide" id="updateAction">Download update</button></div>
   <div class="toast hidden" id="toast"></div>
   <script src="./vendor/lucide.min.js"></script>

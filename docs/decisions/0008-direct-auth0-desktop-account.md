@@ -65,11 +65,20 @@ the credential and becomes `signed-out`. Logout first invalidates the generation
 stops the listener, and durably removes encrypted credentials after earlier writes
 settle; remote revocation is best effort and cannot re-enable the generation.
 
-The final onboarding account offer is non-modal and appears only after the local
-workspace is usable. `Not now` durably suppresses later automatic prompts. A quiet
-sidebar control and Account settings retain manual sign-in and logout. No account
-state gates projects, threads, interactions, providers, models, harnesses,
-permissions, updates, or exports.
+After agent-provider setup, optional account sign-in is its own full onboarding
+step before the desktop workspace is revealed. The step is visually independent
+of projects, chats, and threads and offers both `Sign in` and an explicit
+`Continue without an account` action. Continuing without an account durably
+suppresses later automatic prompts; account or network failure never traps the
+user on this optional step.
+
+After onboarding, a quiet account control is anchored to the bottom-right of the
+application viewport rather than participating in sidebar layout. Its ordinary
+label never includes Stable or Preview. Release channel remains visible only in
+Account settings and diagnostics, where it explains callback selection. Account
+settings retain manual sign-in and logout. No account state gates projects,
+threads, interactions, providers, models, harnesses, permissions, updates, or
+exports after the user resolves the onboarding choice.
 
 Default tests use local fake Auth0 and loopback servers. They do not contact the
 production tenant.

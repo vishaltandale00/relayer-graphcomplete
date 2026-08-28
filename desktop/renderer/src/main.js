@@ -293,6 +293,7 @@ async function boot() {
     updateCreateThreadAvailability();
     updateTutorialAvailability();
     await refreshDesktopAccountUi({ offerOnboarding: true });
+    return true;
   });
   const account = await refreshAccount();
   await initializeProviderSettings();
@@ -316,6 +317,10 @@ async function boot() {
   await initializeDesktopAccountUi({
     desktop,
     offerOnboarding: account?.status === "connected",
+    showWorkspace: () => {
+      document.body.classList.remove("desktop-account-pending");
+      showApplication();
+    },
     openSettings: () => {
       setSettingsTab("account");
       $("#settingsButton").click();

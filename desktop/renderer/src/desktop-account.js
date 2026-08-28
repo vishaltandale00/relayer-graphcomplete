@@ -25,11 +25,10 @@ function reasonLabel(reason) {
 }
 
 function presentation(state) {
-  const preview = state.channel === "preview";
-  const channel = preview ? "Preview" : "Stable";
+  const channel = state.channel === "preview" ? "Preview" : "Stable";
   if (state.status === "signed-in") {
     return {
-      accountButton: preview ? "Account · Preview" : "Account",
+      accountButton: "Account",
       status: "Signed in",
       detail: `Pseudonymous account ID: ${state.subject ?? "Unavailable"}. Privacy-filtered error reports may be associated with this ID.`,
       channel,
@@ -39,7 +38,7 @@ function presentation(state) {
   }
   if (state.status === "signing-in") {
     return {
-      accountButton: preview ? "Signing in · Preview" : "Signing in…",
+      accountButton: "Signing in…",
       status: "Finish signing in in your browser",
       detail: "Relayer remains fully usable while sign-in is in progress.",
       channel,
@@ -49,7 +48,7 @@ function presentation(state) {
   }
   if (state.status === "uncertain" || state.status === "error") {
     return {
-      accountButton: preview ? "Account · Preview" : "Account",
+      accountButton: "Account",
       status: reasonLabel(state.reason),
       detail: "Local features remain available. Error reporting is paused until the account can be verified.",
       channel,
@@ -58,7 +57,7 @@ function presentation(state) {
     };
   }
   return {
-    accountButton: preview ? "Sign in · Preview" : "Sign in",
+    accountButton: "Sign in",
     status: "Signed out",
     detail: "Sign in to associate privacy-filtered error reports with a pseudonymous account ID. Relayer's local features do not require an account.",
     channel,
@@ -67,9 +66,24 @@ function presentation(state) {
   };
 }
 
-export function createDesktopAccountController({ api, elements, storage, openSettings }) {
+export function createDesktopAccountController({ api, elements, storage, openSettings, showWorkspace = () => {} }) {
   let current = normalizeDesktopAccountState(null);
   let bound = false;
+  let workspaceShown = false;
+
+  function finishOnboarding() {
+    elements.onboarding.classList.add("hidden");
+    elements.accountButton.classList.remove("hidden");
+    if (workspaceShown) return;
+    workspaceShown = true;
+    showWorkspace();
+  }
+
+  function offerStandaloneOnboarding() {
+    elements.accountButton.classList.add("hidden");
+    elements.onboarding.classList.remove("hidden");
+    elements.onboardingSignIn.focus();
+  }
 
   function render(value, { offerOnboarding = false } = {}) {
     current = normalizeDesktopAccountState(value);
@@ -83,18 +97,20 @@ export function createDesktopAccountController({ api, elements, storage, openSet
     elements.settingsLogout.classList.toggle("hidden", !copy.canLogout);
     elements.settingsSignIn.disabled = current.status === "signing-in";
     elements.settingsLogout.disabled = current.status === "signing-in";
-    elements.onboardingChannel.textContent = current.channel === "preview" ? "GraphComplete Preview" : "GraphComplete Desktop";
-    elements.onboardingStatus.textContent = "Sign in to associate privacy-filtered error reports with a pseudonymous account ID. All local features work without an account.";
+    elements.onboardingChannel.textContent = "Optional account";
+    elements.onboardingStatus.textContent = "Sign in to connect privacy-filtered error reports to a pseudonymous account. Your projects and conversations stay local, and you can continue without an account.";
     elements.onboardingSignIn.disabled = current.status === "signing-in";
-    if (offerOnboarding
-      && current.status === "signed-out"
-      && storage.getItem(ACCOUNT_ONBOARDING_PREFERENCE_KEY) === null
-      && !elements.onboarding.open) {
-      elements.onboarding.show();
+    const automaticOffer = offerOnboarding
+      && (current.status === "signed-out" || current.status === "error")
+      && storage.getItem(ACCOUNT_ONBOARDING_PREFERENCE_KEY) === null;
+    if (automaticOffer) {
+      offerStandaloneOnboarding();
+    } else if (offerOnboarding) {
+      finishOnboarding();
     }
-    if (current.status === "signed-in" && elements.onboarding.open) {
+    if (current.status === "signed-in" && !elements.onboarding.classList.contains("hidden")) {
       storage.setItem(ACCOUNT_ONBOARDING_PREFERENCE_KEY, "completed");
-      elements.onboarding.close();
+      finishOnboarding();
     }
     return current;
   }
@@ -113,8 +129,7 @@ export function createDesktopAccountController({ api, elements, storage, openSet
     elements.accountButton.onclick = () => openSettings();
     elements.onboardingNotNow.onclick = () => {
       storage.setItem(ACCOUNT_ONBOARDING_PREFERENCE_KEY, "dismissed");
-      elements.onboarding.close();
-      elements.accountButton.focus();
+      finishOnboarding();
     };
     elements.onboardingSignIn.onclick = () => void invoke(api.login);
     elements.settingsSignIn.onclick = () => void invoke(api.login);
@@ -128,7 +143,7 @@ export function createDesktopAccountController({ api, elements, storage, openSet
       try {
         return render(await api.read(), options);
       } catch {
-        return render({ status: "error", channel: current.channel, reason: "authentication-failed" });
+        return render({ status: "error", channel: current.channel, reason: "authentication-failed" }, options);
       }
     },
     async refresh(options) {
@@ -160,10 +175,11 @@ function accountElements() {
   };
 }
 
-export async function initializeDesktopAccountUi({ desktop, openSettings, offerOnboarding = false }) {
+export async function initializeDesktopAccountUi({ desktop, openSettings, showWorkspace, offerOnboarding = false }) {
   const accountButton = document.getElementById("desktopAccountButton");
   if (!desktop?.account) {
     accountButton?.classList.add("hidden");
+    showWorkspace?.();
     return null;
   }
   accountController = createDesktopAccountController({
@@ -171,6 +187,7 @@ export async function initializeDesktopAccountUi({ desktop, openSettings, offerO
     elements: accountElements(),
     storage: localStorage,
     openSettings,
+    showWorkspace,
   });
   return accountController.start({ offerOnboarding });
 }

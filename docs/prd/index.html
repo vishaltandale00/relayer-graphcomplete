@@ -823,6 +823,8 @@ type InteractionModelBinding = {
 <li><strong>ACC-004:</strong> Only a verified signed-in generation supplies a telemetry identity. Uncertain and error states pause authenticated telemetry without affecting local features.</li>
 <li><strong>ACC-005:</strong> The renderer never receives codes, state, PKCE material, tokens, Auth0 configuration, email, profile data, network authority, or the telemetry generation.</li>
 <li><strong>ACC-006:</strong> Refresh rotation and logout cannot resurrect stale credentials after generation invalidation.</li>
+<li><strong>ACC-007:</strong> Optional account sign-in is a dedicated onboarding step after provider setup and before projects, chats, threads, or the desktop workspace are revealed. Sign in and Continue without an account both resolve the step, and account failure cannot trap local use.</li>
+<li><strong>ACC-008:</strong> After onboarding, the account control is anchored to the application viewport's bottom-right corner and never shows Stable or Preview. Release channel appears only in Account settings and diagnostics.</li>
 </ul>
 <h3>2.7 Verification</h3>
 <p>Deterministic UI tests cover each selector transition, conditional field, validation error, and disabled state. They also cover secure storage and secret removal. Credential-adapter integration tests use fake Codex and provider servers.</p>
@@ -832,7 +834,7 @@ type InteractionModelBinding = {
 <tr><td><code>ACC-001</code> and <code>ACC-003</code></td><td><code>test/desktop-account-session.test.mjs</code> drives local fake Auth0 token and JWKS endpoints, PKCE exchange, claim rejection, refresh, and revocation. Production Auth0 is never contacted.</td></tr>
 <tr><td><code>ACC-002</code></td><td>The same suite occupies callback ports, switches Stable and Preview pools, races concurrent controls, and verifies exact callback failure and listener closure.</td></tr>
 <tr><td><code>ACC-004</code> and <code>ACC-006</code></td><td>Generation tests cover unverifiable restart, logout ordering, stale exchange completion, and a paused credential commit followed by deletion.</td></tr>
-<tr><td><code>ACC-005</code> and optional UX</td><td><code>test/desktop-account-ui.test.mjs</code> verifies the presentation whitelist, non-gating onboarding, durable <strong>Not now</strong>, Preview copy, settings actions, and contained failures.</td></tr>
+<tr><td><code>ACC-005</code>, <code>ACC-007</code>, and <code>ACC-008</code></td><td><code>test/desktop-account-ui.test.mjs</code> verifies the optional startup gate, viewport account control, channel-neutral label, settings diagnostics, actions, and contained failures.</td></tr>
 </tbody>
 </table>
 <p>One optional authentication smoke test runs before a signed release. It is not in the default test suite. It does not make a paid Complete call.</p>
