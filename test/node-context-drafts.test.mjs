@@ -292,6 +292,46 @@ describe("node-context draft renderer state", () => {
     expect(controller.draftForNode("alpha", 7)).toBeNull();
   });
 
+  it("keeps discard ownership when an older pending save conflicts", async () => {
+    const conflict = Object.assign(new Error("revision conflict"), {
+      code: "context_draft_revision_conflict",
+    });
+    let rejectPendingSave;
+    let resolveList;
+    const api = {
+      list: vi.fn(() => new Promise((resolve) => { resolveList = resolve; })),
+      save: vi.fn()
+        .mockImplementationOnce(async (_threadId, draft) => ({ ...draft, revision: 1 }))
+        .mockImplementationOnce(() => new Promise((_resolve, reject) => {
+          rejectPendingSave = reject;
+        })),
+      discard: vi.fn(async () => null),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "saved text");
+    await controller.flush("alpha", 7);
+    controller.update("alpha", 7, "newer text");
+    const save = controller.flush("alpha", 7);
+
+    const discard = controller.discard("alpha", 7);
+    rejectPendingSave(conflict);
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(1));
+    expect(controller.draftForNode("alpha", 7)?.operation.kind).toBe("discarding");
+    expect(controller.update("alpha", 7, "racing edit")).toBeNull();
+    resolveList({
+      drafts: [{ id: "draft-a", threadId: 1, target, targetNode, text: "remote", revision: 2 }],
+    });
+
+    await Promise.all([save, discard]);
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(api.discard).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ revision: 2 }),
+    );
+    expect(controller.draftForNode("alpha", 7)).toBeNull();
+  });
+
   it("rebases a revision conflict without losing local text", async () => {
     const conflict = Object.assign(new Error("revision conflict"), {
       code: "context_draft_revision_conflict",

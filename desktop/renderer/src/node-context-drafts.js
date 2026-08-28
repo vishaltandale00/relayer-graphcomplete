@@ -235,17 +235,18 @@ export function createNodeContextDraftController({
         const current = controller.draftForNode(threadId, nodeId);
         if (current?.id === draft.id) {
           const conflict = error.code === "context_draft_revision_conflict";
-          revisionConflict = conflict && allowReconcile;
-          if (!parentOperation) {
+          const ownsOperation = current.operation === saveOperation;
+          revisionConflict = conflict && allowReconcile && ownsOperation;
+          if (ownsOperation) {
             current.operation = revisionConflict
               ? { kind: "reconciling" }
               : { kind: "idle" };
           }
           current.status = conflict
-            ? (allowReconcile ? "saving" : "error")
+            ? (revisionConflict ? "saving" : "error")
             : (current.editVersion === savingVersion ? "error" : "unsaved");
           current.error = conflict
-            ? (allowReconcile ? null : "This draft changed again while recovering. Retry save.")
+            ? (revisionConflict ? null : "This draft changed again while recovering. Retry save.")
             : (current.editVersion !== savingVersion ? null : error.message);
           changed();
         }
@@ -334,8 +335,18 @@ export function createNodeContextDraftController({
       try {
         if (draft.timer != null) cancel(draft.timer);
         draft.timer = null;
-        if (pendingSave) await pendingSave.catch(() => null);
+        let pendingSaveError = null;
+        if (pendingSave) {
+          await pendingSave.catch((error) => {
+            pendingSaveError = error;
+          });
+        }
         draft = controller.draftForNode(threadId, nodeId);
+        if (!draft) return true;
+        if (pendingSaveError?.code === "context_draft_revision_conflict") {
+          await controller.load(threadId);
+          draft = controller.draftForNode(threadId, nodeId);
+        }
         if (!draft) return true;
         if (draft?.revision == null && draft?.status === "error") {
           await controller.flush(threadId, nodeId, { allowResolving: true });
