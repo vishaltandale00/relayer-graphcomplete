@@ -11,6 +11,8 @@ import {
   SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
   TRUE_MYTH_INSPECT_BOTH_CASE_ID,
   calibrationAutonomousCaseIds,
+  API_CONTRACT_SIMULATION_LABORATORY_CASE_ID,
+  materializeApiContractSimulationLaboratoryFixture,
 } from "@relayer/eval-runner";
 
 import {
@@ -257,6 +259,7 @@ describe("EvalService simulated-user result persistence", () => {
       SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
       HTTPX_PROXY_AUTH_REPORT_CASE_ID,
       ...calibrationAutonomousCaseIds,
+      "capability.greenfield.api-contract-simulation-laboratory",
     ]);
     const created = await service.createRun(simulatedUserSelection());
     const completed = await waitForCompletedRun(service, created.id);
@@ -341,6 +344,69 @@ describe("EvalService simulated-user result persistence", () => {
     expect(reloaded.catalog().judges.map(({ id }) => id)).toEqual(["deterministic-graph-contract"]);
     expect(await readFile(bundleFile, "utf8")).toBe(bundleBeforeReload);
 
+  });
+
+  it("routes the API laboratory through its dedicated materializer and independent mandatory gates", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const ordinaryProduct = fakeAcceptedProduct();
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      if (new URL(url).pathname === "/api/projects" && options.method === "POST") return jsonResponse({ id: "project-api-lab" });
+      return ordinaryProduct(url, options);
+    });
+    const materializer = vi.fn(materializeApiContractSimulationLaboratoryFixture);
+    const grader = vi.fn(async () => [
+      "contract-import", "mock-routing", "property-contract", "request-validation", "response-validation",
+      "latency-injection", "failure-injection", "bounded-redirect", "bounded-streaming",
+      "revision-comparison", "compatibility-report", "causal-trace", "deterministic-replay", "runtime-contract",
+      "artifact-scope", "protected-contracts", "delivery-commit", "delivery-clean",
+    ].map((name) => ({ name: `workspace:${name}`, passed: true, detail: `${name} passed.` })));
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      apiContractLaboratoryFixtureMaterializer: materializer,
+      apiContractLaboratoryWorkspaceGrader: grader,
+      platform: "darwin",
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: [API_CONTRACT_SIMULATION_LABORATORY_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const completed = await waitForCompletedRun(service, created.id);
+
+    expect(materializer).toHaveBeenCalledOnce();
+    expect(grader).toHaveBeenCalledOnce();
+    expect(completed.executions[0]).toMatchObject({
+      testCaseId: API_CONTRACT_SIMULATION_LABORATORY_CASE_ID,
+      outcomeGrade: {
+        qualified: null,
+        mandatoryGates: expect.arrayContaining([
+          expect.objectContaining({ gateId: "contract-import", passed: true }),
+          expect.objectContaining({ gateId: "deterministic-replay", passed: true }),
+          expect.objectContaining({ gateId: "scoped-api-laboratory-delivery", passed: true }),
+        ]),
+      },
+    });
+  });
+
+  it("withholds the API laboratory from selection when its exact qualification environment is unavailable", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      apiContractLaboratoryEnvironmentPreflight: async () => ({ available: false, reason: "pinned toolchain digest mismatch" }),
+      platform: "darwin",
+    }).open();
+
+    expect(service.catalog().cases.some(({ id }) => id === API_CONTRACT_SIMULATION_LABORATORY_CASE_ID)).toBe(false);
+    await expect(service.createRun({
+      testCaseIds: [API_CONTRACT_SIMULATION_LABORATORY_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("API contract simulation laboratory is unavailable: pinned toolchain digest mismatch");
   });
 
   it("persists explicit partial and thrown-failure artifacts without losing deterministic evidence", async () => {
