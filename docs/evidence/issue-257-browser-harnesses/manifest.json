@@ -5,13 +5,14 @@
   "assemblyMergeBase": "9188a8123b7c40436f0100d124c24103a768d32d",
   "integratedSource": {
     "algorithm": "sha256-of-sorted-path-nul-file-sha256-lf",
-    "sha256": "005d51516817e3a2cf80aa0651c58f8ef9dc5569daf812dbec21aa2fee6e5861",
+    "sha256": "207da56bd66160f46e67ae07a95c55204547aafddd02644e9fad7b42658cfc3c",
     "files": [
       ".github/workflows/ci.yml",
       "README.md",
       "crates/relayer-app-server/src/runtime.rs",
       "desktop/eval-main/index.mjs",
       "desktop/main/index.mjs",
+      "desktop/main/managed-runtimes/probes.mjs",
       "desktop/main/services/codex-browser-mcp-runtime.mjs",
       "desktop/main/services/graphcomplete-runtime.mjs",
       "desktop/main/services/prime-agent-runtime.mjs",
@@ -36,6 +37,7 @@
       "test/browser-harness-evidence.test.mjs",
       "test/codex-browser-runtime.test.mjs",
       "test/desktop-shell.test.mjs",
+      "test/managed-runtime-installer.test.mjs",
       "test/prime-agent-packaging.test.mjs",
       "vendor/prime-agent/earendil-works-pi-coding-agent-0.8.1-sha256-a1bcc855b83e0d6f7d2f08f803f24d36c771d7ca1a4835a79ecb57e23f51a281.tgz",
       "vendor/prime-agent/manifest.json"
@@ -79,7 +81,7 @@
       "configurationSha256": {
         "claude-basic.yaml": "05fbc6f5c50337595f020b1b2171fbd7a52ae58047a0166878573ea0cd8775da"
       },
-      "browserRuntimeSourceSha256": "1274a51d1ee4812969180d3f303b063649231f5b3c39515f454153ac2d232ced",
+    "browserRuntimeSourceSha256": "4feeb71b1781aa7d6054b30348bfd277658f72bdd5f78d962289463d10f17283",
       "mechanismProof": {
         "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5448833579",
         "commentBodyPlusLfSha256": "9e70d873e30660bfc9ac37d1a851a283fa0c2d1dd783980543af0401e61087c4"
@@ -91,9 +93,13 @@
         "chromeAliveAfterCleanup": true,
         "askEnclosingToolExecuted": false
       },
-      "deterministicProof": {
-        "boundedReadNavigateClickFillBatch": true,
-        "unavailableEndpointFailedHonestly": true
+    "deterministicProof": {
+      "boundedReadNavigateClickFillBatch": true,
+      "clickMustEndBatch": true,
+      "disabledClickRejected": true,
+      "finalFillValueVerified": true,
+      "sdkMcpExportsProbed": true,
+      "unavailableEndpointFailedHonestly": true
       }
     },
     "prime": {
