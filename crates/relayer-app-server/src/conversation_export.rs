@@ -1300,6 +1300,20 @@ fn validate_submitted_inputs(
             &submitted.action.prompt,
             format!("{submitted_path}.action.prompt"),
         )?;
+        if submitted.action.prompt.len() > 2_000 {
+            return Err(ExportValidationError::new(
+                "input_action_prompt_too_long",
+                format!("{submitted_path}.action.prompt"),
+                "Input action prompt exceeds 2,000 UTF-8 bytes.",
+            ));
+        }
+        if submitted.action.options.len() > 50 {
+            return Err(ExportValidationError::new(
+                "input_action_option_count",
+                format!("{submitted_path}.action.options"),
+                "Input actions support at most 50 options.",
+            ));
+        }
         let mut option_keys = HashSet::new();
         for (option_index, option) in submitted.action.options.iter().enumerate() {
             require_string(
@@ -1310,6 +1324,23 @@ fn validate_submitted_inputs(
                 &option.label,
                 format!("{submitted_path}.action.options[{option_index}].label"),
             )?;
+            if option.key.trim() != option.key
+                || option.key.contains('\0')
+                || option.key.len() > 128
+            {
+                return Err(ExportValidationError::new(
+                    "input_action_option_key_invalid",
+                    format!("{submitted_path}.action.options[{option_index}].key"),
+                    "Input option keys must be trimmed, NUL-free, and at most 128 UTF-8 bytes.",
+                ));
+            }
+            if option.label.len() > 512 {
+                return Err(ExportValidationError::new(
+                    "input_action_option_label_too_long",
+                    format!("{submitted_path}.action.options[{option_index}].label"),
+                    "Input option labels must be at most 512 UTF-8 bytes.",
+                ));
+            }
             if !option_keys.insert(&option.key) {
                 return Err(ExportValidationError::new(
                     "input_option_key_duplicate",

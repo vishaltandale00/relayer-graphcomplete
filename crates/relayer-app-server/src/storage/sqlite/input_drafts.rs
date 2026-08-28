@@ -283,6 +283,7 @@ mod tests {
             options: vec![InputOption {
                 key: "one".into(),
                 label: "One".into(),
+                unsupported_fields: Default::default(),
             }],
             minimum_selections: None,
             unsupported_fields: Default::default(),
@@ -381,6 +382,7 @@ mod tests {
             options: vec![InputOption {
                 key: "one".into(),
                 label: "One".into(),
+                unsupported_fields: Default::default(),
             }],
             minimum_selections: None,
             unsupported_fields: Default::default(),

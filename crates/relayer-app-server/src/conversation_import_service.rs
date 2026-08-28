@@ -417,6 +417,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                         .map(|option| relayer_graph_core::InputOption {
                             key: option.key,
                             label: option.label,
+                            unsupported_fields: Default::default(),
                         })
                         .collect(),
                     minimum_selections: submitted
@@ -437,6 +438,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                             .map(|option| relayer_graph_core::InputOption {
                                 key: option.key,
                                 label: option.label,
+                                unsupported_fields: Default::default(),
                             })
                             .collect(),
                     },

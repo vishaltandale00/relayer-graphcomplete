@@ -6135,6 +6135,61 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     .execute(&pool)
     .await
     .unwrap();
+    let transient_missing_interaction_id = sqlx::query(
+        "INSERT INTO interactions(
+            thread_id,sequence,text,created_at,graph_node_id,completion_status,
+            harness_configuration_name,harness_configuration_digest,permission_profile_id,
+            effective_execution_digest,effective_permission_receipt_json,input_identity,input_digest
+         ) VALUES (?1,5,'Restore after definitive absence',?2,80,'running','codex-basic','sha256:test',
+            'auto','sha256:execution','{}','send-restart-missing','sha256:missing-input')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO interaction_attempts(
+            interaction_id,attempt_number,started_at,family_id,family_revision,
+            harness_configuration_name,harness_configuration_revision,harness_configuration_digest,
+            provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,
+            outcome,effect_boundary
+         ) VALUES (?1,1,?2,?3,?4,'codex-basic',1,'sha256:test',
+            'codex','test-adapter',1,'test-model','managed-runtime@1','running','unknown')",
+    )
+    .bind(transient_missing_interaction_id)
+    .bind(&created_at)
+    .bind(family_id)
+    .bind(family_revision)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attempts(
+            interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,
+            graph_root_node_id,created_at,bound_at
+         ) VALUES (?1,?2,1,'sha256:missing-input','sha256:missing-semantic','running',80,?3,?3)",
+    )
+    .bind(transient_missing_interaction_id)
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attachments(
+            interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,
+            source_node_id,action_json,value_json,committed_at
+         ) VALUES (?1,13,23,33,43,?2,?3,?4)",
+    )
+    .bind(transient_missing_interaction_id)
+    .bind(json!({"control":"text","prompt":"Missing"}).to_string())
+    .bind(json!({"text":"restore me"}).to_string())
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
     pool.close().await;
 
     let catalog = root.join("catalog.json");
@@ -6155,6 +6210,8 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
 
     let transient_output_reads = Arc::new(AtomicUsize::new(0));
     let observed_transient_output_reads = transient_output_reads.clone();
+    let transient_missing_output_reads = Arc::new(AtomicUsize::new(0));
+    let observed_transient_missing_output_reads = transient_missing_output_reads.clone();
     let graph = Router::new()
         .route(
             "/api/control/interactions/77",
@@ -6224,6 +6281,37 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
             }),
         )
         .route(
+            "/api/control/interactions/80",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":80,"invocation":null,
+                    "inputIdentity":"send-restart-missing",
+                    "inputDigest":"sha256:missing-input"
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/80/output",
+            axum::routing::get(move || {
+                let observed_transient_missing_output_reads =
+                    observed_transient_missing_output_reads.clone();
+                async move {
+                    if observed_transient_missing_output_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        )
+                            .into_response();
+                    }
+                    (
+                        StatusCode::NOT_FOUND,
+                        axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                    )
+                        .into_response()
+                }
+            }),
+        )
+        .route(
             "/api/control/capabilities",
             axum::routing::delete(|| async { axum::Json(json!({"revoked":true})) }),
         );
@@ -6283,13 +6371,32 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     .await
     .unwrap();
     assert_eq!(mismatched_pending.0, "failed");
+    assert!(mismatched_pending.1.contains("input draft was restored"));
+    assert_eq!(mismatched_pending.2, "failed");
+    assert_eq!(mismatched_pending.3, 1);
+    let transient_missing_pending: (String, String, String, String, i64) = sqlx::query_as(
+        "SELECT i.completion_status,i.completion_error,a.state,
+                (SELECT outcome FROM interaction_attempts execution
+                 WHERE execution.interaction_id=i.id ORDER BY attempt_number DESC LIMIT 1),
+                (SELECT COUNT(*) FROM action_input_attachments d
+                 WHERE d.thread_id=i.thread_id AND d.action_id=33)
+         FROM interactions i
+         JOIN interaction_submitted_input_attempts a ON a.interaction_id=i.id
+         WHERE i.id=?1",
+    )
+    .bind(transient_missing_interaction_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(transient_missing_pending.0, "failed");
     assert!(
-        mismatched_pending
+        transient_missing_pending
             .1
             .starts_with("Canonical reconciliation pending:")
     );
-    assert_eq!(mismatched_pending.2, "running");
-    assert_eq!(mismatched_pending.3, 0);
+    assert_eq!(transient_missing_pending.2, "running");
+    assert_eq!(transient_missing_pending.3, "running");
+    assert_eq!(transient_missing_pending.4, 0);
     let (status, error): (String, Option<String>) =
         sqlx::query_as("SELECT completion_status,completion_error FROM interactions WHERE id=?1")
             .bind(interaction_id)
@@ -6319,7 +6426,7 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     assert_eq!(attempt_receipt.2, "unknown");
     assert!(attempt_receipt.3.is_some());
     let restored: (i64, String) = sqlx::query_as(
-        "SELECT COUNT(*),MAX(value_json) FROM action_input_attachments WHERE thread_id=?1",
+        "SELECT COUNT(*),MAX(value_json) FROM action_input_attachments WHERE thread_id=?1 AND action_id=30",
     )
     .bind(thread_id)
     .fetch_one(&pool)
@@ -6356,7 +6463,19 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
         .find(|interaction| interaction["id"] == mismatched_interaction_id)
         .unwrap();
     assert_eq!(mismatched["completionStatus"], "failed");
-    assert_eq!(mismatched["projectionFresh"], false);
+    let transient_missing = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == transient_missing_interaction_id)
+        .unwrap();
+    assert_eq!(transient_missing["completionStatus"], "failed");
+    assert!(
+        transient_missing["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("input draft was restored")
+    );
     let pool = sqlite_pool(&database).await;
     let transient_accepted: (String, String, i64) = sqlx::query_as(
         "SELECT a.state,
@@ -6385,7 +6504,31 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(mismatch_still_quarantined, ("running".into(), 0));
+    assert_eq!(mismatch_still_quarantined, ("failed".into(), 1));
+    let transient_missing_failed: (String, String, String, String, i64) = sqlx::query_as(
+        "SELECT submitted.state,execution.outcome,
+                COALESCE(execution.failure_category,''),execution.effect_boundary,
+                (SELECT COUNT(*) FROM action_input_attachments d
+                 WHERE d.thread_id=submitted.thread_id AND d.action_id=33)
+         FROM interaction_submitted_input_attempts submitted
+         JOIN interaction_attempts execution
+           ON execution.interaction_id=submitted.interaction_id
+         WHERE submitted.interaction_id=?1",
+    )
+    .bind(transient_missing_interaction_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        transient_missing_failed,
+        (
+            "failed".into(),
+            "execution_failed".into(),
+            "application_restart".into(),
+            "unknown".into(),
+            1
+        )
+    );
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     pool.close().await;
 
