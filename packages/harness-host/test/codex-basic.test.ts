@@ -221,6 +221,8 @@ describe("CodexBasicHarness", () => {
         expect(submittedPrompt).toContain("applies its own narrower graph sandbox");
         expect(submittedPrompt).toContain("the launcher heredoc is the only permitted shell action");
         expect(submittedPrompt).toContain("Do not run sed, rg, cat, find, or any other inspection command");
+        expect(submittedPrompt).toContain("This restriction applies only to the graph-authoring path");
+        expect(submittedPrompt).toContain("ordinary Codex workspace tools under the configured permission policy");
         expect(submittedPrompt).toContain("LayerLayoutObject accepts exactly one argument: the placements array");
         expect(submittedPrompt).toContain("never assign layout.version");
         expect(submittedEnvironment.RELAYER_GRAPH_AUTHORING_NODE).toBeUndefined();
@@ -296,6 +298,12 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain("Each layer should explain its scope as a coherent whole");
     expect(submittedPrompt).toContain('choosing "stop" means leaving the node without a further action');
     expect(submittedPrompt).toContain("It is not GraphComplete's stopped lifecycle state");
+    expect(submittedPrompt).toContain("Complete the underlying user task in the working directory");
+    expect(submittedPrompt).toContain("Use the harness's ordinary workspace tools and reasoning as needed");
+    expect(submittedPrompt).toContain("the graph is the presentation of the work, not a substitute for doing it");
+    expect(submittedPrompt).toContain("does not by itself complete the underlying user task");
+    expect(submittedPrompt).toContain("Do not submit a plan as though it were completed work");
+    expect(submittedPrompt).toContain("verify that requested workspace effects have actually occurred");
     expect(submittedPrompt).toContain("A flat answer is valid");
     expect(submittedPrompt).toContain("Author in whatever order fits the task");
     expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
@@ -318,6 +326,8 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain("Do not add fake navigate or reference actions");
     expect(submittedPrompt).toContain("graph.discardLayer(layer)");
     expect(submittedPrompt).not.toContain("The required order is:");
+    expect(submittedPrompt).not.toContain("native delegation");
+    expect(submittedPrompt).not.toContain("Codex native subagents");
   });
 
   it("appends only the native delegation guidance for the multi-agent profile", async () => {
@@ -343,6 +353,8 @@ describe("CodexBasicHarness", () => {
 
     const delegationGuidance = "Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.";
     expect(prompts).toHaveLength(2);
+    expect(prompts[0]).not.toContain("native delegation");
+    expect(prompts[0]).not.toContain("Codex native subagents");
     expect(prompts[1]).toBe(`${prompts[0]}\n\n${delegationGuidance}`);
   });
 
