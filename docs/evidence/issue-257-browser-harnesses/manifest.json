@@ -5,8 +5,8 @@
   "assemblyMergeBase": "9188a8123b7c40436f0100d124c24103a768d32d",
   "integratedSource": {
     "algorithm": "sha256-of-sorted-path-nul-file-sha256-lf",
-    "snapshotId": "issue-257-browser-harnesses-v3",
-    "sha256": "c3d4e2f9ee348edc4bf251c63d4cca12274acdaf8772c11f59c09ebf3a3f5742",
+    "snapshotId": "issue-257-browser-harnesses-v4",
+    "sha256": "346cbc5887dd9174e75b3f6e7afcd21b17dab0eba8e9a0ad2932f1e68f27928f",
     "files": [
       ".github/workflows/ci.yml",
       "README.md",
@@ -67,11 +67,11 @@
       "docs/prd/index.html": "9a03c31ec7d5b75b15f712dfa4e7630d1365db3f4e472f905b608bc283b31801",
       "package-lock.json": "f2ddae5b7d46206ac66f96af81cc3fbfcc5d5db57a0033cc8fa78ffc5e3c9709",
       "packages/harness-host/package.json": "10f934519885a74bdb478e445b32f19add1bcc12d811c16fb6773208d3617c1e",
-      "packages/harness-host/src/implementations/claude-basic-browser.ts": "a3e4331f46e14305a99531fc5b73cbcbd6ccf51b4f4f35ff10d5dd96bd044769",
+      "packages/harness-host/src/implementations/claude-basic-browser.ts": "5bf3a789ecf85209bf318a999a004a9d800ad0b67e581301aaa5200a37b3352c",
       "packages/harness-host/src/implementations/claude-basic.ts": "b58c101db0444e44bb52b6175e490195b759ad9971aeaac34c3a619531ce0f5a",
       "packages/harness-host/src/implementations/codex-approvals.ts": "69873788880dc92fcc7a3c9f71c29f7e4df70ff3c4b9623b64379c6a3101467b",
       "packages/harness-host/src/implementations/codex-basic.ts": "13698f465acabeccc986a40067c2b8d6e4a6f7ed467ee3529868ad545776e72b",
-      "packages/harness-host/test/claude-basic-browser.test.ts": "89e68cdf92fca4cebcaf700f77ec35fec7751155edecf55e067cde4d46380869",
+      "packages/harness-host/test/claude-basic-browser.test.ts": "973e09594590d7b8c2f5f16ef93d084a841fe93e8c5ca57dba1b2f1f04692b6f",
       "packages/harness-host/test/claude-basic.test.ts": "9f3c1174f25659f191b736b06a53723d1a2faa391f09a0fc7809a9631d43f045",
       "packages/harness-host/test/codex-app-server.test.ts": "6865ef964406974132a79984777f7e34cb5b46f23042daa23217e9b9ced27814",
       "packages/harness-host/test/codex-approvals.test.ts": "03732c833ec96f2b6d47782803c094e3d7ea5e1685c1e143fffd02636dcfe148",
@@ -128,7 +128,7 @@
       "configurationSha256": {
         "claude-basic.yaml": "05fbc6f5c50337595f020b1b2171fbd7a52ae58047a0166878573ea0cd8775da"
       },
-      "browserRuntimeSourceSha256": "a3e4331f46e14305a99531fc5b73cbcbd6ccf51b4f4f35ff10d5dd96bd044769",
+      "browserRuntimeSourceSha256": "5bf3a789ecf85209bf318a999a004a9d800ad0b67e581301aaa5200a37b3352c",
       "mechanismProof": {
         "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5448833579",
         "commentBodyPlusLfSha256": "9e70d873e30660bfc9ac37d1a851a283fa0c2d1dd783980543af0401e61087c4"
