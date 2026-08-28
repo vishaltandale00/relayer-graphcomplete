@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { runInNewContext } from "node:vm";
+import { z } from "zod";
 import {
   CLAUDE_BROWSER_TOOL,
   createClaudeBasicBrowserServer,
@@ -18,6 +20,7 @@ class FakeSocket {
   stallNavigate = false;
   navigateErrorText: string | undefined;
   navigationCompletion: "cross-document" | "same-document" | "unrelated-load" = "cross-document";
+  evaluateExpression: ((expression: string) => { readonly value?: unknown; readonly exception?: boolean }) | undefined;
   private readonly listeners = new Map<string, Set<(event: { data?: unknown }) => void>>();
 
   constructor(readonly readyState = 1) {}
@@ -58,9 +61,17 @@ class FakeSocket {
       }
       return;
     }
-    const result = request.method === "Runtime.evaluate"
-      ? { result: { value: String(request.params?.expression).includes("textContent") ? "existing-session-marker" : true } }
-      : {};
+    if (request.method === "Runtime.evaluate") {
+      const expression = String(request.params?.expression);
+      const evaluated = this.evaluateExpression?.(expression);
+      const result = {
+        result: { value: evaluated?.value ?? (expression.includes("textContent") ? "existing-session-marker" : true) },
+        ...(evaluated?.exception ? { exceptionDetails: {} } : {}),
+      };
+      this.emit("message", { data: JSON.stringify({ id: request.id, result }) });
+      return;
+    }
+    const result = {};
     this.emit("message", { data: JSON.stringify({ id: request.id, result }) });
   }
 
@@ -78,6 +89,62 @@ class FakeSocket {
   }
 }
 
+class DomHTMLElement {
+  disabled = false;
+  readOnly = false;
+  ariaDisabled = false;
+  clickCount = 0;
+  readonly events: string[] = [];
+  onDispatch: ((type: string) => void) | undefined;
+
+  matches(selector: string): boolean {
+    return selector === ":disabled" && this.disabled;
+  }
+
+  getAttribute(name: string): string | null {
+    return name === "aria-disabled" && this.ariaDisabled ? "true" : null;
+  }
+
+  click(): void { this.clickCount += 1; }
+  focus(): void {}
+  dispatchEvent(event: { readonly type: string }): boolean {
+    this.events.push(event.type);
+    this.onDispatch?.(event.type);
+    return true;
+  }
+}
+
+class DomInputElement extends DomHTMLElement {
+  private currentValue = "";
+  type = "text";
+  get value(): string { return this.currentValue; }
+  set value(value: string) {
+    this.currentValue = this.type === "number" && value !== "" && !Number.isFinite(Number(value)) ? "" : value;
+  }
+}
+
+class DomTextAreaElement extends DomInputElement {}
+
+class DomEvent {
+  constructor(readonly type: string, readonly options: unknown) {}
+}
+
+function evaluateInDom(expression: string, element: DomHTMLElement): { readonly value?: unknown; readonly exception?: boolean } {
+  try {
+    return {
+      value: runInNewContext(expression, {
+        document: { querySelector: () => element },
+        HTMLElement: DomHTMLElement,
+        HTMLInputElement: DomInputElement,
+        HTMLTextAreaElement: DomTextAreaElement,
+        Event: DomEvent,
+      }),
+    };
+  } catch {
+    return { exception: true };
+  }
+}
+
 function fixture(options: {
   endpoint?: string;
   socket?: FakeSocket;
@@ -90,12 +157,15 @@ function fixture(options: {
   socket: FakeSocket;
   socketUrls: string[];
   server: unknown;
+  inputSchema: Parameters<ClaudeBrowserSdk["tool"]>[2];
 } {
   let handler: ToolHandler | undefined;
+  let inputSchema: Parameters<ClaudeBrowserSdk["tool"]>[2] | undefined;
   let fullName = "";
   const sdk: ClaudeBrowserSdk = {
-    tool: ((name: string, _description: string, _schema: unknown, candidate: ToolHandler) => {
+    tool: ((name: string, _description: string, schema: Parameters<ClaudeBrowserSdk["tool"]>[2], candidate: ToolHandler) => {
       fullName = `mcp__relayer_browser__${name}`;
+      inputSchema = schema;
       handler = candidate;
       return { name };
     }) as ClaudeBrowserSdk["tool"],
@@ -118,7 +188,8 @@ function fixture(options: {
   });
   expect(fullName).toBe(CLAUDE_BROWSER_TOOL);
   if (!handler) throw new Error("tool handler was not registered");
-  return { handler, socket, socketUrls, server };
+  if (!inputSchema) throw new Error("tool input schema was not registered");
+  return { handler, socket, socketUrls, server, inputSchema };
 }
 
 describe("claude.basic browser MCP tool", () => {
@@ -127,22 +198,26 @@ describe("claude.basic browser MCP tool", () => {
     const result = await handler({ operations: [
       { type: "read_text", selector: "#marker" },
       { type: "navigate", url: "https://example.test/next" },
-      { type: "click", selector: "#continue" },
       { type: "fill", selector: "#name", value: "Ada" },
+      { type: "click", selector: "#continue" },
     ] }, {});
 
     expect(result.isError).toBeUndefined();
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({ operations: [
       { type: "read_text", text: "existing-session-marker" },
       { type: "navigate", url: "https://example.test/next" },
-      { type: "click", clicked: true },
       { type: "fill", filled: true },
+      { type: "click", clicked: true },
     ] });
     expect(socket.sent.map((entry) => entry.method)).toEqual([
       "Runtime.evaluate", "Page.enable", "Page.setLifecycleEventsEnabled", "Page.navigate", "Runtime.evaluate", "Runtime.evaluate",
     ]);
     expect(socket.closed).toBe(true);
-    expect(server).toMatchObject({ name: "relayer_browser", version: "1.0.0" });
+    expect(server).toMatchObject({
+      name: "relayer_browser",
+      version: "1.0.0",
+      instructions: expect.stringContaining("Click must be final"),
+    });
   });
 
   it("rejects a non-loopback dependency override before creating a tool", () => {
@@ -194,6 +269,87 @@ describe("claude.basic browser MCP tool", () => {
     socket.emitProtocol("Page.lifecycleEvent", { frameId: "frame", loaderId: "new-loader", name: "load" });
     await expect(operation).resolves.not.toHaveProperty("isError");
     expect(socket.sent.map((entry) => entry.method)).toContain("Runtime.evaluate");
+    expect(socket.closed).toBe(true);
+  });
+
+  it("requires click to be terminal so later work reattaches in a new native tool call", async () => {
+    const { handler, inputSchema, socket } = fixture();
+    const request = {
+      operations: [
+        { type: "click", selector: "#continue" },
+        { type: "read_text", selector: "body" },
+      ],
+    };
+
+    expect(z.object(inputSchema).safeParse(request)).toMatchObject({ success: false });
+    await expect(handler(request, {})).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "The browser request is not supported." }],
+    });
+    expect(socket.sent).toHaveLength(0);
+  });
+
+  it("fails honestly instead of clicking a disabled control", async () => {
+    const socket = new FakeSocket();
+    const button = new DomHTMLElement();
+    button.disabled = true;
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, button);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "click", selector: "#disabled" }] }, {});
+
+    expect(result).toMatchObject({ isError: true, content: [{ text: "The browser operation failed." }] });
+    expect(button.clickCount).toBe(0);
+    expect(socket.closed).toBe(true);
+  });
+
+  it("uses the native value setter and verifies the resulting fill value", async () => {
+    const socket = new FakeSocket();
+    const input = new DomInputElement();
+    let interceptedAssignments = 0;
+    Object.defineProperty(input, "value", {
+      configurable: true,
+      get() { return Reflect.get(DomInputElement.prototype, "value", this); },
+      set() { interceptedAssignments += 1; },
+    });
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, input);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "fill", selector: "#name", value: "Ada" }] }, {});
+
+    expect(result.isError).toBeUndefined();
+    expect(input.value).toBe("Ada");
+    expect(interceptedAssignments).toBe(0);
+    expect(input.events).toEqual(["input", "change"]);
+  });
+
+  it("fails honestly when framework handling changes the requested fill value", async () => {
+    const socket = new FakeSocket();
+    const input = new DomInputElement();
+    input.onDispatch = (type) => { if (type === "input") input.value = "framework-normalized"; };
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, input);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "fill", selector: "#name", value: "Ada" }] }, {});
+
+    expect(result).toMatchObject({ isError: true, content: [{ text: "The browser operation failed." }] });
+    expect(input.value).toBe("framework-normalized");
+    expect(result.content[0]!.text).not.toContain("framework-normalized");
+    expect(socket.closed).toBe(true);
+  });
+
+  it("fails honestly when a number input's native setter sanitizes the requested value", async () => {
+    const socket = new FakeSocket();
+    const input = new DomInputElement();
+    input.type = "number";
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, input);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "fill", selector: "#age", value: "not-a-number" }] }, {});
+
+    expect(result).toMatchObject({ isError: true, content: [{ text: "The browser operation failed." }] });
+    expect(input.value).toBe("");
+    expect(result.content[0]!.text).not.toContain("not-a-number");
     expect(socket.closed).toBe(true);
   });
 

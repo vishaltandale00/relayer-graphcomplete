@@ -147,7 +147,11 @@ describe("managed runtime installer", () => {
       });
       return child;
     });
-    const importModule = vi.fn(async () => ({ query: () => {} }));
+    const importModule = vi.fn(async () => ({
+      query: () => {},
+      tool: () => {},
+      createSdkMcpServer: () => {},
+    }));
 
     await expect(createDefaultRuntimeProbes({ spawnProcess, importModule }).claude({
       executable: "/runtime/claude",
@@ -178,6 +182,32 @@ describe("managed runtime installer", () => {
       importModule: async () => ({}),
     }).claude({ executable: "/runtime/claude", modulePath: "/runtime/sdk.mjs" }))
       .rejects.toThrow("does not export query");
+  });
+
+  it.each([
+    ["tool", { query: () => {}, createSdkMcpServer: () => {} }],
+    ["createSdkMcpServer", { query: () => {}, tool: () => {} }],
+  ])("rejects a managed Claude SDK module without the %s browser boundary", async (_missing, loaded) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.kill = vi.fn();
+    const spawnProcess = () => {
+      queueMicrotask(() => {
+        child.stdout.end("claude 0.3.247\n");
+        child.exitCode = 0;
+        child.emit("exit", 0, null);
+      });
+      return child;
+    };
+
+    await expect(createDefaultRuntimeProbes({
+      spawnProcess,
+      importModule: async () => loaded,
+    }).claude({ executable: "/runtime/claude", modulePath: "/runtime/sdk.mjs" }))
+      .rejects.toThrow("does not export query(), tool(), and createSdkMcpServer()");
   });
 
   it("bounds a managed executable version probe and terminates a hung child", async () => {

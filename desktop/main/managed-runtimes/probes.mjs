@@ -147,8 +147,11 @@ async function probeClaudeSdk(modulePath, { importModule, timeoutMs }) {
         timer = setTimeout(() => reject(new Error("Claude Agent SDK module probe timed out.")), timeoutMs);
       }),
     ]);
-    if (!loaded || typeof loaded !== "object" || typeof loaded.query !== "function") {
-      throw new Error("Managed Claude Agent SDK module does not export query().");
+    if (!loaded || typeof loaded !== "object"
+      || typeof loaded.query !== "function"
+      || typeof loaded.tool !== "function"
+      || typeof loaded.createSdkMcpServer !== "function") {
+      throw new Error("Managed Claude Agent SDK module does not export query(), tool(), and createSdkMcpServer().");
     }
   } finally {
     clearTimeout(timer);
