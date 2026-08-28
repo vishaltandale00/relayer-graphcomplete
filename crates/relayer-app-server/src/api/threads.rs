@@ -2261,6 +2261,10 @@ async fn prepare_and_claim_interaction(
             .map(|input| input.contexts.as_slice())
             .unwrap_or(&[]),
         personal_presentation: personal_presentation.as_ref(),
+        submitted_inputs: durable_input
+            .as_ref()
+            .map(|input| input.submitted_inputs.as_slice())
+            .unwrap_or(&[]),
     };
     let mut binding_attempt = 0;
     let prepared = loop {
@@ -2298,6 +2302,7 @@ async fn prepare_and_claim_interaction(
                 harness_configuration_digest: &prepared.harness_configuration_digest,
                 effective_execution_digest: &prepared.effective_execution_digest,
                 effective_permission_receipt: &prepared.effective_permission_receipt,
+                input_children: &prepared.input_children,
             })
             .await
         {

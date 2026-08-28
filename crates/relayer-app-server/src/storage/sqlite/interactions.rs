@@ -10,6 +10,24 @@ use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 impl SqliteProductStore {
+    pub(crate) async fn get_interaction_by_input_identity(
+        &self,
+        thread_id: ThreadId,
+        input_identity: &str,
+    ) -> Result<Option<Interaction>, StorageError> {
+        let id: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM interactions WHERE thread_id=?1 AND input_identity=?2",
+        )
+        .bind(thread_id.value())
+        .bind(input_identity)
+        .fetch_optional(&self.pool)
+        .await?;
+        match id {
+            Some(id) => self.get_interaction(InteractionId::from_database(id)).await,
+            None => Ok(None),
+        }
+    }
+
     pub(crate) async fn get_interaction_by_graph_node_id(
         &self,
         graph_node_id: i64,
@@ -274,6 +292,72 @@ impl SqliteProductStore {
     ) -> Result<bool, StorageError> {
         let receipt = serde_json::to_string(binding.effective_permission_receipt)
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let child_receipt = serde_json::to_string(binding.input_children)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let submitted_attempt: Option<(i64, String, String, String)> = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM interaction_submitted_input_attachments snapshot WHERE snapshot.interaction_id=attempt.interaction_id),interaction.input_identity,attempt.authority_digest,attempt.semantic_digest FROM interaction_submitted_input_attempts attempt JOIN interactions interaction ON interaction.id=attempt.interaction_id WHERE attempt.interaction_id=?1",
+        )
+        .bind(binding.interaction_id.value())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        match submitted_attempt.as_ref() {
+            Some((count, _, _, _)) if *count != binding.input_children.len() as i64 => {
+                return Err(StorageError::IncompatibleSchema(
+                    "graph child receipt does not match the reserved submitted input snapshot"
+                        .into(),
+                ));
+            }
+            None if !binding.input_children.is_empty() => {
+                return Err(StorageError::IncompatibleSchema(
+                    "graph returned submitted input children for an interaction without a reserved snapshot".into(),
+                ));
+            }
+            _ => {}
+        }
+        if let Some((_, input_identity, authority_digest, semantic_digest)) =
+            submitted_attempt.as_ref()
+        {
+            let rows = sqlx::query(
+                "SELECT presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json FROM interaction_submitted_input_attachments WHERE interaction_id=?1 ORDER BY presenting_interaction_node_id,presenting_layer_id,action_id",
+            )
+            .bind(binding.interaction_id.value())
+            .fetch_all(&mut *transaction)
+            .await?;
+            let expected = rows
+                .iter()
+                .map(super::interaction_contexts::submitted_input_from_row)
+                .collect::<Result<Vec<_>, _>>()?;
+            let returned = binding
+                .input_children
+                .iter()
+                .map(|child| relayer_graph_core::SubmittedInputDraft {
+                    occurrence: child.occurrence.clone(),
+                    action: child.action.clone(),
+                    value: child.value.clone(),
+                })
+                .collect::<Vec<_>>();
+            if returned != expected {
+                return Err(StorageError::IncompatibleSchema(
+                    "graph child receipt changed the reserved occurrence, action, or value snapshot"
+                        .into(),
+                ));
+            }
+            for (row, child) in rows.iter().zip(binding.input_children) {
+                let source_node_id: i64 = row.try_get("source_node_id")?;
+                if child.parent_interaction_node_id.value() != binding.graph_node_id
+                    || child.source_node_id.value() != source_node_id
+                    || child.attempt_key != *input_identity
+                    || child.authority_digest != *authority_digest
+                    || child.semantic_digest != *semantic_digest
+                {
+                    return Err(StorageError::IncompatibleSchema(
+                        "graph child receipt changed the reserved root, source, attempt, or digest binding"
+                            .into(),
+                    ));
+                }
+            }
+        }
         let result = sqlx::query("UPDATE interactions SET graph_node_id=?1,harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=NULL,completion_error=NULL WHERE id=?6 AND completion_status='submitted' AND graph_node_id IS NULL")
             .bind(binding.graph_node_id)
             .bind(binding.harness_configuration_name)
@@ -281,8 +365,25 @@ impl SqliteProductStore {
             .bind(binding.effective_execution_digest)
             .bind(receipt)
             .bind(binding.interaction_id.value())
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        if result.rows_affected() == 1 && submitted_attempt.is_some() {
+            let updated = sqlx::query(
+                "UPDATE interaction_submitted_input_attempts SET state='bound',graph_root_node_id=?1,child_receipt_json=?2,bound_at=strftime('%s','now') || '000' WHERE interaction_id=?3 AND state='preparing'",
+            )
+            .bind(binding.graph_node_id)
+            .bind(child_receipt)
+            .bind(binding.interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
+            if updated.rows_affected() != 1 {
+                return Err(StorageError::IncompatibleSchema(
+                    "submitted input attempt was not preparing while binding its graph receipt"
+                        .into(),
+                ));
+            }
+        }
+        transaction.commit().await?;
         Ok(result.rows_affected() == 1)
     }
 
@@ -302,6 +403,20 @@ impl SqliteProductStore {
         {
             return Err(StorageError::IncompatibleSchema(
                 "context confirmation IDs must be non-empty and unique".into(),
+            ));
+        }
+        let submitted_input_attempt: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=?1)",
+        )
+        .bind(interaction_id.value())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if submitted_input_attempt {
+            return Err(StorageError::Catalog(
+                crate::product::CatalogError::invalid(
+                    "submitted_input_retry_requires_new_send",
+                    "Send the restored committed inputs again to create a new immutable root and attempt.",
+                ),
             ));
         }
         let attempt: Option<(String, String)> = sqlx::query_as(
@@ -919,6 +1034,7 @@ mod tests {
             input_digest: "sha256:retry-input",
             contexts: &contexts,
             context_confirmation_ids: &[],
+            submitted_input_draft_revision: None,
         };
         let first = store.claim_interaction_retry(
             thread.root_interaction_id,
@@ -960,6 +1076,7 @@ mod tests {
                     input_digest: "sha256:retry-input-conflict",
                     contexts: &conflicting_contexts,
                     context_confirmation_ids: &[],
+                    submitted_input_draft_revision: None,
                 },
                 &next_model,
                 "codex-basic",
@@ -993,6 +1110,8 @@ mod tests {
                 input_identity: "retry-input".into(),
                 input_digest: "sha256:retry-input".into(),
                 contexts,
+                submitted_inputs: vec![],
+                semantic_digest: None,
             })
         );
         let receipt = interaction.latest_attempt.unwrap();

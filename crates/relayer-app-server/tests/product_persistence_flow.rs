@@ -5267,6 +5267,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         .await
         .unwrap();
     for statement in [
+        "DROP TABLE interaction_submitted_input_attachments",
+        "DROP TABLE interaction_submitted_input_attempts",
         "DROP TABLE interactions",
         "DROP TABLE threads",
         "DROP TABLE projects",
@@ -5281,6 +5283,12 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .await
             .unwrap();
     }
+    sqlx::raw_sql(include_str!(
+        "../src/storage/sqlite/migrations/0022_submitted_input_attempts.sql"
+    ))
+    .execute(&partial_index_pool)
+    .await
+    .unwrap();
     sqlx::query("PRAGMA foreign_keys=ON")
         .execute(&partial_index_pool)
         .await

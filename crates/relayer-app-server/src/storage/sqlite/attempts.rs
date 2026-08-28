@@ -394,6 +394,7 @@ mod tests {
             input_digest: "sha256:retry-input",
             contexts: &[],
             context_confirmation_ids: &[],
+            submitted_input_draft_revision: None,
         }
     }
 

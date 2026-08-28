@@ -1025,6 +1025,7 @@ mod tests {
                     target_node: target.clone(),
                     annotations: vec!["Inspect /workspace/project/src".into(), "Second".into()],
                 }],
+                submitted_inputs: vec![],
             },
             actions: vec![InteractionContextAction {
                 id: ActionId::new(30).unwrap(),
@@ -1092,6 +1093,8 @@ mod tests {
                 },
                 annotations: vec!["Compare /workspace/project/private.txt".into()],
             }],
+            submitted_inputs: vec![],
+            semantic_digest: None,
         });
 
         let error = export_contexts(

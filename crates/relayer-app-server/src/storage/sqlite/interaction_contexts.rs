@@ -175,6 +175,55 @@ impl SqliteProductStore {
                 ));
             }
         }
+        let submitted_input = if let Some(expected_revision) = input.submitted_input_draft_revision
+        {
+            let current_revision: Option<i64> =
+                sqlx::query_scalar("SELECT revision FROM action_input_drafts WHERE thread_id=?1")
+                    .bind(thread_id.value())
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if current_revision != Some(expected_revision) {
+                return Err(StorageError::ActionInputDraftConflict {
+                    code: "input_draft_revision_conflict",
+                    message: "The committed interaction inputs changed while Send was reserving them. Reload the draft and send again.".into(),
+                });
+            }
+            let rows = sqlx::query(
+                "SELECT presenting_interaction_node_id,presenting_layer_id,action_id,action_json,value_json FROM action_input_attachments WHERE thread_id=?1 ORDER BY presenting_interaction_node_id,presenting_layer_id,action_id",
+            )
+            .bind(thread_id.value())
+            .fetch_all(&mut *tx)
+            .await?;
+            if rows.is_empty() {
+                return Err(StorageError::ActionInputDraftConflict {
+                    code: "interaction_input_required",
+                    message: "The committed interaction inputs disappeared before Send could reserve them.".into(),
+                });
+            }
+            let submitted_inputs = rows
+                .iter()
+                .map(submitted_input_from_row)
+                .collect::<Result<Vec<_>, _>>()?;
+            let authority_digest = relayer_graph_core::interaction_input_authority_digest(
+                input.text,
+                &submitted_inputs,
+            )
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+            if authority_digest != input.input_digest {
+                return Err(StorageError::ActionInputDraftConflict {
+                    code: "input_draft_revision_conflict",
+                    message: "The committed interaction inputs no longer match the Send snapshot. Reload the draft and send again.".into(),
+                });
+            }
+            let semantic_digest = relayer_graph_core::interaction_input_semantic_digest(
+                input.text,
+                &submitted_inputs,
+            )
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+            Some((expected_revision, semantic_digest))
+        } else {
+            None
+        };
         let model_selection = match model_selection {
             Some(value) => Some(value.clone()),
             None => sqlx::query("SELECT model_provider_id,provider_model_id,model_family_id FROM interactions WHERE thread_id=?1 ORDER BY sequence DESC LIMIT 1")
@@ -239,6 +288,43 @@ impl SqliteProductStore {
             &confirmation_ids,
         )
         .await?;
+        if let Some((draft_revision, semantic_digest)) = submitted_input {
+            sqlx::query(
+                "INSERT INTO interaction_submitted_input_attempts(interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,created_at) VALUES (?1,?2,?3,?4,?5,'reserved',?6)",
+            )
+            .bind(id)
+            .bind(thread_id.value())
+            .bind(draft_revision)
+            .bind(input.input_digest)
+            .bind(semantic_digest)
+            .bind(&timestamp)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO interaction_submitted_input_attachments(interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) SELECT ?1,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at FROM action_input_attachments WHERE thread_id=?2",
+            )
+            .bind(id)
+            .bind(thread_id.value())
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query("DELETE FROM action_input_attachments WHERE thread_id=?1")
+                .bind(thread_id.value())
+                .execute(&mut *tx)
+                .await?;
+            let advanced = sqlx::query(
+                "UPDATE action_input_drafts SET revision=revision+1,updated_at=?1 WHERE thread_id=?2 AND revision=?3",
+            )
+            .bind(&timestamp)
+            .bind(thread_id.value())
+            .bind(draft_revision)
+            .execute(&mut *tx)
+            .await?;
+            if advanced.rows_affected() != 1 {
+                return Err(StorageError::IncompatibleSchema(
+                    "submitted input reservation lost its draft revision".into(),
+                ));
+            }
+        }
         sqlx::query("UPDATE threads SET updated_at=?1 WHERE id=?2")
             .bind(&timestamp)
             .bind(thread_id.value())
@@ -270,12 +356,12 @@ impl SqliteProductStore {
         &self,
         interaction_id: crate::product::InteractionId,
     ) -> Result<Option<DurableInteractionInput>, StorageError> {
-        let header: Option<(Option<String>, Option<String>)> =
-            sqlx::query_as("SELECT input_identity,input_digest FROM interactions WHERE id=?1")
+        let header: Option<(Option<String>, Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT interaction.input_identity,interaction.input_digest,attempt.semantic_digest FROM interactions interaction LEFT JOIN interaction_submitted_input_attempts attempt ON attempt.interaction_id=interaction.id WHERE interaction.id=?1")
                 .bind(interaction_id.value())
                 .fetch_optional(&self.pool)
                 .await?;
-        let Some((input_identity, input_digest)) = header else {
+        let Some((input_identity, input_digest, semantic_digest)) = header else {
             return Ok(None);
         };
         let (input_identity, input_digest) = match (input_identity, input_digest) {
@@ -303,10 +389,22 @@ impl SqliteProductStore {
                 annotations,
             });
         }
+        let submitted_rows = sqlx::query(
+            "SELECT presenting_interaction_node_id,presenting_layer_id,action_id,action_json,value_json FROM interaction_submitted_input_attachments WHERE interaction_id=?1 ORDER BY presenting_interaction_node_id,presenting_layer_id,action_id",
+        )
+        .bind(interaction_id.value())
+        .fetch_all(&self.pool)
+        .await?;
+        let submitted_inputs = submitted_rows
+            .iter()
+            .map(submitted_input_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Some(DurableInteractionInput {
             input_identity,
             input_digest,
             contexts,
+            submitted_inputs,
+            semantic_digest,
         }))
     }
 
@@ -316,7 +414,7 @@ impl SqliteProductStore {
     ) -> Result<bool, StorageError> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let thread_id: Option<i64> = sqlx::query_scalar(
-            "SELECT thread_id FROM interactions WHERE id=?1 AND graph_node_id IS NULL AND input_identity IS NOT NULL AND completion_status IN ('not_started','submitted','failed')",
+            "SELECT thread_id FROM interactions WHERE id=?1 AND graph_node_id IS NULL AND input_identity IS NOT NULL AND completion_status IN ('not_started','submitted','failed') AND NOT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=interactions.id)",
         ).bind(interaction_id.value()).fetch_optional(&mut *tx).await?;
         let Some(thread_id) = thread_id else {
             tx.commit().await?;
@@ -349,6 +447,61 @@ impl SqliteProductStore {
         .await
         .map_err(Into::into)
     }
+}
+
+pub(super) fn submitted_input_from_row(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<relayer_graph_core::SubmittedInputDraft, StorageError> {
+    let action: relayer_graph_core::InputAction =
+        serde_json::from_str(&row.try_get::<String, _>("action_json")?)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+    let value: crate::product::ActionInputValue =
+        serde_json::from_str(&row.try_get::<String, _>("value_json")?)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+    let value = match value {
+        crate::product::ActionInputValue::Text { text } => {
+            relayer_graph_core::SubmittedInputValue::Text { text }
+        }
+        crate::product::ActionInputValue::Selected { selected_keys } => {
+            let selected = selected_keys
+                .into_iter()
+                .map(|key| {
+                    action
+                        .options
+                        .iter()
+                        .find(|option| option.key == key)
+                        .cloned()
+                        .ok_or_else(|| {
+                            StorageError::IncompatibleSchema(format!(
+                                "submitted input snapshot contains unknown option key {key:?}"
+                            ))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            relayer_graph_core::SubmittedInputValue::Selected { selected }
+        }
+    };
+    Ok(relayer_graph_core::SubmittedInputDraft {
+        occurrence: relayer_graph_core::PresentingInputOccurrence {
+            presenting_interaction_node_id: relayer_graph_core::NodeId::new(
+                row.try_get("presenting_interaction_node_id")?,
+            )
+            .ok_or_else(|| {
+                StorageError::IncompatibleSchema("invalid presenting interaction ID".into())
+            })?,
+            presenting_layer_id: relayer_graph_core::LayerId::new(
+                row.try_get("presenting_layer_id")?,
+            )
+            .ok_or_else(|| {
+                StorageError::IncompatibleSchema("invalid presenting layer ID".into())
+            })?,
+            action_id: relayer_graph_core::ActionId::new(row.try_get("action_id")?).ok_or_else(
+                || StorageError::IncompatibleSchema("invalid input action ID".into()),
+            )?,
+        },
+        action,
+        value,
+    })
 }
 
 #[cfg(test)]
@@ -725,6 +878,7 @@ mod tests {
             input_digest: "sha256:v1:one",
             contexts: &contexts,
             context_confirmation_ids: &[],
+            submitted_input_draft_revision: None,
         };
         let created = store
             .insert_interaction_input(
@@ -755,6 +909,7 @@ mod tests {
                     input_digest: "sha256:v1:one",
                     contexts: &contexts,
                     context_confirmation_ids: &[],
+                    submitted_input_draft_revision: None,
                 },
                 None,
                 false,
@@ -774,6 +929,7 @@ mod tests {
                     input_digest: "sha256:v1:two",
                     contexts: &contexts,
                     context_confirmation_ids: &[],
+                    submitted_input_draft_revision: None,
                 },
                 None,
                 false,

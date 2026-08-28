@@ -46,6 +46,7 @@ pub(crate) struct NewInteractionInput<'a> {
     pub(crate) input_digest: &'a str,
     pub(crate) contexts: &'a [crate::product::InteractionContextIntent],
     pub(crate) context_confirmation_ids: &'a [String],
+    pub(crate) submitted_input_draft_revision: Option<i64>,
 }
 
 pub(crate) struct NewNodeContextDraft<'a> {

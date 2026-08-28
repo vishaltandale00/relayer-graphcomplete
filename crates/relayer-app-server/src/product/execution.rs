@@ -227,6 +227,10 @@ impl InteractionExecutionService {
                 .map(|input| input.contexts.as_slice())
                 .unwrap_or(&[]),
             personal_presentation: None,
+            submitted_inputs: durable_input
+                .as_ref()
+                .map(|input| input.submitted_inputs.as_slice())
+                .unwrap_or(&[]),
         };
         let attempt_admission_id = execution_model_selection
             .as_ref()
