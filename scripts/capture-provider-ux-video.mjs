@@ -754,14 +754,14 @@ try {
       "alternate-harness": ["Choose your default model family", "Claude basic", "Claude Sonnet"],
       providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Default provider"],
       families: ["Work coding", "Fast review", "GPT-5.6 Sol"],
-      harnesses: ["Harnesses", "Codex basic", "OpenAI Work", "Work coding", "Advanced configuration"],
+      harnesses: ["Harnesses", "Codex basic", "Advanced configuration"],
       recovery: ["OpenAI Work is rate limited", "Review the provider adapter architecture"],
     }[scene];
     for (const text of required) {
       if (!dom.includes(text)) throw new Error(`Evidence scene ${scene} is missing ${text}.`);
     }
     if (scene === "harnesses") {
-      for (const internal of ["Claude basic", "Execution access", "Revision", "managed-runtime@1", "openai-api", "Available"]) {
+      for (const internal of ["Claude basic", "OpenAI Work", "Work coding", "Fast review", "Execution access", "Revision", "managed-runtime@1", "openai-api", "Available"]) {
         if (audit.harnessMarkup.includes(internal)) throw new Error(`Evidence scene harnesses exposes ${internal}.`);
       }
     }

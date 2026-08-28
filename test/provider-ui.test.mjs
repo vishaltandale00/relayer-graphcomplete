@@ -257,8 +257,8 @@ describe("provider and harness renderer markup", () => {
 
     expect(markup).toContain('data-harness-configuration="codex-basic"');
     expect(markup).not.toContain('data-harness-configuration="claude-basic"');
-    expect(markup).toContain("Codex subscription");
-    expect(markup).toContain("Codex models");
+    expect(markup).not.toContain("Codex subscription");
+    expect(markup).not.toContain("Codex models");
     expect(markup).toContain("Default harness");
     expect(markup).toContain("Advanced configuration");
     expect(markup).not.toContain("Available");
