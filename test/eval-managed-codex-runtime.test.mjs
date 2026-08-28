@@ -1,14 +1,30 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+import { taskSystemFixtureFactory } from "@relayer/eval-runner";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createEvalCodexCatalogProvisioner,
   createEvalCodexExecutionLease,
   createEvalManagedCodexRuntime,
 } from "../desktop/eval-main/managed-codex-runtime.mjs";
+import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
+import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import {
   managedCodexHelperDirectory,
   withManagedCodexPath,
 } from "../desktop/shared/codex-runtime-environment.mjs";
+
+const repositoryRoot = resolve(import.meta.dirname, "..");
+const services = [];
+const directories = [];
+
+afterEach(async () => {
+  for (const service of services.splice(0).reverse()) await service.close();
+  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
+});
 
 describe("Eval managed Codex runtime", () => {
   it("defers platform validation until a runtime is requested", async () => {
@@ -95,12 +111,25 @@ describe("Eval managed Codex runtime", () => {
     const close = vi.fn(async () => undefined);
     const credentialEnvironments = [];
     const requests = [];
-    const fetchImpl = vi.fn(async (url, options) => {
-      requests.push({ url: String(url), ...options, body: JSON.parse(options.body) });
-      return { ok: true };
+    const fetchImpl = vi.fn(async (url, options = {}) => {
+      const request = {
+        url: String(url),
+        ...options,
+        ...(options.body === undefined ? {} : { body: JSON.parse(options.body) }),
+      };
+      requests.push(request);
+      return {
+        ok: true,
+        json: async () => request.url.endsWith("/api/model-settings")
+          ? { defaults: { harnessId: "fixture-task-system" }, families: [] }
+          : {},
+      };
     });
     const provision = createEvalCodexCatalogProvisioner({
-      productSession: { origin: "http://127.0.0.1:43123", cookie: { value: "write-token" } },
+      productSession: {
+        origin: "http://127.0.0.1:43123",
+        cookie: { name: "relayer_session", value: "write-token" },
+      },
       resolveRuntime: async () => ({
         executable: "/managed/codex",
         environment: { PATH: "/managed/codex-path:/usr/bin" },
@@ -119,23 +148,104 @@ describe("Eval managed Codex runtime", () => {
       },
     });
 
-    await Promise.all([provision(), provision()]);
+    await Promise.all([
+      provision("codex-layered-personal-presentation-v0"),
+      provision("codex-layered-personal-presentation-v1"),
+    ]);
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
     expect(requests[0]).toMatchObject({
+      url: "http://127.0.0.1:43123/api/model-settings", method: "GET",
+      headers: { Cookie: "relayer_session=write-token" },
+    });
+    expect(requests[1]).toMatchObject({
+      url: "http://127.0.0.1:43123/api/model-settings/defaults", method: "PUT",
+      body: { harnessId: "codex-layered-personal-presentation-v0" },
+    });
+    expect(requests[2]).toMatchObject({
       url: "http://127.0.0.1:43123/api/internal/provider-definitions", method: "PUT",
       headers: { Authorization: "Bearer write-token" },
       body: [{ id: "codex", adapterId: "codex-subscription", accessContract: "managed-runtime@1" }],
     });
-    expect(requests[1]).toMatchObject({
+    expect(requests[3]).toMatchObject({
       url: "http://127.0.0.1:43123/api/internal/provider-catalog", method: "PUT",
       body: { providerId: "codex", connected: true, models: [{ id: "gpt-5.6-sol", providerDefault: true }] },
+    });
+    expect(requests[4]).toMatchObject({
+      url: "http://127.0.0.1:43123/api/model-settings/defaults", method: "PUT",
+      body: { harnessId: "fixture-task-system" },
     });
     expect(close).toHaveBeenCalledOnce();
     expect(credentialEnvironments).toEqual([{
       PATH: "/managed/codex-path:/usr/bin",
       RELAYER_CODEX_BINARY: "/managed/codex",
     }]);
+  });
+
+  it("materializes a selectable managed family without changing Eval's fixture default", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-codex-catalog-"));
+    directories.push(dataDirectory);
+    const runtime = new GraphCompleteRuntimeService({
+      userDataDirectory: dataDirectory,
+      graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
+      configurationPaths: [
+        join(repositoryRoot, "harnesses", "fixture-task-system.yaml"),
+        join(repositoryRoot, "harnesses", "codex-layered-personal-presentation-v0.yaml"),
+      ],
+      additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
+    });
+    services.push(runtime);
+    const runtimeSession = await runtime.start();
+    const product = new RelayerAppServerService({
+      userDataDirectory: dataDirectory,
+      binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
+      webDirectory: join(repositoryRoot, "desktop", "renderer"),
+      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
+      runtimeSession,
+      defaultHarnessConfiguration: "fixture-task-system",
+      allowHarnessOverride: true,
+    });
+    services.push(product);
+    const productSession = await product.start();
+    const provision = createEvalCodexCatalogProvisioner({
+      productSession,
+      resolveRuntime: async () => ({ executable: "/managed/codex", environment: {} }),
+      createCredentials: () => ({
+        account: async () => ({ status: "connected", account: { id: "account" } }),
+        request: async () => ({
+          data: [{
+            id: "catalog-sol",
+            model: "gpt-5.6-sol",
+            displayName: "Sol",
+            isDefault: true,
+            supportedReasoningEfforts: [],
+          }],
+          nextCursor: null,
+        }),
+        close: async () => {},
+      }),
+    });
+
+    await provision("codex-layered-personal-presentation-v0");
+
+    const response = await fetch(new URL("/api/model-settings", productSession.origin), {
+      headers: { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}` },
+    });
+    expect(response.ok).toBe(true);
+    const settings = await response.json();
+    expect(settings.defaults.harnessId).toBe("fixture-task-system");
+    expect(settings.families).toEqual([
+      expect.objectContaining({
+        kind: "system",
+        enabled: true,
+        managedPolicy: {
+          providerId: "codex",
+          policyId: "codex-default-family",
+          policyVersion: 2,
+        },
+        members: [{ position: 0, providerId: "codex", modelId: "gpt-5.6-sol" }],
+      }),
+    ]);
   });
 
   it("normalizes and deduplicates the helper PATH", () => {

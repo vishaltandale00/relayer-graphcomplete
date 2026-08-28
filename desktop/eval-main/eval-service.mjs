@@ -1534,7 +1534,9 @@ export class EvalService {
         throw new Error("claude-basic has no connected compatible model; connect Claude or Anthropic before running this matrix cell.");
       }
     } else {
-      if (execution.harnessConfiguration.implementation === "codex.basic") await this.ensureModelCatalog();
+      if (execution.harnessConfiguration.implementation === "codex.basic") {
+        await this.ensureModelCatalog(execution.harnessConfigurationName);
+      }
       const modelSettings = await this.#productRequest("/api/model-settings");
       selectedModel = firstAvailableSelection(modelSettings, execution.harnessConfigurationName);
       productModelSelection = !harnessUsesConfigurationModel(
