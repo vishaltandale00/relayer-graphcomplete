@@ -201,9 +201,14 @@ export function createReviewPresentationAdapter({
     return element;
   }
 
-  function capturePlan({ target, mode }) {
+  async function capturePlan({ target, mode }) {
     validateMode(mode);
     if (capture) throw new Error("A review capture is already active.");
+    // Selection state is published before the inspector and graph selection have
+    // necessarily reached Chromium's painted frame. Capturing immediately can
+    // therefore bind new metadata to pixels from the previously selected node.
+    await nextFrame(windowObject);
+    await nextFrame(windowObject);
     const element = resolveTarget(target);
     if (!element) {
       if (mode === "full") throw new Error("Full capture requires a visible element target.");
@@ -286,7 +291,8 @@ export function createReviewPresentationAdapter({
     for (let frame = 0; frame < frameLimit; frame++) {
       await nextFrame(windowObject);
       const current = getPresentationState();
-      settled = kind === "navigate-action" ? logicalPresentationKey(current) !== logicalPresentationKey(before)
+      settled = kind === "node" ? current.selectedNodeId !== before.selectedNodeId
+        : kind === "navigate-action" ? logicalPresentationKey(current) !== logicalPresentationKey(before)
         : kind === "layer-navigation" ? (
           current.layerId !== before.layerId
           || current.selectedNodeId !== before.selectedNodeId
