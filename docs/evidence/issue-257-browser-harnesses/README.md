@@ -4,15 +4,11 @@ This ledger records the delivery proof for the three independent browser routes 
 
 ## Proof boundary
 
-Each lane used an already-running Chrome instance with remote debugging on loopback and a dedicated, non-default persistent profile. The benign page marker existed before the harness route started. Proof retained only hashes and booleans: no cookies, tokens, page bodies, private URLs, tab inventories, profile bytes, screenshots, or credentials.
+Each predecessor mechanism-proof lane used an already-running Chrome instance with remote debugging on loopback and a dedicated, non-default persistent profile. The benign page marker existed before the harness route started. Proof retained only hashes and booleans: no cookies, tokens, page bodies, private URLs, tab inventories, profile bytes, screenshots, or credentials. The manifest identifies each durable GitHub proof receipt and hashes its exact comment body; the integrated source-set digest binds those receipts to the assembled implementation bytes without claiming that live browser work runs in the deterministic suite.
 
-The live checks established the following narrow facts for each delivered route:
+The lane-specific `predecessorLiveProof` fields record only outcomes stated by each hashed live receipt. Deterministic implementation tests separately cover the `deterministicProof` fields; they are not represented as live observations.
 
-1. The harness attached to existing Chrome state and observed the pre-seeded marker.
-2. One benign action was performed and reversed on the selected test page.
-3. Cancellation or normal cleanup closed the harness-owned helper/socket/client lifecycle while Chrome and the page remained alive.
-4. An unavailable endpoint failed honestly without launching Chrome or claiming an observation/action.
-5. Ask denial applied to the existing enclosing native MCP tool or IPython cell; no inner browser-action taxonomy was introduced.
+Across those two evidence classes, the delivered routes cover existing-state observation, benign bounded actions, harness-owned cleanup, honest endpoint failure, and Ask denial at the enclosing native MCP tool or IPython cell. No inner browser-action taxonomy was introduced. Only the Codex and Prime live receipts explicitly record a reversed test-page action; Claude's committed deterministic coverage exercises its bounded read, navigate, click, and fill batch instead.
 
 Claude Ask currently leaves its coarse MCP tool outside `allowedTools`, so the native tool never runs. Codex uses the existing generic MCP approval bridge and Prime uses its existing cell approval/confinement. Auto and Full retain their existing harness translations.
 

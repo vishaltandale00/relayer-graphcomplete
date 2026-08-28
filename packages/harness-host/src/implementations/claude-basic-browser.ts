@@ -198,7 +198,7 @@ async function discoverTarget(
       && typeof candidate.id === "string"
       && typeof candidate.title === "string"
       && typeof candidate.url === "string"
-      && isAllowedSocketUrl(candidate.webSocketDebuggerUrl, endpoint)
+      && isAllowedSocketUrl(candidate.webSocketDebuggerUrl, endpoint, candidate.id)
     ));
     const matches = selectTargets(targets, selector);
     if (matches.length === 0) throw new BrowserFailure("no-page");
@@ -229,7 +229,12 @@ class CdpClient {
     private readonly timeoutMs: number,
     private readonly signal?: AbortSignal,
   ) {
+    throwIfAborted(signal);
     this.socket = createSocket(url);
+    if (signal?.aborted) {
+      this.socket.close();
+      throw abortFailure(signal);
+    }
     signal?.addEventListener("abort", this.abort, { once: true });
   }
 
@@ -380,11 +385,18 @@ function validateNavigationUrl(value: string): string {
   return url.href;
 }
 
-function isAllowedSocketUrl(value: unknown, endpoint: URL): value is string {
+function isAllowedSocketUrl(value: unknown, endpoint: URL, targetId: string): value is string {
   if (typeof value !== "string") return false;
   try {
     const url = new URL(value);
-    return (url.protocol === "ws:" || url.protocol === "wss:") && url.hostname === endpoint.hostname && url.port === endpoint.port;
+    return url.protocol === "ws:"
+      && url.hostname === endpoint.hostname
+      && url.port === endpoint.port
+      && url.username === ""
+      && url.password === ""
+      && url.pathname === `/devtools/page/${targetId}`
+      && url.search === ""
+      && url.hash === "";
   } catch { return false; }
 }
 

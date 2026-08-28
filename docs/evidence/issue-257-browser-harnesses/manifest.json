@@ -1,7 +1,44 @@
 {
   "schemaVersion": 1,
   "issue": 257,
-  "implementationBase": "61de23d527210b8a0d5972e3d12bb6b80a1b59e2",
+  "historicalProofBase": "61de23d527210b8a0d5972e3d12bb6b80a1b59e2",
+  "assemblyMergeBase": "9188a8123b7c40436f0100d124c24103a768d32d",
+  "integratedSource": {
+    "algorithm": "sha256-of-sorted-path-nul-file-sha256-lf",
+    "sha256": "884161be924063d7392705a382f84e955bbf995c0a96ed020cd8526c8ef50a6d",
+    "files": [
+      "README.md",
+      "crates/relayer-app-server/src/runtime.rs",
+      "desktop/eval-main/index.mjs",
+      "desktop/main/index.mjs",
+      "desktop/main/services/codex-browser-mcp-runtime.mjs",
+      "desktop/main/services/graphcomplete-runtime.mjs",
+      "desktop/main/services/prime-agent-runtime.mjs",
+      "desktop/package.json",
+      "desktop/packaging/electron-builder.mjs",
+      "desktop/packaging/eval-electron-builder.mjs",
+      "desktop/packaging/verify-bundled-app-server.mjs",
+      "docs/evidence/issue-257-browser-harnesses/README.md",
+      "package-lock.json",
+      "packages/harness-host/package.json",
+      "packages/harness-host/src/implementations/claude-basic-browser.ts",
+      "packages/harness-host/src/implementations/claude-basic.ts",
+      "packages/harness-host/src/implementations/codex-approvals.ts",
+      "packages/harness-host/src/implementations/codex-basic.ts",
+      "packages/harness-host/test/claude-basic-browser.test.ts",
+      "packages/harness-host/test/claude-basic.test.ts",
+      "packages/harness-host/test/codex-app-server.test.ts",
+      "packages/harness-host/test/codex-approvals.test.ts",
+      "packages/harness-host/test/codex-basic.test.ts",
+      "packages/harness-host/test/prime-agent.test.ts",
+      "test/browser-harness-evidence.test.mjs",
+      "test/codex-browser-runtime.test.mjs",
+      "test/desktop-shell.test.mjs",
+      "test/prime-agent-packaging.test.mjs",
+      "vendor/prime-agent/earendil-works-pi-coding-agent-0.8.1-sha256-a1bcc855b83e0d6f7d2f08f803f24d36c771d7ca1a4835a79ecb57e23f51a281.tgz",
+      "vendor/prime-agent/manifest.json"
+    ]
+  },
   "profileKind": "dedicated-non-default",
   "endpointKind": "explicit-loopback-cdp",
   "harnesses": {
@@ -18,13 +55,19 @@
         "codex-basic-high.yaml": "6b5f4da66ae04d715bb04de3148ae744b05fb00add0ea353ab7604019ed8b9b5"
       },
       "browserRuntimeSourceSha256": "2e95fd710b8a373a41f43ece4496fd284c7e3c6231cbb2753d110afc852589d0",
-      "liveProof": {
+      "mechanismProof": {
+        "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/251#issuecomment-5448877695",
+        "commentBodyPlusLfSha256": "6355ac6b5dc60c55c483b8be804d3b0519811a750583ec86fc6445680326626b"
+      },
+      "predecessorLiveProof": {
         "preseededMarkerObserved": true,
         "reversibleActionRestored": true,
         "helperClosed": true,
         "chromeAliveAfterCleanup": true,
-        "askEnclosingToolExecuted": false,
         "unavailableEndpointFailedHonestly": true
+      },
+      "deterministicProof": {
+        "askEnclosingToolExecuted": false
       }
     },
     "claude": {
@@ -34,13 +77,20 @@
       "configurationSha256": {
         "claude-basic.yaml": "05fbc6f5c50337595f020b1b2171fbd7a52ae58047a0166878573ea0cd8775da"
       },
-      "browserRuntimeSourceSha256": "69eb51a4a9a2ea9031b4213e8da06043c41c052587b8ddf12bf57c322bc7b27f",
-      "liveProof": {
+      "browserRuntimeSourceSha256": "d405d7483ecab62647363023bbf58c4e39de1844e32f469039957cca1051c57a",
+      "mechanismProof": {
+        "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5448833579",
+        "commentBodyPlusLfSha256": "9e70d873e30660bfc9ac37d1a851a283fa0c2d1dd783980543af0401e61087c4"
+      },
+      "predecessorLiveProof": {
         "preseededMarkerObserved": true,
-        "reversibleActionRestored": true,
+        "sdkMcpHandlerInvoked": true,
         "socketClosed": true,
         "chromeAliveAfterCleanup": true,
-        "askEnclosingToolExecuted": false,
+        "askEnclosingToolExecuted": false
+      },
+      "deterministicProof": {
+        "boundedReadNavigateClickFillBatch": true,
         "unavailableEndpointFailedHonestly": true
       }
     },
@@ -59,11 +109,17 @@
         "darwin-x64": "317a3739e81420dd8c482312078588eccb35ff2af967dccbd5c5b7f0f819c782",
         "win32-x64": "78b385100afa98def93114544834f4a364f6806c34e92376aec66e3b38c4b920"
       },
-      "liveProof": {
+      "mechanismProof": {
+        "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/254#issuecomment-5449230377",
+        "commentBodyPlusLfSha256": "639470e66fe124666a0561289268a6c07f615bd9e5c8704d0e9488153cb608ce"
+      },
+      "predecessorLiveProof": {
         "preseededMarkerObserved": true,
         "reversibleActionRestored": true,
         "clientsClosed": true,
-        "chromeAliveAfterCleanup": true,
+        "chromeAliveAfterCleanup": true
+      },
+      "deterministicProof": {
         "askEnclosingCellExecuted": false,
         "unavailableEndpointFailedHonestly": true
       }

@@ -12,13 +12,14 @@ type ToolHandler = (input: {
 }, extra: unknown) => Promise<ClaudeBrowserToolResult>;
 
 class FakeSocket {
-  readonly readyState = 1;
   readonly sent: Record<string, unknown>[] = [];
   closed = false;
   respond = true;
   stallNavigate = false;
   navigateErrorText: string | undefined;
   private readonly listeners = new Map<string, Set<(event: { data?: unknown }) => void>>();
+
+  constructor(readonly readyState = 1) {}
 
   addEventListener(type: string, listener: (event: { data?: unknown }) => void): void {
     const listeners = this.listeners.get(type) ?? new Set();
@@ -64,6 +65,7 @@ function fixture(options: {
   socket?: FakeSocket;
   targets?: readonly Record<string, unknown>[];
   fetch?: typeof globalThis.fetch;
+  createWebSocket?: (url: string, socket: FakeSocket) => FakeSocket;
 } = {}): {
   handler: ToolHandler;
   socket: FakeSocket;
@@ -92,7 +94,7 @@ function fixture(options: {
       url: "https://existing.test/marker",
       webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/existing-page",
     }]), { status: 200 })),
-    createWebSocket: (url) => { socketUrls.push(url); return socket; },
+    createWebSocket: (url) => { socketUrls.push(url); return options.createWebSocket?.(url, socket) ?? socket; },
     timeoutMs: 100,
   });
   expect(fullName).toBe(CLAUDE_BROWSER_TOOL);
@@ -167,6 +169,28 @@ describe("claude.basic browser MCP tool", () => {
     }, {})).resolves.toMatchObject({ isError: true, content: [{ text: "No attachable Chrome page is available." }] });
   });
 
+  it("binds selected discovery metadata to the exact page socket", async () => {
+    const { handler, socket, socketUrls } = fixture({
+      targets: [{
+        id: "marker",
+        type: "page",
+        title: "Benign marker",
+        url: "https://example.test/marker",
+        webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/private",
+      }],
+    });
+
+    await expect(handler({
+      target: { targetId: "marker" },
+      operations: [{ type: "read_text" }],
+    }, {})).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "No attachable Chrome page is available." }],
+    });
+    expect(socketUrls).toHaveLength(0);
+    expect(socket.sent).toHaveLength(0);
+  });
+
   it("closes its CDP socket when the SDK cancels the enclosing native tool", async () => {
     const socket = new FakeSocket();
     socket.respond = false;
@@ -181,6 +205,25 @@ describe("claude.basic browser MCP tool", () => {
       content: [{ text: "Browser operation cancelled." }],
     });
     expect(socket.closed).toBe(true);
+  });
+
+  it("reports prompt cancellation when the signal aborts during socket creation", async () => {
+    const controller = new AbortController();
+    const socket = new FakeSocket(0);
+    const { handler } = fixture({
+      socket,
+      createWebSocket: (_url, created) => {
+        controller.abort(new Error("cancel during socket construction"));
+        return created;
+      },
+    });
+
+    await expect(handler({ operations: [{ type: "read_text" }] }, { signal: controller.signal })).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "Browser operation cancelled." }],
+    });
+    expect(socket.closed).toBe(true);
+    expect(socket.sent).toHaveLength(0);
   });
 
   it("observes both navigation waiters and closes the socket when navigation is cancelled", async () => {

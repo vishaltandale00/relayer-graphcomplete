@@ -2175,14 +2175,19 @@ describe("desktop skeleton", () => {
       const bundledGraphBinary = join(appPath, "Contents", "Resources", "bin", "relayer-graph-server");
       const bundledGraphClient = join(appPath, "Contents", "Resources", "graph-client", "index.js");
       const bundledMarked = join(appPath, "Contents", "Resources", "renderer", "vendor", "marked.umd.js");
+      const bundledCodexBrowserRoot = join(appPath, "Contents", "Resources", "app.asar.unpacked", "node_modules", "chrome-devtools-mcp");
+      const bundledCodexBrowserScript = join(bundledCodexBrowserRoot, "build", "src", "bin", "chrome-devtools-mcp.js");
       await mkdir(join(appPath, "Contents", "Resources", "bin"), { recursive: true });
       await mkdir(join(appPath, "Contents", "Resources", "graph-client"), { recursive: true });
       await mkdir(join(appPath, "Contents", "Resources", "renderer", "vendor"), { recursive: true });
+      await mkdir(join(bundledCodexBrowserRoot, "build", "src", "bin"), { recursive: true });
       await Promise.all([
         writeFile(bundledBinary, "binary-fixture"),
         writeFile(bundledGraphBinary, "binary-fixture"),
         writeFile(bundledGraphClient, "client-fixture"),
         writeFile(bundledMarked, "marked-fixture"),
+        writeFile(join(bundledCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
+        writeFile(bundledCodexBrowserScript, "helper-fixture"),
       ]);
       const packagedRuntimeEntries = () => [
         "main/single-instance.mjs",
@@ -2230,6 +2235,24 @@ describe("desktop skeleton", () => {
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js"),
         verifyPrimeAgent,
       })).rejects.toThrow("missing node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js");
+      await rm(bundledCodexBrowserScript);
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: packagedRuntimeEntries,
+        verifyPrimeAgent,
+      })).rejects.toThrow(/chrome-devtools-mcp\.js|ENOENT/);
+      await writeFile(bundledCodexBrowserScript, "helper-fixture");
+      await rm(bundledCodexBrowserScript);
+      await mkdir(bundledCodexBrowserScript);
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: packagedRuntimeEntries,
+        verifyPrimeAgent,
+      })).rejects.toThrow("Bundled Codex browser helper files are invalid.");
+      await rm(bundledCodexBrowserScript, { recursive: true });
+      await writeFile(bundledCodexBrowserScript, "helper-fixture");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
@@ -2241,11 +2264,15 @@ describe("desktop skeleton", () => {
       await mkdir(join(windowsPath, "resources", "bin"), { recursive: true });
       await mkdir(join(windowsPath, "resources", "graph-client"), { recursive: true });
       await mkdir(join(windowsPath, "resources", "renderer", "vendor"), { recursive: true });
+      const windowsCodexBrowserRoot = join(windowsPath, "resources", "app.asar.unpacked", "node_modules", "chrome-devtools-mcp");
+      await mkdir(join(windowsCodexBrowserRoot, "build", "src", "bin"), { recursive: true });
       await Promise.all([
         writeFile(join(windowsPath, "resources", "bin", "relayer-app-server.exe"), "binary-fixture"),
         writeFile(join(windowsPath, "resources", "bin", "relayer-graph-server.exe"), "binary-fixture"),
         writeFile(join(windowsPath, "resources", "graph-client", "index.js"), "client-fixture"),
         writeFile(join(windowsPath, "resources", "renderer", "vendor", "marked.umd.js"), "marked-fixture"),
+        writeFile(join(windowsCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
+        writeFile(join(windowsCodexBrowserRoot, "build", "src", "bin", "chrome-devtools-mcp.js"), "helper-fixture"),
       ]);
       await expect(verifyBundledAppServer(windowsPath, {
         platform: "win32",

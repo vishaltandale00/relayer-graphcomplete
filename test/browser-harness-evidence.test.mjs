@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import * as tar from "tar";
 
 import {
   PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
@@ -15,6 +16,35 @@ const evidenceRoot = join(repositoryRoot, "docs", "evidence", "issue-257-browser
 
 async function sha256(path) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
+}
+
+async function sourceSetSha256(files) {
+  const digest = createHash("sha256");
+  for (const path of [...files].sort()) {
+    digest.update(path);
+    digest.update("\0");
+    digest.update(await sha256(join(repositoryRoot, path)));
+    digest.update("\n");
+  }
+  return digest.digest("hex");
+}
+
+async function archiveEntrySha256(archivePath, targetPath) {
+  let digest;
+  await tar.t({
+    file: archivePath,
+    onentry(entry) {
+      if (entry.path !== targetPath) {
+        entry.resume();
+        return;
+      }
+      const hash = createHash("sha256");
+      entry.on("data", (chunk) => hash.update(chunk));
+      entry.on("end", () => { digest = hash.digest("hex"); });
+    },
+  });
+  if (!digest) throw new Error(`Missing archive evidence entry: ${targetPath}`);
+  return digest;
 }
 
 describe("issue 257 browser harness evidence", () => {
@@ -32,6 +62,8 @@ describe("issue 257 browser harness evidence", () => {
       .toBe(manifest.harnesses.codex.browserRuntimeSourceSha256);
     expect(await sha256(join(repositoryRoot, "packages", "harness-host", "src", "implementations", "claude-basic-browser.ts")))
       .toBe(manifest.harnesses.claude.browserRuntimeSourceSha256);
+    expect(manifest.assemblyMergeBase).toBe("9188a8123b7c40436f0100d124c24103a768d32d");
+    expect(await sourceSetSha256(manifest.integratedSource.files)).toBe(manifest.integratedSource.sha256);
   });
 
   it("matches the production Prime and Codex package contracts", async () => {
@@ -52,6 +84,14 @@ describe("issue 257 browser harness evidence", () => {
       sha256: manifest.harnesses.prime.archiveSha256,
       treeSha256: manifest.harnesses.prime.runtimeTreeSha256,
     });
+    const archivePath = join(repositoryRoot, "vendor", "prime-agent", codingAgent.file);
+    await expect(Promise.all([
+      archiveEntrySha256(archivePath, "package/skills/browser/src/browser/__init__.py"),
+      archiveEntrySha256(archivePath, "package/dist/skills/browser/src/browser/__init__.py"),
+    ])).resolves.toEqual([
+      manifest.harnesses.prime.browserHelperSha256,
+      manifest.harnesses.prime.browserHelperSha256,
+    ]);
   });
 
   it("records a sanitized harness-owned scope instead of a product browser contract", async () => {

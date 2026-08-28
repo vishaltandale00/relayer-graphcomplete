@@ -1,12 +1,17 @@
 import { execFile } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import * as tar from "tar";
 
 import { desktopTargetFromEnvironment } from "../shared/target.mjs";
 import { PACKAGED_PROVIDER_MODULES } from "../main/providers/provider-adapter-registry.mjs";
+import {
+  CODEX_BROWSER_MCP_ENTRY,
+  CODEX_BROWSER_MCP_PACKAGE,
+  CODEX_BROWSER_MCP_VERSION,
+} from "../main/services/codex-browser-mcp-runtime.mjs";
 import { validatePrimeAgentManifest } from "../main/services/prime-agent-runtime.mjs";
 import {
   digestFileEntries,
@@ -60,6 +65,7 @@ export async function verifyBundledAppServer(
   ]) {
     if (!packagedEntries.has(entry)) throw new Error(`Bundled Relayer runtime is missing ${entry}.`);
   }
+  await verifyPackagedCodexBrowserMcp(resourcesPath);
   await verifyPrimeAgent(resourcesPath, packagedEntries, { targetKey: primeAgentTargetKey });
   let architectures = null;
   if (platform === "darwin") {
@@ -74,6 +80,30 @@ export async function verifyBundledAppServer(
     }
   }
   return { binaryPath, architecture: architectures };
+}
+
+export async function verifyPackagedCodexBrowserMcp(resourcesPath) {
+  const packageRoot = join(resourcesPath, "app.asar.unpacked", "node_modules", CODEX_BROWSER_MCP_PACKAGE);
+  const manifestPath = join(packageRoot, "package.json");
+  const scriptPath = join(packageRoot, CODEX_BROWSER_MCP_ENTRY);
+  const [manifestBytes, manifestStat, scriptStat] = await Promise.all([
+    readFile(manifestPath, "utf8"),
+    stat(manifestPath),
+    stat(scriptPath),
+  ]);
+  if (!manifestStat.isFile() || !scriptStat.isFile()) {
+    throw new Error("Bundled Codex browser helper files are invalid.");
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestBytes);
+  } catch {
+    throw new Error("Bundled Codex browser helper manifest is invalid.");
+  }
+  if (manifest?.name !== CODEX_BROWSER_MCP_PACKAGE || manifest?.version !== CODEX_BROWSER_MCP_VERSION) {
+    throw new Error(`Bundled Codex browser helper must be ${CODEX_BROWSER_MCP_PACKAGE}@${CODEX_BROWSER_MCP_VERSION}.`);
+  }
+  return { packageRoot, scriptPath };
 }
 
 export async function verifyPackagedPrimeAgent(
