@@ -381,19 +381,33 @@ describe("PrimeAgentHarness", () => {
     expect(createAgentSessionFromServices).toHaveBeenCalledOnce();
     expect(session.promptAndWait).toHaveBeenCalledTimes(2);
     expect(modelRegistryAuth).not.toHaveBeenCalled();
-    expect(scopes[0]!.input.models.map(({ id }) => id)).toEqual(["gpt-shared", "gpt-shared", "claude-root"]);
+    expect(scopes[0]!.input.models.map(({ id }) => id)).toEqual([
+      "gpt-shared", "gpt-shared", "claude-root", "qwen-root", "gemini-root",
+    ]);
     expect(scopes[0]!.input.models[0]!.provider).not.toBe(scopes[0]!.input.models[1]!.provider);
     expect(scopes[0]!.input.models[0]!.api).toBe("openai-responses");
     expect(scopes[0]!.input.models[1]!.api).toBe("openai-responses");
     expect(scopes[0]!.input.models[2]).toMatchObject({
       id: "claude-root",
       api: "anthropic-messages",
-      baseUrl: "https://anthropic-work.test/v1",
+      baseUrl: "https://anthropic-work.test",
       reasoning: false,
       input: ["text"],
       contextWindow: 32_768,
       maxTokens: 4_096,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+    expect(scopes[0]!.input.models[3]).toMatchObject({
+      id: "qwen-root",
+      api: "openai-completions",
+      baseUrl: "https://openrouter-work.test/v1",
+      compat: { thinkingFormat: "openrouter", openRouterRouting: {} },
+    });
+    expect(scopes[0]!.input.models[4]).toMatchObject({
+      id: "gemini-root",
+      api: "openai-completions",
+      baseUrl: "https://vercel-work.test/v1",
+      compat: { vercelGatewayRouting: {} },
     });
     expect(scopes[0]!.input.root.id).toBe("claude-root");
     expect(scopes[1]!.input.root.id).toBe("gpt-shared");
@@ -406,11 +420,15 @@ describe("PrimeAgentHarness", () => {
       { kind: "secret", contract: "secret@1", apiKey: "secret-openai-personal" },
       { kind: "secret", contract: "secret@1", apiKey: "secret-openai-work" },
       { kind: "secret", contract: "secret@1", apiKey: "secret-anthropic-work" },
+      { kind: "secret", contract: "secret@1", apiKey: "secret-openrouter-work" },
+      { kind: "secret", contract: "secret@1", apiKey: "secret-vercel-work" },
     ]);
     expect(scopes[0]!.input).not.toHaveProperty("resolveRequestAuth");
     expect(providerRequests.map(({ apiKey }) => apiKey)).toEqual([
       "secret-openai-personal", "secret-openai-work", "secret-anthropic-work",
+      "secret-openrouter-work", "secret-vercel-work",
       "secret-openai-personal", "secret-openai-work", "secret-anthropic-work",
+      "secret-openrouter-work", "secret-vercel-work",
     ]);
     expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/family-session.jsonl" });
 
@@ -462,7 +480,7 @@ describe("PrimeAgentHarness", () => {
     expect(session.promptAndWait).not.toHaveBeenCalled();
   });
 
-  it("uses explicit conservative transport metadata for every product-visible API adapter", async () => {
+  it("uses discovered per-model token capabilities with a conservative fallback", async () => {
     const scopes: ControlledRunScope[] = [];
     const session = {
       promptAndWait: vi.fn(async (_text: string, options: { modelScope: ControlledRunScope }) => { options.modelScope.revoke(); }),
@@ -484,11 +502,29 @@ describe("PrimeAgentHarness", () => {
     }) as never });
 
     for (const [index, adapterId] of ["openai-api", "anthropic-api", "openrouter", "vercel-ai-router"].entries()) {
-      await harness.complete(singleAdapterRunContext(40 + index, adapterId));
+      await harness.complete(singleAdapterRunContext(
+        40 + index,
+        adapterId,
+        adapterId === "openrouter"
+          ? { contextWindow: 196_608, maxOutputTokens: 131_072 }
+          : undefined,
+      ));
     }
+    await harness.complete(singleAdapterRunContext(
+      44,
+      "openrouter",
+      { contextWindow: 32_768, maxOutputTokens: 2_048 },
+    ));
+    await harness.complete(singleAdapterRunContext(
+      45,
+      "anthropic-api",
+      undefined,
+      "https://provider-45.test/proxy/anthropic/v1/",
+    ));
 
     expect(scopes.map(({ input }) => ({
       api: input.root.api,
+      baseUrl: input.root.baseUrl,
       compat: input.root.compat,
       reasoning: input.root.reasoning,
       input: input.root.input,
@@ -496,11 +532,30 @@ describe("PrimeAgentHarness", () => {
       maxTokens: input.root.maxTokens,
       cost: input.root.cost,
     }))).toEqual([
-      { api: "openai-responses", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "anthropic-messages", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-responses", baseUrl: "https://provider-40.test/v1", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "anthropic-messages", baseUrl: "https://provider-41.test", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-42.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 196_608, maxTokens: 131_072, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-43.test/v1", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-44.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 2_048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "anthropic-messages", baseUrl: "https://provider-45.test/proxy/anthropic", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
     ]);
+  });
+
+  it("rejects a discovered context that cannot satisfy Prime's compaction reserve", async () => {
+    const session = {
+      promptAndWait: vi.fn(async (_text: string, _options: { modelScope: ControlledRunScopeInput }) => undefined),
+      waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const harness = await createHarness(session);
+
+    await expect(harness.complete(singleAdapterRunContext(
+      45,
+      "openrouter",
+      { contextWindow: 4_095, maxOutputTokens: 3_685 },
+    ))).rejects.toThrow("context window cannot satisfy Prime's 16384-token compaction reserve");
+    expect(session.promptAndWait).not.toHaveBeenCalled();
   });
 
   it("opens saved Prime Agent state and forwards cancellation", async () => {
@@ -1347,6 +1402,8 @@ function familyRunContext(
     { providerId: "openai-personal", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "1" },
     { providerId: "openai-work", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "1" },
     { providerId: "anthropic-work", adapterId: "anthropic-api", accessContract: "secret@1", modelId: "claude-root", adapterImplementationVersion: "1" },
+    { providerId: "openrouter-work", adapterId: "openrouter", accessContract: "secret@1", modelId: "qwen-root", adapterImplementationVersion: "1" },
+    { providerId: "vercel-work", adapterId: "vercel-ai-router", accessContract: "secret@1", modelId: "gemini-root", adapterImplementationVersion: "1" },
   ] as const;
   const orchestrator = routes[orchestratorIndex];
   if (orchestrator === undefined) throw new Error("invalid test orchestrator");
@@ -1362,6 +1419,14 @@ function familyRunContext(
     "anthropic-work": {
       kind: "secret", contract: "secret@1", providerId: "anthropic-work", adapterId: "anthropic-api",
       adapterImplementationVersion: "1", endpoint: "https://anthropic-work.test/v1", fields: { "api-key": "secret-anthropic-work" },
+    },
+    "openrouter-work": {
+      kind: "secret", contract: "secret@1", providerId: "openrouter-work", adapterId: "openrouter",
+      adapterImplementationVersion: "1", endpoint: "https://openrouter-work.test/v1", fields: { "api-key": "secret-openrouter-work" },
+    },
+    "vercel-work": {
+      kind: "secret", contract: "secret@1", providerId: "vercel-work", adapterId: "vercel-ai-router",
+      adapterImplementationVersion: "1", endpoint: "https://vercel-work.test/v1", fields: { "api-key": "secret-vercel-work" },
     },
   } as const;
   const base = runContext(nodeId, token, trace);
@@ -1381,7 +1446,12 @@ function familyRunContext(
   };
 }
 
-function singleAdapterRunContext(nodeId: number, adapterId: string): HarnessRunContext {
+function singleAdapterRunContext(
+  nodeId: number,
+  adapterId: string,
+  modelCapabilities?: { readonly contextWindow: number; readonly maxOutputTokens: number },
+  endpoint = `https://provider-${nodeId}.test/v1`,
+): HarnessRunContext {
   const base = runContext(nodeId, `token-${nodeId}`);
   const route = {
     providerId: `provider-${nodeId}`,
@@ -1396,8 +1466,11 @@ function singleAdapterRunContext(nodeId: number, adapterId: string): HarnessRunC
     providerId: route.providerId,
     adapterId,
     adapterImplementationVersion: "1",
-    endpoint: `https://provider-${nodeId}.test/v1`,
+    endpoint,
     fields: { "api-key": `secret-${nodeId}` },
+    ...(modelCapabilities === undefined ? {} : {
+      modelCapabilities: { [route.modelId]: modelCapabilities },
+    }),
   } as const;
   return {
     ...base,

@@ -52,6 +52,31 @@ function stringRecord(value) {
     && Object.values(value).every((entry) => typeof entry === "string");
 }
 
+function validatedModelCapabilities(value) {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Provider adapter returned invalid model capabilities.");
+  }
+  const entries = [];
+  for (const [modelId, entry] of Object.entries(value)) {
+    if (!nonEmptyString(modelId)
+      || entry === null
+      || typeof entry !== "object"
+      || Array.isArray(entry)
+      || !Number.isSafeInteger(entry.contextWindow)
+      || entry.contextWindow < 1
+      || !Number.isSafeInteger(entry.maxOutputTokens)
+      || entry.maxOutputTokens < 1) {
+      throw new Error("Provider adapter returned invalid model capabilities.");
+    }
+    entries.push([modelId, Object.freeze({
+      contextWindow: entry.contextWindow,
+      maxOutputTokens: entry.maxOutputTokens,
+    })]);
+  }
+  return Object.freeze(Object.fromEntries(entries));
+}
+
 function validatedManagedRuntime(value) {
   if (value === null
     || typeof value !== "object"
@@ -84,6 +109,7 @@ function validatedExecutionAccess(resolved, definition, descriptor) {
     const runtime = resolved.runtime === undefined
       ? undefined
       : validatedManagedRuntime(resolved.runtime);
+    const modelCapabilities = validatedModelCapabilities(resolved.modelCapabilities);
     return Object.freeze({
       kind: "secret",
       contract: definition.accessContract,
@@ -92,6 +118,7 @@ function validatedExecutionAccess(resolved, definition, descriptor) {
       adapterImplementationVersion: descriptor.implementationVersion,
       endpoint: resolved.endpoint,
       fields: Object.freeze({ ...resolved.fields }),
+      ...(modelCapabilities === undefined ? {} : { modelCapabilities }),
       ...(runtime === undefined ? {} : { runtime }),
     });
   }

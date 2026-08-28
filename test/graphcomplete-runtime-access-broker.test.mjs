@@ -97,6 +97,57 @@ describe("desktop provider execution access broker", () => {
     expect(personal.release).toHaveBeenCalledOnce();
   });
 
+  it("preserves validated per-model capabilities without treating them as credentials", async () => {
+    const fixture = providerLease({
+      providerId: "openrouter-work",
+      adapterId: "openrouter",
+      resolved: {
+        kind: "secret",
+        endpoint: "https://api.example.test/v1",
+        fields: { "api-key": "secret" },
+        modelCapabilities: {
+          "z-ai/glm-5.3": { contextWindow: 202_752, maxOutputTokens: 131_072 },
+        },
+      },
+    });
+    const broker = createProviderExecutionAccessBroker(async () => fixture.lease);
+
+    const acquired = await broker.acquire(
+      { providerId: "openrouter-work", adapterId: "openrouter", modelId: "z-ai/glm-5.3" },
+      ["secret@1"],
+      new AbortController().signal,
+    );
+
+    expect(acquired.access.modelCapabilities).toEqual({
+      "z-ai/glm-5.3": { contextWindow: 202_752, maxOutputTokens: 131_072 },
+    });
+    expect(Object.isFrozen(acquired.access.modelCapabilities["z-ai/glm-5.3"])).toBe(true);
+    await acquired.release();
+  });
+
+  it("rejects malformed model capabilities before admitting provider access", async () => {
+    const fixture = providerLease({
+      providerId: "openrouter-work",
+      adapterId: "openrouter",
+      resolved: {
+        kind: "secret",
+        endpoint: "https://api.example.test/v1",
+        fields: { "api-key": "secret" },
+        modelCapabilities: {
+          "z-ai/glm-5.3": { contextWindow: 202_752, maxOutputTokens: "unbounded" },
+        },
+      },
+    });
+    const broker = createProviderExecutionAccessBroker(async () => fixture.lease);
+
+    await expect(broker.acquire(
+      { providerId: "openrouter-work", adapterId: "openrouter", modelId: "z-ai/glm-5.3" },
+      ["secret@1"],
+      new AbortController().signal,
+    )).rejects.toThrow("invalid model capabilities");
+    expect(fixture.release).toHaveBeenCalledOnce();
+  });
+
   it("coalesces concurrent releases but retries after a rejected release", async () => {
     const fixture = providerLease({ providerId: "openai-work" });
     const failure = new Error("removal finalization failed");
