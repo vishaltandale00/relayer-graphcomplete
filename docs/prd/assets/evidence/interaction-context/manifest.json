@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "passed": true,
-  "capturedAt": "2026-08-26T04:37:22.194Z",
-  "sourceCommit": "7158294bf2747f4a6058257e4beda1fced62285c",
+  "capturedAt": "2026-08-28T14:10:04.417Z",
+  "sourceCommit": "df41786c0d0adc962c3ddc2f3abe040e8bf109e9",
   "workingTreeDirty": false,
   "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
   "paidInferenceCalls": 0,
@@ -27,13 +27,12 @@
   },
   "assertions": {
     "nodeDetailsOpened": true,
-    "multipleAnnotationsAddedEditedAndOrdered": true,
+    "multipleAnnotationsAddedAndOrdered": true,
     "compactComposerPopoverVisible": true,
     "compactComposerPopoverAvoidsNodeDetails": true,
     "multipleNodePillStripScrolls": true,
-    "editPreservesPopoverDimensions": true,
-    "longAnnotationEditorScrolls": true,
-    "annotationDeletedWhileEditing": true,
+    "confirmedPreviewIsReadOnly": true,
+    "annotationDeletedFromExplicitPreview": true,
     "messageAndContextSent": true,
     "historyPillAndPopoverVisible": true,
     "historicalTargetNodeReopened": true,
@@ -45,17 +44,17 @@
   "screenshots": [
     {
       "file": "grouped-composer.png",
-      "sha256": "963275926d437369b9d8d98dd21c5fc88db4662d7e2851ebf8ccb5580798d3fa"
+      "sha256": "dd3869d0dd7cf2005b78dfee37cc7dcf9716257abb93264868da6fe8b58a0a4d"
     },
     {
       "file": "restarted-context.png",
-      "sha256": "141d7a2d1331b37ca5c51f51a2d586964a773ba47f7c6a2da1c611b7458b750b"
+      "sha256": "9f8389ae374aa6e57429e039fdfcf85dd68c0b9b6b139aaedcbf485deca13d4a"
     }
   ],
   "video": {
     "file": "interaction-context.mp4",
-    "sha256": "9d12751bbcf51c6da7f5d0c5cf79af839846cdccafd275a27e6b1ff9f06f3f1f",
-    "durationSeconds": 31.167,
+    "sha256": "dd0e18fd91c32945b258cac6b3543112126f4326b90ad92a7a4d9cc020270301",
+    "durationSeconds": 63.033,
     "stream": {
       "codec_name": "h264",
       "width": 1480,
@@ -67,16 +66,19 @@
     },
     "playbackDecoded": true,
     "steps": [
-      "1. Open Node Details for any visible node; the + control connects it to the next interaction",
-      "2. Editing stays inside the fixed popover and keeps an explicit trash control available",
-      "3. Multiple attached-node pills scroll horizontally within the available composer width",
-      "4. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
-      "5. The turn banner shows one connected-node pill; its popover restores both annotations in order",
-      "6. Clicking the connected node reopens its full Node Details from history",
-      "7. A connected node with a non-empty annotation enables send even when message text is empty",
-      "8. Annotation-only history has no derived message label; the context pill preserves the actual input",
-      "9. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
-      "10. The persisted context still reopens the exact target node after restart"
+      "1. Selecting a graph node opens its full Node Details without covering the graph or composer",
+      "2. The node's + opens its saved annotation editor in the bottom third of Node Details",
+      "3. A failed save stays in Node Details with the draft intact and an inline retryable error",
+      "4. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
+      "5. Confirmed annotations stay read-only in an explicitly opened compact preview",
+      "6. Multiple attached-node pills scroll horizontally within the available composer width",
+      "7. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+      "8. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+      "9. Clicking the connected node reopens its full Node Details from history",
+      "10. A connected node with a non-empty annotation enables send even when message text is empty",
+      "11. Annotation-only history has no derived message label; the context pill preserves the actual input",
+      "12. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+      "13. The persisted context still reopens the exact target node after restart"
     ]
   }
 }
