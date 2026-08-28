@@ -538,6 +538,32 @@ export function contextEditorPresentation(editor, stagingDisabled = false, resol
   };
 }
 
+export function syncMountedContextEditorControls(textarea, presentation, value) {
+  if (!textarea) return;
+  textarea.disabled = presentation.textareaDisabled;
+  const cancel = textarea.parentElement?.querySelector('[aria-label="Cancel annotation edit"]');
+  const remove = textarea.parentElement?.querySelector('[aria-label^="Discard annotation draft"]');
+  const confirm = textarea.parentElement?.querySelector('[aria-label="Confirm annotation"]');
+  if (cancel) cancel.disabled = presentation.controlsDisabled;
+  if (remove) remove.disabled = presentation.controlsDisabled;
+  if (confirm) confirm.disabled = presentation.confirmDisabled || !String(value).trim();
+}
+
+export function applyMountedContextEditorInput({
+  editor,
+  textarea,
+  controller,
+  threadId,
+  nodeId,
+}) {
+  if (editor.durable && !controller.update(threadId, nodeId, textarea.value)) {
+    textarea.value = editor.value;
+    return false;
+  }
+  editor.value = textarea.value;
+  return true;
+}
+
 export function contextDraftStatusPresentation(draft) {
   const status = draft?.status || "unsaved";
   return {
@@ -1643,6 +1669,12 @@ export function createProductWorkspace({
       const confirm = textarea.parentElement?.querySelector('[aria-label="Confirm annotation"]');
       if (confirm) confirm.disabled = !String(draft.text).trim() || contextStagingDisabled();
     }
+    const editorPresentation = contextEditorPresentation(
+      contextEditor,
+      contextStagingDisabled(),
+      ["confirming", "discarding"].includes(draft?.operation?.kind),
+    );
+    syncMountedContextEditorControls(textarea, editorPresentation, contextEditor.value);
     const presentation = contextDraftStatusPresentation(draft);
     status.className = presentation.className;
     status.textContent = presentation.text;
@@ -1662,7 +1694,7 @@ export function createProductWorkspace({
       const editorPresentation = contextEditorPresentation(
         contextEditor,
         contextStagingDisabled(),
-        Boolean(durableDraft?.resolving),
+        ["confirming", "discarding"].includes(durableDraft?.operation?.kind),
       );
       const body = graphDocument.createElement("div");
       body.className = "composer-context-inline-editor";
@@ -1774,10 +1806,13 @@ export function createProductWorkspace({
         renderComposerContexts();
       };
       textarea.oninput = () => {
-        contextEditor.value = textarea.value;
-        if (contextEditor.durable) {
-          contextDraftController.update(getThread()?.id, node.id, textarea.value);
-        }
+        if (!applyMountedContextEditorInput({
+          editor: contextEditor,
+          textarea,
+          controller: contextDraftController,
+          threadId: getThread()?.id,
+          nodeId: node.id,
+        })) return;
         resizeContextEditorTextarea(textarea);
         confirm.disabled = contextEditorPresentation(
           contextEditor,

@@ -8,6 +8,7 @@ import {
   CONTEXT_EDITOR_MIN_HEIGHT,
   applyComposerCapabilities,
   applyContextEditor,
+  applyMountedContextEditorInput,
   bindComposerKeydown,
   clearSubmittedComposerDraft,
   composerDisabledForState,
@@ -33,6 +34,7 @@ import {
   handleComposerKeydown,
   resizeComposerTextarea,
   resizeContextEditorTextarea,
+  syncMountedContextEditorControls,
   interactionContextPayload,
   interactionContextDraftTransition,
   removeContextAnnotation,
@@ -47,6 +49,47 @@ describe("product workspace keyboard behavior", () => {
       className: "composer-context-draft-status status-error",
       text: "Not saved: disk full",
     });
+  });
+
+  it("locks already-mounted draft controls and rejects a racing input event", () => {
+    const controls = {
+      cancel: { disabled: false },
+      remove: { disabled: false },
+      confirm: { disabled: false },
+    };
+    const textarea = {
+      value: "racing edit",
+      disabled: false,
+      parentElement: {
+        querySelector: (selector) => ({
+          '[aria-label="Cancel annotation edit"]': controls.cancel,
+          '[aria-label^="Discard annotation draft"]': controls.remove,
+          '[aria-label="Confirm annotation"]': controls.confirm,
+        }[selector]),
+      },
+    };
+    syncMountedContextEditorControls(
+      textarea,
+      contextEditorPresentation({ durable: true, value: "saved" }, false, true),
+      "saved",
+    );
+    expect(textarea.disabled).toBe(true);
+    expect(controls).toEqual({
+      cancel: { disabled: true },
+      remove: { disabled: true },
+      confirm: { disabled: true },
+    });
+
+    const editor = { durable: true, value: "saved" };
+    expect(applyMountedContextEditorInput({
+      editor,
+      textarea,
+      controller: { update: vi.fn(() => null) },
+      threadId: 1,
+      nodeId: 7,
+    })).toBe(false);
+    expect(textarea.value).toBe("saved");
+    expect(editor.value).toBe("saved");
   });
 
   it("defers a context confirmation that resolves after a thread switch", () => {

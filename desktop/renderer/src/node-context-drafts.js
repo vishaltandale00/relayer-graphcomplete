@@ -37,11 +37,15 @@ function hydratedDraft(draft) {
     error: null,
     editVersion: 0,
     timer: null,
-    inFlight: null,
-    resolving: null,
-    needsReconcile: false,
+    operation: { kind: "idle" },
   };
 }
+
+const isResolving = (draft) => ["confirming", "discarding"].includes(draft?.operation?.kind);
+const isReconciling = (draft) => draft?.operation?.kind === "reconciling";
+const currentSave = (draft) => draft?.operation?.kind === "saving"
+  ? draft.operation.promise
+  : null;
 
 export function createNodeContextDraftController({
   api,
@@ -57,42 +61,92 @@ export function createNodeContextDraftController({
     return draftsByThread.get(key);
   };
   const changed = () => onChange();
+  const settleCurrentSave = async (drafts, key) => {
+    while (true) {
+      const save = currentSave(drafts.get(key));
+      if (!save) return drafts.get(key) || null;
+      await save.catch(() => null);
+      await Promise.resolve();
+    }
+  };
 
   const controller = {
     async load(threadId) {
       const response = await api.list(threadId);
       const localDrafts = threadDrafts(threadId);
-      await Promise.all([...localDrafts.values()].map((draft) => (
-        draft.inFlight?.catch(() => null)
-      )));
+      const responseBaseline = new Map([...localDrafts].map(([key, draft]) => [key, {
+        draft,
+        editVersion: draft.editVersion,
+        operation: draft.operation,
+      }]));
       const drafts = new Map();
-      const retryNodeIds = [];
+      const retryNodeIds = new Set();
+      const observedLocal = new Map();
       for (const draft of response?.drafts || []) {
         const key = nodeKey(draft.target.nodeId);
-        const local = localDrafts.get(key);
-        if (!local || (local.editVersion === 0 && !local.resolving)) {
+        const local = await settleCurrentSave(localDrafts, key);
+        const baseline = responseBaseline.get(key);
+        if (local && (!baseline || (
+          baseline.operation?.kind !== "saving"
+          && (baseline.draft !== local
+            || baseline.editVersion !== local.editVersion
+            || baseline.operation !== local.operation)
+        ))) {
+          drafts.set(key, local);
+          observedLocal.set(key, {
+            draft: local,
+            editVersion: local.editVersion,
+            operation: local.operation,
+          });
+          continue;
+        }
+        observedLocal.set(key, local && {
+          draft: local,
+          editVersion: local.editVersion,
+          operation: local.operation,
+        });
+        if (!local || (
+          local.editVersion === 0 && !isResolving(local) && !isReconciling(local)
+        )) {
           if (local?.timer != null) cancel(local.timer);
           drafts.set(key, hydratedDraft(draft));
           continue;
         }
         if (local.timer != null) cancel(local.timer);
+        const operation = local.operation;
         Object.assign(local, hydratedDraft(draft), {
           text: local.text,
           editVersion: local.editVersion,
-          resolving: local.resolving,
+          operation: isResolving({ operation }) ? operation : { kind: "idle" },
           status: local.text === draft.text ? "saved" : "unsaved",
         });
         drafts.set(key, local);
-        if (local.status === "unsaved") retryNodeIds.push(draft.target.nodeId);
+        if (local.status === "unsaved") retryNodeIds.add(draft.target.nodeId);
       }
       for (const [key, local] of localDrafts) {
         if (drafts.has(key)) continue;
-        if (local.needsReconcile) {
+        await settleCurrentSave(localDrafts, key);
+        observedLocal.set(key, {
+          draft: local,
+          editVersion: local.editVersion,
+          operation: local.operation,
+        });
+        if (isReconciling(local)) {
           local.status = "error";
           local.error = "This draft changed or was resolved elsewhere. Reload before continuing.";
-          local.needsReconcile = false;
+          local.operation = { kind: "idle" };
         }
         drafts.set(key, local);
+      }
+      for (const [key, current] of localDrafts) {
+        const observed = observedLocal.get(key);
+        if (!observed
+          || observed.draft !== current
+          || observed.editVersion !== current.editVersion
+          || observed.operation !== current.operation) {
+          drafts.set(key, current);
+          if (current.status === "unsaved") retryNodeIds.add(current.target.nodeId);
+        }
       }
       draftsByThread.set(threadKey(threadId), drafts);
       for (const nodeId of retryNodeIds) {
@@ -120,9 +174,7 @@ export function createNodeContextDraftController({
           error: null,
           editVersion: 0,
           timer: null,
-          inFlight: null,
-          resolving: null,
-          needsReconcile: false,
+          operation: { kind: "idle" },
         };
         draft.timer = schedule(() => controller.flush(threadId, target.nodeId));
         drafts.set(key, draft);
@@ -132,7 +184,7 @@ export function createNodeContextDraftController({
     },
     update(threadId, nodeId, text) {
       const draft = controller.draftForNode(threadId, nodeId);
-      if (!draft || draft.resolving) return null;
+      if (!draft || isResolving(draft)) return null;
       if (draft.timer != null) cancel(draft.timer);
       draft.text = text;
       draft.editVersion += 1;
@@ -144,9 +196,11 @@ export function createNodeContextDraftController({
     },
     async flush(threadId, nodeId, { allowResolving = false, allowReconcile = true } = {}) {
       const draft = controller.draftForNode(threadId, nodeId);
-      if (!draft || (draft.resolving && !allowResolving)) return null;
-      if (draft.inFlight) {
-        await draft.inFlight.catch(() => null);
+      if (!draft || (isResolving(draft) && !allowResolving)) return null;
+      const parentOperation = isResolving(draft) && allowResolving ? draft.operation : null;
+      const existingSave = currentSave(draft);
+      if (existingSave) {
+        await existingSave.catch(() => null);
         const current = controller.draftForNode(threadId, nodeId);
         return current?.status === "unsaved"
           ? controller.flush(threadId, nodeId, { allowResolving, allowReconcile })
@@ -160,7 +214,8 @@ export function createNodeContextDraftController({
       draft.error = null;
       changed();
       const savePromise = api.save(threadId, payload);
-      draft.inFlight = savePromise;
+      const saveOperation = { kind: "saving", promise: savePromise };
+      draft.operation = parentOperation || saveOperation;
       let revisionConflict = false;
       try {
         const saved = await savePromise;
@@ -181,7 +236,11 @@ export function createNodeContextDraftController({
         if (current?.id === draft.id) {
           const conflict = error.code === "context_draft_revision_conflict";
           revisionConflict = conflict && allowReconcile;
-          current.needsReconcile = revisionConflict;
+          if (!parentOperation) {
+            current.operation = revisionConflict
+              ? { kind: "reconciling" }
+              : { kind: "idle" };
+          }
           current.status = conflict
             ? (allowReconcile ? "saving" : "error")
             : (current.editVersion === savingVersion ? "error" : "unsaved");
@@ -192,68 +251,90 @@ export function createNodeContextDraftController({
         }
       } finally {
         const current = controller.draftForNode(threadId, nodeId);
-        if (current?.inFlight === savePromise) current.inFlight = null;
+        if (current?.operation === saveOperation) current.operation = { kind: "idle" };
       }
       if (revisionConflict) {
         try {
           await controller.load(threadId);
           const reconciled = controller.draftForNode(threadId, nodeId);
           return reconciled?.status === "unsaved"
-            ? controller.flush(threadId, nodeId, { allowReconcile: false })
+            ? controller.flush(threadId, nodeId, {
+              allowResolving,
+              allowReconcile: false,
+            })
             : reconciled;
         } catch (error) {
           const current = controller.draftForNode(threadId, nodeId);
           if (current) {
             current.status = "error";
             current.error = `Could not reload this changed draft: ${error.message}`;
-            current.needsReconcile = false;
+            current.operation = { kind: "idle" };
             changed();
           }
         }
       }
       return null;
     },
-    async confirm(threadId, nodeId) {
-      const draft = controller.draftForNode(threadId, nodeId);
+    async confirm(threadId, nodeId, { allowReconcile = true } = {}) {
+      let draft = controller.draftForNode(threadId, nodeId);
       if (!draft) return null;
-      if (draft.resolving) return null;
-      const confirmationPromise = (async () => {
-        if (draft.status !== "saved") await controller.flush(threadId, nodeId);
-        const current = controller.draftForNode(threadId, nodeId);
-        if (!current || current.status !== "saved" || current.revision == null) return null;
-        const confirmation = await api.confirm(threadId, current);
+      if (isResolving(draft)) return null;
+      if (draft.status !== "saved") await controller.flush(threadId, nodeId);
+      draft = controller.draftForNode(threadId, nodeId);
+      if (!draft || isResolving(draft) || draft.status !== "saved" || draft.revision == null) {
+        return null;
+      }
+      const confirmationPromise = api.confirm(threadId, { ...draft }).then((confirmation) => {
         threadDrafts(threadId).delete(nodeKey(nodeId));
         changed();
         return confirmation;
-      })();
-      draft.resolving = { kind: "confirm", promise: confirmationPromise };
+      });
+      const confirmationOperation = { kind: "confirming", promise: confirmationPromise };
+      draft.operation = confirmationOperation;
       changed();
       try {
         const confirmation = await confirmationPromise;
         if (!confirmation) {
           const unresolved = controller.draftForNode(threadId, nodeId);
-          if (unresolved?.resolving?.promise === confirmationPromise) unresolved.resolving = null;
+          if (unresolved?.operation === confirmationOperation) unresolved.operation = { kind: "idle" };
           changed();
         }
         return confirmation;
       } catch (error) {
         const unresolved = controller.draftForNode(threadId, nodeId);
-        if (unresolved?.resolving?.promise === confirmationPromise) unresolved.resolving = null;
+        if (unresolved?.operation === confirmationOperation) unresolved.operation = { kind: "idle" };
         changed();
+        if (error.code === "context_draft_revision_conflict" && allowReconcile && unresolved) {
+          const staleRevision = unresolved.revision;
+          unresolved.operation = { kind: "reconciling" };
+          await controller.load(threadId);
+          let reconciled = controller.draftForNode(threadId, nodeId);
+          if (!reconciled || reconciled.revision === staleRevision || reconciled.status === "error") {
+            throw error;
+          }
+          if (reconciled.status === "unsaved") {
+            await controller.flush(threadId, nodeId, { allowReconcile: false });
+            reconciled = controller.draftForNode(threadId, nodeId);
+          }
+          if (reconciled?.status === "saved") {
+            return controller.confirm(threadId, nodeId, { allowReconcile: false });
+          }
+        }
         throw error;
       }
     },
-    async discard(threadId, nodeId) {
+    async discard(threadId, nodeId, { allowReconcile = true } = {}) {
       let draft = controller.draftForNode(threadId, nodeId);
       if (!draft) return false;
-      if (draft.resolving) return false;
-      const operation = { kind: "discard" };
-      draft.resolving = operation;
+      if (isResolving(draft)) return false;
+      const pendingSave = currentSave(draft);
+      const operation = { kind: "discarding" };
+      draft.operation = operation;
       changed();
       try {
         if (draft.timer != null) cancel(draft.timer);
         draft.timer = null;
-        if (draft.inFlight) await draft.inFlight.catch(() => null);
+        if (pendingSave) await pendingSave.catch(() => null);
         draft = controller.draftForNode(threadId, nodeId);
         if (!draft) return true;
         if (draft?.revision == null && draft?.status === "error") {
@@ -264,14 +345,23 @@ export function createNodeContextDraftController({
         if (draft?.revision == null && draft?.status === "error") {
           throw new Error("The saved draft state is uncertain. Retry discard when persistence recovers.");
         }
-        if (draft.revision != null) await api.discard(threadId, draft);
+        if (draft.revision != null) await api.discard(threadId, { ...draft });
         threadDrafts(threadId).delete(nodeKey(nodeId));
         changed();
         return true;
       } catch (error) {
         const unresolved = controller.draftForNode(threadId, nodeId);
-        if (unresolved?.resolving === operation) unresolved.resolving = null;
+        if (unresolved?.operation === operation) unresolved.operation = { kind: "idle" };
         changed();
+        if (error.code === "context_draft_revision_conflict" && allowReconcile && unresolved) {
+          const staleRevision = unresolved.revision;
+          unresolved.operation = { kind: "reconciling" };
+          await controller.load(threadId);
+          const reconciled = controller.draftForNode(threadId, nodeId);
+          if (reconciled && reconciled.revision !== staleRevision && reconciled.status !== "error") {
+            return controller.discard(threadId, nodeId, { allowReconcile: false });
+          }
+        }
         throw error;
       }
     },

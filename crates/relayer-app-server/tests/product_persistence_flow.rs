@@ -365,29 +365,48 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
     .unwrap();
     pool.close().await;
 
-    let graph = Router::new().route(
-        "/api/control/interactions/3/accepted-closure",
-        axum::routing::get(|| async {
-            axum::Json(json!({
-                "nodeId": 3,
-                "rootAction": {
-                    "id": 4, "sourceNodeId": 3, "sourceLayerId": null,
-                    "kind": "navigate", "relation": "expand", "label": "Response",
-                    "variant": "pill", "icon": null, "description": null,
-                    "targetLayerId": 5, "interactionText": null, "state": "accepted"
-                },
-                "rootLayerId": 5,
-                "layers": [{
-                    "layer": { "id": 5, "nodes": [7], "edges": [], "layout": null, "state": "accepted" },
-                    "nodes": [{
+    let graph = Router::new()
+        .route(
+            "/api/control/context-occurrences/canonical",
+            axum::routing::post(|axum::Json(target): axum::Json<Value>| async move {
+                match target["nodeId"].as_i64() {
+                    Some(7) => axum::Json(json!({
                         "id": 7, "kind": "concept", "icon": "list", "title": "Incoming queue",
                         "detail": "Tasks wait here while workers are busy.", "state": "accepted"
+                    }))
+                    .into_response(),
+                    Some(10) => axum::Json(json!({
+                        "id": 10, "kind": "concept", "icon": "list", "title": "Changed queue",
+                        "detail": "The accepted node changed unexpectedly.", "state": "accepted"
+                    }))
+                    .into_response(),
+                    _ => (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        axum::Json(json!({
+                            "error": {
+                                "code": "invalid_context_occurrence",
+                                "path": "target",
+                                "message": "not in the accepted source completion"
+                            }
+                        })),
+                    )
+                        .into_response(),
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/3/layers/6",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "layer": { "id": 6, "nodes": [9], "edges": [], "layout": null, "state": "accepted" },
+                    "nodes": [{
+                        "id": 9, "kind": "concept", "icon": "archive", "title": "Unreachable queue",
+                        "detail": "This accepted layer is outside the source completion.", "state": "accepted"
                     }],
                     "edges": [], "actions": []
-                }]
-            }))
-        }),
-    );
+                }))
+            }),
+        );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(Router::new()).await;
     let catalog = root.join("catalog.json");
@@ -491,6 +510,41 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
         response_json(unreachable).await["code"],
         "context_draft_target_unavailable"
     );
+    let changed_uri = format!("/api/threads/{thread_id}/context-drafts/draft-changed");
+    response_json(
+        app.clone()
+            .oneshot(api_request(
+                "PUT",
+                &changed_uri,
+                Some(json!({
+                    "target": { "nodeId": 10, "sourceInteractionNodeId": 3, "sourceLayerId": 5 },
+                    "targetNode": {
+                        "id": 10, "kind": "concept", "icon": "list", "title": "Original queue",
+                        "detail": "The snapshot saved when the editor opened.", "state": "accepted"
+                    },
+                    "text": "Keep this changed-node note.", "expectedRevision": null
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let changed = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("{changed_uri}/confirm?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(changed).await["code"],
+        "context_draft_target_unavailable"
+    );
     let confirm_uri = format!("{draft_uri}/confirm?expectedRevision=1");
     let confirmed = response_json(
         app.clone()
@@ -526,7 +580,7 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
             .unwrap(),
     )
     .await;
-    assert_eq!(drafts["drafts"].as_array().unwrap().len(), 2);
+    assert_eq!(drafts["drafts"].as_array().unwrap().len(), 3);
     assert!(
         drafts["drafts"]
             .as_array()

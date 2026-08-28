@@ -53,30 +53,22 @@ impl NodeContextDraftConfirmationService {
         if source.thread_id != thread_id || source.completion_status != "accepted" {
             return Err(NodeContextDraftConfirmationError::TargetUnavailable);
         }
-        let closure = runtime
-            .accepted_graph_closure(draft.target.source_interaction_node_id)
+        let current_target = runtime
+            .canonical_interaction_context_occurrence(
+                &relayer_graph_core::InteractionContextTarget {
+                    node_id: relayer_graph_core::NodeId::new(draft.target.node_id)
+                        .ok_or(NodeContextDraftConfirmationError::TargetUnavailable)?,
+                    source_interaction_node_id: relayer_graph_core::NodeId::new(
+                        draft.target.source_interaction_node_id,
+                    )
+                    .ok_or(NodeContextDraftConfirmationError::TargetUnavailable)?,
+                    source_layer_id: relayer_graph_core::LayerId::new(draft.target.source_layer_id)
+                        .ok_or(NodeContextDraftConfirmationError::TargetUnavailable)?,
+                },
+            )
             .await
             .map_err(|_| NodeContextDraftConfirmationError::TargetUnavailable)?;
-        if closure.node_id.value() != draft.target.source_interaction_node_id {
-            return Err(NodeContextDraftConfirmationError::TargetUnavailable);
-        }
-        let layer = closure
-            .layers
-            .into_iter()
-            .find(|layer| layer.layer.id.value() == draft.target.source_layer_id)
-            .ok_or(NodeContextDraftConfirmationError::TargetUnavailable)?;
-        let current_target = layer
-            .nodes
-            .into_iter()
-            .find(|node| {
-                node.id.value() == draft.target.node_id
-                    && node.state == relayer_graph_core::RecordState::Accepted
-            })
-            .map(relayer_graph_core::InteractionInputNode::from);
-        if layer.layer.id.value() != draft.target.source_layer_id
-            || layer.layer.state != relayer_graph_core::RecordState::Accepted
-            || current_target.as_ref() != Some(&draft.target_node)
-        {
+        if current_target != draft.target_node {
             return Err(NodeContextDraftConfirmationError::TargetUnavailable);
         }
         self.product

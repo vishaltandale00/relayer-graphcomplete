@@ -978,6 +978,25 @@ impl RuntimeClient {
         Ok(serde_json::from_value(value["actions"].clone())?)
     }
 
+    pub(crate) async fn canonical_interaction_context_occurrence(
+        &self,
+        target: &relayer_graph_core::InteractionContextTarget,
+    ) -> Result<relayer_graph_core::InteractionInputNode, RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join("api/control/context-occurrences/canonical")?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(target)
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
     async fn control_get(&self, path: &str) -> Result<Value, RuntimeError> {
         let response = self
             .client

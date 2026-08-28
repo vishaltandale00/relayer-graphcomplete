@@ -184,10 +184,11 @@ describe("node-context draft renderer state", () => {
 
   it("coalesces concurrent confirms while the initial save is pending", async () => {
     let resolveSave;
+    let resolveConfirm;
     const api = {
       list: vi.fn(),
       save: vi.fn(() => new Promise((resolve) => { resolveSave = resolve; })),
-      confirm: vi.fn(async () => ({ draftId: "draft-a", target, targetNode, annotation: "FIFO" })),
+      confirm: vi.fn(() => new Promise((resolve) => { resolveConfirm = resolve; })),
     };
     const controller = createNodeContextDraftController({
       api,
@@ -201,6 +202,8 @@ describe("node-context draft renderer state", () => {
     const first = controller.confirm("alpha", 7);
     const duplicate = controller.confirm("alpha", 7);
     resolveSave({ id: "draft-a", threadId: 1, target, targetNode, text: "FIFO", revision: 1 });
+    await vi.waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
+    resolveConfirm({ draftId: "draft-a", target, targetNode, annotation: "FIFO" });
 
     await expect(first).resolves.toMatchObject({ draftId: "draft-a" });
     await expect(duplicate).resolves.toBeNull();
@@ -298,18 +301,21 @@ describe("node-context draft renderer state", () => {
         drafts: [{ id: "draft-a", threadId: 1, target, targetNode, text: "remote", revision: 2 }],
       })),
       save: vi.fn()
+        .mockImplementationOnce(async (_threadId, draft) => ({ ...draft, revision: 1 }))
         .mockRejectedValueOnce(conflict)
         .mockImplementationOnce(async (_threadId, draft) => ({ ...draft, revision: 3 })),
     };
     const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
     controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "initial text");
+    await controller.flush("alpha", 7);
     controller.update("alpha", 7, "local text");
 
     await controller.flush("alpha", 7);
 
     expect(api.list).toHaveBeenCalledWith("alpha");
-    expect(api.save).toHaveBeenCalledTimes(2);
-    expect(api.save.mock.calls[1][1]).toMatchObject({
+    expect(api.save).toHaveBeenCalledTimes(3);
+    expect(api.save.mock.calls[2][1]).toMatchObject({
       id: "draft-a",
       revision: 2,
       text: "local text",
@@ -317,6 +323,103 @@ describe("node-context draft renderer state", () => {
     expect(controller.draftForNode("alpha", 7)).toMatchObject({
       revision: 3,
       text: "local text",
+      status: "saved",
+    });
+  });
+
+  it("reloads, preserves local text, and retries a stale confirmation once", async () => {
+    const conflict = Object.assign(new Error("revision conflict"), {
+      code: "context_draft_revision_conflict",
+    });
+    const api = {
+      list: vi.fn(async () => ({
+        drafts: [{ id: "draft-a", threadId: 1, target, targetNode, text: "remote", revision: 2 }],
+      })),
+      save: vi.fn()
+        .mockImplementationOnce(async (_threadId, draft) => ({ ...draft, revision: 1 }))
+        .mockImplementationOnce(async (_threadId, draft) => ({ ...draft, revision: 3 })),
+      confirm: vi.fn()
+        .mockRejectedValueOnce(conflict)
+        .mockImplementationOnce(async () => ({
+          draftId: "draft-a", target, targetNode, annotation: "local text",
+        })),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "local text");
+    await controller.flush("alpha", 7);
+
+    await expect(controller.confirm("alpha", 7)).resolves.toMatchObject({ draftId: "draft-a" });
+
+    expect(api.confirm).toHaveBeenCalledTimes(2);
+    expect(api.confirm.mock.calls[0][1].revision).toBe(1);
+    expect(api.save.mock.calls[1][1]).toMatchObject({ revision: 2, text: "local text" });
+    expect(api.confirm.mock.calls[1][1].revision).toBe(3);
+    expect(controller.draftForNode("alpha", 7)).toBeNull();
+  });
+
+  it("reloads and retries a stale discard once with the current revision", async () => {
+    const conflict = Object.assign(new Error("revision conflict"), {
+      code: "context_draft_revision_conflict",
+    });
+    const api = {
+      list: vi.fn(async () => ({
+        drafts: [{ id: "draft-a", threadId: 1, target, targetNode, text: "local text", revision: 2 }],
+      })),
+      save: vi.fn(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      discard: vi.fn().mockRejectedValueOnce(conflict).mockResolvedValueOnce(null),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "local text");
+    await controller.flush("alpha", 7);
+
+    await expect(controller.discard("alpha", 7)).resolves.toBe(true);
+
+    expect(api.discard).toHaveBeenCalledTimes(2);
+    expect(api.discard.mock.calls[0][1].revision).toBe(1);
+    expect(api.discard.mock.calls[1][1].revision).toBe(2);
+    expect(controller.draftForNode("alpha", 7)).toBeNull();
+  });
+
+  it("does not overwrite a second draft that starts saving while hydration waits", async () => {
+    let resolveFirstSave;
+    let resolveSecondSave;
+    const secondTarget = { ...target, nodeId: 8 };
+    const secondNode = { ...targetNode, id: 8, title: "Second queue" };
+    const api = {
+      list: vi.fn(async () => ({ drafts: [
+        { id: "draft-a", threadId: 1, target, targetNode, text: "server first", revision: 4 },
+        { id: "draft-b", threadId: 1, target: secondTarget, targetNode: secondNode, text: "server second", revision: 4 },
+      ] })),
+      save: vi.fn()
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveFirstSave = resolve; }))
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveSecondSave = resolve; })),
+    };
+    let id = 0;
+    const controller = createNodeContextDraftController({
+      api,
+      createId: () => `draft-${id++ === 0 ? "a" : "b"}`,
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    controller.open("alpha", target, targetNode);
+    controller.open("alpha", secondTarget, secondNode);
+    controller.update("alpha", 7, "local first");
+    const firstSave = controller.flush("alpha", 7);
+    const loading = controller.load("alpha");
+    await Promise.resolve();
+    controller.update("alpha", 8, "local second");
+    const secondSave = controller.flush("alpha", 8);
+    resolveFirstSave({ id: "draft-a", threadId: 1, target, targetNode, text: "local first", revision: 5 });
+    await firstSave;
+    resolveSecondSave({ id: "draft-b", threadId: 1, target: secondTarget, targetNode: secondNode, text: "local second", revision: 5 });
+    await Promise.all([secondSave, loading]);
+
+    expect(controller.draftForNode("alpha", 8)).toMatchObject({
+      id: "draft-b",
+      text: "local second",
+      revision: 5,
       status: "saved",
     });
   });
