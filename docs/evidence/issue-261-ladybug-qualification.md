@@ -186,9 +186,10 @@ release for macOS 13.0–13.2. The 0.18.0 graph-server lifecycle passes locally 
 Windows proof is commit-scoped and exists only when the dedicated hosted job publishes a successful
 receipt for that exact source commit. No such receipt has ever been published.
 
-As of 2026-08-28 the ordinary package job in `.github/workflows/ci.yml` covers macOS arm64 only; the
-macOS Intel and Windows x64 entries were removed because Apple Silicon is the current sole release
-target. That job compiles the qualification-only Ladybug dependency out, so its green status does not
+As of 2026-08-28 the ordinary package job in `.github/workflows/ci.yml` smoke-packages macOS arm64
+only; the macOS Intel and Windows x64 entries were removed from the per-PR matrix. Both remain
+release targets built by `desktop-signed-preview.yml` at release time, so the release contract in
+`README.md` and ADR 0002 is unchanged. That job compiles the qualification-only Ladybug dependency out, so its green status does not
 certify this gate. The dedicated Windows qualification job remains in the workflow but is disabled
 (`if: ${{ false }}`). It was never observed to complete: its final attempt at commit `85042c10` was
 killed by the 60-minute job timeout partway through the LadybugDB source build, and every earlier

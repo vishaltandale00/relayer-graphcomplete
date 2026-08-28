@@ -30,9 +30,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Apple Silicon is the only release target today. Intel macOS and
-          # Windows x64 are parked, not abandoned: re-add them here when either
-          # becomes a release target again.
+          # Apple Silicon is the only target smoke-packaged per PR. Intel macOS
+          # and Windows x64 are still built at release time by
+          # desktop-signed-preview.yml; re-add them here if they need per-PR
+          # coverage again.
           - target: macos-arm64
             runner: macos-15
     runs-on: ${{ matrix.runner }}
