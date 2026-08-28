@@ -4,6 +4,7 @@ import { $, $$, escapeHtml } from "./ui.js";
 import { evalSidebarHeading } from "./navigation-model.js";
 
 const settingsTabs = {
+  account: "Account",
   providers: "Providers",
   models: "Model families",
   harnesses: "Harnesses",

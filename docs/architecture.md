@@ -226,6 +226,35 @@ Terminal provider-execution lease debt is handled by one app-owned reconciliatio
 
 Invoke preparation supplies the accepted source interaction/action pair to graph control. That pair is the graph-side idempotency key, so retrying a lost create response recovers the same leased graph interaction while the product-side invocation record recovers the same result interaction. At startup, bound interrupted invokes are reconciled against canonical graph completion output: an accepted graph finalizes product history using its already persisted execution receipt, while the absence of graph acceptance fails the product result and leaves the leased action unresolved. This closes the graph-accepted/product-uncommitted crash window without a distributed transaction or a second scheduler.
 
+## Optional desktop account boundary
+
+Relayer Desktop remains local-first and fully usable without a Relayer account. The
+optional account is a direct Auth0 Native Application session; no Relayer API,
+custom session broker, database row, or Relayer user UUID participates in desktop
+authentication. The desktop opens the branded
+`https://app.relayerlabs.ai/desktop/login` launcher, then exchanges the resulting
+Authorization Code with Auth0 using PKCE.
+
+Electron main owns the complete protocol boundary: generation of state and the
+PKCE verifier/challenge, binding one registered loopback callback before launching
+the browser, exact callback validation, direct token/refresh/revoke requests, OIDC
+issuer/audience/signature/expiry validation, rotating refresh-token custody through
+Electron `safeStorage`, and the current account generation. Stable uses only ports
+49152-49154 and Preview uses only 49155-49157. The saved update-channel selection
+chooses the launcher label and callback pool; changing it invalidates an in-flight
+login without changing the signed application identity.
+
+The renderer receives only the presentation union `signed-out`, `signing-in`,
+`signed-in`, `uncertain`, or `error`, plus the selected channel, a pseudonymous
+Auth0 subject where useful, and closed diagnostic reason codes. Authorization
+codes, state, verifiers, tokens, Auth0 configuration, email/profile data, and
+network authority never cross IPC. Only a currently verified signed-in generation
+is eligible to supply a telemetry identity; offline or unverifiable sessions leave
+all local features available and pause authenticated telemetry admission. Logout
+invalidates that generation and clears encrypted local credentials before best-
+effort remote revocation, without signing the browser out. See
+[ADR 0008](decisions/0008-direct-auth0-desktop-account.md).
+
 ## Desktop release boundary
 
 Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13 or newer plus Windows x64 and begin at version `0.2.0`.
