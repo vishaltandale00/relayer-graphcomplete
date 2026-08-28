@@ -258,6 +258,39 @@ describe("ClaudeBasicHarness", () => {
     expect(calls[1]?.options.resume).toBe("session-1");
   });
 
+  it("starts invoked completions in fresh sessions without replacing root continuity", async () => {
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits", {
+      claudeSessionId: "root-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+    }), {
+      query: sequentialSdkQuery([
+        [{ type: "result", subtype: "success", result: "child a", session_id: "child-a" }],
+        [{ type: "result", subtype: "success", result: "child b", session_id: "child-b" }],
+        [{ type: "result", subtype: "success", result: "root", session_id: "root-session" }],
+      ], (input) => calls.push(input)),
+      browserSdk: browserSdk(),
+    });
+    const access = managedAccess();
+    const child = (actionId: number, childAccess: HarnessExecutionAccess = access): HarnessRunContext => ({
+      ...runContext(childAccess),
+      origin: { kind: "invoke", sourceCompletionId: 1, actionId },
+    });
+
+    await Promise.all([
+      harness.complete(child(101)),
+      harness.complete(child(102, secretAccess())),
+    ]);
+    expect(calls.slice(0, 2).map(({ options }) => options.resume)).toEqual([undefined, undefined]);
+    expect(harness.state()).toEqual({
+      claudeSessionId: "root-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+    });
+
+    await harness.complete(runContext(access));
+    expect(calls[2]?.options.resume).toBe("root-session");
+  });
+
   it.each([
     { name: "subscription to API", next: secretAccess({ providerId: "anthropic-personal" }) },
     { name: "API to subscription", savedProviderDefinitionId: "anthropic-work", next: managedAccess({ providerId: "claude-work" }) },

@@ -67,6 +67,7 @@ interface ClaudeRuntimeDescriptor {
 }
 
 export class ClaudeBasicHarness implements Harness {
+  readonly supportsInvokedComplete = true;
   private readonly clientModuleUrl: string;
   private sessionId: string | undefined;
   private sessionProviderDefinitionId: string | undefined;
@@ -102,16 +103,18 @@ export class ClaudeBasicHarness implements Harness {
       throw new Error("claude.basic requires execution access for the selected provider definition");
     }
     const providerDefinitionId = context.model.providerId;
-    if (this.sessionProviderDefinitionId !== providerDefinitionId) {
+    const isRoot = context.origin.kind === "root";
+    if (isRoot && this.sessionProviderDefinitionId !== providerDefinitionId) {
       this.sessionId = undefined;
       this.sessionProviderDefinitionId = undefined;
     }
+    const resumeSessionId = isRoot ? this.sessionId : undefined;
     const graph = context.graph.acquireCapability();
     const prompt = this.prompt(context);
     await context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
-    const result = await this.run(prompt, context.model.modelId, graph, context.access, signal);
+    const result = await this.run(prompt, context.model.modelId, graph, context.access, resumeSessionId, signal);
     await context.trace.emit({ type: "message", data: { role: "assistant", text: result.text } });
-    if (result.sessionId) {
+    if (isRoot && result.sessionId) {
       this.sessionId = result.sessionId;
       this.sessionProviderDefinitionId = providerDefinitionId;
     }
@@ -138,6 +141,7 @@ export class ClaudeBasicHarness implements Harness {
     model: string,
     graph: GraphCapability,
     access: HarnessExecutionAccess,
+    resumeSessionId?: string,
     signal?: AbortSignal,
   ): Promise<{ text: string; sessionId?: string }> {
     const runtime = claudeRuntime(access);
@@ -165,7 +169,7 @@ export class ClaudeBasicHarness implements Harness {
           permissionMode,
           ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
           pathToClaudeCodeExecutable: runtime.executable,
-          ...(this.sessionId === undefined ? {} : { resume: this.sessionId }),
+          ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
           abortController,
           // Provider stderr can contain prompts, credentials, account identifiers,
           // or upstream response bodies. Drain it, but never surface or persist it.
