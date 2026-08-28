@@ -85,8 +85,9 @@ const {
 
 function registerIpc() {
   ipcMain.handle("relayer:account-read", () => ({
-    status: "connected",
-    account: { email: "zero-inference@relayer.test", planType: "Fixture" },
+    status: "signed-in",
+    channel: "stable",
+    subject: "fixture|node-details-lifecycle",
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
   ipcMain.handle("relayer:update-status", () => ({
@@ -102,7 +103,11 @@ function registerIpc() {
     status: "dismissed",
     automaticEligible: false,
   }));
-  ipcMain.handle("relayer:provider-status", () => null);
+  ipcMain.handle("relayer:provider-status", () => ({
+    adapters: [],
+    definitions: [],
+    hasCompletedOnboarding: true,
+  }));
 }
 
 function unregisterIpc() {
@@ -320,7 +325,11 @@ async function openThreadWindow(threadId) {
   window.setSize(1280, 820);
   await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(threadId)}`);
   await waitFor("production thread workspace", () => evaluate(`(() => (
-    !document.querySelector('#threadView')?.classList.contains('hidden')
+    document.querySelector('#desktopAccountOnboarding')?.classList.contains('hidden')
+      && !document.body.classList.contains('desktop-account-pending')
+      && !document.querySelector('#appShell')?.classList.contains('hidden')
+      && getComputedStyle(document.querySelector('#appShell')).visibility !== 'hidden'
+      && !document.querySelector('#threadView')?.classList.contains('hidden')
       && document.querySelectorAll('.graph-node').length === 3
       && !document.querySelector('#threadPrompt')?.disabled
   ))()`));
@@ -349,6 +358,30 @@ async function openContextEditor() {
       && !document.querySelector('#composerContextTray')?.contains(editor)
       && document.activeElement === editor;
   })()`));
+  const geometry = await evaluate(`(() => {
+    const account = document.querySelector('#desktopAccountButton');
+    const discard = document.querySelector('[aria-label^="Discard annotation draft"]');
+    const confirm = document.querySelector('[aria-label="Confirm annotation"]');
+    const accountRect = account?.getBoundingClientRect();
+    const controls = [discard, confirm].map((control) => {
+      const rect = control?.getBoundingClientRect();
+      const topmost = rect && document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return {
+        label: control?.getAttribute('aria-label') ?? null,
+        clear: Boolean(rect && accountRect && (
+          rect.right <= accountRect.left
+            || rect.left >= accountRect.right
+            || rect.bottom <= accountRect.top
+            || rect.top >= accountRect.bottom
+        )),
+        hitTarget: topmost === control || control?.contains(topmost),
+      };
+    });
+    return { accountVisible: !account?.classList.contains('hidden'), controls };
+  })()`);
+  if (!geometry.accountVisible || geometry.controls.some(({ clear, hitTarget }) => !clear || !hitTarget)) {
+    throw new Error(`Node Details controls overlap the desktop account control: ${JSON.stringify(geometry)}`);
+  }
 }
 
 async function stageContext(annotation) {

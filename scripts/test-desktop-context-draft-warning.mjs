@@ -52,8 +52,9 @@ const catalogSnapshot = {
 
 function registerIpc() {
   ipcMain.handle("relayer:account-read", () => ({
-    status: "connected",
-    account: { email: "zero-inference@relayer.test", planType: "Fixture" },
+    status: "signed-in",
+    channel: "stable",
+    subject: "fixture|node-details-warning",
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
   ipcMain.handle("relayer:provider-status", () => ({
@@ -290,7 +291,11 @@ async function openThreadWindow(threadId) {
   mainWindow.focus();
   mainWindow.webContents.focus();
   await waitFor("interactive production workspace", () => evaluate(`(() => (
-    !document.querySelector('#threadView')?.classList.contains('hidden')
+    document.querySelector('#desktopAccountOnboarding')?.classList.contains('hidden')
+      && !document.body.classList.contains('desktop-account-pending')
+      && !document.querySelector('#appShell')?.classList.contains('hidden')
+      && getComputedStyle(document.querySelector('#appShell')).visibility !== 'hidden'
+      && !document.querySelector('#threadView')?.classList.contains('hidden')
       && document.querySelectorAll('.graph-node').length === 3
       && document.querySelector('#threadPrompt')?.disabled === false
       && document.querySelector('#sendInteraction')

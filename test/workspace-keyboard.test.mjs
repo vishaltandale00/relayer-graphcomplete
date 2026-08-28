@@ -299,6 +299,7 @@ describe("product workspace keyboard behavior", () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain(".node-context-dock{height:33.333%;min-height:0");
     expect(styles).toContain(".inspector:has(.node-context-dock:not(.hidden)) .inspector-content{min-height:0}");
+    expect(styles).toContain(".app-shell:has(.desktop-account-corner-control:not(.hidden)) .node-context-dock-actions{padding-right:112px}");
     expect(styles).toContain(".node-context-dock textarea{min-height:0;flex:1;resize:none;overflow:auto");
     expect(styles).toContain("@media(forced-colors:active){.node-context-dock");
     expect(styles).toContain("@media(prefers-reduced-motion:reduce){.node-context-dock *");
