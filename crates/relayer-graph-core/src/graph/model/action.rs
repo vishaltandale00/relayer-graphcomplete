@@ -455,7 +455,7 @@ fn validate_input_action(input: &InputAction, issues: &mut Vec<ValidationIssue>)
             for (index, option) in input.options.iter().enumerate() {
                 for field in option.unsupported_fields.keys() {
                     issues.push(ValidationIssue::new(
-                        "input_action_option_payload_unexpected",
+                        "input_action_payload_unexpected",
                         format!("options[{index}].{field}"),
                         "Remove fields outside the input option grammar.",
                     ));
