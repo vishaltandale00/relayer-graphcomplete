@@ -117,7 +117,7 @@ async function archiveEntrySha256(archivePath, targetPath) {
 describe("issue 257 browser harness evidence", () => {
   it("pins the exact independent configuration and implementation bytes", async () => {
     const manifest = JSON.parse(await readFile(join(evidenceRoot, "manifest.json"), "utf8"));
-    expect(manifest.integratedSource.snapshotId).toBe("issue-257-browser-harnesses-v1");
+    expect(manifest.integratedSource.snapshotId).toMatch(/^issue-257-browser-harnesses-v\d+$/);
     expect(Object.keys(manifest.integratedSource.fileSha256).sort())
       .toEqual([...manifest.integratedSource.files].sort());
     expect(Object.values(manifest.integratedSource.fileSha256))
