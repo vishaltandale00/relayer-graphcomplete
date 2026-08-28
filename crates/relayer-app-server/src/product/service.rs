@@ -133,7 +133,7 @@ impl ProductService {
         &self,
         interaction_id: InteractionId,
         requested_version_key: Option<&str>,
-    ) -> Result<crate::storage::PersonalPresentationPin, ProductError> {
+    ) -> Result<Option<crate::storage::PersonalPresentationPin>, ProductError> {
         self.storage
             .prepare_personal_presentation_pin(interaction_id, requested_version_key, &now())
             .await

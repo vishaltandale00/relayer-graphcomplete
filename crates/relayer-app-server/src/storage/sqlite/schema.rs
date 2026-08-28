@@ -86,6 +86,8 @@ const PERSONAL_PRESENTATION_PIN_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("root_layer_id", "INTEGER", true, 0),
     ("pinned_at", "TEXT", true, 0),
 ];
+const LEGACY_UNPINNED_PERSONAL_PRESENTATION_INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] =
+    &[("interaction_id", "INTEGER", false, 1)];
 const INTERACTION_CONTEXT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("interaction_id", "INTEGER", true, 1),
     ("position", "INTEGER", true, 2),
@@ -335,6 +337,12 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         PERSONAL_PRESENTATION_PIN_COLUMNS,
     )
     .await?;
+    validate_columns(
+        pool,
+        "legacy_unpinned_personal_presentation_interactions",
+        LEGACY_UNPINNED_PERSONAL_PRESENTATION_INTERACTION_COLUMNS,
+    )
+    .await?;
     validate_columns(pool, "interaction_attempts", INTERACTION_ATTEMPT_COLUMNS).await?;
     validate_columns(
         pool,
@@ -514,6 +522,15 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_foreign_key(
         pool,
         "interaction_personal_presentation_pins",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "legacy_unpinned_personal_presentation_interactions",
         "interaction_id",
         "interactions",
         "id",

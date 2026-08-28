@@ -1,4 +1,8 @@
-# Issue 242: personal-presentation activation evidence
+# Issue 242: historical personal-presentation comparison
+
+This comparison is exploratory evidence only. Its bundle does not record a
+source commit or workspace digest, and it predates later executable fixes. It
+does not satisfy PPG-006 or certify activation on the reviewed PR snapshot.
 
 ## Activation comparison
 
@@ -20,19 +24,17 @@ specifically credited the separate saturation node with directly explaining
 what happens when both workers are busy. This is a minor renderer-level
 weakness rather than a material regression attributable to V1.
 
-V1 therefore clears the activation gate for future interactions. The product
-policy activates V1 while immutable interaction pins preserve V0 for any
-interaction created before activation.
+The result supported continuing with V1, but it cannot clear the activation
+gate for the final implementation snapshot.
 
 ## Hidden-infrastructure boundary
 
-Both candidate traces are complete and record only the exact
-`personalPresentationVersionId`. The trace manifest does not copy the hidden
-profile graph or rendered preference text. The reviewed production-workspace
-screenshots show only the authored response graph and ordinary task chrome; no
-preference attachment, version, prompt text, graph record, badge, or control is
-visible. Export and thread-list contract tests independently reject those
-hidden records from ordinary product history.
+The historical V1 candidate trace contains rendered preference text and does
+not satisfy the final hidden-trace contract. Later deterministic tests cover
+trace redaction, export exclusion, and ordinary thread-list hiding, but fresh
+product-default evidence on the exact reviewed executable snapshot is still
+required. The historical production-workspace screenshots showed only the
+authored response graph and ordinary task chrome.
 
 Generated screenshots, judge reviews, coverage records, and trace manifests
 are intentionally not checked into the repository. The complete local evidence

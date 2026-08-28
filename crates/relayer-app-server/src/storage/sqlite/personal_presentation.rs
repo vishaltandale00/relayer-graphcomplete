@@ -176,7 +176,7 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         requested_version_key: Option<&str>,
         pinned_at: &str,
-    ) -> Result<PersonalPresentationPin, StorageError> {
+    ) -> Result<Option<PersonalPresentationPin>, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         validate_personal_presentation_target(&mut transaction, interaction_id).await?;
         if let Some((version_key, graph_node_id, root_layer_id)) =
@@ -194,12 +194,24 @@ impl SqliteProductStore {
                 )));
             }
             transaction.commit().await?;
-            return Ok(PersonalPresentationPin {
+            return Ok(Some(PersonalPresentationPin {
                 interaction_id,
                 version_key,
                 version_interaction_node_id: graph_node_id,
                 root_layer_id,
-            });
+            }));
+        }
+        if requested_version_key.is_none() {
+            let preserves_legacy_behavior: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM legacy_unpinned_personal_presentation_interactions WHERE interaction_id=?1)",
+            )
+            .bind(interaction_id.value())
+            .fetch_one(&mut *transaction)
+            .await?;
+            if preserves_legacy_behavior {
+                transaction.commit().await?;
+                return Ok(None);
+            }
         }
         let version_key =
             match requested_version_key {
@@ -228,7 +240,7 @@ impl SqliteProductStore {
         };
         let pin = pin_in_transaction(&mut transaction, interaction_id, &version, pinned_at).await?;
         transaction.commit().await?;
-        Ok(pin)
+        Ok(Some(pin))
     }
 
     #[cfg(test)]
@@ -463,6 +475,7 @@ mod tests {
                 "3",
             )
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(pin.version_interaction_node_id, 501);
         assert!(
@@ -505,12 +518,14 @@ mod tests {
         let next_pin = store
             .prepare_personal_presentation_pin(next.root_interaction_id, None, "6")
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(next_pin.version_interaction_node_id, 502);
         assert_eq!(
             store
                 .prepare_personal_presentation_pin(thread.root_interaction_id, None, "7")
                 .await
+                .unwrap()
                 .unwrap(),
             pin
         );
@@ -588,6 +603,7 @@ mod tests {
         let replay = reopened
             .prepare_personal_presentation_pin(thread.root_interaction_id, None, "4")
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(replay.version_key, "personal-presentation-v0");
         assert_eq!(replay.version_interaction_node_id, 501);

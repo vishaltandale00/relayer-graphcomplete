@@ -120,12 +120,12 @@ async fn reconcile_interrupted_interaction(
                 }
             });
         let personal_presentation = if runtime.supports_personal_presentation() {
-            Some(crate::runtime::PersonalPresentationExecution::from(
-                &storage
-                    .prepare_personal_presentation_pin(interaction.id, None, &startup_timestamp())
-                    .await
-                    .map_err(StartupReconciliationError::retryable)?,
-            ))
+            storage
+                .prepare_personal_presentation_pin(interaction.id, None, &startup_timestamp())
+                .await
+                .map_err(StartupReconciliationError::retryable)?
+                .as_ref()
+                .map(crate::runtime::PersonalPresentationExecution::from)
         } else {
             None
         };

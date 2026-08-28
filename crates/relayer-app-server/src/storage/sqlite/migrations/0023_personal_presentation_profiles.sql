@@ -33,6 +33,16 @@ CREATE TABLE interaction_personal_presentation_pins (
     pinned_at TEXT NOT NULL
 );
 
+CREATE TABLE legacy_unpinned_personal_presentation_interactions (
+    interaction_id INTEGER PRIMARY KEY REFERENCES interactions(id) ON DELETE CASCADE
+);
+
+INSERT INTO legacy_unpinned_personal_presentation_interactions(interaction_id)
+SELECT interaction.id
+FROM interactions interaction
+JOIN threads thread ON thread.id=interaction.thread_id
+WHERE thread.conversation_import_id IS NULL;
+
 INSERT INTO threads(
     id,title,project_id,created_at,updated_at,harness_configuration_name,
     permission_profile_id,conversation_import_id,surface
