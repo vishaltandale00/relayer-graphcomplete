@@ -29,7 +29,7 @@ import { preparePermissionProfiles } from "./permission-profiles.js";
 import { appState } from "./state.js";
 import { createLatestRequestGate } from "./navigation-history.js";
 import { $, $$, escapeHtml, escapeHtmlAttribute, toast } from "./ui.js";
-import { markHarnessEligibilityCurrent, renderHarnessSettings } from "./harness-settings.js";
+import { renderHarnessSettings } from "./harness-settings.js";
 
 let settings = null;
 let selectedFamilyIndex = 0;
@@ -92,7 +92,6 @@ function normalizeSettings(response) {
       .map(hydrateMember),
   }));
   selectedFamilyIndex = Math.min(selectedFamilyIndex, Math.max(0, settings.families.length - 1));
-  markHarnessEligibilityCurrent();
   renderHarnessSettings(appState.modelSettings);
 }
 

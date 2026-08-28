@@ -208,13 +208,8 @@ export function providerDefinitionsMarkup(definitions, defaults = {}, descriptor
 
 export function harnessConfigurationsMarkup(settings) {
   const presentations = usableHarnessPresentations(settings);
-  if (!presentations.length) return `<div class="family-empty harness-empty"><div><strong>No harnesses are usable right now.</strong><span>Connect a provider with an eligible model, or review advanced configuration.</span><button type="button" class="secondary" id="openHarnessAdvanced">Advanced configuration</button></div></div>`;
-  const usableIds = new Set(presentations.map(({ harness }) => harness.id));
-  const hasHiddenEditableHarness = (settings?.harnesses ?? []).some((harness) => (
-    harness.available !== false && !usableIds.has(harness.id)
-  ));
-  return `${presentations.map(({ harness, isDefault }) => `<article class="harness-configuration-card harness-summary-card" data-harness-configuration="${escapeHtmlAttribute(harness.id)}">
+  if (!presentations.length) return `<div class="family-empty harness-empty"><div><strong>No harnesses are usable right now.</strong><span>Connect a provider with an eligible model.</span></div></div>`;
+  return presentations.map(({ harness, isDefault }) => `<article class="harness-configuration-card" data-harness-configuration="${escapeHtmlAttribute(harness.id)}">
     <div class="provider-definition-heading"><div><h3>${escapeHtml(harness.label)}</h3></div>${isDefault ? `<span class="default-badge">Default harness</span>` : ""}</div>
-    <div class="provider-definition-actions"><span class="push"></span><button type="button" class="secondary" data-harness-rules-edit="${escapeHtmlAttribute(harness.id)}">Advanced configuration</button></div>
-  </article>`).join("")}${hasHiddenEditableHarness ? `<div class="harness-advanced-entry"><button type="button" class="secondary" id="openHarnessAdvanced">Configure other harnesses</button></div>` : ""}`;
+  </article>`).join("");
 }

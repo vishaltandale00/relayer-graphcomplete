@@ -46,7 +46,3 @@ export function usableHarnessPresentations(settings) {
     }];
   });
 }
-
-export function authoritativeRefreshConfirmed(previousSettings, currentSettings, applied) {
-  return applied || currentSettings !== previousSettings;
-}

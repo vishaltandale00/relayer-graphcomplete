@@ -260,7 +260,10 @@ describe("provider and harness renderer markup", () => {
     expect(markup).not.toContain("Codex subscription");
     expect(markup).not.toContain("Codex models");
     expect(markup).toContain("Default harness");
-    expect(markup).toContain("Advanced configuration");
+    expect(markup).not.toContain("Advanced configuration");
+    expect(markup).not.toContain("Configure other harnesses");
+    expect(markup).not.toContain("data-harness-rules-edit");
+    expect(markup).not.toContain("<button");
     expect(markup).not.toContain("Available");
     expect(markup).not.toContain("Execution access");
     expect(markup).not.toContain("Revision");
@@ -280,7 +283,8 @@ describe("provider and harness renderer markup", () => {
     expect(markup).toContain("No harnesses are usable right now");
     expect(markup).toContain("Connect a provider");
     expect(markup.match(/family-empty/g)).toHaveLength(1);
-    expect(markup.match(/<button/g)).toHaveLength(1);
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain("Advanced configuration");
     expect(markup).not.toContain("Claude Basic");
     expect(markup).not.toContain("Available");
     expect(markup).not.toContain("Execution access");

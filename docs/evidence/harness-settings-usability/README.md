@@ -9,13 +9,11 @@ usable through the currently connected providers, available models, enabled
 families, model rules, and execution-access contract. The image demonstrates:
 
 - only the usable Codex harness appears in the ordinary list;
-- the ordinary card contains only its user-facing name, saved-default status,
-  and Advanced configuration action;
+- the ordinary card contains only its user-facing name and saved-default status;
 - the saved default is identified without a redundant Available badge;
-- raw adapter rules remain behind the keyboard-native Advanced configuration
-  action; and
-- the separate Configure other harnesses action preserves access to advanced
-  rule editing for installed configurations omitted from the ordinary list.
+- no model-rule editor or Advanced configuration entry point is exposed from
+  this screen; and
+- installed configurations that are not currently usable remain omitted.
 
-The capture is 1280×800, 39,899 bytes, with SHA-256
-`5dde3accb695c009d966b0a2c926ef3f1c1d2d040447091f4a5a219e79308e60`.
+The capture is 1280×800, 28,794 bytes, with SHA-256
+`fa1db8553a5e80b494c0db71c0482c3aaff8ec1ecc898c4217643fce1cbed877`.
