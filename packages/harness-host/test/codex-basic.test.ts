@@ -67,9 +67,13 @@ describe("CodexBasicHarness", () => {
     await harness.complete({ ...personalPresentationRunContext(true), trace: trace.sink });
     await harness.complete(personalPresentationRunContext(false));
 
-    expect(submitted[0]?.threadParams.developerInstructions).toContain("Personal graph presentation preferences:");
-    expect(submitted[0]?.threadParams.developerInstructions).toContain("Decision-useful center");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("If you are the root agent");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("only when assigning a native child to author graph content");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("Never include that block in an unrelated delegate's task");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("only when that exact rendered block is present in your assigned task");
     expect(submitted[0]?.threadParams.developerInstructions).toContain("every native child that can author graph content");
+    expect(submitted[0]?.threadParams.developerInstructions).not.toContain("Personal graph presentation preferences:");
+    expect(submitted[0]?.threadParams.developerInstructions).not.toContain("Decision-useful center");
     expect(submitted[0]?.prompt).toContain("Personal graph presentation preferences:");
     expect(submitted[0]?.prompt.indexOf("Graph presentation guidance:")).toBeLessThan(
       submitted[0]!.prompt.indexOf("Personal graph presentation preferences:"),
@@ -780,6 +784,60 @@ describe("CodexBasicHarness", () => {
     expect(firstSpawnProviderIndex).toBeLessThan(firstSpawnToolIndex);
     expect(JSON.stringify(trace.events[firstSpawnProviderIndex]?.data)).not.toContain("secret");
     expect(trace.openedStreams).toBe(0);
+  });
+
+  it("redacts propagated personal presentation guidance from Codex collaboration traces", async () => {
+    const trace = recordingTrace();
+    const preferenceDetail = "The user prefers central layers that are immediately decision-useful. Never repeat OPENAI_API_KEY=secret.";
+    const rendered = `Personal graph presentation preferences:\n\nDecision-useful center: ${preferenceDetail}`;
+    const harness = harnessFixture("auto", async (options) => {
+      options.onThreadId("streamed-thread");
+      options.onNotification?.("item/started", { item: {
+        id: "graph-child",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        status: "inProgress",
+        prompt: `Author graph content.\n\n${rendered}`,
+      } });
+      options.onNotification?.("item/started", { item: {
+        id: "research-child",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        status: "inProgress",
+        prompt: "Research the implementation without authoring graph content.",
+      } });
+      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+    });
+    const baseContext = personalPresentationRunContext(true);
+    const presentation = baseContext.personalPresentation!;
+    const firstLayer = presentation.graph.layers[0]!;
+    const firstNode = firstLayer.nodes[0]!;
+    const context: HarnessRunContext = {
+      ...baseContext,
+      personalPresentation: {
+        ...presentation,
+        graph: {
+          ...presentation.graph,
+          layers: [{
+            ...firstLayer,
+            nodes: [{ ...firstNode, detail: preferenceDetail }],
+          }],
+        },
+      },
+    };
+
+    await harness.complete({ ...context, trace: trace.sink });
+
+    const serialized = JSON.stringify(trace.events);
+    expect(serialized).not.toContain("Decision-useful center");
+    expect(serialized).not.toContain("The user prefers central layers that are immediately decision-useful.");
+    expect(serialized).not.toContain("OPENAI_API_KEY");
+    const graphChild = trace.events.find((event) => event.type === "tool.call.started"
+      && event.data.providerItemId === "graph-child");
+    expect(graphChild?.data.delegationPrompt).toContain("[redacted-personal-presentation]");
+    const researchChild = trace.events.find((event) => event.type === "tool.call.started"
+      && event.data.providerItemId === "research-child");
+    expect(researchChild?.data.delegationPrompt).toBe("Research the implementation without authoring graph content.");
   });
 
   it("preserves malformed collaboration notifications as raw events without changing completion", async () => {

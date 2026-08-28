@@ -4,7 +4,11 @@ import { isAbsolute } from "node:path";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
 import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
-import { personalPresentationNativeInstructions, personalPresentationPrompt } from "./personal-presentation-guidance.js";
+import {
+  personalPresentationNativeInstructions,
+  personalPresentationPrompt,
+  renderPersonalPresentationGuidance,
+} from "./personal-presentation-guidance.js";
 import {
   runCodexAppServerTurn,
   type CodexAppServerSpawn,
@@ -492,7 +496,10 @@ function pinnedExecutionClause(launcher: string | undefined): string {
 }
 
 function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {
-  const redactedParams = attachCommandExecutableAuthority(redactTraceData(params), params);
+  const redactedParams = attachCommandExecutableAuthority(
+    redactTraceData(redactPersonalPresentationTraceData(context, params) as JsonValue),
+    params,
+  );
   const data = isRecord(redactedParams) ? redactedParams : {};
   const item = isRecord(data.item) ? data.item : undefined;
   const providerEventId = optionalNonemptyString(item?.id);
@@ -531,6 +538,24 @@ function traceCodexAppServerNotification(context: HarnessRunContext, method: str
   } else if (item.type === "reasoning" && typeof item.text === "string") {
     context.trace.emit({ type: "reasoning.summary", data: { text: item.text } });
   }
+}
+
+function redactPersonalPresentationTraceData(context: HarnessRunContext, value: unknown): unknown {
+  const presentation = context.personalPresentation;
+  if (presentation === undefined) return value;
+  const rendered = renderPersonalPresentationGuidance(presentation);
+  if (rendered === "") return value;
+  if (typeof value === "string") {
+    return value.split(rendered).join("[redacted-personal-presentation]");
+  }
+  if (Array.isArray(value)) {
+    return value.map((child) => redactPersonalPresentationTraceData(context, child));
+  }
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    key,
+    redactPersonalPresentationTraceData(context, child),
+  ]));
 }
 
 function attachCommandExecutableAuthority(redactedParams: JsonValue, rawParams: unknown): JsonValue {

@@ -597,9 +597,21 @@ describe("PrimeAgentHarness", () => {
 
   it("uses the separate layered-navigation prompt profile", async () => {
     let prompt = "";
+    let listener: ((event: unknown) => void) | undefined;
     let resourceLoaderOptions: { appendSystemPromptOverride(base: string[]): string[] } | undefined;
     const session = {
-      promptAndWait: vi.fn(async (text: string) => { prompt = text; }),
+      promptAndWait: vi.fn(async (text: string) => {
+        prompt = text;
+        listener?.({
+          type: "rlm_child_update",
+          child: {
+            id: "graph-child",
+            status: "completed",
+            answerPreview: "Personal graph presentation preferences:\n\nDecision-useful center: Foreground the conclusion and material tradeoffs.",
+          },
+        });
+      }),
+      subscribe: vi.fn((next: (event: unknown) => void) => { listener = next; return vi.fn(); }),
       waitForRlmQuiescence: vi.fn(async () => undefined),
       abort: vi.fn(async () => undefined),
       dispose: vi.fn(),
@@ -678,11 +690,18 @@ describe("PrimeAgentHarness", () => {
     const tracedPrompt = trace.events.find((event) => event.type === "prompt")?.data.text;
     expect(tracedPrompt).not.toContain("Decision-useful center");
     expect(tracedPrompt).not.toContain("Personal graph presentation preferences");
+    expect(JSON.stringify(trace.events)).not.toContain("Foreground the conclusion and material tradeoffs.");
+    expect(JSON.stringify(trace.events)).toContain("[redacted-provider-access]");
     expect(session.reload).toHaveBeenCalledOnce();
     const nativeInstructions = resourceLoaderOptions?.appendSystemPromptOverride(["base prompt"]);
     expect(nativeInstructions).toHaveLength(2);
-    expect(nativeInstructions?.[1]).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
+    expect(nativeInstructions?.[1]).toContain("If you are the root agent");
+    expect(nativeInstructions?.[1]).toContain("only when assigning a native child to author graph content");
+    expect(nativeInstructions?.[1]).toContain("Never include that block in an unrelated delegate's task");
+    expect(nativeInstructions?.[1]).toContain("only when that exact rendered block is present in your assigned task");
     expect(nativeInstructions?.[1]).toContain("every native child that can author graph content");
+    expect(nativeInstructions?.[1]).not.toContain("Personal graph presentation preferences:");
+    expect(nativeInstructions?.[1]).not.toContain("Decision-useful center");
   });
 
   it("retries a presentation instruction reload after a transient failure", async () => {
@@ -724,7 +743,10 @@ describe("PrimeAgentHarness", () => {
     expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])).toEqual(["base"]);
     await expect(harness.complete(attached)).resolves.toBeUndefined();
     expect(reload).toHaveBeenCalledTimes(2);
-    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).toContain("Decision-useful center");
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).toContain("If you are the root agent");
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).toContain("Never include that block in an unrelated delegate's task");
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).not.toContain("Personal graph presentation preferences:");
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).not.toContain("Decision-useful center");
   });
 
   it("delivers the same ordered normalized context to Prime and its native children", async () => {

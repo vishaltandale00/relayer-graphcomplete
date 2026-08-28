@@ -1194,7 +1194,7 @@ impl RuntimeClient {
         version_interaction_node_id: i64,
     ) -> Result<(), RuntimeError> {
         let _: Value = self
-            .post(
+            .post_idempotent(
                 self.graph_url
                     .join("api/control/personal-presentation/versions")?,
                 &serde_json::json!({
@@ -1202,6 +1202,7 @@ impl RuntimeClient {
                 }),
                 &self.graph_control_token,
                 StatusCode::OK,
+                "personal presentation publication",
             )
             .await?;
         Ok(())
@@ -2306,6 +2307,66 @@ mod tests {
         assert_eq!(prepared.graph_node_id, 42);
         assert_eq!(identified_creates.load(Ordering::SeqCst), 3);
         runtime.discard_prepared(prepared).await.unwrap();
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn retries_personal_presentation_publication_with_stable_identity() {
+        let publications = Arc::new(AtomicUsize::new(0));
+        let observed = publications.clone();
+        let graph = Router::new().route(
+            "/api/control/personal-presentation/versions",
+            routing::post(move || {
+                let observed = observed.clone();
+                async move {
+                    if observed.fetch_add(1, Ordering::SeqCst)
+                        < super::CONTROL_RETRY_ATTEMPTS as usize - 1
+                    {
+                        (StatusCode::OK, "invalid json")
+                    } else {
+                        (StatusCode::OK, "{}")
+                    }
+                }
+            }),
+        );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(Router::new()).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-personal-presentation-publication-retry-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({"schemaVersion":1,"configurations":[]}).to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+
+        runtime
+            .publish_personal_presentation_version(90)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            publications.load(Ordering::SeqCst),
+            super::CONTROL_RETRY_ATTEMPTS as usize
+        );
         graph_task.abort();
         harness_task.abort();
         fs::remove_dir_all(root).unwrap();

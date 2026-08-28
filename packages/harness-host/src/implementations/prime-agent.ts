@@ -20,7 +20,11 @@ import type {
   JsonObject,
 } from "../types.js";
 import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
-import { personalPresentationNativeInstructions, personalPresentationPrompt } from "./personal-presentation-guidance.js";
+import {
+  personalPresentationNativeInstructions,
+  personalPresentationPrompt,
+  renderPersonalPresentationGuidance,
+} from "./personal-presentation-guidance.js";
 
 export const PRIME_AGENT_KEY = "prime.agent";
 
@@ -994,6 +998,10 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
   const routeByNativeModel = new Map<string, HarnessAdmittedModelRoute>();
   const requestAccessByNativeModel = new Map<string, PrimeAgentRequestAccess>();
   const sensitiveValues = new Set<string>();
+  if (context.personalPresentation !== undefined) {
+    const renderedPresentation = renderPersonalPresentationGuidance(context.personalPresentation);
+    if (renderedPresentation !== "") sensitiveValues.add(renderedPresentation);
+  }
   const models = plan.roster.map((route) => {
     const access = bundle.byProviderId[route.providerId];
     if (access === undefined) throw new Error(`prime.agent is missing upfront access for provider ${route.providerId}`);

@@ -38,13 +38,17 @@ export function renderPersonalPresentationGuidance(
 }
 
 export function personalPresentationPrompt(context: HarnessRunContext): string {
-  const instructions = personalPresentationNativeInstructions(context);
-  return instructions === "" ? "" : `\n\n${instructions}`;
+  if (context.personalPresentation === undefined) return "";
+  const rendered = renderPersonalPresentationGuidance(context.personalPresentation);
+  if (rendered === "") return "";
+  return `\n\n${rendered}\n\n${personalPresentationAuthority}`;
 }
 
 export function personalPresentationNativeInstructions(context: HarnessRunContext): string {
   if (context.personalPresentation === undefined) return "";
   const rendered = renderPersonalPresentationGuidance(context.personalPresentation);
   if (rendered === "") return "";
-  return `${rendered}\n\nGraph integrity and authority remain mandatory. An explicit user presentation request takes precedence over these attached preferences, and these preferences take precedence over provider or model defaults. Apply the same pinned preferences to the root agent and every native child that can author graph content for this interaction. Do not pass them to unrelated delegated agents.`;
+  return `If you are the root agent, include the exact rendered Personal graph presentation preferences block from the current root task only when assigning a native child to author graph content. Never include that block in an unrelated delegate's task. If you are a native child, apply personal presentation preferences only when that exact rendered block is present in your assigned task; otherwise do not infer, retrieve, or apply them. ${personalPresentationAuthority}`;
 }
+
+const personalPresentationAuthority = "Graph integrity and authority remain mandatory. An explicit user presentation request takes precedence over these attached preferences, and these preferences take precedence over provider or model defaults. Apply the same pinned preferences to the root agent and every native child that can author graph content for this interaction. Do not pass them to unrelated delegated agents.";
