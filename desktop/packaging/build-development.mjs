@@ -15,20 +15,36 @@ function run(command, args, options) {
   });
 }
 
-export async function buildDevelopmentDesktop({ evalApplication = false, environment = process.env } = {}) {
+export async function buildDevelopmentDesktop({
+  evalApplication = false,
+  environment = process.env,
+  execute = run,
+} = {}) {
   const repositoryRoot = resolve(import.meta.dirname, "../..");
   const target = desktopTargetFromEnvironment(environment);
-  await run("cargo", [
+  const cargoArguments = [
     "build", "--release",
     "-p", "relayer-app-server",
     "-p", "relayer-graph-server",
     "--target", target.rustTarget,
-  ], { cwd: repositoryRoot, env: environment });
+  ];
+  if (environment.RELAYER_LADYBUG_QUALIFICATION === "1") {
+    if (environment.RUSTFLAGS || environment.CARGO_ENCODED_RUSTFLAGS) {
+      throw new Error("Ladybug qualification rejects ambient Rust compiler flags.");
+    }
+    environment = {
+      ...environment,
+      RUSTFLAGS: "--cfg ladybug_qualification",
+    };
+    delete environment.CARGO_ENCODED_RUSTFLAGS;
+    cargoArguments.push("--locked", "--offline");
+  }
+  await execute("cargo", cargoArguments, { cwd: repositoryRoot, env: environment });
   const configuration = evalApplication
     ? "desktop/packaging/eval-electron-builder.mjs"
     : "desktop/packaging/electron-builder.mjs";
   const platform = target.platform === "darwin" ? "--mac" : "--win";
-  await run(process.execPath, [
+  await execute(process.execPath, [
     resolve(repositoryRoot, "node_modules", "electron-builder", "out", "cli", "cli.js"),
     "--config", configuration,
     "--dir",

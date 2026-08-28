@@ -18,11 +18,24 @@ struct Arguments {
     database: String,
     #[arg(long)]
     control_token: Option<String>,
+    #[cfg(ladybug_qualification)]
+    #[arg(long, hide = true)]
+    ladybug_qualification: bool,
+    #[cfg(ladybug_qualification)]
+    #[arg(long, hide = true, requires = "ladybug_qualification")]
+    ladybug_qualification_hold: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let arguments = Arguments::parse();
+    #[cfg(ladybug_qualification)]
+    if arguments.ladybug_qualification {
+        return run_ladybug_qualification(
+            &arguments.database,
+            arguments.ladybug_qualification_hold,
+        );
+    }
     let (control_token, parent_disconnected) = match arguments.control_token {
         Some(token) => (token, None),
         None => {
@@ -46,6 +59,59 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, router(ServerState::new(graph, control_token)))
         .with_graceful_shutdown(shutdown_signal(parent_disconnected))
         .await?;
+    Ok(())
+}
+
+#[cfg(ladybug_qualification)]
+fn run_ladybug_qualification(path: &str, hold: bool) -> anyhow::Result<()> {
+    use lbug::{Connection, Database, SystemConfig, Value};
+    use std::path::Path;
+
+    let existed = Path::new(path).exists();
+    let database = Database::new(path, SystemConfig::default())
+        .context("open Ladybug qualification database")?;
+    let connection =
+        Connection::new(&database).context("connect Ladybug qualification database")?;
+    if existed {
+        let mut rows = connection
+            .query("MATCH (n:Qualification) WHERE n.id='lifecycle' RETURN n.value")
+            .context("read Ladybug qualification marker after reopen")?;
+        let row = rows
+            .next()
+            .context("Ladybug qualification marker was not persisted")?;
+        if row.first() != Some(&Value::String("persisted".into())) || rows.next().is_some() {
+            anyhow::bail!("Ladybug qualification marker did not reopen exactly");
+        }
+    } else {
+        connection
+            .query("CREATE NODE TABLE Qualification(id STRING, value STRING, PRIMARY KEY(id))")
+            .context("create Ladybug qualification schema")?;
+        connection
+            .query("CREATE (:Qualification {id:'lifecycle',value:'persisted'})")
+            .context("create Ladybug qualification marker")?;
+    }
+    println!(
+        "{}",
+        serde_json::json!({
+            "ready": true,
+            "ladybugQualification": true,
+            "state": if existed { "reopened" } else { "created" },
+            "storageVersion": lbug::get_storage_version(),
+        })
+    );
+    if hold {
+        let mut input = io::stdin().lock();
+        let mut buffer = [0_u8; 256];
+        loop {
+            match input.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error).context("wait for qualification shutdown"),
+            }
+        }
+        println!("{}", serde_json::json!({"shutdown": "clean"}));
+    }
     Ok(())
 }
 

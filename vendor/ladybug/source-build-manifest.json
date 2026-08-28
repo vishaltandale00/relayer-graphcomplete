@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "core": {
+    "name": "LadybugDB",
+    "version": "0.19.1",
+    "tag": "v0.19.1",
+    "commit": "554c1e71158564c37a30c541a92bfc9eddc96430",
+    "source": "rust-binding-crate/lbug-src",
+    "embeddedTreeSha256": "ef17999177f4c3e72c51f2fa1ca076e46d1a40eae68c056739043d219526682d"
+  },
+  "rustBinding": {
+    "crate": "lbug",
+    "version": "0.19.1",
+    "archive": "lbug-0.19.1.crate",
+    "url": "https://static.crates.io/crates/lbug/lbug-0.19.1.crate",
+    "sha256": "a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172",
+    "buildScriptSha256": "e9344becabb4760c2a641da976542d1c938ce45d2d87c3b7963f9c93a145c968",
+    "sourceBasisCommit": "2e89afb712e6e26f2465f486b153e4aea1176130",
+    "sourceBasisDirty": true
+  },
+  "openssl": {
+    "version": "3.5.8",
+    "archive": "openssl-3.5.8.tar.gz",
+    "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
+    "sha256": "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
+    "license": "Apache-2.0",
+    "endOfLife": "2030-04-08"
+  },
+  "extensions": [],
+  "build": {
+    "nativeMode": "fully-static-ladybug-and-openssl",
+    "minimumMacOSVersion": "13.3",
+    "cargoNetworkMode": "offline",
+    "environmentMustBeUnset": [
+      "LBUG_GITHUB_REPOSITORY",
+      "LBUG_INCLUDE_DIR",
+      "LBUG_LIBRARY_DIR",
+      "LBUG_PRECOMPILED_RUN_ID",
+      "LBUG_RUST_BUILD_FROM_SOURCE",
+      "LBUG_SHARED"
+    ],
+    "bindingPatch": null,
+    "corePatch": null,
+    "targets": {
+      "aarch64-apple-darwin": {
+        "supported": true,
+        "opensslConfigureTarget": "darwin64-arm64-cc",
+        "buildTool": "make"
+      },
+      "x86_64-apple-darwin": {
+        "supported": true,
+        "opensslConfigureTarget": "darwin64-x86_64-cc",
+        "buildTool": "make"
+      },
+      "x86_64-pc-windows-msvc": {
+        "supported": false,
+        "blocker": "The unmodified lbug 0.19.1 build emits ssl/crypto link names while pinned OpenSSL installs libssl.lib/libcrypto.lib, and it supplies no verified MSVC static-library search path.",
+        "opensslConfigureTarget": "VC-WIN64A",
+        "buildTool": "nmake"
+      }
+    }
+  },
+  "runtime": {
+    "ladybugLibraryKind": "static",
+    "packagedLadybugLibrary": null,
+    "requiredPackagedRpath": null,
+    "externalOpenSSLLibraries": false
+  },
+  "evidence": {
+    "macOSArm64Observation": "docs/evidence/issue-261-ladybug-source-arm64.txt",
+    "macOSArm64ObservationSha256": "ec0832b0f17faca44a61aebe518b490dc58c301187fc668eb548604971864d7e"
+  },
+  "licenseReceipt": {
+    "bindingManifestDeclares": "MIT",
+    "bindingArchiveContainsLicenseFile": false,
+    "coreRepositoryDeclares": "MIT",
+    "opensslSourceContainsLicenseFile": true,
+    "completeForDistribution": false,
+    "nativeInventory": "vendor/ladybug/native-inventory.json",
+    "remainingObligation": "Obtain a reviewed upstream license file for the lbug binding before packaging."
+  }
+}

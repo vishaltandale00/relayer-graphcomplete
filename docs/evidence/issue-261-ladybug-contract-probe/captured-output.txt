@@ -1,0 +1,29 @@
+CASE=whole-target-scan STATUS=passed
+CASE=thread-selector STATUS=passed
+CASE=project-selector STATUS=passed
+CASE=one-hop-connected STATUS=passed
+CASE=two-hop-connected STATUS=passed
+CASE=layer-action-path STATUS=passed
+CASE=reused-content-occurrence STATUS=passed
+CASE=membership-placement STATUS=passed
+CASE=connected-no-double-count STATUS=passed
+CASE=explicit-order-null-last STATUS=passed
+CASE=implicit-canonical-order STATUS=passed
+CASE=property-absence STATUS=passed
+CASE=distinct-list-record-comparisons-comment-semicolon STATUS=passed
+CASE=aggregate-allowlist STATUS=passed
+CASE=reverse-directed-limit-parameter-null-test STATUS=passed
+CASE=reverse-directed-path STATUS=passed
+CASE=disconnected-contains-navigation-no-occurrence-constraint STATUS=passed
+CASE=root-action-query STATUS=passed
+CASE=reverse-edge-reuse-no-match STATUS=passed
+CASE=structural-candidate-source STATUS=passed
+EXACT_ENVELOPES=passed
+VALUES=passed
+NORMALIZATION_FALSIFIERS=passed
+PARSED_READ_ONLY_GATE=passed
+WALL_TIME_FALSIFIER=passed
+CANCELLATION_FALSIFIER=passed
+TRANSACTION_ROLLBACK_REOPEN=passed
+EXTENSIONS=[]
+LBUG_STORAGE_VERSION=43

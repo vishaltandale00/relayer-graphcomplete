@@ -1,7 +1,9 @@
 # Relayer graph query contract, version 1
 
-Status: frozen contract for Issue #260. The initial Ladybug qualification is a no-go because the
-pinned 0.19.1 native artifacts are not yet self-contained application-owned bytes; see
+Status: frozen contract for Issue #260. The official Ladybug 0.19.1 artifacts remain a no-go, but
+the exact unmodified source route now passes the full positive corpus and packaged graph-server
+lifecycle locally on macOS arm64 with pinned static OpenSSL at the approved macOS 13.3 floor.
+Native Intel, Windows static-link, and binding-license boundaries keep Issue #261 open; see
 `docs/evidence/issue-261-ladybug-qualification.md`. This does not change the contract.
 
 This document defines Relayer's deliberately bounded, read-only, GQL/Cypher-shaped graph query

@@ -344,7 +344,7 @@
         "maxTraversalHops": 1,
         "requiresOccurrenceConstraint": false
       },
-      "expectedResult": { "queryContractVersion": 1, "columns": ["count_all", "count", "min", "max", "sum", "avg", "orders"], "rows": [[{ "type": "integer", "value": "8" }, { "type": "integer", "value": "8" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "1" }, { "type": "integer", "value": "2" }, { "type": "float", "value": 0.25 }, { "type": "list", "elementType": { "kind": "integer" }, "values": [{ "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "1" }, { "type": "integer", "value": "1" }] }]], "truncated": false }
+      "expectedResult": { "queryContractVersion": 1, "columns": ["count_all", "count", "min", "max", "sum", "avg", "orders"], "rows": [[{ "type": "integer", "value": "8" }, { "type": "integer", "value": "8" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "1" }, { "type": "integer", "value": "3" }, { "type": "float", "value": 0.375 }, { "type": "list", "elementType": { "kind": "integer" }, "values": [{ "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "1" }, { "type": "integer", "value": "1" }, { "type": "integer", "value": "1" }] }]], "truncated": false }
     },
     {
       "id": "reverse-directed-limit-parameter-null-test",

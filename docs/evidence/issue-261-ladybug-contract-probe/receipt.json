@@ -1,0 +1,12 @@
+{
+  "issue": 261,
+  "engine": "lbug",
+  "version": "0.19.1",
+  "sha256": {
+    "src/main.rs": "658e63b184add2c99f3db1536779a47951e49d6080fdbce12cd5e3b6f134bedf",
+    "Cargo.lock": "46b363781f480e4c876f4816e5d3bea033de09e6104cd6a9f2cd6d73921d4c8b",
+    "coverage.json": "40bf5d36b9f35d96571690959093a6dc285d9ba77ad77e598f622d47079360b0",
+    "captured-output.txt": "4807203e397643ae24e212b12d55f98add4fc08632149759bb22a259c943e0f9"
+  },
+  "frozenPositiveFixtureSha256": "5ef17df60d951763308c7018741786a19ab2d2e66ff7f1d97631957c0008fe13"
+}

@@ -1774,7 +1774,7 @@ GET  /api/graph/nodes/:id/output
 <h3>11.9 Graph search v1 contract</h3>
 <p><strong>Goal:</strong> Let authorized agents query accepted graph structure without known record identifiers.</p>
 <p><strong>Primary issue:</strong> <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/52">#52 Add graph search functionality</a>.</p>
-<p><strong>Current status:</strong> The product contract is settled. The Issue #261 feasibility gate rejects the upstream Ladybug 0.19.1 artifacts as shipped. The approved product decision raises the minimum supported macOS version to 13.3. This aligns the release floor with the pinned static-OpenSSL Ladybug 0.19.1 source build. The remaining projection, query, recovery, and release qualification must still pass before the gate is accepted; the graph-search contract stays unchanged.</p>
+<p><strong>Current status:</strong> The product contract is settled. The Issue #261 feasibility gate rejects the upstream Ladybug 0.19.1 artifacts as shipped. The approved product decision raises the minimum supported macOS version to 13.3. At that floor, the exact unmodified source route uses pinned static OpenSSL without a Ladybug fork. The complete positive v1 corpus and packaged graph-server lifecycle pass locally on macOS arm64. Native Intel, Windows static-link, and binding-license boundaries remain unresolved, so #262 and later delivery nodes stay blocked. The graph-search contract stays unchanged.</p>
 <h4>Product requirements</h4>
 <ul>
 <li>Graph search uses Ladybug from its first enabled product path. SQLite search fallback is forbidden.</li>

@@ -650,6 +650,66 @@ fn canonical_supergraph_freezes_identity_occurrence_and_exclusions() {
 }
 
 #[test]
+fn aggregate_golden_is_derived_from_the_canonical_project_memberships() {
+    let graph = parse(SUPERGRAPH);
+    let positive = parse(POSITIVE);
+    let mut orders = graph["expectedTargets"]["project:7"]["membershipIds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|membership| {
+            membership
+                .as_str()
+                .unwrap()
+                .split(':')
+                .nth(2)
+                .unwrap()
+                .parse::<i64>()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    orders.sort_unstable();
+
+    let aggregate = objects(&positive, "cases")
+        .iter()
+        .find(|case| case["id"] == "aggregate-allowlist")
+        .unwrap();
+    let row = &aggregate["expectedResult"]["rows"][0];
+    assert_eq!(
+        row[0]["value"].as_str().unwrap().parse::<usize>().unwrap(),
+        orders.len()
+    );
+    assert_eq!(
+        row[1]["value"].as_str().unwrap().parse::<usize>().unwrap(),
+        orders.len()
+    );
+    assert_eq!(
+        row[2]["value"].as_str().unwrap().parse::<i64>().unwrap(),
+        *orders.first().unwrap()
+    );
+    assert_eq!(
+        row[3]["value"].as_str().unwrap().parse::<i64>().unwrap(),
+        *orders.last().unwrap()
+    );
+    let sum = orders.iter().sum::<i64>();
+    assert_eq!(
+        row[4]["value"].as_str().unwrap().parse::<i64>().unwrap(),
+        sum
+    );
+    assert_eq!(
+        row[5]["value"].as_f64().unwrap(),
+        sum as f64 / orders.len() as f64
+    );
+    let collected = row[6]["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value["value"].as_str().unwrap().parse::<i64>().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(collected, orders);
+}
+
+#[test]
 fn positive_goldens_have_closed_plans_and_well_typed_results() {
     let manifest = parse(MANIFEST);
     let graph = parse(SUPERGRAPH);

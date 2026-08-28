@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "scope": "issue-261-local-packaged-qualification",
+  "capturedOn": "2026-08-28",
+  "target": "macos-arm64",
+  "rustTarget": "aarch64-apple-darwin",
+  "application": "Relayer Dev.app",
+  "binary": "Contents/Resources/bin/relayer-graph-server",
+  "binarySha256": "8dd56972097f9baba3b3c55c78e4a03cde0894a962f9b365e05ac497f6af7f3f",
+  "lbug": {
+    "version": "0.19.1",
+    "extensions": []
+  },
+  "nativeMode": "fully-static-ladybug-and-openssl",
+  "dynamicLibraries": [
+    "/usr/lib/libc++.1.dylib",
+    "/usr/lib/libiconv.2.dylib",
+    "/usr/lib/libSystem.B.dylib"
+  ],
+  "minimumMacOSVersion": "13.3",
+  "cleanProfileCreated": true,
+  "lockContentionRejected": true,
+  "cleanShutdown": true,
+  "restartReopenedPersistedMarker": true,
+  "storageVersion": 43,
+  "lockFailure": "Could not set lock on file : /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-ladybug-packaged-txHNqj/ladybug (Error: Resource temporarily unavailable)",
+  "inputSha256": {
+    "Cargo.lock": "1f91b5c432f8c29331c54dcea57fe7d3e1c70e4cbfc593a984de8ab197169c9e",
+    "crates/relayer-graph-server/Cargo.toml": "3c692102a171c675f650ea613ea5c17c91100eff00b1a3fca22043dd00f73c0a",
+    "crates/relayer-graph-server/src/main.rs": "7227d1cb82eeee058251a2c34d2bee705d704539114a93f7d6895303b6fbd0cc",
+    "desktop/packaging/build-development.mjs": "b593c4e6300305af486084034266256597434c70a2a3290da98d9386299466f1",
+    "scripts/capture-ladybug-packaged-lifecycle.mjs": "ecc88a9704c26e4eb2c1cfc80557e5c1964d2d53483cd162ddc3a120d0d71a81",
+    "scripts/prepare-ladybug-source.mjs": "f4784e11f7dfe115e92168187ff87fd5a3c587a6de6814ba8f10634d3b934c38",
+    "vendor/ladybug/source-build-manifest.json": "10238858ff20225533bcb36a54414a81240532348b2df4882d94b421de09843f"
+  },
+  "preparedReceiptSha256": {
+    "source-receipt.json": "97f3b0b8619fbcf3f2d0d57e4f903f8a594d25573d62ecb15372ca605fbe95cb",
+    "cargo-build-env.json": "f16224c5e5503912c24253f7dbb1c568bb7adfb830027e4f8ba836f3e96bc591"
+  },
+  "limitations": [
+    "local macOS arm64 only",
+    "unsigned development package",
+    "not release-ready licensing evidence"
+  ]
+}

@@ -1,0 +1,50 @@
+Issue #261 pinned source-build observation — macOS arm64
+Captured: 2026-08-28
+
+Candidate
+  lbug crate: 0.19.1, SHA-256 a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172
+  embedded Ladybug core: 0.19.1, commit 554c1e71158564c37a30c541a92bfc9eddc96430
+  OpenSSL source: 3.5.8, SHA-256 a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2
+  extensions: []
+  binding/core patches: none
+
+Build boundary
+  cargo build --release --locked --offline
+  MACOSX_DEPLOYMENT_TARGET=13.3
+  LBUG_BUILD_FROM_SOURCE=1
+  OPENSSL_STATIC=1
+  LIBRARY_PATH=<pinned static-only OpenSSL prefix>/lib
+  OS network access denied for the Cargo build and probe run
+  elapsed: 4m24s
+  result: pass
+
+Host toolchain
+  macOS 26.6.1 (25G76), arm64
+  Xcode SDK 26.2
+  Apple clang 17.0.0
+  rustc 1.94.0 (4a4ef493e 2026-03-02)
+  cargo 1.94.0 (85eff7c80 2026-01-15)
+  CMake 4.3.1
+
+Result
+  executable SHA-256: a3e98e731252fc43cfaceafc6bee8fc997d24cccf2d22ef8952c83e716c6822a
+  build-log SHA-256: 5283137996c8da3c5583fd993a0509ab0f47f3b29e0ec2e61280d4b66d4526ad
+  run-log SHA-256: 570a468c36c2c3428071fa5b3307edfb6168d86818b5244792ba829996a14e65
+  probe exit: 0
+  storage version: 43
+  LC_BUILD_VERSION minos: 13.3
+  embedded version string: OpenSSL 3.5.8 25 Aug 2026
+
+otool -L
+  /usr/lib/libiconv.2.dylib
+  /usr/lib/libc++.1.dylib
+  /usr/lib/libSystem.B.dylib
+
+nm -u filter
+  SSL/EVP/BIO/X509 undefined symbols: none
+
+Proof limit
+  This observation proves the pinned unmodified source route on one macOS arm64 host. It is not
+  macOS Intel, Windows x64, packaged-app lifecycle, signing, or release evidence. The source
+  manifest and preparation utility reproduce the reviewed inputs; the temporary binary and full
+  compiler log are not checked-in artifacts.
