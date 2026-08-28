@@ -51,6 +51,19 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.endswith("/discard"):
             layer_id = int(self.path.split("/")[-2])
             self._reply({"layer": {"id": layer_id, "nodes": [1], "edges": [], "state": "stopped"}})
+        elif self.path.endswith("/current/transitions"):
+            transition = body["transition"]
+            self._reply({
+                "completionId": 7,
+                "revision": body["expectedRevision"] + 1,
+                "lifecycle": "active",
+                "currentLayerId": transition["layerId"],
+                "finalLayerId": None,
+                "operationKey": body["operationKey"],
+                "requestDigest": "sha256:request",
+                "snapshotDigest": "sha256:snapshot",
+                "projectionSequence": 2,
+            })
         else:
             self._reply({"ok": True})
 
@@ -67,6 +80,14 @@ class Handler(BaseHTTPRequestHandler):
             })
         elif self.path.endswith("/output"):
             self._reply({"nodeId": 7, "rootAction": {}, "rootLayer": {}})
+        elif self.path.endswith("/current"):
+            self._reply({
+                "completionId": 7,
+                "lifecycle": "active",
+                "headRevision": 0,
+                "currentLayerId": None,
+                "finalLayerId": None,
+            })
         else:
             self._reply({"error": {"message": "not found"}}, 404)
 
@@ -118,6 +139,20 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         output = await self.client.get_completion_output()
         self.assertEqual(output["nodeId"], 7)
         self.assertEqual(Handler.requests[-1][0], "/api/graph/nodes/7/output")
+
+    async def test_current_handle_reads_and_advances_with_explicit_cas_identity(self):
+        current = await self.client.get_current()
+        self.assertEqual(current["headRevision"], 0)
+        receipt = await self.client.advance_current(
+            19, expected_revision=0, operation_key="publish-progress"
+        )
+        self.assertEqual(receipt["revision"], 1)
+        self.assertEqual(Handler.requests[-1][0], "/api/graph/current/transitions")
+        self.assertEqual(Handler.requests[-1][2], {
+            "expectedRevision": 0,
+            "operationKey": "publish-progress",
+            "transition": {"kind": "advance", "layerId": 19},
+        })
 
     async def test_interaction_input_is_typed_and_preserves_annotation_order(self):
         input = await self.client.get_interaction_input()

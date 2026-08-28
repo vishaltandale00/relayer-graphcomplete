@@ -14,6 +14,9 @@ use serde_json::{Value, json};
 #[serde(rename_all = "camelCase")]
 pub(super) struct StateQuery {
     thread_id: Option<i64>,
+    current_projection_after: Option<u64>,
+    current_projection_completion_id: Option<i64>,
+    current_projection_interaction_id: Option<i64>,
 }
 
 #[derive(serde::Serialize)]
@@ -87,6 +90,49 @@ pub(super) async fn product_state(
         &product_state.action_invocations,
     )
     .await;
+    let mut seen_completion_ids = std::collections::HashSet::new();
+    let mut completion_ids = Vec::new();
+    if let Some(requested_interaction) = query.current_projection_interaction_id
+        && let Some(requested) = product_state
+            .interactions
+            .iter()
+            .find(|interaction| interaction.id.value() == requested_interaction)
+            .and_then(|interaction| interaction.graph_node_id)
+    {
+        seen_completion_ids.insert(requested);
+        completion_ids.push(requested);
+    }
+    if let Some(requested) = query.current_projection_completion_id
+        && product_state
+            .interactions
+            .iter()
+            .any(|interaction| interaction.graph_node_id == Some(requested))
+        && seen_completion_ids.insert(requested)
+    {
+        completion_ids.push(requested);
+    }
+    completion_ids.extend(
+        product_state
+            .interactions
+            .iter()
+            .rev()
+            .filter_map(|interaction| interaction.graph_node_id)
+            .filter(|completion_id| seen_completion_ids.insert(*completion_id))
+            .take(200usize.saturating_sub(completion_ids.len())),
+    );
+    let current_projection = match (&state.runtime, completion_ids.is_empty()) {
+        (_, true) | (None, false) => None,
+        (Some(runtime), false) if runtime.temporal_features().projection_ui => Some(
+            runtime
+                .current_projection_page(
+                    &completion_ids,
+                    query.current_projection_after.unwrap_or(0),
+                    500,
+                )
+                .await?,
+        ),
+        (Some(_), false) => None,
+    };
     let imported_thread_ids = product_state
         .threads
         .iter()
@@ -110,6 +156,7 @@ pub(super) async fn product_state(
     }
     let response = ProductStateResponse::from(product_state)
         .with_interactions(interactions)
+        .with_current_projection(current_projection)
         .with_annotations(annotation_capability(&state, &headers));
     Ok(Json(response))
 }

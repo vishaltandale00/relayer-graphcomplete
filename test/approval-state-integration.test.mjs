@@ -84,8 +84,8 @@ describe("desktop approval state integration", () => {
       completionStatus: "running",
     });
     requestImplementation = vi.fn(async (path) => {
-      if (path === "/api/state?threadId=10") {
-        return requestImplementation.mock.calls.filter(([candidate]) => candidate === path).length === 1
+      if (path.startsWith("/api/state?threadId=10")) {
+        return requestImplementation.mock.calls.filter(([candidate]) => candidate.startsWith("/api/state?threadId=10")).length === 1
           ? initial
           : resolved;
       }
@@ -113,7 +113,7 @@ describe("desktop approval state integration", () => {
     const pending = approvalReceipt();
     requestImplementation = vi.fn(async (path) => {
       if (path.endsWith("/decision")) return post.promise;
-      if (path === "/api/state?threadId=10") return productState({ completionStatus: "running" });
+      if (path.startsWith("/api/state?threadId=10")) return productState({ completionStatus: "running" });
       throw new Error(`Unexpected request: ${path}`);
     });
     const controller = await loadModules();
@@ -136,7 +136,7 @@ describe("desktop approval state integration", () => {
     });
     requestImplementation = vi.fn(async (path) => {
       if (path.endsWith("/decision")) return { approval: resolved.approvals[0] };
-      if (path === "/api/state?threadId=10") return resolved;
+      if (path.startsWith("/api/state?threadId=10")) return resolved;
       throw new Error(`Unexpected request: ${path}`);
     });
     const controller = await loadModules();

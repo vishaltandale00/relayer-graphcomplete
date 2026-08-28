@@ -429,6 +429,7 @@ pub(crate) struct ProductStateResponse {
     action_invocations: Vec<ActionInvocationResponse>,
     approvals: Vec<ApprovalReceipt>,
     capabilities: CapabilitiesResponse,
+    current_projection: Option<relayer_graph_core::CurrentProjectionPage>,
 }
 
 impl ProductStateResponse {
@@ -439,6 +440,14 @@ impl ProductStateResponse {
 
     pub(crate) fn with_annotations(mut self, annotations: bool) -> Self {
         self.capabilities.annotations = annotations;
+        self
+    }
+
+    pub(crate) fn with_current_projection(
+        mut self,
+        projection: Option<relayer_graph_core::CurrentProjectionPage>,
+    ) -> Self {
+        self.current_projection = projection;
         self
     }
 }
@@ -456,6 +465,7 @@ impl From<ProductState> for ProductStateResponse {
                 .collect(),
             approvals: state.approvals,
             capabilities: state.capabilities.into(),
+            current_projection: None,
         }
     }
 }

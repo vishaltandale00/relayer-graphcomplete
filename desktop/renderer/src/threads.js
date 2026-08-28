@@ -21,6 +21,7 @@ import {
   appendLayerPath,
   createLayerNavigationCoordinator,
   layerPathForVisibleLayer,
+  reconcileCurrentProjection,
   workspaceTurns,
 } from "./product-workspace/model.js";
 import {
@@ -274,6 +275,7 @@ function currentNavigationEntry() {
     turnId: viewState.currentInteractionId,
     layerPath: viewState.layerPath,
     selectedNodeId: viewState.selectedNodeId,
+    temporalCurrent: viewState.temporalCurrent,
   });
 }
 
@@ -440,7 +442,19 @@ export async function refreshState(
   }
   const refreshToken = refreshGate.begin();
   const requestedThreadId = threadId;
-  const state = await request(`/api/state${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ""}`);
+  const stateQuery = new URLSearchParams();
+  if (threadId) stateQuery.set("threadId", threadId);
+  stateQuery.set("currentProjectionAfter", String(appState.currentProjectionCursor || 0));
+  if (viewState.currentInteractionId != null) {
+    stateQuery.set("currentProjectionInteractionId", String(viewState.currentInteractionId));
+  }
+  const selectedBeforeRefresh = appState.interactions.find((interaction) => (
+    String(interaction.id) === String(viewState.currentInteractionId)
+  ));
+  if (selectedBeforeRefresh?.graphNodeId != null) {
+    stateQuery.set("currentProjectionCompletionId", String(selectedBeforeRefresh.graphNodeId));
+  }
+  const state = await request(`/api/state?${stateQuery}`);
   if (
     !refreshGate.isCurrent(refreshToken)
     || (requestedThreadId && String(viewState.currentThreadId) !== String(requestedThreadId))
@@ -468,6 +482,97 @@ export async function refreshState(
     previousVisibleLayer,
     selected,
   );
+  let temporalSelectedNodeId;
+  let temporalCurrent = viewState.temporalCurrent;
+  let temporalProjectionFailed = false;
+  const projectionPage = state.currentProjection;
+  const projectionState = projectionPage?.states?.find((projection) => (
+    String(projection.completionId) === String(selected?.graphNodeId)
+    && projection.temporalFeatures?.projectionUi === true
+  ));
+  const previousProjection = projectionState == null
+    ? null
+    : appState.currentProjections.get(String(projectionState.completionId)) ?? null;
+  if (projectionState) {
+    const previousLayerId = previousProjection?.currentLayerId ?? null;
+    const visibleLayerId = previousVisibleLayer?.layer?.id ?? null;
+    const selectedChanged = String(previousInteractionId) !== String(selected?.id);
+    const wasFollowing = previousProjection == null
+      ? previousVisibleLayer == null || selectedChanged
+      : (selectedChanged && viewState.temporalCurrent == null)
+        || (
+          viewState.temporalCurrent?.mode === "following"
+          && String(viewState.temporalCurrent.completionId) === String(projectionState.completionId)
+          && Number(viewState.temporalCurrent.revision) === Number(previousProjection.headRevision)
+          && String(visibleLayerId) === String(previousLayerId)
+        );
+    const changed = previousProjection == null
+      || Number(projectionState.headRevision) > Number(previousProjection.headRevision);
+    if (changed && wasFollowing && projectionState.currentLayerId == null) {
+      temporalCurrent = {
+        completionId: projectionState.completionId,
+        revision: projectionState.headRevision,
+        mode: "following",
+      };
+    } else if (
+      changed
+      && viewState.temporalCurrent?.mode === "pinned"
+      && String(viewState.temporalCurrent.completionId) === String(projectionState.completionId)
+    ) {
+      temporalCurrent = {
+        completionId: projectionState.completionId,
+        revision: projectionState.headRevision,
+        mode: "pinned",
+      };
+    }
+    if (changed && wasFollowing && projectionState.currentLayerId != null && selected) {
+      const identity = {
+        threadId: nextThreadId,
+        turnId: selected.id,
+        layerId: projectionState.currentLayerId,
+      };
+      try {
+        const currentLayer = validateResolvedLayer(identity, await request(
+          `/api/threads/${encodeURIComponent(identity.threadId)}/interactions/${encodeURIComponent(identity.turnId)}/layers/${encodeURIComponent(identity.layerId)}`,
+        ));
+        if (
+          !refreshGate.isCurrent(refreshToken)
+          || (requestedThreadId && String(viewState.currentThreadId) !== String(requestedThreadId))
+        ) return false;
+        const reconciled = reconcileCurrentProjection({
+          completionId: projectionState.completionId,
+          revision: previousProjection?.headRevision ?? 0,
+          lifecycle: previousProjection?.lifecycle ?? "active",
+          currentLayerId: previousLayerId,
+          finalLayerId: previousProjection?.finalLayerId ?? null,
+          mode: "following",
+          visibleTarget: previousLayerId == null
+            ? { kind: "anchor", completionId: projectionState.completionId, revision: previousProjection?.headRevision ?? 0 }
+            : { kind: "layer", completionId: projectionState.completionId, layerId: previousLayerId },
+          selectedNodeId: viewState.selectedNodeId,
+        }, {
+          completionId: projectionState.completionId,
+          revision: projectionState.headRevision,
+          previousRevision: previousProjection?.headRevision ?? 0,
+          lifecycle: projectionState.lifecycle,
+          currentLayerId: projectionState.currentLayerId,
+          finalLayerId: projectionState.finalLayerId,
+          safeReason: projectionState.safeReason,
+          currentNodeIds: currentLayer.nodes.map(({ id }) => id),
+        });
+        refreshedVisibleLayer = currentLayer;
+        temporalSelectedNodeId = reconciled.view.selectedNodeId;
+        temporalCurrent = {
+          completionId: projectionState.completionId,
+          revision: projectionState.headRevision,
+          mode: "following",
+        };
+        acceptedLayerCache.set(identity, currentLayer);
+      } catch {
+        temporalProjectionFailed = true;
+      }
+    }
+  }
   const visibleLayerId = refreshedVisibleLayer?.layer?.id;
   let canonicalRefreshFailed = false;
   if (
@@ -507,8 +612,22 @@ export async function refreshState(
   appState.actionInvocations = nextActionInvocations;
   appState.approvals = nextApprovals;
   appState.capabilities = state.capabilities;
+  appState.temporalSafeReason = projectionState?.safeReason ?? null;
+  appState.temporalLifecycle = projectionState?.lifecycle ?? null;
+  if (projectionPage && !temporalProjectionFailed) {
+    appState.currentProjectionCursor = projectionPage.cursor;
+    for (const projection of projectionPage.states || []) {
+      appState.currentProjections.set(String(projection.completionId), projection);
+    }
+  }
   viewState.currentThreadId = nextThreadId;
-  hydrateWorkspace(selected, refreshedVisibleLayer);
+  hydrateWorkspace(selected, refreshedVisibleLayer, {
+    ...(temporalSelectedNodeId === undefined ? {} : { selectedNodeId: temporalSelectedNodeId }),
+    temporalCurrent,
+  });
+  if (["succeeded", "stopped", "failed"].includes(appState.temporalLifecycle)) {
+    appState.status = appState.temporalLifecycle;
+  }
   recordCurrentNavigation(historyMode);
   renderSidebar();
   renderScopeMenu();
@@ -520,7 +639,9 @@ export async function refreshState(
   const nextLiveInteraction = latestInteractionForThread(nextInteractions, nextThreadId);
   const terminalTransition = interactionReachedTerminal(previousLiveInteraction, nextLiveInteraction);
   void refreshCurrentEnvironment({ force: projectChanged || terminalTransition }).catch(() => {});
-  schedulePendingRefresh(viewState.currentThreadId, { force: canonicalRefreshFailed });
+  schedulePendingRefresh(viewState.currentThreadId, {
+    force: canonicalRefreshFailed || temporalProjectionFailed || projectionPage?.hasMore === true,
+  });
   return true;
 }
 
@@ -530,6 +651,7 @@ export async function loadThread(threadId) {
   viewState.currentThreadId = threadId;
   viewState.currentInteractionId = null;
   viewState.selectedNodeId = null;
+  viewState.temporalCurrent = null;
   setMainView("thread");
   const url = new URL(location.href);
   url.searchParams.set("threadId", threadId);
@@ -540,7 +662,7 @@ export async function loadThread(threadId) {
 export function hydrateWorkspace(
   interaction,
   layer = interaction?.completionOutput?.rootLayer ?? null,
-  { layerPath, selectedNodeId } = {},
+  { layerPath, selectedNodeId, temporalCurrent } = {},
 ) {
   const previousInteractionId = viewState.currentInteractionId;
   const previousLayerId = viewState.layerPath.at(-1)?.layerId;
@@ -560,6 +682,8 @@ export function hydrateWorkspace(
   }
   viewState.currentInteractionId = interaction?.id ?? null;
   viewState.layerPath = nextLayerPath;
+  if (temporalCurrent !== undefined) viewState.temporalCurrent = temporalCurrent;
+  else if (String(previousInteractionId) !== String(interaction?.id)) viewState.temporalCurrent = null;
   appState.currentInteractionId = interaction?.id ?? null;
   appState.status = interaction?.completionStatus || "idle";
   appState.visibleLayer = layer;
@@ -591,10 +715,17 @@ export function selectTurnById(interactionId) {
   if (!target || String(target.id) === String(viewState.currentInteractionId)) return;
   supersedePendingHistory({ presentationChanged: true });
   viewState.selectedNodeId = null;
-  hydrateWorkspace(target);
+  const projection = appState.currentProjections.get(String(target.graphNodeId));
+  hydrateWorkspace(target, undefined, {
+    temporalCurrent: projection == null ? null : {
+      completionId: projection.completionId,
+      revision: projection.headRevision,
+      mode: "pinned",
+    },
+  });
   recordCurrentNavigation("push");
   renderThread();
-  schedulePendingRefresh(viewState.currentThreadId);
+  schedulePendingRefresh(viewState.currentThreadId, { force: true });
 }
 
 export async function submitInteraction(
@@ -773,7 +904,15 @@ export async function navigateLayer(layerId, navigation = {}) {
       ? pendingNavigation.layerPath.slice(0, navigation.pathIndex + 1)
       : appendLayerPath(pendingNavigation.layerPath, navigation.action, navigation.sourceNode);
     viewState.selectedNodeId = null;
-    hydrateWorkspace(interaction, layer, { layerPath });
+    const projection = appState.currentProjections.get(String(interaction?.graphNodeId));
+    hydrateWorkspace(interaction, layer, {
+      layerPath,
+      temporalCurrent: projection == null ? null : {
+        completionId: projection.completionId,
+        revision: projection.headRevision,
+        mode: "pinned",
+      },
+    });
     recordCurrentNavigation("push");
     renderThread();
     return true;
@@ -972,6 +1111,7 @@ function applyResolvedPresentation(resolved) {
   hydrateWorkspace(resolved.interaction, resolved.layer, {
     layerPath: resolved.layerPath,
     selectedNodeId: resolved.selectedNodeId,
+    temporalCurrent: resolved.entry.temporalCurrent,
   });
   setMainView("thread");
   renderSidebar();
@@ -1016,7 +1156,12 @@ export async function navigateHistory(deltaOrDirection, { beforeCommit } = {}) {
     beforeCommit?.();
     if (!navigationHistory.commit(transition)) throw navigationSupersededError();
     committed = true;
-    navigationHistory.replaceCurrent(resolved.entry);
+    const restoredEntry = resolved.entry.temporalCurrent == null ? resolved.entry : {
+      ...resolved.entry,
+      temporalCurrent: { ...resolved.entry.temporalCurrent, mode: "pinned" },
+    };
+    viewState.temporalCurrent = restoredEntry.temporalCurrent;
+    navigationHistory.replaceCurrent(restoredEntry);
     rememberNavigationMetadata(navigationHistory.current, resolved);
     pruneNavigationMetadata();
     protectCurrentLayers(navigationHistory.current);

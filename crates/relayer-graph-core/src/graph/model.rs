@@ -1,5 +1,6 @@
 mod action;
 mod context;
+mod current;
 mod edge;
 mod icon;
 mod ids;
@@ -11,6 +12,10 @@ pub use action::{ActionDraft, ActionKind, ActionVariant, GraphAction, NavigateRe
 pub use context::{
     InteractionContext, InteractionContextAction, InteractionContextDraft,
     InteractionContextTarget, InteractionInput, InteractionInputNode, interaction_input_digest,
+};
+pub use current::{
+    CompletionLifecycle, CompletionState, CurrentProjectionEvent, CurrentProjectionPage,
+    CurrentTransition, CurrentTransitionReceipt, TemporalFeatureConfig,
 };
 pub use edge::{EdgeDraft, GraphEdge};
 pub use icon::{

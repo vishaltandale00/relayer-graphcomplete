@@ -312,7 +312,9 @@ export function turnStatusPresentation(status) {
   if (["not_started", "running", "submitted"].includes(status)) {
     return { kind: "running", label: status === "not_started" ? "Waiting" : "Running" };
   }
-  if (status === "accepted") return { kind: "accepted", label: "", hidden: true };
+  if (["accepted", "succeeded"].includes(status)) {
+    return { kind: "accepted", label: "", hidden: true };
+  }
   if (status === "failed") return { kind: "failed", label: "Failed" };
   if (status === "cancelled") return { kind: "cancelled", label: "Cancelled" };
   if (status === "stopped") return { kind: "stopped", label: "Stopped" };
@@ -3475,15 +3477,20 @@ export function createProductWorkspace({
   }
 
   function renderInteractionState(state, interaction, restoredDraft = false) {
-    const viewedStatus = interaction?.completionStatus || state.status || "idle";
+    const viewedStatus = ["succeeded", "stopped", "failed"].includes(state.temporalLifecycle)
+      ? state.temporalLifecycle
+      : interaction?.completionStatus || state.status || "idle";
     const presentation = turnStatusPresentation(viewedStatus);
     const statusElement = $("#interactionStatus");
-    const statusKey = interactionStatusRenderKey(interaction, state.status || "idle");
+    const safeReason = state.temporalSafeReason || null;
+    const statusKey = `${interactionStatusRenderKey(interaction, state.status || "idle")}:${safeReason ?? ""}`;
     if (statusKey !== renderedInteractionStatusKey) {
       statusElement.className = presentation.hidden
         ? "interaction-status hidden"
         : `interaction-status interaction-status-${presentation.kind}`;
-      statusElement.textContent = presentation.label;
+      statusElement.textContent = safeReason == null
+        ? presentation.label
+        : `${presentation.label}: ${safeReason}`;
       renderedInteractionStatusKey = statusKey;
     }
     prompt.disabled = composerDisabledForState(
@@ -3694,7 +3701,9 @@ export function createProductWorkspace({
       $("#graphEmptyMessage").textContent = thread?.imported === true && PENDING_COMPLETION_STATUSES.has(state.status)
         ? "This imported interaction was unfinished and has no accepted graph."
         : state.status === "failed"
-        ? "This interaction failed before producing an accepted graph."
+        ? state.temporalSafeReason
+          ? `This interaction failed before producing an accepted graph: ${state.temporalSafeReason}`
+          : "This interaction failed before producing an accepted graph."
         : "This interaction has no accepted graph yet.";
       return;
     }

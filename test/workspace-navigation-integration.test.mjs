@@ -1205,7 +1205,7 @@ describe("workspace navigation integration", () => {
       const restoreFirst = deferred();
       const restoreSecond = deferred();
       requestImplementation = vi.fn(async (path) => {
-        const stateMatch = path.match(/^\/api\/state\?threadId=(\d+)$/);
+        const stateMatch = path.match(/^\/api\/state\?threadId=(\d+)(?:&|$)/);
         if (stateMatch) return states.get(stateMatch[1]);
         if (path === "/api/threads/10") return restoreFirst.promise;
         if (path === "/api/threads/20") return restoreSecond.promise;
@@ -1221,7 +1221,7 @@ describe("workspace navigation integration", () => {
       restoreSecond.resolve({ thread: threads[1], interactions: [turn2], actionInvocations: [] });
       await expect(stale).rejects.toMatchObject({ code: "navigation_superseded" });
       await vi.advanceTimersByTimeAsync(600);
-      expect(requestImplementation.mock.calls.filter(([path]) => path === "/api/state?threadId=30"))
+      expect(requestImplementation.mock.calls.filter(([path]) => path.startsWith("/api/state?threadId=30")))
         .toHaveLength(1);
       restoreFirst.resolve({ thread: threads[0], interactions: [turn1], actionInvocations: [] });
 

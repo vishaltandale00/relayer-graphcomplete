@@ -20,6 +20,10 @@ export const appState = {
   visibleLayer: null,
   status: "idle",
   environment: null,
+  currentProjectionCursor: 0,
+  currentProjections: new Map(),
+  temporalSafeReason: null,
+  temporalLifecycle: null,
 };
 
 export const viewState = {
@@ -32,6 +36,7 @@ export const viewState = {
   settingsTab: "appearance",
   selectedNodeId: null,
   layerPath: [],
+  temporalCurrent: null,
   evalContext: null,
 };
 

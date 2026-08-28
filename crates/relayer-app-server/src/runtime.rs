@@ -85,6 +85,7 @@ pub(crate) struct RuntimeClient {
     harness_control_token: String,
     configurations: HashMap<String, CatalogEntry>,
     unavailable_configurations: HashMap<String, UnavailableCatalogEntry>,
+    temporal_features: relayer_graph_core::TemporalFeatureConfig,
 }
 
 pub(crate) struct CompleteInteraction<'a> {
@@ -326,19 +327,44 @@ impl RuntimeClient {
                 )));
             }
         }
+        let client = Client::new();
+        let graph_url = loopback_url(graph_url, "graph")?;
+        let harness_url = loopback_url(harness_url, "harness")?;
+        let temporal_response = client
+            .get(graph_url.join("api/control/temporal-features")?)
+            .bearer_auth(&graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .send()
+            .await;
+        let temporal_features = match temporal_response {
+            // Older graph runtimes, temporarily unavailable runtimes, and
+            // narrow deterministic test doubles cannot opt into temporal
+            // behavior. Compatibility is always the conservative all-off
+            // stage.
+            Err(_) => relayer_graph_core::TemporalFeatureConfig::default(),
+            Ok(response) if response.status() == StatusCode::NOT_FOUND => {
+                relayer_graph_core::TemporalFeatureConfig::default()
+            }
+            Ok(response) => serde_json::from_value(response_json(response, StatusCode::OK).await?)?,
+        };
         Ok(Self {
-            client: Client::new(),
-            graph_url: loopback_url(graph_url, "graph")?,
-            harness_url: loopback_url(harness_url, "harness")?,
+            client,
+            graph_url,
+            harness_url,
             graph_control_token,
             harness_control_token,
             configurations,
             unavailable_configurations,
+            temporal_features,
         })
     }
 
     pub(crate) fn has_configuration(&self, name: &str) -> bool {
         self.configurations.contains_key(name)
+    }
+
+    pub(crate) fn temporal_features(&self) -> relayer_graph_core::TemporalFeatureConfig {
+        self.temporal_features
     }
 
     pub(crate) fn product_harnesses(&self) -> Vec<RuntimeProductHarness> {
@@ -963,6 +989,101 @@ impl RuntimeClient {
                 "api/control/interactions/{interaction_node_id}/input"
             ))
             .await?,
+        )?)
+    }
+
+    pub(crate) async fn fail_graph_completion(
+        &self,
+        interaction_node_id: i64,
+        operation_key: &str,
+        reason: &str,
+    ) -> Result<relayer_graph_core::CurrentTransitionReceipt, RuntimeError> {
+        let current: relayer_graph_core::CompletionState = serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/interactions/{interaction_node_id}/current"
+            ))
+            .await?,
+        )?;
+        let transition = relayer_graph_core::CurrentTransition::Fail {
+            reason: reason.to_owned(),
+        };
+        let expected_revision = match current.lifecycle {
+            relayer_graph_core::CompletionLifecycle::Active => current.head_revision,
+            _ => current.head_revision.checked_sub(1).ok_or_else(|| {
+                RuntimeError::Protocol(format!(
+                    "terminal completion {interaction_node_id} has no transition revision"
+                ))
+            })?,
+        };
+        let request_digest =
+            relayer_graph_core::current_transition_request_digest(expected_revision, &transition)
+                .map_err(|error| RuntimeError::Protocol(error.to_string()))?;
+        let recovered = self
+            .client
+            .post(self.graph_url.join(&format!(
+                "api/control/interactions/{interaction_node_id}/current/receipts"
+            ))?)
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({
+                "operationKey": operation_key,
+                "requestDigest": request_digest,
+            }))
+            .send()
+            .await?;
+        if recovered.status() == StatusCode::OK {
+            return Ok(serde_json::from_value(
+                response_json(recovered, StatusCode::OK).await?,
+            )?);
+        }
+        if recovered.status() != StatusCode::NOT_FOUND {
+            response_json(recovered, StatusCode::OK).await?;
+            unreachable!("unexpected receipt response accepted")
+        }
+        if current.lifecycle != relayer_graph_core::CompletionLifecycle::Active {
+            return Err(RuntimeError::Protocol(format!(
+                "completion {interaction_node_id} is already terminal without the expected failure receipt"
+            )));
+        }
+        let response = self
+            .client
+            .post(self.graph_url.join(&format!(
+                "api/control/interactions/{interaction_node_id}/current/transitions"
+            ))?)
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({
+                "expectedRevision": current.head_revision,
+                "operationKey": operation_key,
+                "transition": transition,
+            }))
+            .send()
+            .await?;
+        Ok(serde_json::from_value(
+            response_json(response, StatusCode::OK).await?,
+        )?)
+    }
+
+    pub(crate) async fn current_projection_page(
+        &self,
+        completion_ids: &[i64],
+        after: u64,
+        limit: u32,
+    ) -> Result<relayer_graph_core::CurrentProjectionPage, RuntimeError> {
+        let response = self
+            .client
+            .post(self.graph_url.join("api/control/current-projections")?)
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({
+                "completionIds": completion_ids,
+                "after": after,
+                "limit": limit,
+            }))
+            .send()
+            .await?;
+        Ok(serde_json::from_value(
+            response_json(response, StatusCode::OK).await?,
         )?)
     }
 

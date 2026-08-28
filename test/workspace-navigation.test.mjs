@@ -64,6 +64,7 @@ describe("workspace navigation presentation", () => {
         { layerId: "101", viaActionId: "501" },
       ],
       selectedNodeId: "11",
+      temporalCurrent: null,
     });
     expect(navigationEntryKey(entry)).toBe('['
       + '"7","2",[["100",null],["101","501"]]]');
@@ -144,6 +145,35 @@ describe("workspace navigation presentation", () => {
 
     expect(result.layer).toBe(root);
     expect(result.entry.navigationPath).toEqual([{ layerId: "100", viaActionId: null }]);
+  });
+
+  it("restores a retained temporal current when terminal work has no final output", async () => {
+    const { detail, root } = fixture();
+    const stoppedDetail = {
+      ...detail,
+      interactions: detail.interactions.map((interaction) => (
+        String(interaction.id) === "2"
+          ? { ...interaction, completionOutput: null, completionStatus: "stopped" }
+          : interaction
+      )),
+    };
+    const result = await resolveNavigationPresentation({
+      threadId: 7,
+      turnId: 2,
+      navigationPath: [{ layerId: 100, viaActionId: null }],
+      selectedNodeId: null,
+      temporalCurrent: { completionId: 42, revision: 2, mode: "pinned" },
+    }, {
+      loadThread: async () => stoppedDetail,
+      loadLayer: async () => root,
+    });
+
+    expect(result.layer).toBe(root);
+    expect(result.entry.temporalCurrent).toEqual({
+      completionId: "42",
+      revision: 2,
+      mode: "pinned",
+    });
   });
 
   it("fails without returning a partial presentation for missing turns, paths, or nodes", async () => {

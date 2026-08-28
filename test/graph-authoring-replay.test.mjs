@@ -95,7 +95,15 @@ describe("replay-safe graph authoring", () => {
       edges: [],
       actions: [],
     });
-    await expect(graph.getLayer(first.oldLayer)).resolves.toMatchObject({
+    await expect(graph.getLayer(first.oldLayer)).rejects.toMatchObject({
+      status: 422,
+      code: "authority_generation_expired",
+    });
+    await expect(controlRead(
+      server.url,
+      controlToken,
+      `/api/control/interactions/${interaction.node.id}/layers/${first.oldLayer.id}`,
+    )).resolves.toMatchObject({
       layer: { id: first.oldLayer.id, state: "stopped" },
     });
   });
@@ -197,6 +205,15 @@ async function controlRequest(url, token, path, body) {
   });
   const value = await response.json();
   if (!response.ok) throw new Error(`Control request failed (${response.status}): ${JSON.stringify(value)}`);
+  return value;
+}
+
+async function controlRead(url, token, path) {
+  const response = await fetch(`${url}${path}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const value = await response.json();
+  if (!response.ok) throw new Error(`Control read failed (${response.status}): ${JSON.stringify(value)}`);
   return value;
 }
 

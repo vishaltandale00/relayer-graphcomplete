@@ -329,6 +329,7 @@ impl<'connection> NodeTable<'connection> {
                     thread_id: valid_thread_id(row.thread_id)?,
                     root_node_id: node_id,
                     read_only: row.imported != 0,
+                    authority_epoch: None,
                 })
             }
             _ => Err(GraphError::Forbidden(
@@ -497,14 +498,23 @@ impl<'connection> NodeTable<'connection> {
         Ok(nodes)
     }
 
-    pub(crate) async fn accept_owned(
+    pub(crate) async fn publish_owned(
         &mut self,
         id: NodeId,
         owner: NodeId,
+        revision: Option<u64>,
     ) -> Result<(), GraphError> {
-        sqlx::query("UPDATE nodes SET state='accepted' WHERE id=?1 AND owner_interaction_id=?2")
+        let revision = revision
+            .map(|value| {
+                i64::try_from(value).map_err(|_| {
+                    GraphError::Internal("completion revision exceeds SQLite range".into())
+                })
+            })
+            .transpose()?;
+        sqlx::query("UPDATE nodes SET state='accepted',published_revision=COALESCE(published_revision,?3) WHERE id=?1 AND owner_interaction_id=?2")
             .bind(id.value())
             .bind(owner.value())
+            .bind(revision)
             .execute(&mut *self.connection)
             .await?;
         Ok(())

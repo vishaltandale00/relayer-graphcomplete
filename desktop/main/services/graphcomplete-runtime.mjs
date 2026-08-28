@@ -201,6 +201,7 @@ export class GraphCompleteRuntimeService {
     harnessHostModuleUrl,
     candidateTrace,
     acquireProviderExecution,
+    temporalFeatures = {},
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
@@ -219,6 +220,13 @@ export class GraphCompleteRuntimeService {
     this.harnessHostModuleUrl = harnessHostModuleUrl;
     this.candidateTrace = candidateTrace;
     this.acquireProviderExecution = acquireProviderExecution;
+    this.temporalFeatures = Object.freeze({
+      schemaRead: temporalFeatures.schemaRead === true,
+      rootCurrentWrite: temporalFeatures.rootCurrentWrite === true,
+      projectionUi: temporalFeatures.projectionUi === true,
+      invokeResolution: temporalFeatures.invokeResolution === true,
+      providerRecursion: temporalFeatures.providerRecursion === true,
+    });
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
@@ -284,6 +292,11 @@ export class GraphCompleteRuntimeService {
       const graphProcess = this.spawnProcess(this.graphServerBinary, [
         "--database", join(runtimeDirectory, "graph.sqlite3"),
         "--port", "0",
+        ...(this.temporalFeatures.schemaRead ? ["--temporal-schema-read"] : []),
+        ...(this.temporalFeatures.rootCurrentWrite ? ["--temporal-root-current-write"] : []),
+        ...(this.temporalFeatures.projectionUi ? ["--temporal-projection-ui"] : []),
+        ...(this.temporalFeatures.invokeResolution ? ["--temporal-invoke-resolution"] : []),
+        ...(this.temporalFeatures.providerRecursion ? ["--temporal-provider-recursion"] : []),
       ], { stdio: ["pipe", "pipe", "pipe"] });
       this.graphProcess = graphProcess;
       graphProcess.stdin?.on("error", () => {});

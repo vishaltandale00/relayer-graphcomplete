@@ -330,14 +330,23 @@ impl<'connection> ActionTable<'connection> {
         Ok(draft_action(id, draft))
     }
 
-    pub(crate) async fn accept_owned(
+    pub(crate) async fn publish_owned(
         &mut self,
         id: ActionId,
         owner: NodeId,
+        revision: Option<u64>,
     ) -> Result<(), GraphError> {
-        sqlx::query("UPDATE actions SET state='accepted' WHERE id=?1 AND owner_interaction_id=?2")
+        let revision = revision
+            .map(|value| {
+                i64::try_from(value).map_err(|_| {
+                    GraphError::Internal("completion revision exceeds SQLite range".into())
+                })
+            })
+            .transpose()?;
+        sqlx::query("UPDATE actions SET state='accepted',published_revision=COALESCE(published_revision,?3) WHERE id=?1 AND owner_interaction_id=?2")
             .bind(id.value())
             .bind(owner.value())
+            .bind(revision)
             .execute(&mut *self.connection)
             .await?;
         Ok(())

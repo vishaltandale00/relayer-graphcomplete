@@ -13,6 +13,7 @@ export function navigationEntryFromView({
   turnId,
   layerPath = [],
   selectedNodeId = null,
+  temporalCurrent = null,
 }) {
   if (threadId == null || turnId == null) return null;
   return normalizeNavigationEntry({
@@ -23,6 +24,7 @@ export function navigationEntryFromView({
       viaActionId: entry.viaActionId ?? entry.actionId ?? null,
     })),
     selectedNodeId,
+    temporalCurrent,
   });
 }
 
@@ -98,7 +100,7 @@ export async function resolveNavigationPresentation(entry, {
     throw new Error(`Navigation history turn is unavailable: ${normalized.turnId}`);
   }
 
-  const rootLayer = interaction.completionOutput?.rootLayer ?? null;
+  let rootLayer = interaction.completionOutput?.rootLayer ?? null;
   const loadAcceptedLayer = async (layerId) => {
     const identity = {
       threadId: normalized.threadId,
@@ -111,11 +113,23 @@ export async function resolveNavigationPresentation(entry, {
       : loadValidated();
   };
 
+  let restorationInteraction = interaction;
+  if (
+    rootLayer == null
+    && normalized.temporalCurrent != null
+    && normalized.navigationPath.length > 0
+  ) {
+    rootLayer = await loadAcceptedLayer(normalized.navigationPath[0].layerId);
+    restorationInteraction = {
+      ...interaction,
+      completionOutput: { rootLayer },
+    };
+  }
   let layer = rootLayer;
-  let layerPath = layerPathForVisibleLayer([], interaction, rootLayer);
+  let layerPath = layerPathForVisibleLayer([], restorationInteraction, rootLayer);
   if (normalized.navigationPath.length) {
     const restored = await restoreLayerPath(
-      interaction,
+      restorationInteraction,
       normalized.navigationPath,
       loadAcceptedLayer,
     );
@@ -138,6 +152,7 @@ export async function resolveNavigationPresentation(entry, {
     turnId: normalized.turnId,
     layerPath,
     selectedNodeId: normalized.selectedNodeId,
+    temporalCurrent: normalized.temporalCurrent,
   });
   return Object.freeze({
     entry: resolvedEntry,

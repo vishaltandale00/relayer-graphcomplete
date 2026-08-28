@@ -6,11 +6,12 @@ use axum::{
     routing::{get, post},
 };
 use relayer_graph_core::{
-    ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase,
-    GraphError, GraphNode, GraphWriter, ImportedConversationStage, ImportedTurn,
-    InteractionContextAction, InteractionContextDraft, InteractionContextTarget, InteractionInput,
-    InteractionInputNode, InteractionInvocation, LayerDraft, LayerId, LayerLayout, NodeDraft,
-    NodeId, NodePlacement, ProjectId, RecordState, ThreadId,
+    ActionDraft, ActionId, ActionKind, CompletionOutput, CurrentTransition,
+    CurrentTransitionReceipt, EdgeDraft, GraphAction, GraphDatabase, GraphError, GraphNode,
+    GraphWriter, ImportedConversationStage, ImportedTurn, InteractionContextAction,
+    InteractionContextDraft, InteractionContextTarget, InteractionInput, InteractionInputNode,
+    InteractionInvocation, LayerDraft, LayerId, LayerLayout, NodeDraft, NodeId, NodePlacement,
+    ProjectId, RecordState, TemporalFeatureConfig, ThreadId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -23,8 +24,15 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct ServerState {
     graph: GraphDatabase,
-    sessions: Arc<Mutex<HashMap<String, NodeId>>>,
+    sessions: Arc<Mutex<HashMap<String, RuntimeAuthority>>>,
     control_token: Arc<str>,
+    temporal_features: TemporalFeatureConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeAuthority {
+    node_id: NodeId,
+    epoch: u64,
 }
 
 impl ServerState {
@@ -33,13 +41,23 @@ impl ServerState {
             graph,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             control_token: Arc::from(control_token.into()),
+            temporal_features: TemporalFeatureConfig::default(),
         }
+    }
+
+    pub fn with_temporal_features(mut self, temporal_features: TemporalFeatureConfig) -> Self {
+        self.temporal_features = temporal_features;
+        self
     }
 }
 
 pub fn router(state: ServerState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route(
+            "/api/control/temporal-features",
+            get(control_temporal_features),
+        )
         .route("/api/control/interactions", post(create_interaction))
         .route("/api/control/interactions/{id}", get(interaction_metadata))
         .route("/api/control/interactions/{id}/input", get(control_input))
@@ -52,6 +70,22 @@ pub fn router(state: ServerState) -> Router {
             post(canonical_context_occurrence),
         )
         .route("/api/control/interactions/{id}/output", get(control_output))
+        .route(
+            "/api/control/interactions/{id}/current",
+            get(control_current),
+        )
+        .route(
+            "/api/control/interactions/{id}/current/transitions",
+            post(control_transition_current),
+        )
+        .route(
+            "/api/control/interactions/{id}/current/receipts",
+            post(control_current_receipt),
+        )
+        .route(
+            "/api/control/current-projections",
+            get(control_current_projections).post(control_current_projection_page),
+        )
         .route(
             "/api/control/interactions/{id}/layers/{layer_id}",
             get(control_layer),
@@ -99,6 +133,8 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/actions", post(add_action))
         .route("/api/graph/actions/{id}", get(get_action))
         .route("/api/graph/submit", post(submit_completion))
+        .route("/api/graph/current", get(graph_current))
+        .route("/api/graph/current/transitions", post(transition_current))
         .route("/api/graph/nodes/{id}/output", get(completion_output))
         .with_state(state)
 }
@@ -174,6 +210,25 @@ async fn accepted_closure(
 
 async fn health() -> Json<Value> {
     Json(json!({"ok": true, "service": "relayer-graph"}))
+}
+
+async fn control_temporal_features(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<TemporalFeatureConfig>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(state.temporal_features))
+}
+
+fn require_temporal_feature(enabled: bool, feature: &str) -> Result<(), ApiError> {
+    if enabled {
+        Ok(())
+    } else {
+        Err(ApiError(
+            StatusCode::NOT_FOUND,
+            json!({"error":{"code":"feature_disabled","message":format!("Temporal feature {feature} is disabled.")}}),
+        ))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -270,10 +325,11 @@ async fn create_interaction(
             )
             .await?
     };
-    let graph_token = input
-        .mint_capability
-        .then(|| mint_capability(&state, interaction.id, None))
-        .transpose()?;
+    let graph_token = if input.mint_capability {
+        Some(mint_capability(&state, interaction.id, None).await?)
+    } else {
+        None
+    };
     Ok(Json(CreateInteractionResponse {
         node: interaction,
         graph_token: graph_token.unwrap_or_default(),
@@ -364,6 +420,149 @@ async fn control_output(
     Ok(Json(output))
 }
 
+async fn control_current(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<relayer_graph_core::CompletionState>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    require_temporal_feature(state.temporal_features.schema_read, "schema-read")?;
+    let current = state.graph.current_completion(id).await?;
+    require_temporal_feature(
+        current.temporal_features.schema_read,
+        "completion-schema-read",
+    )?;
+    Ok(Json(current))
+}
+
+async fn control_transition_current(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+    Json(input): Json<CurrentTransitionRequest>,
+) -> Result<Json<CurrentTransitionReceipt>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    require_temporal_feature(
+        state.temporal_features.root_current_write,
+        "root-current-write",
+    )?;
+    let current = state.graph.current_completion(id).await?;
+    require_temporal_feature(
+        current.temporal_features.root_current_write,
+        "completion-root-current-write",
+    )?;
+    if !matches!(
+        input.transition,
+        CurrentTransition::Stop { .. } | CurrentTransition::Fail { .. }
+    ) {
+        return Err(ApiError::invalid(
+            "trusted control may only stop or fail a completion",
+        ));
+    }
+    Ok(Json(
+        state
+            .graph
+            .writer_for_subgraph(id)
+            .await?
+            .transition_current(
+                input.expected_revision,
+                &input.operation_key,
+                input.transition,
+            )
+            .await?,
+    ))
+}
+
+async fn control_current_receipt(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+    Json(input): Json<CurrentReceiptRequest>,
+) -> Result<Json<CurrentTransitionReceipt>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    require_temporal_feature(state.temporal_features.schema_read, "schema-read")?;
+    let current = state.graph.current_completion(id).await?;
+    require_temporal_feature(
+        current.temporal_features.schema_read,
+        "completion-schema-read",
+    )?;
+    let receipt = state
+        .graph
+        .current_transition_receipt(id, &input.operation_key)
+        .await?
+        .ok_or_else(|| ApiError(
+            StatusCode::NOT_FOUND,
+            json!({"error":{"code":"receipt_not_found","message":"No committed current transition has this operation key."}}),
+        ))?;
+    if receipt.request_digest != input.request_digest {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            json!({"error":{"code":"idempotency_conflict","message":"This operation key is committed with a different transition request digest."}}),
+        ));
+    }
+    Ok(Json(receipt))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CurrentReceiptRequest {
+    operation_key: String,
+    request_digest: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectionQuery {
+    #[serde(default)]
+    after: u64,
+    #[serde(default = "default_projection_limit")]
+    limit: u32,
+}
+
+fn default_projection_limit() -> u32 {
+    100
+}
+
+async fn control_current_projections(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<ProjectionQuery>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    require_temporal_feature(state.temporal_features.projection_ui, "projection-ui")?;
+    let events = state
+        .graph
+        .current_projection_events(query.after, query.limit)
+        .await?;
+    let cursor = events.last().map_or(query.after, |event| event.sequence);
+    Ok(Json(json!({"events": events, "cursor": cursor})))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProjectionPageRequest {
+    completion_ids: Vec<NodeId>,
+    #[serde(default)]
+    after: u64,
+    #[serde(default = "default_projection_limit")]
+    limit: u32,
+}
+
+async fn control_current_projection_page(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<ProjectionPageRequest>,
+) -> Result<Json<relayer_graph_core::CurrentProjectionPage>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    require_temporal_feature(state.temporal_features.projection_ui, "projection-ui")?;
+    Ok(Json(
+        state
+            .graph
+            .current_projection_page(&input.completion_ids, input.after, input.limit)
+            .await?,
+    ))
+}
+
 async fn control_layer(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -432,11 +631,11 @@ async fn remint_capability(
     require_bearer(&headers, &state.control_token)?;
     state.graph.writer_for_subgraph(input.node_id).await?;
     Ok(Json(RemintCapabilityResponse {
-        graph_token: mint_capability(&state, input.node_id, input.graph_token)?,
+        graph_token: mint_capability(&state, input.node_id, input.graph_token).await?,
     }))
 }
 
-fn mint_capability(
+async fn mint_capability(
     state: &ServerState,
     node_id: NodeId,
     requested_token: Option<String>,
@@ -445,21 +644,27 @@ fn mint_capability(
     if graph_token.is_empty() {
         return Err(ApiError::invalid("graphToken must be non-empty"));
     }
-    let mut sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| ApiError::internal("session lock poisoned"))?;
-    if let Some(active_node_id) = sessions.get(&graph_token) {
-        if *active_node_id != node_id {
+    {
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| ApiError::internal("session lock poisoned"))?;
+        if let Some(active) = sessions.get(&graph_token)
+            && active.node_id != node_id
+        {
             return Err(ApiError::conflict(
                 "capability_token_conflict",
                 "graphToken is already bound to a different interaction",
             ));
         }
-        return Ok(graph_token);
     }
-    sessions.retain(|_, active_node_id| *active_node_id != node_id);
-    sessions.insert(graph_token.clone(), node_id);
+    let epoch = state.graph.activate_completion_authority(node_id).await?;
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::internal("session lock poisoned"))?;
+    sessions.retain(|_, active| active.node_id != node_id);
+    sessions.insert(graph_token.clone(), RuntimeAuthority { node_id, epoch });
     Ok(graph_token)
 }
 
@@ -478,23 +683,34 @@ async fn revoke_capability(
     Json(input): Json<RevokeCapabilityRequest>,
 ) -> Result<Json<Value>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
-    let mut sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| ApiError::internal("session lock poisoned"))?;
-    let revoked = match (input.graph_token, input.node_id) {
-        (Some(graph_token), None) => sessions.remove(&graph_token).is_some() as usize,
-        (None, Some(node_id)) => {
-            let before = sessions.len();
-            sessions.retain(|_, active_node_id| *active_node_id != node_id);
-            before - sessions.len()
-        }
-        _ => {
-            return Err(ApiError::invalid(
-                "provide exactly one of graphToken or nodeId",
-            ));
+    let (revoked, revoked_node) = {
+        let mut sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| ApiError::internal("session lock poisoned"))?;
+        match (input.graph_token, input.node_id) {
+            (Some(graph_token), None) => match sessions.remove(&graph_token) {
+                Some(authority) => (1, Some(authority.node_id)),
+                None => (0, None),
+            },
+            (None, Some(node_id)) => {
+                let before = sessions.len();
+                sessions.retain(|_, active| active.node_id != node_id);
+                (before - sessions.len(), Some(node_id))
+            }
+            _ => {
+                return Err(ApiError::invalid(
+                    "provide exactly one of graphToken or nodeId",
+                ));
+            }
         }
     };
+    if revoked > 0 {
+        state
+            .graph
+            .cutover_completion_authority(revoked_node.expect("revocation has a node"))
+            .await?;
+    }
     Ok(Json(
         json!({"revoked": revoked > 0, "revokedCount": revoked}),
     ))
@@ -505,10 +721,10 @@ async fn submit_node(
     headers: HeaderMap,
     Json(input): Json<NodeDraft>,
 ) -> Result<Json<Value>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     let node = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .submit_node(&input)
         .await?;
@@ -519,10 +735,10 @@ async fn get_node(
     headers: HeaderMap,
     Path(id): Path<NodeId>,
 ) -> Result<Json<Value>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     let node = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .get_node(id)
         .await?;
@@ -533,10 +749,10 @@ async fn neighbors(
     headers: HeaderMap,
     Path(id): Path<NodeId>,
 ) -> Result<Json<Value>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     let nodes = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .neighbors(id)
         .await?;
@@ -547,11 +763,11 @@ async fn interaction_input(
     State(state): State<ServerState>,
     headers: HeaderMap,
 ) -> Result<Json<InteractionInput>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     Ok(Json(
         state
             .graph
-            .writer_for_subgraph(node_id)
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
             .await?
             .interaction_input()
             .await?,
@@ -562,10 +778,10 @@ async fn create_edge(
     headers: HeaderMap,
     Json(input): Json<EdgeDraft>,
 ) -> Result<Json<Value>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     let edge = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .create_edge(&input)
         .await?;
@@ -576,11 +792,11 @@ async fn submit_layer(
     headers: HeaderMap,
     Json(input): Json<LayerDraftRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     let input = LayerDraft::from(input);
     let layer = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .submit_layer(&input)
         .await?;
@@ -656,10 +872,10 @@ async fn get_layer(
     headers: HeaderMap,
     Path(id): Path<LayerId>,
 ) -> Result<Json<Value>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     let layer = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .get_layer(id)
         .await?;
@@ -670,10 +886,10 @@ async fn discard_layer(
     headers: HeaderMap,
     Path(id): Path<LayerId>,
 ) -> Result<Json<Value>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     let layer = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .discard_layer(id)
         .await?;
@@ -684,10 +900,10 @@ async fn add_action(
     headers: HeaderMap,
     Json(input): Json<ActionDraft>,
 ) -> Result<Json<Value>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     let action = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .add_action(&input)
         .await?;
@@ -698,8 +914,11 @@ async fn get_action(
     headers: HeaderMap,
     Path(id): Path<ActionId>,
 ) -> Result<Json<Value>, ApiError> {
-    let node_id = session(&state, &headers)?;
-    let writer = state.graph.writer_for_subgraph(node_id).await?;
+    let authority = session(&state, &headers)?;
+    let writer = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?;
     let action = accepted_action(&writer, id).await?;
     Ok(Json(json!({"action": action})))
 }
@@ -745,22 +964,81 @@ async fn submit_completion(
     headers: HeaderMap,
     Json(input): Json<CompleteRequest>,
 ) -> Result<Json<CompletionOutput>, ApiError> {
-    let node_id = session(&state, &headers)?;
+    let authority = session(&state, &headers)?;
     let output = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .complete(input.node_id)
         .await?;
     Ok(Json(output))
+}
+
+async fn graph_current(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<relayer_graph_core::CompletionState>, ApiError> {
+    let authority = session(&state, &headers)?;
+    require_temporal_feature(
+        state.temporal_features.root_current_write,
+        "root-current-write",
+    )?;
+    let current = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?
+        .current_completion()
+        .await?;
+    require_temporal_feature(
+        current.temporal_features.root_current_write,
+        "completion-root-current-write",
+    )?;
+    Ok(Json(current))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CurrentTransitionRequest {
+    expected_revision: u64,
+    operation_key: String,
+    transition: CurrentTransition,
+}
+
+async fn transition_current(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<CurrentTransitionRequest>,
+) -> Result<Json<CurrentTransitionReceipt>, ApiError> {
+    let authority = session(&state, &headers)?;
+    require_temporal_feature(
+        state.temporal_features.root_current_write,
+        "root-current-write",
+    )?;
+    let current = state.graph.current_completion(authority.node_id).await?;
+    require_temporal_feature(
+        current.temporal_features.root_current_write,
+        "completion-root-current-write",
+    )?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
+            .await?
+            .transition_current(
+                input.expected_revision,
+                &input.operation_key,
+                input.transition,
+            )
+            .await?,
+    ))
 }
 async fn completion_output(
     State(state): State<ServerState>,
     headers: HeaderMap,
     Path(id): Path<NodeId>,
 ) -> Result<Json<CompletionOutput>, ApiError> {
-    let node_id = session(&state, &headers)?;
-    if id != node_id {
+    let authority = session(&state, &headers)?;
+    if id != authority.node_id {
         return Err(ApiError(
             StatusCode::FORBIDDEN,
             json!({"error":{"code":"forbidden","message":"This capability can only read its completion output."}}),
@@ -768,7 +1046,7 @@ async fn completion_output(
     }
     let output = state
         .graph
-        .writer_for_subgraph(node_id)
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .completion_output()
         .await?
@@ -796,7 +1074,7 @@ fn require_bearer(headers: &HeaderMap, expected: &str) -> Result<(), ApiError> {
         ))
     }
 }
-fn session(state: &ServerState, headers: &HeaderMap) -> Result<NodeId, ApiError> {
+fn session(state: &ServerState, headers: &HeaderMap) -> Result<RuntimeAuthority, ApiError> {
     let token = bearer(headers).ok_or_else(|| {
         ApiError(
             StatusCode::UNAUTHORIZED,
@@ -914,7 +1192,10 @@ mod tests {
             .await
             .unwrap();
         let state = ServerState::new(graph, "control");
-        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
+        let graph_token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
         let app = router(state);
 
         let response = app
@@ -1299,6 +1580,202 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn temporal_current_routes_enforce_control_and_terminal_broker_boundaries() {
+        let state = ServerState::new(GraphDatabase::in_memory().await.unwrap(), "control")
+            .with_temporal_features(TemporalFeatureConfig {
+                schema_read: true,
+                root_current_write: true,
+                projection_ui: true,
+                ..TemporalFeatureConfig::default()
+            });
+        state
+            .graph
+            .set_temporal_features(state.temporal_features)
+            .await
+            .unwrap();
+        let interaction = state
+            .graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Question")
+            .await
+            .unwrap();
+        let token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
+        let app = router(state);
+
+        let current = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/graph/current")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(current.status(), StatusCode::OK);
+
+        let failed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/current/transitions")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"expectedRevision":0,"operationKey":"model-fail","transition":{"kind":"fail","reason":"provider_crashed"}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(failed.status(), StatusCode::FORBIDDEN);
+
+        let stopped = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/current/transitions")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"expectedRevision":0,"operationKey":"model-stop","transition":{"kind":"stop","reason":"cancelled_by_user"}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stopped.status(), StatusCode::OK);
+        let stopped_receipt: CurrentTransitionReceipt =
+            serde_json::from_slice(&to_bytes(stopped.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+
+        let conflicting_receipt = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/control/interactions/{}/current/receipts",
+                        interaction.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"operationKey":"model-stop","requestDigest":"sha256:different"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(conflicting_receipt.status(), StatusCode::CONFLICT);
+
+        let recovered_receipt = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/control/interactions/{}/current/receipts",
+                        interaction.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "operationKey": "model-stop",
+                            "requestDigest": stopped_receipt.request_digest,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recovered_receipt.status(), StatusCode::OK);
+
+        let terminal_model_read = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/graph/current")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            terminal_model_read.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+
+        let terminal_output_read = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/graph/nodes/{}/output",
+                        interaction.id.value()
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            terminal_output_read.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+
+        let control_current = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/control/interactions/{}/current",
+                        interaction.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(control_current.status(), StatusCode::OK);
+        let body: Value = serde_json::from_slice(
+            &to_bytes(control_current.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["lifecycle"], "stopped");
+        assert_eq!(body["headRevision"], 1);
+
+        let projections = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/control/current-projections?after=0&limit=10")
+                    .header("authorization", "Bearer control")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(projections.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(projections.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["events"].as_array().unwrap().len(), 2);
+        assert_eq!(body["events"][1]["lifecycle"], "stopped");
+    }
+
+    #[tokio::test]
     async fn external_interaction_requires_control_token_and_mints_scoped_graph_token() {
         let state = ServerState::new(GraphDatabase::in_memory().await.unwrap(), "control");
         let app = router(state.clone());
@@ -1346,7 +1823,7 @@ mod tests {
             .get(&body.graph_token)
             .unwrap()
             .to_owned();
-        assert_eq!(node_id, body.node.id);
+        assert_eq!(node_id.node_id, body.node.id);
     }
 
     #[tokio::test]
@@ -1447,8 +1924,13 @@ mod tests {
             .unwrap();
         assert_eq!(conflict.status(), StatusCode::CONFLICT);
         assert_eq!(
-            state.sessions.lock().unwrap().get(token),
-            Some(&created.node.id)
+            state
+                .sessions
+                .lock()
+                .unwrap()
+                .get(token)
+                .map(|authority| authority.node_id),
+            Some(created.node.id)
         );
 
         let invalidated = app
@@ -1790,7 +2272,7 @@ mod tests {
     #[tokio::test]
     async fn control_authority_can_revoke_a_graph_capability() {
         let state = ServerState::new(GraphDatabase::in_memory().await.unwrap(), "control");
-        let app = router(state);
+        let app = router(state.clone());
         let created = app
             .clone()
             .oneshot(
@@ -1809,6 +2291,20 @@ mod tests {
         let created: CreateInteractionResponse =
             serde_json::from_slice(&to_bytes(created.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
+        let resolved_before_revoke = *state
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&created.graph_token)
+            .unwrap();
+        let in_flight = state
+            .graph
+            .writer_for_completion_authority(
+                resolved_before_revoke.node_id,
+                resolved_before_revoke.epoch,
+            )
+            .await
+            .unwrap();
 
         let revoked = app
             .clone()
@@ -1827,6 +2323,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(revoked.status(), StatusCode::OK);
+        let stale_in_flight = in_flight
+            .submit_node(&NodeDraft {
+                client_key: "stale-after-revoke".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Stale".into(),
+                detail: "Revocation must cut over already resolved authority.".into(),
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            stale_in_flight,
+            GraphError::Validation {
+                code: "authority_generation_expired",
+                ..
+            }
+        ));
 
         let denied = app
             .oneshot(
@@ -1898,7 +2411,10 @@ mod tests {
             .await
             .unwrap();
         let state = ServerState::new(graph, "control");
-        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
+        let graph_token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
         let app = router(state);
 
         let missing = app
@@ -2051,11 +2567,29 @@ mod tests {
             valid["layer"]["layout"]
         );
 
-        let read = app
+        let terminal_broker_read = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri(format!("/api/graph/layers/{layer_id}"))
                     .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            terminal_broker_read.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        let read = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/control/interactions/{}/layers/{layer_id}",
+                        interaction.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -2096,7 +2630,10 @@ mod tests {
             .await
             .unwrap();
         let state = ServerState::new(graph, "control");
-        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
+        let graph_token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
         let app = router(state);
 
         let older = app
@@ -2175,7 +2712,10 @@ mod tests {
             .await
             .unwrap();
         let state = ServerState::new(graph, "control");
-        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
+        let graph_token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
         let app = router(state);
         let action_body = |client_key: &str, label: &str| {
             serde_json::to_vec(&json!({
@@ -2316,14 +2856,17 @@ mod tests {
         writer.complete(interaction.id).await.unwrap();
 
         let state = ServerState::new(graph, "control");
-        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
         let app = router(state);
         let readable = app
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri(format!("/api/graph/actions/{}", invoke.id.value()))
-                    .header("authorization", format!("Bearer {graph_token}"))
+                    .uri(format!(
+                        "/api/control/interactions/{}/actions/{}",
+                        interaction.id.value(),
+                        invoke.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -2339,8 +2882,11 @@ mod tests {
         let absent = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/graph/actions/99999")
-                    .header("authorization", format!("Bearer {graph_token}"))
+                    .uri(format!(
+                        "/api/control/interactions/{}/actions/99999",
+                        interaction.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
                     .body(Body::empty())
                     .unwrap(),
             )

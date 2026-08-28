@@ -297,6 +297,41 @@ class RelayerGraphClient:
         interaction_id = self.node_id if interaction_node is None else _node_id(interaction_node)
         return await self._request("GET", f"/api/graph/nodes/{interaction_id}/output")
 
+    async def get_current(self) -> Mapping[str, Any]:
+        """Read this completion's durable current head."""
+        return await self._request("GET", "/api/graph/current")
+
+    async def advance_current(self, layer: LayerReference, *, expected_revision: int,
+                              operation_key: str) -> Mapping[str, Any]:
+        """Atomically publish a coherent owned layer and move the current pointer."""
+        return await self._transition_current(
+            expected_revision, operation_key,
+            {"kind": "advance", "layerId": _layer_id(layer)},
+        )
+
+    async def return_current(self, layer: LayerReference, *, expected_revision: int,
+                             operation_key: str) -> Mapping[str, Any]:
+        """Atomically publish and establish the completion's successful final current."""
+        return await self._transition_current(
+            expected_revision, operation_key,
+            {"kind": "return", "layerId": _layer_id(layer)},
+        )
+
+    async def stop_current(self, *, expected_revision: int, operation_key: str,
+                           reason: Literal["cancelled_by_user"]) -> Mapping[str, Any]:
+        """Stop this completion while preserving its last published current."""
+        return await self._transition_current(
+            expected_revision, operation_key, {"kind": "stop", "reason": reason}
+        )
+
+    async def _transition_current(self, expected_revision: int, operation_key: str,
+                                  transition: Mapping[str, Any]) -> Mapping[str, Any]:
+        return await self._request("POST", "/api/graph/current/transitions", {
+            "expectedRevision": expected_revision,
+            "operationKey": operation_key,
+            "transition": transition,
+        })
+
     async def _request(self, method: str, path: str, body: Any = None) -> Any:
         encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode()
         headers = {"accept": "application/json", "authorization": f"Bearer {self.token}"}

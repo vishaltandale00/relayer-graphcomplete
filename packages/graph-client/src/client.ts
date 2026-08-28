@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EdgeObject, LayerObject, NodeObject, edgeId, layerId, nodeId, type ActionObject, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
-import { GraphApiError, type CompletionOutput, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer } from "./types.js";
+import { GraphApiError, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type StopReason } from "./types.js";
 
 export class RelayerGraphClient {
   readonly capability: GraphCapability;
@@ -135,6 +135,34 @@ export class RelayerGraphClient {
 
   async getCompletionOutput(interactionNode: NodeReference = this.capability.nodeId): Promise<CompletionOutput> {
     return this.request<CompletionOutput>(`/api/graph/nodes/${nodeId(interactionNode)}/output`);
+  }
+
+  async getCurrent(): Promise<CompletionState> {
+    return this.request<CompletionState>("/api/graph/current");
+  }
+
+  async advanceCurrent(layer: LayerReference, expectedRevision: number, operationKey: string): Promise<CurrentTransitionReceipt> {
+    return this.transitionCurrent(expectedRevision, operationKey, { kind: "advance", layerId: layerId(layer) });
+  }
+
+  async returnCurrent(layer: LayerReference, expectedRevision: number, operationKey: string): Promise<CurrentTransitionReceipt> {
+    return this.transitionCurrent(expectedRevision, operationKey, { kind: "return", layerId: layerId(layer) });
+  }
+
+  async stopCurrent(expectedRevision: number, operationKey: string, reason: StopReason): Promise<CurrentTransitionReceipt> {
+    return this.transitionCurrent(expectedRevision, operationKey, { kind: "stop", reason });
+  }
+
+  private async transitionCurrent(
+    expectedRevision: number,
+    operationKey: string,
+    transition: { readonly kind: "advance" | "return"; readonly layerId: GraphId }
+      | { readonly kind: "stop"; readonly reason: string },
+  ): Promise<CurrentTransitionReceipt> {
+    return this.request<CurrentTransitionReceipt>("/api/graph/current/transitions", {
+      method: "POST",
+      body: JSON.stringify({ expectedRevision, operationKey, transition }),
+    });
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

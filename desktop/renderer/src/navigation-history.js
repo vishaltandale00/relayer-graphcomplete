@@ -18,6 +18,22 @@ function normalizePath(path) {
   })));
 }
 
+function normalizeTemporalCurrent(value) {
+  if (value == null) return null;
+  const revision = Number(value.revision);
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new TypeError("temporalCurrent.revision must be a non-negative safe integer");
+  }
+  if (value.mode !== "following" && value.mode !== "pinned") {
+    throw new TypeError("temporalCurrent.mode must be following or pinned");
+  }
+  return Object.freeze({
+    completionId: requiredId(value.completionId, "temporalCurrent.completionId"),
+    revision,
+    mode: value.mode,
+  });
+}
+
 export function normalizeNavigationEntry(entry) {
   if (!entry || typeof entry !== "object") {
     throw new TypeError("navigation entry must be an object");
@@ -27,6 +43,7 @@ export function normalizeNavigationEntry(entry) {
     turnId: requiredId(entry.turnId, "turnId"),
     navigationPath: normalizePath(entry.navigationPath),
     selectedNodeId: optionalId(entry.selectedNodeId),
+    temporalCurrent: normalizeTemporalCurrent(entry.temporalCurrent),
   });
 }
 
@@ -37,6 +54,7 @@ export function navigationEntriesEqual(left, right) {
     String(left.threadId) !== String(right.threadId)
     || String(left.turnId) !== String(right.turnId)
     || optionalId(left.selectedNodeId) !== optionalId(right.selectedNodeId)
+    || JSON.stringify(left.temporalCurrent ?? null) !== JSON.stringify(right.temporalCurrent ?? null)
     || left.navigationPath?.length !== right.navigationPath?.length
   ) return false;
   return left.navigationPath.every((step, index) => {

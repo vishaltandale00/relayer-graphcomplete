@@ -17,7 +17,8 @@ use crate::{
 };
 
 pub(crate) struct CompletionPlan {
-    pub root_action: GraphAction,
+    pub root_action: Option<GraphAction>,
+    pub root_layer: LayerId,
     pub lease: Option<InteractionLease>,
     pub nodes: HashSet<NodeId>,
     pub edges: HashSet<EdgeId>,
@@ -66,7 +67,8 @@ impl CompletionPlan {
             )
         })?;
         let mut plan = Self {
-            root_action,
+            root_action: Some(root_action),
+            root_layer,
             lease: None,
             nodes: HashSet::new(),
             edges: HashSet::new(),
@@ -74,7 +76,8 @@ impl CompletionPlan {
             actions: HashSet::new(),
             layer_actions: HashMap::new(),
         };
-        plan.actions.insert(plan.root_action.id);
+        plan.actions
+            .insert(plan.root_action.as_ref().expect("root action").id);
         plan.walk_layers(connection, scope, root_layer).await?;
         plan.validate_expand_acyclic(connection, scope).await?;
         plan.validate_no_orphan_layers(connection, scope).await?;
@@ -91,9 +94,114 @@ impl CompletionPlan {
     }
 
     pub(crate) fn root_layer_id(&self) -> Result<LayerId, GraphError> {
-        self.root_action
-            .target_layer_id
-            .ok_or_else(|| GraphError::Internal("validated completion root has no target".into()))
+        Ok(self.root_layer)
+    }
+
+    pub(crate) fn root_action(&self) -> Result<&GraphAction, GraphError> {
+        self.root_action.as_ref().ok_or_else(|| {
+            GraphError::Internal("terminal completion plan has no root action".into())
+        })
+    }
+
+    pub(crate) async fn build_current(
+        connection: &mut GraphConnection,
+        scope: &InteractionScope,
+        root_layer: LayerId,
+    ) -> Result<Self, GraphError> {
+        let mut plan = Self {
+            root_action: None,
+            root_layer,
+            lease: None,
+            nodes: HashSet::new(),
+            edges: HashSet::new(),
+            layers: HashSet::new(),
+            actions: HashSet::new(),
+            layer_actions: HashMap::new(),
+        };
+        plan.walk_layers(connection, scope, root_layer).await?;
+        plan.validate_expand_acyclic(connection, scope).await?;
+        plan.validate_edge_uniqueness(connection, scope).await?;
+        Ok(plan)
+    }
+
+    pub(crate) async fn build_return(
+        connection: &mut GraphConnection,
+        scope: &InteractionScope,
+        returned_layer: LayerId,
+        persisted_current: Option<LayerId>,
+    ) -> Result<Self, GraphError> {
+        let record = LayerTable::new(&mut *connection)
+            .record(scope, returned_layer)
+            .await?
+            .ok_or_else(|| GraphError::NotFound(format!("layer {returned_layer}")))?;
+        if record.layer.state != RecordState::Accepted {
+            let plan = Self::build(connection, scope).await?;
+            if plan.root_layer != returned_layer {
+                return Err(GraphError::validation(
+                    "return_layer_mismatch",
+                    "layerId",
+                    "The returned layer must match the interaction root action target.",
+                ));
+            }
+            return Ok(plan);
+        }
+        if record.owner != scope.root_node_id || persisted_current != Some(returned_layer) {
+            return Err(GraphError::validation(
+                "foreign_current",
+                "layerId",
+                "A completion may return only its own draft layer or its exact persisted current layer.",
+            ));
+        }
+        let root_actions = ActionTable::new(&mut *connection)
+            .for_source(scope, scope.root_node_id, Some(scope.root_node_id), false)
+            .await?
+            .into_iter()
+            .map(|record| record.action)
+            .collect::<Vec<_>>();
+        if root_actions.len() != 1 {
+            return Err(GraphError::validation(
+                "root_action_count",
+                "interactionNode",
+                format!(
+                    "The interaction needs exactly one root action; found {}.",
+                    root_actions.len()
+                ),
+            ));
+        }
+        let root_action = root_actions[0].clone();
+        if root_action.kind != ActionKind::Navigate
+            || root_action.relation != Some(NavigateRelation::Expand)
+            || root_action.source_layer_id.is_some()
+            || root_action.target_layer_id != Some(returned_layer)
+        {
+            return Err(GraphError::validation(
+                "invalid_root_action",
+                "interactionNode",
+                "The root action must expand to the exact returned current layer.",
+            ));
+        }
+        let lease = NodeTable::new(&mut *connection)
+            .interaction_lease(scope.root_node_id)
+            .await?;
+        if let Some(lease) = lease {
+            ActionTable::new(&mut *connection)
+                .validate_unresolved_lease(scope, lease.source_interaction_id, lease.action_id)
+                .await?;
+        }
+        let mut actions = HashSet::new();
+        actions.insert(root_action.id);
+        let plan = Self {
+            root_action: Some(root_action),
+            root_layer: returned_layer,
+            lease,
+            nodes: HashSet::new(),
+            edges: HashSet::new(),
+            layers: HashSet::new(),
+            actions,
+            layer_actions: HashMap::new(),
+        };
+        plan.validate_no_orphan_layers(connection, scope).await?;
+        Ok(plan)
     }
 
     async fn validate_edge_uniqueness(

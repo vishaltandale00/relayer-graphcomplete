@@ -1,4 +1,5 @@
 mod accept;
+mod current;
 mod plan;
 
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,8 @@ use crate::{
     storage::sqlite::{actions::ActionTable, completions::CompletionTable, layers},
 };
 
-use self::plan::CompletionPlan;
+pub use current::current_transition_request_digest;
+pub(crate) use current::{projection_page, projections_after, transition as transition_current};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,34 +36,78 @@ pub(crate) async fn complete(
     database: &GraphDatabase,
     scope: &InteractionScope,
 ) -> Result<CompletionOutput, GraphError> {
-    if let Some(output) = read_output(database, scope).await? {
-        return Ok(output);
-    }
-    let mut transaction = database.storage.begin_write().await?;
-    if CompletionTable::new(&mut transaction)
-        .root_action(scope.root_node_id)
+    let (target, expected_revision) = {
+        let mut transaction = database.storage.begin_read().await?;
+        let state = crate::storage::sqlite::currents::CurrentTable::new(&mut transaction)
+            .state(scope.root_node_id)
+            .await?;
+        if state.lifecycle != crate::CompletionLifecycle::Active
+            && !state.temporal_features.root_current_write
+        {
+            // Preserve the legacy graph.submit idempotency contract while the
+            // temporal writer is dark for this completion. Once enabled, a
+            // terminal broker cannot read accepted output.
+            scope.require_generation_authority(&mut transaction).await?;
+            if let Some(output) = read_output_on(&mut transaction, scope).await? {
+                transaction.commit().await?;
+                return Ok(output);
+            }
+        } else {
+            scope.require_active_authority(&mut transaction).await?;
+            if let Some(output) = read_output_on(&mut transaction, scope).await? {
+                transaction.commit().await?;
+                return Ok(output);
+            }
+        }
+        if state.lifecycle != crate::CompletionLifecycle::Active {
+            return Err(GraphError::validation(
+                "terminal_completion",
+                "completion",
+                "This completion ended without accepted output.",
+            ));
+        }
+        let actions = ActionTable::new(&mut transaction)
+            .for_source(scope, scope.root_node_id, Some(scope.root_node_id), false)
+            .await?;
+        if actions.len() != 1 {
+            return Err(GraphError::validation(
+                "root_action_count",
+                "interactionNode",
+                format!(
+                    "The interaction needs exactly one new root action; found {}.",
+                    actions.len()
+                ),
+            ));
+        }
+        let target = actions[0].action.target_layer_id.ok_or_else(|| {
+            GraphError::validation(
+                "missing_target_layer",
+                "rootAction.targetLayerId",
+                "The root expand action needs a target layer.",
+            )
+        })?;
+        transaction.commit().await?;
+        (target, state.head_revision)
+    };
+    transition_current(
+        database,
+        scope,
+        expected_revision,
+        "legacy-flat-submit-v1",
+        &crate::CurrentTransition::Return { layer_id: target },
+    )
+    .await?;
+    // This is the response of the already-authorized Return operation, not a
+    // later terminal model read. Revalidate the exact generation in the same
+    // snapshot that materializes its committed output so a concurrent cutover
+    // cannot retire the broker between validation and read.
+    let mut transaction = database.storage.begin_read().await?;
+    scope.require_generation_authority(&mut transaction).await?;
+    let output = read_output_on(&mut transaction, scope)
         .await?
-        .is_some()
-    {
-        transaction.rollback().await?;
-        return read_output(database, scope)
-            .await?
-            .ok_or_else(|| GraphError::Internal("accepted completion could not be read".into()));
-    }
-    let plan = CompletionPlan::build(&mut transaction, scope).await?;
-    accept::apply(&mut transaction, scope, &plan).await?;
+        .ok_or_else(|| GraphError::Internal("accepted completion could not be read".into()))?;
     transaction.commit().await?;
-    read_output(database, scope)
-        .await?
-        .ok_or_else(|| GraphError::Internal("accepted completion could not be read".into()))
-}
-
-pub(crate) async fn read_output(
-    database: &GraphDatabase,
-    scope: &InteractionScope,
-) -> Result<Option<CompletionOutput>, GraphError> {
-    let mut connection = database.storage.acquire().await?;
-    read_output_on(&mut connection, scope).await
+    Ok(output)
 }
 
 pub(crate) async fn read_output_on(
