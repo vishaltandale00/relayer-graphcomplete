@@ -118,6 +118,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn schema_20_confirmations_migrate_as_historical_not_pending() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        pool.execute(include_str!("migrations/0001_product_schema.sql"))
+            .await
+            .unwrap();
+        pool.execute(include_str!("migrations/0020_node_context_drafts.sql"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO threads(id,title,created_at,updated_at) VALUES (1,'Legacy','1','1')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO node_context_draft_resolutions(draft_id,thread_id,outcome,draft_revision,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,resolved_at) VALUES ('legacy-confirmed',1,'confirmed',2,7,3,5,'{}','FIFO','2')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        pool.execute(include_str!(
+            "migrations/0022_confirmed_composer_contexts.sql"
+        ))
+        .await
+        .unwrap();
+
+        let migrated: (Option<String>, Option<String>, Option<i64>) = sqlx::query_as(
+            "SELECT composer_text,dismissed_at,consumed_interaction_id FROM node_context_draft_resolutions WHERE draft_id='legacy-confirmed'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(migrated, (Some("FIFO".into()), Some("2".into()), None));
+        let pending_legacy: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM node_context_draft_resolutions WHERE outcome='confirmed' AND dismissed_at IS NULL AND consumed_interaction_id IS NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(pending_legacy, 0);
+
+        sqlx::query(
+            "INSERT INTO node_context_draft_resolutions(draft_id,thread_id,outcome,draft_revision,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,resolved_at,composer_text) VALUES ('new-confirmed',1,'confirmed',1,8,3,5,'{}','LIFO','3','LIFO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let pending_after_new_confirmation: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM node_context_draft_resolutions WHERE outcome='confirmed' AND dismissed_at IS NULL AND consumed_interaction_id IS NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(pending_after_new_confirmation, 1);
+    }
+
+    #[tokio::test]
     async fn legacy_reused_action_duplicates_are_canonicalized_before_open_validation() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

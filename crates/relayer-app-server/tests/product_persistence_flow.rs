@@ -556,6 +556,118 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
     assert_eq!(confirmed["draftId"], "draft-confirm");
     assert_eq!(confirmed["annotation"], "Call out FIFO ordering.");
     assert_eq!(confirmed["target"]["nodeId"], 7);
+    let duplicate_uri = format!("/api/threads/{thread_id}/context-drafts/draft-confirm-duplicate");
+    response_json(
+        app.clone()
+            .oneshot(api_request(
+                "PUT",
+                &duplicate_uri,
+                Some(json!({
+                    "target": { "nodeId": 7, "sourceInteractionNodeId": 3, "sourceLayerId": 5 },
+                    "targetNode": {
+                        "id": 7, "kind": "concept", "icon": "list", "title": "Incoming queue",
+                        "detail": "Tasks wait here while workers are busy.", "state": "accepted"
+                    },
+                    "text": "A duplicate attachment.", "expectedRevision": null
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let duplicate = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("{duplicate_uri}/confirm?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(duplicate).await["annotation"],
+        "A duplicate attachment."
+    );
+    let dismissed_duplicate = app
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            &format!(
+                "/api/threads/{thread_id}/context-confirmations/draft-confirm-duplicate?expectedRevision=1"
+            ),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(dismissed_duplicate.status(), StatusCode::NO_CONTENT);
+    let other_occurrence_uri =
+        format!("/api/threads/{thread_id}/context-drafts/draft-confirm-other-occurrence");
+    response_json(
+        app.clone()
+            .oneshot(api_request(
+                "PUT",
+                &other_occurrence_uri,
+                Some(json!({
+                    "target": { "nodeId": 7, "sourceInteractionNodeId": 3, "sourceLayerId": 6 },
+                    "targetNode": {
+                        "id": 7, "kind": "concept", "icon": "list", "title": "Incoming queue",
+                        "detail": "Tasks wait here while workers are busy.", "state": "accepted"
+                    },
+                    "text": "A conflicting occurrence.", "expectedRevision": null
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let other_occurrence = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("{other_occurrence_uri}/confirm?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(other_occurrence.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(other_occurrence).await["code"],
+        "context_target_already_confirmed"
+    );
+    let discarded_other_occurrence = app
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            &format!("{other_occurrence_uri}?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(discarded_other_occurrence.status(), StatusCode::NO_CONTENT);
+    let edited = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "PUT",
+                &format!("/api/threads/{thread_id}/context-confirmations/draft-confirm"),
+                Some(json!({
+                    "annotation":"Clarify the edited FIFO ordering.",
+                    "expectedRevision":confirmed["confirmationRevision"]
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(edited["annotation"], "Clarify the edited FIFO ordering.");
+    assert_eq!(edited["confirmationRevision"], 2);
     drop(app);
 
     let reopened = open_app(&database, &root).await;
@@ -567,9 +679,10 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
             .unwrap(),
     )
     .await;
-    assert_eq!(replayed, confirmed);
+    assert_eq!(replayed, edited);
     let drafts = response_json(
         reopened
+            .clone()
             .oneshot(api_request(
                 "GET",
                 &format!("/api/threads/{thread_id}/context-drafts"),
@@ -581,12 +694,35 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
     )
     .await;
     assert_eq!(drafts["drafts"].as_array().unwrap().len(), 3);
+    assert_eq!(drafts["confirmations"].as_array().unwrap(), &[edited]);
     assert!(
         drafts["drafts"]
             .as_array()
             .unwrap()
             .iter()
             .any(|draft| { draft["id"] == "draft-unavailable" })
+    );
+    let dismissed = reopened
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            &format!(
+                "/api/threads/{thread_id}/context-confirmations/draft-confirm?expectedRevision=2"
+            ),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(dismissed.status(), StatusCode::NO_CONTENT);
+    let replay_after_dismiss = reopened
+        .oneshot(api_request("POST", &confirm_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(replay_after_dismiss.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(replay_after_dismiss).await["code"],
+        "context_draft_target_unavailable"
     );
     assert!(
         drafts["drafts"]
@@ -2913,6 +3049,13 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
                     if body["text"] == "ordinary create response loss" {
                         return (StatusCode::OK, "truncated create response").into_response();
                     }
+                    if body["text"] == "Retry preparation failure" {
+                        return (
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            axum::Json(json!({"error":"deterministic retry preparation failure"})),
+                        )
+                            .into_response();
+                    }
                     let node_id = next_graph_node_id.fetch_add(1, Ordering::SeqCst);
                     axum::Json(json!({
                         "node": { "id": node_id },
@@ -3377,11 +3520,89 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         model_selection(family_id, "retryable-model")
     );
     let retry_uri = format!("/api/threads/{thread_id}/interactions/{retryable_id}/retry");
+    let retry_context = json!({
+        "target": {"nodeId": 7, "sourceInteractionNodeId": 3, "sourceLayerId": 5},
+        "annotations": ["FIFO"]
+    });
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("INSERT INTO node_context_draft_resolutions(draft_id,thread_id,outcome,draft_revision,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,resolved_at,composer_text) VALUES ('draft-retry-prepare',?1,'confirmed',1,7,3,5,?2,'FIFO','2','FIFO')")
+        .bind(thread_id)
+        .bind(r#"{"id":7,"kind":"concept","icon":"list","title":"Queue","detail":"Tasks","state":"accepted"}"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let mut latest_attempt_id = attempt_id;
+    for cycle in 1..=2 {
+        let failed_retry = app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                &retry_uri,
+                Some(json!({
+                    "attemptId": latest_attempt_id,
+                    "text": "Retry preparation failure",
+                    "inputId": format!("retry-prepare-failure-{cycle}"),
+                    "contexts": [retry_context.clone()],
+                    "contextConfirmationIds": ["draft-retry-prepare"],
+                    "modelSelection": model_selection(family_id, "second-model")
+                })),
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(failed_retry.status(), StatusCode::OK);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let state = response_json(
+                app.clone()
+                    .oneshot(api_request(
+                        "GET",
+                        &format!("/api/state?threadId={thread_id}"),
+                        None,
+                        true,
+                    ))
+                    .await
+                    .unwrap(),
+            )
+            .await;
+            let retryable = state["interactions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|interaction| interaction["id"] == retryable_id)
+                .expect("retry preparation failure must retain the interaction");
+            let next_attempt_id = retryable["latestAttempt"]["id"].as_i64().unwrap();
+            if retryable["completionStatus"] == "not_started"
+                && retryable["latestAttempt"]["outcome"] == "model_failed"
+                && next_attempt_id != latest_attempt_id
+            {
+                latest_attempt_id = next_attempt_id;
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for retry preparation failure restoration: {state}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let pool = sqlite_pool(&database).await;
+        let consumed_by: Option<i64> = sqlx::query_scalar(
+            "SELECT consumed_interaction_id FROM node_context_draft_resolutions WHERE draft_id='draft-retry-prepare'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        assert_eq!(consumed_by, None);
+    }
     let retry_body = json!({
-        "attemptId": attempt_id,
+        "attemptId": latest_attempt_id,
         "text": "Edited but still the same draft",
         "inputId": "retry-input-edited-draft",
-        "contexts": [],
+        "contexts": [retry_context],
+        "contextConfirmationIds": ["draft-retry-prepare"],
         "modelSelection": model_selection(family_id, "second-model")
     });
     let pool = sqlite_pool(&database).await;
@@ -3425,8 +3646,8 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         .find(|interaction| interaction["id"] == retryable_id)
         .unwrap();
     assert_eq!(preserved["completionStatus"], "not_started");
-    assert_eq!(preserved["text"], "Retry this exact draft");
-    assert_eq!(preserved["latestAttempt"]["id"], attempt_id);
+    assert_eq!(preserved["text"], "Retry preparation failure");
+    assert_eq!(preserved["latestAttempt"]["id"], latest_attempt_id);
     let pool = sqlite_pool(&database).await;
     let refreshed_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -3464,7 +3685,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         retried["modelSelection"],
         model_selection(family_id, "second-model")
     );
-    assert_eq!(retried["latestAttempt"]["attemptNumber"], 2);
+    assert_eq!(retried["latestAttempt"]["attemptNumber"], 4);
     assert_eq!(retried["latestAttempt"]["adapterImplementationVersion"], 7);
     assert_eq!(
         observed_models
@@ -4974,7 +5195,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 21);
+    assert_eq!(applied_migrations, 22);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -5035,6 +5256,10 @@ async fn persists_project_thread_and_interaction_across_restart() {
     let partial_index_database = root.join("partial-index.sqlite3");
     drop(open_app(&partial_index_database, &root).await);
     let partial_index_pool = sqlite_pool(&partial_index_database).await;
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&partial_index_pool)
+        .await
+        .unwrap();
     for statement in [
         "DROP TABLE interactions",
         "DROP TABLE threads",
@@ -5050,6 +5275,10 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .await
             .unwrap();
     }
+    sqlx::query("PRAGMA foreign_keys=ON")
+        .execute(&partial_index_pool)
+        .await
+        .unwrap();
     partial_index_pool.close().await;
     let partial_index = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: partial_index_database,
@@ -5200,6 +5429,21 @@ async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_t
     assert!(!encoded.contains("991"));
     assert!(!encoded.contains("992"));
 
+    let context_free = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text":"Context-free deterministic rejection",
+                "inputId":"invalid-context-free"
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(context_free.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
     let pool = sqlite_pool(&database).await;
     let interaction_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM interactions WHERE thread_id=?1")
@@ -5225,6 +5469,178 @@ async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_t
     assert_eq!(context_count, 0);
     assert_eq!(annotation_count, 0);
     assert_eq!(updated_at, original_timestamp);
+    pool.close().await;
+    graph_task.abort();
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn orphan_context_confirmation_ids_are_rejected_without_creating_an_interaction() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-orphan-context-confirmations-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({"initialMessage":"Seed"})),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+
+    for request in [
+        json!({
+            "text":"Missing context payload",
+            "contextConfirmationIds":["draft-orphan"]
+        }),
+        json!({
+            "text":"Identified but missing context payload",
+            "inputId":"send-orphan",
+            "contextConfirmationIds":["draft-orphan"]
+        }),
+    ] {
+        let rejected = app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                &format!("/api/threads/{thread_id}/interactions"),
+                Some(request),
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response_json(rejected).await["code"], "invalid_input");
+    }
+
+    let pool = sqlite_pool(&database).await;
+    let interaction_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM interactions WHERE thread_id=?1")
+            .bind(thread_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(interaction_count, 1);
+    pool.close().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn pre_binding_failure_restores_consumed_context_confirmation() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-context-prepare-failure-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let offline = open_app(&database, &root).await;
+    let thread = response_json(
+        offline
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({"initialMessage":"Seed"})),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    seed_explicit_test_model_default(&database, thread_id).await;
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("INSERT INTO node_context_draft_resolutions(draft_id,thread_id,outcome,draft_revision,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,resolved_at,composer_text) VALUES ('draft-retry',?1,'confirmed',1,7,3,5,?2,'FIFO','2','FIFO')")
+        .bind(thread_id)
+        .bind(r#"{"id":7,"kind":"concept","icon":"list","title":"Queue","detail":"Tasks","state":"accepted"}"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let graph = Router::new().route(
+        "/api/control/interactions",
+        axum::routing::post(|| async {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(json!({"error":"temporary graph failure"})),
+            )
+        }),
+    );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "modelCompatibility":[{"providerId":"codex"}],
+                "executionAccessContracts":["managed-runtime@1"],
+                "settings":{"model":"test-model"}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
+    let response = app
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text":"Use context",
+                "inputId":"send-after-prepare-failure",
+                "contexts":[{"target":{
+                    "nodeId":7,"sourceInteractionNodeId":3,"sourceLayerId":5
+                },"annotations":["FIFO"]}],
+                "contextConfirmationIds":["draft-retry"]
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        response_json(response).await,
+        json!({"error":"Relayer could not send this message. Your draft was preserved."})
+    );
+
+    let pool = sqlite_pool(&database).await;
+    let failed_input_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM interactions WHERE input_identity='send-after-prepare-failure')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let consumed_interaction_id: Option<i64> = sqlx::query_scalar(
+        "SELECT consumed_interaction_id FROM node_context_draft_resolutions WHERE draft_id='draft-retry'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!failed_input_exists);
+    assert_eq!(consumed_interaction_id, None);
     pool.close().await;
     graph_task.abort();
     harness_task.abort();

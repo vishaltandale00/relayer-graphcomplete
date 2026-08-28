@@ -57,6 +57,48 @@ describe("node-context draft renderer state", () => {
     ]);
   });
 
+  it("does not retarget a draft between repeated node occurrences", () => {
+    const controller = createNodeContextDraftController({
+      api: {},
+      createId: () => "local-id",
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    controller.open("alpha", target, targetNode);
+
+    expect(() => controller.open(
+      "alpha",
+      { ...target, sourceInteractionNodeId: 9, sourceLayerId: 12 },
+      targetNode,
+    )).toThrow("existing annotation draft");
+    expect(controller.draftForNode("alpha", 7)?.target).toEqual(target);
+  });
+
+  it("does not open a second occurrence after the node is confirmed elsewhere", async () => {
+    const confirmation = {
+      draftId: "confirmed-a",
+      target,
+      targetNode,
+      annotation: "FIFO",
+      draftRevision: 1,
+      confirmationRevision: 1,
+    };
+    const controller = createNodeContextDraftController({
+      api: { list: vi.fn(async () => ({ drafts: [], confirmations: [confirmation] })) },
+      createId: () => "local-id",
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    await controller.load("alpha");
+
+    expect(() => controller.open(
+      "alpha",
+      { ...target, sourceInteractionNodeId: 9, sourceLayerId: 12 },
+      targetNode,
+    )).toThrow("already attached from another occurrence");
+    expect(controller.draftsForThread("alpha")).toEqual([]);
+  });
+
   it("returns detached immutable observations that cannot mutate controller drafts", () => {
     const controller = createNodeContextDraftController({
       api: {},
@@ -83,6 +125,147 @@ describe("node-context draft renderer state", () => {
       target: { nodeId: 7 },
       targetNode: { title: "Incoming queue" },
     });
+  });
+
+  it("hydrates pending confirmations and cannot resurrect a consumed stale response", async () => {
+    const confirmation = {
+      draftId: "draft-confirmed",
+      threadId: 1,
+      target,
+      targetNode,
+      annotation: "FIFO",
+      draftRevision: 2,
+    };
+    const api = {
+      list: vi.fn(async () => ({ drafts: [], confirmations: [confirmation] })),
+      save: vi.fn(),
+    };
+    const controller = createNodeContextDraftController({ api });
+
+    await controller.load("alpha");
+    expect(controller.confirmationsForThread("alpha")).toEqual([confirmation]);
+    controller.consumeConfirmations("alpha", [confirmation.draftId]);
+    await controller.load("alpha");
+    expect(controller.confirmationsForThread("alpha")).toEqual([]);
+    controller.allowConfirmationRestoration("alpha");
+    await controller.load("alpha");
+    expect(controller.confirmationsForThread("alpha")).toEqual([confirmation]);
+  });
+
+  it("treats an absent authoritative confirmation as remotely consumed", async () => {
+    const confirmation = {
+      draftId: "draft-confirmed",
+      threadId: 1,
+      target,
+      targetNode,
+      annotation: "FIFO",
+      draftRevision: 2,
+      confirmationRevision: 1,
+    };
+    const api = {
+      list: vi.fn()
+        .mockResolvedValueOnce({ drafts: [], confirmations: [confirmation] })
+        .mockResolvedValueOnce({ drafts: [], confirmations: [] }),
+      save: vi.fn(),
+    };
+    const controller = createNodeContextDraftController({ api });
+    await controller.load("alpha");
+    await controller.load("alpha");
+    expect(controller.confirmationsForThread("alpha")).toEqual([]);
+  });
+
+  it("does not replace a confirmation advanced by a load while its update is pending", async () => {
+    let resolveUpdate;
+    const confirmation = {
+      draftId: "draft-confirmed",
+      threadId: 1,
+      target,
+      targetNode,
+      annotation: "FIFO",
+      draftRevision: 2,
+      confirmationRevision: 1,
+    };
+    const advanced = {
+      ...confirmation,
+      annotation: "Authoritative edit",
+      confirmationRevision: 2,
+    };
+    const api = {
+      list: vi.fn()
+        .mockResolvedValueOnce({ drafts: [], confirmations: [confirmation] })
+        .mockResolvedValueOnce({ drafts: [], confirmations: [advanced] }),
+      updateConfirmation: vi.fn(() => new Promise((resolve) => { resolveUpdate = resolve; })),
+    };
+    const controller = createNodeContextDraftController({ api });
+    await controller.load("alpha");
+
+    const updating = controller.updateConfirmation("alpha", confirmation.draftId, "Local edit");
+    await controller.load("alpha");
+    resolveUpdate({
+      ...confirmation,
+      annotation: "Local edit",
+      confirmationRevision: 2,
+    });
+
+    await expect(updating).resolves.toBeNull();
+    expect(controller.confirmationsForThread("alpha")).toEqual([advanced]);
+  });
+
+  it("does not resurrect a confirmation consumed while its update is pending", async () => {
+    let resolveUpdate;
+    const confirmation = {
+      draftId: "draft-confirmed",
+      threadId: 1,
+      target,
+      targetNode,
+      annotation: "FIFO",
+      draftRevision: 2,
+      confirmationRevision: 1,
+    };
+    const api = {
+      list: vi.fn(async () => ({ drafts: [], confirmations: [confirmation] })),
+      updateConfirmation: vi.fn(() => new Promise((resolve) => { resolveUpdate = resolve; })),
+    };
+    const controller = createNodeContextDraftController({ api });
+    await controller.load("alpha");
+
+    const updating = controller.updateConfirmation("alpha", confirmation.draftId, "Local edit");
+    controller.consumeConfirmations("alpha", [confirmation.draftId]);
+    resolveUpdate({
+      ...confirmation,
+      annotation: "Local edit",
+      confirmationRevision: 2,
+    });
+
+    await expect(updating).resolves.toBeNull();
+    expect(controller.confirmationsForThread("alpha")).toEqual([]);
+  });
+
+  it("keeps confirmed annotations coherent when a multi-dismiss partially fails", async () => {
+    const confirmations = ["a", "b"].map((draftId) => ({
+      draftId,
+      threadId: 1,
+      target,
+      targetNode,
+      annotation: draftId.toUpperCase(),
+      draftRevision: 2,
+      confirmationRevision: 1,
+    }));
+    const changed = vi.fn();
+    const api = {
+      list: vi.fn(async () => ({ drafts: [], confirmations })),
+      dismissConfirmation: vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("revision conflict")),
+    };
+    const controller = createNodeContextDraftController({ api, onChange: changed });
+    await controller.load("alpha");
+
+    await expect(controller.dismissConfirmations("alpha", ["a", "b"]))
+      .rejects.toThrow("revision conflict");
+
+    expect(controller.confirmationsForThread("alpha").map((item) => item.draftId)).toEqual(["b"]);
+    expect(changed).toHaveBeenCalledTimes(2);
   });
 
   it("restores independent server drafts when navigating between threads", async () => {
@@ -254,6 +437,33 @@ describe("node-context draft renderer state", () => {
     });
   });
 
+  it("replaces an untouched editor opened while restart restoration is loading", async () => {
+    let resolveList;
+    const api = {
+      list: vi.fn(() => new Promise((resolve) => { resolveList = resolve; })),
+      save: vi.fn(),
+    };
+    const controller = createNodeContextDraftController({
+      api,
+      createId: () => "local-id",
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    const loading = controller.load("alpha");
+    controller.open("alpha", target, targetNode);
+    resolveList({
+      drafts: [{ id: "server-id", threadId: 1, target, targetNode, text: "restored", revision: 4 }],
+    });
+    await loading;
+
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "server-id",
+      text: "restored",
+      revision: 4,
+      status: "saved",
+    });
+  });
+
   it("serializes overlapping autosaves onto the returned revision", async () => {
     let resolveFirst;
     const api = {
@@ -310,6 +520,171 @@ describe("node-context draft renderer state", () => {
     await expect(duplicate).resolves.toBeNull();
     expect(api.confirm).toHaveBeenCalledTimes(1);
     expect(controller.draftForNode("alpha", 7)).toBeNull();
+  });
+
+  it("does not reinstall a confirmation older than an authoritative reload", async () => {
+    let resolveConfirm;
+    const api = {
+      list: vi.fn(async () => ({
+        drafts: [{
+          id: "draft-newer",
+          threadId: "alpha",
+          target,
+          targetNode,
+          text: "Newer renderer work",
+          revision: 2,
+        }],
+        confirmations: [],
+      })),
+      save: vi.fn(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      confirm: vi.fn(() => new Promise((resolve) => { resolveConfirm = resolve; })),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "FIFO");
+    await controller.flush("alpha", 7);
+
+    const confirming = controller.confirm("alpha", 7);
+    await controller.load("alpha");
+    resolveConfirm({ draftId: "draft-a", target, targetNode, annotation: "FIFO" });
+    await expect(confirming).resolves.toBeNull();
+
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "draft-newer",
+      text: "Newer renderer work",
+      operation: { kind: "idle" },
+    });
+    expect(controller.confirmationsForThread("alpha")).toEqual([]);
+  });
+
+  it("does not reconcile a stale confirmation conflict through a replacement draft", async () => {
+    let rejectConfirm;
+    const conflict = Object.assign(new Error("stale confirmation"), {
+      code: "context_draft_revision_conflict",
+    });
+    const api = {
+      list: vi.fn(async () => ({
+        drafts: [{
+          id: "draft-newer",
+          threadId: "alpha",
+          target,
+          targetNode,
+          text: "Newer renderer work",
+          revision: 2,
+        }],
+        confirmations: [],
+      })),
+      save: vi.fn(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      confirm: vi.fn(() => new Promise((_resolve, reject) => { rejectConfirm = reject; })),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Confirm me");
+    await controller.flush("alpha", 7);
+
+    const confirming = controller.confirm("alpha", 7);
+    await controller.load("alpha");
+    rejectConfirm(conflict);
+    await expect(confirming).rejects.toBe(conflict);
+
+    expect(api.confirm).toHaveBeenCalledTimes(1);
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "draft-newer",
+      text: "Newer renderer work",
+      operation: { kind: "idle" },
+    });
+  });
+
+  it("does not retarget confirmation while its initial save settles", async () => {
+    let resolveSave;
+    let controller;
+    let replacementInstalled = false;
+    const api = {
+      save: vi.fn(() => new Promise((resolve) => { resolveSave = resolve; })),
+      confirm: vi.fn(async () => ({
+        draftId: "draft-newer", target, targetNode, annotation: "Confirm me",
+      })),
+    };
+    controller = createNodeContextDraftController({
+      api,
+      createId: () => "draft-a",
+      onChange() {
+        const draft = controller?.draftForNode("alpha", 7);
+        if (!replacementInstalled
+          && api.save.mock.calls.length === 1
+          && draft?.id === "draft-a"
+          && draft.status === "saved") {
+          replacementInstalled = true;
+          const replacement = {
+            ...draft,
+            id: "draft-newer",
+            revision: 2,
+            operation: { kind: "idle" },
+          };
+          const originalDraftForNode = controller.draftForNode.bind(controller);
+          controller.draftForNode = (threadId, nodeId) => (
+            String(threadId) === "alpha" && String(nodeId) === "7"
+              ? replacement
+              : originalDraftForNode(threadId, nodeId)
+          );
+        }
+      },
+    });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Confirm me");
+
+    const confirming = controller.confirm("alpha", 7);
+    await vi.waitFor(() => expect(api.save).toHaveBeenCalledTimes(1));
+    resolveSave({
+      id: "draft-a", threadId: "alpha", target, targetNode, text: "Confirm me", revision: 1,
+    });
+
+    await expect(confirming).resolves.toBeNull();
+    expect(api.confirm).not.toHaveBeenCalled();
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "draft-newer",
+      operation: { kind: "idle" },
+    });
+  });
+
+  it("does not apply a successful confirmation to a replacement draft", async () => {
+    let resolveList;
+    let resolveConfirm;
+    const api = {
+      list: vi.fn(() => new Promise((resolve) => { resolveList = resolve; })),
+      save: vi.fn(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      confirm: vi.fn(() => new Promise((resolve) => { resolveConfirm = resolve; })),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Confirm me");
+    await controller.flush("alpha", 7);
+
+    const loading = controller.load("alpha");
+    const confirming = controller.confirm("alpha", 7);
+    resolveList({
+      drafts: [{
+        id: "draft-newer",
+        threadId: "alpha",
+        target,
+        targetNode,
+        text: "Newer renderer work",
+        revision: 2,
+      }],
+      confirmations: [],
+    });
+    await loading;
+    resolveConfirm({
+      draftId: "draft-a", target, targetNode, annotation: "Confirm me",
+    });
+
+    await expect(confirming).resolves.toBeNull();
+    expect(controller.confirmationsForThread("alpha")).toEqual([]);
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "draft-newer",
+      text: "Newer renderer work",
+      operation: { kind: "idle" },
+    });
   });
 
   it("rejects edits while confirmation is pending", async () => {
@@ -444,6 +819,103 @@ describe("node-context draft renderer state", () => {
     expect(controller.draftForNode("alpha", 7)).toBeNull();
   });
 
+  it("does not retarget or erase a newer draft while an older discard settles", async () => {
+    let resolveDiscard;
+    const api = {
+      list: vi.fn(async () => ({
+        drafts: [{
+          id: "draft-newer",
+          threadId: "alpha",
+          target,
+          targetNode,
+          text: "Newer renderer work",
+          revision: 2,
+        }],
+        confirmations: [],
+      })),
+      save: vi.fn(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      discard: vi.fn(() => new Promise((resolve) => { resolveDiscard = resolve; })),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Discard me");
+    await controller.flush("alpha", 7);
+
+    const discarding = controller.discard("alpha", 7);
+    await controller.load("alpha");
+    resolveDiscard();
+    await discarding;
+
+    expect(api.discard).toHaveBeenCalledTimes(1);
+    expect(api.discard.mock.calls[0][1].id).toBe("draft-a");
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "draft-newer",
+      text: "Newer renderer work",
+      operation: { kind: "idle" },
+    });
+  });
+
+  it("does not reconcile a stale discard conflict through a replacement draft", async () => {
+    let rejectDiscard;
+    const conflict = Object.assign(new Error("stale discard"), {
+      code: "context_draft_revision_conflict",
+    });
+    const api = {
+      list: vi.fn(async () => ({
+        drafts: [{
+          id: "draft-newer",
+          threadId: "alpha",
+          target,
+          targetNode,
+          text: "Newer renderer work",
+          revision: 2,
+        }],
+        confirmations: [],
+      })),
+      save: vi.fn(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      discard: vi.fn(() => new Promise((_resolve, reject) => { rejectDiscard = reject; })),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Discard me");
+    await controller.flush("alpha", 7);
+
+    const discarding = controller.discard("alpha", 7);
+    rejectDiscard(conflict);
+    await expect(discarding).rejects.toBe(conflict);
+
+    expect(api.discard).toHaveBeenCalledTimes(1);
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "draft-newer",
+      text: "Newer renderer work",
+      operation: { kind: "idle" },
+    });
+  });
+
+  it("releases discard ownership when conflict reconciliation cannot reload", async () => {
+    const conflict = Object.assign(new Error("stale discard"), {
+      code: "context_draft_revision_conflict",
+    });
+    const loadError = new Error("reload unavailable");
+    const api = {
+      list: vi.fn(async () => { throw loadError; }),
+      save: vi.fn(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      discard: vi.fn(async () => { throw conflict; }),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Keep this work");
+    await controller.flush("alpha", 7);
+
+    await expect(controller.discard("alpha", 7)).rejects.toBe(loadError);
+
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "draft-a",
+      text: "Keep this work",
+      operation: { kind: "idle" },
+    });
+  });
+
   it("keeps discard ownership when an older pending save conflicts", async () => {
     const conflict = Object.assign(new Error("revision conflict"), {
       code: "context_draft_revision_conflict",
@@ -548,6 +1020,87 @@ describe("node-context draft renderer state", () => {
     expect(api.save.mock.calls[1][1]).toMatchObject({ revision: 2, text: "local text" });
     expect(api.confirm.mock.calls[1][1].revision).toBe(3);
     expect(controller.draftForNode("alpha", 7)).toBeNull();
+  });
+
+  it("releases confirmation ownership when conflict reconciliation cannot reload", async () => {
+    const conflict = Object.assign(new Error("stale confirmation"), {
+      code: "context_draft_revision_conflict",
+    });
+    const loadError = new Error("reload unavailable");
+    const api = {
+      list: vi.fn(async () => { throw loadError; }),
+      save: vi.fn(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      confirm: vi.fn(async () => { throw conflict; }),
+    };
+    const controller = createNodeContextDraftController({ api, createId: () => "draft-a" });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Keep this work");
+    await controller.flush("alpha", 7);
+
+    await expect(controller.confirm("alpha", 7)).rejects.toBe(loadError);
+
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "draft-a",
+      text: "Keep this work",
+      operation: { kind: "idle" },
+    });
+  });
+
+  it("does not confirm a replacement installed while reconciliation saves", async () => {
+    let controller;
+    let replacementStarted = false;
+    const conflict = Object.assign(new Error("stale confirmation"), {
+      code: "context_draft_revision_conflict",
+    });
+    const api = {
+      list: vi.fn()
+        .mockResolvedValueOnce({
+          drafts: [{ id: "draft-a", threadId: "alpha", target, targetNode, text: "Remote A", revision: 2 }],
+          confirmations: [],
+        }),
+      save: vi.fn()
+        .mockImplementationOnce(async (_threadId, draft) => ({ ...draft, revision: 1 }))
+        .mockImplementationOnce(async (_threadId, draft) => ({ ...draft, revision: 3 })),
+      confirm: vi.fn().mockRejectedValueOnce(conflict),
+    };
+    controller = createNodeContextDraftController({
+      api,
+      createId: () => "draft-a",
+      onChange() {
+        const draft = controller?.draftForNode("alpha", 7);
+        if (!replacementStarted
+          && api.save.mock.calls.length === 2
+          && draft?.id === "draft-a"
+          && draft.status === "saved") {
+          replacementStarted = true;
+          const replacement = {
+            ...draft,
+            id: "draft-b",
+            revision: 4,
+            operation: { kind: "idle" },
+          };
+          const originalDraftForNode = controller.draftForNode.bind(controller);
+          controller.draftForNode = (threadId, nodeId) => (
+            String(threadId) === "alpha" && String(nodeId) === "7"
+              ? replacement
+              : originalDraftForNode(threadId, nodeId)
+          );
+        }
+      },
+    });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Local A");
+    await controller.flush("alpha", 7);
+
+    const confirming = controller.confirm("alpha", 7);
+    await expect(confirming).rejects.toBe(conflict);
+
+    expect(api.confirm).toHaveBeenCalledTimes(1);
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      id: "draft-b",
+      text: "Local A",
+      operation: { kind: "idle" },
+    });
   });
 
   it("reloads and retries a stale discard once with the current revision", async () => {

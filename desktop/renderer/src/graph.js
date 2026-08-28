@@ -40,9 +40,9 @@ function workspace() {
     showThread: () => setMainView("thread"),
     showEmpty: () => setMainView("new"),
     getNavigationHistory,
-    onNavigateHistory: async (direction) => {
+    onNavigateHistory: async (direction, navigation) => {
       try {
-        await navigateHistory(direction);
+        await navigateHistory(direction, navigation);
       } catch (error) {
         if (error.code !== "navigation_superseded") toast(error.message);
       }
@@ -60,7 +60,7 @@ function workspace() {
     onExportConversation: desktop?.conversation?.export
       ? (threadId) => desktop.conversation.export(threadId)
       : null,
-    onSubmitInteraction: (text, modelSelection, contexts) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text, modelSelection, contexts)),
+    onSubmitInteraction: (text, modelSelection, contexts, contextConfirmationIds) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text, modelSelection, contexts, contextConfirmationIds)),
     onOpenSettings: () => {
       setSettingsTab("models");
       document.querySelector("#settingsButton")?.click();
@@ -80,7 +80,9 @@ function workspace() {
       }
       return navigated;
     },
-    onNavigateResolvedInvoke: (action) => import("./threads.js").then(({ navigateResolvedInvoke }) => navigateResolvedInvoke(action)),
+    onNavigateResolvedInvoke: (action, navigation) => import("./threads.js").then(
+      ({ navigateResolvedInvoke }) => navigateResolvedInvoke(action, navigation),
+    ),
     onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
     annotationApi,

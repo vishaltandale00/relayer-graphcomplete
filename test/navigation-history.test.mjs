@@ -4,6 +4,7 @@ import {
   createAcceptedLayerCache,
   createLatestRequestGate,
   createNavigationHistory,
+  navigationEntriesChangeTurn,
   navigationEntriesEqual,
   normalizeNavigationEntry,
 } from "../desktop/renderer/src/navigation-history.js";
@@ -22,6 +23,16 @@ function layerIdentity(layerId, threadId = 1, turnId = 10) {
 }
 
 describe("navigation history", () => {
+  it("distinguishes turn changes from navigation within one turn", () => {
+    const current = entry();
+    expect(navigationEntriesChangeTurn(current, entry({
+      navigationPath: [{ layerId: 101, viaActionId: 501 }],
+    }))).toBe(false);
+    expect(navigationEntriesChangeTurn(current, entry({ turnId: 11 }))).toBe(true);
+    expect(navigationEntriesChangeTurn(current, entry({ threadId: 2 }))).toBe(true);
+    expect(navigationEntriesChangeTurn(current, entry({ threadId: 2, turnId: 10 }))).toBe(true);
+  });
+
   it("normalizes logical IDs and clones the path into an immutable entry", () => {
     const source = entry({
       navigationPath: [

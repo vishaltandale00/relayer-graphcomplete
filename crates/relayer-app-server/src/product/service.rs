@@ -41,8 +41,18 @@ pub(crate) struct RetryInteractionCommand<'a> {
     pub(crate) text: &'a str,
     pub(crate) input_identity: &'a str,
     pub(crate) contexts: &'a [super::InteractionContextIntent],
+    pub(crate) context_confirmation_ids: &'a [String],
     pub(crate) model_selection: &'a InteractionModelSelection,
     pub(crate) harness_configuration_name: &'a str,
+}
+
+pub(crate) struct CreateIdentifiedInteractionCommand<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) input_identity: &'a str,
+    pub(crate) contexts: &'a [super::InteractionContextIntent],
+    pub(crate) context_confirmation_ids: &'a [String],
+    pub(crate) model_selection: Option<&'a InteractionModelSelection>,
+    pub(crate) allow_unselected_model: bool,
 }
 
 pub(crate) struct AcceptedInteractionCompletion<'a> {
@@ -1097,14 +1107,10 @@ impl ProductService {
     pub(crate) async fn create_identified_interaction(
         &self,
         thread_id: ThreadId,
-        text: &str,
-        input_identity: &str,
-        contexts: &[super::InteractionContextIntent],
-        model_selection: Option<&InteractionModelSelection>,
-        allow_unselected_model: bool,
+        command: CreateIdentifiedInteractionCommand<'_>,
     ) -> Result<crate::storage::InteractionInputInsertOutcome, ProductError> {
-        let input_identity = required(input_identity, "inputId")?;
-        let input_digest = validated_interaction_input_digest(text, contexts)?;
+        let input_identity = required(command.input_identity, "inputId")?;
+        let input_digest = validated_interaction_input_digest(command.text, command.contexts)?;
         if self.storage.thread_is_imported(thread_id).await? {
             return Err(ProductError::Invalid(
                 "imported conversations are immutable".into(),
@@ -1114,13 +1120,14 @@ impl ProductService {
             .insert_interaction_input(
                 thread_id,
                 crate::storage::NewInteractionInput {
-                    text,
+                    text: command.text,
                     input_identity,
                     input_digest: &input_digest,
-                    contexts,
+                    contexts: command.contexts,
+                    context_confirmation_ids: command.context_confirmation_ids,
                 },
-                model_selection,
-                self.runtime_available && !allow_unselected_model,
+                command.model_selection,
+                self.runtime_available && !command.allow_unselected_model,
                 self.runtime_available,
             )
             .await
@@ -1196,15 +1203,64 @@ impl ProductService {
             .map_err(Into::into)
     }
 
-    pub(crate) async fn node_context_drafts(
+    pub(crate) async fn node_context_draft_state(
         &self,
         thread_id: ThreadId,
-    ) -> Result<Vec<super::NodeContextDraft>, ProductError> {
+    ) -> Result<
+        (
+            Vec<super::NodeContextDraft>,
+            Vec<super::NodeContextDraftConfirmation>,
+        ),
+        ProductError,
+    > {
         if self.storage.get_thread(thread_id).await?.is_none() {
             return Err(ProductError::NotFound(format!("thread {thread_id}")));
         }
         self.storage
-            .node_context_drafts(thread_id)
+            .node_context_draft_state(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn update_pending_node_context_confirmation(
+        &self,
+        thread_id: ThreadId,
+        draft_id: &str,
+        expected_revision: i64,
+        annotation: &str,
+    ) -> Result<super::NodeContextDraftConfirmation, ProductError> {
+        let draft_id = required(draft_id, "draftId")?;
+        if expected_revision <= 0 {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be a positive integer".into(),
+            ));
+        }
+        let annotation = required(annotation, "annotation")?;
+        self.storage
+            .update_pending_node_context_confirmation(
+                thread_id,
+                draft_id,
+                expected_revision,
+                annotation,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn dismiss_pending_node_context_confirmation(
+        &self,
+        thread_id: ThreadId,
+        draft_id: &str,
+        expected_revision: i64,
+    ) -> Result<bool, ProductError> {
+        let draft_id = required(draft_id, "draftId")?;
+        if expected_revision <= 0 {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be a positive integer".into(),
+            ));
+        }
+        self.storage
+            .dismiss_pending_node_context_confirmation(thread_id, draft_id, expected_revision)
             .await
             .map_err(Into::into)
     }
@@ -1301,6 +1357,16 @@ impl ProductService {
     ) -> Result<bool, ProductError> {
         self.storage
             .discard_unbound_interaction_input(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn interaction_consumes_context_confirmations(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .interaction_consumes_context_confirmations(interaction_id)
             .await
             .map_err(Into::into)
     }
@@ -1543,6 +1609,7 @@ impl ProductService {
                     input_identity,
                     input_digest: &input_digest,
                     contexts: command.contexts,
+                    context_confirmation_ids: command.context_confirmation_ids,
                 },
                 command.model_selection,
                 command.harness_configuration_name,

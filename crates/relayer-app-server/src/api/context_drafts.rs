@@ -27,6 +27,14 @@ pub(super) struct ResolveNodeContextDraftQuery {
 #[derive(Serialize)]
 pub(super) struct NodeContextDraftsResponse {
     drafts: Vec<NodeContextDraftResponse>,
+    confirmations: Vec<NodeContextDraftConfirmationResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct UpdateNodeContextConfirmationRequest {
+    annotation: String,
+    expected_revision: i64,
 }
 
 #[derive(Serialize)]
@@ -66,6 +74,7 @@ pub(super) struct NodeContextDraftConfirmationResponse {
     target_node: relayer_graph_core::InteractionInputNode,
     annotation: String,
     draft_revision: i64,
+    confirmation_revision: i64,
     confirmed_at: String,
 }
 
@@ -78,6 +87,7 @@ impl From<NodeContextDraftConfirmation> for NodeContextDraftConfirmationResponse
             target_node: confirmation.target_node,
             annotation: confirmation.annotation,
             draft_revision: confirmation.draft_revision,
+            confirmation_revision: confirmation.confirmation_revision,
             confirmed_at: confirmation.confirmed_at,
         }
     }
@@ -89,13 +99,54 @@ pub(super) async fn list(
     Path(thread_id): Path<i64>,
 ) -> Result<Json<NodeContextDraftsResponse>, ApiError> {
     authorize_write(&state, &headers)?;
-    let drafts = state
+    let (drafts, confirmations) = state
         .product
-        .node_context_drafts(ThreadId::try_from(thread_id)?)
+        .node_context_draft_state(ThreadId::try_from(thread_id)?)
         .await?;
     Ok(Json(NodeContextDraftsResponse {
         drafts: drafts.into_iter().map(Into::into).collect(),
+        confirmations: confirmations.into_iter().map(Into::into).collect(),
     }))
+}
+
+pub(super) async fn update_confirmation(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, draft_id)): Path<(i64, String)>,
+    Json(request): Json<UpdateNodeContextConfirmationRequest>,
+) -> Result<Json<NodeContextDraftConfirmationResponse>, ApiError> {
+    authorize_write(&state, &headers)?;
+    let confirmation = state
+        .product
+        .update_pending_node_context_confirmation(
+            ThreadId::try_from(thread_id)?,
+            &draft_id,
+            request.expected_revision,
+            &request.annotation,
+        )
+        .await?;
+    Ok(Json(confirmation.into()))
+}
+
+pub(super) async fn dismiss_confirmation(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, draft_id)): Path<(i64, String)>,
+    Query(query): Query<ResolveNodeContextDraftQuery>,
+) -> Result<StatusCode, ApiError> {
+    authorize_write(&state, &headers)?;
+    let dismissed = state
+        .product
+        .dismiss_pending_node_context_confirmation(
+            ThreadId::try_from(thread_id)?,
+            &draft_id,
+            query.expected_revision,
+        )
+        .await?;
+    if !dismissed {
+        return Err(ApiError::not_found("pending node-context confirmation"));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub(super) async fn save(

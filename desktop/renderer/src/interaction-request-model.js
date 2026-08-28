@@ -15,15 +15,33 @@ export function newThreadRequestBody({
   };
 }
 
-export function followupRequestBody(text, modelSelection, inputId, contexts = []) {
+export function followupRequestBody(
+  text,
+  modelSelection,
+  inputId,
+  contexts = [],
+  contextConfirmationIds = [],
+) {
   if (!inputId) throw new Error("A stable inputId is required for a follow-up send.");
-  return { text, inputId, contexts, modelSelection };
+  return { text, inputId, contexts, contextConfirmationIds, modelSelection };
 }
 
 const pendingFollowupSends = new Map();
 
-export function stableFollowupInputId(threadId, text, modelSelection, contexts = []) {
-  const content = JSON.stringify({ threadId: String(threadId), text, modelSelection, contexts });
+export function stableFollowupInputId(
+  threadId,
+  text,
+  modelSelection,
+  contexts = [],
+  contextConfirmationIds = [],
+) {
+  const content = JSON.stringify({
+    threadId: String(threadId),
+    text,
+    modelSelection,
+    contexts,
+    contextConfirmationIds,
+  });
   const pending = pendingFollowupSends.get(content);
   if (pending) return pending;
   const inputId = crypto.randomUUID();

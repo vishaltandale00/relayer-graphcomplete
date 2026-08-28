@@ -284,6 +284,39 @@ describe("desktop environment rail", () => {
     expect(cleared).toHaveLength(1);
   });
 
+  it("re-arms three exact five-second refresh intervals with controlled timers", () => {
+    const scheduled = [];
+    const scheduler = createEnvironmentRefreshScheduler({
+      setTimer(callback, delayMs) {
+        const timer = { callback, delayMs };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearTimer() {},
+    });
+    let now = 100_000;
+    let refreshes = 0;
+    const scheduleNext = () => scheduler.schedule({
+      eligible: true,
+      projectId: 7,
+      lastRequestedAt: now,
+      nextAttemptAt: 0,
+      now,
+      refresh() {
+        refreshes += 1;
+        now += ENVIRONMENT_REFRESH_INTERVAL_MS;
+        scheduleNext();
+      },
+    });
+
+    scheduleNext();
+    for (let index = 0; index < 3; index += 1) {
+      expect(scheduled[index].delayMs).toBe(ENVIRONMENT_REFRESH_INTERVAL_MS);
+      scheduled[index].callback();
+    }
+    expect(refreshes).toBe(3);
+  });
+
   it("retains the last good snapshot for retryable unavailable responses", () => {
     const good = {
       kind: "git",
