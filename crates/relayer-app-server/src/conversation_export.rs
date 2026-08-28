@@ -6,7 +6,7 @@
 //! inference-free validation; snapshot construction and persistence live at
 //! higher product boundaries.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -127,6 +127,8 @@ pub enum ExportInputControl {
 pub struct ExportInputOption {
     pub key: String,
     pub label: String,
+    #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unsupported_fields: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +140,8 @@ pub struct ExportInputActionSnapshot {
     pub options: Vec<ExportInputOption>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimum_selections: Option<u32>,
+    #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unsupported_fields: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1296,6 +1300,13 @@ fn validate_submitted_inputs(
             ));
         }
         previous_sort_key = Some(sort_key);
+        if let Some(field) = submitted.action.unsupported_fields.keys().next() {
+            return Err(ExportValidationError::new(
+                "input_action_payload_unexpected",
+                format!("{submitted_path}.action.{field}"),
+                "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
+            ));
+        }
         if submitted.action.prompt.trim().is_empty() {
             return Err(ExportValidationError::new(
                 "input_action_prompt_required",
@@ -1338,6 +1349,13 @@ fn validate_submitted_inputs(
         }
         let mut option_keys = HashSet::new();
         for (option_index, option) in submitted.action.options.iter().enumerate() {
+            if let Some(field) = option.unsupported_fields.keys().next() {
+                return Err(ExportValidationError::new(
+                    "input_action_payload_unexpected",
+                    format!("{submitted_path}.action.options[{option_index}].{field}"),
+                    "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
+                ));
+            }
             if option.key.is_empty()
                 || option.key.trim() != option.key
                 || option.key.contains('\0')
@@ -1423,6 +1441,15 @@ fn validate_submitted_inputs(
                         "Refresh the accepted action and recommit its value.",
                     ));
                 };
+                for (option_index, option) in selected.iter().enumerate() {
+                    if let Some(field) = option.unsupported_fields.keys().next() {
+                        return Err(ExportValidationError::new(
+                            "input_action_payload_unexpected",
+                            format!("{submitted_path}.value.selected[{option_index}].{field}"),
+                            "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
+                        ));
+                    }
+                }
                 if selected
                     .iter()
                     .map(|option| &option.key)

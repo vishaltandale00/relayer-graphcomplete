@@ -61,6 +61,7 @@ fn option(key: &str, label: &str) -> ExportInputOption {
     ExportInputOption {
         key: key.into(),
         label: label.into(),
+        unsupported_fields: Default::default(),
     }
 }
 
@@ -849,6 +850,7 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
                 prompt: "Explain".into(),
                 options: vec![],
                 minimum_selections: None,
+                unsupported_fields: Default::default(),
             },
             value: ExportSubmittedInputValue::Text {
                 text: "Because".into(),
@@ -863,6 +865,7 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
                 prompt: "Choose one".into(),
                 options: single_options.clone(),
                 minimum_selections: None,
+                unsupported_fields: Default::default(),
             },
             value: ExportSubmittedInputValue::Selected {
                 selected: vec![single_options[1].clone()],
@@ -877,6 +880,7 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
                 prompt: "Choose several".into(),
                 options: multi_options.clone(),
                 minimum_selections: Some(2),
+                unsupported_fields: Default::default(),
             },
             value: ExportSubmittedInputValue::Selected {
                 selected: multi_options,
@@ -1037,4 +1041,62 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
         selected: vec![selected],
     };
     assert_rejected_with_parity(&too_few_selections, "input_selection_count");
+
+    let text_only = || {
+        let mut records = fixture.clone();
+        let ConversationExportRecord::Turn(turn) = &mut records[2] else {
+            unreachable!()
+        };
+        turn.submitted_inputs
+            .retain(|input| input.action.control == ExportInputControl::Text);
+        records
+    };
+    let mut unknown_action_field = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut unknown_action_field[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0]
+        .action
+        .unsupported_fields
+        .insert("sliderMin".into(), serde_json::Value::from(1));
+    assert_rejected_with_parity(&unknown_action_field, "input_action_payload_unexpected");
+
+    let mut unknown_option_field = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut unknown_option_field[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[0]
+        .unsupported_fields
+        .insert("imageUrl".into(), serde_json::Value::from("banner.png"));
+    assert_rejected_with_parity(&unknown_option_field, "input_action_payload_unexpected");
+
+    let mut blank_text = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut blank_text[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Text { text: " ".into() };
+    assert_rejected_with_parity(&blank_text, "input_text_blank");
+
+    let mut text_with_options = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut text_with_options[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options = vec![option("extra", "Extra")];
+    assert_rejected_with_parity(&text_with_options, "input_action_options_unexpected");
+
+    let mut text_with_selected = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut text_with_selected[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Selected { selected: vec![] };
+    assert_rejected_with_parity(&text_with_selected, "input_action_snapshot_mismatch");
+
+    let mut select_with_text = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut select_with_text[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Text {
+        text: "wrong shape".into(),
+    };
+    assert_rejected_with_parity(&select_with_text, "input_action_snapshot_mismatch");
 }
