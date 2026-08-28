@@ -602,6 +602,7 @@ export async function captureLadybugPackagedLifecycle({
     const { stdout: checkoutStatus } = await execFileAsync("git", ["status", "--porcelain"], { cwd: checkout });
     if (checkoutStatus !== "") throw new Error("detached qualification checkout is not clean");
     for (const path of [
+      ".gitattributes",
       "desktop/packaging/build-development.mjs",
       "desktop/shared/target.mjs",
       "scripts/capture-ladybug-packaged-lifecycle.mjs",
@@ -677,6 +678,7 @@ export async function captureLadybugPackagedLifecycle({
   const lifecycleTimeoutMs = qualificationLifecycleTimeout(target);
   const lifecycle = await provePackagedLadybugLifecycle(executable, { commandTimeout: lifecycleTimeoutMs });
   const inputPaths = [
+    ".gitattributes",
     "Cargo.lock",
     "crates/relayer-graph-server/Cargo.toml",
     "crates/relayer-graph-server/src/main.rs",

@@ -172,6 +172,19 @@ describe("Ladybug packaged lifecycle qualification", () => {
       .rejects.toMatchObject({ stderr: expect.stringContaining("usage: capture-ladybug-packaged-lifecycle.mjs") });
   });
 
+  it("materializes every authenticated text input with stable LF bytes", async () => {
+    const paths = [
+      ".gitattributes",
+      "desktop/packaging/build-development.mjs",
+      "desktop/shared/target.mjs",
+      "scripts/capture-ladybug-packaged-lifecycle.mjs",
+      "scripts/prepare-ladybug-source.mjs",
+      "vendor/ladybug/source-build-manifest.json",
+    ];
+    const { stdout } = await execFileAsync("git", ["check-attr", "eol", "--", ...paths]);
+    expect(stdout.trim().split(/\r?\n/u)).toEqual(paths.map((path) => `${path}: eol: lf`));
+  });
+
   it("binds both isolated macOS captures to their exact committed qualification inputs", async () => {
     const expectations = [
       ["issue-261-ladybug-packaged-arm64.json", {
