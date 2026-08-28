@@ -13,6 +13,7 @@ import {
   npmCommandForPlatform,
   npmEnvironmentForDesktopTarget,
   packagedApplicationBuiltAfter,
+  qualificationBuildTempPrefix,
   parseMachOArchitectures,
   qualificationLifecycleTimeout,
   parseLadybugLockContention,
@@ -341,6 +342,13 @@ describe("Ladybug packaged lifecycle qualification", () => {
       prefixArgs: ["/d", "/s", "/c", "npm.cmd"],
     });
     expect(npmCommandForPlatform("darwin")).toEqual({ executable: "npm", prefixArgs: [] });
+  });
+
+  it("uses the short hosted runner temp root for Windows native compilation", () => {
+    expect(qualificationBuildTempPrefix({ RUNNER_TEMP: "D:\\a\\_temp" }, "win32"))
+      .toBe("D:\\a\\_temp\\rlb-");
+    expect(qualificationBuildTempPrefix({}, "darwin"))
+      .toBe(join(tmpdir(), "relayer-ladybug-clean-build-"));
   });
 
   it("requires a newly created Windows unpacked application", async () => {

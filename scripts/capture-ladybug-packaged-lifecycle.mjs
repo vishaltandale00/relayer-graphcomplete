@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
 import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep, win32 as win32Path } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -206,6 +206,16 @@ export function npmCommandForPlatform(
   return platform === "win32"
     ? { executable: commandShell, prefixArgs: ["/d", "/s", "/c", "npm.cmd"] }
     : { executable: "npm", prefixArgs: [] };
+}
+
+export function qualificationBuildTempPrefix(
+  environment = process.env,
+  platform = process.platform,
+) {
+  if (platform !== "win32") return join(tmpdir(), "relayer-ladybug-clean-build-");
+  const runnerTemp = String(environment.RUNNER_TEMP || "");
+  const parent = win32Path.isAbsolute(runnerTemp) ? runnerTemp : tmpdir();
+  return win32Path.join(parent, "rlb-");
 }
 
 export function parseLadybugLockContention(output) {
@@ -550,7 +560,7 @@ export async function captureLadybugPackagedLifecycle({
   if (environment.RUSTFLAGS || environment.CARGO_ENCODED_RUSTFLAGS) {
     throw new Error("the packaged Ladybug proof rejects ambient Rust compiler flags");
   }
-  const qualificationRoot = await mkdtemp(join(tmpdir(), "relayer-ladybug-clean-build-"));
+  const qualificationRoot = await mkdtemp(qualificationBuildTempPrefix(environment, target.platform));
   const preparedSource = join(qualificationRoot, "prepared-source");
   let sourceReceipt;
   let sourceEnvironment;
