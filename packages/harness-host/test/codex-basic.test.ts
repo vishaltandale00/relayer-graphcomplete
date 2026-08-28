@@ -11,6 +11,11 @@ import { CodexBasicHarness, type CodexBasicDependencies } from "../src/implement
 import type { HarnessConfiguration, HarnessRunContext, HarnessTraceEvent, HarnessTraceEventInput, HarnessTracePolicy, HarnessTraceSink } from "../src/types.js";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
+const browserMcpRuntime = {
+  executable: "/Applications/Relayer.app/Contents/MacOS/Relayer",
+  script: "/Applications/Relayer.app/Contents/Resources/app.asar.unpacked/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
+  connectionArgs: ["--browserUrl", "http://127.0.0.1:9222", "--no-usage-statistics", "--no-performance-crux"],
+} as const;
 
 const codexBasicConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
@@ -102,6 +107,18 @@ describe("CodexBasicHarness", () => {
       configuration: { ...codexBasicConfiguration, implementationVersion: 2 },
       savedState: { codexThreadId: "codex-thread" },
     })).toThrow("Unsupported codex.basic implementation version: 2");
+  });
+
+  it("rejects non-absolute browser MCP launch paths before starting Codex", () => {
+    expect(() => new CodexBasicHarness(context("ask"), {
+      browserMcpRuntime: { ...browserMcpRuntime, script: "node_modules/chrome-devtools-mcp.js" },
+    })).toThrow("requires absolute executable and script paths");
+  });
+
+  it("rejects an empty browser MCP attachment route before starting Codex", () => {
+    expect(() => new CodexBasicHarness(context("ask"), {
+      browserMcpRuntime: { ...browserMcpRuntime, connectionArgs: [] },
+    })).toThrow("requires non-empty connection arguments");
   });
 
   it("retains a provider thread ID when the first app-server turn fails", async () => {
@@ -404,6 +421,57 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.prompt).toContain("Codex native subagents are available when useful");
     expect(configuration.settings).not.toHaveProperty("model");
     expect(configuration.modelCompatibility?.[0]).not.toHaveProperty("preferredModelId");
+  });
+
+  it.each(["codex-basic", "codex-basic-high"])("leaves browser MCP approval routing to each %s product profile", async (name) => {
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
+    expect(Object.keys(configuration.permissionBindings)).toEqual(["ask", "auto", "full"]);
+    const cases = [
+      ["ask", { approvalPolicy: "on-request", approvalsReviewer: "user" }],
+      ["auto", { approvalPolicy: "on-request", approvalsReviewer: "auto_review" }],
+      ["full", { approvalPolicy: "never" }],
+    ] as const;
+    for (const [permissionProfileId, nativeApproval] of cases) {
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const harness = new CodexBasicHarness({
+        threadId: 1,
+        permissionProfileId,
+        permissionBinding: configuration.permissionBindings[permissionProfileId]!,
+        workingDirectory: repositoryRoot,
+        configuration,
+      }, {
+        browserMcpRuntime,
+        codexPathOverride: "/managed/codex",
+        runAppServerTurn: async (options) => {
+          submitted = options;
+          options.onThreadId("browser-thread");
+          return { threadId: "browser-thread", turnId: "turn-1", status: "completed" };
+        },
+      });
+
+      await harness.complete({ ...runContext(1, "token"), access: codexAccess() });
+
+      expect(submitted?.threadParams).toMatchObject(nativeApproval);
+      if (permissionProfileId === "full") {
+        expect(submitted?.threadParams).not.toHaveProperty("approvalsReviewer");
+      }
+      expect(submitted?.threadParams.config).toEqual({
+        skip_git_repo_check: true,
+        features: { tool_call_mcp_elicitation: false },
+        mcp_servers: {
+          "chrome-devtools": {
+            command: browserMcpRuntime.executable,
+            args: [browserMcpRuntime.script, ...browserMcpRuntime.connectionArgs],
+            env: { ELECTRON_RUN_AS_NODE: "1" },
+            enabled: true,
+            required: false,
+            startup_timeout_sec: 20,
+            tool_timeout_sec: 20,
+            default_tools_approval_mode: "prompt",
+          },
+        },
+      });
+    }
   });
 
   it("translates the three product profiles without adding a fixture-only profile", async () => {

@@ -1,0 +1,30 @@
+# Issue 257: harness-owned browser evidence
+
+This ledger records the delivery proof for the three independent browser routes assembled by issue #257. It is evidence about these exact harness/runtime combinations, not a browser capability or conformance contract for Relayer.
+
+## Proof boundary
+
+Each predecessor mechanism-proof lane used an already-running Chrome instance with remote debugging on loopback and a dedicated, non-default persistent profile. The benign page marker existed before the harness route started. Proof retained only hashes and booleans: no cookies, tokens, page bodies, private URLs, tab inventories, profile bytes, screenshots, or credentials. The manifest identifies each durable GitHub proof receipt and hashes its exact comment body; the integrated source-set digest binds those receipts to the assembled implementation bytes without claiming that live browser work runs in the deterministic suite.
+
+The lane-specific `predecessorLiveProof` fields record only outcomes stated by each hashed live receipt. Deterministic implementation tests separately cover the `deterministicProof` fields; they are not represented as live observations.
+
+Across those two evidence classes, the delivered routes cover existing-state observation, benign bounded actions, harness-owned cleanup, honest endpoint failure, and Ask denial at the enclosing native MCP tool or IPython cell. No inner browser-action taxonomy was introduced. Each harness now has a live receipt that explicitly records a reversed test-page action; [Claude's addendum](claude-live-reversible-action.md) binds the production SDK MCP handler to a pre-seeded marker, an observed value change, and restoration while leaving Chrome alive.
+
+Claude Ask currently leaves its coarse MCP tool outside `allowedTools`, so the native tool never runs. Codex uses the existing generic MCP approval bridge and Prime uses its existing cell approval/confinement. Auto and Full retain their existing harness translations.
+
+## Deterministic evidence
+
+[`manifest.json`](manifest.json) pins the exact configuration and implementation digests used by the proof. Tests cover:
+
+The manifest carries a stable snapshot identifier, every reviewed path's SHA-256, and their aggregate digest. On the delivery pull request, CI reads the synthetic merge's second parent and requires the inventory to equal the assembly-base-to-head diff, excluding only the self-referential manifest. Future CI recognizes the snapshot identifier in its base, locates the commit that introduced it (including a squash-merge commit), and validates that immutable historical tree instead of comparing unrelated later changes with issue #257's fixed assembly base.
+
+- Codex helper identity/version, explicit loopback arguments, packaged ASAR presence, native approval labels, cancellation, and Codex-local failure isolation;
+- Claude target selection, bounded payloads and operations, terminal-click and terminal-fill ordering, disabled-action rejection, final fill-value verification, managed SDK export admission, navigation failure, cancellation, sanitized errors, native Ask/Auto/Full translation, and socket-only cleanup;
+- Prime archive/tree/three-target dependency closures, required root/dist skill assets, configuration discovery, production preflight, and unchanged permission profiles;
+- packaged presence of each harness-owned route alongside the ordinary GraphComplete runtime.
+
+The Prime target closure receipts were replayed through the real `verifyPackagedPrimeAgent` implementation for macOS arm64, macOS x64, and Windows x64. Cross-target staging used placeholder Relayer server binaries where necessary, so that proof covers the Electron `app.asar` Prime closure—not signing, release readiness, or cross-architecture Rust binaries.
+
+## Limitations
+
+This evidence does not promise identical sites, prompts, approvals, authenticated access, CAPTCHA behavior, downloads, uploads, or action semantics across harnesses. It does not certify arbitrary attachment to Chrome's default profile. Chrome/profile setup and browser credentials remain outside Relayer, and no release, deployment, merge, or publication is part of this evidence.

@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import * as tar from "tar";
 import { describe, expect, it } from "vitest";
 
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
@@ -36,6 +37,23 @@ async function packageFileEntries(root, relativeRoot, output = []) {
   return output;
 }
 
+async function readArchiveFiles(archivePath, wantedPaths) {
+  const files = new Map();
+  await tar.t({
+    file: archivePath,
+    onentry(entry) {
+      if (!wantedPaths.has(entry.path)) {
+        entry.resume();
+        return;
+      }
+      const chunks = [];
+      entry.on("data", (chunk) => chunks.push(chunk));
+      entry.on("end", () => files.set(entry.path, Buffer.concat(chunks)));
+    },
+  });
+  return files;
+}
+
 describe("Prime Agent packaged runtime", () => {
   it("keeps integrity-bound source assets byte-stable across host checkouts", async () => {
     const attributes = await readFile(join(repositoryRoot, ".gitattributes"), "utf8");
@@ -54,7 +72,7 @@ describe("Prime Agent packaged runtime", () => {
     const lockfile = JSON.parse(await readFile(join(repositoryRoot, "package-lock.json"), "utf8"));
     const desktopManifest = JSON.parse(await readFile(join(repositoryRoot, "desktop", "package.json"), "utf8"));
 
-    expect(manifest.source.commit).toBe("2f4977eceb39e228b78241bd8084eb82b43efe6b");
+    expect(manifest.source.commit).toBe("f6130839ad3043f1cd3d5294fe03023035bfcd5c");
     expect(manifest.runtimeContract.modelScopeAccess).toBe("upfront-request-access@1");
     expect(manifest.packages).toHaveLength(4);
     for (const entry of manifest.packages) {
@@ -71,6 +89,53 @@ describe("Prime Agent packaged runtime", () => {
     expect(JSON.stringify(lockfile)).not.toContain("prime-agent/packages/");
   });
 
+  it("discovers the browser route through Prime's bundled Python skill semantics", async () => {
+    const { loadSkillsFromDir } = await import("@earendil-works/pi-coding-agent");
+    const packageRoot = resolve(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "..");
+    const { skills } = loadSkillsFromDir({ dir: join(packageRoot, "skills"), source: "builtin" });
+    const browser = skills.find(({ name }) => name === "browser");
+
+    expect(browser).toMatchObject({
+      name: "browser",
+      kind: "python",
+      python: { importName: "browser" },
+    });
+    for (const name of ["prime-agent-basic.yaml", "prime-agent-deep.yaml"]) {
+      const configuration = await readFile(join(repositoryRoot, "harnesses", name), "utf8");
+      expect(configuration).toContain("ask:\n    boundary: workspace-write@1");
+      expect(configuration).toContain("auto:\n    boundary: workspace-write@1");
+      expect(configuration).toContain("full: {}");
+    }
+  });
+
+  it("ships the tested browser helper at both production skill paths", async () => {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const codingAgent = manifest.packages.find(({ name }) => name === "@earendil-works/pi-coding-agent");
+    const sourcePath = "package/skills/browser/src/browser/__init__.py";
+    const distPath = "package/dist/skills/browser/src/browser/__init__.py";
+    const archiveFiles = await readArchiveFiles(
+      join(repositoryRoot, "vendor", "prime-agent", codingAgent.file),
+      new Set([sourcePath, distPath]),
+    );
+    expect(archiveFiles.get(sourcePath)).toEqual(archiveFiles.get(distPath));
+
+    const helper = archiveFiles.get(sourcePath)?.toString("utf8") ?? "";
+    expect(helper).toContain('element.matches(":disabled")');
+    expect(helper).toContain('element.getAttribute("aria-disabled") === "true"');
+    expect(helper).toContain("HTMLElement.prototype.click.call(element)");
+    expect(helper).toContain("return {{ previous, current: String(element.value) }};");
+    expect(helper).toContain("if current != value:");
+    expect(helper).toContain("page rejected or sanitized the requested fill value");
+    expect(helper).toContain("Replace and verify an input value, then disconnect this terminal page action.");
+    expect(helper).toContain("Click one matching element, then disconnect this terminal page action.");
+    expect(helper.match(/await asyncio\.shield\(self\.close\(\)\)/g)).toHaveLength(4);
+    expect(helper).toContain('"Page.lifecycleEvent",');
+    expect(helper).toContain('"Page.navigatedWithinDocument",');
+    expect(helper).toContain('params.get("loaderId") == loader_id');
+    expect(helper).toContain('params.get("frameId") == frame_id');
+    expect(helper).toContain('_normalized_navigation_url(params["url"]) == normalized_url');
+  });
+
   it("admits only the exact runtime API, production configs, and Python client", async () => {
     await expect(inspectPrimeAgentRuntime({
       appPath: repositoryRoot,
@@ -81,7 +146,7 @@ describe("Prime Agent packaged runtime", () => {
       architecture: "arm64",
     })).resolves.toMatchObject({
       available: true,
-      sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b",
+      sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
       configurationNames: ["prime-agent-basic", "prime-agent-deep"],
     });
 
@@ -103,7 +168,7 @@ describe("Prime Agent packaged runtime", () => {
       code: "prime_agent_api_incompatible",
       message: "This Relayer build cannot use the packaged Prime Agent API. Update Relayer.",
       diagnostics: {
-        sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b",
+        sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
         packages: expect.arrayContaining([{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }]),
       },
     });

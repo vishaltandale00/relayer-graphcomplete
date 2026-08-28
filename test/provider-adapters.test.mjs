@@ -46,7 +46,7 @@ const codexRuntime = Object.freeze({
   runtimeId: "codex", version: "0.150.1", executable: "/managed/codex",
 });
 const claudeRuntime = Object.freeze({
-  runtimeId: "claude", version: "0.3.247", executable: "/managed/claude",
+  runtimeId: "claude", version: "0.3.250", executable: "/managed/claude",
   moduleUrl: "file:///managed/claude/sdk.mjs",
 });
 

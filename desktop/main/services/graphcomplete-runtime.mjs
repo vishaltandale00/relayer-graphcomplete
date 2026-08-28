@@ -194,6 +194,7 @@ export class GraphCompleteRuntimeService {
     unavailableConfigurations = [],
     additionalImplementations = {},
     codexBasicClientModuleUrl,
+    codexBrowserMcpRuntime,
     graphAuthoringLauncherPath,
     codexPathOverride,
     resolveCodexRuntime,
@@ -211,6 +212,7 @@ export class GraphCompleteRuntimeService {
     this.unavailableConfigurations = unavailableConfigurations;
     this.additionalImplementations = additionalImplementations;
     this.codexBasicClientModuleUrl = codexBasicClientModuleUrl;
+    this.codexBrowserMcpRuntime = codexBrowserMcpRuntime;
     this.graphAuthoringLauncherPath = graphAuthoringLauncherPath;
     this.codexPathOverride = codexPathOverride;
     this.resolveCodexRuntime = resolveCodexRuntime;
@@ -293,9 +295,10 @@ export class GraphCompleteRuntimeService {
       }
       const harnessHost = await this.#awaitStartupOperation(startHarnessHost({
         implementations: productHarnessImplementations({
-          ...(this.codexBasicClientModuleUrl || this.graphAuthoringLauncherPath || this.codexPathOverride || this.resolveCodexRuntime ? {
+          ...(this.codexBasicClientModuleUrl || this.codexBrowserMcpRuntime || this.graphAuthoringLauncherPath || this.codexPathOverride || this.resolveCodexRuntime ? {
             "codex.basic": createCodexBasicFactory({
               ...(this.codexBasicClientModuleUrl ? { clientModuleUrl: this.codexBasicClientModuleUrl } : {}),
+              ...(this.codexBrowserMcpRuntime ? { browserMcpRuntime: this.codexBrowserMcpRuntime } : {}),
               ...(this.graphAuthoringLauncherPath ? { graphAuthoringLauncherPath: this.graphAuthoringLauncherPath } : {}),
               ...(this.codexPathOverride ? { codexPathOverride: this.codexPathOverride } : {}),
               ...(this.resolveCodexRuntime ? { resolveCodexRuntime: this.resolveCodexRuntime } : {}),

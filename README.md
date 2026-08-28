@@ -69,6 +69,18 @@ configurations as unavailable.
 
 Prime Agent is one optional recursive harness implementation, not the product runtime. See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), [ADR 0006](docs/decisions/0006-harness-provider-agnostic-product-boundary.md), and the adapter-specific [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
+## Harness-owned browser use
+
+The shipped Codex, Claude, and Prime harnesses can each attach to an already-running Chrome instance at `http://127.0.0.1:9222`. Start Chrome yourself with remote debugging enabled and a dedicated, non-default persistent profile; Chrome 136 and later do not honor remote-debugging switches for the default data directory. Relayer does not launch, stop, authenticate, or coordinate Chrome, and it has no shared browser service or browser setting.
+
+- `codex.basic` uses Codex's native MCP support with the packaged `chrome-devtools-mcp@1.8.0` helper. Its helper process follows the Codex app-server lifecycle; Chrome does not. If the exact packaged helper is missing or incompatible, only this Codex browser route is omitted and Desktop continues normally.
+- `claude.basic` supplies one bounded in-process Claude SDK MCP tool for navigation, text reads, clicks, and fills. With one page it can attach implicitly; with multiple pages the agent must provide a unique target ID, URL substring, or title substring. The helper closes only its own fetch/WebSocket connections.
+- `prime.agent` discovers Prime Agent's bundled dependency-free Python browser skill. The skill uses in-process loopback CDP inside Prime's existing kernel confinement and closes only its own connections. Prime Ask and Auto retain their current macOS confinement requirements.
+
+Browser use stays inside each harness's existing native approval unit. Ask, Approve for me, and Full access remain the same `ask`, `auto`, and `full` product profiles described below; Relayer does not classify or approve individual actions inside a native browser tool or cell. For `claude.basic`, Ask leaves the coarse browser MCP tool unlisted, Auto keeps SDK `acceptEdits` and pre-approves that one code-owned tool through `allowedTools`, and Full keeps `bypassPermissions`. SDK 0.3.250 therefore runs the Auto unit without a user prompt or a separate model or Relayer reviewer. Codex and Prime retain their existing native enclosing-tool or cell approval. No browser-specific permission mode or inner-action review is added.
+
+Unsupported setup fails as an ordinary harness limitation: Codex reports its native MCP connection or packaged-helper failure, Claude returns a sanitized unavailable/no-page/ambiguous-target/timeout error, and Prime raises its browser skill's loopback CDP failure. None of these paths may claim unread content or an action that did not execute. Site behavior, authenticated access, prompts, downloads, CAPTCHA handling, and compatibility are harness- and site-specific rather than a cross-harness guarantee. The sanitized delivery ledger is in [issue #257 evidence](docs/evidence/issue-257-browser-harnesses/README.md).
+
 ## Run the GraphComplete runtime eval
 
 The default run is deterministic and makes no inference calls. It launches the Rust graph server and Node host, completes two interactions through one live harness object with separately scoped graph capabilities, exercises the real TypeScript client, and saves `result.json` plus an interactive turn-navigable `index.html` under `.relayer/evals/runtime/<test-run-id>/<test-case-id>/<harness-configuration-name>/`:
