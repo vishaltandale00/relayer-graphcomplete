@@ -7,7 +7,10 @@ use crate::{
         HarnessModelRule, HarnessModelRules, RuntimeProductHarness, validate_stable_id,
     },
 };
-use relayer_graph_core::{ImportedConversationReceipt, ImportedConversationStage, ImportedTurn};
+use relayer_graph_core::{
+    ImportedConversationReceipt, ImportedConversationStage, ImportedTurn,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID,
+};
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -83,6 +86,7 @@ pub(crate) struct RuntimeClient {
     harness_url: Url,
     graph_control_token: String,
     harness_control_token: String,
+    personal_presentation_supported: bool,
     configurations: HashMap<String, CatalogEntry>,
     unavailable_configurations: HashMap<String, UnavailableCatalogEntry>,
 }
@@ -105,6 +109,24 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) input_identity: Option<&'a str>,
     pub(crate) input_digest: Option<&'a str>,
     pub(crate) contexts: &'a [crate::product::InteractionContextIntent],
+    pub(crate) personal_presentation: Option<&'a PersonalPresentationExecution>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PersonalPresentationExecution {
+    pub(crate) version_key: String,
+    pub(crate) version_interaction_node_id: i64,
+    pub(crate) root_layer_id: i64,
+}
+
+impl From<&crate::storage::PersonalPresentationPin> for PersonalPresentationExecution {
+    fn from(value: &crate::storage::PersonalPresentationPin) -> Self {
+        Self {
+            version_key: value.version_key.clone(),
+            version_interaction_node_id: value.version_interaction_node_id,
+            root_layer_id: value.root_layer_id,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -132,6 +154,7 @@ pub(crate) struct PreparedInteraction {
     pub(crate) effective_permission_receipt: Value,
     configuration: HarnessConfiguration,
     model_selection: Option<ExecutionModelSelection>,
+    personal_presentation_version_id: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -196,6 +219,15 @@ impl ApprovalEvent {
 pub(crate) struct RuntimeLayerOwner {
     pub(crate) layer_id: i64,
     pub(crate) owner_interaction_node_id: i64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MaterializedPersonalPresentationVersion {
+    pub(crate) interaction_node_id: i64,
+    pub(crate) root_layer_id: i64,
+    pub(crate) output: Value,
+    #[cfg(test)]
+    pub(crate) closure: relayer_graph_core::AcceptedGraphClosure,
 }
 
 #[derive(Debug, Deserialize)]
@@ -326,12 +358,15 @@ impl RuntimeClient {
                 )));
             }
         }
+        let client = Client::new();
+        let graph_url = loopback_url(graph_url, "graph")?;
         Ok(Self {
-            client: Client::new(),
-            graph_url: loopback_url(graph_url, "graph")?,
+            client,
+            graph_url,
             harness_url: loopback_url(harness_url, "harness")?,
             graph_control_token,
             harness_control_token,
+            personal_presentation_supported: false,
             configurations,
             unavailable_configurations,
         })
@@ -339,6 +374,47 @@ impl RuntimeClient {
 
     pub(crate) fn has_configuration(&self, name: &str) -> bool {
         self.configurations.contains_key(name)
+    }
+
+    pub(crate) fn supports_personal_presentation(&self) -> bool {
+        self.personal_presentation_supported
+    }
+
+    pub(crate) async fn detect_personal_presentation_support(
+        &mut self,
+    ) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .get(self.graph_url.join("api/control/personal-presentation")?)
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .send()
+            .await?;
+        let status = response.status();
+        if status != StatusCode::OK {
+            return Err(RuntimeError::Remote {
+                status: status.as_u16(),
+                body: response.json::<Value>().await.unwrap_or(Value::Null),
+            });
+        }
+        let contract = response.json::<Value>().await?;
+        self.personal_presentation_supported = match contract["schemaVersion"].as_u64() {
+            Some(1) => true,
+            Some(0)
+                if self
+                    .configurations
+                    .values()
+                    .all(|entry| entry.configuration.implementation == "test") =>
+            {
+                false
+            }
+            _ => {
+                return Err(RuntimeError::Protocol(
+                    "graph personal presentation contract must use schema version 1".into(),
+                ));
+            }
+        };
+        Ok(())
     }
 
     pub(crate) fn product_harnesses(&self) -> Vec<RuntimeProductHarness> {
@@ -392,6 +468,35 @@ impl RuntimeClient {
             })
     }
 
+    pub(crate) fn personal_presentation_version_key(
+        &self,
+        configuration_name: &str,
+    ) -> Result<Option<&str>, RuntimeError> {
+        let configuration = &self
+            .configurations
+            .get(configuration_name)
+            .ok_or_else(|| {
+                RuntimeError::Configuration(format!(
+                    "unknown harness configuration {configuration_name}"
+                ))
+            })?
+            .configuration;
+        match configuration.settings.get("personalPresentationVersion") {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(value))
+                if matches!(
+                    value.as_str(),
+                    "personal-presentation-v0" | "personal-presentation-v1"
+                ) =>
+            {
+                Ok(Some(value))
+            }
+            Some(_) => Err(RuntimeError::Configuration(format!(
+                "harness configuration {configuration_name} has an invalid personal presentation version"
+            ))),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) async fn complete(
         &self,
@@ -441,39 +546,25 @@ impl RuntimeClient {
             "contexts": command.contexts,
             "mintCapability": false,
         });
-        let mut attempts = 0;
-        let interaction: CreateInteractionResponse = loop {
-            attempts += 1;
-            match tokio::time::timeout(
-                CONTROL_REQUEST_TIMEOUT,
-                self.post(
+        let interaction: CreateInteractionResponse =
+            if command.invocation.is_some() || command.input_identity.is_some() {
+                self.post_idempotent(
                     create_url.clone(),
                     &create_body,
                     &self.graph_control_token,
                     StatusCode::OK,
-                ),
-            )
-            .await
-            .unwrap_or(Err(RuntimeError::Timeout("graph interaction creation")))
-            {
-                Ok(interaction) => break interaction,
-                Err(
-                    RuntimeError::Http(_)
-                    | RuntimeError::ResponseDecode(_)
-                    | RuntimeError::Timeout(_),
-                ) if (command.invocation.is_some() || command.input_identity.is_some())
-                    && attempts < CONTROL_RETRY_ATTEMPTS =>
-                {
-                    // Invoke creation is keyed by the immutable source pair in graph core.
-                    // Bounded exact retries recover response loss without another lease.
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        (attempts * 25).min(1_000),
-                    ))
-                    .await;
-                }
-                Err(error) => return Err(error),
-            }
-        };
+                    "graph interaction creation",
+                )
+                .await?
+            } else {
+                self.post(
+                    create_url,
+                    &create_body,
+                    &self.graph_control_token,
+                    StatusCode::OK,
+                )
+                .await?
+            };
         if !interaction.graph_token.is_empty() {
             self.revoke_capability(&interaction.graph_token).await?;
             return Err(RuntimeError::Protocol(
@@ -492,10 +583,36 @@ impl RuntimeClient {
                 "graph server returned a different interaction input identity".into(),
             ));
         }
+        if let Some(personal_presentation) = command.personal_presentation {
+            let attached: relayer_graph_core::PersonalPresentationAttachment = self
+                .post_idempotent(
+                    self.graph_url.join(&format!(
+                        "api/control/interactions/{}/personal-presentation",
+                        interaction.node.id
+                    ))?,
+                    &serde_json::json!({
+                        "versionInteractionNodeId": personal_presentation.version_interaction_node_id,
+                    }),
+                    &self.graph_control_token,
+                    StatusCode::OK,
+                    "personal presentation attachment",
+                )
+                .await?;
+            if attached.interaction_node_id.value() != interaction.node.id
+                || attached.version_interaction_node_id.value()
+                    != personal_presentation.version_interaction_node_id
+                || attached.root_layer_id.value() != personal_presentation.root_layer_id
+            {
+                return Err(RuntimeError::Protocol(
+                    "graph server attached a different personal presentation version".into(),
+                ));
+            }
+        }
         let effective_execution_digest = effective_execution_digest(
             harness_configuration_digest,
             &command.permission_profile.id,
             command.model_selection,
+            command.personal_presentation,
         );
         let unrestricted = command.permission_profile.authority == "unrestricted";
         Ok(PreparedInteraction {
@@ -517,6 +634,9 @@ impl RuntimeClient {
             }),
             configuration: selected.configuration.clone(),
             model_selection: command.model_selection.cloned(),
+            personal_presentation_version_id: command
+                .personal_presentation
+                .map(|value| value.version_interaction_node_id),
         })
     }
 
@@ -613,6 +733,10 @@ impl RuntimeClient {
                 "graph": graph,
                 "traceContext": { "productInteractionId": command.product_interaction_id },
             });
+            if let Some(version_id) = prepared.personal_presentation_version_id {
+                complete_body["traceContext"]["personalPresentationVersionId"] =
+                    Value::from(version_id);
+            }
             if let Some(model_selection) = prepared.model_selection.as_ref() {
                 complete_body["model"] = serde_json::json!({
                     "providerId": model_selection.provider_id.as_str(),
@@ -891,6 +1015,200 @@ impl RuntimeClient {
         }
     }
 
+    pub(crate) async fn ensure_personal_presentation_version(
+        &self,
+        version_key: &str,
+    ) -> Result<MaterializedPersonalPresentationVersion, RuntimeError> {
+        let definition = personal_presentation_definition(version_key)?;
+        let digest = relayer_graph_core::interaction_input_digest(
+            definition.interaction_text,
+            &[] as &[relayer_graph_core::InteractionContextDraft],
+        )
+        .map_err(|error| {
+            RuntimeError::Protocol(format!(
+                "could not digest personal presentation input: {error}"
+            ))
+        })?;
+        let created: CreateInteractionResponse = self
+            .post_idempotent(
+                self.graph_url.join("api/control/interactions")?,
+                &serde_json::json!({
+                    "projectId": null,
+                    "threadId": PERSONAL_PRESENTATION_PROFILE_THREAD_ID,
+                    "text": definition.interaction_text,
+                    "inputIdentity": format!("relayer.personal-presentation:{version_key}"),
+                    "inputDigest": digest,
+                    "contexts": [],
+                    "mintCapability": true,
+                    "personalPresentationProfile": true,
+                }),
+                &self.graph_control_token,
+                StatusCode::OK,
+                "personal presentation version creation",
+            )
+            .await?;
+        let node_id = created.node.id;
+        let graph_token = created.graph_token;
+        let operation = async {
+            if let Some(output) = self.completion_output(node_id).await? {
+                let closure = self.accepted_graph_closure(node_id).await?;
+                self.publish_personal_presentation_version(node_id).await?;
+                return Ok(MaterializedPersonalPresentationVersion {
+                    interaction_node_id: node_id,
+                    root_layer_id: closure.root_layer_id.value(),
+                    output,
+                    #[cfg(test)]
+                    closure,
+                });
+            }
+
+            let mut nodes = Vec::with_capacity(definition.nodes.len());
+            for node in definition.nodes {
+                let value = self
+                    .graph_capability_post(
+                        "api/graph/nodes",
+                        &graph_token,
+                        &serde_json::json!({
+                            "clientKey": node.client_key,
+                            "kind": node.kind,
+                            "icon": node.icon,
+                            "title": node.title,
+                            "detail": node.detail,
+                        }),
+                    )
+                    .await?;
+                let id = value
+                    .pointer("/node/id")
+                    .and_then(Value::as_i64)
+                    .ok_or_else(|| {
+                        RuntimeError::Protocol(
+                            "graph server omitted a personal presentation node ID".into(),
+                        )
+                    })?;
+                nodes.push(id);
+            }
+            let mut edges = Vec::with_capacity(definition.edges.len());
+            for (index, [left, right]) in definition.edges.iter().copied().enumerate() {
+                let value = self
+                    .graph_capability_post(
+                        "api/graph/edges",
+                        &graph_token,
+                        &serde_json::json!({
+                            "clientKey": format!("preference-edge-{index}"),
+                            "endpoints": [nodes[left], nodes[right]],
+                        }),
+                    )
+                    .await?;
+                edges.push(
+                    value
+                        .pointer("/edge/id")
+                        .and_then(Value::as_i64)
+                        .ok_or_else(|| {
+                            RuntimeError::Protocol(
+                                "graph server omitted a personal presentation edge ID".into(),
+                            )
+                        })?,
+                );
+            }
+            let placements = nodes
+                .iter()
+                .enumerate()
+                .map(|(index, node_id)| {
+                    serde_json::json!({
+                        "nodeId": node_id,
+                        "x": if nodes.len() == 1 { 0.5 } else { 0.25 + index as f64 * 0.5 },
+                        "y": 0.5,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let layer = self
+                .graph_capability_post(
+                    "api/graph/layers",
+                    &graph_token,
+                    &serde_json::json!({
+                        "clientKey": "personal-presentation-root",
+                        "nodes": nodes,
+                        "edges": edges,
+                        "layout": {"version": 1, "placements": placements},
+                    }),
+                )
+                .await?;
+            let root_layer_id = layer
+                .pointer("/layer/id")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| {
+                    RuntimeError::Protocol(
+                        "graph server omitted the personal presentation root layer ID".into(),
+                    )
+                })?;
+            self.graph_capability_post(
+                "api/graph/actions",
+                &graph_token,
+                &serde_json::json!({
+                    "clientKey": "personal-presentation-response",
+                    "sourceNodeId": node_id,
+                    "kind": "navigate",
+                    "relation": "expand",
+                    "label": "Personal presentation",
+                    "variant": "pill",
+                    "targetLayerId": root_layer_id,
+                }),
+            )
+            .await?;
+            let output = self
+                .graph_capability_post(
+                    "api/graph/submit",
+                    &graph_token,
+                    &serde_json::json!({"nodeId": node_id}),
+                )
+                .await?;
+            let closure = self.accepted_graph_closure(node_id).await?;
+            if closure.root_layer_id.value() != root_layer_id {
+                return Err(RuntimeError::Protocol(
+                    "personal presentation submission returned a mismatched root layer".into(),
+                ));
+            }
+            self.publish_personal_presentation_version(node_id).await?;
+            Ok(MaterializedPersonalPresentationVersion {
+                interaction_node_id: node_id,
+                root_layer_id,
+                output,
+                #[cfg(test)]
+                closure,
+            })
+        }
+        .await;
+        let cleanup = self.revoke_capability(&graph_token).await;
+        match (operation, cleanup) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Err(operation), Ok(())) => Err(operation),
+            (Ok(_), Err(cleanup)) => Err(cleanup),
+            (Err(operation), Err(cleanup)) => Err(RuntimeError::Cleanup {
+                operation: Box::new(operation),
+                cleanup: Box::new(cleanup),
+            }),
+        }
+    }
+
+    async fn publish_personal_presentation_version(
+        &self,
+        version_interaction_node_id: i64,
+    ) -> Result<(), RuntimeError> {
+        let _: Value = self
+            .post_idempotent(
+                self.graph_url
+                    .join("api/control/personal-presentation/versions")?,
+                &serde_json::json!({
+                    "versionInteractionNodeId": version_interaction_node_id,
+                }),
+                &self.graph_control_token,
+                StatusCode::OK,
+                "personal presentation publication",
+            )
+            .await?;
+        Ok(())
+    }
+
     pub(crate) async fn get_layer(
         &self,
         interaction_node_id: i64,
@@ -919,15 +1237,11 @@ impl RuntimeClient {
         &self,
         interaction_node_id: i64,
     ) -> Result<relayer_graph_core::AcceptedGraphClosure, RuntimeError> {
-        let response = self
-            .client
-            .get(self.graph_url.join(&format!(
+        let value = self
+            .control_get(&format!(
                 "api/control/interactions/{interaction_node_id}/accepted-closure"
-            ))?)
-            .bearer_auth(&self.graph_control_token)
-            .send()
+            ))
             .await?;
-        let value = response_json(response, StatusCode::OK).await?;
         Ok(serde_json::from_value(value)?)
     }
 
@@ -1008,10 +1322,40 @@ impl RuntimeClient {
         response_json(response, StatusCode::OK).await
     }
 
-    async fn revoke_capability(&self, graph_token: &str) -> Result<(), RuntimeError> {
-        self.delete_control(&serde_json::json!({"graphToken": graph_token}))
+    async fn graph_capability_post(
+        &self,
+        path: &str,
+        graph_token: &str,
+        body: &Value,
+    ) -> Result<Value, RuntimeError> {
+        let response = self
+            .client
+            .post(self.graph_url.join(path)?)
+            .bearer_auth(graph_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(body)
+            .send()
             .await?;
-        Ok(())
+        response_json(response, StatusCode::OK).await
+    }
+
+    async fn revoke_capability(&self, graph_token: &str) -> Result<(), RuntimeError> {
+        let body = serde_json::json!({"graphToken": graph_token});
+        for attempt in 1..=CONTROL_RETRY_ATTEMPTS {
+            match self.delete_control(&body).await {
+                Ok(_) => return Ok(()),
+                Err(
+                    RuntimeError::Http(_)
+                    | RuntimeError::ResponseDecode(_)
+                    | RuntimeError::Timeout(_),
+                ) if attempt < CONTROL_RETRY_ATTEMPTS => {
+                    tokio::time::sleep(std::time::Duration::from_millis((attempt * 25).min(1_000)))
+                        .await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("bounded retry loop always returns")
     }
 
     async fn delete_control(&self, body: &Value) -> Result<Value, RuntimeError> {
@@ -1042,6 +1386,97 @@ impl RuntimeClient {
             .await?;
         let value = response_json(response, expected).await?;
         Ok(serde_json::from_value(value)?)
+    }
+
+    async fn post_idempotent<T: for<'de> Deserialize<'de>>(
+        &self,
+        url: Url,
+        body: &Value,
+        control_token: &str,
+        expected: StatusCode,
+        timeout_operation: &'static str,
+    ) -> Result<T, RuntimeError> {
+        for attempt in 1..=CONTROL_RETRY_ATTEMPTS {
+            let result = tokio::time::timeout(
+                CONTROL_REQUEST_TIMEOUT,
+                self.post(url.clone(), body, control_token, expected),
+            )
+            .await
+            .unwrap_or(Err(RuntimeError::Timeout(timeout_operation)));
+            match result {
+                Ok(value) => return Ok(value),
+                Err(
+                    RuntimeError::Http(_)
+                    | RuntimeError::ResponseDecode(_)
+                    | RuntimeError::Timeout(_),
+                ) if attempt < CONTROL_RETRY_ATTEMPTS => {
+                    tokio::time::sleep(std::time::Duration::from_millis((attempt * 25).min(1_000)))
+                        .await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("bounded retry loop always returns")
+    }
+}
+
+struct PersonalPresentationNodeDefinition {
+    client_key: &'static str,
+    kind: &'static str,
+    icon: &'static str,
+    title: &'static str,
+    detail: &'static str,
+}
+
+struct PersonalPresentationDefinition {
+    interaction_text: &'static str,
+    nodes: &'static [PersonalPresentationNodeDefinition],
+    edges: &'static [[usize; 2]],
+}
+
+const PERSONAL_PRESENTATION_V0_NODES: &[PersonalPresentationNodeDefinition] =
+    &[PersonalPresentationNodeDefinition {
+        client_key: "neutral-manifest",
+        kind: "personal-presentation-manifest",
+        icon: "settings",
+        title: "Neutral personal presentation",
+        detail: "This control version adds no personal presentation guidance.",
+    }];
+
+const PERSONAL_PRESENTATION_V1_NODES: &[PersonalPresentationNodeDefinition] = &[
+    PersonalPresentationNodeDefinition {
+        client_key: "decision-useful-center",
+        kind: "presentation-preference",
+        icon: "compass",
+        title: "Decision-useful center",
+        detail: "The user prefers central layers that are immediately decision-useful. Foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations.",
+    },
+    PersonalPresentationNodeDefinition {
+        client_key: "adaptive-progressive-disclosure",
+        kind: "presentation-preference",
+        icon: "layers",
+        title: "Adaptive progressive disclosure",
+        detail: "Reveal additional information according to its value to understanding. Keep information central when it is necessary to understand the response without navigating. Use graph actions when supporting evidence, implementation detail, or secondary context would materially improve understanding or help the user proceed. Do not add branches that merely repeat or decorate the central explanation.",
+    },
+];
+
+fn personal_presentation_definition(
+    version_key: &str,
+) -> Result<PersonalPresentationDefinition, RuntimeError> {
+    match version_key {
+        "personal-presentation-v0" => Ok(PersonalPresentationDefinition {
+            interaction_text: "Personal presentation V0",
+            nodes: PERSONAL_PRESENTATION_V0_NODES,
+            edges: &[],
+        }),
+        "personal-presentation-v1" => Ok(PersonalPresentationDefinition {
+            interaction_text: "Personal presentation V1",
+            nodes: PERSONAL_PRESENTATION_V1_NODES,
+            edges: &[[0, 1]],
+        }),
+        _ => Err(RuntimeError::Configuration(format!(
+            "unknown personal presentation version {version_key}"
+        ))),
     }
 }
 
@@ -1260,6 +1695,7 @@ fn effective_execution_digest(
     configuration_digest: &str,
     permission_profile_id: &str,
     model_selection: Option<&ExecutionModelSelection>,
+    personal_presentation: Option<&PersonalPresentationExecution>,
 ) -> String {
     let mut digest = Sha256::new();
     digest.update(b"relayer.effective-execution.v2");
@@ -1280,6 +1716,19 @@ fn effective_execution_digest(
         digest.update(b"provider-model");
         digest.update([0]);
         digest.update(model_selection.model_id.as_bytes());
+    }
+    if let Some(personal_presentation) = personal_presentation {
+        digest.update([0]);
+        digest.update(b"personal-presentation-version");
+        digest.update([0]);
+        digest.update(personal_presentation.version_key.as_bytes());
+        digest.update([0]);
+        digest.update(
+            personal_presentation
+                .version_interaction_node_id
+                .to_string()
+                .as_bytes(),
+        );
     }
     format!("sha256:{:x}", digest.finalize())
 }
@@ -1508,7 +1957,8 @@ impl RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CompleteInteraction, HarnessConfiguration, PreparedInvocation, RuntimeClient, RuntimeError,
+        CONTROL_REQUEST_TIMEOUT, CompleteInteraction, HarnessConfiguration, PreparedInvocation,
+        RuntimeClient, RuntimeError,
     };
     use crate::{permissions::PermissionProfile, product::ExecutionHarnessPolicy};
     use axum::{
@@ -1525,7 +1975,7 @@ mod tests {
             Arc,
             atomic::{AtomicUsize, Ordering},
         },
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     #[test]
@@ -1709,6 +2159,121 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn missing_personal_presentation_contract_fails_runtime_detection() {
+        let (graph_url, graph_task) = serve(Router::new()).await;
+        let catalog = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            catalog.path(),
+            json!({"schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"test","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let mut runtime = RuntimeClient::open(
+            &graph_url,
+            "http://127.0.0.1:2/",
+            "graph-control".into(),
+            "harness-control".into(),
+            catalog.path(),
+        )
+        .await
+        .unwrap();
+
+        let error = runtime
+            .detect_personal_presentation_support()
+            .await
+            .unwrap_err();
+        assert!(matches!(error, RuntimeError::Remote { status: 404, .. }));
+        assert!(!runtime.supports_personal_presentation());
+        graph_task.abort();
+    }
+
+    #[tokio::test]
+    async fn personal_presentation_contract_probe_times_out_when_headers_stall() {
+        let (graph_url, graph_task) = serve(Router::new().route(
+            "/api/control/personal-presentation",
+            routing::get(|| async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                Json(json!({"schemaVersion": 1}))
+            }),
+        ))
+        .await;
+        let catalog = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            catalog.path(),
+            json!({"schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"test","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let mut runtime = RuntimeClient::open(
+            &graph_url,
+            "http://127.0.0.1:2/",
+            "graph-control".into(),
+            "harness-control".into(),
+            catalog.path(),
+        )
+        .await
+        .unwrap();
+
+        let bounded = tokio::time::timeout(
+            CONTROL_REQUEST_TIMEOUT + Duration::from_secs(1),
+            runtime.detect_personal_presentation_support(),
+        )
+        .await
+        .expect("the contract probe must honor its request timeout")
+        .unwrap_err();
+        assert!(matches!(bounded, RuntimeError::Http(ref error) if error.is_timeout()));
+        assert!(!runtime.supports_personal_presentation());
+        graph_task.abort();
+    }
+
+    #[tokio::test]
+    async fn accepted_graph_closure_times_out_when_headers_stall() {
+        let (graph_url, graph_task) = serve(Router::new().route(
+            "/api/control/interactions/1/accepted-closure",
+            routing::get(|| async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                Json(json!({"rootLayerId": 1, "layers": []}))
+            }),
+        ))
+        .await;
+        let catalog = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            catalog.path(),
+            json!({"schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"test","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            "http://127.0.0.1:2/",
+            "graph-control".into(),
+            "harness-control".into(),
+            catalog.path(),
+        )
+        .await
+        .unwrap();
+
+        let bounded = tokio::time::timeout(
+            CONTROL_REQUEST_TIMEOUT + Duration::from_secs(1),
+            runtime.accepted_graph_closure(1),
+        )
+        .await
+        .expect("the accepted-closure read must honor its request timeout")
+        .unwrap_err();
+        assert!(matches!(bounded, RuntimeError::Http(ref error) if error.is_timeout()));
+        graph_task.abort();
+    }
+
+    #[tokio::test]
     async fn invoke_and_identified_prepare_retry_lost_create_responses_with_stable_identity() {
         let creates = Arc::new(AtomicUsize::new(0));
         let observed_creates = creates.clone();
@@ -1805,6 +2370,7 @@ mod tests {
             input_identity: None,
             input_digest: None,
             contexts: &[],
+            personal_presentation: None,
         };
 
         let prepared = runtime.prepare(&command).await.unwrap();
@@ -1829,11 +2395,165 @@ mod tests {
             input_identity: Some("product:99"),
             input_digest: Some("sha256:v1:stable"),
             contexts: &[],
+            personal_presentation: None,
         };
         let prepared = runtime.prepare(&identified).await.unwrap();
         assert_eq!(prepared.graph_node_id, 42);
         assert_eq!(identified_creates.load(Ordering::SeqCst), 3);
         runtime.discard_prepared(prepared).await.unwrap();
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn retries_personal_presentation_publication_with_stable_identity() {
+        let publications = Arc::new(AtomicUsize::new(0));
+        let observed = publications.clone();
+        let graph = Router::new().route(
+            "/api/control/personal-presentation/versions",
+            routing::post(move || {
+                let observed = observed.clone();
+                async move {
+                    if observed.fetch_add(1, Ordering::SeqCst)
+                        < super::CONTROL_RETRY_ATTEMPTS as usize - 1
+                    {
+                        (StatusCode::OK, "invalid json")
+                    } else {
+                        (StatusCode::OK, "{}")
+                    }
+                }
+            }),
+        );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(Router::new()).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-personal-presentation-publication-retry-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({"schemaVersion":1,"configurations":[]}).to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+
+        runtime
+            .publish_personal_presentation_version(90)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            publications.load(Ordering::SeqCst),
+            super::CONTROL_RETRY_ATTEMPTS as usize
+        );
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn materializes_built_in_personal_presentation_versions_as_ordinary_completions() {
+        let graph = relayer_graph_core::GraphDatabase::in_memory()
+            .await
+            .unwrap();
+        let graph_reader = graph.clone();
+        let graph_app = relayer_graph_server::router(relayer_graph_server::ServerState::new(
+            graph,
+            "graph-control",
+        ));
+        let (graph_url, graph_task) = serve(graph_app).await;
+        let (harness_url, harness_task) = serve(Router::new()).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-personal-presentation-runtime-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({
+                "schemaVersion":1,
+                "configurations":[{"configuration":{
+                    "schemaVersion":1,"name":"test","implementation":"test",
+                    "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+                },"digest":"sha256:test"}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+
+        let v0 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v0")
+            .await
+            .unwrap();
+        assert_eq!(
+            v0.closure.layers[0].nodes[0].kind,
+            "personal-presentation-manifest"
+        );
+        let v1 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v1")
+            .await
+            .unwrap();
+        assert_eq!(
+            v1.closure.layers[0]
+                .nodes
+                .iter()
+                .map(|node| node.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Decision-useful center", "Adaptive progressive disclosure"]
+        );
+        assert_eq!(v1.closure.layers[0].edges.len(), 1);
+        let replay = runtime
+            .ensure_personal_presentation_version("personal-presentation-v1")
+            .await
+            .unwrap();
+        assert_eq!(replay.interaction_node_id, v1.interaction_node_id);
+        assert_eq!(replay.root_layer_id, v1.root_layer_id);
+        let ordinary = graph_reader
+            .create_interaction(
+                None,
+                relayer_graph_core::ThreadId::new(900).unwrap(),
+                "ordinary standalone interaction",
+            )
+            .await
+            .unwrap();
+        let ordinary_writer = graph_reader.writer_for_subgraph(ordinary.id).await.unwrap();
+        assert!(
+            ordinary_writer
+                .get_node(v1.closure.layers[0].nodes[0].id)
+                .await
+                .is_err(),
+            "an ordinary standalone thread must not see the reserved profile graph"
+        );
+
         graph_task.abort();
         harness_task.abort();
         fs::remove_dir_all(root).unwrap();
@@ -1910,6 +2630,7 @@ mod tests {
             input_identity: None,
             input_digest: None,
             contexts: &[],
+            personal_presentation: None,
         };
         let error = runtime.prepare(&command).await.unwrap_err();
         assert!(matches!(&error, super::RuntimeError::ResponseDecode(_)));
@@ -1943,7 +2664,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revokes_the_interaction_capability_when_session_registration_fails() {
+    async fn retries_capability_revocation_when_session_registration_fails() {
         let revocations = Arc::new(AtomicUsize::new(0));
         let observed_revocations = revocations.clone();
         let graph = Router::new()
@@ -1963,8 +2684,10 @@ mod tests {
                     let observed_revocations = observed_revocations.clone();
                     async move {
                         assert_eq!(headers["authorization"], "Bearer graph-control");
-                        observed_revocations.fetch_add(1, Ordering::SeqCst);
-                        Json(json!({ "revoked": true }))
+                        if observed_revocations.fetch_add(1, Ordering::SeqCst) == 0 {
+                            return (StatusCode::OK, "response was truncated").into_response();
+                        }
+                        Json(json!({ "revoked": true })).into_response()
                     }
                 }),
             );
@@ -2044,11 +2767,12 @@ mod tests {
                 input_identity: None,
                 input_digest: None,
                 contexts: &[],
+                personal_presentation: None,
             })
             .await;
 
         assert!(result.is_err());
-        assert_eq!(revocations.load(Ordering::SeqCst), 1);
+        assert_eq!(revocations.load(Ordering::SeqCst), 2);
         graph_task.abort();
         harness_task.abort();
         fs::remove_dir_all(root).unwrap();
@@ -2058,12 +2782,32 @@ mod tests {
     async fn revokes_the_interaction_capability_after_successful_completion() {
         let revocations = Arc::new(AtomicUsize::new(0));
         let observed_revocations = revocations.clone();
+        let attachments = Arc::new(AtomicUsize::new(0));
+        let observed_attachments = attachments.clone();
         let graph = Router::new()
             .route(
                 "/api/control/interactions",
                 routing::post(|headers: HeaderMap| async move {
                     assert_eq!(headers["authorization"], "Bearer graph-control");
                     Json(json!({ "node": { "id": 41 }, "graphToken": "" }))
+                }),
+            )
+            .route(
+                "/api/control/interactions/{id}/personal-presentation",
+                routing::post(move |Json(body): Json<Value>| {
+                    let observed_attachments = observed_attachments.clone();
+                    async move {
+                        assert_eq!(body["versionInteractionNodeId"], 90);
+                        if observed_attachments.fetch_add(1, Ordering::SeqCst) < 2 {
+                            return (StatusCode::OK, "response was truncated").into_response();
+                        }
+                        Json(json!({
+                            "interactionNodeId": 41,
+                            "versionInteractionNodeId": 90,
+                            "rootLayerId": 91,
+                        }))
+                        .into_response()
+                    }
                 }),
             )
             .route(
@@ -2094,6 +2838,7 @@ mod tests {
                     assert_eq!(headers["authorization"], "Bearer harness-control");
                     assert_eq!(body["interactionId"], 7);
                     assert_eq!(body["graph"]["nodeId"], 41);
+                    assert_eq!(body["traceContext"]["personalPresentationVersionId"], 90);
                     Json(json!({ "output": { "nodeId": 41 } }))
                 }),
             )
@@ -2155,6 +2900,11 @@ mod tests {
             reviewer: "automatic".into(),
         };
 
+        let personal_presentation = super::PersonalPresentationExecution {
+            version_key: "personal-presentation-v1".into(),
+            version_interaction_node_id: 90,
+            root_layer_id: 91,
+        };
         let completed = runtime
             .complete(CompleteInteraction {
                 project_id: None,
@@ -2174,11 +2924,13 @@ mod tests {
                 input_identity: None,
                 input_digest: None,
                 contexts: &[],
+                personal_presentation: Some(&personal_presentation),
             })
             .await
             .unwrap();
 
         assert_eq!(completed.output, json!({ "nodeId": 41 }));
+        assert_eq!(attachments.load(Ordering::SeqCst), 3);
         assert_eq!(revocations.load(Ordering::SeqCst), 1);
         graph_task.abort();
         harness_task.abort();

@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadHarnessConfiguration } from "../src/configuration.js";
 import { createNoopHarnessTraceSink, HarnessTraceStore } from "../src/trace.js";
 import type { CodexAppServerTurnOptions } from "../src/implementations/codex-app-server.js";
-import { CodexBasicHarness, type CodexBasicDependencies } from "../src/implementations/codex-basic.js";
+import { buildLayeredNavigationPrompt, CodexBasicHarness, type CodexBasicDependencies } from "../src/implementations/codex-basic.js";
 import type { HarnessConfiguration, HarnessRunContext, HarnessTraceEvent, HarnessTraceEventInput, HarnessTracePolicy, HarnessTraceSink } from "../src/types.js";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
@@ -36,6 +36,83 @@ const codexBasicConfiguration: HarnessConfiguration = {
 };
 
 describe("CodexBasicHarness", () => {
+  it("renders V1 after generic guidance and leaves neutral V0 at baseline", () => {
+    const baseline = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
+    const neutral = buildLayeredNavigationPrompt(personalPresentationRunContext(false), "@relayer/graph-client");
+    const treatment = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client");
+    const codexProviderPrompt = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client", undefined, false);
+
+    expect(neutral).toBe(baseline);
+    expect(treatment).toContain("Personal graph presentation preferences:");
+    expect(treatment).toContain("Decision-useful center: The user prefers central layers");
+    expect(treatment).toContain("every native child that can author graph content");
+    expect(treatment.indexOf("Graph presentation guidance:")).toBeLessThan(
+      treatment.indexOf("Personal graph presentation preferences:"),
+    );
+    expect(treatment.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+      treatment.indexOf("Normalized interaction input:"),
+    );
+    expect(codexProviderPrompt).toBe(baseline);
+  });
+
+  it("reuses a native Codex thread only while its pinned presentation version is unchanged", async () => {
+    const submitted: CodexAppServerTurnOptions[] = [];
+    const trace = recordingTrace();
+    const harness = harnessFixture("auto", async (options) => {
+      submitted.push(options);
+      options.onThreadId("thread-1");
+      return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
+    });
+
+    await harness.complete({ ...personalPresentationRunContext(true), trace: trace.sink });
+    await harness.complete(personalPresentationRunContext(true));
+    await harness.complete(personalPresentationRunContext(false));
+
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("If you are the root agent");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("only when assigning a native child to author graph content");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("Never include that block in an unrelated delegate's task");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("only when that exact rendered block is present in your assigned task");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("every native child that can author graph content");
+    expect(submitted[0]?.threadParams.developerInstructions).not.toContain("Personal graph presentation preferences:");
+    expect(submitted[0]?.threadParams.developerInstructions).not.toContain("Decision-useful center");
+    expect(submitted[0]?.prompt).toContain("Personal graph presentation preferences:");
+    expect(submitted[0]?.prompt.indexOf("Graph presentation guidance:")).toBeLessThan(
+      submitted[0]!.prompt.indexOf("Personal graph presentation preferences:"),
+    );
+    expect(submitted[0]?.prompt.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+      submitted[0]!.prompt.indexOf("Normalized interaction input:"),
+    );
+    const tracedPrompt = trace.events.find((event) => event.type === "prompt")?.data.text;
+    expect(tracedPrompt).not.toContain("Personal graph presentation preferences:");
+    expect(tracedPrompt).not.toContain("Decision-useful center");
+    expect(submitted[1]?.savedThreadId).toBe("thread-1");
+    expect(submitted[2]?.savedThreadId).toBeUndefined();
+    expect(submitted[2]?.threadParams.developerInstructions).toBeNull();
+  });
+
+  it("rotates a legacy saved Codex thread whose presentation version is unknown", async () => {
+    let submitted: CodexAppServerTurnOptions | undefined;
+    const harness = new CodexBasicHarness({
+      ...context("auto"),
+      savedState: { codexThreadId: "legacy-thread" },
+    }, {
+      codexPathOverride: "/managed/codex",
+      runAppServerTurn: async (options) => {
+        submitted = options;
+        options.onThreadId("replacement-thread");
+        return { threadId: "replacement-thread", turnId: "turn-1", status: "completed" };
+      },
+    });
+
+    await harness.complete(runContext(1, "token"));
+
+    expect(submitted?.savedThreadId).toBeUndefined();
+    expect(harness.state()).toEqual({
+      codexThreadId: "replacement-thread",
+      codexThreadPersonalPresentationVersionId: null,
+    });
+  });
+
   it("requires an explicit Codex executable before submitting an app-server turn", async () => {
     const runAppServerTurn = vi.fn(async () => ({
       threadId: "unreachable",
@@ -131,7 +208,10 @@ describe("CodexBasicHarness", () => {
 
     await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("turn failed");
 
-    expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
+    expect(harness.state()).toEqual({
+      codexThreadId: "codex-thread-after-start",
+      codexThreadPersonalPresentationVersionId: null,
+    });
     expect(submitted?.prompt).toContain("Relayer graph affordances:");
     expect(submitted?.prompt).toContain("Each layer should explain its scope as a coherent whole");
     expect(submitted?.prompt).toContain('Choose "expand" when another layer should deepen one part');
@@ -169,6 +249,7 @@ describe("CodexBasicHarness", () => {
       sandbox: "workspace-write",
       model: "gpt-test",
       config: { skip_git_repo_check: true, web_search: "disabled" },
+      developerInstructions: null,
       serviceName: "relayer_graphcomplete",
     });
     expect(submitted?.turnParams).toMatchObject({
@@ -280,11 +361,9 @@ describe("CodexBasicHarness", () => {
 
       await harness.complete(runContext(1, "token"));
 
-      if (promptProfile === undefined) {
-        expect(submittedPrompt).toContain("Run exactly node --input-type=module");
-      } else {
-        expect(submittedPrompt).toContain("Write a temporary .mjs file outside the project checkout");
-      }
+      expect(submittedPrompt).toContain("Run exactly node --input-type=module");
+      expect(submittedPrompt).toContain("delimited by exactly RELAYER_GRAPH_PROGRAM");
+      expect(submittedPrompt).toContain("do not create a script in either the project checkout or a temporary directory");
       expect(submittedPrompt).not.toContain("do not resolve Node.js from PATH");
       expect(submittedEnvironment).not.toHaveProperty("RELAYER_GRAPH_AUTHORING_NODE");
     }
@@ -515,7 +594,10 @@ describe("CodexBasicHarness", () => {
       ["gpt-first", "gpt-first"],
       ["gpt-second", "gpt-second"],
     ]);
-    expect(harness.state()).toEqual({ codexThreadId: "codex-thread-1" });
+    expect(harness.state()).toEqual({
+      codexThreadId: "codex-thread-1",
+      codexThreadPersonalPresentationVersionId: null,
+    });
   });
 
   it("passes only the selected execution-scoped provider secret to Codex", async () => {
@@ -733,6 +815,110 @@ describe("CodexBasicHarness", () => {
     expect(trace.openedStreams).toBe(0);
   });
 
+  it("redacts propagated personal presentation guidance from Codex collaboration traces", async () => {
+    const trace = recordingTrace();
+    const preferenceDetail = "The user prefers central layers that are immediately decision-useful. Never repeat OPENAI_API_KEY=secret.";
+    const rendered = `Personal graph presentation preferences:\n\nDecision-useful center: ${preferenceDetail}`;
+    const harness = harnessFixture("auto", async (options) => {
+      options.onThreadId("streamed-thread");
+      options.onNotification?.("item/started", { item: {
+        id: "graph-child",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        status: "inProgress",
+        prompt: `Author graph content.\n\n${rendered}`,
+      } });
+      options.onNotification?.("item/started", { item: {
+        id: "research-child",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        status: "inProgress",
+        prompt: "Research the implementation without authoring graph content.",
+      } });
+      options.onNotification?.("item/completed", { item: {
+        id: "partial-echo",
+        type: "agentMessage",
+        text: `Applied Decision-useful center. ${preferenceDetail}`,
+      } });
+      options.onNotification?.("item/completed", { item: {
+        id: "unrelated-command",
+        type: "commandExecution",
+        aggregatedOutput: "Decision-useful center",
+      } });
+      options.onNotification?.("item/started", { item: {
+        id: "graph-command",
+        type: "commandExecution",
+        command: "node --input-type=module <<'RELAYER_GRAPH_PROGRAM'\n// Decision-useful center\nawait graph.submit(1);\nRELAYER_GRAPH_PROGRAM",
+        aggregatedOutput: "Decision-useful center",
+      } });
+      options.onNotification?.("item/started", { item: {
+        id: "unrelated-node-heredoc",
+        type: "commandExecution",
+        command: "node --input-type=module <<'NODE'\nconsole.log('Decision-useful center')\nNODE",
+        aggregatedOutput: "Decision-useful center",
+      } });
+      options.onNotification?.("item/agentMessage/delta", {
+        itemId: "agent-delta",
+        delta: "Decision-useful center",
+      });
+      options.onNotification?.("item/commandExecution/outputDelta", {
+        itemId: "graph-command",
+        delta: "Decision-useful center",
+      });
+      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+    });
+    const baseContext = personalPresentationRunContext(true);
+    const presentation = baseContext.personalPresentation!;
+    const firstLayer = presentation.graph.layers[0]!;
+    const firstNode = firstLayer.nodes[0]!;
+    const context: HarnessRunContext = {
+      ...baseContext,
+      personalPresentation: {
+        ...presentation,
+        graph: {
+          ...presentation.graph,
+          layers: [{
+            ...firstLayer,
+            nodes: [{
+              ...firstNode,
+              title: ` ${firstNode.title} `,
+              detail: ` ${preferenceDetail} `,
+            }],
+          }],
+        },
+      },
+    };
+
+    await harness.complete({ ...context, trace: trace.sink });
+
+    const echoEvents = trace.events.filter((event) => !["unrelated-command", "unrelated-node-heredoc"].includes(event.providerEventId ?? ""));
+    const serializedEchoes = JSON.stringify(echoEvents);
+    expect(serializedEchoes).not.toContain("Decision-useful center");
+    expect(serializedEchoes).not.toContain("The user prefers central layers that are immediately decision-useful.");
+    expect(serializedEchoes).not.toContain("OPENAI_API_KEY");
+    expect(serializedEchoes.match(/\[redacted-personal-presentation\]/g)?.length).toBeGreaterThanOrEqual(3);
+    const unrelatedCommand = trace.events.find((event) => event.type === "provider.event"
+      && event.providerEventId === "unrelated-command");
+    expect(JSON.stringify(unrelatedCommand?.data)).toContain("Decision-useful center");
+    const unrelatedNodeHeredoc = trace.events.find((event) => event.type === "provider.event"
+      && event.providerEventId === "unrelated-node-heredoc");
+    expect(JSON.stringify(unrelatedNodeHeredoc?.data)).toContain("Decision-useful center");
+    const agentDelta = trace.events.find((event) => event.type === "provider.event"
+      && event.data.method === "item/agentMessage/delta");
+    expect(JSON.stringify(agentDelta?.data)).toContain("[redacted-personal-presentation]");
+    expect(JSON.stringify(agentDelta?.data)).not.toContain("Decision-useful center");
+    const commandDelta = trace.events.find((event) => event.type === "provider.event"
+      && event.data.method === "item/commandExecution/outputDelta");
+    expect(JSON.stringify(commandDelta?.data)).toContain("[redacted-personal-presentation]");
+    expect(JSON.stringify(commandDelta?.data)).not.toContain("Decision-useful center");
+    const graphChild = trace.events.find((event) => event.type === "tool.call.started"
+      && event.data.providerItemId === "graph-child");
+    expect(graphChild?.data.delegationPrompt).toContain("[redacted-personal-presentation]");
+    const researchChild = trace.events.find((event) => event.type === "tool.call.started"
+      && event.data.providerItemId === "research-child");
+    expect(researchChild?.data.delegationPrompt).toBe("Research the implementation without authoring graph content.");
+  });
+
   it("preserves malformed collaboration notifications as raw events without changing completion", async () => {
     const trace = recordingTrace();
     const harness = harnessFixture("auto", async (options) => {
@@ -903,6 +1089,36 @@ function runContext(id: number, token: string, trace: HarnessTraceSink = createN
     },
     trace,
     approvals: { request: async () => { throw new Error("unused approval channel"); } },
+  };
+}
+
+function personalPresentationRunContext(preference: boolean): HarnessRunContext {
+  const context = runContext(1, "token");
+  const versionInteractionNodeId = preference ? 90 : 100;
+  const rootLayerId = versionInteractionNodeId + 1;
+  return {
+    ...context,
+    personalPresentation: {
+      attachment: { interactionNodeId: 1, versionInteractionNodeId, rootLayerId },
+      graph: {
+        nodeId: versionInteractionNodeId,
+        rootLayerId,
+        rootAction: { id: rootLayerId + 1, sourceNodeId: versionInteractionNodeId, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: rootLayerId, state: "accepted" },
+        layers: [{
+          layer: { id: rootLayerId, nodes: [rootLayerId + 2], edges: [], state: "accepted" },
+          nodes: [{
+            id: rootLayerId + 2,
+            kind: preference ? "presentation-preference" : "personal-presentation-manifest",
+            icon: preference ? "compass" : "settings",
+            title: preference ? "Decision-useful center" : "Neutral personal presentation",
+            detail: preference ? "The user prefers central layers that are immediately decision-useful." : "No additional guidance.",
+            state: "accepted",
+          }],
+          edges: [],
+          actions: [],
+        }],
+      },
+    },
   };
 }
 

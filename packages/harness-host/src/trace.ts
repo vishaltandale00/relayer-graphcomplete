@@ -52,6 +52,7 @@ export interface HarnessTraceStartInput {
   readonly threadId: number;
   readonly interactionNodeId: number;
   readonly productInteractionId?: number;
+  readonly personalPresentationVersionId?: number;
   readonly implementation: string;
   readonly configurationName: string;
   readonly support: HarnessTraceSupport;
@@ -144,10 +145,23 @@ const LOCAL_HOME_PATTERN = LOCAL_HOME !== "/"
   ? new RegExp(`(?<![A-Za-z0-9._-])${ESCAPED_LOCAL_HOME}(?=[\\\\/\\s'\"\u0060]|$)`, "g")
   : undefined;
 
+export class HarnessTraceExportError extends Error {
+  readonly personalPresentationVersionId?: number;
+
+  constructor(cause: unknown, personalPresentationVersionId?: number) {
+    super(cause instanceof Error ? cause.message : "Candidate trace export failed.", { cause });
+    this.name = "HarnessTraceExportError";
+    if (personalPresentationVersionId !== undefined) {
+      this.personalPresentationVersionId = personalPresentationVersionId;
+    }
+  }
+}
+
 export class HarnessTraceStore {
   private readonly now: () => Date;
   private readonly createId: () => string;
   private readonly tracesByProductInteraction = new Map<number, StoredTrace>();
+  private readonly attributionByProductInteraction = new Map<number, number | undefined>();
   private readonly startupCleanup: Promise<Error | undefined>;
   private readonly storageOperations = new Set<Promise<void>>();
   private closed = false;
@@ -170,6 +184,9 @@ export class HarnessTraceStore {
     validateTraceSupport(input.support);
     validateRequiredCoverage(this.options.policy, input.support);
     if (this.options.policy.mode === "off") return disabledTrace(this.options.policy);
+    if (input.productInteractionId !== undefined) {
+      this.attributionByProductInteraction.set(input.productInteractionId, input.personalPresentationVersionId);
+    }
     return new BufferedHarnessTrace(this, input, this.options.policy, this.now, this.createId);
   }
 
@@ -182,29 +199,40 @@ export class HarnessTraceStore {
     targetDirectory: string,
     correlation: HarnessTraceExportCorrelation,
   ): Promise<HarnessTraceDescriptor> {
-    // Export is an explicit post-run handoff and remains available after the
-    // execution host has closed, but it still participates in the IO fence.
-    return this.runStorageOperation(async () => {
-      const stored = this.tracesByProductInteraction.get(productInteractionId);
-      if (stored === undefined) throw new Error(`No candidate trace exists for product interaction ${productInteractionId}`);
-      const target = resolve(targetDirectory);
-      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-      await cp(stored.directory, target, { recursive: true, force: false, errorOnExist: true, preserveTimestamps: true });
-      const manifestFile = join(target, "manifest.json");
-      const manifest = {
-        ...stored.manifest,
-        correlation: redactJson(correlation).value,
-      } satisfies JsonObject;
-      await atomicWrite(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
-      try {
-        await rm(stored.directory, { recursive: true, force: true });
-      } catch (error) {
-        await rm(target, { recursive: true, force: true });
-        throw error;
-      }
-      this.tracesByProductInteraction.delete(productInteractionId);
-      return stored.descriptor;
-    }, true);
+    const personalPresentationVersionId = this.attributionByProductInteraction.get(productInteractionId);
+    try {
+      // Export is an explicit post-run handoff and remains available after the
+      // execution host has closed, but it still participates in the IO fence.
+      const descriptor = await this.runStorageOperation(async () => {
+        const stored = this.tracesByProductInteraction.get(productInteractionId);
+        if (stored === undefined) throw new Error(`No candidate trace exists for product interaction ${productInteractionId}`);
+        const target = resolve(targetDirectory);
+        await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+        await cp(stored.directory, target, { recursive: true, force: false, errorOnExist: true, preserveTimestamps: true });
+        const manifestFile = join(target, "manifest.json");
+        const manifest = {
+          ...stored.manifest,
+          correlation: redactJson(correlation).value,
+        } satisfies JsonObject;
+        await atomicWrite(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+        try {
+          await rm(stored.directory, { recursive: true, force: true });
+        } catch (error) {
+          await rm(target, { recursive: true, force: true });
+          throw error;
+        }
+        this.tracesByProductInteraction.delete(productInteractionId);
+        return stored.descriptor;
+      }, true);
+      this.attributionByProductInteraction.delete(productInteractionId);
+      return descriptor;
+    } catch (error) {
+      throw new HarnessTraceExportError(error, personalPresentationVersionId);
+    }
+  }
+
+  personalPresentationVersionId(productInteractionId: number): number | undefined {
+    return this.attributionByProductInteraction.get(productInteractionId);
   }
 
   record(productInteractionId: number | undefined, stored: StoredTrace): void {
@@ -413,6 +441,7 @@ class BufferedHarnessTrace implements ActiveHarnessTrace, HarnessTraceSink {
         threadId: input.threadId,
         interactionNodeId: input.interactionNodeId,
         ...(input.productInteractionId === undefined ? {} : { productInteractionId: input.productInteractionId }),
+        ...(input.personalPresentationVersionId === undefined ? {} : { personalPresentationVersionId: input.personalPresentationVersionId }),
         configurationName: input.configurationName,
       },
     });
@@ -539,6 +568,9 @@ class BufferedHarnessTrace implements ActiveHarnessTrace, HarnessTraceSink {
           ...(this.truncated ? { truncated: true } : {}),
           ...(this.redactionCount > 0 ? { redactionCount: this.redactionCount } : {}),
           ...(reason === undefined ? {} : { error: reason }),
+          ...(this.input.personalPresentationVersionId === undefined ? {} : {
+            personalPresentationVersionId: this.input.personalPresentationVersionId,
+          }),
         };
         const manifest: JsonObject = {
           schemaVersion: 1,
@@ -553,6 +585,7 @@ class BufferedHarnessTrace implements ActiveHarnessTrace, HarnessTraceSink {
           threadId: this.input.threadId,
           interactionNodeId: this.input.interactionNodeId,
           productInteractionId: this.input.productInteractionId ?? null,
+          personalPresentationVersionId: this.input.personalPresentationVersionId ?? null,
           declaredCoverage: redactTraceData(this.input.support),
           achievedCoverage: redactTraceData(achievedCoverage),
           policy: redactTraceData(this.policy),

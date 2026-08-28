@@ -25,6 +25,8 @@ const THREAD_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("harness_configuration_name", "TEXT", true, 0),
     ("permission_profile_id", "TEXT", true, 0),
     ("conversation_import_id", "TEXT", false, 0),
+    ("surface", "TEXT", true, 0),
+    ("personal_presentation_version_key", "TEXT", false, 0),
 ];
 const CONVERSATION_IMPORT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "TEXT", true, 1),
@@ -64,6 +66,28 @@ const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("input_identity", "TEXT", false, 0),
     ("input_digest", "TEXT", false, 0),
 ];
+const PERSONAL_PRESENTATION_VERSION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("version_key", "TEXT", true, 1),
+    ("profile_interaction_id", "INTEGER", true, 0),
+    ("graph_node_id", "INTEGER", false, 0),
+    ("root_layer_id", "INTEGER", false, 0),
+    ("published_at", "TEXT", false, 0),
+    ("retired", "INTEGER", true, 0),
+];
+const PERSONAL_PRESENTATION_POLICY_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("singleton", "INTEGER", true, 1),
+    ("profile_thread_id", "INTEGER", true, 0),
+    ("active_version_key", "TEXT", true, 0),
+];
+const PERSONAL_PRESENTATION_PIN_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("interaction_id", "INTEGER", false, 1),
+    ("version_key", "TEXT", true, 0),
+    ("version_interaction_node_id", "INTEGER", true, 0),
+    ("root_layer_id", "INTEGER", true, 0),
+    ("pinned_at", "TEXT", true, 0),
+];
+const LEGACY_UNPINNED_PERSONAL_PRESENTATION_INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] =
+    &[("interaction_id", "INTEGER", false, 1)];
 const INTERACTION_CONTEXT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("interaction_id", "INTEGER", true, 1),
     ("position", "INTEGER", true, 2),
@@ -295,6 +319,30 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "projects", PROJECT_COLUMNS).await?;
     validate_columns(pool, "threads", THREAD_COLUMNS).await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
+    validate_columns(
+        pool,
+        "personal_presentation_versions",
+        PERSONAL_PRESENTATION_VERSION_COLUMNS,
+    )
+    .await?;
+    validate_columns(
+        pool,
+        "personal_presentation_policy",
+        PERSONAL_PRESENTATION_POLICY_COLUMNS,
+    )
+    .await?;
+    validate_columns(
+        pool,
+        "interaction_personal_presentation_pins",
+        PERSONAL_PRESENTATION_PIN_COLUMNS,
+    )
+    .await?;
+    validate_columns(
+        pool,
+        "legacy_unpinned_personal_presentation_interactions",
+        LEGACY_UNPINNED_PERSONAL_PRESENTATION_INTERACTION_COLUMNS,
+    )
+    .await?;
     validate_columns(pool, "interaction_attempts", INTERACTION_ATTEMPT_COLUMNS).await?;
     validate_columns(
         pool,
@@ -442,6 +490,60 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "threads",
         "id",
         "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "personal_presentation_versions",
+        "profile_interaction_id",
+        "interactions",
+        "id",
+        "RESTRICT",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "personal_presentation_policy",
+        "profile_thread_id",
+        "threads",
+        "id",
+        "RESTRICT",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "personal_presentation_policy",
+        "active_version_key",
+        "personal_presentation_versions",
+        "version_key",
+        "RESTRICT",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "interaction_personal_presentation_pins",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "legacy_unpinned_personal_presentation_interactions",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "interaction_personal_presentation_pins",
+        "version_key",
+        "personal_presentation_versions",
+        "version_key",
+        "RESTRICT",
     )
     .await?;
     validate_foreign_key(
@@ -654,6 +756,15 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_foreign_key(
         pool,
+        "threads",
+        "personal_presentation_version_key",
+        "personal_presentation_versions",
+        "version_key",
+        "RESTRICT",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
         "action_invocations",
         "source_interaction_id",
         "interactions",
@@ -684,6 +795,48 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     if thread_without_interaction {
         return Err(incompatible(
             "every stored thread must have a root interaction",
+        ));
+    }
+    let invalid_personal_presentation_policy: bool = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM personal_presentation_policy)!=1
+             OR (SELECT COUNT(*) FROM threads WHERE surface='personal_presentation_profile')!=1",
+    )
+    .fetch_one(pool)
+    .await?;
+    let invalid_personal_presentation: bool = invalid_personal_presentation_policy || sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM personal_presentation_policy policy
+            JOIN threads profile ON profile.id=policy.profile_thread_id
+            JOIN personal_presentation_versions active ON active.version_key=policy.active_version_key
+            WHERE policy.singleton!=1 OR profile.surface!='personal_presentation_profile'
+               OR active.retired!=0
+            UNION ALL
+            SELECT 1 FROM personal_presentation_versions version
+            JOIN interactions source ON source.id=version.profile_interaction_id
+            JOIN personal_presentation_policy policy ON policy.singleton=1
+            WHERE source.thread_id!=policy.profile_thread_id
+               OR (version.graph_node_id IS NULL)!=(version.root_layer_id IS NULL)
+            UNION ALL
+            SELECT 1 FROM interaction_personal_presentation_pins pin
+            JOIN interactions target ON target.id=pin.interaction_id
+            JOIN threads target_thread ON target_thread.id=target.thread_id
+            JOIN personal_presentation_versions version ON version.version_key=pin.version_key
+            WHERE target_thread.surface!='conversation'
+               OR target_thread.conversation_import_id IS NOT NULL
+               OR pin.version_interaction_node_id!=version.graph_node_id
+               OR pin.root_layer_id!=version.root_layer_id
+            UNION ALL
+            SELECT 1 FROM threads target_thread
+            JOIN personal_presentation_versions version
+              ON version.version_key=target_thread.personal_presentation_version_key
+            WHERE target_thread.surface!='conversation'
+        )",
+    )
+    .fetch_one(pool)
+    .await?;
+    if invalid_personal_presentation {
+        return Err(incompatible(
+            "stored personal presentation profile, versions, or pins are inconsistent",
         ));
     }
     let cross_thread_invocation: bool = sqlx::query_scalar(

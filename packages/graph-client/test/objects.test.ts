@@ -127,6 +127,32 @@ describe("agent-facing graph objects", () => {
     );
   });
 
+  it("reads the hidden personal presentation graph through its dedicated capability boundary", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      attachment: { interactionNodeId: 10, versionInteractionNodeId: 90, rootLayerId: 91 },
+      graph: {
+        nodeId: 90,
+        rootLayerId: 91,
+        rootAction: { id: 92, sourceNodeId: 90, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: 91, state: "accepted" },
+        layers: [{
+          layer: { id: 91, nodes: [93], edges: [], state: "accepted" },
+          nodes: [{ id: 93, kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "Foreground the conclusion.", state: "accepted" }],
+          edges: [], actions: [],
+        }],
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 10 });
+
+    const presentation = await graph.getPersonalPresentation();
+
+    expect(presentation.attachment.versionInteractionNodeId).toBe(90);
+    expect(presentation.graph.layers[0]?.nodes[0]?.kind).toBe("presentation-preference");
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/graph/personal-presentation",
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }) }),
+    );
+  });
+
   it("discards a submitted layer and refreshes its object reference", async () => {
     let request: { url: string; method?: string } | undefined;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {

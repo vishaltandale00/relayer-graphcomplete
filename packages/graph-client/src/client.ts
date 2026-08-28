@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EdgeObject, LayerObject, NodeObject, edgeId, layerId, nodeId, type ActionObject, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
-import { GraphApiError, type CompletionOutput, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer } from "./types.js";
+import { GraphApiError, type CompletionOutput, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation } from "./types.js";
 
 export class RelayerGraphClient {
   readonly capability: GraphCapability;
@@ -31,6 +31,10 @@ export class RelayerGraphClient {
 
   async getInteractionInput(): Promise<InteractionInput> {
     return this.request<InteractionInput>("/api/graph/input");
+  }
+
+  async getPersonalPresentation(): Promise<ResolvedPersonalPresentation> {
+    return this.request<ResolvedPersonalPresentation>("/api/graph/personal-presentation");
   }
 
   async submitNode(node: NodeObject): Promise<GraphNode> {

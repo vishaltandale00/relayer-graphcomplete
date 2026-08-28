@@ -8,7 +8,7 @@ import {
 } from "../src/implementations/claude-basic.js";
 import { CLAUDE_BROWSER_TOOL } from "../src/implementations/claude-basic-browser.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
-import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext } from "../src/types.js";
+import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext, HarnessTraceEventInput } from "../src/types.js";
 import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
 
 function factoryContext(approvalMode: string, savedState = {}): HarnessFactoryContext {
@@ -114,6 +114,39 @@ function runContext(access: HarnessRunContext["access"]): HarnessRunContext {
   };
 }
 
+function personalPresentationRunContext(
+  access: HarnessRunContext["access"],
+  preference: boolean,
+): HarnessRunContext {
+  const context = runContext(access);
+  const versionInteractionNodeId = preference ? 90 : 100;
+  const rootLayerId = versionInteractionNodeId + 1;
+  return {
+    ...context,
+    personalPresentation: {
+      attachment: { interactionNodeId: 4, versionInteractionNodeId, rootLayerId },
+      graph: {
+        nodeId: versionInteractionNodeId,
+        rootLayerId,
+        rootAction: { id: rootLayerId + 1, sourceNodeId: versionInteractionNodeId, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: rootLayerId, state: "accepted" },
+        layers: [{
+          layer: { id: rootLayerId, nodes: [rootLayerId + 2], edges: [], state: "accepted" },
+          nodes: [{
+            id: rootLayerId + 2,
+            kind: preference ? "presentation-preference" : "personal-presentation-manifest",
+            icon: preference ? "compass" : "settings",
+            title: preference ? "Decision-useful center" : "Neutral personal presentation",
+            detail: preference ? "Foreground the conclusion and material tradeoffs." : "No additional guidance.",
+            state: "accepted",
+          }],
+          edges: [],
+          actions: [],
+        }],
+      },
+    },
+  };
+}
+
 describe("ClaudeBasicHarness", () => {
   it("maps product approval modes onto supported Claude SDK permission modes", () => {
     expect(claudePermissionMode("ask")).toBe("default");
@@ -167,6 +200,7 @@ describe("ClaudeBasicHarness", () => {
       expect(harness.state()).toEqual({
         claudeSessionId: "session-1",
         claudeSessionProviderDefinitionId: "anthropic-work",
+        claudeSessionPersonalPresentationVersionId: null,
       });
     } finally {
       vi.unstubAllEnvs();
@@ -190,11 +224,94 @@ describe("ClaudeBasicHarness", () => {
     });
   });
 
+  it("delivers each pinned presentation version while redacting the traced Claude prompt", async () => {
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const events: HarnessTraceEventInput[] = [];
+    const trace = createNoopHarnessTraceSink();
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+      query: sequentialSdkQuery([
+        [{ type: "result", subtype: "success", result: "first", session_id: "session-1" }],
+        [{ type: "result", subtype: "success", result: "second", session_id: "session-1" }],
+      ], (input) => calls.push(input)),
+      browserSdk: browserSdk(),
+    });
+    const access = managedAccess();
+
+    await harness.complete({
+      ...personalPresentationRunContext(access, true),
+      trace: { ...trace, emit: (event) => { events.push(event); } },
+    });
+    await harness.complete(personalPresentationRunContext(access, false));
+
+    expect(calls[0]?.prompt).toContain("Personal graph presentation preferences:");
+    expect(calls[0]?.prompt).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
+    expect(calls[0]?.prompt.indexOf("Graph presentation guidance:")).toBeLessThan(
+      calls[0]!.prompt.indexOf("Personal graph presentation preferences:"),
+    );
+    expect(calls[0]?.prompt.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+      calls[0]!.prompt.indexOf("Normalized interaction input:"),
+    );
+    const tracedPrompt = events.find((event) => event.type === "prompt")?.data.text;
+    expect(tracedPrompt).not.toContain("Personal graph presentation preferences:");
+    expect(tracedPrompt).not.toContain("Decision-useful center");
+    expect(calls[0]?.options.allowedTools).toEqual(["Bash"]);
+    expect(calls[1]?.prompt).not.toContain("Personal graph presentation preferences:");
+    expect(calls[1]?.options.resume).toBeUndefined();
+    expect(harness.state()).toMatchObject({
+      claudeSessionId: "session-1",
+      claudeSessionPersonalPresentationVersionId: 100,
+    });
+  });
+
+  it("redacts preference fragments echoed by Claude from message traces", async () => {
+    const events: HarnessTraceEventInput[] = [];
+    const trace = createNoopHarnessTraceSink();
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+      query: sdkQuery([{
+        type: "result",
+        subtype: "success",
+        result: "Decision-useful center means Foreground the conclusion and material tradeoffs.",
+        session_id: "session-1",
+      }]),
+      browserSdk: browserSdk(),
+    });
+
+    await harness.complete({
+      ...personalPresentationRunContext(managedAccess(), true),
+      trace: { ...trace, emit: (event) => { events.push(event); } },
+    });
+
+    const tracedMessage = events.find((event) => event.type === "message")?.data.text;
+    expect(tracedMessage).toBe(
+      "[redacted-personal-presentation] means [redacted-personal-presentation]",
+    );
+  });
+
+  it("preserves Claude message traces without a presentation attachment", async () => {
+    const events: HarnessTraceEventInput[] = [];
+    const trace = createNoopHarnessTraceSink();
+    const text = "Decision-useful center is ordinary task content here.";
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+      query: sdkQuery([{
+        type: "result", subtype: "success", result: text, session_id: "session-1",
+      }]),
+      browserSdk: browserSdk(),
+    });
+
+    await harness.complete({
+      ...runContext(managedAccess()),
+      trace: { ...trace, emit: (event) => { events.push(event); } },
+    });
+
+    expect(events.find((event) => event.type === "message")?.data.text).toBe(text);
+  });
+
   it("uses definition-scoped runtime state and explicit bypass only for full access", async () => {
     let call: Parameters<ClaudeSdkQuery>[0] | undefined;
     const harness = new ClaudeBasicHarness(factoryContext("bypassPermissions", {
       claudeSessionId: "prior",
       claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
     }), {
       query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "prior" }], (input) => { call = input; }),
       browserSdk: browserSdk(),
@@ -216,6 +333,26 @@ describe("ClaudeBasicHarness", () => {
     expect(call?.options.env.CLAUDE_CONFIG_DIR).toBe("/isolated");
     expect(call?.options.env).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(call?.options.env.RELAYER_GRAPH_TOKEN).toBe("token");
+  });
+
+  it("rotates provider-scoped legacy state whose presentation version is unknown", async () => {
+    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
+    const harness = new ClaudeBasicHarness(factoryContext("ask", {
+      claudeSessionId: "legacy-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+    }), {
+      query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "legacy-session" }], (input) => { call = input; }),
+      browserSdk: browserSdk(),
+    });
+
+    await harness.complete(runContext(managedAccess()));
+
+    expect(call?.options.resume).toBeUndefined();
+    expect(harness.state()).toEqual({
+      claudeSessionId: "legacy-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
+    });
   });
 
   it("preserves one conventional Windows Path for Claude SDK Bash execution", async () => {
@@ -280,6 +417,7 @@ describe("ClaudeBasicHarness", () => {
     expect(harness.state()).toEqual({
       claudeSessionId: "replacement",
       claudeSessionProviderDefinitionId: next.providerId,
+      claudeSessionPersonalPresentationVersionId: null,
     });
   });
 

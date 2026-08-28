@@ -5,6 +5,11 @@ import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interacti
 import { redactTraceData } from "../trace.js";
 import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 import {
+  personalPresentationNativeInstructions,
+  personalPresentationPrompt,
+  personalPresentationTraceValues,
+} from "./personal-presentation-guidance.js";
+import {
   runCodexAppServerTurn,
   type CodexAppServerSpawn,
   type CodexAppServerTurnOptions,
@@ -83,6 +88,8 @@ interface ResolvedCodexPermission {
 
 interface CodexTraceState {
   readonly collaborationSpans: Map<string, HarnessTraceSpan>;
+  readonly graphAuthoringCommandIds: Set<string>;
+  readonly fallbackGraphAuthoringEnabled: boolean;
 }
 
 interface NormalizedCollaborationItem {
@@ -102,6 +109,7 @@ export class CodexBasicHarness implements Harness {
   private readonly clientModuleUrl: string;
   private readonly resolved: ResolvedCodexConfiguration;
   private codexThreadId: string | undefined;
+  private codexThreadPersonalPresentationVersionId: number | null | undefined;
   private readonly activeForceShutdowns = new Set<AbortController>();
 
   constructor(private readonly context: HarnessFactoryContext, private readonly dependencies: CodexBasicDependencies = {}) {
@@ -110,10 +118,25 @@ export class CodexBasicHarness implements Harness {
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
     validateBrowserMcpRuntime(dependencies.browserMcpRuntime);
     const codexThreadId = context.savedState?.codexThreadId;
-    this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
+    const savedPresentationVersionId = context.savedState?.codexThreadPersonalPresentationVersionId;
+    const validSavedPresentationVersion = savedPresentationVersionId === undefined
+      || savedPresentationVersionId === null
+      || (typeof savedPresentationVersionId === "number"
+        && Number.isSafeInteger(savedPresentationVersionId)
+        && savedPresentationVersionId > 0);
+    if (typeof codexThreadId === "string" && validSavedPresentationVersion) {
+      this.codexThreadId = codexThreadId;
+      this.codexThreadPersonalPresentationVersionId = savedPresentationVersionId;
+    }
   }
 
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+    const personalPresentationVersionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
+    if (this.codexThreadId !== undefined
+      && this.codexThreadPersonalPresentationVersionId !== personalPresentationVersionId) {
+      this.codexThreadId = undefined;
+      this.codexThreadPersonalPresentationVersionId = undefined;
+    }
     const model = this.selectedModel(context);
     if (context.model !== undefined && context.access === undefined) {
       throw new Error("codex.basic requires execution-scoped access for the selected provider");
@@ -124,8 +147,15 @@ export class CodexBasicHarness implements Harness {
     const sandboxPolicy = this.sandboxPolicy();
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
     const prompt = this.prompt(context);
-    context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
-    const traceState: CodexTraceState = { collaborationSpans: new Map() };
+    context.trace.emit({
+      type: "prompt",
+      data: { text: this.prompt(context, false), interactionNodeId: context.inputGraph.id },
+    });
+    const traceState: CodexTraceState = {
+      collaborationSpans: new Map(),
+      graphAuthoringCommandIds: new Set(),
+      fallbackGraphAuthoringEnabled: this.dependencies.graphAuthoringLauncherPath === undefined,
+    };
     const forceShutdown = new AbortController();
     this.activeForceShutdowns.add(forceShutdown);
     try {
@@ -133,7 +163,7 @@ export class CodexBasicHarness implements Harness {
         environment,
         codexPathOverride: resolvedRuntime.executable,
         ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
-        threadParams: this.threadParams(model),
+        threadParams: this.threadParams(model, context),
         turnParams: this.turnParams(sandboxPolicy, model),
         prompt,
         approvals: context.approvals,
@@ -145,7 +175,10 @@ export class CodexBasicHarness implements Harness {
         ...(signal === undefined ? {} : { signal }),
         forceSignal: forceShutdown.signal,
         ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
-        onThreadId: (threadId) => { this.codexThreadId = threadId; },
+        onThreadId: (threadId) => {
+          this.codexThreadId = threadId;
+          this.codexThreadPersonalPresentationVersionId = personalPresentationVersionId;
+        },
         onNotification: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
         onServerRequest: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
       });
@@ -169,7 +202,13 @@ export class CodexBasicHarness implements Harness {
   }
 
   state(): HarnessSessionState {
-    return this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId };
+    return this.codexThreadId === undefined
+      || this.codexThreadPersonalPresentationVersionId === undefined
+      ? {}
+      : {
+          codexThreadId: this.codexThreadId,
+          codexThreadPersonalPresentationVersionId: this.codexThreadPersonalPresentationVersionId,
+        };
   }
 
   forceShutdown(): void {
@@ -255,8 +294,9 @@ export class CodexBasicHarness implements Harness {
     return context.model.modelId;
   }
 
-  private threadParams(model: string | undefined): JsonObject {
+  private threadParams(model: string | undefined, context: HarnessRunContext): JsonObject {
     const { settings, permission } = this.resolved;
+    const presentationInstructions = personalPresentationNativeInstructions(context);
     const config: Record<string, JsonObject[keyof JsonObject]> = {};
     if (settings.skipGitRepoCheck !== undefined) config.skip_git_repo_check = settings.skipGitRepoCheck;
     if (settings.webSearchMode !== undefined) config.web_search = settings.webSearchMode;
@@ -289,6 +329,7 @@ export class CodexBasicHarness implements Harness {
       ...(permission.approvalsReviewer === undefined ? {} : { approvalsReviewer: permission.approvalsReviewer }),
       ...(model === undefined ? {} : { model }),
       ...(Object.keys(config).length === 0 ? {} : { config }),
+      developerInstructions: presentationInstructions === "" ? null : presentationInstructions,
       serviceName: "relayer_graphcomplete",
     };
   }
@@ -320,13 +361,13 @@ export class CodexBasicHarness implements Harness {
     };
   }
 
-  private prompt(context: HarnessRunContext): string {
+  private prompt(context: HarnessRunContext, includePersonalPresentation = true): string {
     const interactionNode = context.inputGraph;
     if (this.resolved.promptProfile === "layered-navigation-v1") {
-      return this.layeredNavigationPrompt(context);
+      return this.layeredNavigationPrompt(context, includePersonalPresentation);
     }
     if (this.resolved.promptProfile === "layered-navigation-multi-agent-v1") {
-      return `${this.layeredNavigationPrompt(context)}
+      return `${this.layeredNavigationPrompt(context, includePersonalPresentation)}
 
 Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.`;
     }
@@ -337,6 +378,8 @@ Codex native subagents are available when useful. Subagents may directly author,
     return `You are the basic Relayer graph harness. ${UNDERLYING_TASK_GUIDANCE}
 
 Answer the current user interaction by authoring and accepting a useful graph layer that truthfully presents the completed work or genuine blocker.
+
+${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -371,8 +414,6 @@ Relayer graph affordances:
 - A node can open supporting evidence or reusable context. Submit the stable-keyed target LayerObject, then attach it with await graph.addAction(node, { kind: "navigate", relation: "reference", sourceLayer: layer, label: "View evidence", target: evidenceLayer, variant: "pill", clientKey: "node-evidence" }).
 - A node can offer a useful follow-up interaction with await graph.addAction(node, { kind: "invoke", sourceLayer: layer, label: "Useful label", interactionText: "A useful follow-up", variant: "chip", clientKey: "node-follow-up" }).
 
-${GRAPH_PRESENTATION_GUIDANCE}
-
 Every action uses Relayer's renderer-independent presentation grammar. You author its order, kind and payload, label, optional supported icon, and one of these variants:
 - "chip": the most compact inline action;
 - "pill": the standard rounded action and the default when variant is omitted;
@@ -386,8 +427,13 @@ Navigate and invoke actions are first-class options, not requirements for every 
 If a graph call rejects an object or graph.submit reports a repairable issue, edit the same program and rerun it with the same clientKey values. Stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. The graph is complete only after graph.submit succeeds.`;
   }
 
-  private layeredNavigationPrompt(context: HarnessRunContext): string {
-    return buildLayeredNavigationPrompt(context, this.clientModuleUrl, this.dependencies.graphAuthoringLauncherPath);
+  private layeredNavigationPrompt(context: HarnessRunContext, includePersonalPresentation: boolean): string {
+    return buildLayeredNavigationPrompt(
+      context,
+      this.clientModuleUrl,
+      this.dependencies.graphAuthoringLauncherPath,
+      includePersonalPresentation,
+    );
   }
 
   private graphAuthoringCommand(): string {
@@ -415,6 +461,7 @@ export function buildLayeredNavigationPrompt(
   input: HarnessRunContext | GraphNode,
   clientModuleUrl: string,
   graphAuthoringLauncherPath?: string,
+  includePersonalPresentation = true,
 ): string {
   const context = "inputGraph" in input ? input as HarnessRunContext : undefined;
   const interactionNode = context ? context.inputGraph : input as GraphNode;
@@ -422,11 +469,13 @@ export function buildLayeredNavigationPrompt(
     ? renderInteractionInput(context.interactionInput)
     : `Interaction:\n- id: ${interactionNode.id}\n- title: ${interactionNode.title}\n- detail: ${interactionNode.detail}`;
   const authoringInstructions = graphAuthoringLauncherPath === undefined
-    ? `Write a temporary .mjs file outside the project checkout and run it with Node.js. Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from ${clientModuleUrl}, then use RelayerGraphClient.fromEnv(). Author in whatever order fits the task. Keep each object's generated clientKey stable when retrying the same rejected submit; create a new object only for a genuinely new graph record. Submit each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.`
+    ? `Run exactly node --input-type=module with no additional arguments and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM; never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from:\n${clientModuleUrl}\nThen use RelayerGraphClient.fromEnv(). Author in whatever order fits the task. Keep each object's generated clientKey stable when retrying the same rejected submit; create a new object only for a genuinely new graph record. Submit each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.`
     : `Run exactly ${graphAuthoringCommand(graphAuthoringLauncherPath)} with no arguments, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM; do not resolve the launcher or Node.js from PATH, never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:\n${clientModuleUrl}\n${pinnedExecutionClause(graphAuthoringLauncherPath)}`;
   return `You are the Relayer layered-navigation harness. ${UNDERLYING_TASK_GUIDANCE}
 
 After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+
+${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -443,8 +492,6 @@ The current interaction may carry an invoke lease created by the product. Before
 Navigation has two meanings:
 - "expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
 - "reference" opens supporting evidence or context. References may reuse an accepted layer, may point to other reference layers, and may revisit a layer.
-
-${GRAPH_PRESENTATION_GUIDANCE}
 
 The interaction node must have one root navigate action with relation: "expand" and no sourceLayer. Every action on a response node must include sourceLayer: the LayerObject in which you are authoring that action. Expansion layers may author expand, reference, or invoke actions. A layer reached as a reference may author only reference actions. Do not create both expand and reference actions to the same new target layer.
 
@@ -480,7 +527,15 @@ function pinnedExecutionClause(launcher: string | undefined): string {
 }
 
 function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {
-  const redactedParams = attachCommandExecutableAuthority(redactTraceData(params), params);
+  rememberGraphAuthoringCommand(state, params);
+  const redactedParams = attachCommandExecutableAuthority(
+    redactTraceData(redactPersonalPresentationTraceData(
+      context,
+      params,
+      isPersonalPresentationEchoEvent(method, params, state),
+    ) as JsonValue),
+    params,
+  );
   const data = isRecord(redactedParams) ? redactedParams : {};
   const item = isRecord(data.item) ? data.item : undefined;
   const providerEventId = optionalNonemptyString(item?.id);
@@ -519,6 +574,75 @@ function traceCodexAppServerNotification(context: HarnessRunContext, method: str
   } else if (item.type === "reasoning" && typeof item.text === "string") {
     context.trace.emit({ type: "reasoning.summary", data: { text: item.text } });
   }
+}
+
+function redactPersonalPresentationTraceData(
+  context: HarnessRunContext,
+  value: unknown,
+  includeFragments: boolean,
+): unknown {
+  const traceValues = personalPresentationTraceValues(context);
+  if (traceValues === undefined) return value;
+  if (typeof value === "string") {
+    const values = includeFragments
+      ? [traceValues.exactBlock, ...traceValues.fragments]
+      : [traceValues.exactBlock];
+    return values.reduce(
+      (sanitized, traceValue) => sanitized.split(traceValue).join("[redacted-personal-presentation]"),
+      value,
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map((child) => redactPersonalPresentationTraceData(context, child, includeFragments));
+  }
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    key,
+    redactPersonalPresentationTraceData(context, child, includeFragments),
+  ]));
+}
+
+function rememberGraphAuthoringCommand(state: CodexTraceState, params: unknown): void {
+  if (!isRecord(params) || !isRecord(params.item)) return;
+  const item = params.item;
+  const id = optionalNonemptyString(item.id);
+  if (id === undefined) return;
+  const commands = [
+    item.command,
+    ...(Array.isArray(item.commandActions)
+      ? item.commandActions.flatMap((action) => isRecord(action) ? [action.command] : [])
+      : []),
+  ];
+  if (commands.some((command) => pinnedGraphAuthoringLauncher(command) !== undefined
+    || (state.fallbackGraphAuthoringEnabled && isFallbackGraphAuthoringCommand(command)))) {
+    state.graphAuthoringCommandIds.add(id);
+  }
+}
+
+function isFallbackGraphAuthoringCommand(command: unknown): boolean {
+  if (typeof command !== "string") return false;
+  const input = command.trim();
+  return /^node[ \t]+--input-type=module[ \t]+<<'RELAYER_GRAPH_PROGRAM'[ \t]*\r?\n/.test(input);
+}
+
+function isPersonalPresentationEchoEvent(
+  method: string,
+  params: unknown,
+  state: CodexTraceState,
+): boolean {
+  const normalizedMethod = normalizeName(method);
+  if (normalizedMethod.includes("delta")
+    && (normalizedMethod.includes("agentmessage") || normalizedMethod.includes("reasoning"))) {
+    return true;
+  }
+  if (!isRecord(params)) return false;
+  const itemId = optionalNonemptyString(params.itemId);
+  if (itemId !== undefined && state.graphAuthoringCommandIds.has(itemId)) return true;
+  if (!isRecord(params.item) || typeof params.item.type !== "string") return false;
+  const providerItemId = optionalNonemptyString(params.item.id);
+  if (providerItemId !== undefined && state.graphAuthoringCommandIds.has(providerItemId)) return true;
+  return ["agentmessage", "reasoning", "collabtoolcall", "collabagenttoolcall"]
+    .includes(normalizeName(params.item.type));
 }
 
 function attachCommandExecutableAuthority(redactedParams: JsonValue, rawParams: unknown): JsonValue {
@@ -810,7 +934,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
     throw new Error(`Unsupported codex.basic implementation version: ${selected.implementationVersion}`);
   }
   const configuration = selected.settings;
-  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories", "promptProfile"]);
+  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories", "promptProfile", "personalPresentationVersion"]);
   const unknown = Object.keys(configuration).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown codex.basic configuration field: ${unknown.join(", ")}`);
 
@@ -820,6 +944,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
   const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
+  optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1"] as const, "personalPresentationVersion");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
   return {

@@ -10,12 +10,123 @@ pub(super) async fn run(pool: &SqlitePool) -> Result<(), StorageError> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::SqliteProductStore;
+    use super::{super::super::SqliteProductStore, MIGRATOR};
     use crate::product::{
         HarnessModelRule, HarnessModelRules, RuntimeProductHarness, UpdateHarnessModelRulesCommand,
     };
-    use sqlx::{Executor, Row, sqlite::SqlitePoolOptions};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use sqlx::{Executor, Row, migrate::Migrator, sqlite::SqlitePoolOptions};
+    use std::{
+        borrow::Cow,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[tokio::test]
+    async fn schema_22_interactions_remain_unpinned_after_migration_and_reopen() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("sqlite://{}", file.path().display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let pre_personal_presentation = Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 22)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        pre_personal_presentation.run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Legacy','1','1','codex-basic','auto')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (1,1,1,'Interrupted legacy turn','1','submitted','auto'),(2,1,2,'Stopped legacy turn','2','stopped','auto')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let store = SqliteProductStore::open(file.path()).await.unwrap();
+        for (key, node_id, layer_id) in [
+            ("personal-presentation-v0", 501, 601),
+            ("personal-presentation-v1", 502, 602),
+        ] {
+            store
+                .publish_personal_presentation_version(
+                    key,
+                    node_id,
+                    layer_id,
+                    &serde_json::json!({"nodeId":node_id,"rootLayer":{"layer":{"id":layer_id}}}),
+                    "3",
+                )
+                .await
+                .unwrap();
+        }
+        for interaction_id in [1, 2] {
+            assert!(
+                store
+                    .prepare_personal_presentation_pin(
+                        crate::product::InteractionId::from_database(interaction_id),
+                        None,
+                        "4",
+                    )
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let new_thread = store
+            .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                title: "Current",
+                project_id: None,
+                initial_message: "New turn",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: None,
+                timestamp: "5",
+            })
+            .await
+            .unwrap();
+        let new_pin = store
+            .prepare_personal_presentation_pin(new_thread.root_interaction_id, None, "5")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(new_pin.version_key, "personal-presentation-v1");
+        store.pool.close().await;
+
+        let reopened = SqliteProductStore::open(file.path()).await.unwrap();
+        let legacy_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM interactions WHERE id IN (1,2) AND thread_id=1",
+        )
+        .fetch_one(&reopened.pool)
+        .await
+        .unwrap();
+        assert_eq!(legacy_count, 2);
+        assert!(
+            reopened
+                .prepare_personal_presentation_pin(
+                    crate::product::InteractionId::from_database(1),
+                    None,
+                    "6",
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            reopened
+                .prepare_personal_presentation_pin(new_thread.root_interaction_id, None, "6")
+                .await
+                .unwrap()
+                .unwrap(),
+            new_pin
+        );
+    }
 
     #[tokio::test]
     async fn legacy_prime_threads_migrate_to_full_access() {
@@ -321,7 +432,9 @@ mod tests {
         assert_eq!(first_thread_history.len(), 1);
         assert_eq!(first_thread_history[0].source_interaction_id.value(), 1);
         assert_eq!(first_thread_history[0].result_interaction_id.value(), 2);
-        let interaction_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM interactions")
+        let interaction_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE t.surface='conversation'",
+        )
             .fetch_one(&reopened.pool)
             .await
             .unwrap();
