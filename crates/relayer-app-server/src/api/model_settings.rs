@@ -99,7 +99,6 @@ pub(super) struct ProviderOnboardingProjectionQuery {
 #[serde(rename_all = "camelCase")]
 pub(super) struct CompleteProviderOnboardingRequest {
     provider_id: String,
-    harness_id: String,
     expected_projection_revision: String,
     family: ProviderOnboardingFamilyRequest,
 }
@@ -191,7 +190,6 @@ pub(super) async fn complete_provider_onboarding(
             .complete_provider_onboarding(
                 &CompleteProviderOnboardingCommand {
                     provider_id: ProviderId::parse(request.provider_id)?,
-                    harness_id: request.harness_id,
                     expected_projection_revision: request.expected_projection_revision,
                     family,
                 },
@@ -477,7 +475,7 @@ mod tests {
         let existing: CompleteProviderOnboardingRequest =
             serde_json::from_value(serde_json::json!({
                 "providerId": "anthropic-work",
-                "harnessId": "claude-basic",
+                "harnessId": "prime-agent-deep",
                 "expectedProjectionRevision": "sha256:preview",
                 "family": { "kind": "existing", "familyId": 12 }
             }))
@@ -489,7 +487,6 @@ mod tests {
 
         let create: CompleteProviderOnboardingRequest = serde_json::from_value(serde_json::json!({
             "providerId": "anthropic-work",
-            "harnessId": "claude-basic",
             "expectedProjectionRevision": "sha256:preview",
             "family": {
                 "kind": "create",
@@ -509,10 +506,43 @@ mod tests {
         assert!(
             serde_json::from_value::<CompleteProviderOnboardingRequest>(serde_json::json!({
                 "providerId": "anthropic-work",
-                "harnessId": "claude-basic",
                 "family": { "kind": "existing", "familyId": 12 }
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn onboarding_responses_never_serialize_the_resolved_harness() {
+        let defaults = crate::product::ProviderOnboardingDefaults {
+            provider_id: ProviderId::parse("anthropic-work").unwrap(),
+            harness_id: "claude-basic".into(),
+            family_id: Some(ModelFamilyId::try_from_value(12).unwrap()),
+        };
+        let resolution = crate::product::ProviderOnboardingResolution {
+            family_id: ModelFamilyId::try_from_value(12).unwrap(),
+            family_revision: 3,
+            resolvable_members: Vec::new(),
+        };
+        let responses = [
+            serde_json::to_value(ProviderOnboardingCompletion {
+                defaults: defaults.clone(),
+                resolution: resolution.clone(),
+            })
+            .unwrap(),
+            serde_json::to_value(ProviderOnboardingStatus {
+                complete: true,
+                defaults,
+                resolution: Some(resolution),
+                blocking_reason: None,
+            })
+            .unwrap(),
+        ];
+
+        for response in responses {
+            let serialized = response.to_string().to_ascii_lowercase();
+            assert!(!serialized.contains("harness"));
+            assert!(!serialized.contains("claude-basic"));
+        }
     }
 }

@@ -292,13 +292,11 @@ async function runEvidence() {
     await fill(client, "#providerField-endpoint", provider.endpoint);
     await fill(client, '[data-provider-field="api-key"]', PRIME_EVIDENCE_API_KEY);
     await click(client, "#connectProvider");
-    await waitFor(client, "Prime onboarding choice", "Boolean(document.querySelector('[data-onboarding-harness=\"prime-agent-basic\"]:not(:disabled)'))");
-    const incompatibleCopy = await client.evaluate("document.querySelector('#providerFamilyStep')?.innerText || ''");
-    if (!/Codex/i.test(incompatibleCopy) || !/Prime/i.test(incompatibleCopy)) throw new Error("Onboarding did not expose incompatible default and Prime choice.");
-    assertions.push("clean profile exposes incompatible app default and an explicit Prime choice");
-    await capture(client, outputDirectory, "02-explicit-prime-choice", frames).then((item) => screenshots.push(item));
-    await click(client, '[data-onboarding-harness="prime-agent-basic"]');
     await waitFor(client, "custom family choice", "Boolean(document.querySelector('[data-onboarding-family-kind=\"create\"]'))");
+    const familyStepCopy = await client.evaluate("document.querySelector('#providerFamilyStep')?.innerText || ''");
+    if (/harness|Codex basic|Prime Agent/i.test(familyStepCopy)) throw new Error("Provider onboarding exposed the internally resolved harness.");
+    assertions.push("clean profile resolves Prime internally and exposes only model-family choices");
+    await capture(client, outputDirectory, "02-internal-prime-resolution", frames).then((item) => screenshots.push(item));
     await click(client, '[data-onboarding-family-kind="create"]');
     await fill(client, "#onboardingFamilyName", "Prime Evidence Family");
     for (const model of [PRIME_EVIDENCE_ROOT_MODEL, PRIME_EVIDENCE_CHILD_MODEL]) {

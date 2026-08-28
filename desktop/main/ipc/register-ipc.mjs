@@ -105,7 +105,7 @@ export function registerDesktopIpc({
   ipcMain.handle("relayer:provider-onboarding-complete", async () => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     if (!validateProviderOnboarding || !await validateProviderOnboarding()) {
-      throw new Error("A working default provider, family, and harness are required to continue.");
+      throw new Error("A working provider and default model family are required to continue.");
     }
     const saved = await settings.read();
     await settings.write({ ...saved, providerOnboardingComplete: true });

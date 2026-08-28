@@ -43,7 +43,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
 describe("provider onboarding IPC hard gate", () => {
   it("rejects a forged completion when current product defaults do not resolve", async () => {
     const { complete, writes } = fixture(async () => false);
-    await expect(complete()).rejects.toThrow("working default provider, family, and harness");
+    await expect(complete()).rejects.toThrow("working provider and default model family");
     expect(writes).toEqual([]);
   });
 

@@ -98,32 +98,17 @@ function onboardingReason(reason) {
   return reason?.message ? `<small class="onboarding-choice-reason">${escapeHtml(reason.message)}</small>` : "";
 }
 
-export function onboardingHarnessOptionsMarkup(projection, selectedHarnessId) {
-  const harnesses = projection?.harnesses ?? [];
-  let firstSelectable = true;
-  return `<div class="onboarding-choice-group" role="radiogroup" aria-label="Compatible harness">${harnesses.map((harness) => {
-    const selected = harness.selectable && harness.id === selectedHarnessId;
-    const tabStop = harness.selectable && (selected || (selectedHarnessId == null && firstSelectable));
-    if (harness.selectable && firstSelectable) firstSelectable = false;
-    const reasonId = harness.incompatibilityReason ? `onboardingHarnessReason-${escapeHtmlAttribute(harness.id)}` : null;
-    return `<button type="button" class="onboarding-choice" role="radio" aria-checked="${selected}" tabindex="${tabStop ? 0 : -1}" data-onboarding-harness="${escapeHtmlAttribute(harness.id)}" ${harness.selectable ? "" : "disabled"} ${reasonId ? `aria-describedby="${reasonId}"` : ""}>
-      <span><strong>${escapeHtml(harness.label)}</strong><small>${harness.id === projection.appDefaultHarnessId ? "App default" : "Harness"}${harness.matchingAccessContract ? ` · ${escapeHtml(harness.matchingAccessContract)}` : ""}</small>${reasonId ? `<small id="${reasonId}" class="onboarding-choice-reason">${escapeHtml(harness.incompatibilityReason.message)}</small>` : ""}</span>
-      <i aria-hidden="true">${selected ? "✓" : ""}</i>
-    </button>`;
-  }).join("")}</div>`;
-}
-
 function familyChoice({ kind, id = "", name, summary, selected }) {
   return `<button type="button" class="onboarding-choice" role="radio" aria-checked="${selected}" tabindex="${selected ? 0 : -1}" data-onboarding-family-kind="${escapeHtmlAttribute(kind)}" ${id === "" ? "" : `data-onboarding-family-id="${escapeHtmlAttribute(id)}"`}>
     <span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(summary)}</small></span><i aria-hidden="true">${selected ? "✓" : ""}</i>
   </button>`;
 }
 
-export function onboardingFamilyOptionsMarkup(harness, intent = {}) {
-  const customFamilies = harness?.existingCustomFamilies ?? [];
-  const managedFamilies = harness?.existingManagedFamilies ?? [];
-  const managed = harness?.managedFamilyCandidate;
-  const eligibleModels = harness?.eligibleModels ?? [];
+export function onboardingFamilyOptionsMarkup(options, intent = {}) {
+  const customFamilies = options?.existingCustomFamilies ?? [];
+  const managedFamilies = options?.existingManagedFamilies ?? [];
+  const managed = options?.managedFamilyCandidate;
+  const eligibleModels = options?.eligibleModels ?? [];
   const selectedMembers = new Set((intent.members ?? []).map(({ providerId, modelId }) => `${providerId}\0${modelId}`));
   const existingChoice = (family, typeLabel) => familyChoice({
     kind: "existing",
@@ -138,7 +123,7 @@ export function onboardingFamilyOptionsMarkup(harness, intent = {}) {
     { label: "Managed family candidate", choices: managed ? [familyChoice({
       kind: "managed",
       name: managed.name,
-      summary: `Managed by ${harness.label} · ${(managed.members ?? []).length} model${(managed.members ?? []).length === 1 ? "" : "s"}`,
+      summary: `Managed default · ${(managed.members ?? []).length} model${(managed.members ?? []).length === 1 ? "" : "s"}`,
       selected: intent.kind === "managed",
     })] : [] },
     { label: "New custom family", choices: eligibleModels.length ? [familyChoice({
@@ -165,7 +150,7 @@ export function onboardingFamilyOptionsMarkup(harness, intent = {}) {
       return `<label><input type="checkbox" data-onboarding-member-provider="${escapeHtmlAttribute(model.providerId)}" data-onboarding-member-model="${escapeHtmlAttribute(model.modelId)}" ${selectedMembers.has(key) ? "checked" : ""} /><span><strong>${escapeHtml(model.label)}</strong><small>${escapeHtml(model.modelId)}</small></span></label>`;
     }).join("")}</fieldset>
   </div>` : "";
-  return `<div class="onboarding-choice-group" role="radiogroup" aria-label="Default model family">${groupedChoices}</div>${createFields}${onboardingReason(harness?.blockingReason)}`;
+  return `<div class="onboarding-choice-group" role="radiogroup" aria-label="Default model family">${groupedChoices}</div>${createFields}${onboardingReason(options?.blockingReason)}`;
 }
 
 export function providerConnectionFormMarkup(descriptor, values = {}, definitions = [], showErrors = false) {

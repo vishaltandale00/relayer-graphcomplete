@@ -83,7 +83,6 @@ describe("provider browser evidence", () => {
         "onboarding",
         "endpoint",
         "family",
-        "alternate-harness",
         "providers",
         "families",
         "harnesses",
@@ -93,7 +92,7 @@ describe("provider browser evidence", () => {
       const frames = (await readdir(join(output, "frames")))
         .filter((name) => name.endsWith(".png"))
         .sort();
-      expect(frames).toHaveLength(8);
+      expect(frames).toHaveLength(7);
       for (const frame of frames) {
         const bytes = await readFile(join(output, "frames", frame));
         expect([...bytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
