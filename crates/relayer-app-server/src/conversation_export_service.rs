@@ -1234,6 +1234,7 @@ mod tests {
                     label: "From /workspace/project".into(),
                 }],
                 minimum_selections: None,
+                unsupported_fields: Default::default(),
             },
             value: SubmittedInputValue::Selected {
                 selected: vec![InputOption {

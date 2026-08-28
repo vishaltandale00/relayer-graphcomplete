@@ -423,6 +423,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                         .action
                         .minimum_selections
                         .map(|minimum| minimum as usize),
+                    unsupported_fields: Default::default(),
                 },
                 value: match submitted.value {
                     crate::conversation_export::ExportSubmittedInputValue::Text { text } => {

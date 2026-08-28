@@ -528,6 +528,7 @@ impl TryFrom<ActionRow> for ActionRecord {
                             .map_err(|error| GraphError::Internal(error.to_string()))
                     })
                     .transpose()?,
+                unsupported_fields: Default::default(),
             }),
             _ => {
                 return Err(GraphError::Internal(

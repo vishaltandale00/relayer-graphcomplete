@@ -1683,6 +1683,7 @@ impl RuntimeClient {
 
     pub(crate) async fn canonical_input_action_occurrence(
         &self,
+        destination_project_id: Option<i64>,
         destination_thread_id: i64,
         occurrence: &relayer_graph_core::PresentingInputOccurrence,
     ) -> Result<relayer_graph_core::GraphAction, RuntimeError> {
@@ -1695,6 +1696,7 @@ impl RuntimeClient {
             .bearer_auth(&self.graph_control_token)
             .timeout(CONTROL_REQUEST_TIMEOUT)
             .json(&serde_json::json!({
+                "destinationProjectId": destination_project_id,
                 "destinationThreadId": destination_thread_id,
                 "occurrence": occurrence,
             }))
@@ -3142,6 +3144,7 @@ mod tests {
                 prompt: "Explain".into(),
                 options: vec![],
                 minimum_selections: None,
+                unsupported_fields: Default::default(),
             },
             value: relayer_graph_core::SubmittedInputValue::Text {
                 text: "exact".into(),

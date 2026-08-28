@@ -1328,10 +1328,7 @@ fn validate_submitted_inputs(
                 ExportSubmittedInputValue::Selected { selected },
             ) if !submitted.action.options.is_empty()
                 && selected.len() == 1
-                && submitted
-                    .action
-                    .minimum_selections
-                    .is_none_or(|minimum| minimum > 0 && minimum as usize <= selected.len())
+                && submitted.action.minimum_selections.is_none()
                 && selected.iter().all(|selected| {
                     submitted
                         .action

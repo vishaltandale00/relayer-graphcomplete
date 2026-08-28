@@ -1004,6 +1004,10 @@ async fn reconcile_quarantined_interaction(
     })?;
     runtime.invalidate_node_capabilities(graph_node_id).await?;
     let metadata = runtime.interaction_metadata(graph_node_id).await?;
+    let durable_input = product
+        .interaction_input(interaction.id)
+        .await
+        .map_err(|error| RuntimeError::Protocol(error.to_string()))?;
     let expected = product
         .invocation_graph_source(interaction.id)
         .await
@@ -1025,11 +1029,19 @@ async fn reconcile_quarantined_interaction(
         .map_err(|error| RuntimeError::Protocol(error.to_string()))?;
     let legacy_unleased_invocation =
         !graph_lease_required && expected.is_some() && metadata.invocation.is_none();
+    let expected_identity = durable_input
+        .as_ref()
+        .map(|input| input.input_identity.as_str());
+    let expected_digest = durable_input
+        .as_ref()
+        .map(|input| input.input_digest.as_str());
     if metadata.node_id != graph_node_id
         || (metadata.invocation != expected && !legacy_unleased_invocation)
+        || metadata.input_identity.as_deref() != expected_identity
+        || metadata.input_digest.as_deref() != expected_digest
     {
         return Err(RuntimeError::Protocol(
-            "graph interaction lease provenance does not match product history".into(),
+            "graph interaction lease or input provenance does not match product history".into(),
         ));
     }
     let Some(output) = runtime.completion_output(graph_node_id).await? else {
@@ -1041,6 +1053,23 @@ async fn reconcile_quarantined_interaction(
                 .map_err(|error| RuntimeError::Protocol(error.to_string()))?
             {
                 interaction.completion_error = Some(LEGACY_INTERRUPTED.into());
+                return Ok(());
+            }
+        }
+        if durable_input
+            .as_ref()
+            .is_some_and(|input| !input.submitted_inputs.is_empty())
+        {
+            const INTERRUPTED: &str = "Submitted interaction input was interrupted before graph acceptance. The input draft was restored; send it again to create a new attempt.";
+            if product
+                .finalize_quarantined_submitted_input_failure(interaction.id, INTERRUPTED)
+                .await
+                .map_err(|error| RuntimeError::Protocol(error.to_string()))?
+            {
+                *interaction = product
+                    .get_interaction(interaction.id)
+                    .await
+                    .map_err(|error| RuntimeError::Protocol(error.to_string()))?;
                 return Ok(());
             }
         }
