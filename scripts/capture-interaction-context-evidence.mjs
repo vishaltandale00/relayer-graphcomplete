@@ -280,9 +280,16 @@ async function run() {
     method: "POST",
     body: JSON.stringify({ path: repositoryRoot }),
   });
-  const modelSettings = await productRequest("/api/model-settings");
+  const fixtureFamily = await productRequest("/api/model-families", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Fixture models",
+      enabled: true,
+      members: [{ providerId: "codex", modelId: "fixture-model" }],
+    }),
+  });
   const modelSelection = {
-    familyId: modelSettings.families[0].id,
+    familyId: fixtureFamily.id,
     providerId: "codex",
     modelId: "fixture-model",
   };
