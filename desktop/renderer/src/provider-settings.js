@@ -1,5 +1,6 @@
 import { refreshNewThreadModelPicker } from "./composer-model-picker.js";
 import { refreshModelFamilySettings } from "./model-family-settings.js";
+import { createProviderSettingsConnectionController } from "./provider-settings-connection.js";
 import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
 import { bindRovingRadioGroup, providerConnectionFormMarkup, providerDefinitionsMarkup, providerOptionsMarkup } from "./provider-ui.js";
 import { appState, desktop } from "./state.js";
@@ -8,8 +9,12 @@ import { $, $$, toast } from "./ui.js";
 let status;
 let selectedDescriptor;
 let values;
-let pendingConnectionId;
+let pendingReconnectConnectionId;
 let initialized = false;
+const providerConnection = desktop?.providers ? createProviderSettingsConnectionController({
+  providers: desktop.providers,
+  onPending: () => dialogStatus("Complete sign-in in your browser. Relayer will continue automatically."),
+}) : null;
 
 function setStatus(message = "", kind = "") {
   const element = $("#providerSettingsStatus");
@@ -54,14 +59,14 @@ function renderDefinitions() {
     button.onclick = async () => {
       try {
         let result = await desktop.providers.reconnect(button.dataset.providerReconnect);
-        pendingConnectionId = result.status === "pending" ? result.connectionId : null;
-        while (result.status === "pending" && result.connectionId === pendingConnectionId) {
+        pendingReconnectConnectionId = result.status === "pending" ? result.connectionId : null;
+        while (result.status === "pending" && result.connectionId === pendingReconnectConnectionId) {
           setStatus("Complete sign-in in your browser. Relayer will continue automatically.");
           await new Promise((resolve) => setTimeout(resolve, 750));
-          if (pendingConnectionId !== result.connectionId) return;
+          if (pendingReconnectConnectionId !== result.connectionId) return;
           result = await desktop.providers.completeConnection(result.connectionId);
         }
-        pendingConnectionId = null;
+        pendingReconnectConnectionId = null;
         await refreshProviderSettings();
         await refreshModelFamilySettings();
         refreshNewThreadModelPicker();
@@ -132,36 +137,26 @@ function renderConnectionForm(adapterId, showErrors = false) {
 }
 
 async function connect() {
+  if (!providerConnection || providerConnection.current()) return;
   readValues();
   const errors = providerConnectionErrors(selectedDescriptor, values, status.definitions);
   if (Object.keys(errors).length) return renderConnectionForm(selectedDescriptor.adapterId, true);
   dialogStatus(`Preparing ${selectedDescriptor.label} runtime and connecting…`);
-  const connectionId = crypto.randomUUID().toLowerCase();
-  pendingConnectionId = connectionId;
   try {
-    let result = await desktop.providers.connect(providerCreationPayload(
+    const outcome = await providerConnection.connect(providerCreationPayload(
       selectedDescriptor,
       values,
-      { connectionId },
     ));
-    if (pendingConnectionId !== connectionId) return;
-    pendingConnectionId = result.status === "pending" ? result.connectionId : null;
-    while (result.status === "pending" && result.connectionId === pendingConnectionId) {
-      dialogStatus("Complete sign-in in your browser. Relayer will continue automatically.");
-      await new Promise((resolve) => setTimeout(resolve, 750));
-      if (pendingConnectionId !== result.connectionId) return;
-      result = await desktop.providers.completeConnection(result.connectionId);
-    }
+    if (outcome.status !== "settled") return;
+    const { result } = outcome;
     if (result.status !== "connected") return;
-    pendingConnectionId = null;
     $("#providerDialog").close();
     await refreshProviderSettings();
     await refreshModelFamilySettings();
     refreshNewThreadModelPicker();
     setStatus("Provider connected.", "success");
   } catch (error) {
-    if (pendingConnectionId !== connectionId && error.message === "Provider connection was cancelled.") return;
-    pendingConnectionId = null;
+    if (error.message === "Provider connection was cancelled.") return;
     dialogStatus(error.message, "error");
   }
 }
@@ -195,9 +190,7 @@ export async function initializeProviderSettings() {
     $("#providerDialog").showModal();
   };
   $("#providerDialog").addEventListener("close", () => {
-    const connectionId = pendingConnectionId;
-    pendingConnectionId = null;
-    if (connectionId) void desktop.providers.cancelConnection(connectionId).catch(() => {});
+    providerConnection?.close();
   });
   desktop.providers.onChanged(() => void refreshProviderSettings().catch((error) => toast(error.message)));
 }
