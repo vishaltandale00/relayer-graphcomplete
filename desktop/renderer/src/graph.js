@@ -8,6 +8,7 @@ import { activeThread, appState, desktop, evalReview, query, viewState } from ".
 import { toast } from "./ui.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { createAnnotationApi } from "./annotation-api.js";
+import { createNodeContextDraftApi } from "./node-context-drafts.js";
 import {
   getNavigationHistory,
   navigateHistory,
@@ -83,6 +84,7 @@ function workspace() {
     onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
     annotationApi,
+    contextDraftApi: nextMode === "interactive" ? createNodeContextDraftApi() : null,
   });
   return productWorkspace;
 }

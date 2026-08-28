@@ -108,3 +108,4 @@ html[data-theme="light"] .tutorial-target{outline-color:#527baa!important;box-sh
 .turn-option-comments{color:var(--muted);font-size:9px}
 .turn-option-meta{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0}
 .onboarding-family-choice-section{display:grid;gap:6px}.onboarding-family-choice-section h4{margin:3px 0 0;color:var(--faint);font-size:9px;font-weight:500}
+.composer-context-draft-status{grid-column:1;font-size:10px;color:var(--muted)}.composer-context-draft-status.status-error{color:var(--danger)}

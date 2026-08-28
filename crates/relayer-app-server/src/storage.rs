@@ -47,6 +47,13 @@ pub(crate) struct NewInteractionInput<'a> {
     pub(crate) contexts: &'a [crate::product::InteractionContextIntent],
 }
 
+pub(crate) struct NewNodeContextDraft<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) target: &'a crate::product::InteractionContextTarget,
+    pub(crate) target_node: &'a relayer_graph_core::InteractionInputNode,
+    pub(crate) text: &'a str,
+}
+
 #[derive(Debug)]
 pub(crate) enum InteractionInputInsertOutcome {
     Created(crate::product::Interaction),
@@ -118,4 +125,6 @@ pub(crate) enum StorageError {
     ApprovalConflict(String),
     #[error("annotation write conflicts with durable history: {0}")]
     AnnotationConflict(String),
+    #[error("node-context draft conflict: {message}")]
+    ContextDraftConflict { code: &'static str, message: String },
 }

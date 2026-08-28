@@ -38,6 +38,568 @@ use tower::ServiceExt;
 const ANNOTATION_COOKIE: &str = "relayer_annotation";
 
 #[tokio::test]
+async fn node_context_drafts_are_thread_scoped_and_survive_reopen() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-context-drafts-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Explain the queue" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let saved = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "PUT",
+                &format!("/api/threads/{thread_id}/context-drafts/draft-incoming-queue"),
+                Some(json!({
+                    "target": {
+                        "nodeId": 7,
+                        "sourceInteractionNodeId": 3,
+                        "sourceLayerId": 5
+                    },
+                    "targetNode": {
+                        "id": 7,
+                        "kind": "concept",
+                        "icon": "list",
+                        "title": "Incoming queue",
+                        "detail": "Tasks wait here while workers are busy.",
+                        "state": "accepted",
+                        "workspacePath": "/private/secret",
+                        "leaseId": "must-not-persist"
+                    },
+                    "text": "Call out FIFO ordering.",
+                    "expectedRevision": null
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(saved["id"], "draft-incoming-queue");
+    assert_eq!(saved["threadId"], thread_id);
+    assert_eq!(saved["revision"], 1);
+    assert_eq!(saved["targetNode"]["title"], "Incoming queue");
+    assert!(saved["targetNode"].get("workspacePath").is_none());
+    assert!(saved["targetNode"].get("leaseId").is_none());
+
+    drop(app);
+    let reopened = open_app(&database, &root).await;
+    let drafts = response_json(
+        reopened
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/threads/{thread_id}/context-drafts"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(drafts["drafts"].as_array().unwrap(), &[saved]);
+}
+
+#[tokio::test]
+async fn node_context_draft_autosave_is_revisioned_and_idempotent() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-context-draft-revisions-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let app = open_app(&root.join("product.sqlite3"), &root).await;
+    let thread = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Explain the queue" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let target = json!({
+        "target": { "nodeId": 7, "sourceInteractionNodeId": 3, "sourceLayerId": 5 },
+        "targetNode": {
+            "id": 7, "kind": "concept", "icon": "list", "title": "Incoming queue",
+            "detail": "Tasks wait here while workers are busy.", "state": "accepted"
+        }
+    });
+    let save = |draft_id: &str, text: &str, expected_revision: Option<i64>| {
+        let mut body = target.clone();
+        body["text"] = json!(text);
+        body["expectedRevision"] = json!(expected_revision);
+        api_request(
+            "PUT",
+            &format!("/api/threads/{thread_id}/context-drafts/{draft_id}"),
+            Some(body),
+            true,
+        )
+    };
+    let created = response_json(
+        app.clone()
+            .oneshot(save("draft-incoming", "First", None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let create_replay = response_json(
+        app.clone()
+            .oneshot(save("draft-incoming", "First", None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(create_replay, created);
+    let updated = response_json(
+        app.clone()
+            .oneshot(save("draft-incoming", "Second", Some(1)))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(updated["revision"], 2);
+    assert_eq!(updated["text"], "Second");
+    let replayed = response_json(
+        app.clone()
+            .oneshot(save("draft-incoming", "Second", Some(1)))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(replayed, updated);
+
+    let stale = app
+        .clone()
+        .oneshot(save("draft-incoming", "Stale overwrite", Some(1)))
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(stale).await["code"],
+        "context_draft_revision_conflict"
+    );
+    let duplicate_target = app
+        .oneshot(save("different-draft", "Competing identity", None))
+        .await
+        .unwrap();
+    assert_eq!(duplicate_target.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(duplicate_target).await["code"],
+        "context_draft_target_conflict"
+    );
+}
+
+#[tokio::test]
+async fn discarding_a_node_context_draft_is_durable_and_replay_safe() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-context-draft-discard-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Explain the queue" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let body = json!({
+        "target": { "nodeId": 7, "sourceInteractionNodeId": 3, "sourceLayerId": 5 },
+        "targetNode": {
+            "id": 7, "kind": "concept", "icon": "list", "title": "Incoming queue",
+            "detail": "Tasks wait here while workers are busy.", "state": "accepted"
+        },
+        "text": "Call out FIFO ordering.", "expectedRevision": null
+    });
+    let draft_uri = format!("/api/threads/{thread_id}/context-drafts/draft-discard");
+    response_json(
+        app.clone()
+            .oneshot(api_request("PUT", &draft_uri, Some(body.clone()), true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let discarded = app
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            &format!("{draft_uri}?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(discarded.status(), StatusCode::NO_CONTENT);
+
+    drop(app);
+    let reopened = open_app(&database, &root).await;
+    let replay = reopened
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            &format!("{draft_uri}?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(replay.status(), StatusCode::NO_CONTENT);
+    let drafts = response_json(
+        reopened
+            .clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/threads/{thread_id}/context-drafts"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(drafts["drafts"], json!([]));
+    let reused = reopened
+        .oneshot(api_request("PUT", &draft_uri, Some(body), true))
+        .await
+        .unwrap();
+    assert_eq!(reused.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(reused).await["code"],
+        "context_draft_resolved"
+    );
+}
+
+#[tokio::test]
+async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-context-draft-confirm-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let offline = open_app(&database, &root).await;
+    let thread = response_json(
+        offline
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Explain the queue" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let draft_uri = format!("/api/threads/{thread_id}/context-drafts/draft-confirm");
+    response_json(
+        offline
+            .clone()
+            .oneshot(api_request(
+                "PUT",
+                &draft_uri,
+                Some(json!({
+                    "target": { "nodeId": 7, "sourceInteractionNodeId": 3, "sourceLayerId": 5 },
+                    "targetNode": {
+                        "id": 7, "kind": "concept", "icon": "list", "title": "Incoming queue",
+                        "detail": "Tasks wait here while workers are busy.", "state": "accepted"
+                    },
+                    "text": "  Call out FIFO ordering.  ", "expectedRevision": null
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    drop(offline);
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=3,completion_status='accepted' WHERE thread_id=?1 AND sequence=1",
+    )
+    .bind(thread_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let graph = Router::new()
+        .route(
+            "/api/control/context-occurrences/canonical",
+            axum::routing::post(|axum::Json(target): axum::Json<Value>| async move {
+                match target["nodeId"].as_i64() {
+                    Some(7) => axum::Json(json!({
+                        "id": 7, "kind": "concept", "icon": "list", "title": "Incoming queue",
+                        "detail": "Tasks wait here while workers are busy.", "state": "accepted"
+                    }))
+                    .into_response(),
+                    Some(10) => axum::Json(json!({
+                        "id": 10, "kind": "concept", "icon": "list", "title": "Changed queue",
+                        "detail": "The accepted node changed unexpectedly.", "state": "accepted"
+                    }))
+                    .into_response(),
+                    _ => (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        axum::Json(json!({
+                            "error": {
+                                "code": "invalid_context_occurrence",
+                                "path": "target",
+                                "message": "not in the accepted source completion"
+                            }
+                        })),
+                    )
+                        .into_response(),
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/3/layers/6",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "layer": { "id": 6, "nodes": [9], "edges": [], "layout": null, "state": "accepted" },
+                    "nodes": [{
+                        "id": 9, "kind": "concept", "icon": "archive", "title": "Unreachable queue",
+                        "detail": "This accepted layer is outside the source completion.", "state": "accepted"
+                    }],
+                    "edges": [], "actions": []
+                }))
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "modelCompatibility":[{"providerId":"codex"}],
+                "executionAccessContracts":["managed-runtime@1"],"settings":{}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
+    let unavailable_uri = format!("/api/threads/{thread_id}/context-drafts/draft-unavailable");
+    let unavailable_saved = app
+        .clone()
+        .oneshot(api_request(
+            "PUT",
+            &unavailable_uri,
+            Some(json!({
+                "target": { "nodeId": 8, "sourceInteractionNodeId": 3, "sourceLayerId": 5 },
+                "targetNode": {
+                    "id": 8, "kind": "concept", "icon": "archive", "title": "Removed queue",
+                    "detail": "This occurrence disappeared.", "state": "accepted"
+                },
+                "text": "Preserve this recovery note.", "expectedRevision": null
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unavailable_saved.status(), StatusCode::OK);
+    let unavailable = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("{unavailable_uri}/confirm?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unavailable.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(unavailable).await["code"],
+        "context_draft_target_unavailable"
+    );
+    let preserved = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/threads/{thread_id}/context-drafts"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(preserved["drafts"].as_array().unwrap().iter().any(|draft| {
+        draft["id"] == "draft-unavailable" && draft["text"] == "Preserve this recovery note."
+    }));
+    let unreachable_uri = format!("/api/threads/{thread_id}/context-drafts/draft-unreachable");
+    response_json(
+        app.clone()
+            .oneshot(api_request(
+                "PUT",
+                &unreachable_uri,
+                Some(json!({
+                    "target": { "nodeId": 9, "sourceInteractionNodeId": 3, "sourceLayerId": 6 },
+                    "targetNode": {
+                        "id": 9, "kind": "concept", "icon": "archive", "title": "Unreachable queue",
+                        "detail": "This accepted layer is outside the source completion.", "state": "accepted"
+                    },
+                    "text": "Keep this unreachable note.", "expectedRevision": null
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let unreachable = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("{unreachable_uri}/confirm?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unreachable.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(unreachable).await["code"],
+        "context_draft_target_unavailable"
+    );
+    let changed_uri = format!("/api/threads/{thread_id}/context-drafts/draft-changed");
+    response_json(
+        app.clone()
+            .oneshot(api_request(
+                "PUT",
+                &changed_uri,
+                Some(json!({
+                    "target": { "nodeId": 10, "sourceInteractionNodeId": 3, "sourceLayerId": 5 },
+                    "targetNode": {
+                        "id": 10, "kind": "concept", "icon": "list", "title": "Original queue",
+                        "detail": "The snapshot saved when the editor opened.", "state": "accepted"
+                    },
+                    "text": "Keep this changed-node note.", "expectedRevision": null
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let changed = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("{changed_uri}/confirm?expectedRevision=1"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(changed).await["code"],
+        "context_draft_target_unavailable"
+    );
+    let confirm_uri = format!("{draft_uri}/confirm?expectedRevision=1");
+    let confirmed = response_json(
+        app.clone()
+            .oneshot(api_request("POST", &confirm_uri, None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(confirmed["draftId"], "draft-confirm");
+    assert_eq!(confirmed["annotation"], "Call out FIFO ordering.");
+    assert_eq!(confirmed["target"]["nodeId"], 7);
+    drop(app);
+
+    let reopened = open_app(&database, &root).await;
+    let replayed = response_json(
+        reopened
+            .clone()
+            .oneshot(api_request("POST", &confirm_uri, None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(replayed, confirmed);
+    let drafts = response_json(
+        reopened
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/threads/{thread_id}/context-drafts"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(drafts["drafts"].as_array().unwrap().len(), 3);
+    assert!(
+        drafts["drafts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|draft| { draft["id"] == "draft-unavailable" })
+    );
+    assert!(
+        drafts["drafts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|draft| { draft["id"] == "draft-unreachable" })
+    );
+    graph_task.abort();
+    harness_task.abort();
+}
+
+#[tokio::test]
 async fn eval_annotations_are_scoped_append_only_and_durable() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -4412,7 +4974,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 19);
+    assert_eq!(applied_migrations, 20);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");

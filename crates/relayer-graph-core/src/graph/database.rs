@@ -2,7 +2,8 @@ use std::path::Path;
 
 use crate::{
     AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, InteractionContextAction,
-    InteractionContextDraft, InteractionInvocation, NodeId, ProjectId, ThreadId,
+    InteractionContextDraft, InteractionContextTarget, InteractionInputNode, InteractionInvocation,
+    NodeId, ProjectId, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
     interaction_input_digest,
     storage::{
@@ -230,6 +231,30 @@ impl GraphDatabase {
         };
         let mut connection = self.storage.acquire().await?;
         ContextTable::new(&mut connection).actions(&scope).await
+    }
+
+    pub async fn canonical_interaction_context_occurrence(
+        &self,
+        target: &InteractionContextTarget,
+    ) -> Result<InteractionInputNode, GraphError> {
+        let scope = {
+            let mut connection = self.storage.acquire().await?;
+            NodeTable::new(&mut connection)
+                .interaction_scope(target.source_interaction_node_id)
+                .await
+                .map_err(|error| match error {
+                    GraphError::Forbidden(_) | GraphError::NotFound(_) => GraphError::validation(
+                        "invalid_context_occurrence",
+                        "target",
+                        "Context must identify an accepted node occurrence in the exact visible accepted source completion.",
+                    ),
+                    other => other,
+                })?
+        };
+        let mut connection = self.storage.acquire().await?;
+        ContextTable::new(&mut connection)
+            .canonical_occurrence(&scope, "target", target)
+            .await
     }
 
     pub async fn close(&self) {

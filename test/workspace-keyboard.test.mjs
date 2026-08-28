@@ -8,6 +8,7 @@ import {
   CONTEXT_EDITOR_MIN_HEIGHT,
   applyComposerCapabilities,
   applyContextEditor,
+  applyMountedContextEditorInput,
   bindComposerKeydown,
   clearSubmittedComposerDraft,
   composerDisabledForState,
@@ -22,6 +23,8 @@ import {
   contextDetachNeedsConfirmation,
   contextEditorCanConfirm,
   contextEditorPresentation,
+  contextDraftStatusPresentation,
+  contextConfirmationDestination,
   contextStagingDisabledFor,
   createComposerDraftScopeState,
   graphTurnNavigationDelta,
@@ -31,6 +34,7 @@ import {
   handleComposerKeydown,
   resizeComposerTextarea,
   resizeContextEditorTextarea,
+  syncMountedContextEditorControls,
   interactionContextPayload,
   interactionContextDraftTransition,
   removeContextAnnotation,
@@ -39,6 +43,59 @@ import {
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
+  it("never presents a failed context-draft save as saved", () => {
+    expect(contextDraftStatusPresentation({ status: "saved" }).text).toBe("Saved");
+    expect(contextDraftStatusPresentation({ status: "error", error: "disk full" })).toEqual({
+      className: "composer-context-draft-status status-error",
+      text: "Not saved: disk full",
+    });
+  });
+
+  it("locks already-mounted draft controls and rejects a racing input event", () => {
+    const controls = {
+      cancel: { disabled: false },
+      remove: { disabled: false },
+      confirm: { disabled: false },
+    };
+    const textarea = {
+      value: "racing edit",
+      disabled: false,
+      parentElement: {
+        querySelector: (selector) => ({
+          '[aria-label="Cancel annotation edit"]': controls.cancel,
+          '[aria-label^="Discard annotation draft"]': controls.remove,
+          '[aria-label="Confirm annotation"]': controls.confirm,
+        }[selector]),
+      },
+    };
+    syncMountedContextEditorControls(
+      textarea,
+      contextEditorPresentation({ durable: true, value: "saved" }, false, true),
+      "saved",
+    );
+    expect(textarea.disabled).toBe(true);
+    expect(controls).toEqual({
+      cancel: { disabled: true },
+      remove: { disabled: true },
+      confirm: { disabled: true },
+    });
+
+    const editor = { durable: true, value: "saved" };
+    expect(applyMountedContextEditorInput({
+      editor,
+      textarea,
+      controller: { update: vi.fn(() => null) },
+      threadId: 1,
+      nodeId: 7,
+    })).toBe(false);
+    expect(textarea.value).toBe("saved");
+    expect(editor.value).toBe("saved");
+  });
+
+  it("defers a context confirmation that resolves after a thread switch", () => {
+    expect(contextConfirmationDestination("thread-b", "thread-a")).toBe("deferred");
+    expect(contextConfirmationDestination("thread-a", "thread-a")).toBe("current");
+  });
   it("keeps composer-owned review elements mounted while disabling composition", () => {
     const element = () => ({ classList: { toggle: vi.fn() } });
     const composer = element();
@@ -265,11 +322,18 @@ describe("product workspace keyboard behavior", () => {
     expect(contextStagingDisabledFor("failed", true, false)).toBe(false);
     expect(contextEditorPresentation({ attaching: true, value: "" }, true)).toEqual({
       textareaDisabled: true,
+      controlsDisabled: true,
       confirmDisabled: true,
     });
     expect(contextEditorPresentation({ attaching: true, value: "" }, false)).toEqual({
       textareaDisabled: false,
+      controlsDisabled: false,
       confirmDisabled: false,
+    });
+    expect(contextEditorPresentation({ attaching: false, value: "note" }, false, true)).toEqual({
+      textareaDisabled: true,
+      controlsDisabled: true,
+      confirmDisabled: true,
     });
     expect(composerStatusForThread({
       status: "accepted",

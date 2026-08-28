@@ -4,8 +4,8 @@ use sqlx::{FromRow, SqliteConnection};
 
 use crate::{
     ActionId, ActionKind, GraphError, InteractionContext, InteractionContextAction,
-    InteractionContextDraft, InteractionContextTarget, InteractionInput, NodeId, ProjectId,
-    RecordState, graph::InteractionScope,
+    InteractionContextDraft, InteractionContextTarget, InteractionInput, InteractionInputNode,
+    NodeId, ProjectId, RecordState, graph::InteractionScope,
 };
 
 use super::nodes::NodeTable;
@@ -53,8 +53,12 @@ impl<'connection> ContextTable<'connection> {
                     ));
                 }
             }
-            self.validate_occurrence(scope, context_index, &draft.target)
-                .await?;
+            self.validate_occurrence(
+                scope,
+                &format!("contexts[{context_index}].target"),
+                &draft.target,
+            )
+            .await?;
         }
 
         for (position, draft) in drafts.iter().enumerate() {
@@ -71,10 +75,23 @@ impl<'connection> ContextTable<'connection> {
         Ok(result)
     }
 
+    pub(crate) async fn canonical_occurrence(
+        &mut self,
+        scope: &InteractionScope,
+        field: &str,
+        target: &InteractionContextTarget,
+    ) -> Result<InteractionInputNode, GraphError> {
+        self.validate_occurrence(scope, field, target).await?;
+        Ok(NodeTable::new(&mut *self.connection)
+            .visible(scope, target.node_id)
+            .await?
+            .into())
+    }
+
     async fn validate_occurrence(
         &mut self,
         scope: &InteractionScope,
-        index: usize,
+        field: &str,
         target: &InteractionContextTarget,
     ) -> Result<(), GraphError> {
         let valid: i64 = sqlx::query_scalar(
@@ -129,7 +146,7 @@ impl<'connection> ContextTable<'connection> {
         if valid == 0 {
             return Err(GraphError::validation(
                 "invalid_context_occurrence",
-                format!("contexts[{index}].target"),
+                field,
                 "Context must identify an accepted node occurrence in the exact visible accepted source completion.",
             ));
         }

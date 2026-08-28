@@ -1,5 +1,6 @@
 mod annotations;
 mod auth;
+mod context_drafts;
 mod conversation_imports;
 mod environment;
 mod error;
@@ -12,7 +13,7 @@ mod types;
 use crate::{approval::ApprovalDecision, runtime::RuntimeClient};
 use crate::{
     permissions::PermissionCatalog,
-    product::{InteractionExecutionService, ProductService},
+    product::{InteractionExecutionService, NodeContextDraftConfirmationService, ProductService},
 };
 use auth::DesktopSessionAuthenticator;
 use axum::{Router, routing::get};
@@ -38,6 +39,7 @@ pub(crate) struct ApiState {
     pub(crate) authenticator: DesktopSessionAuthenticator,
     pub(crate) runtime: Option<RuntimeClient>,
     pub(crate) interaction_execution: Option<InteractionExecutionService>,
+    pub(crate) context_draft_confirmation: NodeContextDraftConfirmationService,
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
@@ -80,11 +82,14 @@ pub(crate) fn router(
             runtime.execution_lease_reconciler.clone(),
         )
     });
+    let context_draft_confirmation =
+        NodeContextDraftConfirmationService::new(product.clone(), runtime.runtime.clone());
     let state = ApiState {
         product,
         authenticator: DesktopSessionAuthenticator::new(control_token, read_only_control_token),
         runtime: runtime.runtime,
         interaction_execution,
+        context_draft_confirmation,
         permission_catalog: runtime.permission_catalog,
         default_harness_configuration: runtime.default_harness_configuration,
         allow_harness_override: runtime.allow_harness_override,
@@ -183,6 +188,18 @@ pub(crate) fn router(
         .route("/api/threads", get(threads::list).post(threads::create))
         .route("/api/threads/{id}", get(threads::get))
         .route("/api/threads/{id}/export", get(threads::export))
+        .route(
+            "/api/threads/{thread_id}/context-drafts",
+            get(context_drafts::list),
+        )
+        .route(
+            "/api/threads/{thread_id}/context-drafts/{draft_id}",
+            axum::routing::put(context_drafts::save).delete(context_drafts::discard),
+        )
+        .route(
+            "/api/threads/{thread_id}/context-drafts/{draft_id}/confirm",
+            axum::routing::post(context_drafts::confirm),
+        )
         .route(
             "/api/internal/annotation-sessions",
             axum::routing::post(annotations::register_session)

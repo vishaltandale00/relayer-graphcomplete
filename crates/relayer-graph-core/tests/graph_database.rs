@@ -676,7 +676,7 @@ async fn interaction_context_rejects_duplicate_invalid_and_empty_input_atomicall
         .unwrap();
     let other_writer = database.writer_for_subgraph(other.id).await.unwrap();
     let other_node = node(&other_writer, "other").await;
-    accept_single_node(&other_writer, other.clone(), other_node).await;
+    let other_layer = accept_single_node(&other_writer, other.clone(), other_node.clone()).await;
 
     let occurrence = InteractionContextDraft {
         target: InteractionContextTarget {
@@ -686,6 +686,49 @@ async fn interaction_context_rejects_duplicate_invalid_and_empty_input_atomicall
         },
         annotations: vec!["Use this".into()],
     };
+    let mut accepted_target = target.clone();
+    accepted_target.state = RecordState::Accepted;
+    assert_eq!(
+        database
+            .canonical_interaction_context_occurrence(&occurrence.target)
+            .await
+            .unwrap(),
+        InteractionInputNode::from(accepted_target)
+    );
+
+    let unreachable = InteractionContextTarget {
+        node_id: other_node.id,
+        source_interaction_node_id: source.id,
+        source_layer_id: other_layer.id,
+    };
+    let unreachable_error = database
+        .canonical_interaction_context_occurrence(&unreachable)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        unreachable_error,
+        GraphError::Validation {
+            code: "invalid_context_occurrence",
+            ref path,
+            ..
+        } if path == "target"
+    ));
+
+    let missing_source = database
+        .canonical_interaction_context_occurrence(&InteractionContextTarget {
+            source_interaction_node_id: NodeId::new(999_999).unwrap(),
+            ..occurrence.target.clone()
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        missing_source,
+        GraphError::Validation {
+            code: "invalid_context_occurrence",
+            ref path,
+            ..
+        } if path == "target"
+    ));
     let duplicate = database
         .create_interaction_with_context(
             Some(project(1)),
@@ -720,6 +763,26 @@ async fn interaction_context_rejects_duplicate_invalid_and_empty_input_atomicall
         .unwrap_err();
     assert!(matches!(
         invalid,
+        GraphError::Validation {
+            code: "invalid_context_occurrence",
+            ..
+        }
+    ));
+
+    let unreachable_create = database
+        .create_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Unreachable occurrence",
+            &[InteractionContextDraft {
+                target: unreachable,
+                annotations: vec!["Use this".into()],
+            }],
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        unreachable_create,
         GraphError::Validation {
             code: "invalid_context_occurrence",
             ..

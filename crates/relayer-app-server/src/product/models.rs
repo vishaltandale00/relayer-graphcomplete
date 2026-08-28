@@ -122,6 +122,29 @@ pub(crate) struct DurableInteractionInput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NodeContextDraft {
+    pub(crate) id: String,
+    pub(crate) thread_id: ThreadId,
+    pub(crate) target: InteractionContextTarget,
+    pub(crate) target_node: relayer_graph_core::InteractionInputNode,
+    pub(crate) text: String,
+    pub(crate) revision: i64,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NodeContextDraftConfirmation {
+    pub(crate) draft_id: String,
+    pub(crate) thread_id: ThreadId,
+    pub(crate) target: InteractionContextTarget,
+    pub(crate) target_node: relayer_graph_core::InteractionInputNode,
+    pub(crate) annotation: String,
+    pub(crate) draft_revision: i64,
+    pub(crate) confirmed_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActionInvocation {
     pub(crate) source_interaction_id: InteractionId,
     pub(crate) action_id: i64,

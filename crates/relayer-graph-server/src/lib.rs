@@ -8,9 +8,9 @@ use axum::{
 use relayer_graph_core::{
     ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase,
     GraphError, GraphNode, GraphWriter, ImportedConversationStage, ImportedTurn,
-    InteractionContextAction, InteractionContextDraft, InteractionInput, InteractionInvocation,
-    LayerDraft, LayerId, LayerLayout, NodeDraft, NodeId, NodePlacement, ProjectId, RecordState,
-    ThreadId,
+    InteractionContextAction, InteractionContextDraft, InteractionContextTarget, InteractionInput,
+    InteractionInputNode, InteractionInvocation, LayerDraft, LayerId, LayerLayout, NodeDraft,
+    NodeId, NodePlacement, ProjectId, RecordState, ThreadId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -46,6 +46,10 @@ pub fn router(state: ServerState) -> Router {
         .route(
             "/api/control/interactions/{id}/context-actions",
             get(control_context_actions),
+        )
+        .route(
+            "/api/control/context-occurrences/canonical",
+            post(canonical_context_occurrence),
         )
         .route("/api/control/interactions/{id}/output", get(control_output))
         .route(
@@ -304,6 +308,33 @@ async fn control_context_actions(
     Ok(Json(json!({
         "actions": state.graph.interaction_context_actions(id).await?,
     })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalContextOccurrenceRequest {
+    node_id: NodeId,
+    source_interaction_node_id: NodeId,
+    source_layer_id: LayerId,
+}
+
+async fn canonical_context_occurrence(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<CanonicalContextOccurrenceRequest>,
+) -> Result<Json<InteractionInputNode>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let target = InteractionContextTarget {
+        node_id: input.node_id,
+        source_interaction_node_id: input.source_interaction_node_id,
+        source_layer_id: input.source_layer_id,
+    };
+    Ok(Json(
+        state
+            .graph
+            .canonical_interaction_context_occurrence(&target)
+            .await?,
+    ))
 }
 
 async fn interaction_metadata(
@@ -1048,6 +1079,104 @@ mod tests {
 
         let state = ServerState::new(graph, "control");
         let app = router(state.clone());
+        let occurrence_body = json!({
+            "nodeId": target.id,
+            "sourceInteractionNodeId": source.id,
+            "sourceLayerId": layer.id,
+        });
+        let denied_occurrence = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/context-occurrences/canonical")
+                    .header("content-type", "application/json")
+                    .body(Body::from(occurrence_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied_occurrence.status(), StatusCode::UNAUTHORIZED);
+
+        let canonical = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/context-occurrences/canonical")
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(occurrence_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(canonical.status(), StatusCode::OK);
+        let canonical: Value =
+            serde_json::from_slice(&to_bytes(canonical.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(canonical["id"], target.id.value());
+        assert_eq!(canonical["title"], "Target");
+
+        let unknown_field = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/context-occurrences/canonical")
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "nodeId": target.id,
+                            "sourceInteractionNodeId": source.id,
+                            "sourceLayerId": layer.id,
+                            "projectId": 41,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unknown_field.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let invalid_occurrence = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/context-occurrences/canonical")
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "nodeId": target.id,
+                            "sourceInteractionNodeId": 999999,
+                            "sourceLayerId": layer.id,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            invalid_occurrence.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        let invalid_occurrence: Value = serde_json::from_slice(
+            &to_bytes(invalid_occurrence.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            invalid_occurrence["error"]["code"],
+            "invalid_context_occurrence"
+        );
+        assert_eq!(invalid_occurrence["error"]["path"], "target");
+
         let created = app
             .clone()
             .oneshot(

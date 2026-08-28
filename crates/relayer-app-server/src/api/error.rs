@@ -2,7 +2,9 @@ use super::types::ProjectResponse;
 use crate::conversation_export_service::ConversationExportBuildError;
 use crate::conversation_import_service::ConversationImportError;
 use crate::permissions::PermissionError;
-use crate::product::{CatalogError, InvalidProductId, ProductError};
+use crate::product::{
+    CatalogError, InvalidProductId, NodeContextDraftConfirmationError, ProductError,
+};
 use crate::runtime::RuntimeError;
 use crate::storage::StorageError;
 use axum::{
@@ -119,6 +121,18 @@ impl From<RuntimeError> for ApiError {
     }
 }
 
+impl From<NodeContextDraftConfirmationError> for ApiError {
+    fn from(error: NodeContextDraftConfirmationError) -> Self {
+        match error {
+            NodeContextDraftConfirmationError::Product(error) => error.into(),
+            NodeContextDraftConfirmationError::TargetUnavailable => Self::conflict(
+                "context_draft_target_unavailable",
+                "The saved node occurrence is no longer available. The draft was preserved.",
+            ),
+        }
+    }
+}
+
 impl From<ConversationExportBuildError> for ApiError {
     fn from(error: ConversationExportBuildError) -> Self {
         match error {
@@ -191,6 +205,9 @@ impl From<ProductError> for ApiError {
             ),
             ProductError::Catalog(error) | ProductError::Storage(StorageError::Catalog(error)) => {
                 catalog_error(error)
+            }
+            ProductError::Storage(StorageError::ContextDraftConflict { code, message }) => {
+                Self::conflict(code, message)
             }
             ProductError::Storage(error) => Self::internal(&error.to_string()),
         }
