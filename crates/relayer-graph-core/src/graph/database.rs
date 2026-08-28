@@ -368,7 +368,7 @@ impl GraphDatabase {
     }
 }
 
-async fn initialize_completion(
+pub(crate) async fn initialize_completion(
     connection: &mut crate::storage::GraphConnection,
     node: &GraphNode,
     project_id: Option<ProjectId>,

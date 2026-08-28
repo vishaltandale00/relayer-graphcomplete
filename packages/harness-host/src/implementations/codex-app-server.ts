@@ -32,7 +32,7 @@ export interface CodexAppServerTurnOptions {
   readonly shutdownGraceMs?: number;
   readonly spawnProcess?: CodexAppServerSpawn;
   readonly killProcessGroup?: typeof process.kill;
-  readonly onThreadId: (threadId: string) => void;
+  readonly onThreadId: (threadId: string) => void | Promise<void>;
   readonly onNotification?: (method: string, params: unknown) => void;
   readonly onServerRequest?: (method: string, params: unknown) => void;
 }
@@ -188,7 +188,7 @@ class CodexAppServerConnection {
     if (threadId === undefined || (this.options.savedThreadId !== undefined && threadId !== this.options.savedThreadId)) {
       throw new Error("Codex app-server returned an invalid thread identity");
     }
-    this.options.onThreadId(threadId);
+    await this.options.onThreadId(threadId);
 
     this.startingTurn = true;
     let turnResult: unknown;

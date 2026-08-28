@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { GraphCapability, GraphId, ResolvedLayer } from "@relayer/graph-client";
 import type { JsonObject } from "./types.js";
 
@@ -78,6 +79,11 @@ export function nativeExecutionHandle(
   stopSelf?: (reason: string) => void | Promise<void>,
   attached?: Promise<JsonObject>,
 ): NativeExecutionHandle {
+  // Attachment has independent settlement from provider execution. Install a
+  // rejection observer so callers that only await the execution do not create
+  // an unhandled rejection; callers still receive the original rejecting
+  // promise when they inspect native identity explicitly.
+  void attached?.catch(() => undefined);
   const settled: Promise<NativeCompletionExecution> = execution.then(
     (): NativeCompletionExecution => ({ status: "exited", effectBoundary: "none" }),
     (): NativeCompletionExecution => ({ status: "failed", effectBoundary: "unknown" }),
@@ -125,7 +131,10 @@ export class CompletionTerminalError extends Error {
  * or incorporation policy; provider adapters retain their native execution rules.
  */
 export class CompletionExecutionModule {
-  private readonly handles = new Map<GraphId, CompletionHandle>();
+  private readonly handles = new Map<GraphId, {
+    readonly bindingDigest: string;
+    readonly handle: CompletionHandle;
+  }>();
 
   constructor(
     private readonly preparation: CompletionPreparation,
@@ -134,8 +143,14 @@ export class CompletionExecutionModule {
 
   complete(inputGraph: CompletionInputGraph): CompletionHandle {
     const binding = this.preparation.prepare(inputGraph);
+    const bindingDigest = completionBindingDigest(binding);
     const existing = this.handles.get(binding.completionId);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      if (existing.bindingDigest !== bindingDigest) {
+        throw new Error("Completion is already active under a different completion binding");
+      }
+      return existing.handle;
+    }
 
     const current: CompletionCurrent = Object.freeze({
       snapshot: () => this.preparation.current(binding),
@@ -165,7 +180,16 @@ export class CompletionExecutionModule {
     }).catch(() => {});
 
     const handle = Object.freeze({ completionId: binding.completionId, current, result });
-    this.handles.set(binding.completionId, handle);
+    this.handles.set(binding.completionId, { bindingDigest, handle });
     return handle;
   }
+}
+
+function completionBindingDigest(binding: CompletionBinding): string {
+  return createHash("sha256").update(JSON.stringify({
+    completionId: binding.completionId,
+    inputGraph: binding.inputGraph,
+    capability: binding.capability,
+    origin: binding.origin,
+  })).digest("hex");
 }

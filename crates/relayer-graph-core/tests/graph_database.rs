@@ -1341,17 +1341,16 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
         .await
         .unwrap();
 
-    let invocation = InteractionInvocation {
-        source_interaction_node_id: parent.id,
-        source_action_id: invoke.id,
-    };
-    let child = database
-        .create_interaction_with_invocation(
-            Some(project(1)),
-            thread(1),
-            "caller supplied text is not authority",
-            Some(invocation),
-        )
+    let parent_epoch = database
+        .activate_completion_authority(parent.id)
+        .await
+        .unwrap();
+    let recursive_writer = database
+        .writer_for_completion_authority(parent.id, parent_epoch)
+        .await
+        .unwrap();
+    let child = recursive_writer
+        .prepare_recursive_completion(invoke.id)
         .await
         .unwrap();
     let later_source = node(&writer, "later-parent-current").await;
@@ -1382,13 +1381,8 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
         )
         .await
         .unwrap();
-    let retry = database
-        .create_interaction_with_invocation(
-            Some(project(1)),
-            thread(1),
-            "different retry text is ignored",
-            Some(invocation),
-        )
+    let retry = recursive_writer
+        .prepare_recursive_completion(invoke.id)
         .await
         .unwrap();
 
@@ -1449,16 +1443,15 @@ async fn active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off(
         .await
         .unwrap();
 
+    let parent_epoch = database
+        .activate_completion_authority(parent.id)
+        .await
+        .unwrap();
     let error = database
-        .create_interaction_with_invocation(
-            Some(project(1)),
-            thread(1),
-            "not authoritative",
-            Some(InteractionInvocation {
-                source_interaction_node_id: parent.id,
-                source_action_id: invoke.id,
-            }),
-        )
+        .writer_for_completion_authority(parent.id, parent_epoch)
+        .await
+        .unwrap()
+        .prepare_recursive_completion(invoke.id)
         .await
         .unwrap_err();
 

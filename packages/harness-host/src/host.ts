@@ -78,7 +78,10 @@ interface LiveSession {
     readonly interactionId: number;
     readonly controller: AbortController;
   }>;
-  recursiveCompletionRuns: Map<GraphId, Promise<HarnessCompleteResult>>;
+  recursiveCompletionRuns: Map<GraphId, {
+    readonly capabilityDigest: string;
+    readonly run: Promise<HarnessCompleteResult>;
+  }>;
   activeHumanRootCompletionId?: GraphId;
   currentPolicyRevision?: number;
   currentPolicyIdentity?: string;
@@ -435,8 +438,14 @@ export class HarnessHost {
     if (this.closed) throw new Error("Harness host is closed");
     validateGraphCapability(capability);
     const session = this.liveSession(threadId);
+    const capabilityDigest = graphCapabilityDigest(capability);
     const existing = session.recursiveCompletionRuns.get(capability.nodeId);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      if (existing.capabilityDigest !== capabilityDigest) {
+        throw new Error("Recursive completion is already active under a different graph capability");
+      }
+      return existing.run;
+    }
     const run = this.runCompletion({
       threadId,
       interactionId: capability.nodeId,
@@ -445,9 +454,9 @@ export class HarnessHost {
       ...(signal === undefined ? {} : { signal }),
       humanRoot: false,
     });
-    session.recursiveCompletionRuns.set(capability.nodeId, run);
+    session.recursiveCompletionRuns.set(capability.nodeId, { capabilityDigest, run });
     void run.finally(() => {
-      if (session.recursiveCompletionRuns.get(capability.nodeId) === run) {
+      if (session.recursiveCompletionRuns.get(capability.nodeId)?.run === run) {
         session.recursiveCompletionRuns.delete(capability.nodeId);
       }
     }).catch(() => {});
@@ -927,7 +936,9 @@ export class HarnessHost {
     }
     await Promise.all([...this.sessions.entries()].map(async ([threadId, session]) => {
       try {
-        const recursiveRuns = Promise.allSettled([...session.recursiveCompletionRuns.values()])
+        const recursiveRuns = Promise.allSettled(
+          [...session.recursiveCompletionRuns.values()].map(({ run }) => run),
+        )
           .then(() => undefined);
         await waitForHarnessSessionClose(
           Promise.all([session.tail, recursiveRuns]).then(() => undefined),
@@ -2041,6 +2052,12 @@ function validateGraphCapability(capability: GraphCapability): void {
   if (parsedUrl.protocol !== "http:" || parsedUrl.hostname !== "127.0.0.1" || parsedUrl.port === "" || parsedUrl.username !== "" || parsedUrl.password !== "" || parsedUrl.pathname !== "/" || parsedUrl.search !== "" || parsedUrl.hash !== "") {
     throw new Error("Harness graph capability URL must use authenticated 127.0.0.1 HTTP");
   }
+}
+
+function graphCapabilityDigest(capability: GraphCapability): string {
+  return createHash("sha256")
+    .update(JSON.stringify({ url: capability.url, nodeId: capability.nodeId, token: capability.token }))
+    .digest("hex");
 }
 
 class ActiveHarnessGraphScope implements HarnessGraphScope {

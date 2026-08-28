@@ -1650,6 +1650,53 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("rejects a conflicting capability instead of transferring an in-flight recursive result", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-binding-conflict-"));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let starts = 0;
+    let accepted = false;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? (accepted
+        ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } }))
+      : graphReadResponse(url, 2)));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => ({
+        async complete() {},
+        async completeRecursive() {
+          starts += 1;
+          await gate;
+          accepted = true;
+        },
+        state: emptyState,
+      }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      const running = host.completeRecursive(1, graph(2, "child-token"));
+      await vi.waitFor(() => expect(starts).toBe(1));
+
+      await expect(host.completeRecursive(1, graph(2, "foreign-token")))
+        .rejects.toThrow("different graph capability");
+
+      release();
+      await expect(running).resolves.toMatchObject({ output: completion });
+      expect(starts).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("waits for recursive completion cleanup before disposing the provider session", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-close-"));
     let started!: () => void;

@@ -126,6 +126,31 @@ describe("Codex app-server transport", () => {
     expect(fake.killed).toBe(true);
   });
 
+  it("waits for native thread attachment before starting the turn", async () => {
+    let releaseAttachment: (() => void) | undefined;
+    const attachment = new Promise<void>((resolve) => { releaseAttachment = resolve; });
+    const fake = new FakeCodexProcess((message) => {
+      if (message.method === "initialize") fake.respond(message.id, {});
+      if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1" } });
+        queueMicrotask(() => fake.notify("turn/completed", {
+          threadId: "thread-new",
+          turn: { id: "turn-1", status: "completed", error: null },
+        }));
+      }
+    });
+
+    const running = runCodexAppServerTurn(options(fake, {
+      onThreadId: async () => attachment,
+    }));
+    await vi.waitFor(() => expect(fake.messages.some((request) => request.method === "thread/start")).toBe(true));
+    expect(fake.messages.some((request) => request.method === "turn/start")).toBe(false);
+
+    releaseAttachment?.();
+    await expect(running).resolves.toMatchObject({ threadId: "thread-new", turnId: "turn-1" });
+  });
+
   it("bridges a server command approval and never sends acceptForSession", async () => {
     const onServerRequest = vi.fn();
     const request = vi.fn(async () => ({

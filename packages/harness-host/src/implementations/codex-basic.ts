@@ -115,10 +115,35 @@ export class CodexBasicHarness implements Harness {
   }
 
   complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
-    return nativeExecutionHandle(this.execute(context, signal));
+    return this.executionHandle(context, "root", signal);
   }
 
-  private async execute(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+  completeRecursive(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
+    return this.executionHandle(context, "recursive", signal);
+  }
+
+  private executionHandle(
+    context: HarnessRunContext,
+    kind: "root" | "recursive",
+    signal?: AbortSignal,
+  ): NativeExecutionHandle {
+    let resolveAttached!: (identity: JsonObject) => void;
+    let rejectAttached!: (error: unknown) => void;
+    const attached = new Promise<JsonObject>((resolve, reject) => {
+      resolveAttached = resolve;
+      rejectAttached = reject;
+    });
+    const execution = this.execute(context, kind, resolveAttached, signal);
+    void execution.catch(rejectAttached);
+    return nativeExecutionHandle(execution, undefined, attached);
+  }
+
+  private async execute(
+    context: HarnessRunContext,
+    kind: "root" | "recursive",
+    attach: (identity: JsonObject) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const model = this.selectedModel(context);
     if (context.model !== undefined && context.access === undefined) {
       throw new Error("codex.basic requires execution-scoped access for the selected provider");
@@ -137,7 +162,9 @@ export class CodexBasicHarness implements Harness {
       await run({
         environment,
         codexPathOverride: resolvedRuntime.executable,
-        ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
+        ...(kind === "root" && this.codexThreadId !== undefined
+          ? { savedThreadId: this.codexThreadId }
+          : {}),
         threadParams: this.threadParams(model),
         turnParams: this.turnParams(sandboxPolicy, model),
         prompt,
@@ -150,7 +177,10 @@ export class CodexBasicHarness implements Harness {
         ...(signal === undefined ? {} : { signal }),
         forceSignal: forceShutdown.signal,
         ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
-        onThreadId: (threadId) => { this.codexThreadId = threadId; },
+        onThreadId: (threadId) => {
+          if (kind === "root") this.codexThreadId = threadId;
+          attach(Object.freeze({ provider: "codex", threadId }));
+        },
         onNotification: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
         onServerRequest: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
       });

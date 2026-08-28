@@ -40,11 +40,11 @@ function layer(id: number): ResolvedLayer {
   };
 }
 
-function binding(completionId: number): CompletionBinding {
+function binding(completionId: number, token = `token-${completionId}`): CompletionBinding {
   return {
     completionId,
     inputGraph: inputGraph(completionId),
-    capability: { url: "http://127.0.0.1:43123", token: `token-${completionId}`, nodeId: completionId },
+    capability: { url: "http://127.0.0.1:43123", token, nodeId: completionId },
     origin: { kind: "invoke", sourceCompletionId: 1, actionId: completionId + 100 },
   };
 }
@@ -175,6 +175,32 @@ describe("CompletionExecutionModule", () => {
     expect(recovered).toBe(first);
     expect(adapter.complete).toHaveBeenCalledTimes(1);
     expect(preparation.observe).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects recovery of one completion through a different prepared capability", () => {
+    const terminal = deferred<CompletionLifecycleObservation>();
+    let preparations = 0;
+    const preparation: CompletionPreparation = {
+      prepare: vi.fn(() => binding(2, preparations++ === 0 ? "first-token" : "foreign-token")),
+      current: vi.fn(async (): Promise<CompletionCurrentSnapshot> => ({
+        completionId: 2,
+        lifecycle: "active",
+        revision: 0,
+        currentLayerId: null,
+        finalLayerId: null,
+      })),
+      observe: vi.fn(() => terminal.promise),
+      fail: vi.fn(async () => {}),
+    };
+    const adapter: RecursiveHarnessAdapter = {
+      complete: vi.fn(() => nativeHandle(new Promise<NativeCompletionExecution>(() => {}))),
+    };
+    const module = new CompletionExecutionModule(preparation, adapter);
+
+    module.complete(inputGraph(2));
+
+    expect(() => module.complete(inputGraph(2))).toThrow("different completion binding");
+    expect(adapter.complete).toHaveBeenCalledTimes(1);
   });
 
   test("returns a handle and fails only that completion when native launch throws", async () => {

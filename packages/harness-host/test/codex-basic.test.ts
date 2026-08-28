@@ -518,6 +518,42 @@ describe("CodexBasicHarness", () => {
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-1" });
   });
 
+  it("starts recursive semantic completions in fresh Codex threads without replacing root continuity", async () => {
+    const submissions: CodexAppServerTurnOptions[] = [];
+    const harness = new CodexBasicHarness({
+      ...context("auto"),
+      savedState: { codexThreadId: "root-thread" },
+    }, {
+      codexPathOverride: "/managed/codex",
+      runAppServerTurn: async (options) => {
+        submissions.push(options);
+        const threadId = options.savedThreadId ?? `child-thread-${submissions.length}`;
+        await options.onThreadId(threadId);
+        return { threadId, turnId: `turn-${submissions.length}`, status: "completed" };
+      },
+    });
+
+    const first = harness.completeRecursive!(runContext(2, "child-token-a"));
+    const second = harness.completeRecursive!(runContext(3, "child-token-b"));
+    await Promise.all([first, second]);
+
+    await expect(first.attached).resolves.toEqual({ provider: "codex", threadId: "child-thread-1" });
+    await expect(second.attached).resolves.toEqual({ provider: "codex", threadId: "child-thread-2" });
+    expect(submissions.map(({ savedThreadId, environment }) => [
+      savedThreadId,
+      environment.RELAYER_GRAPH_TOKEN,
+      environment.RELAYER_NODE_ID,
+    ])).toEqual([
+      [undefined, "child-token-a", "2"],
+      [undefined, "child-token-b", "3"],
+    ]);
+    expect(harness.state()).toEqual({ codexThreadId: "root-thread" });
+
+    await harness.complete(runContext(1, "root-token"));
+    expect(submissions[2]?.savedThreadId).toBe("root-thread");
+    expect(harness.state()).toEqual({ codexThreadId: "root-thread" });
+  });
+
   it("passes only the selected execution-scoped provider secret to Codex", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "ambient-anthropic-secret");
     vi.stubEnv("CODEX_HOME", "/ambient/codex-home");

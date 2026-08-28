@@ -1,9 +1,9 @@
 use crate::{
-    ActionDraft, CompletionOutput, CompletionState, CurrentTransition, CurrentTransitionReceipt,
-    EdgeDraft, GraphAction, GraphDatabase, GraphEdge, GraphError, GraphLayer, GraphNode,
-    InteractionInput, LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId, RecordState,
-    ResolvedLayer,
-    graph::{InteractionScope, completion, model::LayerCandidate},
+    ActionDraft, ActionId, CompletionOutput, CompletionState, CurrentTransition,
+    CurrentTransitionReceipt, EdgeDraft, GraphAction, GraphDatabase, GraphEdge, GraphError,
+    GraphLayer, GraphNode, InteractionInput, InteractionInvocation, LayerDraft, LayerId,
+    NavigateRelation, NodeDraft, NodeId, RecordState, ResolvedLayer,
+    graph::{InteractionScope, completion, database::initialize_completion, model::LayerCandidate},
     storage::{
         GraphConnection,
         sqlite::{
@@ -25,6 +25,36 @@ impl GraphWriter {
 
     pub fn node_id(&self) -> NodeId {
         self.scope.root_node_id
+    }
+
+    pub async fn prepare_recursive_completion(
+        &self,
+        action_id: ActionId,
+    ) -> Result<GraphNode, GraphError> {
+        let mut transaction = self.database.storage.begin_write().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let child = NodeTable::new(&mut transaction)
+            .insert_interaction(
+                self.scope.project_id,
+                self.scope.thread_id,
+                "",
+                Some(InteractionInvocation {
+                    source_interaction_node_id: self.scope.root_node_id,
+                    source_action_id: action_id,
+                }),
+            )
+            .await?;
+        initialize_completion(
+            &mut transaction,
+            &child,
+            self.scope.project_id,
+            self.scope.thread_id,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(child)
     }
 
     pub async fn interaction_input(&self) -> Result<InteractionInput, GraphError> {

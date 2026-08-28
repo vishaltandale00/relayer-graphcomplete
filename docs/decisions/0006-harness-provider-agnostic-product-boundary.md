@@ -14,6 +14,10 @@ Every invocation also has a durable GraphComplete completion identity, append-on
 
 The persistent harness host resolves a named configuration to a code-owned implementation factory. The selected harness owns model execution and provider-session reuse, and exposes the canonical recursive `complete(inputGraph)` function to agent-authored code. Codex may coordinate native subagents and Prime Agent may coordinate native RLM children; their adapters associate each semantic recursive call with a distinct completion execution. GraphComplete supplies neither with a separate scheduler. A provider adapter owns authentication, model discovery, credentials, and provider-specific execution details. GraphComplete owns graph semantics, interaction-scoped authority, validation, and acceptance. Relayer owns product lifecycle, persistence, activation, and user experience.
 
+One GraphComplete completion owns one provider execution scope. Codex subagents and Prime RLM helpers remain provider-native implementation details inside that scope and may share its completion authority. Creating a native helper never creates semantic graph identity. An explicit `complete(inputGraph)` call creates a fresh GraphComplete completion and a fresh provider execution scope. The new execution retains the harness's ordinary native helper infrastructure.
+
+For Codex, the adapter starts a fresh app-server thread and turn for the semantic child. That child orchestrator may use Codex-native subagents inside its completion scope. For Prime Agent, the adapter starts an invocation-aware native RLM execution for the semantic child. That child orchestrator may use nested RLM helpers inside its completion scope. Native helpers can report a semantic opportunity to their orchestrator, but Relayer does not mirror provider execution topology into GraphComplete.
+
 Harness configurations declare compatible providers, models, and product permission-profile bindings. Product APIs expose only stable catalog identifiers and normalized receipts. Raw provider credentials, sandbox flags, runtime session records, and implementation-specific recursion policy do not enter the product record contract.
 
 Harness- and provider-agnostic means the product contract remains stable across supported implementations. It does not create a generic agent protocol or make arbitrary providers and harnesses work without explicit adapters, compatibility declarations, tests, and release inclusion.
@@ -25,6 +29,7 @@ The packaged application includes the `codex.basic` implementation through `code
 - Product requirements and acceptance criteria describe capabilities through the selected harness and provider rather than naming one implementation.
 - Implementation-specific setup, limitations, evidence, and tests remain explicit and separately scoped.
 - Each harness owns any provider-native delegation it uses. It executes and associates agent-invoked `complete(inputGraph)` calls; GraphComplete does not add another scheduler.
+- Provider-native helper topology and GraphComplete semantic-completion topology remain independent.
 - Adding a supported provider or harness requires an adapter, catalog compatibility, permission translation, lifecycle tests, and product evidence.
 - Eval cases remain harness agnostic and may compare supported configurations without changing the underlying product workflow.
 - [ADR 0001](0001-prime-agent-runtime-boundary.md) is narrowed to the optional `prime.agent` implementation and is otherwise superseded.

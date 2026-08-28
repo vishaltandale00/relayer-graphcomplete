@@ -132,6 +132,7 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/layers/{id}/discard", post(discard_layer))
         .route("/api/graph/actions", post(add_action))
         .route("/api/graph/actions/{id}", get(get_action))
+        .route("/api/graph/completions", post(prepare_recursive_completion))
         .route("/api/graph/submit", post(submit_completion))
         .route("/api/graph/current", get(graph_current))
         .route("/api/graph/current/transitions", post(transition_current))
@@ -337,6 +338,37 @@ async fn create_interaction(
         input_identity: input.input_identity,
         input_digest: input.input_digest,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrepareRecursiveCompletionRequest {
+    action_id: ActionId,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrepareRecursiveCompletionResponse {
+    node: GraphNode,
+}
+
+async fn prepare_recursive_completion(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<PrepareRecursiveCompletionRequest>,
+) -> Result<Json<PrepareRecursiveCompletionResponse>, ApiError> {
+    require_temporal_feature(
+        state.temporal_features.provider_recursion,
+        "provider-recursion",
+    )?;
+    let authority = session(&state, &headers)?;
+    let node = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?
+        .prepare_recursive_completion(input.action_id)
+        .await?;
+    Ok(Json(PrepareRecursiveCompletionResponse { node }))
 }
 
 async fn control_input(
@@ -1773,6 +1805,97 @@ mod tests {
                 .unwrap();
         assert_eq!(body["events"].as_array().unwrap().len(), 2);
         assert_eq!(body["events"][1]["lifecycle"], "stopped");
+    }
+
+    #[tokio::test]
+    async fn parent_capability_prepares_one_recursive_child_without_caller_scope() {
+        let features = TemporalFeatureConfig {
+            schema_read: true,
+            root_current_write: true,
+            projection_ui: true,
+            invoke_resolution: true,
+            provider_recursion: true,
+            ..TemporalFeatureConfig::default()
+        };
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        graph.set_temporal_features(features).await.unwrap();
+        let parent = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Parent")
+            .await
+            .unwrap();
+        let writer = graph.writer_for_subgraph(parent.id).await.unwrap();
+        let source = writer
+            .submit_node(&NodeDraft {
+                client_key: "source".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Source".into(),
+                detail: "Source".into(),
+            })
+            .await
+            .unwrap();
+        let layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: "current".into(),
+                nodes: vec![source.id],
+                edges: vec![],
+                layout: authored_layout(source.id),
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        let invoke = writer
+            .add_action(&ActionDraft {
+                client_key: "child".into(),
+                source_node_id: source.id,
+                source_layer_id: Some(layer.id),
+                kind: ActionKind::Invoke,
+                relation: None,
+                label: "Investigate".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: Some("Canonical child input".into()),
+            })
+            .await
+            .unwrap();
+        writer
+            .transition_current(
+                0,
+                "publish-child",
+                CurrentTransition::Advance { layer_id: layer.id },
+            )
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control").with_temporal_features(features);
+        let parent_token = mint_capability(&state, parent.id, None).await.ok().unwrap();
+        let app = router(state);
+        let request = || {
+            Request::builder()
+                .method("POST")
+                .uri("/api/graph/completions")
+                .header("authorization", format!("Bearer {parent_token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "actionId": invoke.id }).to_string()))
+                .unwrap()
+        };
+
+        let first = app.clone().oneshot(request()).await.unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let first: PrepareRecursiveCompletionResponse =
+            serde_json::from_slice(&to_bytes(first.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        let retry = app.oneshot(request()).await.unwrap();
+        assert_eq!(retry.status(), StatusCode::OK);
+        let retry: PrepareRecursiveCompletionResponse =
+            serde_json::from_slice(&to_bytes(retry.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+
+        assert_eq!(retry.node.id, first.node.id);
+        assert_eq!(first.node.detail, "Canonical child input");
+        assert_eq!(first.node.leased_action_id, Some(invoke.id));
+        assert_ne!(first.node.id, parent.id);
     }
 
     #[tokio::test]
