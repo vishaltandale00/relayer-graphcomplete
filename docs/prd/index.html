@@ -359,7 +359,7 @@
 <tr><td>Provider adapter</td><td>The implementation boundary for authentication, model discovery, credentials, and provider-specific execution details.</td></tr>
 <tr><td>Thread</td><td>A saved conversation entry in Relayer Desktop.</td></tr>
 <tr><td>Interaction</td><td>One user event that calls Complete. A message or an authored node action can be an interaction.</td></tr>
-<tr><td>Complete</td><td>The operation <code>complete(inputGraph)</code>. It returns an accepted, stopped, or failed result.</td></tr>
+<tr><td>Complete</td><td>The operation <code>complete(inputGraph)</code>. It immediately returns a completion handle whose result promise settles from durable GraphComplete state.</td></tr>
 <tr><td>Accepted layer</td><td>The exact response layer that passed graph validation and acceptance.</td></tr>
 <tr><td>Project</td><td>A stable Relayer record for an authorized local folder.</td></tr>
 <tr><td>No-folder chat</td><td>A thread that uses an isolated app-owned directory. The UI label is <strong>No folder</strong>.</td></tr>
@@ -432,19 +432,33 @@
 <p>These runtime components are implemented and evaluated together. They remain separate packages. The graph engine is authoritative. Clients must not open its database directly. The harness host must not implement graph rules. The evaluation runner must not contain a second product or Complete implementation.</p>
 <p>The Rust app server creates product interactions and calls the same persistent Node harness host used by evaluation. It persists the accepted result and serves it to the renderer.</p>
 <h3>1.4 Relayer Desktop and Relayer Harness interface</h3>
-<p>The canonical external boundary is one Complete call. <code>inputGraph</code> is a small pointer. Its root is the current user-interaction node. It is not a serialized copy of the project graph.</p>
+<p>The canonical external boundary is one Complete call. <code>inputGraph</code> is a small pointer. Its root is one already-prepared canonical user-interaction node. It is not a serialized copy of the project graph. Human-root product code prepares that interaction from the user event; trusted recursive adapter code prepares or exactly recovers an agent child from one immutable published invoke occurrence before entering the same Complete module. Model-authored code cannot substitute an arbitrary interaction-shaped node or mint child authority.</p>
 <p>The root package does not export this boundary yet. Today, the Rust app server reaches the same executable seam through the persistent <code>HarnessHost</code>. Exporting <code>complete(inputGraph)</code> remains required.</p>
 <pre><code class="language-ts">interface RelayerHarnessClient {
-  complete(inputGraph: { interactionNode: NodeReference }): Promise&lt;CompleteResult&gt;;
+  complete(inputGraph: { interactionNode: NodeReference }): CompletionHandle;
 }
 
-type CompleteResult =
-  | { status: &quot;accepted&quot;; interactionNode: NodeReference; display: ResolvedGraphLayer }
-  | { status: &quot;stopped&quot; | &quot;failed&quot;; interactionNode: NodeReference; retryable: boolean; message?: string };
+interface CompletionHandle {
+  readonly completionId: GraphId;
+  readonly current: CompletionCurrent;
+  readonly result: Promise&lt;ResolvedGraphLayer&gt;;
+}
+
+interface CompletionCurrent {
+  snapshot(): Promise&lt;CompletionCurrentSnapshot&gt;;
+}
+
+interface CompletionTerminalError extends Error {
+  readonly completionId: GraphId;
+  readonly lifecycle: &quot;stopped&quot; | &quot;failed&quot;;
+  readonly current: CompletionCurrentSnapshot;
+  readonly reason: string;
+}
 </code></pre>
-<p>The app server creates the interaction and passes its pointer to Complete. The selected harness uses its bound graph client to construct nodes, edges, layers, and actions, then ends by calling <code>graph.submit(interactionNode)</code>. The accepted result includes the fully resolved first layer so the desktop can display it immediately without a second request. The graph engine persists the same layer and serves later navigation. A model turn ending without submission is incomplete.</p>
+<p>Complete returns one handle immediately after trusted preparation has established or recovered the canonical completion identity. <code>current</code> observes the durable GraphComplete pointer. <code>result</code> resolves only from GraphComplete <code>succeeded</code> state and its canonical final layer; it does not resolve merely because a model turn or provider process ended. Stopped and failed completions retain their last current and reject <code>result</code> with a structured terminal error; they never fabricate a final layer.</p>
+<p>The app server creates the human-root interaction and passes its pointer to Complete. A supported recursive provider adapter derives an agent child's prepared pointer from the invoking completion and exact published invoke occurrence, then passes that same pointer to Complete. The selected harness uses its bound graph client to construct nodes, edges, layers, and actions, then returns with <code>current.return(layer)</code> or the compatible <code>graph.submit(interactionNode)</code>. The accepted result includes the fully resolved first layer so the desktop can display it immediately without a second request. The graph engine persists the same layer and serves later navigation. A model turn ending without Return is failure, never success.</p>
 <p>The product stores one named harness on the thread. Model is the primary composer choice. Advanced shows compatible harness configurations before thread creation. The pinned harness becomes read-only after creation.</p>
-<p>The selected harness owns model execution and provider-session reuse. The <code>prime.agent</code> implementation alone owns recursive child scheduling. Provider adapters own authentication and model discovery. Relayer product records do not expose raw credentials, provider flags, runtime sessions, or implementation-specific recursion policy.</p>
+<p>The selected harness owns model execution and provider-session reuse. Each explicitly supported recursive adapter, including Codex and Prime Agent, owns its provider-native child launch or binding, concurrency, waiting, messaging, and session behavior. GraphComplete, Relayer product, and the harness host do not add a recursive runnable queue, automatic parent wakeup, or incorporation policy. Provider adapters own authentication and model discovery. Relayer product records do not expose raw credentials, provider flags, runtime sessions, or implementation-specific recursion policy.</p>
 <h3>1.5 Items not in V1</h3>
 <p>V1 does not include arbitrary harness adapters, third-party conversation views, a generic agent protocol, or a public multi-harness conformance kit. Eval may compare supported harness, provider, and model configurations, but every run still exercises the Relayer product contract. A general platform should be reconsidered only after repeated implementations reveal a concrete reusable seam.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15">15. Canonical visual product reference</h2>
@@ -1809,13 +1823,19 @@ interface HarnessRunContext {
 }
 
 interface Harness {
-  complete(context: HarnessRunContext, signal?: AbortSignal): Promise&lt;void&gt;;
+  complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle;
   state(): HarnessSessionState;
   dispose?(): void | Promise&lt;void&gt;;
 }
+
+interface NativeExecutionHandle {
+  readonly attached: Promise&lt;OpaqueHarnessState&gt;;
+  readonly settled: Promise&lt;ProviderExit&gt;;
+  stopSelf(reason: SafeReason): Promise&lt;void&gt;;
+}
 </code></pre>
-<p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to the current interaction node. The host resolves the pointer once and creates one run context. The persistent harness keeps its provider session and working directory, but it does not keep a current graph credential.</p>
-<p>Complete has one required job: build and submit one response graph under that interaction, or stop/fail explicitly. After the harness returns, the host reads the accepted result from Rust. A turn that ends without <code>graph.submit(interactionNode)</code> is a failure.</p>
+<p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to an already-prepared canonical interaction node. The trusted human or recursive adapter prepares or exactly recovers the identity and capability before invoking the shared completion-execution module. The host resolves the pointer once and creates one run context. The persistent harness keeps its provider session and working directory, but it does not persist a current graph credential.</p>
+<p>Complete returns a <code>CompletionHandle</code> whose current and result are settled from durable GraphComplete state independently of <code>NativeExecutionHandle.settled</code>. A successful Return may resolve the semantic result while provider cleanup continues. Provider exit while GraphComplete remains active records trusted failure and never implies success. An explicit recursive call is bound or launched only through that provider adapter's defined native mechanism; collaboration or RLM trace events alone never create semantic children.</p>
 <h3>12.2 Persistent Node harness host</h3>
 <p>The Node harness host is a long-lived child process of the evaluator or Relayer app server. It resolves a small code-owned implementation map and lazily constructs one harness object per thread:</p>
 <pre><code class="language-ts">const harnessImplementations: Record&lt;string, HarnessFactory&gt; = {
@@ -1825,7 +1845,7 @@ interface Harness {
 </code></pre>
 <p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host keeps the same JavaScript harness object and provider session alive across turns. Factories may initialize asynchronously.</p>
 <p>If the Node process or provider session expires, the host recreates the object from stored configuration and opaque provider resume state. The next Complete call supplies its own graph scope. Continuous conversation must not start a new provider conversation on every Complete call.</p>
-<p>The Relayer app server owns one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object. It serializes construction and Complete calls, forwards cancellation through an <code>AbortSignal</code>, and disposes live harnesses during shutdown. Harness objects for different threads can run concurrently. Only <code>prime.agent</code> owns recursive child-agent scheduling inside a completion.</p>
+<p>The Relayer app server owns one-active-human-root-completion coordination for a thread. The Node host owns the live JavaScript object and a completion registry keyed by canonical completion identity. It serializes construction and durable provider-session state mutation where required, but it does not place recursive provider work behind a thread-global Complete queue. Cancellation, approval, trace, capability, and settlement state are completion scoped. Parent terminality never waits for, cancels, settles, or incorporates an active child. Codex and Prime Agent each retain their native execution behavior; the host owns no recursive child-agent scheduler.</p>
 <h3>12.3 Minimal harness configuration</h3>
 <p>Each YAML file has a unique machine-readable <code>name</code>, selects an implementation type and version, and carries implementation-owned settings. The host validates only the common envelope. Each implementation validates its own settings. Prime Agent can add recursive model policy, review, and budget settings without changing host or product types.</p>
 <pre><code class="language-yaml">schemaVersion: 1

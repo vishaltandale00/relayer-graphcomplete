@@ -1,4 +1,5 @@
 import type { GraphCapability } from "@relayer/graph-client";
+import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import type {
   Harness,
   HarnessExecutionAccess,
@@ -86,7 +87,11 @@ export class ClaudeBasicHarness implements Harness {
     }
   }
 
-  async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+  complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
+    return nativeExecutionHandle(this.execute(context, signal));
+  }
+
+  private async execute(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     if (context.model === undefined || context.access === undefined) {
       throw new Error("claude.basic requires an exact model and execution access");
     }

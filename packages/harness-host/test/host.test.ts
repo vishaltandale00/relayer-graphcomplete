@@ -454,7 +454,8 @@ describe("HarnessHost", () => {
 
       const completing = host.complete(1, 1, graph(), undefined, undefined, { productInteractionId: 8 });
       await started;
-      expect(host.cancel(1)).toBe(true);
+      expect(host.cancel(1, 2)).toBe(false);
+      expect(host.cancel(1, 1)).toBe(true);
       await expect(completing).rejects.toThrow("cancelled for thread 1");
       expect(host.cancel(1)).toBe(false);
       await host.exportCandidateTrace(8, join(directory, "cancelled-export"), {
@@ -1549,6 +1550,158 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("lets provider-owned recursive completions run concurrently and cancels one exact completion", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-concurrency-"));
+    const started = new Set<number>();
+    const accepted = new Set<number>();
+    const releases = new Map<number, () => void>();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/output")) {
+        const nodeId = Number(/nodes\/(\d+)/.exec(url)?.[1]);
+        return accepted.has(nodeId)
+          ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      const token = new Headers(init?.headers).get("authorization");
+      return graphReadResponse(url, token === "Bearer child-b-token" ? 3 : 2);
+    }));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          async complete() {},
+          completeRecursive(context, signal) {
+            const id = context.inputGraph.id;
+            started.add(id);
+            return new Promise<void>((resolve, reject) => {
+              releases.set(id, () => { accepted.add(id); resolve(); });
+              signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+            });
+          },
+          state: emptyState,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+
+      const first = host.completeRecursive(1, graph(2, "child-a-token"));
+      const second = host.completeRecursive(1, graph(3, "child-b-token"));
+      await vi.waitFor(() => expect([...started].sort()).toEqual([2, 3]));
+
+      expect(host.cancel(1, 2)).toBe(true);
+      releases.get(3)!();
+      await expect(first).rejects.toThrow("cancelled for thread 1");
+      await expect(second).resolves.toMatchObject({ output: completion });
+      expect(host.cancel(1, 3)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers an in-flight recursive completion without starting the provider twice", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-retry-"));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let starts = 0;
+    let accepted = false;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? (accepted
+        ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } }))
+      : graphReadResponse(url, 2)));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => ({
+        async complete() {},
+        async completeRecursive() {
+          starts += 1;
+          await gate;
+          accepted = true;
+        },
+        state: emptyState,
+      }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      const capability = graph(2, "child-token");
+      const first = host.completeRecursive(1, capability);
+      const retry = host.completeRecursive(1, capability);
+      await vi.waitFor(() => expect(starts).toBe(1));
+      release();
+      await expect(Promise.all([first, retry])).resolves.toHaveLength(2);
+      expect(starts).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for recursive completion cleanup before disposing the provider session", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-close-"));
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => { started = resolve; });
+    let unwound = false;
+    let disposed = false;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : graphReadResponse(url, 2)));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => ({
+        async complete() {},
+        completeRecursive(_context, signal) {
+          started();
+          return new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              setTimeout(() => {
+                unwound = true;
+                reject(signal.reason);
+              }, 10);
+            }, { once: true });
+          });
+        },
+        state: emptyState,
+        dispose() {
+          expect(unwound).toBe(true);
+          disposed = true;
+        },
+      }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      const running = host.completeRecursive(1, graph(2, "child-token"));
+      await didStart;
+      const closing = host.close();
+      await expect(running).rejects.toThrow("Harness host closed");
+      await expect(closing).resolves.toBeUndefined();
+      expect(disposed).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("releases the per-thread queue when harness state capture throws", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-queue-"));
     let stateCalls = 0;
@@ -2272,6 +2425,12 @@ describe("HarnessHost", () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ cancelled: false });
+      const invalid = await fetch(`${running.url}/sessions/1/cancel?completionId=not-a-number`, {
+        method: "POST",
+        headers: { authorization: "Bearer control" },
+      });
+      expect(invalid.status).toBe(400);
+      expect(await invalid.json()).toEqual({ error: "invalid_completion_id" });
     } finally {
       await running?.close();
       await rm(directory, { recursive: true, force: true });

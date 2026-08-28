@@ -69,7 +69,9 @@ impl GraphDatabase {
         text: &str,
         invocation: Option<InteractionInvocation>,
     ) -> Result<GraphNode, GraphError> {
-        require_nonempty(text, "text")?;
+        if invocation.is_none() {
+            require_nonempty(text, "text")?;
+        }
         let mut transaction = self.storage.begin_write().await?;
         let node = NodeTable::new(&mut transaction)
             .insert_interaction(project_id, thread_id, text, invocation)

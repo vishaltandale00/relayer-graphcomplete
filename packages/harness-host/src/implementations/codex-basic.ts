@@ -1,6 +1,7 @@
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
+import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
 import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
@@ -113,7 +114,11 @@ export class CodexBasicHarness implements Harness {
     this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
   }
 
-  async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+  complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
+    return nativeExecutionHandle(this.execute(context, signal));
+  }
+
+  private async execute(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     const model = this.selectedModel(context);
     if (context.model !== undefined && context.access === undefined) {
       throw new Error("codex.basic requires execution-scoped access for the selected provider");

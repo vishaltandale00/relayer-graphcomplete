@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import type { GraphCapability } from "@relayer/graph-client";
+import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { MAX_HARNESS_APPROVAL_TEXT_LENGTH } from "../approval.js";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { HarnessApprovalRequestTerminatedError } from "../approval-coordinator.js";
@@ -281,7 +282,11 @@ export class PrimeAgentHarness implements Harness {
     );
   }
 
-  async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+  complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
+    return nativeExecutionHandle(this.execute(context, signal), () => this.session.abort());
+  }
+
+  private async execute(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
     const execution = createPrimeAgentModelScope(context, this.primeAgent);
     const runContext: PrimeAgentRunContext = Object.freeze({ graph: context.graph });

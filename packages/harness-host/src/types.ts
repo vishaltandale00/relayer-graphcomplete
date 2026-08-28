@@ -1,5 +1,6 @@
 import type { CompletionOutput, GraphCapability, GraphId, GraphNode, InteractionInput } from "@relayer/graph-client";
 import type { HarnessApprovalChannel } from "./approval-coordinator.js";
+import type { NativeExecutionHandle } from "./completion-execution.js";
 
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = Readonly<Record<string, JsonValue>>;
@@ -304,7 +305,9 @@ export interface InteractionModelSelection {
 
 export interface Harness {
   traceSupport?(): HarnessTraceSupport;
-  complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void>;
+  complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle | Promise<void>;
+  /** Provider-owned semantic child binding; absence means recursive Complete is unsupported. */
+  completeRecursive?(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle | Promise<void>;
   state(): HarnessSessionState;
   dispose?(): void | Promise<void>;
   /** Immediately interrupt provider work so the host-owned dispose operation can finish. */

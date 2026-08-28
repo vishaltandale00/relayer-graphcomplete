@@ -1294,6 +1294,184 @@ async fn temporal_rollout_flags_default_off_and_enforce_stage_dependencies() {
 }
 
 #[tokio::test]
+async fn published_active_invoke_prepares_one_recursive_completion_with_canonical_input() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    database
+        .set_temporal_features(TemporalFeatureConfig {
+            schema_read: true,
+            root_current_write: true,
+            projection_ui: true,
+            invoke_resolution: true,
+            provider_recursion: true,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap();
+    let parent = database
+        .create_interaction(Some(project(1)), thread(1), "Parent task")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(parent.id).await.unwrap();
+    let source = node(&writer, "recursive-source").await;
+    let current = single_node_layer(&writer, "recursive-current", &source).await;
+    let invoke = writer
+        .add_action(&ActionDraft {
+            client_key: "recursive-child".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(current.id),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Investigate".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Investigate the published branch".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .transition_current(
+            0,
+            "publish-recursive-child",
+            CurrentTransition::Advance {
+                layer_id: current.id,
+            },
+        )
+        .await
+        .unwrap();
+
+    let invocation = InteractionInvocation {
+        source_interaction_node_id: parent.id,
+        source_action_id: invoke.id,
+    };
+    let child = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(1),
+            "caller supplied text is not authority",
+            Some(invocation),
+        )
+        .await
+        .unwrap();
+    let later_source = node(&writer, "later-parent-current").await;
+    let later_current = single_node_layer(&writer, "later-current", &later_source).await;
+    writer
+        .add_action(&ActionDraft {
+            client_key: "retain-prior-current".into(),
+            source_node_id: later_source.id,
+            source_layer_id: Some(later_current.id),
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Reference),
+            label: "Prior current".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(current.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .transition_current(
+            1,
+            "advance-after-child-launch",
+            CurrentTransition::Advance {
+                layer_id: later_current.id,
+            },
+        )
+        .await
+        .unwrap();
+    let retry = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(1),
+            "different retry text is ignored",
+            Some(invocation),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(retry.id, child.id);
+    assert_eq!(child.detail, "Investigate the published branch");
+    assert_eq!(child.leased_action_id, Some(invoke.id));
+    let child_current = database.current_completion(child.id).await.unwrap();
+    assert_eq!(child_current.lifecycle, CompletionLifecycle::Active);
+    assert_eq!(child_current.head_revision, 0);
+    assert_ne!(child.id, parent.id);
+}
+
+#[tokio::test]
+async fn active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    database
+        .set_temporal_features(TemporalFeatureConfig {
+            schema_read: true,
+            root_current_write: true,
+            projection_ui: true,
+            invoke_resolution: true,
+            provider_recursion: false,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap();
+    let parent = database
+        .create_interaction(Some(project(1)), thread(1), "Parent task")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(parent.id).await.unwrap();
+    let source = node(&writer, "gated-source").await;
+    let current = single_node_layer(&writer, "gated-current", &source).await;
+    let invoke = writer
+        .add_action(&ActionDraft {
+            client_key: "gated-child".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(current.id),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Investigate".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Investigate the gated branch".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .transition_current(
+            0,
+            "publish-gated-child",
+            CurrentTransition::Advance {
+                layer_id: current.id,
+            },
+        )
+        .await
+        .unwrap();
+
+    let error = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(1),
+            "not authoritative",
+            Some(InteractionInvocation {
+                source_interaction_node_id: parent.id,
+                source_action_id: invoke.id,
+            }),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "invalid_invocation_source",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
 async fn remint_cuts_over_broker_epoch_and_terminal_state_denies_model_reads() {
     let database = GraphDatabase::in_memory().await.unwrap();
     database
