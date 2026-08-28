@@ -203,6 +203,42 @@ describe("CompletionExecutionModule", () => {
     expect(adapter.complete).toHaveBeenCalledTimes(1);
   });
 
+  test("recovers equivalent capabilities independently of object property insertion order", () => {
+    const terminal = deferred<CompletionLifecycleObservation>();
+    let preparations = 0;
+    const preparation: CompletionPreparation = {
+      prepare: vi.fn(() => {
+        const prepared = binding(2);
+        if (preparations++ === 0) return prepared;
+        return {
+          ...prepared,
+          capability: {
+            nodeId: prepared.capability.nodeId,
+            token: prepared.capability.token,
+            url: prepared.capability.url,
+          },
+        };
+      }),
+      current: vi.fn(async (): Promise<CompletionCurrentSnapshot> => ({
+        completionId: 2,
+        lifecycle: "active",
+        revision: 0,
+        currentLayerId: null,
+        finalLayerId: null,
+      })),
+      observe: vi.fn(() => terminal.promise),
+      fail: vi.fn(async () => {}),
+    };
+    const adapter: RecursiveHarnessAdapter = {
+      complete: vi.fn(() => nativeHandle(new Promise<NativeCompletionExecution>(() => {}))),
+    };
+    const module = new CompletionExecutionModule(preparation, adapter);
+
+    const first = module.complete(inputGraph(2));
+    expect(module.complete(inputGraph(2))).toBe(first);
+    expect(adapter.complete).toHaveBeenCalledTimes(1);
+  });
+
   test("returns a handle and fails only that completion when native launch throws", async () => {
     const terminal = deferred<CompletionLifecycleObservation>();
     let state: "active" | "failed" = "active";

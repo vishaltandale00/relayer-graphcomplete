@@ -99,14 +99,17 @@ describe("Codex app-server transport", () => {
       }
     });
     const onThreadId = vi.fn();
+    const onTurnId = vi.fn();
 
     const result = await runCodexAppServerTurn(options(fake, {
       ...(savedThreadId === undefined ? {} : { savedThreadId }),
       onThreadId,
+      onTurnId,
     }));
 
     expect(result).toEqual({ threadId: savedThreadId ?? "thread-new", turnId: "turn-1", status: "completed" });
     expect(onThreadId).toHaveBeenCalledWith(savedThreadId ?? "thread-new");
+    expect(onTurnId).toHaveBeenCalledWith(savedThreadId ?? "thread-new", "turn-1");
     expect(fake.messages.map(({ method }) => method).filter(Boolean)).toEqual([
       "initialize",
       "initialized",
@@ -149,6 +152,25 @@ describe("Codex app-server transport", () => {
 
     releaseAttachment?.();
     await expect(running).resolves.toMatchObject({ threadId: "thread-new", turnId: "turn-1" });
+  });
+
+  it("cancels a stalled thread-attachment fence without starting a turn", async () => {
+    const controller = new AbortController();
+    const fake = new FakeCodexProcess((message) => {
+      if (message.method === "initialize") fake.respond(message.id, {});
+      if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
+    });
+    const running = runCodexAppServerTurn(options(fake, {
+      signal: controller.signal,
+      onThreadId: () => new Promise<void>(() => {}),
+    }));
+    await vi.waitFor(() => expect(fake.messages.some((request) => request.method === "thread/start")).toBe(true));
+
+    controller.abort(new Error("cancel attachment"));
+
+    await expect(running).rejects.toThrow("cancel attachment");
+    expect(fake.messages.some((request) => request.method === "turn/start")).toBe(false);
+    expect(fake.killed).toBe(true);
   });
 
   it("bridges a server command approval and never sends acceptForSession", async () => {

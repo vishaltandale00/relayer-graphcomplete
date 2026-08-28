@@ -527,18 +527,35 @@ describe("CodexBasicHarness", () => {
       codexPathOverride: "/managed/codex",
       runAppServerTurn: async (options) => {
         submissions.push(options);
-        const threadId = options.savedThreadId ?? `child-thread-${submissions.length}`;
+        const invocation = submissions.length;
+        const threadId = options.savedThreadId ?? `child-thread-${invocation}`;
         await options.onThreadId(threadId);
-        return { threadId, turnId: `turn-${submissions.length}`, status: "completed" };
+        await options.onTurnId?.(threadId, `turn-${invocation}`);
+        return { threadId, turnId: `turn-${invocation}`, status: "completed" };
       },
     });
 
-    const first = harness.completeRecursive!(runContext(2, "child-token-a"));
-    const second = harness.completeRecursive!(runContext(3, "child-token-b"));
+    const admitted = (id: number, token: string): HarnessRunContext => ({
+      ...runContext(id, token),
+      model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-test" },
+      access: codexAccess(),
+    });
+    const first = harness.completeRecursive!(admitted(2, "child-token-a"));
+    const second = harness.completeRecursive!(admitted(3, "child-token-b"));
     await Promise.all([first, second]);
 
-    await expect(first.attached).resolves.toEqual({ provider: "codex", threadId: "child-thread-1" });
-    await expect(second.attached).resolves.toEqual({ provider: "codex", threadId: "child-thread-2" });
+    await expect(first.attached).resolves.toEqual({
+      schemaVersion: 1,
+      provider: "codex",
+      threadId: "child-thread-1",
+      turnId: "turn-1",
+    });
+    await expect(second.attached).resolves.toEqual({
+      schemaVersion: 1,
+      provider: "codex",
+      threadId: "child-thread-2",
+      turnId: "turn-2",
+    });
     expect(submissions.map(({ savedThreadId, environment }) => [
       savedThreadId,
       environment.RELAYER_GRAPH_TOKEN,
@@ -552,6 +569,19 @@ describe("CodexBasicHarness", () => {
     await harness.complete(runContext(1, "root-token"));
     expect(submissions[2]?.savedThreadId).toBe("root-thread");
     expect(harness.state()).toEqual({ codexThreadId: "root-thread" });
+  });
+
+  it("fails recursive Codex execution closed without fresh admission and access", async () => {
+    const runAppServerTurn = vi.fn(async () => ({
+      threadId: "unreachable",
+      turnId: "unreachable",
+      status: "completed" as const,
+    }));
+    const harness = harnessFixture("auto", runAppServerTurn);
+
+    await expect(harness.completeRecursive!(runContext(2, "child-token")))
+      .rejects.toThrow("requires an explicitly admitted model and execution-scoped access");
+    expect(runAppServerTurn).not.toHaveBeenCalled();
   });
 
   it("passes only the selected execution-scoped provider secret to Codex", async () => {

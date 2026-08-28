@@ -119,6 +119,11 @@ export class CodexBasicHarness implements Harness {
   }
 
   completeRecursive(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
+    if (context.model === undefined || context.access === undefined) {
+      return nativeExecutionHandle(Promise.reject(new Error(
+        "codex.basic recursive completion requires an explicitly admitted model and execution-scoped access",
+      )));
+    }
     return this.executionHandle(context, "recursive", signal);
   }
 
@@ -179,8 +184,13 @@ export class CodexBasicHarness implements Harness {
         ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
         onThreadId: (threadId) => {
           if (kind === "root") this.codexThreadId = threadId;
-          attach(Object.freeze({ provider: "codex", threadId }));
         },
+        onTurnId: (threadId, turnId) => attach(Object.freeze({
+          schemaVersion: 1,
+          provider: "codex",
+          threadId,
+          turnId,
+        })),
         onNotification: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
         onServerRequest: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
       });

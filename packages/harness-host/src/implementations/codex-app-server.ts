@@ -33,6 +33,7 @@ export interface CodexAppServerTurnOptions {
   readonly spawnProcess?: CodexAppServerSpawn;
   readonly killProcessGroup?: typeof process.kill;
   readonly onThreadId: (threadId: string) => void | Promise<void>;
+  readonly onTurnId?: (threadId: string, turnId: string) => void | Promise<void>;
   readonly onNotification?: (method: string, params: unknown) => void;
   readonly onServerRequest?: (method: string, params: unknown) => void;
 }
@@ -163,6 +164,18 @@ class CodexAppServerConnection {
     if (options.forceSignal?.aborted) forceClose();
     else options.forceSignal?.addEventListener("abort", forceClose, { once: true });
     this.detachForceAbort = () => options.forceSignal?.removeEventListener("abort", forceClose);
+    const abort = () => {
+      queueMicrotask(() => {
+        if (this.activeTurn === undefined) {
+          this.forceClose(new Error("Codex app-server was cancelled before turn attachment."));
+        } else {
+          void this.interrupt();
+        }
+      });
+    };
+    if (options.signal?.aborted) abort();
+    else options.signal?.addEventListener("abort", abort, { once: true });
+    this.detachAbort = () => options.signal?.removeEventListener("abort", abort);
   }
 
   async start(): Promise<void> {
@@ -188,7 +201,7 @@ class CodexAppServerConnection {
     if (threadId === undefined || (this.options.savedThreadId !== undefined && threadId !== this.options.savedThreadId)) {
       throw new Error("Codex app-server returned an invalid thread identity");
     }
-    await this.options.onThreadId(threadId);
+    await abortableCallback(this.options.onThreadId(threadId), this.options.signal);
 
     this.startingTurn = true;
     let turnResult: unknown;
@@ -212,16 +225,16 @@ class CodexAppServerConnection {
       this.startingTurn = false;
       throw new Error("Codex app-server returned an invalid turn identity");
     }
+    if (this.options.onTurnId !== undefined) {
+      await abortableCallback(this.options.onTurnId(threadId, turnId), this.options.signal);
+    }
+    if (this.fatalError !== undefined) throw this.fatalError;
 
     const completion = new Promise<CodexAppServerTurnResult>((resolve, reject) => {
       this.activeTurn = { threadId, turnId, resolve, reject };
     });
     this.startingTurn = false;
     this.flushDeferredTurnMessages();
-    const abort = () => { void this.interrupt(); };
-    if (this.options.signal?.aborted) abort();
-    else this.options.signal?.addEventListener("abort", abort, { once: true });
-    this.detachAbort = () => this.options.signal?.removeEventListener("abort", abort);
     return completion;
   }
 
@@ -534,6 +547,27 @@ function waitForSpawn(child: ChildProcessWithoutNullStreams): Promise<void> {
     child.once("error", failed);
     child.once("exit", exited);
   });
+}
+
+async function abortableCallback(
+  operation: void | Promise<void>,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (signal === undefined) return operation;
+  signal.throwIfAborted();
+  let detach: () => void = () => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const abort = () => reject(
+      signal.reason instanceof Error ? signal.reason : new Error("Codex operation aborted"),
+    );
+    signal.addEventListener("abort", abort, { once: true });
+    detach = () => signal.removeEventListener("abort", abort);
+  });
+  try {
+    await Promise.race([Promise.resolve(operation), aborted]);
+  } finally {
+    detach();
+  }
 }
 
 function resolveCodexExecutable(path: string | undefined): string {

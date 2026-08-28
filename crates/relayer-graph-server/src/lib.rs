@@ -122,6 +122,10 @@ pub fn router(state: ServerState) -> Router {
             "/api/control/capabilities",
             post(remint_capability).delete(revoke_capability),
         )
+        .route(
+            "/api/control/recursive-completions",
+            post(prepare_recursive_completion),
+        )
         .route("/api/graph/nodes", post(submit_node))
         .route("/api/graph/nodes/{id}", get(get_node))
         .route("/api/graph/nodes/{id}/neighbors", get(neighbors))
@@ -132,7 +136,6 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/layers/{id}/discard", post(discard_layer))
         .route("/api/graph/actions", post(add_action))
         .route("/api/graph/actions/{id}", get(get_action))
-        .route("/api/graph/completions", post(prepare_recursive_completion))
         .route("/api/graph/submit", post(submit_completion))
         .route("/api/graph/current", get(graph_current))
         .route("/api/graph/current/transitions", post(transition_current))
@@ -344,6 +347,7 @@ async fn create_interaction(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PrepareRecursiveCompletionRequest {
     action_id: ActionId,
+    parent_graph_token: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -361,7 +365,8 @@ async fn prepare_recursive_completion(
         state.temporal_features.provider_recursion,
         "provider-recursion",
     )?;
-    let authority = session(&state, &headers)?;
+    require_bearer(&headers, &state.control_token)?;
+    let authority = session_for_token(&state, &input.parent_graph_token)?;
     let node = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
@@ -1113,6 +1118,10 @@ fn session(state: &ServerState, headers: &HeaderMap) -> Result<RuntimeAuthority,
             json!({"error":{"code":"unauthorized","message":"A graph capability token is required."}}),
         )
     })?;
+    session_for_token(state, token)
+}
+
+fn session_for_token(state: &ServerState, token: &str) -> Result<RuntimeAuthority, ApiError> {
     state
         .sessions
         .lock()
@@ -1871,13 +1880,32 @@ mod tests {
         let state = ServerState::new(graph, "control").with_temporal_features(features);
         let parent_token = mint_capability(&state, parent.id, None).await.ok().unwrap();
         let app = router(state);
+        let denied = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/recursive-completions")
+                    .header("authorization", format!("Bearer {parent_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({ "actionId": invoke.id, "parentGraphToken": &parent_token })
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
         let request = || {
             Request::builder()
                 .method("POST")
-                .uri("/api/graph/completions")
-                .header("authorization", format!("Bearer {parent_token}"))
+                .uri("/api/control/recursive-completions")
+                .header("authorization", "Bearer control")
                 .header("content-type", "application/json")
-                .body(Body::from(json!({ "actionId": invoke.id }).to_string()))
+                .body(Body::from(
+                    json!({ "actionId": invoke.id, "parentGraphToken": &parent_token }).to_string(),
+                ))
                 .unwrap()
         };
 
