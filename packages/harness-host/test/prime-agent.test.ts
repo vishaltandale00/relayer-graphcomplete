@@ -312,7 +312,10 @@ describe("PrimeAgentHarness", () => {
       token: "first-token",
       nodeId: 11,
     });
-    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/prime-session.jsonl" });
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/prime-session.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: null,
+    });
   });
 
   it("maps an admitted family to isolated native providers and reuses the session across root changes", async () => {
@@ -430,7 +433,10 @@ describe("PrimeAgentHarness", () => {
       "secret-openai-personal", "secret-openai-work", "secret-anthropic-work",
       "secret-openrouter-work", "secret-vercel-work",
     ]);
-    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/family-session.jsonl" });
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/family-session.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: null,
+    });
 
     const trace = JSON.stringify(firstTrace.events);
     expect(trace).toContain('"providerDefinitionId":"anthropic-work"');
@@ -576,7 +582,10 @@ describe("PrimeAgentHarness", () => {
       workingDirectory: "/tmp/project",
       ...fullPermission,
       configuration,
-      savedState: { primeAgentSessionFile: "/tmp/saved.jsonl" },
+      savedState: {
+        primeAgentSessionFile: "/tmp/saved.jsonl",
+        primeAgentSessionPersonalPresentationVersionId: null,
+      },
     }, { loadModule: async () => ({
       ...runScopeApi(),
       SessionManager: { create: vi.fn(), open },
@@ -764,6 +773,190 @@ describe("PrimeAgentHarness", () => {
     expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).toContain("Never include that block in an unrelated delegate's task");
     expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).not.toContain("Personal graph presentation preferences:");
     expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).not.toContain("Decision-useful center");
+  });
+
+  it("rotates the native Prime session when the durable presentation pin changes", async () => {
+    const firstDispose = vi.fn();
+    const firstSession = {
+      sessionFile: "/tmp/prime-v1.jsonl",
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: firstDispose, reload: vi.fn(async () => undefined),
+    };
+    const secondSession = {
+      sessionFile: "/tmp/prime-neutral.jsonl",
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
+    };
+    const createAgentSessionFromServices = vi.fn()
+      .mockResolvedValueOnce({ session: firstSession })
+      .mockResolvedValueOnce({ session: secondSession });
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(() => ({})), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices,
+    }) as never });
+    const first = presentationRunContext(11, "first-token", 90);
+
+    await harness.complete(first);
+    await harness.complete(first);
+    await harness.complete(runContext(12, "second-token"));
+
+    expect(firstSession.promptAndWait).toHaveBeenCalledTimes(2);
+    expect(firstDispose).toHaveBeenCalledOnce();
+    expect(secondSession.promptAndWait).toHaveBeenCalledOnce();
+    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(2);
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/prime-neutral.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: null,
+    });
+  });
+
+  it("reloads native propagation instructions when restoring a matching presentation pin", async () => {
+    let resourceLoaderOptions: { appendSystemPromptOverride(base: string[]): string[] } | undefined;
+    const session = {
+      sessionFile: "/tmp/saved-v1.jsonl",
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
+    };
+    const open = vi.fn(() => "saved-v1-session");
+    const createAgentSessionFromServices = vi.fn(async () => ({ session }));
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+      savedState: {
+        primeAgentSessionFile: "/tmp/saved-v1.jsonl",
+        primeAgentSessionPersonalPresentationVersionId: 90,
+      },
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(), open },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async (options: { resourceLoaderOptions: typeof resourceLoaderOptions }) => {
+        resourceLoaderOptions = options.resourceLoaderOptions;
+        return { modelRegistry: { find: vi.fn() } };
+      }),
+      createAgentSessionFromServices,
+    }) as never });
+    const attached = presentationRunContext(11, "token", 90);
+
+    await harness.complete(attached);
+    await harness.complete(attached);
+
+    expect(open).toHaveBeenCalledWith("/tmp/saved-v1.jsonl");
+    expect(createAgentSessionFromServices).toHaveBeenCalledOnce();
+    expect(session.reload).toHaveBeenCalledOnce();
+    expect(session.promptAndWait).toHaveBeenCalledTimes(2);
+    const nativeInstructions = resourceLoaderOptions?.appendSystemPromptOverride(["base"]);
+    expect(nativeInstructions?.[1]).toContain("If you are the root agent");
+    expect(nativeInstructions?.[1]).not.toContain("Decision-useful center");
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/saved-v1.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: 90,
+    });
+  });
+
+  it("does not prompt a restored session when force shutdown wins its instruction reload", async () => {
+    let markReloadStarted!: () => void;
+    let releaseReload!: () => void;
+    const reloadStarted = new Promise<void>((resolve) => { markReloadStarted = resolve; });
+    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+    const nativeDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: nativeDispose,
+      reload: vi.fn(async () => {
+        markReloadStarted();
+        await reloadGate;
+      }),
+    };
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+      savedState: {
+        primeAgentSessionFile: "/tmp/saved-v1.jsonl",
+        primeAgentSessionPersonalPresentationVersionId: 90,
+      },
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(), open: vi.fn(() => ({})) },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+
+    const completing = harness.complete(presentationRunContext(11, "token", 90));
+    await reloadStarted;
+    harness.forceShutdown();
+    releaseReload();
+
+    await expect(completing).rejects.toThrow("Prime Agent harness is shutting down");
+    expect(session.promptAndWait).not.toHaveBeenCalled();
+    expect(nativeDispose).toHaveBeenCalledOnce();
+  });
+
+  it("disposes a replacement session created after force shutdown wins a rotation", async () => {
+    let markReplacementStarted!: () => void;
+    let releaseReplacement!: () => void;
+    const replacementStarted = new Promise<void>((resolve) => { markReplacementStarted = resolve; });
+    const replacementGate = new Promise<void>((resolve) => { releaseReplacement = resolve; });
+    const firstSession = {
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
+    };
+    const replacementDispose = vi.fn();
+    const replacementSession = {
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: replacementDispose,
+    };
+    const createAgentSessionFromServices = vi.fn()
+      .mockResolvedValueOnce({ session: firstSession })
+      .mockImplementationOnce(async () => {
+        markReplacementStarted();
+        await replacementGate;
+        return { session: replacementSession };
+      });
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(() => ({})), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices,
+    }) as never });
+    await harness.complete(presentationRunContext(11, "first-token", 90));
+
+    const rotating = harness.complete(runContext(12, "second-token"));
+    await replacementStarted;
+    harness.forceShutdown();
+    releaseReplacement();
+
+    await expect(rotating).rejects.toThrow("Prime Agent harness is shutting down");
+    expect(replacementSession.promptAndWait).not.toHaveBeenCalled();
+    expect(replacementDispose).toHaveBeenCalledOnce();
+  });
+
+  it("does not resume legacy Prime state whose presentation pin is unknown", async () => {
+    const session = {
+      sessionFile: "/tmp/fresh.jsonl",
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
+    };
+    const create = vi.fn(() => "fresh-session");
+    const open = vi.fn(() => "legacy-session");
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+      savedState: { primeAgentSessionFile: "/tmp/legacy.jsonl" },
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create, open },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+
+    await harness.complete(runContext(11, "token"));
+
+    expect(open).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith("/tmp/project");
+    expect(session.promptAndWait).toHaveBeenCalledOnce();
   });
 
   it("delivers the same ordered normalized context to Prime and its native children", async () => {
@@ -1376,6 +1569,25 @@ function attachedRunContext(nodeId: number, token: string): HarnessRunContext {
           annotations: ["third annotation"],
         },
       ],
+    },
+  };
+}
+
+function presentationRunContext(nodeId: number, token: string, versionId: number): HarnessRunContext {
+  return {
+    ...runContext(nodeId, token),
+    personalPresentation: {
+      attachment: { interactionNodeId: nodeId, versionInteractionNodeId: versionId, rootLayerId: 91 },
+      graph: {
+        nodeId: versionId,
+        rootLayerId: 91,
+        rootAction: { id: 92, sourceNodeId: versionId, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: 91, state: "accepted" },
+        layers: [{
+          layer: { id: 91, nodes: [93], edges: [], state: "accepted" },
+          nodes: [{ id: 93, kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "Foreground the conclusion.", state: "accepted" }],
+          edges: [], actions: [],
+        }],
+      },
     },
   };
 }

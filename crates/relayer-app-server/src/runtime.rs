@@ -1340,9 +1340,22 @@ impl RuntimeClient {
     }
 
     async fn revoke_capability(&self, graph_token: &str) -> Result<(), RuntimeError> {
-        self.delete_control(&serde_json::json!({"graphToken": graph_token}))
-            .await?;
-        Ok(())
+        let body = serde_json::json!({"graphToken": graph_token});
+        for attempt in 1..=CONTROL_RETRY_ATTEMPTS {
+            match self.delete_control(&body).await {
+                Ok(_) => return Ok(()),
+                Err(
+                    RuntimeError::Http(_)
+                    | RuntimeError::ResponseDecode(_)
+                    | RuntimeError::Timeout(_),
+                ) if attempt < CONTROL_RETRY_ATTEMPTS => {
+                    tokio::time::sleep(std::time::Duration::from_millis((attempt * 25).min(1_000)))
+                        .await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("bounded retry loop always returns")
     }
 
     async fn delete_control(&self, body: &Value) -> Result<Value, RuntimeError> {
@@ -2651,7 +2664,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revokes_the_interaction_capability_when_session_registration_fails() {
+    async fn retries_capability_revocation_when_session_registration_fails() {
         let revocations = Arc::new(AtomicUsize::new(0));
         let observed_revocations = revocations.clone();
         let graph = Router::new()
@@ -2671,8 +2684,10 @@ mod tests {
                     let observed_revocations = observed_revocations.clone();
                     async move {
                         assert_eq!(headers["authorization"], "Bearer graph-control");
-                        observed_revocations.fetch_add(1, Ordering::SeqCst);
-                        Json(json!({ "revoked": true }))
+                        if observed_revocations.fetch_add(1, Ordering::SeqCst) == 0 {
+                            return (StatusCode::OK, "response was truncated").into_response();
+                        }
+                        Json(json!({ "revoked": true })).into_response()
                     }
                 }),
             );
@@ -2757,7 +2772,7 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert_eq!(revocations.load(Ordering::SeqCst), 1);
+        assert_eq!(revocations.load(Ordering::SeqCst), 2);
         graph_task.abort();
         harness_task.abort();
         fs::remove_dir_all(root).unwrap();

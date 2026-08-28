@@ -1447,12 +1447,10 @@ async fn prepare_and_claim_interaction(
         );
     let durable_input = state.product.interaction_input(interaction.id).await?;
     let personal_presentation = if runtime.supports_personal_presentation() {
-        let requested =
-            runtime.personal_presentation_version_key(&thread.harness_configuration_name)?;
         Some(crate::runtime::PersonalPresentationExecution::from(
             &state
                 .product
-                .prepare_personal_presentation_pin(interaction.id, requested)
+                .prepare_personal_presentation_pin(interaction.id, None)
                 .await?,
         ))
     } else {
