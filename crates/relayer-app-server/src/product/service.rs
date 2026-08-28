@@ -1154,9 +1154,24 @@ impl ProductService {
                     "interaction input identity was reused with different content".into(),
                 ));
             }
-            return Ok(crate::storage::InteractionInputInsertOutcome::Existing(
-                existing,
-            ));
+            return self
+                .storage
+                .insert_interaction_input(
+                    thread_id,
+                    crate::storage::NewInteractionInput {
+                        text: command.text,
+                        input_identity,
+                        input_digest: &durable.input_digest,
+                        contexts: command.contexts,
+                        context_confirmation_ids: command.context_confirmation_ids,
+                        submitted_input_draft_revision: None,
+                    },
+                    command.model_selection,
+                    self.runtime_available && !command.allow_unselected_model,
+                    self.runtime_available,
+                )
+                .await
+                .map_err(Into::into);
         }
         let action_input_draft = self.storage.action_input_draft(thread_id).await?;
         let submitted_inputs = action_input_draft

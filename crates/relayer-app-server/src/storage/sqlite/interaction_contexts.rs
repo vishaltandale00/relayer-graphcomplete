@@ -575,6 +575,7 @@ mod tests {
                     input_digest: "sha256:confirmed",
                     contexts: &contexts,
                     context_confirmation_ids: &confirmation_ids,
+                    submitted_input_draft_revision: None,
                 },
                 None,
                 false,
@@ -715,6 +716,7 @@ mod tests {
             input_digest: "sha256:replay",
             contexts: &contexts,
             context_confirmation_ids: &confirmation_ids,
+            submitted_input_draft_revision: None,
         };
         let created = store
             .insert_interaction_input(
@@ -834,6 +836,7 @@ mod tests {
                     input_digest: "sha256:duplicate-confirmations",
                     contexts: &contexts,
                     context_confirmation_ids: &confirmation_ids,
+                    submitted_input_draft_revision: None,
                 },
                 None,
                 false,
