@@ -59,7 +59,7 @@ pub struct InputAction {
     pub minimum_selections: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PresentingInputOccurrence {
     pub presenting_interaction_node_id: NodeId,

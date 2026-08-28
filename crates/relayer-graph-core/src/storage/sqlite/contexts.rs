@@ -8,6 +8,7 @@ use crate::{
     NodeId, ProjectId, RecordState, graph::InteractionScope,
 };
 
+use super::input_children::InputChildTable;
 use super::nodes::NodeTable;
 
 pub(crate) struct ContextTable<'connection> {
@@ -217,6 +218,9 @@ impl<'connection> ContextTable<'connection> {
         Ok(InteractionInput {
             interaction: interaction.into(),
             contexts,
+            submitted_inputs: InputChildTable::new(&mut *self.connection)
+                .normalized(scope.root_node_id)
+                .await?,
         })
     }
 

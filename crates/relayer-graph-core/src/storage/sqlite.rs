@@ -2,6 +2,7 @@ pub(crate) mod actions;
 pub(crate) mod completions;
 pub(crate) mod contexts;
 pub(crate) mod edges;
+pub(crate) mod input_children;
 pub(crate) mod layers;
 pub(crate) mod migrations;
 pub(crate) mod nodes;

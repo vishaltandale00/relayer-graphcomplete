@@ -191,6 +191,27 @@ describe("agent-facing graph objects", () => {
     );
   });
 
+  it("reads submitted input snapshots without child or occurrence authority", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      interaction: { id: 10, kind: "user-interaction", icon: "user", title: "", detail: "", state: "accepted" },
+      contexts: [],
+      submittedInputs: [{
+        action: { control: "single_select", prompt: "Choose evidence", options: [{ key: "logs", label: "Logs" }] },
+        value: { selected: [{ key: "logs", label: "Logs" }] },
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 10 });
+
+    const input = await graph.getInteractionInput();
+
+    expect(input.submittedInputs?.[0]).toEqual({
+      action: { control: "single_select", prompt: "Choose evidence", options: [{ key: "logs", label: "Logs" }] },
+      value: { selected: [{ key: "logs", label: "Logs" }] },
+    });
+    expect(input.submittedInputs?.[0]).not.toHaveProperty("actionId");
+    expect(input.submittedInputs?.[0]).not.toHaveProperty("occurrence");
+  });
+
   it("discards a submitted layer and refreshes its object reference", async () => {
     let request: { url: string; method?: string } | undefined;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {

@@ -64,6 +64,10 @@ class Handler(BaseHTTPRequestHandler):
                     "targetNode": {"id": 4, "kind": "concept", "icon": "box", "title": "Boundary", "detail": "Evidence", "state": "accepted"},
                     "annotations": ["First", "Second"],
                 }],
+                "submittedInputs": [{
+                    "action": {"control": "text", "prompt": "Explain the tradeoff"},
+                    "value": {"text": "Preserve this exactly"},
+                }],
             })
         elif self.path.endswith("/output"):
             self._reply({"nodeId": 7, "rootAction": {}, "rootLayer": {}})
@@ -125,6 +129,8 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(input.contexts[0].type, "interaction.context")
         self.assertEqual(input.contexts[0].target_node.title, "Boundary")
         self.assertEqual(input.contexts[0].annotations, ("First", "Second"))
+        self.assertEqual(input.submitted_inputs[0].action["control"], "text")
+        self.assertEqual(input.submitted_inputs[0].value["text"], "Preserve this exactly")
         self.assertEqual(Handler.requests[-1][0], "/api/graph/input")
 
     async def test_discard_layer_posts_to_recovery_endpoint_and_refreshes_reference(self):

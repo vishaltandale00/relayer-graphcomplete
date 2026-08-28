@@ -509,4 +509,50 @@ mod tests {
                 .unwrap();
         assert!(foreign_key_errors.is_empty());
     }
+
+    #[tokio::test]
+    async fn interaction_input_children_migration_is_additive_for_existing_databases() {
+        let mut connection = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+        for migration in [
+            include_str!("migrations/0001_graph_schema.sql"),
+            include_str!("migrations/0002_action_presentation.sql"),
+            include_str!("migrations/0003_navigation_relations.sql"),
+            include_str!("migrations/0004_imported_conversations.sql"),
+            include_str!("migrations/0005_interaction_action_leases.sql"),
+            include_str!("migrations/0006_layer_layout.sql"),
+            include_str!("migrations/0007_active_root_action_guard.sql"),
+            include_str!("migrations/0008_interaction_context_actions.sql"),
+            include_str!("migrations/0009_interaction_input_identity.sql"),
+            include_str!("migrations/0010_input_actions.sql"),
+        ] {
+            sqlx::raw_sql(migration)
+                .execute(&mut connection)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO nodes(id,project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (1,NULL,1,'user-interaction','user','Legacy','Legacy','accepted',NULL,NULL)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+
+        sqlx::raw_sql(include_str!(
+            "migrations/0011_interaction_input_children.sql"
+        ))
+        .execute(&mut connection)
+        .await
+        .unwrap();
+
+        let legacy: String = sqlx::query_scalar("SELECT detail FROM nodes WHERE id=1")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+        let children: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM interaction_input_children")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+        assert_eq!(legacy, "Legacy");
+        assert_eq!(children, 0);
+    }
 }

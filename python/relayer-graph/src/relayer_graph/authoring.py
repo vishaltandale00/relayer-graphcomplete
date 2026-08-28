@@ -75,15 +75,27 @@ class InteractionContext:
 
 
 @dataclass(frozen=True, slots=True)
+class SubmittedInput:
+    action: Mapping[str, Any]
+    value: Mapping[str, Any]
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "SubmittedInput":
+        return cls(dict(value["action"]), dict(value["value"]))
+
+
+@dataclass(frozen=True, slots=True)
 class InteractionInput:
     interaction: InteractionInputNode
     contexts: tuple[InteractionContext, ...]
+    submitted_inputs: tuple[SubmittedInput, ...] = ()
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "InteractionInput":
         return cls(
             InteractionInputNode.from_dict(value["interaction"]),
             tuple(InteractionContext.from_dict(item) for item in value.get("contexts", ())),
+            tuple(SubmittedInput.from_dict(item) for item in value.get("submittedInputs", ())),
         )
 
 
