@@ -691,9 +691,11 @@ fn export_submitted_inputs(
                     .map(|option| ExportInputOption {
                         key: redactor.text(&option.key),
                         label: redactor.text(&option.label),
+                        unsupported_fields: Default::default(),
                     })
                     .collect(),
                 minimum_selections,
+                unsupported_fields: Default::default(),
             };
             let value = match input.value {
                 relayer_graph_core::SubmittedInputValue::Text { text } => {
@@ -708,6 +710,7 @@ fn export_submitted_inputs(
                             .map(|option| ExportInputOption {
                                 key: redactor.text(&option.key),
                                 label: redactor.text(&option.label),
+                                unsupported_fields: Default::default(),
                             })
                             .collect(),
                     }

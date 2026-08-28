@@ -1047,10 +1047,12 @@ mod tests {
             ExportInputOption {
                 key: "failed".into(),
                 label: "Failed value".into(),
+                unsupported_fields: Default::default(),
             },
             ExportInputOption {
                 key: "stopped".into(),
                 label: "Stopped value".into(),
+                unsupported_fields: Default::default(),
             },
         ];
         for (sequence, status, suffix) in [
@@ -1098,6 +1100,7 @@ mod tests {
                                 prompt: "Choose evidence".into(),
                                 options: options.clone(),
                                 minimum_selections: Some(2),
+                                unsupported_fields: Default::default(),
                             },
                             value: ExportSubmittedInputValue::Selected {
                                 selected: options.clone(),
@@ -1117,6 +1120,7 @@ mod tests {
                                 prompt: "Choose outcome".into(),
                                 options: options.clone(),
                                 minimum_selections: None,
+                                unsupported_fields: Default::default(),
                             },
                             value: ExportSubmittedInputValue::Selected {
                                 selected: vec![
@@ -1142,6 +1146,7 @@ mod tests {
                                 prompt: "Explain outcome".into(),
                                 options: vec![],
                                 minimum_selections: None,
+                                unsupported_fields: Default::default(),
                             },
                             value: ExportSubmittedInputValue::Text {
                                 text: format!("{suffix} explanation"),
