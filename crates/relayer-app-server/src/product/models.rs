@@ -145,6 +145,32 @@ pub(crate) struct NodeContextDraftConfirmation {
     pub(crate) confirmed_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", untagged)]
+pub(crate) enum ActionInputValue {
+    Text { text: String },
+    Selected { selected_keys: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActionInputAttachment {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) occurrence: relayer_graph_core::PresentingInputOccurrence,
+    pub(crate) source_node_id: i64,
+    pub(crate) action: relayer_graph_core::InputAction,
+    pub(crate) value: ActionInputValue,
+    pub(crate) draft_revision: i64,
+    pub(crate) committed_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActionInputDraft {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) revision: i64,
+    pub(crate) attachments: Vec<ActionInputAttachment>,
+    pub(crate) updated_at: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActionInvocation {
     pub(crate) source_interaction_id: InteractionId,

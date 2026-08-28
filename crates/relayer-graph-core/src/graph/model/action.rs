@@ -59,6 +59,14 @@ pub struct InputAction {
     pub minimum_selections: Option<usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PresentingInputOccurrence {
+    pub presenting_interaction_node_id: NodeId,
+    pub presenting_layer_id: LayerId,
+    pub action_id: ActionId,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NavigateRelation {

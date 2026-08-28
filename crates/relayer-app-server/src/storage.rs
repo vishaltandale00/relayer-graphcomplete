@@ -55,6 +55,13 @@ pub(crate) struct NewNodeContextDraft<'a> {
     pub(crate) text: &'a str,
 }
 
+pub(crate) struct NewActionInputAttachment<'a> {
+    pub(crate) occurrence: &'a relayer_graph_core::PresentingInputOccurrence,
+    pub(crate) source_node_id: i64,
+    pub(crate) action: &'a relayer_graph_core::InputAction,
+    pub(crate) value: &'a crate::product::ActionInputValue,
+}
+
 #[derive(Debug)]
 pub(crate) enum InteractionInputInsertOutcome {
     Created(crate::product::Interaction),
@@ -130,4 +137,6 @@ pub(crate) enum StorageError {
     ContextDraftConflict { code: &'static str, message: String },
     #[error("personal presentation conflict: {0}")]
     PersonalPresentationConflict(String),
+    #[error("action-input draft conflict: {message}")]
+    ActionInputDraftConflict { code: &'static str, message: String },
 }

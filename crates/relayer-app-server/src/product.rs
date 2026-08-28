@@ -91,6 +91,7 @@ pub(crate) use models::ProductState;
 pub(crate) use models::Project;
 pub(crate) use models::Thread;
 pub(crate) use models::ThreadView;
+pub(crate) use models::{ActionInputAttachment, ActionInputDraft, ActionInputValue};
 pub(crate) use service::AcceptedInteractionCompletion;
 pub(crate) use service::CreateIdentifiedInteractionCommand;
 pub(crate) use service::CreateProjectCommand;

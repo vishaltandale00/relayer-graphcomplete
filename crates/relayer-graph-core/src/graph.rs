@@ -20,8 +20,9 @@ pub use model::{
     InteractionContextAction, InteractionContextDraft, InteractionContextTarget, InteractionInput,
     InteractionInputNode, InteractionInvocation, LayerDraft, LayerId, LayerLayout,
     NavigateRelation, NodeDraft, NodeId, NodePlacement, PERSONAL_PRESENTATION_PROFILE_THREAD_ID,
-    ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer, ThreadId,
-    interaction_input_digest, is_supported_icon, normalize_icon_name, resolve_icon_name,
+    PresentingInputOccurrence, ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState,
+    ResolvedLayer, ThreadId, interaction_input_digest, is_supported_icon, normalize_icon_name,
+    resolve_icon_name,
 };
 pub use personal_presentation::{
     PersonalPresentationAttachment, PublishedPersonalPresentationVersion,

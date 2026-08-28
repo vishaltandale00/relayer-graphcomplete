@@ -2,8 +2,8 @@ use sqlx::{FromRow, SqliteConnection};
 
 use crate::{
     ActionDraft, ActionId, ActionKind, ActionVariant, GraphAction, GraphError, InputAction,
-    InputControl, InputOption, LayerId, NavigateRelation, NodeId, ProjectId, RecordState,
-    graph::InteractionScope,
+    InputControl, InputOption, LayerId, NavigateRelation, NodeId, PresentingInputOccurrence,
+    ProjectId, RecordState, graph::InteractionScope,
 };
 
 pub(crate) struct ActionTable<'connection> {
@@ -59,6 +59,92 @@ impl<'connection> ActionTable<'connection> {
         .await?
         .map(ActionRecord::try_from)
         .transpose()
+    }
+
+    pub(crate) async fn canonical_input_occurrence(
+        &mut self,
+        scope: &InteractionScope,
+        occurrence: &PresentingInputOccurrence,
+    ) -> Result<GraphAction, GraphError> {
+        let valid: i64 = sqlx::query_scalar(
+            r#"
+            WITH RECURSIVE reachable_layers(id) AS (
+                SELECT root.target_layer_id
+                FROM completions completion
+                JOIN actions root ON root.id=completion.root_action_id
+                WHERE completion.interaction_node_id=?1
+                  AND root.kind='navigate'
+                  AND root.state='accepted'
+                  AND root.target_layer_id IS NOT NULL
+                UNION
+                SELECT child.target_layer_id
+                FROM reachable_layers reachable
+                JOIN layer_actions membership ON membership.layer_id=reachable.id
+                JOIN actions child ON child.id=membership.action_id
+                WHERE child.kind='navigate'
+                  AND child.state='accepted'
+                  AND child.target_layer_id IS NOT NULL
+            )
+            SELECT EXISTS(
+                SELECT 1
+                FROM nodes presenting_interaction
+                JOIN reachable_layers reachable ON reachable.id=?2
+                JOIN layers presenting_layer ON presenting_layer.id=reachable.id
+                JOIN layer_actions membership
+                  ON membership.layer_id=presenting_layer.id AND membership.action_id=?3
+                JOIN actions input_action ON input_action.id=membership.action_id
+                JOIN layer_nodes source_membership
+                  ON source_membership.layer_id=presenting_layer.id
+                 AND source_membership.node_id=input_action.source_node_id
+                WHERE presenting_interaction.id=?1
+                  AND presenting_interaction.kind='user-interaction'
+                  AND presenting_interaction.state='accepted'
+                  AND presenting_interaction.owner_interaction_id IS NULL
+                  AND presenting_layer.state='accepted'
+                  AND input_action.state='accepted'
+                  AND input_action.kind='input'
+                  AND ((?4 IS NOT NULL AND presenting_interaction.project_id=?4 AND input_action.project_id=?4)
+                       OR (?4 IS NULL
+                           AND presenting_interaction.project_id IS NULL
+                           AND input_action.project_id IS NULL
+                           AND presenting_interaction.thread_id=?5
+                           AND input_action.thread_id=?5))
+            )
+            "#,
+        )
+        .bind(occurrence.presenting_interaction_node_id.value())
+        .bind(occurrence.presenting_layer_id.value())
+        .bind(occurrence.action_id.value())
+        .bind(scope.project_id.map(ProjectId::value))
+        .bind(scope.thread_id.value())
+        .fetch_one(&mut *self.connection)
+        .await?;
+        if valid == 0 {
+            return Err(GraphError::validation(
+                "input_action_not_in_occurrence",
+                "occurrence.actionId",
+                "Reopen and commit the input action from the exact accepted presenting layer.",
+            ));
+        }
+        let action = self
+            .record(scope, occurrence.action_id)
+            .await?
+            .ok_or_else(|| {
+                GraphError::validation(
+                    "input_occurrence_not_visible",
+                    "occurrence",
+                    "Remove an occurrence unavailable to this thread scope.",
+                )
+            })?
+            .action;
+        if action.kind != ActionKind::Input || action.input.is_none() {
+            return Err(GraphError::validation(
+                "input_action_snapshot_mismatch",
+                "occurrence",
+                "Refresh the accepted action and recommit its value.",
+            ));
+        }
+        Ok(action)
     }
 
     pub(crate) async fn for_source(

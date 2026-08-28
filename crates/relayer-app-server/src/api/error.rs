@@ -209,6 +209,9 @@ impl From<ProductError> for ApiError {
             ProductError::Storage(StorageError::ContextDraftConflict { code, message }) => {
                 Self::conflict(code, message)
             }
+            ProductError::Storage(StorageError::ActionInputDraftConflict { code, message }) => {
+                Self::conflict(code, message)
+            }
             ProductError::Storage(error) => Self::internal(&error.to_string()),
         }
     }

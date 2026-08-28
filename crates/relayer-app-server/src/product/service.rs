@@ -1348,6 +1348,83 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn action_input_draft(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<super::ActionInputDraft, ProductError> {
+        self.storage
+            .action_input_draft(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn commit_action_input_attachment(
+        &self,
+        thread_id: ThreadId,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+        action: &relayer_graph_core::GraphAction,
+        value: &super::ActionInputValue,
+        expected_revision: i64,
+    ) -> Result<super::ActionInputDraft, ProductError> {
+        if expected_revision < 0 {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be zero or a positive integer".into(),
+            ));
+        }
+        if action.id != occurrence.action_id
+            || action.kind != relayer_graph_core::ActionKind::Input
+            || action.state != relayer_graph_core::RecordState::Accepted
+        {
+            return Err(ProductError::Invalid(
+                "the canonical action does not match this accepted input occurrence".into(),
+            ));
+        }
+        let input = action.input.as_ref().ok_or_else(|| {
+            ProductError::Invalid("the accepted input action has no control payload".into())
+        })?;
+        validate_action_input_value(input, value)?;
+        let normalized_value = match value {
+            super::ActionInputValue::Text { text } => {
+                super::ActionInputValue::Text { text: text.clone() }
+            }
+            super::ActionInputValue::Selected { selected_keys } => {
+                let mut selected_keys = selected_keys.clone();
+                selected_keys.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+                super::ActionInputValue::Selected { selected_keys }
+            }
+        };
+        self.storage
+            .commit_action_input_attachment(
+                thread_id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence,
+                    source_node_id: action.source_node_id.value(),
+                    action: input,
+                    value: &normalized_value,
+                },
+                expected_revision,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn detach_action_input_attachment(
+        &self,
+        thread_id: ThreadId,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+        expected_revision: i64,
+    ) -> Result<super::ActionInputDraft, ProductError> {
+        if expected_revision < 0 {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be zero or a positive integer".into(),
+            ));
+        }
+        self.storage
+            .detach_action_input_attachment(thread_id, occurrence, expected_revision)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, ProductError> {
         self.storage
             .interrupted_interactions()
@@ -1899,6 +1976,69 @@ impl ProductService {
             .await?
             .ok_or_else(|| ProductError::NotFound(format!("project {project_id}")))
     }
+}
+
+fn validate_action_input_value(
+    action: &relayer_graph_core::InputAction,
+    value: &super::ActionInputValue,
+) -> Result<(), ProductError> {
+    use relayer_graph_core::InputControl;
+    match (action.control, value) {
+        (InputControl::Text, super::ActionInputValue::Text { text }) => {
+            if text.trim().is_empty() {
+                return Err(ProductError::Invalid(
+                    "input_text_blank: enter non-whitespace text".into(),
+                ));
+            }
+        }
+        (InputControl::SingleSelect, super::ActionInputValue::Selected { selected_keys }) => {
+            if selected_keys.len() != 1 {
+                return Err(ProductError::Invalid(
+                    "input_selection_count: select exactly one option".into(),
+                ));
+            }
+            validate_selected_keys(action, selected_keys)?;
+        }
+        (InputControl::MultiSelect, super::ActionInputValue::Selected { selected_keys }) => {
+            validate_selected_keys(action, selected_keys)?;
+            if selected_keys.len() < action.minimum_selections.unwrap_or(1) {
+                return Err(ProductError::Invalid(
+                    "input_selection_count: meet this action's minimum selections".into(),
+                ));
+            }
+        }
+        _ => {
+            return Err(ProductError::Invalid(
+                "the submitted value does not match the input control".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_selected_keys(
+    action: &relayer_graph_core::InputAction,
+    selected_keys: &[String],
+) -> Result<(), ProductError> {
+    let known = action
+        .options
+        .iter()
+        .map(|option| option.key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut selected = std::collections::HashSet::new();
+    for key in selected_keys {
+        if !known.contains(key.as_str()) {
+            return Err(ProductError::Invalid(format!(
+                "input_option_unknown: option key {key:?} is not in the accepted action"
+            )));
+        }
+        if !selected.insert(key.as_str()) {
+            return Err(ProductError::Invalid(
+                "input_option_duplicate: remove repeated option keys".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn stored_project_path(canonical_path: &std::path::Path) -> Result<String, ProductError> {

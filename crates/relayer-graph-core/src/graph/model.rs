@@ -9,7 +9,7 @@ mod record_state;
 
 pub use action::{
     ActionDraft, ActionKind, ActionVariant, GraphAction, InputAction, InputControl, InputOption,
-    NavigateRelation,
+    NavigateRelation, PresentingInputOccurrence,
 };
 pub use context::{
     InteractionContext, InteractionContextAction, InteractionContextDraft,

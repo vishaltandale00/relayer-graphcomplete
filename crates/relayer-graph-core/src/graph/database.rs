@@ -3,12 +3,12 @@ use std::path::Path;
 use crate::{
     AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, InteractionContextAction,
     InteractionContextDraft, InteractionContextTarget, InteractionInputNode, InteractionInvocation,
-    NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId,
+    NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
     interaction_input_digest,
     storage::{
         SqliteGraphStore,
-        sqlite::{contexts::ContextTable, nodes::NodeTable},
+        sqlite::{actions::ActionTable, contexts::ContextTable, nodes::NodeTable},
     },
 };
 
@@ -306,6 +306,30 @@ impl GraphDatabase {
         let mut connection = self.storage.acquire().await?;
         ContextTable::new(&mut connection)
             .canonical_occurrence(&scope, "target", target)
+            .await
+    }
+
+    pub async fn canonical_input_action_occurrence(
+        &self,
+        occurrence: &PresentingInputOccurrence,
+    ) -> Result<crate::GraphAction, GraphError> {
+        let scope = {
+            let mut connection = self.storage.acquire().await?;
+            NodeTable::new(&mut connection)
+                .interaction_scope(occurrence.presenting_interaction_node_id)
+                .await
+                .map_err(|error| match error {
+                    GraphError::Forbidden(_) | GraphError::NotFound(_) => GraphError::validation(
+                        "input_occurrence_not_accepted",
+                        "occurrence.presentingInteractionNodeId",
+                        "Reopen an action from accepted history.",
+                    ),
+                    other => other,
+                })?
+        };
+        let mut connection = self.storage.acquire().await?;
+        ActionTable::new(&mut connection)
+            .canonical_input_occurrence(&scope, occurrence)
             .await
     }
 
