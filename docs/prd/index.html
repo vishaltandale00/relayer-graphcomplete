@@ -194,7 +194,7 @@
 <body>
   <main><h1>Relayer Desktop and Relayer Harness: Product Requirements</h1>
 <p><strong>Document status:</strong> Draft for product review.<br>
-<strong>Last updated:</strong> 2026-08-24.<br>
+<strong>Last updated:</strong> 2026-08-28.<br>
 <strong>Application-state baseline:</strong> Commit <code>38286cb</code>.</p>
 <section class="reading-map" aria-labelledby="reading-map-title">
 <span class="reading-map-eyebrow">Start here</span>
@@ -738,7 +738,7 @@ type CompleteResult =
 <p><strong>Acceptance:</strong> A new desktop process recognizes the saved connection.</p>
 </section>
 <h3>2.1 First launch</h3>
-<p>Relayer has no product account in V1. It uses one implicit local profile. First launch opens Agent setup and, after a valid configuration is saved, opens the normal New thread window. Folder and project choice are not onboarding steps.</p>
+<p>Relayer uses one implicit local profile. First launch opens Agent setup and, after a valid configuration is saved, opens the normal New thread window. An optional Relayer account offer may appear only after that local workspace is usable. Folder, project, and account choice are not blocking onboarding steps.</p>
 <p>The setup surface is one focused <strong>Agent login</strong> card. Codex and API key are presented as horizontal login-method choices, followed by the credential and model controls for the selected method. The form should not split setup into equal Harness and Agent login columns or stack alternative methods into a long vertical option list.</p>
 <p>Agent setup does not require a harness choice. After connection, the New Thread composer presents Model as the primary execution control. Its Advanced tab contains compatible harness configurations.</p>
 <p>The packaged application includes <code>codex-basic</code> as its Codex product harness. <code>codex-basic-high</code> remains available only to internal Eval and code workflows. Prime Agent configurations remain development targets until a clean installation can load the upstream package.</p>
@@ -770,7 +770,17 @@ type CompleteResult =
 <li>Harnesses Settings lists only harnesses usable now. Provider and model diagnostics remain in their owning Settings surfaces.</li>
 <li>Existing UI-authored harness rule overrides reset once to catalog defaults when their editor is removed.</li>
 </ul>
-<h3>2.4 Configuration schema</h3>
+<h3>2.4 Optional Relayer account</h3>
+<p>The Relayer account is separate from every agent-provider credential. Stable and Preview open the branded <code>app.relayerlabs.ai/desktop/login</code> launcher and authenticate directly with the Auth0 Native Application using Authorization Code and PKCE. No Relayer authentication API, custom desktop session, database row, or Relayer user UUID participates.</p>
+<ul>
+<li>The final onboarding offer explains that privacy-filtered error reports may use a pseudonymous Auth0 subject.</li>
+<li><strong>Sign in</strong> opens the browser flow. <strong>Not now</strong> durably suppresses later automatic offers.</li>
+<li>A quiet sidebar control and Account settings keep manual sign-in, logout, channel diagnostics, and the privacy explanation available.</li>
+<li>Signed-out, signing-in, uncertain, error, offline, cancellation, and refresh failure never gate local product use.</li>
+<li>Logout disables the current telemetry generation and clears the encrypted local refresh credential before best-effort Auth0 revocation. It does not sign the browser out.</li>
+</ul>
+<p>Electron main owns state and PKCE generation, loopback binding, callback validation, direct token operations, OIDC verification, encrypted refresh-token custody, and account generation. Stable can bind only ports 49152 through 49154. Preview can bind only ports 49155 through 49157. The renderer receives only a closed presentation state, the selected channel, a pseudonymous subject where useful, and safe reason codes.</p>
+<h3>2.5 Configuration schema</h3>
 <pre><code class="language-ts">type AgentConfiguration = {
   harnessId: string;
   harnessVersion: string;
@@ -795,9 +805,9 @@ type InteractionModelBinding = {
 };
 </code></pre>
 <p>The harness binding is written when the thread&#39;s root interaction is created and is inherited by every interaction in that thread. The model picker remains available in the composer and may change before any interaction. Every submitted interaction records the exact provider, credential reference, and model used for that call.</p>
-<h3>2.5 Product requirements</h3>
+<h3>2.6 Product requirements</h3>
 <ul>
-<li><strong>AGT-001:</strong> No Relayer sign-up, sign-in, avatar, cloud-sync promise, or Sign out action appears in V1.</li>
+<li><strong>AGT-001:</strong> Agent-provider login remains independent from the optional Relayer account. No avatar or cloud-sync promise appears in V1.</li>
 <li><strong>AGT-002:</strong> Agent login is the primary setup task. Harness selection does not compete with credential setup.</li>
 <li><strong>AGT-003:</strong> Model is the primary composer choice. Advanced selects a compatible harness before thread creation. A harness change applies only to new threads.</li>
 <li><strong>AGT-004:</strong> Codex and API key are the enabled V1 login methods.</li>
@@ -807,9 +817,26 @@ type InteractionModelBinding = {
 <li><strong>AGT-008:</strong> Continue is disabled until the preselected or advanced-selected harness, credential, provider, and initial model form a valid configuration.</li>
 <li><strong>AGT-009:</strong> The composer exposes the model for the next interaction. Changing it affects that interaction and later defaults, never prior interaction records.</li>
 <li><strong>AGT-010:</strong> An existing thread cannot switch harnesses in place. To use a different harness, the user starts or forks into a new thread.</li>
+<li><strong>ACC-001:</strong> Optional account login is direct Auth0 Authorization Code plus PKCE with no Relayer API or database dependency.</li>
+<li><strong>ACC-002:</strong> Main binds the channel-specific loopback listener before browser launch and fails closed for invalid, duplicate, late, mismatched, timed-out, cancelled, or stale callbacks.</li>
+<li><strong>ACC-003:</strong> Main validates the Auth0 signature, issuer, audience, authorized party, expiry, subject, and nonce whenever requested.</li>
+<li><strong>ACC-004:</strong> Only a verified signed-in generation supplies a telemetry identity. Uncertain and error states pause authenticated telemetry without affecting local features.</li>
+<li><strong>ACC-005:</strong> The renderer never receives codes, state, PKCE material, tokens, Auth0 configuration, email, profile data, network authority, or the telemetry generation.</li>
+<li><strong>ACC-006:</strong> Refresh rotation and logout cannot resurrect stale credentials after generation invalidation.</li>
+<li><strong>ACC-007:</strong> Optional account sign-in is a dedicated onboarding step after provider setup and before projects, chats, threads, or the desktop workspace are revealed. Sign in and Continue without an account both resolve the step, and account failure cannot trap local use.</li>
+<li><strong>ACC-008:</strong> After onboarding, the account control is anchored to the application viewport's bottom-right corner and never shows Stable or Preview. Release channel appears only in Account settings and diagnostics.</li>
 </ul>
-<h3>2.6 Verification</h3>
+<h3>2.7 Verification</h3>
 <p>Deterministic UI tests cover each selector transition, conditional field, validation error, and disabled state. They also cover secure storage and secret removal. Credential-adapter integration tests use fake Codex and provider servers.</p>
+<table>
+<thead><tr><th>Optional-account checkpoint</th><th>Deterministic proof</th></tr></thead>
+<tbody>
+<tr><td><code>ACC-001</code> and <code>ACC-003</code></td><td><code>test/desktop-account-session.test.mjs</code> drives local fake Auth0 token and JWKS endpoints, PKCE exchange, claim rejection, refresh, and revocation. Production Auth0 is never contacted.</td></tr>
+<tr><td><code>ACC-002</code></td><td>The same suite occupies callback ports, switches Stable and Preview pools, races concurrent controls, and verifies exact callback failure and listener closure.</td></tr>
+<tr><td><code>ACC-004</code> and <code>ACC-006</code></td><td>Generation tests cover unverifiable restart, logout ordering, stale exchange completion, and a paused credential commit followed by deletion.</td></tr>
+<tr><td><code>ACC-005</code>, <code>ACC-007</code>, and <code>ACC-008</code></td><td><code>test/desktop-account-ui.test.mjs</code> verifies the optional startup gate, viewport account control, channel-neutral label, settings diagnostics, actions, and contained failures.</td></tr>
+</tbody>
+</table>
 <p>One optional authentication smoke test runs before a signed release. It is not in the default test suite. It does not make a paid Complete call.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15.1">15A. Agent connection evidence</h2>
 <p><code>PROV-001</code> is one product requirement with several observable subrequirements, not a collection of independent setup features:</p>
@@ -2597,6 +2624,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <h3>17.1 Included in V1</h3>
 <ul>
 <li>local profile with Codex or API-key agent login;</li>
+<li>optional direct Auth0 desktop account with a pseudonymous subject and no cloud-workspace promise;</li>
 <li>one OSS monorepo containing graph-engine crates, typed clients, Node harness host, harness implementations, eval runner, Rust Relayer app server, and Electron desktop packages;</li>
 <li>a harness- and provider-agnostic product contract behind the Relayer Complete interface;</li>
 <li>no-folder and project-backed threads;</li>
@@ -2610,7 +2638,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 </ul>
 <h3>17.2 Excluded or deferred</h3>
 <ul>
-<li>Relayer accounts, cloud sync, remote hosting, teams, and enterprise workspace administration;</li>
+<li>account-backed cloud sync, remote hosting, teams, profiles, and enterprise workspace administration;</li>
 <li>mandatory up-front workspace graph construction;</li>
 <li>continuous background stale-node propagation;</li>
 <li>self-assessment as a separate product algorithm before Complete is stable;</li>
