@@ -63,6 +63,10 @@ export function npmEnvironmentForDesktopTarget(environment, target) {
   };
 }
 
+export function qualificationLifecycleTimeout(target, hostArchitecture = process.arch) {
+  return target.architecture === hostArchitecture ? 5_000 : 15_000;
+}
+
 function parseArguments(arguments_) {
   const options = {};
   for (let index = 0; index < arguments_.length; index += 2) {
@@ -266,12 +270,12 @@ export async function validatePreparedLadybugSource({ sourceOutput, manifest, ta
 
 export async function provePackagedLadybugLifecycle(
   executable,
-  { execute = execFileAsync, spawn = spawnProcess } = {},
+  { execute = execFileAsync, spawn = spawnProcess, commandTimeout = 5_000 } = {},
 ) {
   const profile = await mkdtemp(join(tmpdir(), "relayer-ladybug-packaged-"));
   const database = join(profile, "ladybug");
   const args = ["--database", database, "--ladybug-qualification"];
-  const bounded = { timeout: 5_000, killSignal: "SIGKILL" };
+  const bounded = { timeout: commandTimeout, killSignal: "SIGKILL" };
   let holder;
   let holderExit;
   let holderLines;
@@ -301,7 +305,7 @@ export async function provePackagedLadybugLifecycle(
       await execute(executable, args, bounded);
     } catch (error) {
       if (error.killed || error.code === "ETIMEDOUT" || error.signal === "SIGKILL") {
-        throw new Error("lock-contended packaged Ladybug open did not fail within five seconds");
+        throw new Error(`lock-contended packaged Ladybug open did not fail within ${commandTimeout}ms`);
       }
       lockFailure = `${error.stderr || ""}\n${error.message || ""}`.trim();
     }
@@ -447,7 +451,8 @@ export async function captureLadybugPackagedLifecycle({
       `packaged graph server minimum macOS is ${minimumMacOSVersion}, expected ${manifest.build.minimumMacOSVersion}`,
     );
   }
-  const lifecycle = await provePackagedLadybugLifecycle(executable);
+  const lifecycleTimeoutMs = qualificationLifecycleTimeout(target);
+  const lifecycle = await provePackagedLadybugLifecycle(executable, { commandTimeout: lifecycleTimeoutMs });
   const inputPaths = [
     "Cargo.lock",
     "crates/relayer-graph-server/Cargo.toml",
@@ -484,6 +489,7 @@ export async function captureLadybugPackagedLifecycle({
     minimumMacOSVersion,
     inputSha256,
     preparedReceiptSha256,
+    lifecycleTimeoutMs,
     ...lifecycle,
     limitations: [
       `local ${target.key} ${process.arch === target.architecture ? "native" : "Rosetta"} execution only`,
