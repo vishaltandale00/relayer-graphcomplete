@@ -399,6 +399,9 @@ function registerEvalIpc() {
   ipcMain.handle("relayer-eval:judge-imported-conversation", (_event, executionId, judgeConfigurationName) => (
     evalService.judgeImportedConversation(executionId, judgeConfigurationName)
   ));
+  ipcMain.handle("relayer-eval:rejudge-execution", (_event, executionId, judgeConfigurationName) => (
+    evalService.rejudgeExecution(executionId, judgeConfigurationName)
+  ));
   ipcMain.handle("relayer-eval:open-review", async (_event, executionId) => {
     await createReviewWindow(executionId);
     return true;

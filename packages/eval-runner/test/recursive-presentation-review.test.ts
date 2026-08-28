@@ -6,15 +6,20 @@ import {
   RecursivePresentationReviewStore,
   type RecursiveLayerResult,
   type RecursiveNodeReview,
+  type RecursiveNodeScore,
   type RecursiveTurnReview,
 } from "../src/simulated-user/recursive-review.js";
 
+function judgment(score: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | null, evidence = ["shot-root"]) {
+  return { score, reason: score === null ? "Not assessable in this fixture." : `Fixture judgment ${score}.`, evidence } as const;
+}
+
 const ratings = {
-  purpose_clarity: 4,
-  cohesion: 4,
-  visual_organization: 4,
-  relationship_clarity: 4,
-  coverage: 4,
+  purpose_clarity: judgment(8),
+  cohesion: judgment(8),
+  visual_organization: judgment(8),
+  relationship_clarity: judgment(8),
+  coverage: judgment(8),
 } as const;
 const screenshotDigest = `sha256:${"a".repeat(64)}` as const;
 
@@ -69,14 +74,16 @@ function semantic(nodeId: string, evidence = [`shot-${nodeId}`]) {
   };
 }
 
-function score(nodeId: string, overrides = {}) {
+function score(nodeId: string, overrides: Partial<Record<Exclude<keyof RecursiveNodeScore, "nodeId">, number | null>> = {}): RecursiveNodeScore {
+  const value = (key: Exclude<keyof RecursiveNodeScore, "nodeId">, fallback: number | null) =>
+    judgment((overrides[key] ?? fallback) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | null, [`shot-${nodeId}`]);
   return {
     nodeId,
-    content: 4 as const,
-    actionAllocation: 4 as const,
-    actionDelivery: null,
-    recursiveQuality: null,
-    ...overrides,
+    content: value("content", 8),
+    actionAllocation: value("actionAllocation", 8),
+    actionDelivery: value("actionDelivery", null),
+    recursiveQuality: value("recursiveQuality", null),
+    polish: value("polish", 8),
   };
 }
 
@@ -115,7 +122,7 @@ function layerResult(layerId: string, depth: number, nodeReview: RecursiveNodeRe
     depth,
     nodeScores: [nodeReview.score, null, null, null, null, null, null, null],
     nodeSemantics: [nodeReview.semantic, null, null, null, null, null, null, null],
-    layerRatings: ratings,
+    criterionJudgments: ratings,
     materiallyMisleading: false,
     layerSummary: `${layerId} summary`,
     evidence: [...nodeReview.evidence.context],
@@ -194,17 +201,16 @@ function turnReview(root: RecursiveLayerResult): RecursiveTurnReview {
     turnId: "turn-1",
     rootLayerResult: root,
     evidence: { representative: ["shot-root"] },
-    ratings: {
-      answer_quality: 4,
-      recursive_coherence: 4,
-      navigation_value: 3,
-      presentation_quality: 4,
-      follow_up_progress: null,
+    criterionJudgments: {
+      answer_quality: judgment(8),
+      recursive_coherence: judgment(8),
+      navigation_value: judgment(6),
+      presentation_quality: judgment(8),
+      follow_up_progress: judgment(null),
     },
-    nullRatingJustifications: { follow_up_progress: "This is the first turn." },
     summary: "The root result is a complete handoff.",
     findings: [],
-    scoreCeiling: { maximum: 4, reason: "No critical omission.", evidence: ["shot-root"] },
+    scoreCeiling: { maximum: 8, reason: "No critical omission.", evidence: ["shot-root"] },
   };
 }
 
@@ -450,7 +456,7 @@ describe("recursive semantic presentation review", () => {
     expect(store.reviewLayer(layerResult("child", 1, child)).review.layerId).toBe("child");
   });
 
-  it("requires a justification for each null recursive layer rating", () => {
+  it("requires a reason for each null recursive layer judgment", () => {
     const store = new RecursivePresentationReviewStore({ inventory: inventoryReviewSubjects({
       turnId: "flat-turn",
       rootLayerId: "flat-layer",
@@ -459,9 +465,9 @@ describe("recursive semantic presentation review", () => {
     const node = { ...leafNodeReview(), layerId: "flat-layer", nodeId: "flat-node", score: score("flat-node"), semantic: semantic("flat-node", ["shot-flat"]), evidence: { context: ["shot-flat"], detail: ["shot-flat"] }, allocationSteps: [{ ...leafNodeReview().allocationSteps[0]!, evidence: ["shot-flat"] }] };
     store.reviewNode(node);
     const result = layerResult("flat-layer", 0, node);
-    const nullable = { ...result, layerRatings: { ...ratings, coverage: null } } as RecursiveLayerResult;
-    expect(() => store.reviewLayer(nullable)).toThrow("null coverage rating requires justification");
-    expect(store.reviewLayer({ ...nullable, nullRatingJustifications: { coverage: "No coverage claim is visible." } }).review.layerId).toBe("flat-layer");
+    const nullable = { ...result, criterionJudgments: { ...ratings, coverage: { score: null, reason: "", evidence: ["shot-flat"] } } } as RecursiveLayerResult;
+    expect(() => store.reviewLayer(nullable)).toThrow("coverage reason must not be empty");
+    expect(store.reviewLayer({ ...nullable, criterionJudgments: { ...nullable.criterionJudgments, coverage: judgment(null, ["shot-flat"]) } }).review.layerId).toBe("flat-layer");
   });
 
   it("rejects misaligned vectors and final turn judgments that do not consume the current root result", () => {
@@ -524,7 +530,7 @@ describe("recursive semantic presentation review", () => {
       findings: [],
     };
     store.reviewNode(node);
-    expect(store.reviewLayer(layerResult("flat-layer", 0, node)).review.nodeScores[0]?.actionAllocation).toBe(actionAllocation);
+    expect(store.reviewLayer(layerResult("flat-layer", 0, node)).review.nodeScores[0]?.actionAllocation.score).toBe(actionAllocation);
   });
 
   it("rejects a perfect allocation score when a material expansion opportunity is missing", () => {
@@ -538,7 +544,7 @@ describe("recursive semantic presentation review", () => {
       layerId: "flat-layer",
       nodeId: "flat-node",
       evidence: { context: ["shot-flat"], detail: ["shot-flat"] },
-      score: score("flat-node", { actionAllocation: 4 }),
+      score: score("flat-node", { actionAllocation: 8 }),
       semantic: semantic("flat-node", ["shot-flat"]),
       allocationSteps: [{
         step: 0,
@@ -564,7 +570,7 @@ describe("recursive semantic presentation review", () => {
     } as const satisfies RecursiveNodeReview;
 
     expect(() => store.reviewNode(node)).toThrow(
-      "material missing-action opportunity caps actionAllocation at 2",
+      "material missing-action opportunity caps actionAllocation at 4",
     );
   });
 
@@ -641,25 +647,29 @@ describe("recursive semantic presentation review", () => {
       turnId: "flat-turn",
       rootLayerResult: root,
       evidence: { representative: ["shot-flat"] },
-      ratings: {
-        answer_quality: 4,
-        recursive_coherence: 4,
-        navigation_value: 4,
-        presentation_quality: 4,
-        follow_up_progress: null,
+      criterionJudgments: {
+        answer_quality: judgment(8, ["shot-flat"]),
+        recursive_coherence: judgment(8, ["shot-flat"]),
+        navigation_value: judgment(8, ["shot-flat"]),
+        presentation_quality: judgment(8, ["shot-flat"]),
+        follow_up_progress: judgment(null, ["shot-flat"]),
       },
-      nullRatingJustifications: { follow_up_progress: "This is the first turn." },
       summary: "A flat handoff with a material missing expansion.",
       findings: [],
-      scoreCeiling: { maximum: 4, reason: "No critical omission.", evidence: ["shot-flat"] },
+      scoreCeiling: { maximum: 8, reason: "No critical omission.", evidence: ["shot-flat"] },
     };
 
     expect(() => store.submitReview(turn)).toThrow(
-      "material missing-action opportunity caps recursive_coherence at 3",
+      "material missing-action opportunity caps recursive_coherence at 6",
     );
     const result = store.submitReview({
       ...turn,
-      ratings: { ...turn.ratings, recursive_coherence: 3 },
+      criterionJudgments: {
+        ...turn.criterionJudgments,
+        recursive_coherence: judgment(6, ["shot-flat"]),
+        navigation_value: judgment(6, ["shot-flat"]),
+        presentation_quality: judgment(6, ["shot-flat"]),
+      },
     });
     expect(result.coverage.allocations).toEqual({
       required: 1,
@@ -712,26 +722,25 @@ describe("recursive semantic presentation review", () => {
       turnId: "critical-turn",
       rootLayerResult: root,
       evidence: { representative: ["shot-critical"] },
-      ratings: {
-        answer_quality: 2,
-        recursive_coherence: 2,
-        navigation_value: 2,
-        presentation_quality: 3,
-        follow_up_progress: null,
+      criterionJudgments: {
+        answer_quality: judgment(4, ["shot-critical"]),
+        recursive_coherence: judgment(4, ["shot-critical"]),
+        navigation_value: judgment(4, ["shot-critical"]),
+        presentation_quality: judgment(4, ["shot-critical"]),
+        follow_up_progress: judgment(null, ["shot-critical"]),
       },
-      nullRatingJustifications: { follow_up_progress: "This is the first turn." },
       summary: "The main explanation is absent.",
       findings: [],
-      scoreCeiling: { maximum: 4, reason: "No ceiling applied.", evidence: ["shot-critical"] },
+      scoreCeiling: { maximum: 8, reason: "No ceiling applied.", evidence: ["shot-critical"] },
     };
 
     expect(() => store.submitReview(turn)).toThrow(
-      "Critical missing-action opportunity caps the presentation score at 2",
+      "Critical missing-action opportunity caps the presentation score at 4",
     );
     expect(store.submitReview({
       ...turn,
-      scoreCeiling: { maximum: 2, reason: "The main explanation is absent.", evidence: ["shot-critical"] },
-    }).turn.scoreCeiling.maximum).toBe(2);
+      scoreCeiling: { maximum: 4, reason: "The main explanation is absent.", evidence: ["shot-critical"] },
+    }).turn.scoreCeiling.maximum).toBe(4);
   });
 
   it.each([
@@ -792,7 +801,7 @@ describe("recursive semantic presentation review", () => {
     const rootResult = store.reviewLayer(layerResult("nested-root", 0, root)).review;
 
     expect(rootResult.nodeSemantics[0]?.effectOnLayer).toBe(rootEffect);
-    expect(rootResult.nodeScores[0]?.content).toBe(rootContent);
+    expect(rootResult.nodeScores[0]?.content.score).toBe(rootContent);
     expect(store.snapshot().trace.map(({ layerId }) => layerId)).toEqual([
       "deep", "deep", "middle", "middle", "nested-root", "nested-root",
     ]);
@@ -837,7 +846,7 @@ describe("recursive semantic presentation review", () => {
       findings: [],
     };
     store.reviewNode(node);
-    expect(store.reviewLayer(layerResult("multi-layer", 0, node)).review.nodeScores[0]?.actionAllocation).toBe(3);
+    expect(store.reviewLayer(layerResult("multi-layer", 0, node)).review.nodeScores[0]?.actionAllocation.score).toBe(3);
   });
 
   it("represents failed child delivery in the parent while preserving the child semantic signal", () => {
@@ -856,8 +865,8 @@ describe("recursive semantic presentation review", () => {
     };
     store.reviewNode(root);
     expect(store.reviewLayer(layerResult("root", 0, root)).review.nodeScores[0]).toMatchObject({
-      actionDelivery: 1,
-      recursiveQuality: 1,
+      actionDelivery: { score: 1 },
+      recursiveQuality: { score: 1 },
     });
   });
 });

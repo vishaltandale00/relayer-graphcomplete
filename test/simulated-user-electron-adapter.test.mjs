@@ -374,8 +374,8 @@ describe("local Electron simulated-user judge adapter", () => {
     };
     const runJudge = vi.fn(async ({ reviewStore, artifactEvidence }) => {
       expect(reviewStore.snapshot()).toMatchObject({
-        schemaVersion: 3,
-        contractId: "recursive-presentation-judge-v3",
+        schemaVersion: 5,
+        contractId: "recursive-presentation-judge-v5",
       });
       expect(artifactEvidence).toEqual(evidence);
       throw new Error("fixture stops before paid inference");
@@ -397,12 +397,12 @@ describe("local Electron simulated-user judge adapter", () => {
       thread: { id: "7" },
       turn: { id: "41", rootLayerId: "10" },
       request: { text: "Explain." },
-      rubric: { rubricVersion: "graph-presentation-rubric-v5" },
+      rubric: { rubricVersion: "graph-presentation-rubric-v10" },
       artifactEvidence: evidence,
       reviewSequence: { index: 0, count: 1 },
     });
 
-    expect(result).toMatchObject({ status: "partial", review: { schemaVersion: 3 }, error: "fixture stops before paid inference" });
+    expect(result).toMatchObject({ status: "partial", review: { schemaVersion: 5 }, error: "fixture stops before paid inference" });
   });
 });
 

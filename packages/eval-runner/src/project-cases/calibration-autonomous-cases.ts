@@ -234,23 +234,49 @@ test("viewer lifecycle grants reads and denies every mutation", () => {
   Object.freeze({
     id: calibrationCaseIds.staleResultRace,
     name: "Debugging · stale result race",
-    description: "Diagnoses and repairs a seeded overlapping-publication race without globally serializing work.",
+    description: "Diagnoses a stale refresh across scheduling, publication, persisted state, and user-visible projection without globally serializing work.",
     category: "coding",
     taskType: "debugging",
     prompt: "Users sometimes see an older result after refreshing. Figure out why and fix it without making all work run one at a time. Add a regression test, verify it, and commit the fix. Do not push or publish anything.",
     files: Object.freeze({
-      ...codingFiles("Asynchronous Result Store", `\`ResultStore\` receives results from overlapping attempts. A larger generation is newer. The seeded implementation publishes whichever attempt finishes last, so a slow old generation can replace a newer one. Preserve concurrent execution while making publication and state round-tripping safe.`, `import test from "node:test";
+      ...codingFiles("Refresh Results", `This small application models the production refresh path across a coordinator, a durable result store, and the user-visible projection. Users may refresh the same report while earlier work is still running, and different reports must continue concurrently. A larger generation is newer. Diagnose the stale-result failure from the implementation and tests, preserve state across restart, and keep the public exports in \`src/index.js\` compatible.`, `import test from "node:test";
 import assert from "node:assert/strict";
-import { ResultStore } from "../src/index.js";
+import { RefreshCoordinator, ResultStore, resultView } from "../src/index.js";
 
-test("a stale completion cannot overwrite a newer generation", async () => {
+test("overlapping refreshes keep the newest visible result", async () => {
   const store = new ResultStore();
-  await store.publish("report", { generation: 2, value: "new" });
-  await store.publish("report", { generation: 1, value: "old" });
-  assert.deepEqual(store.read("report"), { generation: 2, value: "new" });
+  const pending = new Map();
+  const coordinator = new RefreshCoordinator({
+    store,
+    run: (key, generation) => new Promise((resolve) => pending.set(key + ":" + generation, resolve)),
+  });
+  const older = coordinator.refresh("report");
+  const newer = coordinator.refresh("report");
+  assert.deepEqual([...pending.keys()], ["report:1", "report:2"]);
+  pending.get("report:2")({ value: "new" });
+  await newer;
+  pending.get("report:1")({ value: "old" });
+  await older;
+  assert.deepEqual(resultView(store, "report"), { status: "ready", generation: 2, value: "new" });
 });
 `),
-      "src/index.js": `export class ResultStore {
+      "src/index.js": `export { RefreshCoordinator } from "./refresh-coordinator.js";
+export { ResultStore } from "./result-store.js";
+export { resultView } from "./result-view.js";
+`,
+      "src/refresh-coordinator.js": `export class RefreshCoordinator {
+  #issued = new Map();
+  constructor({ store, run }) { this.store = store; this.run = run; }
+  async refresh(key) {
+    const generation = Math.max(this.#issued.get(key) ?? 0, this.store.read(key)?.generation ?? 0) + 1;
+    this.#issued.set(key, generation);
+    const result = await this.run(key, generation);
+    await this.store.publish(key, { generation, value: result.value });
+    return this.store.read(key);
+  }
+}
+`,
+      "src/result-store.js": `export class ResultStore {
   #results = new Map();
   async publish(key, result) { await Promise.resolve(); this.#results.set(key, structuredClone(result)); }
   read(key) { const result = this.#results.get(key); return result && structuredClone(result); }
@@ -258,20 +284,28 @@ test("a stale completion cannot overwrite a newer generation", async () => {
   static fromState(state) { const store = new ResultStore(); store.#results = new Map(JSON.parse(state)); return store; }
 }
 `,
+      "src/result-view.js": `export function resultView(store, key) {
+  const result = store.read(key);
+  return result ? { status: "ready", generation: result.generation, value: result.value } : { status: "empty" };
+}
+`,
     }),
-    requiredDeliverables: ["src/index.js", "test/contract.test.js"],
-    referenceSummary: "A complete solution identifies the publication race and uses per-result monotonic admission rather than global work serialization, including restart and concurrency regression evidence.",
-    hiddenScript: `import assert from 'node:assert/strict'; import {ResultStore} from './src/index.js'; const s=new ResultStore(); await Promise.all([s.publish('x',{generation:3,value:'three'}),s.publish('x',{generation:1,value:'one'}),s.publish('x',{generation:2,value:'two'})]); assert.equal(s.read('x').generation,3); const r=ResultStore.fromState(s.exportState()); await r.publish('x',{generation:2,value:'stale'}); assert.equal(r.read('x').value,'three');`,
+    requiredDeliverables: ["src/index.js", "src/refresh-coordinator.js", "src/result-store.js", "src/result-view.js", "test/contract.test.js"],
+    referenceSummary: "A complete investigation connects overlapping scheduling, per-result monotonic publication, persisted generation state, user-visible projection, and concurrency-focused regression evidence.",
+    hiddenScript: `import assert from 'node:assert/strict'; import {RefreshCoordinator,ResultStore,resultView} from './src/index.js';
+const s=new ResultStore(); await Promise.all([s.publish('x',{generation:3,value:'three'}),s.publish('x',{generation:1,value:'one'}),s.publish('x',{generation:2,value:'two'})]); assert.equal(s.read('x').generation,3);
+const r=ResultStore.fromState(s.exportState()); await r.publish('x',{generation:2,value:'stale'}); assert.equal(resultView(r,'x').value,'three');
+const pending=new Map(); const c=new RefreshCoordinator({store:r,run:(key,generation)=>new Promise(resolve=>pending.set(key+':'+generation,resolve))}); const x=c.refresh('x'); const y=c.refresh('y'); assert.equal(pending.size,2); pending.get('x:4')({value:'four'}); pending.get('y:1')({value:'other'}); await Promise.all([x,y]); assert.equal(r.read('x').generation,4); assert.equal(r.read('y').value,'other');`,
   }),
   Object.freeze({
     id: calibrationCaseIds.credentialLeak,
     name: "Security · proxy credential leakage",
-    description: "Repairs seeded leakage while preserving proxy transport authentication.",
+    description: "Traces proxy credentials across configuration, transport, logs, errors, and debug representations while preserving authentication.",
     category: "coding",
     taskType: "debugging",
     prompt: "Stop proxy credentials from appearing in logs, errors, and debug representations without breaking proxy authentication. Add adversarial tests and commit the fix. Do not push or publish anything.",
     files: Object.freeze({
-      ...codingFiles("Proxy Transport", `The seeded proxy helper must continue to derive a correct Basic authorization header from URL userinfo. Export \`proxyAuthorization(url)\`, \`sanitizeUrl(url)\`, \`safeError(error)\`, and \`debugProxy(url)\`. No raw or percent-encoded password may appear in sanitized URLs, errors, or debug output. Do not redact unrelated host, port, path, or username information.`, `import test from "node:test";
+      ...codingFiles("Proxy Transport", `This package routes one proxy configuration through parsing, transport authentication, logging, error wrapping, and diagnostic inspection. Credentials must reach the transport authorization header but must not escape through any human-facing representation. Preserve useful non-secret context and the public exports in \`src/index.js\`.`, `import test from "node:test";
 import assert from "node:assert/strict";
 import { debugProxy, proxyAuthorization, safeError, sanitizeUrl } from "../src/index.js";
 
@@ -284,14 +318,27 @@ test("keeps transport auth while redacting representations", () => {
   }
 });
 `),
-      "src/index.js": `export function proxyAuthorization(value) { const url = new URL(value); return "Basic " + Buffer.from(decodeURIComponent(url.username) + ":" + decodeURIComponent(url.password)).toString("base64"); }
+      "src/index.js": `export { proxyAuthorization } from "./transport.js";
+export { sanitizeUrl } from "./proxy-config.js";
+export { safeError } from "./safe-error.js";
+export { debugProxy } from "./debug-proxy.js";
+`,
+      "src/proxy-config.js": `export function proxyUrl(value) { return new URL(value); }
 export function sanitizeUrl(value) { return String(value); }
-export function safeError(error) { return new Error(String(error?.message ?? error)); }
-export function debugProxy(value) { return "Proxy(" + value + ")"; }
+`,
+      "src/transport.js": `import { proxyUrl } from "./proxy-config.js";
+export function proxyAuthorization(value) {
+  const url = proxyUrl(value);
+  return "Basic " + Buffer.from(decodeURIComponent(url.username) + ":" + decodeURIComponent(url.password)).toString("base64");
+}
+`,
+      "src/debug-proxy.js": `export function debugProxy(value) { return "Proxy(" + value + ")"; }
+`,
+      "src/safe-error.js": `export function safeError(error) { return new Error(String(error?.message ?? error)); }
 `,
     }),
-    requiredDeliverables: ["src/index.js", "test/contract.test.js"],
-    referenceSummary: "A complete solution separates secret-bearing transport data from every representation, handles encoded credentials, preserves useful URL context, and adds adversarial regression coverage.",
+    requiredDeliverables: ["src/index.js", "src/proxy-config.js", "src/transport.js", "src/debug-proxy.js", "src/safe-error.js", "test/contract.test.js"],
+    referenceSummary: "A complete investigation traces the secret-bearing value across configuration, transport, logging, error, and diagnostic paths; centralizes safe representation; preserves authentication and useful context; and adds adversarial regression coverage.",
     hiddenScript: `import assert from 'node:assert/strict'; import {proxyAuthorization,sanitizeUrl,debugProxy,safeError} from './src/index.js'; const u='http://u:p%40ss@proxy.test:9/a'; assert.equal(proxyAuthorization(u),'Basic '+Buffer.from('u:p@ss').toString('base64')); for(const x of [sanitizeUrl(u),debugProxy(u),safeError(new Error(u)).message]){assert.equal(/p%40ss|p@ss/.test(x),false); assert.equal(x.includes('proxy.test:9'),true);}`,
   }),
   Object.freeze({

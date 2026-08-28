@@ -5,7 +5,7 @@ export const DEFAULT_PRESENTATION_DEPTH_DECAY = 0.5 as const;
 export type GradingStatus = "pending" | "running" | "completed" | "partial" | "failed" | "unjudged";
 export type PresentationGradingStatus = GradingStatus | "not_applicable";
 export type OutcomeRubricRating = 1 | 2 | 3 | 4 | null;
-export type PresentationRating = 1 | 2 | 3 | 4 | null;
+export type PresentationRating = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | null;
 
 export interface MandatoryGateReceipt {
   readonly schemaVersion: 1;
@@ -80,14 +80,15 @@ export interface GraphPresentationGrade {
   readonly schemaVersion: 1;
   readonly kind: "graph_presentation_grade";
   readonly status: PresentationGradingStatus;
-  /** Weighted mean on the 1-4 scale; never combined with task-outcome score. */
+  /** Weighted mean on the judge contract's declared scale; never combined with task-outcome score. */
   readonly score: number | null;
   /** Whole-turn task-grounded handoff comprehension before visual aggregation. */
   readonly comprehensionScore?: number | null;
   /** Depth-decayed layer/node rendered experience. */
   readonly renderedScore?: number | null;
   readonly rawScore?: number | null;
-  readonly scoreCeiling?: 1 | 2 | 3 | 4 | null;
+  readonly scoreCeiling?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | null;
+  readonly scoreScaleMaximum?: 4 | 8;
   readonly depthDecay: number;
   readonly layers: readonly PresentationLayerGrade[];
   readonly aggregation: readonly PresentationLayerAggregation[];

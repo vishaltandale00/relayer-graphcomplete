@@ -169,10 +169,29 @@ inspectable evidence and are not arithmetically reaggregated. Explicit critical-
 omission ceilings apply to that model-authored root judgment. Judge lifecycle
 completion remains independent from both task-outcome qualification and graph-
 presentation score, and historical rubric records retain their legacy projection.
+The active human-experience rubric judges the accepted output only as a graph-native
+interface: it values discoverable inspect-or-act choices and layouts whose edges
+and placement communicate real relationships, while penalizing missing obvious
+paths, semantically empty geometry, and action spam. Artifact inspection may reveal
+useful presentation opportunities, but implementation correctness, verifier results,
+and task-outcome contradictions can neither raise nor lower this independent grade.
+The rubric does not require media capabilities that the graph contract and renderer
+do not yet support. Recursive review contract v4 records basic rendered integrity
+as a separate node-level `polish` score. Polish covers clipping, readability,
+density, alignment, and control rendering only; it is inspectable in the score
+vector and cannot raise or offset semantic, interaction, navigation, layer, turn,
+or task-outcome grades. The v9 human-experience rubric treats polish evidence as
+exclusive: a clean textual handoff split across static cards remains at most a
+two for graph response value and graph experience. Repeated judge-identified
+material missing actions cap recursive coherence, navigation, and graph experience
+at two. Historical recursive reviews remain readable without the polish vector.
 
 The Eval application's deterministic graph-contract judge scores only durable graph structure; it does not use phrase matching as a semantic proxy. A separate hierarchical-overview case checks for a useful node-level navigate action so navigation capability is measured without requiring artificial child layers in every answer.
+Judge-only calibration reruns reuse the immutable accepted candidate turn, append a
+new judgment result, and write each attempt under its own artifact directory so
+historical judgments and screenshots are never overwritten.
 
-Deep calibration cases sit behind one manifest-driven fixture module. The module owns generated baseline files, immutable source identity, materialization, evaluator-only reference expectations, and deterministic grading through a small materialize/grade interface. Seven coding cases expose behavioral contracts that are red in the seeded workspace. Five noncoding cases begin without curated research content and deterministically check only artifact presence, source-ledger shape, and task-specific consistency; semantic outcome criteria remain partial until scoped review. This prevents structural checks from masquerading as historical, creative, travel, technology, or sports expertise.
+Deep calibration cases sit behind one manifest-driven fixture module. They form a graph-presentation calibration corpus for recursive-judge tuning and human labels, not the full verifiable-work benchmark. The module owns generated baseline files, immutable source identity, materialization, evaluator-only reference expectations, and lightweight deterministic completion checks through a small materialize/grade interface. Seven coding cases expose behavioral contracts that are red in the seeded workspace. Five noncoding cases begin without curated research content and deterministically check only artifact presence, source-ledger shape, and task-specific consistency; semantic outcome criteria remain partial until scoped review. Completion checks confirm that inspectable work exists but do not qualify its substantive quality. This prevents structural checks from masquerading as implementation, historical, creative, travel, technology, or sports expertise.
 
 The runner input is a test-run ID, selected test-case IDs, selected harness-configuration names, and one judge configuration. At the CLI boundary, configuration names resolve to validated snapshots. The runner expands their Cartesian product into executions identified by `(testRunId, testCaseId, harnessConfigurationName)` and passes each resolved `HarnessConfiguration` into case execution. Every execution artifact stores that exact snapshot and its canonical SHA-256 digest. Two configurations may select the same implementation; that is ordinary run selection, not a harness-specific case or matrix.
 

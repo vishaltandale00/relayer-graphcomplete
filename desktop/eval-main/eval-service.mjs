@@ -17,7 +17,7 @@ import {
   canonicalJson,
   checkNodeNavigation,
   checkBasicOutput,
-  GRAPH_PRESENTATION_RUBRIC_V5,
+  GRAPH_PRESENTATION_RUBRIC_V10,
   expandTestRun,
   gradeH3Workspace,
   gradeFrontierProjectWorkspace,
@@ -178,7 +178,12 @@ function presentationGradeFromTurns(turns, requested) {
   if (!requested) {
     return buildGraphPresentationGrade({ status: "unjudged" });
   }
-  const results = turns.flatMap((turn) => turn.judgeResults || []);
+  // Rejudging supersedes the prior attempt for a turn. Never average duplicate
+  // attempts or mix legacy 1-4 results with the current 1-8 contract.
+  const results = turns.flatMap((turn) => {
+    const attempts = turn.judgeResults || [];
+    return attempts.length > 0 ? [attempts.at(-1)] : [];
+  });
   const completed = results.filter((result) => result.status === "completed");
   const failed = results.filter((result) => result.status === "failed");
   const terminalWithoutReview = turns.filter((turn) => (
@@ -190,19 +195,24 @@ function presentationGradeFromTurns(turns, requested) {
     : completed.length === results.length && terminalWithoutReview.length === 0 ? "completed"
       : failed.length === results.length ? "failed" : "partial";
   const recursive = completed.length > 0 && completed.every((result) => (
-    [2, 3].includes(result.review?.schemaVersion)
-    && ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3"].includes(result.review?.contractId)
+    [2, 3, 4, 5].includes(result.review?.schemaVersion)
+    && ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5"].includes(result.review?.contractId)
   ));
   if (recursive) {
+    const reasoned = completed.every((result) => result.review?.schemaVersion === 5);
+    const turnScore = (result, criterion) => reasoned
+      ? result.review?.turn?.criterionJudgments?.[criterion]?.score ?? null
+      : result.review?.turn?.ratings?.[criterion] ?? null;
     return buildRecursiveGraphPresentationGrade({
       status,
       layers: presentationLayers(completed),
-      presentationRatings: completed.map((result) => result.review?.turn?.ratings?.presentation_quality ?? null),
-      comprehensionRatings: completed.map((result) => result.review?.turn?.ratings?.answer_quality ?? null),
+      presentationRatings: completed.map((result) => turnScore(result, "presentation_quality")),
+      comprehensionRatings: completed.map((result) => turnScore(result, "answer_quality")),
       scoreCeilings: completed.flatMap((result) => {
         const maximum = result.review?.turn?.scoreCeiling?.maximum;
-        return [1, 2, 3, 4].includes(maximum) ? [maximum] : [];
+        return [1, 2, 3, 4, 5, 6, 7, 8].includes(maximum) ? [maximum] : [];
       }),
+      scoreScaleMaximum: reasoned ? 8 : 4,
       rootLayerResultIds: completed.flatMap((result) => {
         const layerId = result.review?.rootLayerResult?.layerId;
         return typeof layerId === "string" && layerId ? [layerId] : [];
@@ -238,7 +248,10 @@ function presentationLayers(results) {
         return [{
           nodeId: String(nodeRecord?.subject?.nodeId ?? node?.nodeId ?? ""),
           ratings: node?.score
-            ? copy(Object.fromEntries(Object.entries(node.score).filter(([key]) => key !== "nodeId")))
+            ? copy(Object.fromEntries(Object.entries(node.score).filter(([key]) => key !== "nodeId").map(([key, value]) => [
+                key,
+                value && typeof value === "object" && "score" in value ? value.score : value,
+              ])))
             : {
                 ...copy(node?.ratings || {}),
                 recursive_disclosure: [1, 2, 3, 4].includes(node?.structure?.rating)
@@ -263,7 +276,9 @@ function presentationLayers(results) {
       return {
         layerId,
         depth: Number.isInteger(inventoryLayer?.depth) ? inventoryLayer.depth : Number(record?.subject?.depth ?? index),
-        ratings: copy(current?.layerRatings || current?.ratings || {}),
+        ratings: copy(current?.criterionJudgments
+          ? Object.fromEntries(Object.entries(current.criterionJudgments).map(([key, value]) => [key, value?.score ?? null]))
+          : current?.layerRatings || current?.ratings || {}),
         summary: typeof current?.layerSummary === "string"
           ? current.layerSummary
           : typeof current?.summary === "string" ? current.summary : "",
@@ -535,6 +550,9 @@ export class EvalService {
             }
           }
         }
+        if ((execution.turns || []).some((turn) => (turn.judgeResults || []).length > 0)) {
+          execution.presentationGrade = presentationGradeFromTurns(execution.turns, true);
+        }
       }
       if (["passed", "failed", "error", "interrupted"].includes(run.status) && !run.bundleRef) {
         await this.#writeRunBundle(run);
@@ -588,6 +606,50 @@ export class EvalService {
     this.running.set(located.run.id, operation);
     await operation;
     return this.getRun(located.run.id);
+  }
+
+  async rejudgeExecution(executionId, judgeConfigurationName) {
+    const located = this.#findExecution(executionId);
+    if (!simulatedUserJudgeIds.has(judgeConfigurationName)) {
+      throw new Error("Judge-only reruns require a simulated-user judge configuration.");
+    }
+    if (this.simulatedUserJudgeRunner === null) {
+      throw new Error("Simulated-user judge is not available in this EvalService.");
+    }
+    const operationKey = `rejudge:${executionId}`;
+    if (this.running.has(operationKey)) throw new Error("This execution is already being rejudged.");
+
+    const operation = (async () => {
+      const executionForJudge = {
+        ...located.execution,
+        judgeConfiguration: { name: judgeConfigurationName },
+      };
+      const accepted = [];
+      for (const turn of located.execution.turns || []) {
+        if (turn.threadId == null || turn.interactionId == null) continue;
+        const detail = await this.#productRequest(`/api/threads/${encodeURIComponent(turn.threadId)}`);
+        const interaction = (detail.interactions || []).find(
+          (candidate) => String(candidate.id) === String(turn.interactionId),
+        );
+        if (interaction?.completionStatus !== "accepted" || !interaction.completionOutput) continue;
+        accepted.push({ thread: detail.thread, interaction, turn });
+      }
+      if (accepted.length === 0) throw new Error("This execution has no accepted turns eligible for rejudging.");
+
+      const results = [];
+      for (const [index, candidate] of accepted.entries()) {
+        results.push(await this.#judgeAcceptedTurn({
+          execution: executionForJudge,
+          ...candidate,
+          reviewSequence: { index, count: accepted.length },
+        }));
+      }
+      located.execution.presentationGrade = presentationGradeFromTurns(located.execution.turns, true);
+      await this.#changed();
+      return copy({ executionId, judgeConfigurationName, results });
+    })().finally(() => this.running.delete(operationKey));
+    this.running.set(operationKey, operation);
+    return operation;
   }
 
   #findExecution(executionId) {
@@ -1465,6 +1527,7 @@ export class EvalService {
 
   async #judgeAcceptedTurn({ execution, thread, interaction, turn, reviewSequence, provenance = null }) {
     const judgeConfigurationId = execution.judgeConfiguration.name;
+    const judgeResultId = randomUUID();
     const previousTurnIds = execution.turns
       .filter((candidate) => (
         String(candidate.threadId) === String(turn.threadId)
@@ -1480,11 +1543,12 @@ export class EvalService {
       "turns",
       encodeURIComponent(String(interaction.id)),
       judgeConfigurationId,
+      judgeResultId,
     );
     await mkdir(artifactDirectory, { recursive: true });
     const judgeResult = {
       schemaVersion: 1,
-      id: randomUUID(),
+      id: judgeResultId,
       judge: judgeConfigurationId,
       status: "running",
       passed: null,
@@ -1492,7 +1556,7 @@ export class EvalService {
       completedAt: null,
       artifactDirectory,
       artifactAuthority: "references",
-      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V5.rubricVersion,
+      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V10.rubricVersion,
       judgeConfiguration: copy(execution.judgeConfiguration),
       references: emptyJudgeReferences(),
       review: null,
@@ -1533,7 +1597,7 @@ export class EvalService {
         },
         artifact: judgeArtifactForExecution(execution, turn),
         artifactEvidence: judgeArtifactEvidenceForExecution(execution, turn),
-        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V5),
+        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V10),
         judgeConfiguration: copy(execution.judgeConfiguration),
         ...(provenance === null ? {} : { provenance: copy(provenance) }),
       };

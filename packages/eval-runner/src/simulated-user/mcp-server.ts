@@ -221,13 +221,23 @@ const turnReviewSchema = z.object({
   }).strict(),
 }).strict();
 
-const scoreValueSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
+const scoreValueSchema = z.union([
+  z.literal(1), z.literal(2), z.literal(3), z.literal(4),
+  z.literal(5), z.literal(6), z.literal(7), z.literal(8),
+]);
+const allocationRankSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
+const criterionJudgmentSchema = z.object({
+  score: scoreValueSchema.nullable(),
+  reason: z.string().min(1),
+  evidence: z.array(screenshotReferenceSchema).min(1),
+}).strict();
 const recursiveScoreSchema = z.object({
   nodeId: z.string().min(1),
-  content: scoreValueSchema,
-  actionAllocation: scoreValueSchema,
-  actionDelivery: scoreValueSchema.nullable(),
-  recursiveQuality: scoreValueSchema.nullable(),
+  content: criterionJudgmentSchema,
+  actionAllocation: criterionJudgmentSchema,
+  actionDelivery: criterionJudgmentSchema,
+  recursiveQuality: criterionJudgmentSchema,
+  polish: criterionJudgmentSchema,
 }).strict();
 const recursiveSemanticSchema = z.object({
   nodeId: z.string().min(1),
@@ -240,7 +250,7 @@ const recursiveSemanticSchema = z.object({
 const allocationChoiceSchema = z.enum(["expand", "reference", "invoke", "stop"]);
 const allocationStepSchema = z.object({
   step: z.number().int().nonnegative(),
-  ranking: z.array(z.object({ choice: allocationChoiceSchema, rank: scoreValueSchema }).strict()).length(4),
+  ranking: z.array(z.object({ choice: allocationChoiceSchema, rank: allocationRankSchema }).strict()).length(4),
   preferredChoice: allocationChoiceSchema,
   authoredChoice: allocationChoiceSchema,
   authoredActionId: z.string().min(1).nullable(),
@@ -287,8 +297,9 @@ const recursiveLayerResultSchema = z.object({
   depth: z.number().int().nonnegative(),
   nodeScores: z.array(recursiveScoreSchema.nullable()).length(8),
   nodeSemantics: z.array(recursiveSemanticSchema.nullable()).length(8),
-  layerRatings: layerRatingsSchema,
-  nullRatingJustifications: optionalJustifications(layerRatingsSchema.shape),
+  criterionJudgments: z.object(Object.fromEntries(
+    Object.keys(layerRatingsSchema.shape).map((key) => [key, criterionJudgmentSchema]),
+  ) as Record<keyof typeof layerRatingsSchema.shape, typeof criterionJudgmentSchema>).strict(),
   materiallyMisleading: z.boolean(),
   layerSummary: z.string().min(1),
   evidence: z.array(screenshotReferenceSchema).min(1),
@@ -297,8 +308,9 @@ const recursiveTurnReviewSchema = z.object({
   turnId: z.string().min(1),
   rootLayerResult: recursiveLayerResultSchema,
   evidence: z.object({ representative: z.array(screenshotReferenceSchema).min(1) }).strict(),
-  ratings: turnRatingsSchema,
-  nullRatingJustifications: optionalJustifications(turnRatingsSchema.shape),
+  criterionJudgments: z.object(Object.fromEntries(
+    Object.keys(turnRatingsSchema.shape).map((key) => [key, criterionJudgmentSchema]),
+  ) as Record<keyof typeof turnRatingsSchema.shape, typeof criterionJudgmentSchema>).strict(),
   summary: z.string().min(1),
   findings: z.array(findingSchema),
   scoreCeiling: z.object({
@@ -535,7 +547,6 @@ function registerRecursiveReviewTools(
   }, async ({ review }) => traced(trace, now, "reviewLayer", { review }, async () => {
     try {
       const typed = review as unknown as RecursiveLayerResult;
-      assertNullRatingsJustified(typed.layerRatings, typed.nullRatingJustifications, ["review", "layerRatings"]);
       const revision = store.reviewLayer(typed);
       return mcpResult({
         ok: true,
@@ -555,7 +566,6 @@ function registerRecursiveReviewTools(
   }, async ({ review }) => traced(trace, now, "submitReview", { review }, async () => {
     try {
       const typed = review as unknown as RecursiveTurnReview;
-      assertNullRatingsJustified(typed.ratings, typed.nullRatingJustifications, ["review", "ratings"]);
       store.submitReview(typed);
       return mcpResult({ ok: true, finalized: true, turnId: typed.turnId });
     } catch (error) {

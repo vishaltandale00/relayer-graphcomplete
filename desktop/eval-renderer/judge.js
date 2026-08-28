@@ -31,6 +31,10 @@ function scoreLabel(ratings) {
   return score === null ? "—" : score.toFixed(1);
 }
 
+function criterionScore(value) {
+  return value && typeof value === "object" && "score" in value ? value.score : value;
+}
+
 function statusMarkup(turn) {
   return `<span class="review-status ${escapeHtml(turn.state)}">${escapeHtml(turn.stateLabel)}</span>`;
 }
@@ -93,7 +97,7 @@ function layerMarkup(layer) {
         const semantic = layer.review.nodeSemantics?.[index] ?? null;
         const node = score ? layer.nodes.find((candidate) => candidate.nodeId === String(score.nodeId)) : null;
         return node
-          ? `<div class="recursive-slot"><small>Slot ${index + 1}</small>${nodeChipMarkup(node)}<dl><div><dt>C</dt><dd>${escapeHtml(score.content)}</dd></div><div><dt>A</dt><dd>${escapeHtml(score.actionAllocation)}</dd></div><div><dt>D</dt><dd>${score.actionDelivery === null ? "N/A" : escapeHtml(score.actionDelivery)}</dd></div><div><dt>R</dt><dd>${score.recursiveQuality === null ? "N/A" : escapeHtml(score.recursiveQuality)}</dd></div></dl><p>${escapeHtml(semantic?.effectOnLayer || semantic?.delivered || "No aligned semantic summary")}</p></div>`
+          ? `<div class="recursive-slot"><small>Slot ${index + 1}</small>${nodeChipMarkup(node)}<dl><div><dt>C</dt><dd>${escapeHtml(criterionScore(score.content))}</dd></div><div><dt>A</dt><dd>${escapeHtml(criterionScore(score.actionAllocation))}</dd></div><div><dt>D</dt><dd>${criterionScore(score.actionDelivery) === null ? "N/A" : escapeHtml(criterionScore(score.actionDelivery))}</dd></div><div><dt>R</dt><dd>${criterionScore(score.recursiveQuality) === null ? "N/A" : escapeHtml(criterionScore(score.recursiveQuality))}</dd></div><div><dt>P</dt><dd>${score.polish === undefined ? "—" : escapeHtml(criterionScore(score.polish))}</dd></div></dl><p>${escapeHtml(semantic?.effectOnLayer || semantic?.delivered || "No aligned semantic summary")}</p></div>`
           : `<span class="recursive-slot empty-slot"><small>Slot ${index + 1}</small><b>Score null</b><p>Semantic null</p></span>`;
       }).join("")}</div>`
     : `<div class="node-chips" aria-label="Nodes in layer ${escapeHtml(layer.layerId)}">${layer.nodes.map(nodeChipMarkup).join("") || '<span class="empty-note">No inventoried nodes</span>'}</div>`;
@@ -109,7 +113,10 @@ function layerMarkup(layer) {
 
 function ratingsMarkup(review) {
   if (!review?.ratings || typeof review.ratings !== "object") return '<p class="empty-note">No criterion scores were submitted.</p>';
-  return `<dl class="ratings">${Object.entries(review.ratings).map(([criterion, rating]) => `<div><dt>${escapeHtml(titleCase(criterion))}</dt><dd>${rating === null ? "N/A" : escapeHtml(rating)}</dd></div>`).join("")}</dl>`;
+  return `<dl class="ratings">${Object.entries(review.ratings).map(([criterion, rating]) => {
+    const judgment = review.criterionJudgments?.[criterion];
+    return `<div style="flex-wrap:wrap"><dt>${escapeHtml(titleCase(criterion))}</dt><dd>${rating === null ? "N/A" : escapeHtml(rating)}</dd>${judgment?.reason ? `<p style="flex-basis:100%;margin:0;color:var(--muted);font-size:10px;line-height:1.45">${escapeHtml(judgment.reason)}</p>` : ""}</div>`;
+  }).join("")}</dl>`;
 }
 
 function findingsMarkup(review) {

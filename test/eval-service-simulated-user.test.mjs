@@ -157,7 +157,7 @@ describe("EvalService simulated-user result persistence", () => {
         status: "accepted",
       },
       request: { followUp: false },
-      rubric: { rubricVersion: "graph-presentation-rubric-v5" },
+      rubric: { rubricVersion: "graph-presentation-rubric-v10" },
       judgeConfiguration: { name: "simulated-user" },
     });
     expect(calls[0].request.text).toContain("incoming queue");
@@ -171,7 +171,7 @@ describe("EvalService simulated-user result persistence", () => {
         judge: "simulated-user",
         status: "completed",
         passed: null,
-        rubricVersion: "graph-presentation-rubric-v5",
+        rubricVersion: "graph-presentation-rubric-v10",
         judgeConfiguration: { name: "simulated-user" },
         artifactAuthority: "references",
         references: {

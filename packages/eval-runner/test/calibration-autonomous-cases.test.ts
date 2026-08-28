@@ -90,6 +90,32 @@ describe("deep calibration candidate cases", () => {
     }
   });
 
+  it("gives the cross-cutting debugging cases inspectable responsibility seams", async () => {
+    const expectedFiles: Partial<Readonly<Record<CalibrationCaseId, readonly string[]>>> = {
+      "calibration.debugging.stale-result-race": [
+        "src/refresh-coordinator.js",
+        "src/result-store.js",
+        "src/result-view.js",
+      ],
+      "calibration.security.credential-leak": [
+        "src/proxy-config.js",
+        "src/transport.js",
+        "src/debug-proxy.js",
+        "src/safe-error.js",
+      ],
+    };
+
+    for (const [caseId, relativePaths] of Object.entries(expectedFiles)) {
+      const root = await mkdtemp(join(tmpdir(), "relayer-calibration-depth-"));
+      temporaryDirectories.push(root);
+      const workspaceDirectory = join(root, "workspace");
+      await materializeCalibrationFixture({ caseId: caseId as CalibrationCaseId, workspaceDirectory });
+      for (const relativePath of relativePaths) {
+        expect((await readFile(join(workspaceDirectory, relativePath), "utf8")).trim(), `${caseId}:${relativePath}`).not.toBe("");
+      }
+    }
+  });
+
   it("accepts one known-good implementation for every coding verifier", async () => {
     const solutions: Readonly<Record<string, string>> = {
       "calibration.greenfield.json-explorer": `const esc=(v)=>String(v).replaceAll('~','~0').replaceAll('/','~1');
@@ -114,6 +140,8 @@ export const exportWorkspace=(value)=>JSON.stringify(value); export const import
       "calibration.feature.readonly-collaborators": `export class ProjectAccess{#roles=new Map();#invites=new Map();constructor({ownerId}){this.#roles.set(ownerId,'owner')}#owner(id){if(this.#roles.get(id)!=='owner')throw Error('forbidden')}addEditor(a,u){this.#owner(a);this.#roles.set(u,'editor')}invite(a,email,role){this.#owner(a);if(role!=='viewer')throw Error('invalid role');const token='invite-'+this.#invites.size;const value={token,email,role};this.#invites.set(token,value);return value}accept(token,userId){const i=this.#invites.get(token);if(!i)throw Error('invalid invitation');this.#roles.set(userId,i.role);this.#invites.delete(token)}revoke(a,u){this.#owner(a);this.#roles.delete(u)}authorize(u,action){const r=this.#roles.get(u);if(r==='owner')return true;if(r==='editor')return action!=='delete';if(r==='viewer')return action==='read';return false}projection(u){return {role:this.#roles.get(u)??null,canWrite:this.authorize(u,'write')}}}
 `,
       "calibration.debugging.stale-result-race": `export class ResultStore{#results=new Map();async publish(key,result){await Promise.resolve();const prior=this.#results.get(key);if(!prior||result.generation>prior.generation)this.#results.set(key,structuredClone(result))}read(key){const r=this.#results.get(key);return r&&structuredClone(r)}exportState(){return JSON.stringify([...this.#results])}static fromState(text){const s=new ResultStore();s.#results=new Map(JSON.parse(text));return s}}
+export class RefreshCoordinator{#issued=new Map();constructor({store,run}){this.store=store;this.run=run}async refresh(key){const generation=Math.max(this.#issued.get(key)??0,this.store.read(key)?.generation??0)+1;this.#issued.set(key,generation);const result=await this.run(key,generation);await this.store.publish(key,{generation,value:result.value});return this.store.read(key)}}
+export const resultView=(store,key)=>{const result=store.read(key);return result?{status:'ready',generation:result.generation,value:result.value}:{status:'empty'}};
 `,
       "calibration.security.credential-leak": `const parsed=(value)=>new URL(value); export function proxyAuthorization(value){const u=parsed(value);return 'Basic '+Buffer.from(decodeURIComponent(u.username)+':'+decodeURIComponent(u.password)).toString('base64')} export function sanitizeUrl(value){const u=parsed(value);u.password='';return u.toString()} export function debugProxy(value){return 'Proxy('+sanitizeUrl(value)+')'} export function safeError(error){return new Error(String(error?.message??error).replace(/https?:\\/\\/[^\\s]+/g,(url)=>sanitizeUrl(url)))}
 `,
