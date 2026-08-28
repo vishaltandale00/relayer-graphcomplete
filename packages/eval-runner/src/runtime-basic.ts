@@ -1,4 +1,4 @@
-import { Codex } from "@openai/codex-sdk";
+import { Codex, type CodexOptions, type ThreadOptions, type TurnOptions } from "@openai/codex-sdk";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -71,6 +71,12 @@ export interface RuntimeEvalArtifact {
 }
 export interface BasicJudge { readonly factIds: readonly string[]; readonly graphUseful: boolean; readonly detailsUseful: boolean; readonly problems: readonly string[]; readonly verdict: "pass" | "fail" }
 export interface BasicJudgeConfiguration { readonly name: "none" | "codex-structured" }
+export interface BasicJudgeThread {
+  run(input: string, options?: TurnOptions): Promise<{ readonly finalResponse: string }>;
+}
+export interface BasicJudgeThreadFactory {
+  start(codexOptions: CodexOptions, threadOptions: ThreadOptions): BasicJudgeThread;
+}
 
 export interface ReplayRepairPass {
   readonly primaryNodeId: number;
@@ -113,6 +119,8 @@ export async function runBasicRuntimeEval(options: {
   serverBinary?: string;
   serverReadyTimeoutMs?: number;
   harnessCloseGraceMs?: number;
+  judgeCodexPathOverride?: string;
+  judgeThreadFactory?: BasicJudgeThreadFactory;
 }): Promise<RuntimeEvalArtifact> {
   if (![basicEvalCaseId, replayRepairEvalCaseId].includes(options.execution.testCaseId)) throw new Error(`Unsupported runtime-basic test case: ${options.execution.testCaseId}`);
   if (options.execution.harnessConfiguration.name !== options.execution.harnessConfigurationName) {
@@ -174,7 +182,10 @@ export async function runBasicRuntimeEval(options: {
         : checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);
       const judge = options.execution.testCaseId === basicEvalCaseId && options.execution.judgeConfiguration.name === "codex-structured" && deterministicPassed
-        ? await judgeOutput(complete.output, prompt, workingDirectory)
+        ? await judgeOutput(complete.output, prompt, workingDirectory, {
+            ...(options.judgeCodexPathOverride === undefined ? {} : { codexPathOverride: options.judgeCodexPathOverride }),
+            ...(options.judgeThreadFactory === undefined ? {} : { threadFactory: options.judgeThreadFactory }),
+          })
         : undefined;
       turns.push({
         interactionNodeId: interaction.node.id,
@@ -657,14 +668,32 @@ function arraysEqual(left: readonly number[], right: readonly number[]): boolean
 }
 
 const judgeSchema = { type: "object", properties: { factIds: { type: "array", items: { type: "string" } }, graphUseful: { type: "boolean" }, detailsUseful: { type: "boolean" }, problems: { type: "array", items: { type: "string" } }, verdict: { type: "string", enum: ["pass", "fail"] } }, required: ["factIds", "graphUseful", "detailsUseful", "problems", "verdict"], additionalProperties: false } as const;
-async function judgeOutput(output: CompletionOutput, promptText: string, workingDirectory: string): Promise<BasicJudge> {
-  const codex = new Codex(); const thread = codex.startThread({ workingDirectory, skipGitRepoCheck: true, sandboxMode: "read-only", approvalPolicy: "never", networkAccessEnabled: false });
+async function judgeOutput(
+  output: CompletionOutput,
+  promptText: string,
+  workingDirectory: string,
+  dependencies: {
+    readonly codexPathOverride?: string;
+    readonly threadFactory?: BasicJudgeThreadFactory;
+  },
+): Promise<BasicJudge> {
+  const codexPathOverride = dependencies.codexPathOverride?.trim();
+  if (!codexPathOverride) throw new Error("codex-structured judge requires an explicit managed Codex executable");
+  const codexOptions = { codexPathOverride } satisfies CodexOptions;
+  const threadOptions = { workingDirectory, skipGitRepoCheck: true, sandboxMode: "read-only", approvalPolicy: "never", networkAccessEnabled: false } satisfies ThreadOptions;
+  const thread = (dependencies.threadFactory ?? defaultBasicJudgeThreadFactory).start(codexOptions, threadOptions);
   const turn = await thread.run(basicJudgePrompt(output, promptText), { outputSchema: judgeSchema });
   const value = JSON.parse(turn.finalResponse) as BasicJudge;
   const expected = new Set(basicEvalFacts.map((fact) => fact.id)); const actual = new Set(value.factIds);
   const valid = expected.size === actual.size && [...expected].every((id) => actual.has(id)) && value.graphUseful && value.detailsUseful && value.problems.length === 0;
   return { ...value, verdict: valid ? "pass" : "fail" };
 }
+
+const defaultBasicJudgeThreadFactory: BasicJudgeThreadFactory = {
+  start(codexOptions, threadOptions) {
+    return new Codex(codexOptions).startThread(threadOptions);
+  },
+};
 
 export function basicJudgePrompt(output: CompletionOutput, promptText: string): string {
   const visible = judgeVisibleGraph(output);

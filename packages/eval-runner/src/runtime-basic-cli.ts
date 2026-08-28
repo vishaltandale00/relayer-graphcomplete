@@ -32,19 +32,26 @@ async function main(): Promise<void> {
     judgeConfiguration,
   };
   const executions = expandTestRun(selection, harnessConfigurations);
-  const usesCodex = [...harnessConfigurations.values()].some(({ implementation }) => implementation === "codex.basic");
+  const candidateUsesCodex = [...harnessConfigurations.values()].some(({ implementation }) => implementation === "codex.basic");
+  const judgeUsesCodex = judgeConfiguration.name === "codex-structured";
   const codexBinary = process.env.RELAYER_CODEX_BINARY?.trim();
-  if (usesCodex && !codexBinary) {
-    throw new Error("Live Codex Eval requires an explicit managed executable in RELAYER_CODEX_BINARY.");
+  if ((candidateUsesCodex || judgeUsesCodex) && !codexBinary) {
+    throw new Error("Live Codex candidate or judge requires an explicit managed executable in RELAYER_CODEX_BINARY.");
   }
+  const managedCodexExecutable = codexBinary ? resolve(codexBinary) : undefined;
   const implementations = productHarnessImplementations({
     "fixture.task-system": taskSystemFixtureFactory,
-    ...(usesCodex ? { "codex.basic": createCodexBasicFactory({ codexPathOverride: resolve(codexBinary!) }) } : {}),
+    ...(candidateUsesCodex ? { "codex.basic": createCodexBasicFactory({ codexPathOverride: managedCodexExecutable! }) } : {}),
   });
   const results = [];
 
   for (const execution of executions) {
-    const artifact = await runBasicRuntimeEval({ outputDirectory, execution, implementations });
+    const artifact = await runBasicRuntimeEval({
+      outputDirectory,
+      execution,
+      implementations,
+      ...(judgeUsesCodex ? { judgeCodexPathOverride: managedCodexExecutable! } : {}),
+    });
     results.push({
       testRunId: execution.testRunId,
       testCaseId: execution.testCaseId,
