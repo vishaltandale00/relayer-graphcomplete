@@ -446,7 +446,7 @@ describe("Prime Agent packaged runtime", () => {
           const values = {
             CFBundleIdentifier: "ai.relayer.desktop",
             CFBundleName: "Relayer",
-            LSMinimumSystemVersion: "13.0.0",
+            LSMinimumSystemVersion: "13.3.0",
           };
           return { stdout: `${values[args[1]]}\n`, stderr: "" };
         }
