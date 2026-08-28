@@ -176,20 +176,34 @@ describe("ReviewSession", () => {
       .toMatchObject({ contentDigest: full.contentDigest, tileCount: 3 });
   });
 
-  it("rejects screenshot metadata when presentation changes while the renderer settles", async () => {
+  it("restores an element capture when presentation changes and permits a retry", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
     directories.push(directory);
     let state = reviewState({ selectedNodeId: "node-1" });
+    let captureActive = false;
+    let capturePlans = 0;
+    let restorations = 0;
     const electron = fakeElectron({
       snapshot: async () => state,
       capturePlan: async ({ target, mode }) => {
-        state = reviewState({ selectedNodeId: "node-2" });
+        if (captureActive) throw new Error("A review capture is already active.");
+        captureActive = true;
+        capturePlans += 1;
+        if (capturePlans === 1) state = reviewState({ selectedNodeId: "node-2" });
         return {
           target,
           mode,
-          clip: { x: 0, y: 0, width: 1200, height: 800 },
+          clip: { x: 20, y: 40, width: 300, height: 200 },
           tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
         };
+      },
+      prepareCaptureTile: async ({ index }) => ({
+        index,
+        clip: { x: 20, y: 40, width: 300, height: 200 },
+      }),
+      restoreCapture: async () => {
+        captureActive = false;
+        restorations += 1;
       },
     });
     const session = new ReviewSession({
@@ -202,10 +216,20 @@ describe("ReviewSession", () => {
     await session.open();
 
     await expect(session.screenshot({
-      target: { kind: "viewport" },
+      target: { kind: "element", elementRef: "node-detail" },
       label: "unstable selection",
     })).rejects.toThrow("changed presentation while preparing the screenshot");
+    expect(captureActive).toBe(false);
+    expect(restorations).toBe(1);
     expect(electron.captures).toHaveLength(0);
+
+    await expect(session.screenshot({
+      target: { kind: "element", elementRef: "node-detail" },
+      label: "stable retry",
+    })).resolves.toMatchObject({ ok: true, screenshot: { selectedNodeId: "node-2" } });
+    expect(captureActive).toBe(false);
+    expect(restorations).toBe(2);
+    expect(electron.captures).toHaveLength(1);
   });
 
   it("activates only current controls and delegates arbitrary signed history deltas to the workspace", async () => {

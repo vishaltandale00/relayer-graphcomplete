@@ -138,14 +138,16 @@ export class ReviewSession {
     validateScreenshotInput({ target, mode, label });
     this.#assertOpen();
     const initialState = validateState(this.executionId, await this.#rendererCommand("snapshot"));
-    const plan = await this.#rendererCommand("capturePlan", { target, mode });
-    const state = validateState(this.executionId, await this.#rendererCommand("snapshot"));
-    if (presentationKey(state) !== presentationKey(initialState)) {
-      throw new Error("The production workspace changed presentation while preparing the screenshot.");
-    }
-    if (!Array.isArray(plan?.tiles) || !plan.tiles.length) throw new Error("The review capture plan has no tiles.");
+    let plan;
+    let state;
     const tileArtifacts = [];
     try {
+      plan = await this.#rendererCommand("capturePlan", { target, mode });
+      state = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+      if (presentationKey(state) !== presentationKey(initialState)) {
+        throw new Error("The production workspace changed presentation while preparing the screenshot.");
+      }
+      if (!Array.isArray(plan?.tiles) || !plan.tiles.length) throw new Error("The review capture plan has no tiles.");
       for (const tile of plan.tiles) {
         const prepared = target.kind === "viewport"
           ? { index: tile.index, clip: plan.clip }
