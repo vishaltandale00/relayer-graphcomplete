@@ -197,6 +197,7 @@ describe("product workspace keyboard behavior", () => {
     };
     const editor = durableContextEditorForDraft("thread-a", targetNode, draft, {
       attaching: false,
+      error: "Confirmation failed",
     });
 
     expect(editor).toMatchObject({
@@ -208,6 +209,7 @@ describe("product workspace keyboard behavior", () => {
       annotationIndex: null,
       attaching: false,
       durable: true,
+      error: "Confirmation failed",
     });
     expect(contextEditorIdentity(editor)).toBe(JSON.stringify([
       "thread-a",
@@ -298,7 +300,7 @@ describe("product workspace keyboard behavior", () => {
     expect(styles).toContain(".inspector:has(.node-context-dock:not(.hidden)) .inspector-content{min-height:0}");
     expect(styles).toContain(".node-context-dock textarea{min-height:0;flex:1;resize:none;overflow:auto");
     expect(styles).toContain("@media(forced-colors:active){.node-context-dock");
-    expect(styles).toContain("@media(prefers-reduced-motion:reduce)");
+    expect(styles).toContain("@media(prefers-reduced-motion:reduce){.node-context-dock *");
   });
 
   it("presents every unconfirmed draft with stable accessible identity", () => {

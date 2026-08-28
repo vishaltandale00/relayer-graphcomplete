@@ -720,15 +720,18 @@ async function run() {
   await click("[aria-label='Confirm annotation']");
   await waitFor("confirmation request held for selection race", () => Boolean(rejectConfirmRequest));
   await clickNode("Two-worker pool");
+  await click("#nextTurn");
   const selectionDuringConfirm = await evaluate(`(() => ({
     title: document.querySelector('#detailTitle')?.textContent,
     editorVisible: Boolean(document.querySelector('#contextAnnotationEditor')),
+    turn: document.querySelector('#turnPickerButton')?.textContent,
   }))()`);
   if (JSON.stringify(selectionDuringConfirm) !== JSON.stringify({
     title: "Incoming queue",
     editorVisible: true,
+    turn: "Turn 1 of 2",
   })) {
-    throw new Error(`Selection escaped a pending confirm: ${JSON.stringify(selectionDuringConfirm)}`);
+    throw new Error(`Selection or turn navigation escaped a pending confirm: ${JSON.stringify(selectionDuringConfirm)}`);
   }
   rejectConfirmRequest();
   await waitFor("inline Node Details confirmation failure", () => evaluate(`(() => {

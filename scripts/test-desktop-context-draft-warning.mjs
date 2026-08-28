@@ -751,12 +751,29 @@ async function run() {
     `Boolean(document.querySelector('#contextAnnotationEditor'))`,
   ));
   await evaluate(`window.__contextDraftWarningFetchProbe.holdNextDraftSave = true`);
-  const heldDraftText = "This draft save is intentionally held while the override is cancelled.";
+  const heldDraftText = "This draft save is intentionally held before Node Details closes.";
   await setField("#contextAnnotationEditor", heldDraftText);
   await click("#closeInspector");
-  await waitFor("draft dock hidden after Node Details closed", () => evaluate(
-    `document.querySelector('#inspector')?.classList.contains('hidden')
+  await waitFor("Node Details waits for its held draft save", () => evaluate(
+    `window.__contextDraftWarningFetchProbe.draftSaveHeld === true
+      && !document.querySelector('#inspector')?.classList.contains('hidden')
+      && document.querySelector('#contextAnnotationEditor')?.disabled === true`,
+  ));
+  await evaluate(`window.__contextDraftWarningFetchProbe.releaseDraftSave = true`);
+  await waitFor("draft save releases before Node Details closes", () => evaluate(
+    `window.__contextDraftWarningFetchProbe.draftSaveHeld === false
+      && document.querySelector('#inspector')?.classList.contains('hidden')
       && !document.querySelector('#contextAnnotationEditor')`,
+  ));
+  await clickNode(pendingCancelNodeTitle);
+  await waitFor("saved draft editor reopens for pending override cancellation", () => evaluate(
+    `document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(heldDraftText)}`,
+  ));
+  const pendingOverrideDraftText = `${heldDraftText} The override must remain cancellable.`;
+  await evaluate(`window.__contextDraftWarningFetchProbe.holdNextDraftSave = true`);
+  await setField("#contextAnnotationEditor", pendingOverrideDraftText);
+  await waitFor("draft persistence held before override", () => evaluate(
+    `window.__contextDraftWarningFetchProbe.draftSaveHeld === true`,
   ));
   await setPrompt("Do not send after I cancel the pending draft-save override.");
   await click("#sendInteraction", { focus: true });
@@ -764,9 +781,8 @@ async function run() {
     `document.querySelector('#contextDraftSendWarning')?.open === true`,
   ));
   await click("[data-context-draft-warning-action='send']");
-  await waitFor("held draft persistence", () => evaluate(
-    `window.__contextDraftWarningFetchProbe.draftSaveHeld === true
-      && document.querySelector('#confirmContextDraftSend')?.disabled === true`,
+  await waitFor("override activation", () => evaluate(
+    `document.querySelector('#confirmContextDraftSend')?.disabled === true`,
   ));
   await click("[data-context-draft-warning-action='cancel']");
   await waitFor("pending override cancellation", () => evaluate(`(() => (
@@ -775,7 +791,7 @@ async function run() {
       && document.querySelector('#confirmContextDraftSend')?.disabled === false
   ))()`));
   await evaluate(`window.__contextDraftWarningFetchProbe.releaseDraftSave = true`);
-  await waitFor("held draft save release", () => evaluate(
+  await waitFor("cancelled override draft save release", () => evaluate(
     `window.__contextDraftWarningFetchProbe.draftSaveHeld === false`,
   ));
   await new Promise((resolve) => setTimeout(resolve, 150));
@@ -792,8 +808,8 @@ async function run() {
     (draft) => String(draft.target.nodeId) === String(pendingCancelNodeId),
   );
   if (!heldDraft
-    || heldDraft.text !== heldDraftText
-    || heldDraft.revision !== 1
+    || heldDraft.text !== pendingOverrideDraftText
+    || heldDraft.revision !== 2
     || !heldDraft.id
     || !heldDraft.createdAt
     || !heldDraft.updatedAt) {
@@ -801,7 +817,7 @@ async function run() {
   }
   await clickNode(pendingCancelNodeTitle);
   await waitFor("persisted cancellation-test draft editor", () => evaluate(`(() => (
-    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(heldDraftText)}
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(pendingOverrideDraftText)}
   ))()`));
   const draftsAfterReopen = await productRequest(`/api/threads/${withDraft.thread.id}/context-drafts`);
   const reopenedHeldDraft = draftsAfterReopen.drafts.find(
@@ -1044,7 +1060,7 @@ async function run() {
     duplicateActivationRequests: initialWarning.requests,
     cancelPreserved: true,
     keyboardCancelRestoredFocus: true,
-    pendingPersistenceCancelPassed: true,
+    closeWaitedForPersistence: true,
     workspaceDisposalCancelPassed: true,
     newThreadCancelPassed: true,
     newThreadRestorationPassed: true,

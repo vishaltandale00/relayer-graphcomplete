@@ -756,6 +756,7 @@ export function contextEditorIdentity(editor) {
 
 export function durableContextEditorForDraft(threadId, node, draft, {
   attaching = true,
+  error = null,
 } = {}) {
   if (!draft || String(draft.target?.nodeId) !== String(node?.id)) return null;
   return {
@@ -768,7 +769,7 @@ export function durableContextEditorForDraft(threadId, node, draft, {
     value: draft.text || "",
     attaching,
     durable: true,
-    error: null,
+    error,
   };
 }
 
@@ -1219,12 +1220,50 @@ export function createProductWorkspace({
       onChange: () => renderContextDraftStatus(),
     })
     : null;
+  const contextEditorErrors = new Map();
+  const contextEditorErrorKey = (editor) => (
+    editor?.draftId == null ? null : `${editor.ownerThreadId}:${editor.draftId}`
+  );
+  const rememberContextEditorError = (editor, error) => {
+    const key = contextEditorErrorKey(editor);
+    if (key !== null) contextEditorErrors.set(key, error);
+    editor.error = error;
+  };
+  const clearContextEditorError = (editor) => {
+    const key = contextEditorErrorKey(editor);
+    if (key !== null) contextEditorErrors.delete(key);
+    editor.error = null;
+  };
+  const restoredContextEditorError = (threadId, draftId) => (
+    contextEditorErrors.get(`${threadId}:${draftId}`) || null
+  );
   const contextDraftLoads = new Map();
   const loadedContextDraftThreads = new Set();
   const recoveredConfirmationThreads = new Set();
   const contextDraftLoadRetryTimers = new Map();
   const contextDraftLoadRetryAttempts = new Map();
   let disposed = false;
+
+  const prepareNodeContextSelectionChange = async () => {
+    const requestSequence = ++nodeSelectionSequence;
+    const editor = contextEditor;
+    if (!editor?.durable) return true;
+    if (editor.resolving) return false;
+    editor.resolving = true;
+    renderNodeContextDock();
+    const saved = await saveContextDraftBeforeSelection({
+      controller: contextDraftController,
+      editor,
+      textarea: $("#nodeContextDock #contextAnnotationEditor"),
+    });
+    editor.resolving = false;
+    if (requestSequence !== nodeSelectionSequence || contextEditor !== editor) return false;
+    if (!saved) {
+      renderComposerContexts();
+      return false;
+    }
+    return true;
+  };
 
   const ensureContextDraftsLoaded = (threadId) => {
     if (!contextDraftController || threadId == null) return Promise.resolve();
@@ -1414,9 +1453,9 @@ export function createProductWorkspace({
       },
     };
   };
-  const closeInspector = ({ restoreFocus = true } = {}) => {
+  const closeInspector = async ({ restoreFocus = true } = {}) => {
+    if (!await prepareNodeContextSelectionChange()) return false;
     cancelInspectorFit();
-    nodeSelectionSequence += 1;
     selection.selectedNodeId = null;
     selectedContextTarget = null;
     contextEditor = null;
@@ -1438,8 +1477,9 @@ export function createProductWorkspace({
       : null;
     inspectorFocusOrigin = null;
     focusTarget?.focus({ preventScroll: true });
+    return true;
   };
-  $("#closeInspector").onclick = () => closeInspector();
+  $("#closeInspector").onclick = () => { void closeInspector(); };
   const closeInspectorOnEscape = (event) => {
     if (!inspectorEscapeShouldClose({
       key: event.key,
@@ -1451,13 +1491,14 @@ export function createProductWorkspace({
       inspectorOpen: !$("#inspector").classList.contains("hidden"),
     })) return;
     event.preventDefault();
-    closeInspector();
+    void closeInspector();
   };
   graphDocument.addEventListener("keydown", closeInspectorOnEscape, true);
   const navigateHistory = async (direction) => {
     const history = getNavigationHistory() || {};
     const presentation = historyNavigationPresentation(history);
     if (presentation[direction].disabled) return;
+    if (!await prepareNodeContextSelectionChange()) return;
     const beforeCommit = history[`${direction}ChangesTurn`] === true
       ? collapseContextPreviews
       : undefined;
@@ -1469,12 +1510,14 @@ export function createProductWorkspace({
   $("#historyForward").onclick = (event) => (
     activateHistoryControl(event.currentTarget, "forward", navigateHistory)
   );
-  $("#previousTurn").onclick = () => {
+  $("#previousTurn").onclick = async () => {
+    if (!await prepareNodeContextSelectionChange()) return;
     closeTurnPopover();
     collapseContextPreviews();
     onSelectTurn(-1);
   };
-  $("#nextTurn").onclick = () => {
+  $("#nextTurn").onclick = async () => {
+    if (!await prepareNodeContextSelectionChange()) return;
     closeTurnPopover();
     collapseContextPreviews();
     onSelectTurn(1);
@@ -1851,13 +1894,14 @@ export function createProductWorkspace({
     }
   };
   graphDocument.addEventListener("pointerdown", blurGraphFromOutsidePointer, true);
-  graphStage.onkeydown = (event) => {
+  graphStage.onkeydown = async (event) => {
     if (!capabilities.canNavigate) return;
     const delta = graphTurnNavigationDelta(event, graphDocument.activeElement === graphStage);
     if (delta === null) return;
     event.preventDefault();
     const turnButton = delta < 0 ? $("#previousTurn") : $("#nextTurn");
     if (!turnButton.disabled) {
+      if (!await prepareNodeContextSelectionChange()) return;
       collapseContextPreviews();
       onSelectTurn(delta);
     }
@@ -2074,6 +2118,7 @@ export function createProductWorkspace({
       value: durableDraft.text || "",
       attaching: !context,
       durable: true,
+      error: restoredContextEditorError(String(getThread()?.id), durableDraft.id),
     };
     renderComposerContexts();
     $("#contextAnnotationEditor")?.focus();
@@ -2182,6 +2227,7 @@ export function createProductWorkspace({
     if (!contextEditor && selectedDraft) {
       contextEditor = durableContextEditorForDraft(threadId, selectedNode, selectedDraft, {
         attaching: !contextForTarget(selectedDraft.target),
+        error: restoredContextEditorError(threadId, selectedDraft.id),
       });
     }
     if (!contextEditor?.durable
@@ -2280,14 +2326,15 @@ export function createProductWorkspace({
       if (contextStagingDisabled()) return;
       const discardingEditor = contextEditor;
       discardingEditor.resolving = true;
-      discardingEditor.error = null;
+      clearContextEditorError(discardingEditor);
       renderNodeContextDock();
       try {
         await contextDraftController.discard(threadId, selectedNode.id);
+        clearContextEditorError(discardingEditor);
         closeDurableEditor(threadId, discardingEditor.draftId);
       } catch (discardError) {
         discardingEditor.resolving = false;
-        discardingEditor.error = discardError.message;
+        rememberContextEditorError(discardingEditor, discardError.message);
       }
       renderComposerContexts();
     };
@@ -2302,26 +2349,32 @@ export function createProductWorkspace({
       if (contextStagingDisabled()) return;
       const confirmingEditor = contextEditor;
       confirmingEditor.resolving = true;
-      confirmingEditor.error = null;
+      clearContextEditorError(confirmingEditor);
       renderNodeContextDock();
       try {
         const confirmation = await contextDraftController.confirm(threadId, selectedNode.id);
         if (!confirmation) {
           confirmingEditor.resolving = false;
-          confirmingEditor.error = "This annotation could not be confirmed. Retry after it is saved.";
-        } else if (contextConfirmationDestination(getThread()?.id, threadId) === "current") {
-          applyConfirmedContextDraft(confirmation);
-          closeDurableEditor(threadId, confirmingEditor.draftId);
+          rememberContextEditorError(
+            confirmingEditor,
+            "This annotation could not be confirmed. Retry after it is saved.",
+          );
+        } else {
+          clearContextEditorError(confirmingEditor);
+          if (contextConfirmationDestination(getThread()?.id, threadId) === "current") {
+            applyConfirmedContextDraft(confirmation);
+            closeDurableEditor(threadId, confirmingEditor.draftId);
+          }
         }
       } catch (confirmError) {
         confirmingEditor.resolving = false;
-        confirmingEditor.error = confirmError.message;
+        rememberContextEditorError(confirmingEditor, confirmError.message);
       }
       renderComposerContexts();
     };
 
     textarea.oninput = () => {
-      contextEditor.error = null;
+      clearContextEditorError(contextEditor);
       if (!applyMountedContextEditorInput({
         editor: contextEditor,
         textarea,
@@ -2990,10 +3043,11 @@ export function createProductWorkspace({
         if (commentsText) meta.append(commentsText);
         row.append(meta);
       }
-      row.onclick = () => {
+      row.onclick = async () => {
         const intent = turnSelectionIntent(turns, interaction?.id, turn.id);
         closeTurnPopover();
         if (!intent) return;
+        if (!await prepareNodeContextSelectionChange()) return;
         collapseContextPreviews();
         if (onSelectTurnById) onSelectTurnById(intent.interactionId);
         else onSelectTurn(intent.offset);
@@ -3067,6 +3121,8 @@ export function createProductWorkspace({
     const state = getState();
     const thread = getThread();
     if (!thread) {
+      nodeSelectionSequence += 1;
+      contextEditor = null;
       releaseSendAttempt();
       if (contextDraftSendWarning.open) {
         closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
@@ -3089,6 +3145,7 @@ export function createProductWorkspace({
       });
     }
     if (renderedThreadId !== null && renderedThreadId !== threadId) {
+      nodeSelectionSequence += 1;
       releaseSendAttempt();
       if (contextDraftSendWarning.open) {
         closeContextDraftSendWarning({ focusSend: false });
@@ -3255,10 +3312,13 @@ export function createProductWorkspace({
           segment.dataset.reviewRef = `breadcrumb-${item.key}`;
           segment.dataset.reviewKind = "layer-navigation";
           segment.dataset.reviewPathIndex = String(item.pathIndex);
-          segment.onclick = () => onNavigateLayer(item.layerId, {
-            restore: true,
-            pathIndex: item.pathIndex,
-          });
+          segment.onclick = async () => {
+            if (!await prepareNodeContextSelectionChange()) return;
+            await onNavigateLayer(item.layerId, {
+              restore: true,
+              pathIndex: item.pathIndex,
+            });
+          };
         }
         children.push(segment);
       }
@@ -3276,6 +3336,7 @@ export function createProductWorkspace({
           badge.disabled = true;
           try {
             if (!item.current) {
+              if (!await prepareNodeContextSelectionChange()) return;
               await onNavigateLayer(item.layerId, {
                 restore: true,
                 pathIndex: item.pathIndex,
@@ -3489,6 +3550,7 @@ export function createProductWorkspace({
       contextNodeOverrides,
     );
     if (enteringView) {
+      nodeSelectionSequence += 1;
       cancelInspectorFit();
       if (!preserveHistoricalSelection) $("#inspector").classList.add("hidden");
       saveGraphView();
@@ -3506,6 +3568,7 @@ export function createProductWorkspace({
         nodeInGraph: false,
         preserveHistoricalSelection,
       })) {
+        nodeSelectionSequence += 1;
         selection.selectedNodeId = null;
         if (!["thread", "turn"].includes(annotationSubject?.anchor.kind)) {
           annotationSubject = null;
@@ -3643,6 +3706,7 @@ export function createProductWorkspace({
       nodeInGraph: ids.has(String(selection.selectedNodeId)),
       preserveHistoricalSelection,
     })) {
+      nodeSelectionSequence += 1;
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
     }
@@ -3747,6 +3811,7 @@ export function createProductWorkspace({
   } = {}) {
     if (contextEditor?.resolving) return false;
     const requestSequence = ++nodeSelectionSequence;
+    const sourceThreadId = String(getThread()?.id);
     const node = resolveInteractionContextNode(
       id,
       state.nodes,
@@ -3778,7 +3843,8 @@ export function createProductWorkspace({
         textarea: mountedTextarea,
       });
       previousEditor.resolving = false;
-      if (requestSequence !== nodeSelectionSequence) return false;
+      if (requestSequence !== nodeSelectionSequence
+        || String(getThread()?.id) !== sourceThreadId) return false;
       if (!saved) {
         contextEditor = previousEditor;
         renderComposerContexts();
@@ -3786,7 +3852,8 @@ export function createProductWorkspace({
       }
       contextEditor = null;
     }
-    if (requestSequence !== nodeSelectionSequence) return false;
+    if (requestSequence !== nodeSelectionSequence
+      || String(getThread()?.id) !== sourceThreadId) return false;
     selection.selectedNodeId = id;
     selectedContextTarget = nextSelectedContextTarget;
     if (!contextEditor && contextDraftController) {
@@ -3798,6 +3865,7 @@ export function createProductWorkspace({
       if (draft) {
         contextEditor = durableContextEditorForDraft(getThread()?.id, node, draft, {
           attaching: !contextForTarget(draft.target),
+          error: restoredContextEditorError(String(getThread()?.id), draft.id),
         });
       }
     }
@@ -3904,6 +3972,7 @@ export function createProductWorkspace({
       button.classList.toggle("retryable", activation.retryableInvoke);
       button.onclick = async () => {
         if (activation.navigational) {
+          if (!await prepareNodeContextSelectionChange()) return;
           button.disabled = true;
           try {
             await navigateWorkspaceAction({
@@ -3938,6 +4007,8 @@ export function createProductWorkspace({
 
   function dispose() {
     disposed = true;
+    nodeSelectionSequence += 1;
+    contextEditor = null;
     releaseSendAttempt();
     if (contextDraftSendWarning.open) {
       closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });

@@ -135,7 +135,7 @@ async function refreshCaptureSurface() {
   await sleep(120);
 }
 
-async function captureStep(caption, selector, duration = 2.4) {
+async function captureStep(caption, selector, duration = 4.5) {
   await mkdir(framesDirectory, { recursive: true });
   await evaluate(`(() => {
     document.querySelector('[data-relayer-evidence-caption]')?.remove();
@@ -306,19 +306,61 @@ async function run() {
       && !document.querySelector('#inspector')?.classList.contains('hidden')
       && !document.querySelector('#attachNodeContext')?.classList.contains('hidden')
   `));
-  await click("#attachNodeContext");
-  await waitFor("new context annotation editor", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
   await captureStep(
-    "1. The selected node's + opens an annotation editor in the bottom third of Node Details",
+    "1. Selecting a graph node opens its full Node Details without covering the graph or composer",
     "#inspector",
   );
+  await click("#attachNodeContext");
+  await waitFor("new context annotation editor", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
   await setValue("#contextAnnotationEditor", "Queue order controls which task is claimed next.");
+  await waitFor("first annotation autosave", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.[0]?.text === "Queue order controls which task is claimed next."
+      && response.drafts[0].revision >= 1;
+  });
+  await captureStep(
+    "2. The node's + opens its saved annotation editor in the bottom third of Node Details",
+    "#inspector",
+  );
+  let rejectedDraftSave = false;
+  const draftSaveFilter = { urls: [`${productSession.origin}/api/threads/*/context-drafts/*`] };
+  mainWindow.webContents.session.webRequest.onBeforeRequest(draftSaveFilter, (details, callback) => {
+    if (!rejectedDraftSave && details.method === "PUT") {
+      rejectedDraftSave = true;
+      callback({ cancel: true });
+      return;
+    }
+    callback({});
+  });
+  await setValue("#contextAnnotationEditor", "Queue order must remain stable while workers are busy.");
+  await waitFor("inline annotation save failure", () => evaluate(`(() => {
+    const error = document.querySelector('#nodeContextDock [role="alert"]');
+    return error?.textContent?.startsWith('Not saved:')
+      && document.querySelector('#contextAnnotationEditor')?.value
+        === 'Queue order must remain stable while workers are busy.';
+  })()`));
+  await captureStep(
+    "3. A failed save stays in Node Details with the draft intact and an inline retryable error",
+    "#nodeContextDock",
+  );
+  mainWindow.webContents.session.webRequest.onBeforeRequest(draftSaveFilter, null);
+  await setValue("#contextAnnotationEditor", "Queue order controls which task is claimed next.");
+  await waitFor("annotation save recovery", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.[0]?.text === "Queue order controls which task is claimed next."
+      && response.drafts[0].revision >= 2
+      && await evaluate(`document.querySelector('#nodeContextDock [role="alert"]')?.classList.contains('hidden')`);
+  });
   await click("[aria-label='Confirm annotation']");
   await waitFor("first collapsed context pill", () => evaluate(`
     document.querySelectorAll('.composer-context-pill-wrap').length === 1
       && document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
       && !document.querySelector('.composer-context-preview')
   `));
+  await captureStep(
+    "4. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
+    "#composerContextTray",
+  );
   await click("[aria-label='Show Incoming queue annotations']");
   await waitFor("first compact annotation preview", () => evaluate(`
     document.querySelectorAll('.composer-context-annotations li').length === 1
@@ -347,7 +389,7 @@ async function run() {
     throw new Error(`Composer context preview overlaps Node Details: ${JSON.stringify(explicitPreview)}`);
   }
   await captureStep(
-    "2. Confirmed annotations stay read-only in an explicitly opened compact preview",
+    "5. Confirmed annotations stay read-only in an explicitly opened compact preview",
     ".composer-context-preview",
   );
   await click("[aria-label='Delete annotation 2 for Incoming queue']");
@@ -394,7 +436,7 @@ async function run() {
     throw new Error(`Multiple node pills did not scroll horizontally: ${JSON.stringify(pillOverflow)}`);
   }
   await captureStep(
-    "3. Multiple attached-node pills scroll horizontally within the available composer width",
+    "6. Multiple attached-node pills scroll horizontally within the available composer width",
     ".composer-context-pills",
   );
   mainWindow.setSize(1480, 920);
@@ -410,9 +452,9 @@ async function run() {
   await refreshCaptureSurface();
   await writeFile(composerScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
   await captureStep(
-    "4. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+    "7. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
     "#composerContextTray",
-    3,
+    4.5,
   );
   await click("[aria-label='Close Incoming queue annotations']");
   await click("#sendInteraction");
@@ -434,9 +476,9 @@ async function run() {
       && document.querySelectorAll('#interactionContextPopover li').length === 2
   `));
   await captureStep(
-    "5. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+    "8. The turn banner shows one connected-node pill; its popover restores both annotations in order",
     "#interactionContextPopover",
-    3,
+    4.5,
   );
 
   await click("#interactionContextPopover .interaction-context-node");
@@ -447,7 +489,7 @@ async function run() {
       && document.querySelector('#attachNodeContext')?.disabled === false
   `));
   await captureStep(
-    "6. Clicking the connected node reopens its full Node Details from history",
+    "9. Clicking the connected node reopens its full Node Details from history",
     "#inspector",
   );
 
@@ -462,7 +504,7 @@ async function run() {
       && document.querySelector('#sendInteraction')?.disabled === false
   `));
   await captureStep(
-    "7. A connected node with a non-empty annotation enables send even when message text is empty",
+    "10. A connected node with a non-empty annotation enables send even when message text is empty",
     "#threadComposerShell",
   );
   await click("#sendInteraction");
@@ -482,9 +524,9 @@ async function run() {
       === 'This annotation alone is a valid interaction input.'
   `));
   await captureStep(
-    "8. Annotation-only history has no derived message label; the context pill preserves the actual input",
+    "11. Annotation-only history has no derived message label; the context pill preserves the actual input",
     "#interactionBanner",
-    3,
+    4.5,
   );
 
   await restartStack(thread.id);
@@ -502,9 +544,9 @@ async function run() {
   await refreshCaptureSurface();
   await writeFile(restartedScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
   await captureStep(
-    "9. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+    "12. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
     "#interactionContextPopover",
-    3.4,
+    4.5,
   );
   await click("#interactionContextPopover .interaction-context-node");
   await waitFor("restarted target Node Details", () => evaluate(`
@@ -512,9 +554,9 @@ async function run() {
       && !document.querySelector('#inspector')?.classList.contains('hidden')
   `));
   await captureStep(
-    "10. The persisted context still reopens the exact target node after restart",
+    "13. The persisted context still reopens the exact target node after restart",
     "#inspector",
-    3.4,
+    4.5,
   );
 
   if (restartedDetail.interactions[2].contexts?.[0]?.targetNode?.title !== "Incoming queue") {
