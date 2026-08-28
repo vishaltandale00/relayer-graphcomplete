@@ -1639,7 +1639,7 @@ mod tests {
                         "message": "Prime Agent Ask and Auto require macOS. Choose another available harness on this device."
                     },
                     "diagnostics": {
-                        "sourceCommit": "dcf944527913245e3d4937f2143081894db8eaeb",
+                        "sourceCommit": "e8769419e84f8357cab19e1aa6ee4af458796005",
                         "packages": [{"name": "@earendil-works/pi-coding-agent", "version": "0.8.1"}]
                     }
                 }]

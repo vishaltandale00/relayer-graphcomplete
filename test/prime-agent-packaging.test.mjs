@@ -72,7 +72,7 @@ describe("Prime Agent packaged runtime", () => {
     const lockfile = JSON.parse(await readFile(join(repositoryRoot, "package-lock.json"), "utf8"));
     const desktopManifest = JSON.parse(await readFile(join(repositoryRoot, "desktop", "package.json"), "utf8"));
 
-    expect(manifest.source.commit).toBe("dcf944527913245e3d4937f2143081894db8eaeb");
+    expect(manifest.source.commit).toBe("e8769419e84f8357cab19e1aa6ee4af458796005");
     expect(manifest.runtimeContract.modelScopeAccess).toBe("upfront-request-access@1");
     expect(manifest.packages).toHaveLength(4);
     for (const entry of manifest.packages) {
@@ -127,6 +127,7 @@ describe("Prime Agent packaged runtime", () => {
     expect(helper).toContain('"Page.navigatedWithinDocument",');
     expect(helper).toContain('params.get("loaderId") == loader_id');
     expect(helper).toContain('params.get("frameId") == frame_id');
+    expect(helper).toContain('_normalized_navigation_url(params["url"]) == normalized_url');
   });
 
   it("admits only the exact runtime API, production configs, and Python client", async () => {
@@ -139,7 +140,7 @@ describe("Prime Agent packaged runtime", () => {
       architecture: "arm64",
     })).resolves.toMatchObject({
       available: true,
-      sourceCommit: "dcf944527913245e3d4937f2143081894db8eaeb",
+      sourceCommit: "e8769419e84f8357cab19e1aa6ee4af458796005",
       configurationNames: ["prime-agent-basic", "prime-agent-deep"],
     });
 
@@ -161,7 +162,7 @@ describe("Prime Agent packaged runtime", () => {
       code: "prime_agent_api_incompatible",
       message: "This Relayer build cannot use the packaged Prime Agent API. Update Relayer.",
       diagnostics: {
-        sourceCommit: "dcf944527913245e3d4937f2143081894db8eaeb",
+        sourceCommit: "e8769419e84f8357cab19e1aa6ee4af458796005",
         packages: expect.arrayContaining([{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }]),
       },
     });
