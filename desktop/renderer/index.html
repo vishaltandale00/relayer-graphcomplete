@@ -10,7 +10,7 @@
   <script src="./theme-bootstrap.js"></script>
   <link rel="stylesheet" href="./styles.css" />
 </head>
-<body>
+<body class="desktop-account-pending">
   <section class="auth-screen hidden" id="authScreen" aria-labelledby="authTitle">
     <div class="auth-card provider-setup-card" aria-busy="false">
       <div class="logo large" role="img" aria-label="Relayer"></div>
@@ -54,6 +54,7 @@
         <div class="side-section settings-navigation">
           <div class="section-label">Settings</div>
           <div class="entry-list" id="settingsTabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
+            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="account" aria-controls="accountSettingsPanel"><span class="entry-icon" aria-hidden="true">◎</span><span>Account</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="providers" aria-controls="providerSettingsPanel"><span class="entry-icon" aria-hidden="true">◉</span><span>Providers</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="models" aria-controls="modelSettingsPanel"><span class="entry-icon" aria-hidden="true">✦</span><span>Model families</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="harnesses" aria-controls="harnessSettingsPanel"><span class="entry-icon" aria-hidden="true">⌘</span><span>Harnesses</span></button>
@@ -117,6 +118,7 @@
             <button class="settings-compact-back" id="settingsCompactBackButton" type="button" aria-label="Back to Relayer"><span aria-hidden="true">←</span><span>Relayer</span></button>
             <label for="settingsCompactSelect">Settings section</label>
             <select id="settingsCompactSelect">
+              <option value="account">Account</option>
               <option value="providers">Providers</option>
               <option value="models">Model families</option>
               <option value="harnesses">Harnesses</option>
@@ -128,6 +130,15 @@
           <div><small>Settings</small><h1 id="settingsTitle">Appearance</h1></div>
         </header>
         <div class="settings-content">
+          <section class="settings-section account-settings-section hidden" id="accountSettingsPanel" role="tabpanel" data-settings-panel="account" aria-labelledby="accountSettingsHeading">
+            <h2 id="accountSettingsHeading">Account</h2>
+            <p class="account-settings-intro">An account is optional. Projects, threads, models, harnesses, permissions, updates, and exports remain available while signed out.</p>
+            <div class="setting-row account-status-row">
+              <div><b id="desktopAccountStatus">Checking account…</b><small id="desktopAccountDetail">Privacy-filtered error reports can use a pseudonymous account ID.</small></div>
+              <div class="account-settings-actions"><button type="button" class="secondary" id="desktopAccountSignIn">Sign in</button><button type="button" class="secondary hidden" id="desktopAccountLogout">Log out</button></div>
+            </div>
+            <div class="setting-row"><div><b>Release channel</b><small>Preview is identified separately in account diagnostics.</small></div><span class="account-channel" id="desktopAccountChannel">Stable</span></div>
+          </section>
           <section class="settings-section provider-settings-section hidden" id="providerSettingsPanel" role="tabpanel" data-settings-panel="providers" aria-labelledby="providerSettingsHeading">
             <div class="settings-section-heading"><div><h2 id="providerSettingsHeading">Providers</h2><p>Each provider is an independent access path with its own credentials.</p></div><div class="provider-definition-actions"><button type="button" class="secondary" id="refreshProviderCatalogs">Refresh models</button><button type="button" class="primary" id="newProviderDefinition">＋ Add provider</button></div></div>
             <div class="provider-definition-list" id="providerDefinitionList"><div class="family-empty">Loading providers…</div></div>
@@ -184,6 +195,7 @@
         </div>
       </section>
     </main>
+    <button class="desktop-account-corner-control hidden" id="desktopAccountButton" type="button" title="Account">Sign in</button>
   </div>
 
   <dialog class="provider-dialog" id="providerDialog" aria-labelledby="providerDialogTitle">
@@ -193,6 +205,18 @@
       <div class="auth-status" id="providerDialogStatus" role="status" aria-live="polite"></div>
     </form>
   </dialog>
+  <section class="desktop-account-onboarding hidden" id="desktopAccountOnboarding" aria-labelledby="desktopAccountOnboardingTitle" aria-describedby="desktopAccountOnboardingStatus">
+    <div class="desktop-account-onboarding-card">
+      <div class="logo large" role="img" aria-label="Relayer"></div>
+      <small id="desktopAccountOnboardingChannel">Optional account</small>
+      <h2 id="desktopAccountOnboardingTitle">Sign in to Relayer</h2>
+      <p id="desktopAccountOnboardingStatus">Sign in to connect privacy-filtered error reports to a pseudonymous account. Your projects and conversations stay local, and you can continue without an account.</p>
+      <div class="desktop-account-onboarding-actions">
+        <button type="button" class="secondary" id="desktopAccountOnboardingNotNow">Continue without an account</button>
+        <button type="button" class="primary" id="desktopAccountOnboardingSignIn">Sign in</button>
+      </div>
+    </div>
+  </section>
   <div class="update-popover hidden" id="updatePopover"><button class="icon-button close-popover" id="closeUpdate">×</button><small>Relayer update</small><h3 id="updateTitle">Update available</h3><p id="updateDetail"></p><button class="primary wide" id="updateAction">Download update</button></div>
   <div class="toast hidden" id="toast"></div>
   <script src="./vendor/lucide.min.js"></script>
