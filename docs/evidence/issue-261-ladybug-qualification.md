@@ -156,8 +156,8 @@ coverage, and digest receipt are in `issue-261-ladybug-contract-probe/`. The sup
 observation remains historical. The active package receipts are
 `issue-261-ladybug-packaged-arm64.json` and `issue-261-ladybug-packaged-intel.json`; both bind the
 exact 0.18.0 qualification inputs at commit `15a0770f6d958d790ba68dc2809fe8aee6f83afe`.
-The Intel receipt records a bounded 15-second first-launch window for Rosetta translation; the
-arm64 native receipt retains the 5-second window.
+Both receipts use a bounded 15-second cold packaged-startup window. The previous 5-second native
+window was falsified by a clean arm64 capture before the lifecycle emitted its first state.
 
 Source identity was checked with recursive diffs. The crate's packaged
 `lbug-src/{src,cmake,third_party,CMakeLists.txt,tools/CMakeLists.txt}` bytes match core tag v0.18.0.

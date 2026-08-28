@@ -29,8 +29,8 @@ import {
 const execFileAsync = promisify(execFile);
 
 describe("Ladybug packaged lifecycle qualification", () => {
-  it("gives first-launch Rosetta translation a recorded bounded window", () => {
-    expect(qualificationLifecycleTimeout({ architecture: "arm64" }, "arm64")).toBe(5_000);
+  it("gives every cold packaged launch one recorded bounded window", () => {
+    expect(qualificationLifecycleTimeout({ architecture: "arm64" }, "arm64")).toBe(15_000);
     expect(qualificationLifecycleTimeout({ architecture: "x64" }, "arm64")).toBe(15_000);
   });
   it("installs the dependency closure for the packaged architecture", () => {

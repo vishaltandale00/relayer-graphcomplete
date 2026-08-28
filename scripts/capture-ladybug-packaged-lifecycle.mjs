@@ -71,7 +71,9 @@ export function npmEnvironmentForDesktopTarget(environment, target) {
 }
 
 export function qualificationLifecycleTimeout(target, hostArchitecture = process.arch) {
-  return target.architecture === hostArchitecture ? 5_000 : 15_000;
+  void target;
+  void hostArchitecture;
+  return 15_000;
 }
 
 function parseArguments(arguments_) {
