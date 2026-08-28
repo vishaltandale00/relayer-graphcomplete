@@ -1,6 +1,5 @@
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
-import { delimiter } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { CredentialAdapter } from "./credential-adapter.mjs";
@@ -71,18 +70,7 @@ function waitForSpawn(child) {
 
 export async function findCodexExecutable(environment = process.env) {
   const explicit = String(environment.RELAYER_CODEX_BINARY || "").trim();
-  const pathEntries = String(environment.PATH || "").split(delimiter).filter(Boolean);
-  const candidates = [
-    explicit,
-    ...pathEntries.map((entry) => `${entry}/codex`),
-    "/opt/homebrew/bin/codex",
-    "/usr/local/bin/codex",
-    "/usr/bin/codex",
-  ];
-  for (const candidate of [...new Set(candidates)]) {
-    if (await executableExists(candidate)) return candidate;
-  }
-  return null;
+  return await executableExists(explicit) ? explicit : null;
 }
 
 export class CodexCredentialAdapter extends CredentialAdapter {
@@ -126,7 +114,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
   async #start() {
     const executable = await findCodexExecutable(this.environment);
     if (!executable) {
-      throw new Error("Codex CLI is not installed. Install Codex, then try Connect Codex again.");
+      throw new Error("The managed Codex runtime is unavailable. Try Connect Codex again.");
     }
     if (this.closing) throw new Error("Codex app-server is shutting down.");
     const child = this.spawnProcess(executable, ["app-server", "--listen", "stdio://"], {

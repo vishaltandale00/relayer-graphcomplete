@@ -105,6 +105,12 @@ pub(super) struct CompleteProviderOnboardingRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CompleteDefaultOnboardingRequest {
+    provider_id: String,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -189,6 +195,25 @@ pub(super) async fn complete_provider_onboarding(
                     expected_projection_revision: request.expected_projection_revision,
                     family,
                 },
+                &state.default_harness_configuration,
+                &permission_available,
+            )
+            .await?,
+    ))
+}
+
+pub(super) async fn complete_default_onboarding(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(request): Json<CompleteDefaultOnboardingRequest>,
+) -> Result<Json<Option<ProviderOnboardingCompletion>>, ApiError> {
+    authorize_write(&state, &headers)?;
+    let permission_available = permission_available_harnesses(&state).await?;
+    Ok(Json(
+        state
+            .product
+            .complete_default_provider_onboarding(
+                &ProviderId::parse(request.provider_id)?,
                 &state.default_harness_configuration,
                 &permission_available,
             )

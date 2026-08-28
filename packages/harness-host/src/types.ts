@@ -204,6 +204,19 @@ export interface HarnessRunContext {
   readonly trace: HarnessTraceSink;
 }
 
+/**
+ * Execution-scoped access to a Relayer-managed harness runtime. The runtime is
+ * capability-owned and shared across compatible provider definitions; only the
+ * provider-specific environment is attached to an execution lease.
+ */
+export interface HarnessManagedRuntimeAccess {
+  readonly runtimeId: string;
+  readonly version: string;
+  readonly executable: string;
+  readonly moduleUrl?: string;
+  readonly environment: Readonly<Record<string, string>>;
+}
+
 export type HarnessExecutionAccess =
   | {
       readonly kind: "secret";
@@ -213,16 +226,24 @@ export type HarnessExecutionAccess =
       readonly adapterImplementationVersion: string;
       readonly endpoint: string;
       readonly fields: Readonly<Record<string, string>>;
+      readonly runtime?: HarnessManagedRuntimeAccess;
     }
-  | {
+  | ({
       readonly kind: "managed-runtime";
       readonly contract: "managed-runtime@1";
       readonly providerId: string;
       readonly adapterId: string;
       readonly adapterImplementationVersion: string;
-      readonly executable?: string;
-      readonly environment: Readonly<Record<string, string>>;
-    };
+    } & (
+      | HarnessManagedRuntimeAccess
+      | {
+          readonly runtimeId?: never;
+          readonly version?: never;
+          readonly executable?: never;
+          readonly moduleUrl?: never;
+          readonly environment: Readonly<Record<string, string>>;
+        }
+    ));
 
 export interface HarnessExecutionAccessLease {
   readonly access: HarnessExecutionAccess;

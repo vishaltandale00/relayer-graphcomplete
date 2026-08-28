@@ -180,7 +180,11 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
             onboardingBusyLocksControls: (() => {
               const card = document.querySelector(".provider-setup-card");
               const controls = [...(card?.querySelectorAll("button,input,select,textarea") ?? [])];
-              return card?.getAttribute("aria-busy") === "true" && controls.length > 0 && controls.every((control) => control.disabled);
+              const cancel = controls.find((control) => control.id === "cancelProviderConnection");
+              return card?.getAttribute("aria-busy") === "true"
+                && controls.length > 0
+                && cancel?.disabled === false
+                && controls.filter((control) => control !== cancel).every((control) => control.disabled);
             })(),
             customFamilyHasNoImplicitMembers: [...document.querySelectorAll("[data-onboarding-member-model]")]
               .every((input) => !input.checked),
@@ -286,6 +290,12 @@ async function recordBrowserFlow(url, directory, profile) {
       await click('[data-onboarding-member-model="gpt-5.2-mini"]');
       await click("#finishProviderSetup");
       await waitFor("!document.querySelector('#appShell').classList.contains('hidden')", "desktop application");
+      await click('[data-model-picker="new"] [data-model-picker-trigger]');
+      await waitFor(`(() => {
+        const picker = document.querySelector('[data-model-picker="new"]');
+        return picker?.querySelector('[data-model-family]')?.value === '21'
+          && picker.querySelector('[data-model-option][data-provider-id="openai-work"][data-model-id="gpt-5.2-mini"]')?.getAttribute('aria-checked') === 'true';
+      })()`, "onboarded family available in chat before opening Settings");
 
       await caption("3 · Add and sign out a managed subscription");
       await click("#settingsButton");
@@ -388,6 +398,7 @@ const adapters = [
 
 const flowState = {
   defaults: { harnessId: "codex-basic", providerId: null, familyId: null },
+  family: null,
   retrySubmitted: false,
   retryRequest: null,
 };
@@ -448,6 +459,7 @@ const modelSettings = (scene) => ({
       revision: 1,
       members: [{ providerId: "openai-work", modelId: "gpt-5.2-mini", position: 0 }],
     },
+    ...(scene === "flow" && flowState.family ? [flowState.family] : []),
   ],
   harnesses: [
     {
@@ -630,10 +642,23 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/provider-onboarding/projection") {
       return json(response, onboardingProjection(scene, url.searchParams.get("providerId") ?? "openai-work"));
     }
+    if (url.pathname === "/api/provider-onboarding/default" && request.method === "POST") {
+      await requestJson(request);
+      return json(response, null);
+    }
     if (url.pathname === "/api/provider-onboarding/complete" && request.method === "POST") {
       const intent = await requestJson(request);
       const member = intent.family?.members?.[0] ?? { providerId: intent.providerId, modelId: "gpt-5.2" };
       flowState.defaults = { harnessId: intent.harnessId, providerId: intent.providerId, familyId: 21 };
+      flowState.family = {
+        id: 21,
+        name: intent.family?.name ?? "OpenAI Work default",
+        kind: intent.family?.kind === "managed" ? "system" : "custom",
+        enabled: true,
+        position: 2,
+        revision: 1,
+        members: (intent.family?.members ?? [member]).map((value, position) => ({ ...value, position })),
+      };
       return json(response, {
         defaults: { providerId: intent.providerId, harnessId: intent.harnessId, familyId: 21 },
         resolution: { familyId: 21, familyRevision: 1, resolvableMembers: [{ ...member, position: 0 }] },

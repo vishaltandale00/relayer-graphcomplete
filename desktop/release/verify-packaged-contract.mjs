@@ -4,6 +4,20 @@ import { join } from "node:path";
 
 import { parse as parseYaml } from "yaml";
 
+export function assertNoBundledHarnessRuntimes(entries) {
+  const bundledHarnessRuntime = [...entries].find((entry) => (
+    entry === "node_modules/@openai/codex" ||
+    entry.startsWith("node_modules/@openai/codex/") ||
+    entry.startsWith("node_modules/@openai/codex-darwin-") ||
+    entry.startsWith("node_modules/@openai/codex-linux-") ||
+    entry.startsWith("node_modules/@openai/codex-win32-") ||
+    entry.startsWith("node_modules/@anthropic-ai/claude-agent-sdk-")
+  ));
+  if (bundledHarnessRuntime) {
+    throw new Error(`Desktop release must not package a native harness runtime: ${bundledHarnessRuntime}`);
+  }
+}
+
 export async function verifyPackagedDesktopContract({ appPath, contract } = {}) {
   if (!contract?.release) {
     throw new Error("Packaged desktop verification requires the signed release contract.");
@@ -39,6 +53,7 @@ export async function verifyPackagedDesktopContract({ appPath, contract } = {}) 
   if (entries.has("node_modules/prime-agent/package.json")) {
     throw new Error("Desktop release foundation must not package the deferred agent harness.");
   }
+  assertNoBundledHarnessRuntimes(entries);
 
   const updateConfiguration = parseYaml(await readFile(join(resourcesPath, "app-update.yml"), "utf8"));
   if (

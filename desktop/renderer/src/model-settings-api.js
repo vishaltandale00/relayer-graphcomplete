@@ -33,6 +33,13 @@ export function completeProviderOnboarding(intent) {
   });
 }
 
+export function completeDefaultProviderOnboarding(providerId) {
+  return request("/api/provider-onboarding/default", {
+    method: "POST",
+    body: JSON.stringify({ providerId }),
+  });
+}
+
 export function loadProviderOnboardingStatus() {
   return request("/api/provider-onboarding/status");
 }

@@ -7,6 +7,7 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
+    "types": ["node"],
     "skipLibCheck": true
   },
   "include": [
@@ -14,4 +15,3 @@
     "test/**/*.ts"
   ]
 }
-

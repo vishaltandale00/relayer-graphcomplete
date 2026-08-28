@@ -13,6 +13,12 @@ function providerLease({
     kind: "secret",
     endpoint: "https://api.example.test/v1",
     fields: { "api-key": "secret" },
+    runtime: {
+      runtimeId: "codex",
+      version: "0.150.1",
+      executable: "/managed/codex",
+      environment: { CODEX_HOME: "/isolated/codex" },
+    },
   },
 } = {}) {
   const release = vi.fn(async () => {});
@@ -68,6 +74,12 @@ describe("desktop provider execution access broker", () => {
       adapterId: "openai-api",
       adapterImplementationVersion: "3",
       contract: "secret@1",
+      runtime: {
+        runtimeId: "codex",
+        version: "0.150.1",
+        executable: "/managed/codex",
+        environment: { CODEX_HOME: "/isolated/codex" },
+      },
     });
     expect(personalAccess.access).toMatchObject({
       providerId: "openai-personal",
@@ -177,5 +189,37 @@ describe("desktop provider execution access broker", () => {
 
     expect(fixture.lease.runtime.executionAccess).toHaveBeenCalledWith({ signal: controller.signal });
     expect(fixture.release).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the complete Claude managed runtime descriptor", async () => {
+    const fixture = providerLease({
+      providerId: "claude-work",
+      adapterId: "claude-subscription",
+      accessContract: "managed-runtime@1",
+      resolved: {
+        kind: "managed-runtime",
+        runtimeId: "claude",
+        version: "2.1.0",
+        executable: "/managed/claude",
+        moduleUrl: "file:///managed/claude/sdk.mjs",
+        environment: { CLAUDE_CONFIG_DIR: "/isolated/claude" },
+      },
+    });
+    const broker = createProviderExecutionAccessBroker(async () => fixture.lease);
+
+    const acquired = await broker.acquire(
+      { providerId: "claude-work", adapterId: "claude-subscription", modelId: "sonnet" },
+      ["managed-runtime@1"],
+      new AbortController().signal,
+    );
+
+    expect(acquired.access).toMatchObject({
+      runtimeId: "claude",
+      version: "2.1.0",
+      executable: "/managed/claude",
+      moduleUrl: "file:///managed/claude/sdk.mjs",
+      environment: { CLAUDE_CONFIG_DIR: "/isolated/claude" },
+    });
+    await acquired.release();
   });
 });

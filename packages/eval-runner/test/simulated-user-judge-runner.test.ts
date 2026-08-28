@@ -76,6 +76,7 @@ describe("simulated-user Codex judge runner", () => {
         RANDOM_SECRET: "must-not-leak",
       },
       workingDirectory: process.cwd(),
+      codexPathOverride: "/managed/codex",
       artifact: {
         kind: "git_workspace",
         workingDirectory: process.cwd(),
@@ -105,6 +106,7 @@ describe("simulated-user Codex judge runner", () => {
       PATH: "/usr/bin",
       [SIMULATED_USER_MCP_TOKEN_ENV]: "test-token-with-at-least-24-characters",
     });
+    expect(startRequest?.codexOptions.codexPathOverride).toBe("/managed/codex");
     expect(startRequest?.codexOptions.env).not.toHaveProperty("OPENAI_API_KEY");
     expect(startRequest?.codexOptions.env).not.toHaveProperty("RELAYER_GRAPH_TOKEN");
     expect(startRequest?.codexOptions.config).toMatchObject({

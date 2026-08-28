@@ -25,6 +25,7 @@ export class ProviderDefinitionService {
     definitionStore,
     credentialStore,
     runtimeDependencies = () => ({}),
+    prepareRuntime = async () => null,
     publishCatalog = async () => {},
     canRemove = async () => ({ allowed: true }),
     idGenerator = randomUUID,
@@ -43,6 +44,7 @@ export class ProviderDefinitionService {
     this.definitionStore = definitionStore;
     this.credentialStore = credentialStore;
     this.runtimeDependencies = runtimeDependencies;
+    this.prepareRuntime = prepareRuntime;
     this.publishCatalog = publishCatalog;
     this.canRemove = canRemove;
     this.idGenerator = idGenerator;
@@ -57,9 +59,14 @@ export class ProviderDefinitionService {
     this.definitions = null;
     this.runtimes = new Map(initialRuntimes);
     this.pendingConnections = new Map();
+    this.preparingConnections = new Map();
     this.activeExecutions = new Map();
     this.statusOverrides = new Map();
     this.queue = Promise.resolve();
+    this.nextPreparationOrder = 1;
+    this.lifecycleTasks = new Set();
+    this.closing = false;
+    this.closePromise = null;
   }
 
   adapters() { return this.registry.list().map(publicDescriptor); }
@@ -97,7 +104,26 @@ export class ProviderDefinitionService {
     return result;
   }
 
-  #assertUniqueLabel(label, exceptId = null) {
+  #activeDefinition(id) {
+    const definition = this.definitions.find((item) => item.id === id);
+    if (!definition || definition.lifecycleState !== "active") {
+      throw new Error("Unknown active provider definition.");
+    }
+    return definition;
+  }
+
+  #reconnectableDefinition(id) {
+    const definition = this.#activeDefinition(id);
+    const descriptor = this.registry.get(definition.adapterId);
+    if (descriptor.connection.mode === "secret-fields") throw new Error("API provider definitions do not support reconnect.");
+    if (this.activeExecutions.has(id)) {
+      throw new Error("Provider cannot reconnect while interactions are running.");
+    }
+    if (this.pendingConnections.has(id)) throw new Error("Provider reconnect is already pending.");
+    return definition;
+  }
+
+  #assertUniqueLabel(label, exceptId = null, preparationOrder = null) {
     const normalized = label.trim().toLowerCase();
     if (this.definitions.some((definition) => definition.id !== exceptId
       && definition.lifecycleState !== "tombstoned"
@@ -107,36 +133,86 @@ export class ProviderDefinitionService {
     if ([...this.pendingConnections.values()].some(({ candidate }) => (
       candidate.id !== exceptId && candidate.label.toLowerCase() === normalized
     ))) throw new Error("A pending provider connection already uses that name.");
+    if ([...this.preparingConnections.values()].some(({ candidate, order }) => (
+      candidate?.id !== exceptId
+      && candidate?.label.toLowerCase() === normalized
+      && (preparationOrder === null || order < preparationOrder)
+    ))) throw new Error("A preparing provider connection already uses that name.");
   }
 
-  async connect({ adapterId, label, endpoint, fields = {} }, { signal } = {}) {
-    return this.#serialized(async () => {
-      await this.#initialize();
-      signal?.throwIfAborted();
-      this.#assertUniqueLabel(label);
-      const descriptor = this.registry.get(adapterId);
-      const id = this.idGenerator().toLowerCase();
-      const credentialReference = descriptor.accessContract === "secret@1" ? `provider:${id}` : null;
-      const candidate = {
-        id,
+  connect(input, options = {}) {
+    if (this.closing) return Promise.reject(new Error("Provider setup is shutting down."));
+    return this.#trackLifecycle(this.#connect(input, options));
+  }
+
+  #trackLifecycle(task) {
+    this.lifecycleTasks.add(task);
+    void task.finally(() => this.lifecycleTasks.delete(task)).catch(() => undefined);
+    return task;
+  }
+
+  async #connect({ connectionId, harnessId, adapterId, label, endpoint, fields = {} }, { signal } = {}) {
+    const id = String(connectionId ?? this.idGenerator()).trim().toLowerCase();
+    if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(id)) {
+      throw new Error("Provider connection requires a stable connection id.");
+    }
+    if (this.preparingConnections.has(id)) throw new Error("Provider connection id is already in use.");
+    const descriptor = this.registry.get(adapterId);
+    const credentialReference = descriptor.accessContract === "secret@1" ? `provider:${id}` : null;
+    const candidate = {
+      id,
+      adapterId,
+      label: label.trim(),
+      endpoint: endpoint ?? descriptor.defaultEndpoint,
+      accessContract: descriptor.accessContract,
+      credentialReference,
+      lifecycleState: "active",
+      removedAt: null,
+    };
+    const preparation = {
+      cancelled: false,
+      cancellable: true,
+      candidate,
+      order: this.nextPreparationOrder++,
+    };
+    this.preparingConnections.set(id, preparation);
+    let runtime;
+    let credentialStored = false;
+    let runtimeRegistrationAttempted = false;
+    try {
+      await this.#serialized(async () => {
+        await this.#initialize();
+        signal?.throwIfAborted();
+        if (preparation.cancelled) throw new Error("Provider connection was cancelled.");
+        this.#assertUniqueLabel(label, id, preparation.order);
+        if (this.definitions.some((definition) => definition.id === id)
+          || this.pendingConnections.has(id)) {
+          throw new Error("Provider connection id is already in use.");
+        }
+      });
+      await this.prepareRuntime(Object.freeze({
+        harnessId: harnessId ?? null,
         adapterId,
-        label: label.trim(),
-        endpoint: endpoint ?? descriptor.defaultEndpoint,
-        accessContract: descriptor.accessContract,
-        credentialReference,
-        lifecycleState: "active",
-        removedAt: null,
-      };
-      let runtime;
-      let credentialStored = false;
-      let runtimeRegistrationAttempted = false;
-      try {
+        providerDefinition: publicDefinition(candidate),
+      }));
+      signal?.throwIfAborted();
+      if (preparation.cancelled) throw new Error("Provider connection was cancelled.");
+      return await this.#serialized(async () => {
+        signal?.throwIfAborted();
+        if (preparation.cancelled) throw new Error("Provider connection was cancelled.");
+        this.#assertUniqueLabel(label, id, preparation.order);
+        if (this.definitions.some((definition) => definition.id === id)
+          || this.pendingConnections.has(id)) {
+          throw new Error("Provider connection id is already in use.");
+        }
         runtime = this.registry.create(candidate, {
           ...await this.runtimeDependencies(candidate),
           secrets: fields,
         });
         if (descriptor.connection.mode === "managed-login") {
           const login = await runtime.credentials.login({ signal });
+          signal?.throwIfAborted();
+          if (preparation.cancelled) throw new Error("Provider connection was cancelled.");
           this.pendingConnections.set(id, { candidate, runtime, login });
           return Object.freeze({
             status: "pending",
@@ -146,9 +222,16 @@ export class ProviderDefinitionService {
           });
         }
         const catalog = await this.#discover(runtime, signal);
+        signal?.throwIfAborted();
+        if (preparation.cancelled) throw new Error("Provider connection was cancelled.");
         if (!catalog.models.some(({ visible }) => visible)) throw new Error("Provider did not report any visible models.");
         runtimeRegistrationAttempted = true;
         await this.onRuntimeReady(candidate, runtime);
+        signal?.throwIfAborted();
+        if (preparation.cancelled) throw new Error("Provider connection was cancelled.");
+        // Past this point the provider commit may perform atomic persistence
+        // that cannot truthfully be reported to the renderer as cancelled.
+        preparation.cancellable = false;
         if (credentialReference) {
           await this.credentialStore.set(credentialReference, fields);
           credentialStored = true;
@@ -163,24 +246,28 @@ export class ProviderDefinitionService {
         }
         this.runtimes.set(id, runtime);
         return Object.freeze({ status: "connected", providerDefinition: publicDefinition(candidate) });
-      } catch (error) {
-        await this.diagnostics?.write({
-          category: "provider_connection_failed",
-          adapterId,
-          providerId: id,
-          ...providerDiagnosticDetails(error),
-        }).catch(() => undefined);
-        if (runtimeRegistrationAttempted) {
-          try { await this.onRuntimeRemoved(candidate); } catch { /* preserve the connection failure */ }
-        }
-        try { await runtime?.close?.(); } catch { /* preserve the connection failure */ }
-        try { await this.removeRuntimeState(candidate); } catch { /* preserve the connection failure */ }
-        if (credentialStored) {
-          try { await this.credentialStore.delete(credentialReference); } catch { /* preserve the connection failure */ }
-        }
-        throw error;
+      });
+    } catch (error) {
+      await this.diagnostics?.write({
+        category: "provider_connection_failed",
+        adapterId,
+        providerId: id,
+        ...providerDiagnosticDetails(error),
+      }).catch(() => undefined);
+      if (runtimeRegistrationAttempted) {
+        try { await this.onRuntimeRemoved(candidate); } catch { /* preserve the connection failure */ }
       }
-    });
+      try { await runtime?.close?.(); } catch { /* preserve the connection failure */ }
+      if (runtime) {
+        try { await this.removeRuntimeState(candidate); } catch { /* preserve the connection failure */ }
+      }
+      if (credentialStored) {
+        try { await this.credentialStore.delete(credentialReference); } catch { /* preserve the connection failure */ }
+      }
+      throw error;
+    } finally {
+      this.preparingConnections.delete(id);
+    }
   }
 
   async #discover(runtime, signal) {
@@ -265,6 +352,12 @@ export class ProviderDefinitionService {
   }
 
   async cancelConnection(connectionId) {
+    const preparation = this.preparingConnections.get(connectionId);
+    if (preparation) {
+      if (!preparation.cancellable) return false;
+      preparation.cancelled = true;
+      return true;
+    }
     return this.#serialized(() => this.#cancelPendingConnection(connectionId));
   }
 
@@ -344,19 +437,30 @@ export class ProviderDefinitionService {
     });
   }
 
-  async reconnect(id, { signal } = {}) {
+  reconnect(id, options = {}) {
+    if (this.closing) return Promise.reject(new Error("Provider setup is shutting down."));
+    return this.#trackLifecycle(this.#reconnect(id, options));
+  }
+
+  async #reconnect(id, { signal } = {}) {
+    const preparedDefinition = await this.#serialized(async () => {
+      await this.#initialize();
+      signal?.throwIfAborted();
+      if (this.closing) throw new Error("Provider setup is shutting down.");
+      return publicDefinition(this.#reconnectableDefinition(id));
+    });
+    await this.prepareRuntime(Object.freeze({
+      harnessId: null,
+      adapterId: preparedDefinition.adapterId,
+      providerDefinition: preparedDefinition,
+    }));
+    signal?.throwIfAborted();
+    if (this.closing) throw new Error("Provider setup is shutting down.");
     return this.#serialized(async () => {
       await this.#initialize();
       signal?.throwIfAborted();
-      const definition = this.definitions.find((item) => item.id === id);
-      if (!definition || definition.lifecycleState !== "active") throw new Error("Unknown active provider definition.");
-      const descriptor = this.registry.get(definition.adapterId);
-      if (descriptor.connection.mode === "secret-fields") throw new Error("API provider definitions do not support reconnect.");
-      if (this.activeExecutions.has(id)) {
-        throw new Error("Provider cannot reconnect while interactions are running.");
-      }
-      if (this.pendingConnections.has(id)) throw new Error("Provider reconnect is already pending.");
-
+      if (this.closing) throw new Error("Provider setup is shutting down.");
+      const definition = this.#reconnectableDefinition(id);
       let runtime = this.runtimes.get(id);
       const createdRuntime = !runtime;
       if (!runtime) {
@@ -369,6 +473,7 @@ export class ProviderDefinitionService {
       let login;
       try {
         login = await runtime.credentials.login({ signal });
+        if (this.closing) throw new Error("Provider setup is shutting down.");
       } catch (error) {
         if (createdRuntime) {
           try { await runtime.close?.(); } catch { /* preserve the login failure */ }
@@ -442,6 +547,35 @@ export class ProviderDefinitionService {
     this.runtimes.set(definition.id, runtime);
     this.statusOverrides.delete(definition.id);
     return runtime;
+  }
+
+  recoverUnavailable(id, options = {}) {
+    if (this.closing) return Promise.reject(new Error("Provider setup is shutting down."));
+    return this.#trackLifecycle(this.#recoverUnavailable(id, options));
+  }
+
+  async #recoverUnavailable(id, { signal } = {}) {
+    const preparedDefinition = await this.#serialized(async () => {
+      await this.#initialize();
+      signal?.throwIfAborted();
+      if (this.closing) throw new Error("Provider setup is shutting down.");
+      return publicDefinition(this.#activeDefinition(id));
+    });
+    await this.prepareRuntime(Object.freeze({
+      harnessId: null,
+      adapterId: preparedDefinition.adapterId,
+      providerDefinition: preparedDefinition,
+    }));
+    signal?.throwIfAborted();
+    if (this.closing) throw new Error("Provider setup is shutting down.");
+    return this.#serialized(async () => {
+      await this.#initialize();
+      signal?.throwIfAborted();
+      if (this.closing) throw new Error("Provider setup is shutting down.");
+      const definition = this.#activeDefinition(id);
+      const runtime = await this.#runtimeFor(definition);
+      return this.#discover(runtime, signal);
+    });
   }
 
   async activate() {
@@ -535,11 +669,21 @@ export class ProviderDefinitionService {
   }
 
   async close() {
-    await Promise.allSettled([
-      ...[...this.runtimes.values()].map((runtime) => runtime.close?.()),
-      ...[...this.pendingConnections.values()].map(({ runtime }) => runtime.close?.()),
-    ]);
-    this.runtimes.clear();
-    this.pendingConnections.clear();
+    this.closePromise ??= (async () => {
+      this.closing = true;
+      for (const preparation of this.preparingConnections.values()) {
+        if (preparation.cancellable) preparation.cancelled = true;
+      }
+      await Promise.allSettled([...this.lifecycleTasks]);
+      const runtimes = new Set([
+        ...this.runtimes.values(),
+        ...[...this.pendingConnections.values()].map(({ runtime }) => runtime),
+      ]);
+      await Promise.allSettled([...runtimes].map((runtime) => runtime.close?.()));
+      this.runtimes.clear();
+      this.pendingConnections.clear();
+      this.preparingConnections.clear();
+    })();
+    await this.closePromise;
   }
 }

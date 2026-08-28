@@ -58,25 +58,10 @@ export async function verifyWindowsSignatures({ paths, publisherName, execute = 
 }
 
 export function windowsApplicationExecutables(appOutDir) {
-  const codexVendorRoot = join(
-    appOutDir,
-    "resources",
-    "app.asar.unpacked",
-    "node_modules",
-    "@openai",
-    "codex-win32-x64",
-    "vendor",
-    "x86_64-pc-windows-msvc",
-  );
   return [
     join(appOutDir, "Relayer.exe"),
     join(appOutDir, "resources", "bin", "relayer-app-server.exe"),
     join(appOutDir, "resources", "bin", "relayer-graph-server.exe"),
-    join(codexVendorRoot, "bin", "codex.exe"),
-    join(codexVendorRoot, "bin", "codex-code-mode-host.exe"),
-    join(codexVendorRoot, "codex-path", "rg.exe"),
-    join(codexVendorRoot, "codex-resources", "codex-command-runner.exe"),
-    join(codexVendorRoot, "codex-resources", "codex-windows-sandbox-setup.exe"),
   ];
 }
 

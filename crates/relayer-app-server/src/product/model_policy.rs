@@ -1,10 +1,15 @@
 use super::{CatalogError, FamilyPolicyReference, ModelFamilyMember, ProviderCatalogSnapshot};
 
 pub(crate) const CODEX_DEFAULT_FAMILY_POLICY_ID: &str = "codex-default-family";
+pub(crate) const CLAUDE_DEFAULT_FAMILY_POLICY_ID: &str = "claude-default-family";
 const CODEX_DEFAULT_FAMILY_V2_MODELS: [&str; 3] = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 
 pub(crate) fn applies_to_adapter(policy: &FamilyPolicyReference, adapter_id: &str) -> bool {
-    policy.id == CODEX_DEFAULT_FAMILY_POLICY_ID && adapter_id == "codex-subscription"
+    matches!(
+        (policy.id.as_str(), adapter_id),
+        (CODEX_DEFAULT_FAMILY_POLICY_ID, "codex-subscription")
+            | (CLAUDE_DEFAULT_FAMILY_POLICY_ID, "claude-subscription")
+    )
 }
 
 /// Product-owned managed-family policy registry. Provider adapters normalize
@@ -53,6 +58,24 @@ pub(crate) fn derive_managed_family_members(
                 .collect::<Vec<_>>();
             provider_defaults.sort_by_key(|model| model.order);
             models.extend(provider_defaults);
+            Ok(models
+                .into_iter()
+                .take(super::catalog::MAX_MODELS_PER_FAMILY)
+                .enumerate()
+                .map(|(position, model)| ModelFamilyMember {
+                    provider_id: snapshot.provider_id.clone(),
+                    model_id: model.id.clone(),
+                    position,
+                })
+                .collect())
+        }
+        (CLAUDE_DEFAULT_FAMILY_POLICY_ID, 1) => {
+            let mut models = snapshot
+                .models
+                .iter()
+                .filter(|model| model.visible)
+                .collect::<Vec<_>>();
+            models.sort_by_key(|model| model.order);
             Ok(models
                 .into_iter()
                 .take(super::catalog::MAX_MODELS_PER_FAMILY)
@@ -195,6 +218,35 @@ mod tests {
                 .map(|member| member.model_id.as_str())
                 .collect::<Vec<_>>(),
             vec!["gpt-5.6-sol"]
+        );
+    }
+
+    #[test]
+    fn claude_policy_uses_all_visible_aliases_in_provider_order() {
+        let policy = FamilyPolicyReference {
+            id: CLAUDE_DEFAULT_FAMILY_POLICY_ID.into(),
+            version: 1,
+        };
+        assert!(applies_to_adapter(&policy, "claude-subscription"));
+        assert!(!applies_to_adapter(&policy, "anthropic-api"));
+
+        let members = derive_managed_family_members(
+            &policy,
+            &snapshot(vec![
+                model("opus", 1, true, false),
+                model("sonnet", 0, true, true),
+                model("fable", 2, true, false),
+                model("hidden", 3, false, true),
+            ]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["sonnet", "opus", "fable"]
         );
     }
 

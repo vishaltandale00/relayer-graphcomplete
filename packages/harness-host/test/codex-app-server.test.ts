@@ -14,6 +14,16 @@ import {
 import type { HarnessApprovalChannel } from "../src/approval-coordinator.js";
 
 describe("Codex app-server transport", () => {
+  it("rejects a missing explicit Codex executable before spawning", async () => {
+    const fake = new FakeCodexProcess(() => undefined);
+    const { codexPathOverride: _codexPathOverride, ...withoutExecutable } = options(fake);
+
+    await expect(runCodexAppServerTurn(withoutExecutable as CodexAppServerTurnOptions))
+      .rejects.toThrow("Codex app-server requires an explicit executable path");
+
+    expect(fake.spawn).toBeUndefined();
+  });
+
   it("uses only platform-supported generic force signals", () => {
     expect(codexForceTerminationSignal("darwin")).toBe("SIGUSR2");
     expect(codexForceTerminationSignal("win32")).toBe("SIGKILL");

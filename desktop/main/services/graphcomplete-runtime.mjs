@@ -52,6 +52,27 @@ function stringRecord(value) {
     && Object.values(value).every((entry) => typeof entry === "string");
 }
 
+function validatedManagedRuntime(value) {
+  if (value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || !nonEmptyString(value.runtimeId)
+    || !nonEmptyString(value.version)
+    || !nonEmptyString(value.executable)
+    || !stringRecord(value.environment)
+    || (value.moduleUrl !== undefined && !nonEmptyString(value.moduleUrl))
+    || (value.runtimeId === "claude" && !nonEmptyString(value.moduleUrl))) {
+    throw new Error("Provider adapter returned an invalid managed runtime descriptor.");
+  }
+  return Object.freeze({
+    runtimeId: value.runtimeId,
+    version: value.version,
+    executable: value.executable,
+    ...(value.moduleUrl === undefined ? {} : { moduleUrl: value.moduleUrl }),
+    environment: Object.freeze({ ...value.environment }),
+  });
+}
+
 function validatedExecutionAccess(resolved, definition, descriptor) {
   if (definition.accessContract === "secret@1") {
     if (resolved?.kind !== "secret"
@@ -60,6 +81,9 @@ function validatedExecutionAccess(resolved, definition, descriptor) {
       || !stringRecord(resolved.fields)) {
       throw new Error("Provider adapter returned invalid secret execution access.");
     }
+    const runtime = resolved.runtime === undefined
+      ? undefined
+      : validatedManagedRuntime(resolved.runtime);
     return Object.freeze({
       kind: "secret",
       contract: definition.accessContract,
@@ -68,22 +92,29 @@ function validatedExecutionAccess(resolved, definition, descriptor) {
       adapterImplementationVersion: descriptor.implementationVersion,
       endpoint: resolved.endpoint,
       fields: Object.freeze({ ...resolved.fields }),
+      ...(runtime === undefined ? {} : { runtime }),
     });
   }
   if (definition.accessContract === "managed-runtime@1") {
-    if (resolved?.kind !== "managed-runtime"
-      || !stringRecord(resolved.environment)
-      || (resolved.executable !== undefined && !nonEmptyString(resolved.executable))) {
+    if (resolved?.kind !== "managed-runtime" || !stringRecord(resolved.environment)) {
       throw new Error("Provider adapter returned invalid managed-runtime execution access.");
     }
+    const hasRuntimeDescriptor = [
+      resolved.runtimeId,
+      resolved.version,
+      resolved.executable,
+      resolved.moduleUrl,
+    ].some((value) => value !== undefined);
+    const runtime = hasRuntimeDescriptor
+      ? validatedManagedRuntime(resolved)
+      : Object.freeze({ environment: Object.freeze({ ...resolved.environment }) });
     return Object.freeze({
       kind: "managed-runtime",
       contract: definition.accessContract,
       providerId: definition.id,
       adapterId: definition.adapterId,
       adapterImplementationVersion: descriptor.implementationVersion,
-      ...(resolved.executable === undefined ? {} : { executable: resolved.executable }),
-      environment: Object.freeze({ ...resolved.environment }),
+      ...runtime,
     });
   }
   throw new Error("Provider definition declares an unsupported execution contract.");
@@ -165,6 +196,7 @@ export class GraphCompleteRuntimeService {
     codexBasicClientModuleUrl,
     graphAuthoringLauncherPath,
     codexPathOverride,
+    resolveCodexRuntime,
     harnessHostModuleUrl,
     candidateTrace,
     acquireProviderExecution,
@@ -181,6 +213,7 @@ export class GraphCompleteRuntimeService {
     this.codexBasicClientModuleUrl = codexBasicClientModuleUrl;
     this.graphAuthoringLauncherPath = graphAuthoringLauncherPath;
     this.codexPathOverride = codexPathOverride;
+    this.resolveCodexRuntime = resolveCodexRuntime;
     this.harnessHostModuleUrl = harnessHostModuleUrl;
     this.candidateTrace = candidateTrace;
     this.acquireProviderExecution = acquireProviderExecution;
@@ -260,11 +293,12 @@ export class GraphCompleteRuntimeService {
       }
       const harnessHost = await this.#awaitStartupOperation(startHarnessHost({
         implementations: productHarnessImplementations({
-          ...(this.codexBasicClientModuleUrl || this.graphAuthoringLauncherPath || this.codexPathOverride ? {
+          ...(this.codexBasicClientModuleUrl || this.graphAuthoringLauncherPath || this.codexPathOverride || this.resolveCodexRuntime ? {
             "codex.basic": createCodexBasicFactory({
               ...(this.codexBasicClientModuleUrl ? { clientModuleUrl: this.codexBasicClientModuleUrl } : {}),
               ...(this.graphAuthoringLauncherPath ? { graphAuthoringLauncherPath: this.graphAuthoringLauncherPath } : {}),
               ...(this.codexPathOverride ? { codexPathOverride: this.codexPathOverride } : {}),
+              ...(this.resolveCodexRuntime ? { resolveCodexRuntime: this.resolveCodexRuntime } : {}),
             }),
           } : {}),
           ...this.additionalImplementations,
