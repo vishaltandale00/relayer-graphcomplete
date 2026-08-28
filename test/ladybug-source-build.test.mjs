@@ -13,6 +13,7 @@ import {
   validateLadybugSourceManifest,
   verifyLadybugSourceCache,
 } from "../scripts/prepare-ladybug-source.mjs";
+import { DESKTOP_RELEASE } from "../desktop/release/contract.mjs";
 
 const temporaryDirectories = [];
 
@@ -27,6 +28,34 @@ async function temporaryDirectory() {
   temporaryDirectories.push(directory);
   return directory;
 }
+
+// macOS release -> Darwin kernel version. Apple's mapping is not a formula
+// (macOS 13.0 is Darwin 22.1, but 14.0 is Darwin 23.0), so every floor Relayer
+// may adopt is listed explicitly. Moving the floor means adding its pair here,
+// which is the point: it forces the update-manifest version to move with it.
+const DARWIN_KERNEL_FOR_MACOS = {
+  "13.0.0": "22.1.0",
+  "13.3.0": "22.4.0",
+  "14.0.0": "23.0.0",
+  "15.0.0": "24.0.0",
+};
+
+describe("macOS minimum version contract", () => {
+  it("keeps the desktop floor, its Darwin translation, and the Ladybug build floor in agreement", async () => {
+    const manifest = await loadLadybugSourceManifest();
+    const floor = DESKTOP_RELEASE.minimumMacOSVersion;
+
+    // The Ladybug source build compiles with -mmacosx-version-min from its own
+    // manifest; if that drifts below the product floor the binary silently
+    // targets an older OS than the app claims to require.
+    expect(`${manifest.build.minimumMacOSVersion}`).toBe(floor.split(".").slice(0, 2).join("."));
+
+    // electron-updater gates on the Darwin kernel version, not the macOS one.
+    expect(DARWIN_KERNEL_FOR_MACOS, `no Darwin kernel recorded for macOS ${floor}`)
+      .toHaveProperty(floor);
+    expect(DESKTOP_RELEASE.minimumUpdateSystemVersion).toBe(DARWIN_KERNEL_FOR_MACOS[floor]);
+  });
+});
 
 describe("pinned Ladybug source build", () => {
   it("freezes an unpatched binding, embedded core, static OpenSSL, and zero extensions", async () => {

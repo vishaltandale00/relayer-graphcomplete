@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
 import {
+  RECEIPT_INPUT_PATHS,
   captureLadybugPackagedLifecycle,
   inspectPortableExecutable,
   npmCommandForPlatform,
@@ -32,7 +33,13 @@ import {
 } from "../scripts/prepare-ladybug-source.mjs";
 
 const execFileAsync = promisify(execFile);
-const receiptInputPaths = [
+// The committed macOS receipts were captured at 23a2d3d1, before `.gitattributes`
+// joined the authenticated inputs. They cannot be regenerated without re-running
+// the packaged capture on real hardware, so they are checked against the input set
+// that existed when they were captured. `authenticates every current qualification
+// input` below pins that set as a strict subset of the script's current list, so
+// the two cannot drift apart unnoticed.
+const frozenReceiptInputPaths = [
   "Cargo.lock",
   "crates/relayer-graph-server/Cargo.toml",
   "crates/relayer-graph-server/src/main.rs",
@@ -52,10 +59,10 @@ const receiptFields = [
   "storageVersion", "target",
 ].sort();
 
-function verifyReceiptShape(receipt, targetExpectation) {
+function verifyReceiptShape(receipt, targetExpectation, expectedInputPaths = frozenReceiptInputPaths) {
   const { limitation, ...receiptExpectation } = targetExpectation;
   expect(Object.keys(receipt).sort()).toEqual(receiptFields);
-  expect(Object.keys(receipt.inputSha256).sort()).toEqual(receiptInputPaths);
+  expect(Object.keys(receipt.inputSha256).sort()).toEqual(expectedInputPaths);
   expect(Object.keys(receipt.preparedReceiptSha256).sort()).toEqual([
     "cargo-build-env.json", "source-receipt.json",
   ]);
@@ -185,6 +192,19 @@ describe("Ladybug packaged lifecycle qualification", () => {
     ];
     const { stdout } = await execFileAsync("git", ["check-attr", "eol", "--", ...paths]);
     expect(stdout.trim().split(/\r?\n/u)).toEqual(paths.map((path) => `${path}: eol: lf`));
+  });
+
+  it("authenticates every current qualification input and keeps the frozen receipts a subset", () => {
+    // `.gitattributes` pins the line endings the source digests depend on, so it
+    // must stay in the authenticated set.
+    expect(RECEIPT_INPUT_PATHS).toContain(".gitattributes");
+    expect(new Set(RECEIPT_INPUT_PATHS).size).toBe(RECEIPT_INPUT_PATHS.length);
+    // The frozen 23a2d3d1 receipts predate `.gitattributes` coverage. Every path
+    // they authenticate must still be authenticated today; regenerating a receipt
+    // then yields exactly RECEIPT_INPUT_PATHS.
+    for (const path of frozenReceiptInputPaths) {
+      expect(RECEIPT_INPUT_PATHS, `frozen receipt input dropped: ${path}`).toContain(path);
+    }
   });
 
   it("binds both isolated macOS captures to their exact committed qualification inputs", async () => {

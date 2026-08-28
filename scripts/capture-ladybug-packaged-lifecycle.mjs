@@ -19,11 +19,30 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+// Every source input a packaged qualification receipt authenticates. Exported so
+// the receipt test asserts against this exact list instead of a second copy.
+export const RECEIPT_INPUT_PATHS = [
+  ".gitattributes",
+  "Cargo.lock",
+  "crates/relayer-graph-server/Cargo.toml",
+  "crates/relayer-graph-server/src/main.rs",
+  "desktop/packaging/build-development.mjs",
+  "desktop/shared/target.mjs",
+  "scripts/capture-ladybug-packaged-lifecycle.mjs",
+  "scripts/prepare-ladybug-source.mjs",
+  "vendor/ladybug/source-build-manifest.json",
+];
+
 export function parseDynamicLibraries(output) {
+  // `otool -L` prints one header per Mach-O architecture ("<path>:" for a thin
+  // binary, "<path> (architecture arm64):" for each slice of a fat one). Drop
+  // every header rather than only the first, so a universal binary's own path
+  // is not mistaken for an imported library.
   return String(output)
     .split(/\r?\n/u)
-    .slice(1)
-    .map((line) => line.trim().split(/\s+/u)[0])
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.endsWith(":"))
+    .map((line) => line.split(/\s+/u)[0])
     .filter(Boolean);
 }
 
@@ -344,16 +363,32 @@ async function waitForExit(exit, label, timeout = 10_000) {
 async function nextJsonLineBounded(iterator, child, exit, label, timeout = 10_000) {
   const bounded = timeoutAfter(timeout, `${label} JSON line`);
   try {
-    return await Promise.race([
-      nextJsonLine(iterator, label),
-      exit.then((result) => {
-        if (result.error) throw result.error;
-        throw new Error(
-          `${label} exited before its expected JSON line (${result.signal ? `signal ${result.signal}` : `exit code ${result.code}`})`,
-        );
-      }),
+    // Node reports 'exit' when the child is reaped, independently of the stdout
+    // pipe draining, so a child that prints its line and immediately returns can
+    // be seen as exited before readline delivers that line. Start the read once
+    // and let a delivered line always win over the exit signal; only treat exit
+    // as failure after the reader has settled with nothing.
+    const line = nextJsonLine(iterator, label);
+    const exited = exit.then((result) => {
+      if (result.error) throw result.error;
+      return { exited: result };
+    });
+    const first = await Promise.race([
+      line.then((value) => ({ value })),
+      exited,
       bounded.promise,
     ]);
+    if ("value" in first) return first.value;
+    const settled = await Promise.race([
+      line.then((value) => ({ value }), (error) => ({ error })),
+      bounded.promise,
+    ]);
+    if (settled.error) throw settled.error;
+    if ("value" in settled) return settled.value;
+    const { exited: result } = first;
+    throw new Error(
+      `${label} exited before its expected JSON line (${result.signal ? `signal ${result.signal}` : `exit code ${result.code}`})`,
+    );
   } catch (error) {
     if (!child.killed && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     await Promise.race([exit, new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000))]);
@@ -487,6 +522,7 @@ export async function provePackagedLadybugLifecycle(
       holder,
       holderExit,
       "packaged Ladybug holder",
+      commandTimeout,
     );
     if (held.state !== "reopened" || held.ready !== true) {
       throw new Error("packaged graph server did not reopen and hold the Ladybug profile");
@@ -510,8 +546,9 @@ export async function provePackagedLadybugLifecycle(
         holder,
         holderExit,
         "packaged Ladybug holder shutdown",
+        commandTimeout,
       ),
-      waitForExit(holderExit, "packaged Ladybug holder"),
+      waitForExit(holderExit, "packaged Ladybug holder", commandTimeout),
     ]);
     if (shutdown.shutdown !== "clean") {
       throw new Error("packaged graph server did not report clean Ladybug shutdown");
@@ -715,18 +752,7 @@ export async function captureLadybugPackagedLifecycle({
   );
   const lifecycleTimeoutMs = qualificationLifecycleTimeout(target);
   const lifecycle = await provePackagedLadybugLifecycle(executable, { commandTimeout: lifecycleTimeoutMs });
-  const inputPaths = [
-    ".gitattributes",
-    "Cargo.lock",
-    "crates/relayer-graph-server/Cargo.toml",
-    "crates/relayer-graph-server/src/main.rs",
-    "desktop/packaging/build-development.mjs",
-    "desktop/shared/target.mjs",
-    "scripts/capture-ladybug-packaged-lifecycle.mjs",
-    "scripts/prepare-ladybug-source.mjs",
-    "vendor/ladybug/source-build-manifest.json",
-  ];
-  const inputSha256 = Object.fromEntries(await Promise.all(inputPaths.map(async (path) => {
+  const inputSha256 = Object.fromEntries(await Promise.all(RECEIPT_INPUT_PATHS.map(async (path) => {
     const { stdout } = await execFileAsync("git", ["show", `${sourceCommit}:${path}`], {
       encoding: "buffer",
       maxBuffer: 10 * 1024 * 1024,

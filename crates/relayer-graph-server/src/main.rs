@@ -100,19 +100,25 @@ fn run_ladybug_qualification(path: &str, hold: bool) -> anyhow::Result<()> {
         })
     );
     if hold {
-        let mut input = io::stdin().lock();
-        let mut buffer = [0_u8; 256];
-        loop {
-            match input.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(_) => {}
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(error).context("wait for qualification shutdown"),
-            }
-        }
+        drain_stdin_until_eof().context("wait for qualification shutdown")?;
         println!("{}", serde_json::json!({"shutdown": "clean"}));
     }
     Ok(())
+}
+
+/// Read stdin to EOF, retrying through interrupts. Returns the first real error
+/// so each caller decides whether to propagate or ignore it.
+fn drain_stdin_until_eof() -> io::Result<()> {
+    let mut input = io::stdin().lock();
+    let mut buffer = [0_u8; 256];
+    loop {
+        match input.read(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 fn read_control_token() -> anyhow::Result<String> {
@@ -131,16 +137,8 @@ fn read_control_token() -> anyhow::Result<String> {
 fn watch_parent_connection() -> oneshot::Receiver<()> {
     let (disconnected, parent_disconnected) = oneshot::channel();
     std::thread::spawn(move || {
-        let mut input = io::stdin().lock();
-        let mut buffer = [0_u8; 256];
-        loop {
-            match input.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(_) => {}
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
-            }
-        }
+        // A parent that vanishes is an ordinary shutdown, not an error.
+        let _ = drain_stdin_until_eof();
         let _ = disconnected.send(());
     });
     parent_disconnected

@@ -1,43 +1,18 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { lstat, mkdir, readlink, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+
+import { digestLadybugSourceTree, sha256File } from "./prepare-ladybug-source.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const defaultInventoryPath = resolve(repositoryRoot, "vendor/ladybug/native-inventory.json");
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 
-async function sha256File(path) {
-  return createHash("sha256").update(await readFile(path)).digest("hex");
-}
-
-async function sha256Tree(root) {
-  const hash = createHash("sha256");
-  async function visit(directory) {
-    const entries = await readdir(directory, { withFileTypes: true });
-    entries.sort((left, right) => Buffer.from(left.name).compare(Buffer.from(right.name)));
-    for (const entry of entries) {
-      const path = join(directory, entry.name);
-      const name = relative(root, path).split(sep).join("/");
-      const info = await lstat(path);
-      if (info.isDirectory()) {
-        hash.update(`D\0${name}\0`);
-        await visit(path);
-      } else if (info.isSymbolicLink()) {
-        hash.update(`L\0${name}\0${await readlink(path)}\0`);
-      } else if (info.isFile()) {
-        const bytes = await readFile(path);
-        hash.update(`F\0${name}\0${bytes.length}\0`);
-        hash.update(bytes);
-      } else {
-        throw new Error(`unsupported source entry: ${name}`);
-      }
-    }
-  }
-  await visit(root);
-  return hash.digest("hex");
-}
+// `vendor/ladybug/native-inventory.json` and `vendor/ladybug/source-build-manifest.json`
+// pin the same digest of the same lbug source tree. Share one walker so the two
+// receipts cannot disagree about identical, unmodified source.
+const sha256Tree = digestLadybugSourceTree;
 
 function resolveRepositoryPath(path, label) {
   assert.equal(isAbsolute(path), false, `${label} must be repository-relative`);
