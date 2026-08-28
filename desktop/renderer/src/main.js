@@ -31,6 +31,7 @@ import {
   updateCreateThreadAvailability,
 } from "./threads.js";
 import { bindComposerKeydown } from "./product-workspace/workspace.js";
+import { prepareCurrentWorkspaceTransition } from "./graph.js";
 import {
   initializeModelFamilySettings,
   refreshModelFamilySettings,
@@ -116,6 +117,7 @@ async function maybeStartAutomaticTutorial(providerConnected) {
 
 function bindEvents() {
   $("#newThread").onclick = async () => {
+    if (!await prepareCurrentWorkspaceTransition()) return;
     takeOverPendingAutomaticTutorial();
     try {
       await openNewThreadComposer();
@@ -156,6 +158,7 @@ function bindEvents() {
   };
   $("#settingsButton").onclick = async () => {
     takeOverPendingAutomaticTutorial();
+    if (!await prepareCurrentWorkspaceTransition()) return;
     cancelNavigationHistory();
     setMainView("settings", { moveFocus: true });
     try {
@@ -248,7 +251,13 @@ function bindEvents() {
   };
   document.addEventListener("click", (event) => {
     const threadButton = event.target.closest("[data-thread]");
-    if (threadButton) void loadThread(threadButton.dataset.thread);
+    if (threadButton) {
+      event.preventDefault();
+      void (async () => {
+        if (!await prepareCurrentWorkspaceTransition()) return;
+        await loadThread(threadButton.dataset.thread);
+      })().catch((error) => toast(error.message));
+    }
     if (!event.target.closest(".scope-control")) {
       $("#scopeMenu").classList.add("hidden");
       $("#scopeButton").setAttribute("aria-expanded", "false");

@@ -117,6 +117,7 @@ export function productWorkspaceMarkup() {
           <div class="node-content" id="detailContent"></div>
           <div class="inline-actions hidden" id="detailActions"></div>
         </div>
+        <section class="node-context-dock hidden" id="nodeContextDock" aria-label="Node context annotation editor"></section>
         <section class="annotation-panel hidden" id="annotationPanel" aria-labelledby="annotationHeading">
           <div class="annotation-heading"><span id="annotationHeading">Comments</span><span id="annotationCount">0</span></div>
           <div class="annotation-list" id="annotationList"></div>
