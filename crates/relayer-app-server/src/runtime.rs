@@ -110,6 +110,7 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) input_digest: Option<&'a str>,
     pub(crate) contexts: &'a [crate::product::InteractionContextIntent],
     pub(crate) personal_presentation: Option<&'a PersonalPresentationExecution>,
+    pub(crate) submitted_inputs: &'a [relayer_graph_core::SubmittedInputDraft],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,6 +153,7 @@ pub(crate) struct PreparedInteraction {
     pub(crate) permission_profile_id: String,
     pub(crate) effective_execution_digest: String,
     pub(crate) effective_permission_receipt: Value,
+    pub(crate) input_children: Vec<relayer_graph_core::InteractionInputChild>,
     configuration: HarnessConfiguration,
     model_selection: Option<ExecutionModelSelection>,
     personal_presentation_version_id: Option<i64>,
@@ -544,6 +546,7 @@ impl RuntimeClient {
             "inputIdentity": command.input_identity,
             "inputDigest": command.input_digest,
             "contexts": command.contexts,
+            "submittedInputs": command.submitted_inputs,
             "mintCapability": false,
         });
         let interaction: CreateInteractionResponse =
@@ -632,6 +635,7 @@ impl RuntimeClient {
                 "unconfinedHostAccess": unrestricted,
                 "disclosure": unrestricted.then_some("Filesystem and network access were not hard-confined."),
             }),
+            input_children: interaction.input_children,
             configuration: selected.configuration.clone(),
             model_selection: command.model_selection.cloned(),
             personal_presentation_version_id: command
@@ -1514,6 +1518,8 @@ struct CreateInteractionResponse {
     input_identity: Option<String>,
     #[serde(default)]
     input_digest: Option<String>,
+    #[serde(default)]
+    input_children: Vec<relayer_graph_core::InteractionInputChild>,
 }
 
 #[derive(Deserialize)]
@@ -2307,12 +2313,29 @@ mod tests {
                     async move {
                         if body["inputIdentity"] == "product:99" {
                             assert_eq!(body["inputDigest"], "sha256:v1:stable");
+                            assert_eq!(body["submittedInputs"][0]["actionId"], 23);
+                            assert_eq!(body["submittedInputs"][0]["value"]["text"], "exact");
                             if observed_identified.fetch_add(1, Ordering::SeqCst) < 2 {
                                 return (StatusCode::OK, "response was truncated").into_response();
                             }
                             return Json(json!({
                                 "node": { "id": 42 }, "graphToken": "",
-                                "inputIdentity": "product:99", "inputDigest": "sha256:v1:stable"
+                                "inputIdentity": "product:99", "inputDigest": "sha256:v1:stable",
+                                "inputChildren": [{
+                                    "id": "interaction-input-child:1",
+                                    "parentInteractionNodeId": 42,
+                                    "occurrence": {
+                                        "presentingInteractionNodeId": 17,
+                                        "presentingLayerId": 19,
+                                        "actionId": 23
+                                    },
+                                    "sourceNodeId": 21,
+                                    "action": { "control": "text", "prompt": "Explain" },
+                                    "value": { "text": "exact" },
+                                    "attemptKey": "product:99",
+                                    "authorityDigest": "sha256:v1:stable",
+                                    "semanticDigest": "sha256:semantic"
+                                }]
                             }))
                             .into_response();
                         }
@@ -2390,12 +2413,29 @@ mod tests {
             input_digest: None,
             contexts: &[],
             personal_presentation: None,
+            submitted_inputs: &[],
         };
 
         let prepared = runtime.prepare(&command).await.unwrap();
         assert_eq!(prepared.graph_node_id, 41);
         assert_eq!(creates.load(Ordering::SeqCst), 3);
         runtime.discard_prepared(prepared).await.unwrap();
+        let submitted_inputs = [relayer_graph_core::SubmittedInputDraft {
+            occurrence: relayer_graph_core::PresentingInputOccurrence {
+                presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+                presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+                action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+            },
+            action: relayer_graph_core::InputAction {
+                control: relayer_graph_core::InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+            },
+            value: relayer_graph_core::SubmittedInputValue::Text {
+                text: "exact".into(),
+            },
+        }];
         let identified = CompleteInteraction {
             project_id: None,
             product_interaction_id: 99,
@@ -2415,9 +2455,11 @@ mod tests {
             input_digest: Some("sha256:v1:stable"),
             contexts: &[],
             personal_presentation: None,
+            submitted_inputs: &submitted_inputs,
         };
         let prepared = runtime.prepare(&identified).await.unwrap();
         assert_eq!(prepared.graph_node_id, 42);
+        assert_eq!(prepared.input_children.len(), 1);
         assert_eq!(identified_creates.load(Ordering::SeqCst), 3);
         runtime.discard_prepared(prepared).await.unwrap();
         graph_task.abort();
@@ -2650,6 +2692,7 @@ mod tests {
             input_digest: None,
             contexts: &[],
             personal_presentation: None,
+            submitted_inputs: &[],
         };
         let error = runtime.prepare(&command).await.unwrap_err();
         assert!(matches!(&error, super::RuntimeError::ResponseDecode(_)));
@@ -2787,6 +2830,7 @@ mod tests {
                 input_digest: None,
                 contexts: &[],
                 personal_presentation: None,
+                submitted_inputs: &[],
             })
             .await;
 
@@ -2944,6 +2988,7 @@ mod tests {
                 input_digest: None,
                 contexts: &[],
                 personal_presentation: Some(&personal_presentation),
+                submitted_inputs: &[],
             })
             .await
             .unwrap();

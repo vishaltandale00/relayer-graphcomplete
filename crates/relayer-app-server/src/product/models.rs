@@ -119,6 +119,8 @@ pub(crate) struct DurableInteractionInput {
     pub(crate) input_identity: String,
     pub(crate) input_digest: String,
     pub(crate) contexts: Vec<InteractionContextIntent>,
+    pub(crate) submitted_inputs: Vec<relayer_graph_core::SubmittedInputDraft>,
+    pub(crate) semantic_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

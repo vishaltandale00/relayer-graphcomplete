@@ -144,6 +144,29 @@ const ACTION_INPUT_ATTACHMENT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("value_json", "TEXT", true, 0),
     ("committed_at", "TEXT", true, 0),
 ];
+const SUBMITTED_INPUT_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("interaction_id", "INTEGER", false, 1),
+    ("thread_id", "INTEGER", true, 0),
+    ("draft_revision", "INTEGER", true, 0),
+    ("authority_digest", "TEXT", true, 0),
+    ("semantic_digest", "TEXT", true, 0),
+    ("state", "TEXT", true, 0),
+    ("graph_root_node_id", "INTEGER", false, 0),
+    ("child_receipt_json", "TEXT", false, 0),
+    ("created_at", "TEXT", true, 0),
+    ("bound_at", "TEXT", false, 0),
+    ("finished_at", "TEXT", false, 0),
+];
+const SUBMITTED_INPUT_ATTEMPT_ATTACHMENT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("interaction_id", "INTEGER", true, 1),
+    ("presenting_interaction_node_id", "INTEGER", true, 2),
+    ("presenting_layer_id", "INTEGER", true, 3),
+    ("action_id", "INTEGER", true, 4),
+    ("source_node_id", "INTEGER", true, 0),
+    ("action_json", "TEXT", true, 0),
+    ("value_json", "TEXT", true, 0),
+    ("committed_at", "TEXT", true, 0),
+];
 const INTERACTION_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "INTEGER", false, 1),
     ("interaction_id", "INTEGER", true, 0),
@@ -385,6 +408,18 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         ACTION_INPUT_ATTACHMENT_COLUMNS,
     )
     .await?;
+    validate_columns(
+        pool,
+        "interaction_submitted_input_attempts",
+        SUBMITTED_INPUT_ATTEMPT_COLUMNS,
+    )
+    .await?;
+    validate_columns(
+        pool,
+        "interaction_submitted_input_attachments",
+        SUBMITTED_INPUT_ATTEMPT_ATTACHMENT_COLUMNS,
+    )
+    .await?;
     validate_columns(pool, "conversation_imports", CONVERSATION_IMPORT_COLUMNS).await?;
     validate_columns(pool, "imported_turns", IMPORTED_TURN_COLUMNS).await?;
     validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
@@ -425,6 +460,24 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "action_input_attachments",
         &[
             "thread_id",
+            "presenting_interaction_node_id",
+            "presenting_layer_id",
+            "action_id",
+        ],
+        false,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "interaction_submitted_input_attempts",
+        &["thread_id", "interaction_id"],
+        true,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "interaction_submitted_input_attachments",
+        &[
             "presenting_interaction_node_id",
             "presenting_layer_id",
             "action_id",
@@ -722,6 +775,33 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "thread_id",
         "action_input_drafts",
         "thread_id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "interaction_submitted_input_attempts",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "interaction_submitted_input_attempts",
+        "thread_id",
+        "threads",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "interaction_submitted_input_attachments",
+        "interaction_id",
+        "interaction_submitted_input_attempts",
+        "interaction_id",
         "CASCADE",
     )
     .await?;

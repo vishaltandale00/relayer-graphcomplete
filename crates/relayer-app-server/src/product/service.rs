@@ -85,6 +85,7 @@ pub(crate) struct PreparedInteractionBinding<'a> {
     pub(crate) harness_configuration_digest: &'a str,
     pub(crate) effective_execution_digest: &'a str,
     pub(crate) effective_permission_receipt: &'a serde_json::Value,
+    pub(crate) input_children: &'a [relayer_graph_core::InteractionInputChild],
 }
 
 pub(crate) struct ProjectWriteOutcome {
@@ -1125,12 +1126,46 @@ impl ProductService {
         command: CreateIdentifiedInteractionCommand<'_>,
     ) -> Result<crate::storage::InteractionInputInsertOutcome, ProductError> {
         let input_identity = required(command.input_identity, "inputId")?;
-        let input_digest = validated_interaction_input_digest(command.text, command.contexts)?;
         if self.storage.thread_is_imported(thread_id).await? {
             return Err(ProductError::Invalid(
                 "imported conversations are immutable".into(),
             ));
         }
+        if let Some(existing) = self
+            .storage
+            .get_interaction_by_input_identity(thread_id, input_identity)
+            .await?
+        {
+            let durable = self
+                .storage
+                .interaction_input(existing.id)
+                .await?
+                .ok_or_else(|| {
+                    ProductError::Invalid(
+                        "existing identified interaction lost its durable input".into(),
+                    )
+                })?;
+            if existing.text != command.text
+                || durable.contexts != command.contexts
+                || command.model_selection.is_some()
+                    && existing.model_selection.as_ref() != command.model_selection
+            {
+                return Err(ProductError::Invalid(
+                    "interaction input identity was reused with different content".into(),
+                ));
+            }
+            return Ok(crate::storage::InteractionInputInsertOutcome::Existing(
+                existing,
+            ));
+        }
+        let action_input_draft = self.storage.action_input_draft(thread_id).await?;
+        let submitted_inputs = action_input_draft
+            .attachments
+            .iter()
+            .map(submitted_input_from_attachment)
+            .collect::<Result<Vec<_>, _>>()?;
+        let input_digest =
+            validated_interaction_input_digest(command.text, command.contexts, &submitted_inputs)?;
         self.storage
             .insert_interaction_input(
                 thread_id,
@@ -1140,6 +1175,8 @@ impl ProductService {
                     input_digest: &input_digest,
                     contexts: command.contexts,
                     context_confirmation_ids: command.context_confirmation_ids,
+                    submitted_input_draft_revision: (!submitted_inputs.is_empty())
+                        .then_some(action_input_draft.revision),
                 },
                 command.model_selection,
                 self.runtime_available && !command.allow_unselected_model,
@@ -1691,7 +1728,7 @@ impl ProductService {
         command: RetryInteractionCommand<'_>,
     ) -> Result<bool, ProductError> {
         let input_identity = required(command.input_identity, "inputId")?;
-        let input_digest = validated_interaction_input_digest(command.text, command.contexts)?;
+        let input_digest = validated_interaction_input_digest(command.text, command.contexts, &[])?;
         self.storage
             .claim_interaction_retry(
                 interaction_id,
@@ -1702,6 +1739,7 @@ impl ProductService {
                     input_digest: &input_digest,
                     contexts: command.contexts,
                     context_confirmation_ids: command.context_confirmation_ids,
+                    submitted_input_draft_revision: None,
                 },
                 command.model_selection,
                 command.harness_configuration_name,
@@ -2050,8 +2088,10 @@ fn stored_project_path(canonical_path: &std::path::Path) -> Result<String, Produ
 fn validated_interaction_input_digest(
     text: &str,
     contexts: &[super::InteractionContextIntent],
+    submitted_inputs: &[relayer_graph_core::SubmittedInputDraft],
 ) -> Result<String, ProductError> {
     if text.trim().is_empty()
+        && submitted_inputs.is_empty()
         && !contexts
             .iter()
             .flat_map(|context| &context.annotations)
@@ -2100,8 +2140,47 @@ fn validated_interaction_input_digest(
             annotations: context.annotations.clone(),
         });
     }
-    relayer_graph_core::interaction_input_digest(text, &graph_contexts)
-        .map_err(|error| ProductError::Invalid(error.to_string()))
+    if submitted_inputs.is_empty() {
+        relayer_graph_core::interaction_input_digest(text, &graph_contexts)
+            .map_err(|error| ProductError::Invalid(error.to_string()))
+    } else {
+        relayer_graph_core::interaction_input_authority_digest(text, submitted_inputs)
+            .map_err(|error| ProductError::Invalid(error.to_string()))
+    }
+}
+
+fn submitted_input_from_attachment(
+    attachment: &super::ActionInputAttachment,
+) -> Result<relayer_graph_core::SubmittedInputDraft, ProductError> {
+    let value = match &attachment.value {
+        super::ActionInputValue::Text { text } => {
+            relayer_graph_core::SubmittedInputValue::Text { text: text.clone() }
+        }
+        super::ActionInputValue::Selected { selected_keys } => {
+            let selected = selected_keys
+                .iter()
+                .map(|key| {
+                    attachment
+                        .action
+                        .options
+                        .iter()
+                        .find(|option| &option.key == key)
+                        .cloned()
+                        .ok_or_else(|| {
+                            ProductError::Invalid(format!(
+                                "input_option_unknown: option key {key:?} is not in the accepted action snapshot"
+                            ))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            relayer_graph_core::SubmittedInputValue::Selected { selected }
+        }
+    };
+    Ok(relayer_graph_core::SubmittedInputDraft {
+        occurrence: attachment.occurrence.clone(),
+        action: attachment.action.clone(),
+        value,
+    })
 }
 
 fn required<'a>(value: &'a str, name: &str) -> Result<&'a str, ProductError> {

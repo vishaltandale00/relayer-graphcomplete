@@ -246,6 +246,7 @@ fn input_draft_conflict(code: &'static str, message: &str) -> StorageError {
 mod tests {
     use super::*;
     use crate::storage::NewThreadRecord;
+    use crate::storage::{InteractionInputInsertOutcome, NewInteractionInput};
     use relayer_graph_core::{
         ActionId, InputAction, InputControl, InputOption, LayerId, NodeId,
         PresentingInputOccurrence,
@@ -353,5 +354,304 @@ mod tests {
             .unwrap();
         assert_eq!(detached.revision, 3);
         assert_eq!(detached.attachments[0].occurrence.action_id.value(), 301);
+    }
+
+    #[tokio::test]
+    async fn send_reserves_an_immutable_snapshot_and_failure_restores_a_new_draft() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteProductStore::open(directory.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Crash safe input",
+                project_id: None,
+                initial_message: "Initial",
+                harness_configuration_name: "fixture-task-system",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "2026-08-28T00:00:00Z",
+            })
+            .await
+            .unwrap();
+        let action = InputAction {
+            control: InputControl::SingleSelect,
+            prompt: "Choose".into(),
+            options: vec![InputOption {
+                key: "one".into(),
+                label: "One".into(),
+            }],
+            minimum_selections: None,
+        };
+        let value = ActionInputValue::Selected {
+            selected_keys: vec!["one".into()],
+        };
+        let committed = store
+            .commit_action_input_attachment(
+                thread.id,
+                NewActionInputAttachment {
+                    occurrence: &occurrence(300),
+                    source_node_id: 400,
+                    action: &action,
+                    value: &value,
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        let submitted = relayer_graph_core::SubmittedInputDraft {
+            occurrence: occurrence(300),
+            action: action.clone(),
+            value: relayer_graph_core::SubmittedInputValue::Selected {
+                selected: action.options.clone(),
+            },
+        };
+        let digest = relayer_graph_core::interaction_input_authority_digest(
+            "",
+            std::slice::from_ref(&submitted),
+        )
+        .unwrap();
+        let created = store
+            .insert_interaction_input(
+                thread.id,
+                NewInteractionInput {
+                    text: "",
+                    input_identity: "send:one",
+                    input_digest: &digest,
+                    contexts: &[],
+                    submitted_input_draft_revision: Some(committed.revision),
+                },
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+        let interaction = match created {
+            InteractionInputInsertOutcome::Created(interaction) => interaction,
+            _ => panic!("expected a new immutable attempt"),
+        };
+        let fresh = store.action_input_draft(thread.id).await.unwrap();
+        assert_eq!(fresh.revision, committed.revision + 1);
+        assert!(fresh.attachments.is_empty());
+        let durable = store
+            .interaction_input(interaction.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            durable.submitted_inputs.as_slice(),
+            std::slice::from_ref(&submitted)
+        );
+        assert!(durable.semantic_digest.is_some());
+        let duplicate = store
+            .insert_interaction_input(
+                thread.id,
+                NewInteractionInput {
+                    text: "",
+                    input_identity: "send:one",
+                    input_digest: &digest,
+                    contexts: &[],
+                    submitted_input_draft_revision: Some(committed.revision),
+                },
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            duplicate,
+            InteractionInputInsertOutcome::Existing(existing) if existing.id == interaction.id
+        ));
+
+        assert!(
+            store
+                .claim_interaction_preparing(interaction.id)
+                .await
+                .unwrap()
+        );
+        let semantic_digest = durable.semantic_digest.unwrap();
+        let child = relayer_graph_core::InteractionInputChild {
+            id: relayer_graph_core::InteractionInputChildId::new(1).unwrap(),
+            parent_interaction_node_id: NodeId::new(500).unwrap(),
+            occurrence: submitted.occurrence.clone(),
+            source_node_id: NodeId::new(400).unwrap(),
+            action: action.clone(),
+            value: submitted.value.clone(),
+            attempt_key: "send:one".into(),
+            authority_digest: digest.clone(),
+            semantic_digest,
+        };
+        let mut changed_source = child.clone();
+        changed_source.source_node_id = NodeId::new(401).unwrap();
+        let changed_source_error = store
+            .bind_prepared_interaction(crate::product::PreparedInteractionBinding {
+                interaction_id: interaction.id,
+                graph_node_id: 500,
+                harness_configuration_name: "fixture-task-system",
+                harness_configuration_digest: "sha256:fixture",
+                effective_execution_digest: "sha256:execution",
+                effective_permission_receipt: &serde_json::json!({}),
+                input_children: &[changed_source],
+            })
+            .await
+            .unwrap_err();
+        assert!(changed_source_error.to_string().contains(
+            "graph child receipt changed the reserved root, source, attempt, or digest binding"
+        ));
+        assert!(
+            store
+                .bind_prepared_interaction(crate::product::PreparedInteractionBinding {
+                    interaction_id: interaction.id,
+                    graph_node_id: 500,
+                    harness_configuration_name: "fixture-task-system",
+                    harness_configuration_digest: "sha256:fixture",
+                    effective_execution_digest: "sha256:execution",
+                    effective_permission_receipt: &serde_json::json!({}),
+                    input_children: &[child],
+                })
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .claim_interaction_running(interaction.id, "fixture-task-system")
+                .await
+                .unwrap()
+        );
+        let newer_edit = store
+            .commit_action_input_attachment(
+                thread.id,
+                NewActionInputAttachment {
+                    occurrence: &occurrence(300),
+                    source_node_id: 401,
+                    action: &action,
+                    value: &value,
+                },
+                fresh.revision,
+            )
+            .await
+            .unwrap();
+        assert!(
+            store
+                .fail_interaction_completion(
+                    interaction.id,
+                    "fixture-task-system",
+                    "provider stopped before graph acceptance",
+                )
+                .await
+                .unwrap()
+        );
+        let restored = store.action_input_draft(thread.id).await.unwrap();
+        assert_eq!(restored.revision, newer_edit.revision + 1);
+        assert_eq!(restored.attachments.len(), 1);
+        assert_eq!(restored.attachments[0].source_node_id, 401);
+        let immutable_state: String = sqlx::query_scalar(
+            "SELECT state FROM interaction_submitted_input_attempts WHERE interaction_id=?1",
+        )
+        .bind(interaction.id.value())
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(immutable_state, "failed");
+        assert_eq!(
+            store
+                .get_interaction(interaction.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .completion_status,
+            "failed"
+        );
+
+        let second = store
+            .insert_interaction_input(
+                thread.id,
+                NewInteractionInput {
+                    text: "",
+                    input_identity: "send:two",
+                    input_digest: &digest,
+                    contexts: &[],
+                    submitted_input_draft_revision: Some(restored.revision),
+                },
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+        let second = match second {
+            InteractionInputInsertOutcome::Created(interaction) => interaction,
+            _ => panic!("a send after failure must reserve a new immutable attempt"),
+        };
+        assert_ne!(second.id, interaction.id);
+        assert!(store.claim_interaction_preparing(second.id).await.unwrap());
+        let second_durable = store.interaction_input(second.id).await.unwrap().unwrap();
+        let second_child = relayer_graph_core::InteractionInputChild {
+            id: relayer_graph_core::InteractionInputChildId::new(2).unwrap(),
+            parent_interaction_node_id: NodeId::new(501).unwrap(),
+            occurrence: submitted.occurrence,
+            source_node_id: NodeId::new(401).unwrap(),
+            action,
+            value: submitted.value,
+            attempt_key: "send:two".into(),
+            authority_digest: digest,
+            semantic_digest: second_durable.semantic_digest.unwrap(),
+        };
+        assert!(
+            store
+                .bind_prepared_interaction(crate::product::PreparedInteractionBinding {
+                    interaction_id: second.id,
+                    graph_node_id: 501,
+                    harness_configuration_name: "fixture-task-system",
+                    harness_configuration_digest: "sha256:fixture",
+                    effective_execution_digest: "sha256:execution",
+                    effective_permission_receipt: &serde_json::json!({}),
+                    input_children: &[second_child],
+                })
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .claim_interaction_running(second.id, "fixture-task-system")
+                .await
+                .unwrap()
+        );
+        store
+            .accept_interaction_completion(crate::product::AcceptedInteractionCompletion {
+                interaction_id: second.id,
+                graph_node_id: 501,
+                harness_configuration_name: "fixture-task-system",
+                harness_configuration_digest: "sha256:fixture",
+                effective_execution_digest: "sha256:execution",
+                effective_permission_receipt: &serde_json::json!({}),
+                output: &serde_json::json!({ "nodeId": 501 }),
+            })
+            .await
+            .unwrap();
+        assert!(
+            store
+                .action_input_draft(thread.id)
+                .await
+                .unwrap()
+                .attachments
+                .is_empty()
+        );
+        assert!(
+            !store
+                .fail_interaction_completion(second.id, "fixture-task-system", "late cancel")
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .action_input_draft(thread.id)
+                .await
+                .unwrap()
+                .attachments
+                .is_empty()
+        );
     }
 }
