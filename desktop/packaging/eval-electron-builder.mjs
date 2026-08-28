@@ -13,6 +13,7 @@ export default {
   electronVersion: "43.0.0",
   npmRebuild: false,
   asar: true,
+  asarUnpack: ["node_modules/chrome-devtools-mcp/**/*"],
   directories: { app: desktopRoot, output: resolve(desktopRoot, "eval-dist") },
   extraMetadata: { main: "eval-main/index.mjs" },
   files: [

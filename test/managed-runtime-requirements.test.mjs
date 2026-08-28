@@ -14,8 +14,8 @@ describe("managed runtime requirements", () => {
       "claude.basic": { runtimeId: "claude", minimumVersion: RELEASE_MANAGED_RUNTIME_REQUIREMENTS.claude },
       "codex.basic": { runtimeId: "codex", minimumVersion: RELEASE_MANAGED_RUNTIME_REQUIREMENTS.codex },
     });
-    expect(managedRuntimeRequirementForAdapter("anthropic-api")).toEqual({ runtimeId: "claude", minimumVersion: "0.3.247" });
-    expect(managedRuntimeRequirementForAdapter("claude-subscription")).toEqual({ runtimeId: "claude", minimumVersion: "0.3.247" });
+    expect(managedRuntimeRequirementForAdapter("anthropic-api")).toEqual({ runtimeId: "claude", minimumVersion: "0.3.250" });
+    expect(managedRuntimeRequirementForAdapter("claude-subscription")).toEqual({ runtimeId: "claude", minimumVersion: "0.3.250" });
     for (const adapterId of ["codex-subscription", "openai-api", "openrouter", "vercel-ai-router"]) {
       expect(managedRuntimeRequirementForAdapter(adapterId)).toEqual({ runtimeId: "codex", minimumVersion: "0.147.0" });
     }
@@ -28,7 +28,7 @@ describe("managed runtime requirements", () => {
       { adapterId: "anthropic-api", lifecycleState: "active" },
       { adapterId: "claude-subscription", lifecycleState: "tombstoned" },
     ])).toEqual([
-      { runtimeId: "claude", minimumVersion: "0.3.247" },
+      { runtimeId: "claude", minimumVersion: "0.3.250" },
       { runtimeId: "codex", minimumVersion: "0.147.0" },
     ]);
   });

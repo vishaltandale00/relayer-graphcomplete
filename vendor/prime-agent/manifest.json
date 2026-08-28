@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": {
     "repository": "https://github.com/vishaltandale00/prime-agent",
-    "commit": "2f4977eceb39e228b78241bd8084eb82b43efe6b"
+    "commit": "f6130839ad3043f1cd3d5294fe03023035bfcd5c"
   },
   "packages": [
     {
@@ -22,9 +22,9 @@
     {
       "name": "@earendil-works/pi-coding-agent",
       "version": "0.8.1",
-      "file": "earendil-works-pi-coding-agent-0.8.1-sha256-e30030498033239f32a58f51a5716c6bb3cbd71ae630b85fa875d27065c29b19.tgz",
-      "sha256": "e30030498033239f32a58f51a5716c6bb3cbd71ae630b85fa875d27065c29b19",
-      "treeSha256": "4e996fa724e6f97f6fc7e93c9ac33db273f492df00d810aa6e87bc692e6d7b57"
+      "file": "earendil-works-pi-coding-agent-0.8.1-sha256-ac88dfc53a9c737d214eccd81d77a6cd7f0b12a9e3432281b0a1a2a5cdd82e6a.tgz",
+      "sha256": "ac88dfc53a9c737d214eccd81d77a6cd7f0b12a9e3432281b0a1a2a5cdd82e6a",
+      "treeSha256": "1633b986dd8809ae6fe1013c9cb284bd7f50340dc12c64853b71872f56ea1156"
     },
     {
       "name": "@earendil-works/pi-tui",
@@ -60,9 +60,9 @@
     "pythonPackageTreeSha256": "f70f003aa45414121ed7ec7f759f945369cbf4ea120a754e651a340bb8f8f0e4"
   },
   "dependencyClosureSha256ByTarget": {
-    "darwin-arm64": "3afe87b82aef9f6876473ae9781be92c7b0685008412d25b4086f0d14d281961",
-    "darwin-x64": "29346ee054f873dda0ec5c15c5b3a39003c61fb8d2705117cbe762d65a994904",
-    "win32-x64": "477a0bbb7e8ad3b1a5645575aaca0bd9813b7a11f326b1d4dbcc2c4253bdbe7e"
+    "darwin-arm64": "bdbbff636ced9f4eca35ea16bb7a594cc89352c32dc0e1c039ccae753dc4fcea",
+    "darwin-x64": "958556efec9f1d899f74d33a4dde357c5901168c7b3ae36e42380d494d40a917",
+    "win32-x64": "d9457c3a442be1705e9d42d4640a187d7030dc1de5a332ea3643a15a1e70186b"
   },
   "harnessConfigurations": ["prime-agent-basic.yaml", "prime-agent-deep.yaml"],
   "pythonPackage": "relayer_graph"

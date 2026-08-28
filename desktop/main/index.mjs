@@ -18,6 +18,7 @@ import {
 } from "./providers/provider-definition-store.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { createConversationExportService } from "./services/conversation-export.mjs";
+import { inspectCodexBrowserMcpRuntime } from "./services/codex-browser-mcp-runtime.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
@@ -85,6 +86,19 @@ const permissionCatalogPath = app.isPackaged
 const graphClientModuleUrl = app.isPackaged
   ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
   : undefined;
+const codexBrowserMcpInspection = await inspectCodexBrowserMcpRuntime({
+  executable: process.execPath,
+  packageRoot: app.isPackaged
+    ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "chrome-devtools-mcp")
+    : join(repositoryRoot, "node_modules", "chrome-devtools-mcp"),
+});
+if (!codexBrowserMcpInspection.available) {
+  console.error("Codex browser helper unavailable", {
+    code: codexBrowserMcpInspection.code,
+    message: codexBrowserMcpInspection.message,
+    diagnostics: codexBrowserMcpInspection.diagnostics,
+  });
+}
 const primePythonClientRoot = app.isPackaged
   ? join(process.resourcesPath, "python", "relayer-graph", "src")
   : join(repositoryRoot, "python", "relayer-graph", "src");
@@ -143,6 +157,7 @@ if (primaryInstance) {
       diagnostics: primeAgentRuntime.diagnostics,
     })),
     codexBasicClientModuleUrl: graphClientModuleUrl,
+    ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
     acquireProviderExecution: (providerId) => {
       if (!providerSetup) throw new Error("Provider execution broker is not ready.");
       return providerSetup.acquireExecution(providerId);

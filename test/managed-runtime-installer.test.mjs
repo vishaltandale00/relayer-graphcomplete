@@ -141,18 +141,22 @@ describe("managed runtime installer", () => {
     child.kill = vi.fn();
     const spawnProcess = vi.fn(() => {
       queueMicrotask(() => {
-        child.stdout.end("claude 0.3.247\n");
+        child.stdout.end("claude 0.3.250\n");
         child.exitCode = 0;
         child.emit("exit", 0, null);
       });
       return child;
     });
-    const importModule = vi.fn(async () => ({ query: () => {} }));
+    const importModule = vi.fn(async () => ({
+      query: () => {},
+      tool: () => {},
+      createSdkMcpServer: () => {},
+    }));
 
     await expect(createDefaultRuntimeProbes({ spawnProcess, importModule }).claude({
       executable: "/runtime/claude",
       modulePath: "/runtime/sdk.mjs",
-    })).resolves.toEqual({ version: "0.3.247" });
+    })).resolves.toEqual({ version: "0.3.250" });
 
     expect(importModule).toHaveBeenCalledWith("file:///runtime/sdk.mjs");
   });
@@ -166,7 +170,7 @@ describe("managed runtime installer", () => {
     child.kill = vi.fn();
     const spawnProcess = () => {
       queueMicrotask(() => {
-        child.stdout.end("claude 0.3.247\n");
+        child.stdout.end("claude 0.3.250\n");
         child.exitCode = 0;
         child.emit("exit", 0, null);
       });
@@ -178,6 +182,32 @@ describe("managed runtime installer", () => {
       importModule: async () => ({}),
     }).claude({ executable: "/runtime/claude", modulePath: "/runtime/sdk.mjs" }))
       .rejects.toThrow("does not export query");
+  });
+
+  it.each([
+    ["tool", { query: () => {}, createSdkMcpServer: () => {} }],
+    ["createSdkMcpServer", { query: () => {}, tool: () => {} }],
+  ])("rejects a managed Claude SDK module without the %s browser boundary", async (_missing, loaded) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.kill = vi.fn();
+    const spawnProcess = () => {
+      queueMicrotask(() => {
+        child.stdout.end("claude 0.3.250\n");
+        child.exitCode = 0;
+        child.emit("exit", 0, null);
+      });
+      return child;
+    };
+
+    await expect(createDefaultRuntimeProbes({
+      spawnProcess,
+      importModule: async () => loaded,
+    }).claude({ executable: "/runtime/claude", modulePath: "/runtime/sdk.mjs" }))
+      .rejects.toThrow("does not export query(), tool(), and createSdkMcpServer()");
   });
 
   it("bounds a managed executable version probe and terminates a hung child", async () => {
@@ -207,13 +237,13 @@ describe("managed runtime installer", () => {
     const fetch = registryFixture(new Map([
       ["https://registry.npmjs.org/@anthropic-ai%2fclaude-agent-sdk/latest", {
         name: "@anthropic-ai/claude-agent-sdk",
-        version: "0.3.247",
-        optionalDependencies: { "@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.3.247" },
+        version: "0.3.250",
+        optionalDependencies: { "@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.3.250" },
         dist: { tarball: sdkTarball, integrity: integrity(sdkBytes) },
       }],
-      ["https://registry.npmjs.org/@anthropic-ai%2fclaude-agent-sdk-darwin-arm64/0.3.247", {
+      ["https://registry.npmjs.org/@anthropic-ai%2fclaude-agent-sdk-darwin-arm64/0.3.250", {
         name: "@anthropic-ai/claude-agent-sdk-darwin-arm64",
-        version: "0.3.247",
+        version: "0.3.250",
         dist: { tarball: nativeTarball, integrity: integrity(nativeBytes) },
       }],
       [sdkTarball, sdkBytes],
@@ -221,8 +251,8 @@ describe("managed runtime installer", () => {
     ]));
     const probe = vi.fn(async ({ executable, version }) => {
       expect(await readFile(executable, "utf8")).toBe("managed claude");
-      expect(version).toBe("0.3.247");
-      return { version: "2.1.247" };
+      expect(version).toBe("0.3.250");
+      return { version: "2.1.250" };
     });
 
     try {
@@ -239,9 +269,9 @@ describe("managed runtime installer", () => {
         },
       });
 
-      const installed = await installer.ensure("claude", "0.3.200");
+      const installed = await installer.ensure("claude", "0.3.250");
 
-      expect(installed).toMatchObject({ runtimeId: "claude", version: "0.3.247" });
+      expect(installed).toMatchObject({ runtimeId: "claude", version: "0.3.250" });
       expect(installed.executable).toMatch(/installations[/\\][^/\\]+[/\\]native[/\\]claude$/);
       expect(installed.modulePath).toMatch(/installations[/\\][^/\\]+[/\\]sdk[/\\]sdk\.mjs$/);
       expect(probe).toHaveBeenCalledOnce();
@@ -250,12 +280,32 @@ describe("managed runtime installer", () => {
       expect(receipt).toMatchObject({
         schemaVersion: 1,
         runtimeId: "claude",
-        version: "0.3.247",
-        runtimeVersion: "2.1.247",
+        version: "0.3.250",
+        runtimeVersion: "2.1.250",
         target: "macos-arm64",
       });
       expect(receipt.artifacts).toHaveLength(2);
-      await expect(installer.installed("claude", "0.3.200")).resolves.toMatchObject({ version: "0.3.247" });
+      await expect(installer.installed("claude", "0.3.250")).resolves.toMatchObject({ version: "0.3.250" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a Claude SDK older than the browser-proved managed runtime floor before probing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    const probe = vi.fn(async ({ version }) => ({ version }));
+    try {
+      const installer = createManagedRuntimeInstaller({
+        root,
+        platform: "darwin",
+        architecture: "arm64",
+        fetch: registryFixture(latestClaudeRoutes("0.3.248", "pre-browser-floor")),
+        probes: { claude: probe },
+      });
+
+      await expect(installer.ensure("claude", "0.3.250"))
+        .rejects.toThrow("claude latest 0.3.248 is below required 0.3.250");
+      expect(probe).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -1,0 +1,571 @@
+import { z } from "zod";
+
+export const CLAUDE_BROWSER_SERVER_NAME = "relayer_browser";
+export const CLAUDE_BROWSER_TOOL_NAME = "run";
+export const CLAUDE_BROWSER_TOOL = `mcp__${CLAUDE_BROWSER_SERVER_NAME}__${CLAUDE_BROWSER_TOOL_NAME}`;
+
+const DEFAULT_CDP_ENDPOINT = "http://127.0.0.1:9222";
+const MAX_OPERATIONS = 8;
+const MAX_TEXT_LENGTH = 20_000;
+const MAX_VALUE_LENGTH = 10_000;
+const MAX_PROTOCOL_MESSAGE_LENGTH = 1_000_000;
+const MAX_BUFFERED_CDP_EVENTS = 64;
+const REQUEST_TIMEOUT_MS = 10_000;
+
+const selector = z.string().trim().min(1).max(1_000);
+const targetSelector = z.union([
+  z.object({ targetId: z.string().trim().min(1).max(256) }).strict(),
+  z.object({ urlContains: z.string().min(1).max(2_048) }).strict(),
+  z.object({ titleContains: z.string().min(1).max(1_000) }).strict(),
+]);
+const operation = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("navigate"), url: z.url().max(4_096) }).strict(),
+  z.object({ type: z.literal("read_text"), selector: selector.optional() }).strict(),
+  z.object({ type: z.literal("click"), selector }).strict(),
+  z.object({ type: z.literal("fill"), selector, value: z.string().max(MAX_VALUE_LENGTH) }).strict(),
+]);
+const operations = z.array(operation).min(1).max(MAX_OPERATIONS).refine(
+  (items) => items.every((item, index) => !isTerminalOperation(item) || index === items.length - 1),
+  { message: "click and fill must be the final browser operation" },
+);
+const requestSchema = {
+  target: targetSelector.optional(),
+  operations,
+};
+
+type BrowserRequest = z.infer<z.ZodObject<typeof requestSchema>>;
+type BrowserTargetSelector = z.infer<typeof targetSelector>;
+
+export interface ClaudeBrowserSdk {
+  readonly tool: (
+    name: string,
+    description: string,
+    inputSchema: typeof requestSchema,
+    handler: (input: BrowserRequest, extra: unknown) => Promise<ClaudeBrowserToolResult>,
+  ) => unknown;
+  readonly createSdkMcpServer: (options: {
+    readonly name: string;
+    readonly version: string;
+    readonly instructions: string;
+    readonly tools: readonly unknown[];
+  }) => unknown;
+}
+
+export interface ClaudeBrowserToolResult {
+  readonly content: readonly { readonly type: "text"; readonly text: string }[];
+  readonly isError?: boolean;
+}
+
+interface BrowserSocket {
+  readonly readyState: number;
+  addEventListener(type: string, listener: (event: { readonly data?: unknown }) => void, options?: { once?: boolean }): void;
+  removeEventListener(type: string, listener: (event: { readonly data?: unknown }) => void): void;
+  send(data: string): void;
+  close(): void;
+}
+
+export interface ClaudeBasicBrowserDependencies {
+  /** Test-only override. Production always uses the code-owned loopback endpoint. */
+  readonly cdpEndpoint?: string;
+  readonly fetch?: typeof globalThis.fetch;
+  readonly createWebSocket?: (url: string) => BrowserSocket;
+  readonly timeoutMs?: number;
+}
+
+interface CdpTarget {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  readonly url: string;
+  readonly webSocketDebuggerUrl: string;
+}
+
+interface CdpResponse {
+  readonly id?: number;
+  readonly method?: string;
+  readonly result?: unknown;
+  readonly params?: unknown;
+  readonly error?: unknown;
+}
+
+export function createClaudeBasicBrowserServer(
+  sdk: ClaudeBrowserSdk,
+  dependencies: ClaudeBasicBrowserDependencies = {},
+): unknown {
+  const endpoint = validateLoopbackEndpoint(dependencies.cdpEndpoint ?? DEFAULT_CDP_ENDPOINT);
+  const tool = sdk.tool(
+    CLAUDE_BROWSER_TOOL_NAME,
+    "Use the user's already-running Chrome through its loopback DevTools endpoint. Runs one bounded batch of navigation, text observation, click, and fill operations. Click and fill must be the final operation because either may navigate; use a later call to reattach before continuing. If Chrome has multiple pages, select exactly one by targetId, URL substring, or title substring. It never starts or stops Chrome.",
+    requestSchema,
+    async (input, extra) => {
+      const signal = signalFromExtra(extra);
+      try {
+        const output = await runBrowserOperations(input, endpoint, dependencies, signal);
+        return { content: [{ type: "text", text: JSON.stringify(output) }] };
+      } catch (error) {
+        return {
+          content: [{ type: "text", text: browserErrorMessage(signal?.aborted ? new BrowserFailure("cancelled") : error) }],
+          isError: true,
+        };
+      }
+    },
+  );
+  return sdk.createSdkMcpServer({
+    name: CLAUDE_BROWSER_SERVER_NAME,
+    version: "1.0.0",
+    instructions: "This server attaches only to the code-owned loopback Chrome DevTools endpoint. Use one run call for a bounded related interaction. Click and fill must be final in a call; if either navigates, reattach with a later call before continuing. A single open page needs no target selector; multiple pages require a selector that matches exactly one. Chrome must already be running with remote debugging enabled.",
+    tools: [tool],
+  });
+}
+
+async function runBrowserOperations(
+  request: BrowserRequest,
+  endpoint: URL,
+  dependencies: ClaudeBasicBrowserDependencies,
+  signal?: AbortSignal,
+): Promise<{ readonly operations: readonly unknown[] }> {
+  throwIfAborted(signal);
+  if (request.operations.some((item, index) => isTerminalOperation(item) && index !== request.operations.length - 1)) {
+    throw new BrowserFailure("invalid-request");
+  }
+  const target = await discoverTarget(endpoint, dependencies, request.target, signal);
+  const client = new CdpClient(
+    target.webSocketDebuggerUrl,
+    dependencies.createWebSocket ?? ((url) => new WebSocket(url) as unknown as BrowserSocket),
+    dependencies.timeoutMs ?? REQUEST_TIMEOUT_MS,
+    signal,
+  );
+  try {
+    await client.connect();
+    const results: unknown[] = [];
+    for (const current of request.operations) {
+      throwIfAborted(signal);
+      switch (current.type) {
+        case "navigate": {
+          const url = validateNavigationUrl(current.url);
+          await client.command("Page.enable");
+          await client.command("Page.setLifecycleEventsEnabled", { enabled: true });
+          const sameDocument = client.captureEvents("Page.navigatedWithinDocument");
+          const loaded = client.captureEvents("Page.lifecycleEvent", isLoadLifecycleEvent);
+          try {
+            const navigation = await client.command("Page.navigate", { url });
+            if (isRecord(navigation) && typeof navigation.errorText === "string" && navigation.errorText !== "") {
+              throw new BrowserFailure("navigation-failed");
+            }
+            if (!isRecord(navigation) || typeof navigation.frameId !== "string") {
+              throw new BrowserFailure("operation-failed");
+            }
+            const frameId = navigation.frameId;
+            const loaderId = navigation.loaderId;
+            const completion = typeof loaderId === "string"
+              ? loaded.waitFor((event) => isMatchingLoadEvent(event, frameId, loaderId))
+              : sameDocument.waitFor((event) => isMatchingSameDocumentEvent(event, frameId, url));
+            const outcome = await completion;
+            if (!outcome.ok) throw outcome.error;
+          } catch (error) {
+            sameDocument.cancel();
+            loaded.cancel();
+            throw error;
+          }
+          sameDocument.cancel();
+          loaded.cancel();
+          results.push({ type: current.type, url });
+          break;
+        }
+        case "read_text": {
+          const value = await client.evaluate(pageFunction("read_text"), { selector: current.selector ?? "body" });
+          if (!isRecord(value)
+            || typeof value.text !== "string"
+            || value.text.length > MAX_TEXT_LENGTH
+            || typeof value.originalLength !== "number"
+            || !Number.isSafeInteger(value.originalLength)
+            || value.originalLength < value.text.length) {
+            throw new BrowserFailure("operation-failed");
+          }
+          results.push({
+            type: current.type,
+            text: value.text,
+            truncated: value.originalLength > value.text.length,
+          });
+          break;
+        }
+        case "click": {
+          const clicked = await client.evaluate(pageFunction("click"), { selector: current.selector });
+          if (clicked !== true) throw new BrowserFailure("operation-failed");
+          results.push({ type: current.type, clicked: true });
+          break;
+        }
+        case "fill": {
+          const filled = await client.evaluate(pageFunction("fill"), { selector: current.selector, value: current.value });
+          if (filled !== true) throw new BrowserFailure("operation-failed");
+          results.push({ type: current.type, filled: true });
+          break;
+        }
+      }
+    }
+    return { operations: results };
+  } finally {
+    client.close();
+  }
+}
+
+function isTerminalOperation(item: { readonly type: string }): boolean {
+  return item.type === "click" || item.type === "fill";
+}
+
+async function discoverTarget(
+  endpoint: URL,
+  dependencies: ClaudeBasicBrowserDependencies,
+  selector: BrowserTargetSelector | undefined,
+  signal?: AbortSignal,
+): Promise<CdpTarget> {
+  const fetchImpl = dependencies.fetch ?? globalThis.fetch;
+  const controller = new AbortController();
+  const cancel = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", cancel, { once: true });
+  const timer = setTimeout(() => controller.abort(new BrowserFailure("timeout")), dependencies.timeoutMs ?? REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(new URL("/json/list", endpoint), { signal: controller.signal });
+    if (!response.ok) throw new BrowserFailure("unavailable");
+    const declaredLength = Number(response.headers.get("content-length") ?? "0");
+    if (declaredLength > MAX_PROTOCOL_MESSAGE_LENGTH) throw new BrowserFailure("invalid-response");
+    const text = await readBoundedResponse(response, controller);
+    let body: unknown;
+    try { body = JSON.parse(text); } catch { throw new BrowserFailure("invalid-response"); }
+    if (!Array.isArray(body)) throw new BrowserFailure("invalid-response");
+    const targets = body.filter((candidate): candidate is CdpTarget => (
+      isRecord(candidate)
+      && candidate.type === "page"
+      && typeof candidate.id === "string"
+      && typeof candidate.title === "string"
+      && typeof candidate.url === "string"
+      && isAllowedSocketUrl(candidate.webSocketDebuggerUrl, endpoint, candidate.id)
+    ));
+    const matches = selectTargets(targets, selector);
+    if (matches.length === 0) throw new BrowserFailure("no-page");
+    if (matches.length > 1) throw new BrowserFailure("ambiguous-target");
+    return matches[0]!;
+  } catch (error) {
+    if (signal?.aborted) throw new BrowserFailure("cancelled");
+    if (controller.signal.reason instanceof BrowserFailure) throw controller.signal.reason;
+    if (error instanceof BrowserFailure) throw error;
+    throw new BrowserFailure("unavailable");
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", cancel);
+  }
+}
+
+class CdpClient {
+  private readonly socket: BrowserSocket;
+  private nextId = 1;
+  private readonly pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
+  private readonly events = new Map<string, Set<{
+    accept(value: unknown): boolean;
+    reject(error: Error): void;
+    timer: ReturnType<typeof setTimeout>;
+  }>>();
+  private readonly abort = () => this.failAll(abortFailure(this.signal));
+  private listening = false;
+
+  constructor(
+    url: string,
+    createSocket: (url: string) => BrowserSocket,
+    private readonly timeoutMs: number,
+    private readonly signal?: AbortSignal,
+  ) {
+    throwIfAborted(signal);
+    this.socket = createSocket(url);
+    if (signal?.aborted) {
+      this.socket.close();
+      throw abortFailure(signal);
+    }
+    signal?.addEventListener("abort", this.abort, { once: true });
+  }
+
+  async connect(): Promise<void> {
+    if (this.socket.readyState === 1) { this.listen(); return; }
+    await this.socketWait("open");
+  }
+
+  command(method: string, params: Readonly<Record<string, unknown>> = {}): Promise<unknown> {
+    throwIfAborted(this.signal);
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new BrowserFailure("timeout"));
+      }, this.timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      this.socket.send(JSON.stringify({ id, method, params }));
+    });
+  }
+
+  async evaluate(expression: string, argument: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const response = await this.command("Runtime.evaluate", {
+      expression: `(${expression})(${JSON.stringify(argument)})`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (!isRecord(response) || !isRecord(response.result)) throw new BrowserFailure("operation-failed");
+    if (response.exceptionDetails !== undefined) throw new BrowserFailure("operation-failed");
+    return response.result.value;
+  }
+
+  captureEvents(method: string, isCandidate: (value: unknown) => boolean = () => true): {
+    waitFor(matches: (value: unknown) => boolean): Promise<{ readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: Error }>;
+    cancel(): void;
+  } {
+    let matches: ((value: unknown) => boolean) | undefined;
+    const buffered: unknown[] = [];
+    let cancel = () => {};
+    let waiter: {
+      accept(value: unknown): boolean;
+      reject(error: Error): void;
+      timer: ReturnType<typeof setTimeout>;
+    };
+    const pending = new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.events.get(method)?.delete(waiter);
+        reject(new BrowserFailure("timeout"));
+      }, this.timeoutMs);
+      waiter = {
+        accept: (value: unknown) => {
+          if (!isCandidate(value)) return false;
+          if (matches === undefined) {
+            if (buffered.length >= MAX_BUFFERED_CDP_EVENTS) {
+              clearTimeout(timer);
+              reject(new BrowserFailure("invalid-response"));
+              return true;
+            }
+            buffered.push(value);
+            return false;
+          }
+          if (!matches(value)) return false;
+          clearTimeout(timer);
+          resolve(value);
+          return true;
+        },
+        reject,
+        timer,
+      };
+      const current = this.events.get(method) ?? new Set();
+      current.add(waiter);
+      this.events.set(method, current);
+      cancel = () => {
+        clearTimeout(timer);
+        this.events.get(method)?.delete(waiter);
+        resolve(undefined);
+      };
+    });
+    // Observe rejection immediately. A disconnect or cancellation can reject
+    // the CDP command and this event waiter in the same turn; the outcome
+    // promise never rejects while the command path unwinds and closes the socket.
+    const promise = pending.then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error: error instanceof Error ? error : new BrowserFailure("disconnected") }),
+    );
+    return {
+      waitFor: (candidate) => {
+        matches = candidate;
+        const bufferedMatch = buffered.findIndex(candidate);
+        const value = buffered[bufferedMatch];
+        buffered.length = 0;
+        if (bufferedMatch >= 0 && waiter.accept(value)) {
+          this.events.get(method)?.delete(waiter);
+        }
+        return promise;
+      },
+      cancel,
+    };
+  }
+
+  close(): void {
+    this.signal?.removeEventListener("abort", this.abort);
+    this.failAll(new BrowserFailure("disconnected"));
+    this.socket.close();
+  }
+
+  private socketWait(type: "open"): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const opened = () => { cleanup(); this.listen(); resolve(); };
+      const failed = () => { cleanup(); reject(new BrowserFailure("unavailable")); };
+      const cancelled = () => { cleanup(); reject(abortFailure(this.signal)); };
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.socket.removeEventListener("open", opened);
+        this.socket.removeEventListener("error", failed);
+        this.signal?.removeEventListener("abort", cancelled);
+      };
+      const timer = setTimeout(() => { cleanup(); reject(new BrowserFailure("timeout")); }, this.timeoutMs);
+      this.socket.addEventListener(type, opened, { once: true });
+      this.socket.addEventListener("error", failed, { once: true });
+      this.signal?.addEventListener("abort", cancelled, { once: true });
+    });
+  }
+
+  private listen(): void {
+    if (this.listening) return;
+    this.listening = true;
+    this.socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") return;
+      if (event.data.length > MAX_PROTOCOL_MESSAGE_LENGTH) {
+        this.failAll(new BrowserFailure("invalid-response"));
+        return;
+      }
+      let message: CdpResponse;
+      try { message = JSON.parse(event.data) as CdpResponse; } catch { return; }
+      if (typeof message.id === "number") {
+        const pending = this.pending.get(message.id);
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        this.pending.delete(message.id);
+        if (message.error !== undefined) pending.reject(new BrowserFailure("operation-failed"));
+        else pending.resolve(message.result);
+      } else if (typeof message.method === "string") {
+        const waiters = this.events.get(message.method);
+        if (!waiters) return;
+        for (const waiter of [...waiters]) {
+          if (waiter.accept(message.params)) waiters.delete(waiter);
+        }
+        if (waiters.size === 0) this.events.delete(message.method);
+      }
+    });
+    const disconnected = () => this.failAll(new BrowserFailure("disconnected"));
+    this.socket.addEventListener("close", disconnected, { once: true });
+    this.socket.addEventListener("error", disconnected, { once: true });
+  }
+
+  private failAll(error: Error): void {
+    for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
+    this.pending.clear();
+    for (const waiters of this.events.values()) {
+      for (const waiter of waiters) { clearTimeout(waiter.timer); waiter.reject(error); }
+    }
+    this.events.clear();
+  }
+}
+
+function pageFunction(type: "read_text" | "click" | "fill"): string {
+  if (type === "read_text") return `({selector}) => { const element = document.querySelector(selector); if (!element) throw new Error("missing"); const text = element.textContent ?? ""; return {text:text.slice(0,${MAX_TEXT_LENGTH}),originalLength:text.length}; }`;
+  if (type === "click") return `({selector}) => { const element = document.querySelector(selector); if (!(element instanceof HTMLElement) || element.matches(":disabled") || element.getAttribute("aria-disabled") === "true") throw new Error("invalid"); element.click(); return true; }`;
+  return `({selector,value}) => { const element = document.querySelector(selector); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) || element.matches(":disabled") || element.readOnly) throw new Error("invalid"); const prototype = element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype; const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set; if (!setter) throw new Error("invalid"); element.focus(); setter.call(element, value); element.dispatchEvent(new Event("input", {bubbles:true})); element.dispatchEvent(new Event("change", {bubbles:true})); return element.value === value; }`;
+}
+
+function validateLoopbackEndpoint(value: string): URL {
+  let endpoint: URL;
+  try { endpoint = new URL(value); } catch { throw new BrowserFailure("invalid-endpoint"); }
+  if (endpoint.protocol !== "http:"
+    || !new Set(["127.0.0.1", "[::1]", "localhost"]).has(endpoint.hostname)
+    || endpoint.username !== "" || endpoint.password !== ""
+    || endpoint.pathname !== "/" || endpoint.search !== "" || endpoint.hash !== "") {
+    throw new BrowserFailure("invalid-endpoint");
+  }
+  return endpoint;
+}
+
+function validateNavigationUrl(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new BrowserFailure("invalid-request");
+  return url.href;
+}
+
+function isLoadLifecycleEvent(value: unknown): boolean {
+  return isRecord(value) && value.name === "load";
+}
+
+function isMatchingLoadEvent(value: unknown, frameId: string, loaderId: string): boolean {
+  return isRecord(value) && value.name === "load" && value.frameId === frameId && value.loaderId === loaderId;
+}
+
+function isMatchingSameDocumentEvent(value: unknown, frameId: string, url: string): boolean {
+  return isRecord(value) && value.frameId === frameId && value.url === url;
+}
+
+function isAllowedSocketUrl(value: unknown, endpoint: URL, targetId: string): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "ws:"
+      && url.hostname === endpoint.hostname
+      && url.port === endpoint.port
+      && url.username === ""
+      && url.password === ""
+      && url.pathname === `/devtools/page/${targetId}`
+      && url.search === ""
+      && url.hash === "";
+  } catch { return false; }
+}
+
+function selectTargets(targets: readonly CdpTarget[], selector: BrowserTargetSelector | undefined): readonly CdpTarget[] {
+  if (selector === undefined) return targets;
+  if ("targetId" in selector) return targets.filter((target) => target.id === selector.targetId);
+  if ("urlContains" in selector) return targets.filter((target) => target.url.includes(selector.urlContains));
+  return targets.filter((target) => target.title.includes(selector.titleContains));
+}
+
+async function readBoundedResponse(response: Response, controller: AbortController): Promise<string> {
+  if (response.body === null) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_PROTOCOL_MESSAGE_LENGTH) {
+        const failure = new BrowserFailure("invalid-response");
+        controller.abort(failure);
+        await reader.cancel(failure).catch(() => {});
+        throw failure;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function signalFromExtra(extra: unknown): AbortSignal | undefined {
+  return isRecord(extra) && isAbortSignal(extra.signal) ? extra.signal : undefined;
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return isRecord(value) && typeof value.aborted === "boolean" && typeof value.addEventListener === "function";
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortFailure(signal);
+}
+
+function abortFailure(signal?: AbortSignal): Error {
+  return new BrowserFailure(signal?.aborted ? "cancelled" : "disconnected");
+}
+
+class BrowserFailure extends Error {
+  constructor(readonly code: string) { super(code); }
+}
+
+function browserErrorMessage(error: unknown): string {
+  const code = error instanceof BrowserFailure ? error.code : "operation-failed";
+  switch (code) {
+    case "cancelled": return "Browser operation cancelled.";
+    case "timeout": return "Chrome did not respond before the browser operation timed out.";
+    case "invalid-endpoint": return "The browser helper is restricted to its loopback Chrome endpoint.";
+    case "invalid-request": return "The browser request is not supported.";
+    case "no-page": return "No attachable Chrome page is available.";
+    case "ambiguous-target": return "More than one Chrome page matches the browser target selection.";
+    case "navigation-failed": return "Chrome could not reach the requested page.";
+    case "invalid-response": return "Chrome returned an invalid browser discovery response.";
+    case "unavailable": return "Chrome is not available at the browser helper endpoint.";
+    case "disconnected": return "Chrome disconnected during the browser operation.";
+    default: return "The browser operation failed.";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
