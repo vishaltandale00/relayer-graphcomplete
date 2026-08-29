@@ -1,5 +1,6 @@
 mod error;
 mod graph;
+pub mod query;
 mod storage;
 
 pub use error::{GraphError, ValidationIssue};
