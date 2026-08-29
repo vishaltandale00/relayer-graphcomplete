@@ -1127,35 +1127,36 @@ async fn get_action(
 }
 
 async fn accepted_action(writer: &GraphWriter, id: ActionId) -> Result<GraphAction, ApiError> {
-    let output = writer.completion_output().await?.ok_or_else(|| {
-        ApiError(
-            StatusCode::NOT_FOUND,
-            json!({"error":{"code":"completion_not_found","message":"This node has no accepted completion output yet."}}),
-        )
-    })?;
-    let mut layers = VecDeque::from([output.root_layer]);
-    let mut visited = HashSet::new();
-    while let Some(layer) = layers.pop_front() {
-        if !visited.insert(layer.layer.id) {
-            continue;
-        }
-        for action in layer.actions {
-            if action.id == id && action.state == RecordState::Accepted {
-                return Ok(action);
+    if let Some(output) = writer.completion_output().await? {
+        let mut layers = VecDeque::from([output.root_layer]);
+        let mut visited = HashSet::new();
+        while let Some(layer) = layers.pop_front() {
+            if !visited.insert(layer.layer.id) {
+                continue;
             }
-            if action.kind == ActionKind::Navigate
-                && action.state == RecordState::Accepted
-                && let Some(target_layer_id) = action.target_layer_id
-                && !visited.contains(&target_layer_id)
-            {
-                layers.push_back(writer.get_layer(target_layer_id).await?);
+            for action in layer.actions {
+                if action.id == id && action.state == RecordState::Accepted {
+                    return Ok(action);
+                }
+                if action.kind == ActionKind::Navigate
+                    && action.state == RecordState::Accepted
+                    && let Some(target_layer_id) = action.target_layer_id
+                    && !visited.contains(&target_layer_id)
+                {
+                    layers.push_back(writer.get_layer(target_layer_id).await?);
+                }
             }
         }
     }
-    Err(ApiError(
-        StatusCode::NOT_FOUND,
-        json!({"error":{"code":"action_not_found","message":"This accepted completion does not contain that action."}}),
-    ))
+    // A completion that has not returned yet has no output, but it can already have
+    // published an accepted invoke occurrence through a current advance. That published
+    // occurrence is exactly what recursive child preparation derives authority from.
+    writer.accepted_authored_action(id).await?.ok_or_else(|| {
+        ApiError(
+            StatusCode::NOT_FOUND,
+            json!({"error":{"code":"action_not_found","message":"This completion has no accepted action with that identity."}}),
+        )
+    })
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     approval::{ApprovalDecision, ApprovalDecisionSubmission, ApprovalReceipt},
-    completion_broker::{CompletionBrokerGrant, CompletionBrokerLease, CompletionObservations},
+    completion_broker::{CompletionBrokerGrant, CompletionBrokerLease},
     product::{
         AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionContextIntent,
         InteractionId, InteractionModelSelection, InvokeActionOutcome, ModelFamilyId,
@@ -1330,9 +1330,6 @@ pub(super) async fn completion_current(
     ))
 }
 
-/// How long one awaited observation stays open before it answers with the unchanged current.
-const COMPLETION_OBSERVATION_HOLD: std::time::Duration = std::time::Duration::from_secs(25);
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CompletionResultQuery {
@@ -1357,14 +1354,12 @@ pub(super) async fn completion_result(
     if let Some(after_revision) = query.after_revision
         && current.lifecycle == relayer_graph_core::CompletionLifecycle::Active
         && current.head_revision <= after_revision
+        && state
+            .completion_observations
+            .hold(completion_id, after_revision)
+            .await
     {
-        current = hold_completion_observation(
-            &state.completion_observations,
-            completion_id,
-            after_revision,
-            current,
-        )
-        .await;
+        current = runtime.completion_current(completion_id).await?;
     }
     match current.lifecycle {
         relayer_graph_core::CompletionLifecycle::Succeeded => {
@@ -1407,6 +1402,8 @@ pub(super) async fn stop_completion(
     Path(completion_id): Path<i64>,
     request: Option<Json<StopCompletionRequest>>,
 ) -> Result<Json<Value>, ApiError> {
+    let grant = authorize_completion_broker(&state, &headers)?;
+    let interaction = authorize_child_completion(&state, grant, completion_id).await?;
     let reason = request
         .and_then(|Json(body)| body.reason)
         .unwrap_or_default();
@@ -1415,17 +1412,13 @@ pub(super) async fn stop_completion(
             "stop reason must be at most 200 non-control characters",
         ));
     }
-    let grant = authorize_completion_broker(&state, &headers)?;
-    let interaction = authorize_child_completion(&state, grant, completion_id).await?;
     let runtime = state
         .runtime
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
-    let cancelled = runtime
-        .cancel_invoked_completion(interaction.thread_id.value(), completion_id)
-        .await?;
-    // Cancelling the provider alone would settle the child as a failure. An explicit
-    // parent stop is a terminal stop that retains the child's last published current.
+    // Settle the durable current before cancelling the provider. Cancelling first lets the
+    // provider-exit observer record `provider_exited_without_return` and win the race, and a
+    // deliberately stopped child would then report `failed`.
     let stopped = runtime
         .stop_graph_completion(
             completion_id,
@@ -1444,6 +1437,9 @@ pub(super) async fn stop_completion(
             (current.lifecycle, current.head_revision)
         }
     };
+    let cancelled = runtime
+        .cancel_invoked_completion(interaction.thread_id.value(), completion_id)
+        .await?;
     Ok(Json(serde_json::json!({
         "cancelled": cancelled,
         "completionId": completion_id,
@@ -1451,42 +1447,6 @@ pub(super) async fn stop_completion(
         "revision": revision,
         "reason": reason,
     })))
-}
-
-/// Answers when the awaited completion advances past the caller's revision.
-///
-/// Delivery is sourced from the supervising observer's projection reads, so an awaiting
-/// execution never polls. An unobserved completion answers immediately with its current.
-async fn hold_completion_observation(
-    observations: &CompletionObservations,
-    completion_id: i64,
-    after_revision: u64,
-    current: relayer_graph_core::CompletionState,
-) -> relayer_graph_core::CompletionState {
-    let Some(mut observation) = observations.subscribe(completion_id) else {
-        return current;
-    };
-    let deadline = tokio::time::Instant::now() + COMPLETION_OBSERVATION_HOLD;
-    loop {
-        let observed = observation.borrow_and_update().clone();
-        if observed.head_revision > after_revision
-            || observed.lifecycle != relayer_graph_core::CompletionLifecycle::Active
-        {
-            return observed;
-        }
-        if !matches!(
-            tokio::time::timeout_at(deadline, observation.changed()).await,
-            Ok(Ok(()))
-        ) {
-            // The hold elapsed, or the completion stopped being supervised. Answer with
-            // whichever view is furthest ahead so the caller's cursor never moves backwards.
-            return if observed.head_revision > current.head_revision {
-                observed
-            } else {
-                current
-            };
-        }
-    }
 }
 
 fn authorize_completion_broker(
@@ -1575,19 +1535,39 @@ fn spawn_recursive_completion_observers(
     let permission_receipt = prepared.effective_permission_receipt.clone();
     let completion_id = prepared.graph_node_id;
     let semantic_origin_digest = permission_origin_digest.clone();
+    let supervision = semantic_state
+        .completion_observations
+        .supervise(completion_id);
     tokio::spawn(async move {
-        let _observation = semantic_state.completion_observations.guard(completion_id);
+        let _supervision = supervision;
         let mut observation_failures = 0_u8;
+        let mut projection_cursor = 0_u64;
         loop {
             let Some(runtime) = semantic_state.runtime.as_ref() else {
                 return;
             };
-            let observed = runtime.observed_completion_state(completion_id).await;
-            if let Ok(current) = observed.as_ref() {
-                semantic_state
-                    .completion_observations
-                    .publish(current.clone());
-            }
+            let observed = match runtime
+                .observed_completion_projection(completion_id, projection_cursor)
+                .await
+            {
+                Ok(page) => {
+                    projection_cursor = page.cursor;
+                    for event in &page.events {
+                        semantic_state
+                            .completion_observations
+                            .publish(completion_id, event.into());
+                    }
+                    page.states
+                        .into_iter()
+                        .find(|state| state.completion_id.value() == completion_id)
+                        .ok_or_else(|| {
+                            RuntimeError::Protocol(format!(
+                                "canonical current projection is missing for completion {completion_id}"
+                            ))
+                        })
+                }
+                Err(error) => Err(error),
+            };
             match observed {
                 Ok(current)
                     if current.lifecycle == relayer_graph_core::CompletionLifecycle::Active =>
@@ -2378,7 +2358,10 @@ mod tests {
             ApprovalAction, ApprovalActor, ApprovalCorrelation, ApprovalOutcome, ApprovalRequest,
             ApprovalResolution,
         },
-        completion_broker::CompletionBrokerRegistry,
+        completion_broker::{
+            COMPLETION_OBSERVATION_HOLD, CompletionBrokerRegistry, CompletionObservations,
+            ObservedRevision,
+        },
         conversation_export::ExportProducer,
         product::{
             CreateThreadCommand, NodeContextDraftConfirmationService, ProductService,
@@ -2959,105 +2942,80 @@ mod tests {
         fixture.finish();
     }
 
-    fn observed_state(
+    fn observed(
         lifecycle: relayer_graph_core::CompletionLifecycle,
-        head_revision: u64,
-    ) -> relayer_graph_core::CompletionState {
-        serde_json::from_value(serde_json::json!({
-            "completionId":202,"lifecycle":lifecycle,"headRevision":head_revision,
-            "currentLayerId":1,"finalLayerId":null,"safeReason":null,
-            "temporalFeatures":{"configVersion":1,"schemaRead":true,
-                "rootCurrentWrite":true,"projectionUi":true,
-                "invokeResolution":true,"providerRecursion":true}
-        }))
-        .unwrap()
+        revision: u64,
+    ) -> ObservedRevision {
+        ObservedRevision {
+            revision,
+            lifecycle,
+        }
     }
 
     #[tokio::test]
     async fn a_held_observation_answers_when_the_awaited_pointer_advances() {
         let observations = CompletionObservations::default();
-        let _guard = observations.guard(202);
-        observations.publish(observed_state(
-            relayer_graph_core::CompletionLifecycle::Active,
-            2,
-        ));
+        let _supervision = observations.supervise(202);
+        observations.publish(
+            202,
+            observed(relayer_graph_core::CompletionLifecycle::Active, 2),
+        );
         let publisher = observations.clone();
         tokio::spawn(async move {
-            publisher.publish(observed_state(
-                relayer_graph_core::CompletionLifecycle::Active,
-                3,
-            ));
+            publisher.publish(
+                202,
+                observed(relayer_graph_core::CompletionLifecycle::Active, 3),
+            );
         });
 
-        let delivered = hold_completion_observation(
-            &observations,
-            202,
-            2,
-            observed_state(relayer_graph_core::CompletionLifecycle::Active, 2),
-        )
-        .await;
-
-        assert_eq!(delivered.head_revision, 3);
+        assert!(observations.hold(202, 2).await);
     }
 
     #[tokio::test]
     async fn a_held_observation_answers_immediately_once_the_child_is_terminal() {
         let observations = CompletionObservations::default();
-        let _guard = observations.guard(202);
-        observations.publish(observed_state(
-            relayer_graph_core::CompletionLifecycle::Stopped,
-            2,
-        ));
-
-        let delivered = hold_completion_observation(
-            &observations,
+        let _supervision = observations.supervise(202);
+        observations.publish(
             202,
-            9,
-            observed_state(relayer_graph_core::CompletionLifecycle::Active, 2),
-        )
-        .await;
-
-        assert_eq!(
-            delivered.lifecycle,
-            relayer_graph_core::CompletionLifecycle::Stopped
+            observed(relayer_graph_core::CompletionLifecycle::Stopped, 2),
         );
+
+        assert!(observations.hold(202, 9).await);
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_held_observation_releases_its_caller_when_the_hold_elapses() {
         let observations = CompletionObservations::default();
-        let _guard = observations.guard(202);
-        observations.publish(observed_state(
-            relayer_graph_core::CompletionLifecycle::Active,
-            4,
-        ));
+        let _supervision = observations.supervise(202);
+        observations.publish(
+            202,
+            observed(relayer_graph_core::CompletionLifecycle::Active, 4),
+        );
         let started = tokio::time::Instant::now();
 
-        let delivered = hold_completion_observation(
-            &observations,
-            202,
-            4,
-            observed_state(relayer_graph_core::CompletionLifecycle::Active, 4),
-        )
-        .await;
-
-        assert_eq!(delivered.head_revision, 4);
+        assert!(!observations.hold(202, 4).await);
         assert!(started.elapsed() >= COMPLETION_OBSERVATION_HOLD);
     }
 
-    #[tokio::test]
-    async fn an_unobserved_completion_answers_with_its_own_current() {
+    #[tokio::test(start_paused = true)]
+    async fn a_supervised_completion_holds_before_its_first_projection_read() {
         let observations = CompletionObservations::default();
+        let _supervision = observations.supervise(202);
+        let started = tokio::time::Instant::now();
 
-        let delivered = hold_completion_observation(
-            &observations,
-            202,
-            9,
-            observed_state(relayer_graph_core::CompletionLifecycle::Active, 5),
-        )
-        .await;
+        // Nothing has been published yet. Answering now would put the awaiting execution
+        // straight back on the wire with the same cursor, which is the loop we removed.
+        assert!(!observations.hold(202, 0).await);
+        assert!(started.elapsed() >= COMPLETION_OBSERVATION_HOLD);
+    }
 
-        assert_eq!(delivered.head_revision, 5);
+    #[tokio::test(start_paused = true)]
+    async fn an_unsupervised_completion_holds_rather_than_inviting_a_request_loop() {
+        let observations = CompletionObservations::default();
+        let started = tokio::time::Instant::now();
+
+        assert!(!observations.hold(202, 9).await);
+        assert!(started.elapsed() >= COMPLETION_OBSERVATION_HOLD);
     }
 
     async fn serve(app: Router) -> (String, tokio::task::JoinHandle<Result<(), std::io::Error>>) {

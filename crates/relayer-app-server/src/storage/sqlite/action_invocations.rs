@@ -15,12 +15,18 @@ impl SqliteProductStore {
         fetch_action_invocations_for_export(&mut connection, thread_id).await
     }
 
+    /// Resolves the graph invoke occurrence one result interaction was created from.
+    ///
+    /// A running source is included deliberately. A human clicks an invoke action only after
+    /// its turn is accepted, but an agent delegates from a completion that is still running,
+    /// and that occurrence is what binds its child's identity. The graph engine, not this
+    /// lookup, decides whether the occurrence is a published and leasable one.
     pub(crate) async fn invocation_graph_source(
         &self,
         result_interaction_id: InteractionId,
     ) -> Result<Option<(i64, i64)>, StorageError> {
         sqlx::query_as(
-            "SELECT source.graph_node_id,ai.action_id FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id WHERE ai.result_interaction_id=?1 AND ai.authoritative=1 AND source.completion_status='accepted' AND source.graph_node_id IS NOT NULL",
+            "SELECT source.graph_node_id,ai.action_id FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id WHERE ai.result_interaction_id=?1 AND ai.authoritative=1 AND source.completion_status IN ('accepted','running') AND source.graph_node_id IS NOT NULL",
         )
         .bind(result_interaction_id.value())
         .fetch_optional(&self.pool)

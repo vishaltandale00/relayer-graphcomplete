@@ -156,6 +156,9 @@ pub(crate) struct PreparedInteraction {
     configuration: HarnessConfiguration,
     model_selection: Option<ExecutionModelSelection>,
     personal_presentation_version_id: Option<i64>,
+    /// The policy this execution was admitted under. A recursive child launch must carry it
+    /// too: once a session has taken a dynamic policy update, every later execution needs one.
+    harness_policy: Option<ExecutionHarnessPolicy>,
 }
 
 #[derive(Debug)]
@@ -655,6 +658,7 @@ impl RuntimeClient {
         Ok(PreparedInteraction {
             graph_node_id: interaction.node.id,
             graph_token: Uuid::new_v4().to_string(),
+            harness_policy: command.harness_policy.cloned(),
             harness_configuration_name: selected.configuration.name.clone(),
             harness_configuration_digest: harness_configuration_digest.to_owned(),
             permission_profile_id: command.permission_profile.id.clone(),
@@ -884,6 +888,9 @@ impl RuntimeClient {
                 "adapterId": &model_selection.adapter_id,
                 "modelId": &model_selection.model_id,
             });
+        }
+        if let Some(harness_policy) = prepared.harness_policy.as_ref() {
+            body["harnessPolicy"] = serde_json::to_value(harness_policy)?;
         }
         if let Some(completion_broker) = completion_broker {
             body["completionBroker"] = serde_json::json!({
@@ -1548,21 +1555,26 @@ impl RuntimeClient {
         )?)
     }
 
-    /// Reads one completion's durable current from the projection surface that orders revisions.
-    pub(crate) async fn observed_completion_state(
+    /// Reads one completion's projection page: its durable current plus the outbox records
+    /// published since `after_sequence`, in the order the outbox committed them.
+    pub(crate) async fn observed_completion_projection(
         &self,
         interaction_node_id: i64,
-    ) -> Result<relayer_graph_core::CompletionState, RuntimeError> {
-        self.current_projection_page(&[interaction_node_id], 0, 1)
-            .await?
+        after_sequence: u64,
+    ) -> Result<relayer_graph_core::CurrentProjectionPage, RuntimeError> {
+        let page = self
+            .current_projection_page(&[interaction_node_id], after_sequence, 100)
+            .await?;
+        if !page
             .states
-            .into_iter()
-            .find(|state| state.completion_id.value() == interaction_node_id)
-            .ok_or_else(|| {
-                RuntimeError::Protocol(format!(
-                    "canonical current projection is missing for completion {interaction_node_id}"
-                ))
-            })
+            .iter()
+            .any(|state| state.completion_id.value() == interaction_node_id)
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "canonical current projection is missing for completion {interaction_node_id}"
+            )));
+        }
+        Ok(page)
     }
 
     pub(crate) async fn current_projection_page(
@@ -2518,6 +2530,7 @@ mod tests {
         let prepared = PreparedInteraction {
             graph_node_id: 41,
             graph_token: "child-token".into(),
+            harness_policy: None,
             harness_configuration_name: "test".into(),
             harness_configuration_digest: "sha256:test".into(),
             permission_profile_id: "auto".into(),

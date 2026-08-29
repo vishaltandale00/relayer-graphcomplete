@@ -67,11 +67,21 @@ class CompletionCurrent:
 class CompletionHandle:
     """One live semantic child: its identity, its durable current, and its awaited result."""
 
+    __slots__ = ("_transport", "_observation", "_completion_id", "_current")
+
     def __init__(self, transport: "_CompletionTransport") -> None:
         self._transport = transport
         self._observation: "asyncio.Task[Mapping[str, Any]] | None" = None
-        self.completion_id = transport.completion_id
-        self.current = CompletionCurrent(transport)
+        self._completion_id = transport.completion_id
+        self._current = CompletionCurrent(transport)
+
+    @property
+    def completion_id(self) -> int:
+        return self._completion_id
+
+    @property
+    def current(self) -> CompletionCurrent:
+        return self._current
 
     @property
     def result(self) -> Awaitable[Mapping[str, Any]]:

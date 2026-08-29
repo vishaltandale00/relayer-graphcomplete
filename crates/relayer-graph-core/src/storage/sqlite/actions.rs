@@ -56,6 +56,24 @@ impl<'connection> ActionTable<'connection> {
         .transpose()
     }
 
+    pub(crate) async fn authored_accepted(
+        &mut self,
+        scope: &InteractionScope,
+        id: ActionId,
+    ) -> Result<Option<ActionRecord>, GraphError> {
+        sqlx::query_as::<_, ActionRow>(
+            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE id=?1 AND owner_interaction_id=?2 AND state='accepted' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4))",
+        )
+        .bind(id.value())
+        .bind(scope.root_node_id.value())
+        .bind(scope.project_id.map(ProjectId::value))
+        .bind(scope.thread_id.value())
+        .fetch_optional(&mut *self.connection)
+        .await?
+        .map(ActionRecord::try_from)
+        .transpose()
+    }
+
     pub(crate) async fn for_source(
         &mut self,
         scope: &InteractionScope,
@@ -183,6 +201,14 @@ impl<'connection> ActionTable<'connection> {
                   AND root.state='accepted'
                   AND root.target_layer_id IS NOT NULL
                 UNION
+                SELECT revision.current_layer_id
+                FROM current_revisions revision
+                JOIN completion_states current
+                  ON current.interaction_node_id=revision.interaction_node_id
+                WHERE revision.interaction_node_id=?1
+                  AND current.temporal_provider_recursion=1
+                  AND revision.current_layer_id IS NOT NULL
+                UNION
                 SELECT child.target_layer_id
                 FROM reachable_layers reachable
                 JOIN layer_actions membership ON membership.layer_id=reachable.id
@@ -199,7 +225,15 @@ impl<'connection> ActionTable<'connection> {
                   AND source.kind='user-interaction'
                   AND source.state='accepted'
                   AND source.owner_interaction_id IS NULL
-                  AND EXISTS(SELECT 1 FROM completions WHERE interaction_node_id=source.id)
+                  -- A semantic child outlives its parent, so it can return while that parent
+                  -- is still running and has no final completion of its own yet. Its lease
+                  -- then names an occurrence published in one of the parent's revisions.
+                  AND (EXISTS(SELECT 1 FROM completions WHERE interaction_node_id=source.id)
+                       OR EXISTS(
+                           SELECT 1 FROM completion_states current
+                           WHERE current.interaction_node_id=source.id
+                             AND current.temporal_provider_recursion=1
+                       ))
                   AND ((?3 IS NOT NULL AND source.project_id=?3)
                        OR (?3 IS NULL AND source.project_id IS NULL AND source.thread_id=?4))
                   AND (leased.id=(

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   GraphCompleteRuntimeService,
+  RECURSIVE_TEMPORAL_FEATURES,
   developerTemporalFeatures,
 } from "../desktop/main/services/graphcomplete-runtime.mjs";
 
@@ -41,18 +42,20 @@ describe("developer recursion enable path", () => {
   });
 
   it("enables the whole persisted chain recursion depends on", () => {
-    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "1" })).toEqual({
+    expect(RECURSIVE_TEMPORAL_FEATURES).toEqual({
       schemaRead: true,
       rootCurrentWrite: true,
       projectionUi: true,
       invokeResolution: true,
       providerRecursion: true,
     });
+    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "1" }))
+      .toBe(RECURSIVE_TEMPORAL_FEATURES);
   });
 
   it("passes the enabled chain to the graph server it starts", async () => {
     const { service, spawned } = spawnedGraphArguments(
-      developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "1" }),
+      RECURSIVE_TEMPORAL_FEATURES,
     );
 
     await expect(service.start()).rejects.toThrow("startup is not exercised");

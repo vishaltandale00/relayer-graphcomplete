@@ -1,5 +1,5 @@
 use crate::product::{InteractionId, ThreadId};
-use relayer_graph_core::CompletionState;
+use relayer_graph_core::{CompletionLifecycle, CurrentProjectionEvent};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -62,33 +62,53 @@ impl CompletionBrokerRegistry {
     }
 }
 
+/// How long one awaited observation stays open before it answers with the unchanged current.
+pub(crate) const COMPLETION_OBSERVATION_HOLD: std::time::Duration =
+    std::time::Duration::from_secs(25);
+
+/// One published current-pointer revision, as the projection outbox ordered it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ObservedRevision {
+    pub(crate) revision: u64,
+    pub(crate) lifecycle: CompletionLifecycle,
+}
+
+impl From<&CurrentProjectionEvent> for ObservedRevision {
+    fn from(event: &CurrentProjectionEvent) -> Self {
+        Self {
+            revision: event.revision,
+            lifecycle: event.lifecycle,
+        }
+    }
+}
+
 /// Delivers current-pointer revisions to execution-scoped awaiters without repeated polling.
 ///
-/// One live completion owns one channel. The supervising observer publishes each projection
-/// state it reads; awaiting broker requests hold their observation open on the same channel.
+/// One supervised completion owns one channel, registered before its observer starts so an
+/// awaiter that arrives first still has something to wait on. The channel carries `None`
+/// until the observer reads the completion's first projection-outbox record.
 #[derive(Clone, Default)]
 pub(crate) struct CompletionObservations {
-    channels: Arc<Mutex<HashMap<i64, watch::Sender<CompletionState>>>>,
+    channels: Arc<Mutex<HashMap<i64, watch::Sender<Option<ObservedRevision>>>>>,
 }
 
 impl CompletionObservations {
-    pub(crate) fn publish(&self, state: CompletionState) {
-        let completion_id = state.completion_id.value();
+    pub(crate) fn publish(&self, completion_id: i64, observed: ObservedRevision) {
         let mut channels = self
             .channels
             .lock()
             .expect("completion observation registry poisoned");
         match channels.get(&completion_id) {
             Some(sender) => {
-                sender.send_replace(state);
+                sender.send_replace(Some(observed));
             }
             None => {
-                channels.insert(completion_id, watch::channel(state).0);
+                channels.insert(completion_id, watch::channel(Some(observed)).0);
             }
         }
     }
 
-    pub(crate) fn subscribe(&self, completion_id: i64) -> Option<watch::Receiver<CompletionState>> {
+    fn subscribe(&self, completion_id: i64) -> Option<watch::Receiver<Option<ObservedRevision>>> {
         self.channels
             .lock()
             .expect("completion observation registry poisoned")
@@ -96,11 +116,49 @@ impl CompletionObservations {
             .map(watch::Sender::subscribe)
     }
 
-    /// Holds one completion's channel open for as long as its observer supervises it.
-    pub(crate) fn guard(&self, completion_id: i64) -> CompletionObservationGuard {
+    /// Registers one completion's channel and holds it open while its observer supervises it.
+    ///
+    /// Registration is synchronous and precedes the observer, because the awaiting execution
+    /// can ask for news before the first projection read returns.
+    pub(crate) fn supervise(&self, completion_id: i64) -> CompletionObservationGuard {
+        self.channels
+            .lock()
+            .expect("completion observation registry poisoned")
+            .entry(completion_id)
+            .or_insert_with(|| watch::channel(None).0);
         CompletionObservationGuard {
             observations: self.clone(),
             completion_id,
+        }
+    }
+
+    /// Waits until the awaited completion publishes a revision past the caller's, and reports
+    /// whether one arrived.
+    ///
+    /// Delivery is sourced from the projection-outbox records the supervising observer reads,
+    /// so an awaiting execution never polls. The hold always lasts its full interval: a
+    /// completion nothing supervises here has no news to deliver, and answering it at once
+    /// would invite the request loop this mechanism exists to remove.
+    pub(crate) async fn hold(&self, completion_id: i64, after_revision: u64) -> bool {
+        let deadline = tokio::time::Instant::now() + COMPLETION_OBSERVATION_HOLD;
+        let Some(mut observation) = self.subscribe(completion_id) else {
+            tokio::time::sleep_until(deadline).await;
+            return false;
+        };
+        loop {
+            let observed = *observation.borrow_and_update();
+            if observed.is_some_and(|observed| {
+                observed.revision > after_revision
+                    || observed.lifecycle != CompletionLifecycle::Active
+            }) {
+                return true;
+            }
+            if !matches!(
+                tokio::time::timeout_at(deadline, observation.changed()).await,
+                Ok(Ok(()))
+            ) {
+                return false;
+            }
         }
     }
 

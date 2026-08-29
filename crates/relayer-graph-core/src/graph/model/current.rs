@@ -35,7 +35,13 @@ impl CompletionLifecycle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+// `rename_all` renames the variants; variant fields need `rename_all_fields`. Without it
+// `advance` and `return` demand `layer_id` while every client on this API sends `layerId`.
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
 pub enum CurrentTransition {
     Advance { layer_id: LayerId },
     Return { layer_id: LayerId },

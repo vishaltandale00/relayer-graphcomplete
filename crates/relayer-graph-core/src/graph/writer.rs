@@ -57,6 +57,22 @@ impl GraphWriter {
         Ok(child)
     }
 
+    /// Reads one accepted action this completion authored.
+    ///
+    /// A published invoke occurrence is accepted at the revision that published it, long
+    /// before its completion returns, so this deliberately does not read a final output.
+    pub async fn accepted_authored_action(
+        &self,
+        action_id: ActionId,
+    ) -> Result<Option<GraphAction>, GraphError> {
+        let mut transaction = self.database.storage.begin_read().await?;
+        let record = ActionTable::new(&mut transaction)
+            .authored_accepted(&self.scope, action_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(record.map(|record| record.action))
+    }
+
     pub async fn interaction_input(&self) -> Result<InteractionInput, GraphError> {
         let mut transaction = self.database.storage.begin_read().await?;
         self.scope

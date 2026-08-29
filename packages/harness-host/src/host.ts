@@ -99,6 +99,8 @@ export interface HarnessInvokedCompletion {
   readonly capability: GraphCapability;
   readonly origin: Extract<CompletionOrigin, { readonly kind: "invoke" }>;
   readonly model?: InteractionModelSelection;
+  /** Required once this session has taken a dynamic policy update, exactly as a root run is. */
+  readonly harnessPolicy?: HarnessExecutionPolicy;
   readonly completionBroker?: HarnessCompletionBrokerScope;
 }
 
@@ -486,12 +488,14 @@ export class HarnessHost {
     invocation: HarnessInvokedCompletion,
     signal?: AbortSignal,
   ): InvokedCompletionRun {
-    const { capability, origin, model, completionBroker } = invocation;
+    const { capability, origin, model, harnessPolicy, completionBroker } = invocation;
     validateGraphCapability(capability);
     validateCompletionOrigin(origin);
     if (model !== undefined) validateInteractionModelSelection(model);
     const session = this.liveSession(threadId);
-    if (model !== undefined) validateConfiguredModelSelection(executionConfiguration(session, undefined), model);
+    if (model !== undefined) {
+      validateConfiguredModelSelection(executionConfiguration(session, harnessPolicy), model);
+    }
     const invocationDigest = graphInvocationDigest(capability, origin, model);
     const existing = session.invokedCompletionRuns.get(capability.nodeId);
     if (existing !== undefined) {
@@ -517,6 +521,7 @@ export class HarnessHost {
       capability,
       origin,
       ...(model === undefined ? {} : { model }),
+      ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
       ...(completionBroker === undefined ? {} : { completionBroker }),
       ...(signal === undefined ? {} : { signal }),
       onNativeExecution: (native) => {
@@ -1787,7 +1792,7 @@ function readCompleteInput(value: unknown): {
 
 function readInvokedCompletionInput(value: unknown): HarnessInvokedCompletion {
   if (!isRecord(value)) throw new Error("Harness invoked completion input must be an object");
-  const unknown = Object.keys(value).filter((key) => !["capability", "origin", "model", "completionBroker"].includes(key));
+  const unknown = Object.keys(value).filter((key) => !["capability", "origin", "model", "harnessPolicy", "completionBroker"].includes(key));
   if (unknown.length > 0) throw new Error(`Harness invoked completion contains unsupported fields: ${unknown.join(", ")}`);
   if (!isRecord(value.capability)
     || Object.keys(value.capability).some((key) => !["url", "token", "nodeId"].includes(key))) {
@@ -1799,11 +1804,13 @@ function readInvokedCompletionInput(value: unknown): HarnessInvokedCompletion {
   }
   validateCompletionOrigin(value.origin);
   const model = readInteractionModelSelection(value);
+  const harnessPolicy = readHarnessExecutionPolicy(value);
   const completionBroker = readCompletionBroker(value);
   return {
     capability: readGraphCapability({ graph: value.capability }),
     origin: value.origin,
     ...(model === undefined ? {} : { model }),
+    ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
     ...(completionBroker === undefined ? {} : { completionBroker }),
   };
 }

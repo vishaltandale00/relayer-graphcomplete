@@ -220,15 +220,18 @@ export function createProviderExecutionAccessBroker(acquireProviderExecution) {
  * need the whole persisted feature chain, so one switch turns on every prerequisite.
  * Whether the feature ships enabled by default is decided from live-run timing evidence.
  */
+export const RECURSIVE_TEMPORAL_FEATURES = Object.freeze({
+  schemaRead: true,
+  rootCurrentWrite: true,
+  projectionUi: true,
+  invokeResolution: true,
+  providerRecursion: true,
+});
+
 export function developerTemporalFeatures(environment = process.env) {
-  if (String(environment.RELAYER_DEV_PROVIDER_RECURSION ?? "").trim() !== "1") return {};
-  return Object.freeze({
-    schemaRead: true,
-    rootCurrentWrite: true,
-    projectionUi: true,
-    invokeResolution: true,
-    providerRecursion: true,
-  });
+  return String(environment.RELAYER_DEV_PROVIDER_RECURSION ?? "").trim() === "1"
+    ? RECURSIVE_TEMPORAL_FEATURES
+    : {};
 }
 
 export class GraphCompleteRuntimeService {

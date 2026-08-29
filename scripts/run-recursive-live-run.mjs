@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 
 import {
   GraphCompleteRuntimeService,
-  developerTemporalFeatures,
+  RECURSIVE_TEMPORAL_FEATURES,
 } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import {
@@ -120,9 +120,7 @@ async function runOnce({ recursionEnabled, harnessConfiguration, codexBinary, pr
     graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
     configurationPaths: [join(repositoryRoot, "harnesses", `${harnessConfiguration}.yaml`)],
     codexPathOverride: codexBinary,
-    temporalFeatures: recursionEnabled
-      ? developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "1" })
-      : {},
+    temporalFeatures: recursionEnabled ? RECURSIVE_TEMPORAL_FEATURES : {},
   });
   const productServer = new RelayerAppServerService({
     userDataDirectory: dataDirectory,
