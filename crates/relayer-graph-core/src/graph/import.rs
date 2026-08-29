@@ -6,6 +6,7 @@ use crate::{
     ActionId, ActionKind, GraphError, InputAction, LayerId, NodeId,
     PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
     SubmittedInputValue, ThreadId, graph::InteractionScope, storage::sqlite::actions::ActionTable,
+    storage::sqlite::input_children::validate_value,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -670,15 +671,18 @@ impl crate::GraphDatabase {
                 read_only: false,
             };
             let mut child_position = 0i64;
-            for submitted in &turn.submitted_inputs {
+            for (index, submitted) in turn.submitted_inputs.iter().enumerate() {
                 let resolved = resolve_imported_input_occurrence(
                     &mut tx,
                     &scope,
                     &turn.source_turn_id,
+                    index,
                     submitted,
-                    &node_ids,
-                    &layer_ids,
-                    &action_ids,
+                    &MaterializedImportIds {
+                        nodes: &node_ids,
+                        layers: &layer_ids,
+                        actions: &action_ids,
+                    },
                 )
                 .await?;
                 let resolution = match resolved {
@@ -702,7 +706,7 @@ impl crate::GraphDatabase {
                 .bind(resolution.action_id)
                 .bind(resolution.source_node_id)
                 .bind(serde_json::to_string(&submitted.action).map_err(|error| GraphError::Internal(error.to_string()))?)
-                .bind(serde_json::to_string(&submitted.value).map_err(|error| GraphError::Internal(error.to_string()))?)
+                .bind(serde_json::to_string(&resolution.value).map_err(|error| GraphError::Internal(error.to_string()))?)
                 .bind(format!("imported-inert:{position}"))
                 .execute(&mut *tx)
                 .await?;
@@ -1016,6 +1020,14 @@ struct ResolvedImportedInput {
     presenting_layer_id: i64,
     action_id: i64,
     source_node_id: i64,
+    value: SubmittedInputValue,
+}
+
+/// The identifier maps built while materializing one imported conversation.
+struct MaterializedImportIds<'a> {
+    nodes: &'a HashMap<String, i64>,
+    layers: &'a HashMap<String, i64>,
+    actions: &'a HashMap<String, i64>,
 }
 
 enum ImportedInputResolution {
@@ -1028,16 +1040,17 @@ enum ImportedInputResolution {
 /// `canonical_input_occurrence` is the same authority the live send path uses, so
 /// import cannot drift from it: the presenting layer must be reachable from that
 /// interaction's accepted root, the action must belong to that layer, and the source
-/// node is derived from the action. A rejection names the reason and never fails the
+/// node is derived from the action, and the value must satisfy that accepted action under
+/// the same `validate_value` the live path applies, so an honest occurrence cannot carry an
+/// answer the question never offered. A rejection names the reason and never fails the
 /// surrounding import.
 async fn resolve_imported_input_occurrence(
     connection: &mut sqlx::SqliteConnection,
     scope: &InteractionScope,
     source_turn_id: &str,
+    index: usize,
     submitted: &ImportedSubmittedInput,
-    node_ids: &HashMap<String, i64>,
-    layer_ids: &HashMap<String, i64>,
-    action_ids: &HashMap<String, i64>,
+    ids: &MaterializedImportIds<'_>,
 ) -> Result<ImportedInputResolution, GraphError> {
     if submitted.root_turn_id != source_turn_id {
         return Ok(ImportedInputResolution::Rejected(
@@ -1050,10 +1063,10 @@ async fn resolve_imported_input_occurrence(
         Some(&action_id),
         Some(&claimed_source_node_id),
     ) = (
-        node_ids.get(&submitted.source.interaction_node_id),
-        layer_ids.get(&submitted.source.layer_id),
-        action_ids.get(&submitted.source.action_id),
-        node_ids.get(&submitted.source.node_id),
+        ids.nodes.get(&submitted.source.interaction_node_id),
+        ids.layers.get(&submitted.source.layer_id),
+        ids.actions.get(&submitted.source.action_id),
+        ids.nodes.get(&submitted.source.node_id),
     )
     else {
         return Ok(ImportedInputResolution::Rejected(
@@ -1087,11 +1100,26 @@ async fn resolve_imported_input_occurrence(
             "submitted input names a source node that did not author the action",
         ));
     }
+    let Some(accepted_action) = accepted.input.as_ref() else {
+        return Ok(ImportedInputResolution::Rejected(
+            "submitted input provenance is not one accepted input occurrence",
+        ));
+    };
+    let value = match validate_value(index, accepted_action, &submitted.value) {
+        Ok(value) => value,
+        Err(GraphError::Validation { .. }) => {
+            return Ok(ImportedInputResolution::Rejected(
+                "submitted input value does not satisfy the accepted action",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
     Ok(ImportedInputResolution::Resolved(ResolvedImportedInput {
         presenting_interaction_node_id,
         presenting_layer_id,
         action_id,
         source_node_id: accepted.source_node_id.value(),
+        value,
     }))
 }
 
