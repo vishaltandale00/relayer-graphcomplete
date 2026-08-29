@@ -105,6 +105,7 @@ pub(crate) async fn complete(
         &mut transaction,
         target,
         vec![closure],
+        crate::publication_targets(scope.project_id, scope.thread_id),
         database.expiry(),
     )
     .await
@@ -134,6 +135,7 @@ pub(crate) async fn index_and_record(
     transaction: &mut GraphConnection,
     target: SearchTarget,
     closures: Vec<AcceptedGraphClosure>,
+    published_to: Vec<SearchTarget>,
     expiry: tokio::time::Instant,
 ) -> Result<(), GraphError> {
     // The next revision has to clear both sides, not just SQLite. A write
@@ -148,7 +150,8 @@ pub(crate) async fn index_and_record(
         .max(stored)
         .map_or(SearchIndexRevision::FIRST, SearchIndexRevision::next);
 
-    let committed = index_closures(database, target, revision, closures, expiry).await?;
+    let committed =
+        index_closures(database, target, revision, closures, published_to, expiry).await?;
     SearchIndexTable::new(&mut *transaction)
         .record_revision(target, committed)
         .await?;
@@ -166,6 +169,7 @@ async fn index_closures(
     target: SearchTarget,
     revision: SearchIndexRevision,
     closures: Vec<AcceptedGraphClosure>,
+    published_to: Vec<SearchTarget>,
     expiry: tokio::time::Instant,
 ) -> Result<SearchIndexRevision, GraphError> {
     // One deadline spans the whole sequence rather than each step, because what
@@ -176,7 +180,7 @@ async fn index_closures(
     // store keeps its write lock and every later write fails behind it. An
     // abandoned write releases its own transaction when it is dropped.
     for closure in closures {
-        if let Err(error) = deadline(expiry, write.apply(closure)).await {
+        if let Err(error) = deadline(expiry, write.apply(closure, published_to.clone())).await {
             let _ = deadline(expiry, write.rollback()).await;
             return Err(error);
         }

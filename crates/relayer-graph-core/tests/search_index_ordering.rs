@@ -38,6 +38,8 @@ struct Recorded {
     /// recorded. Seeding this simulates a write interrupted after the store
     /// committed and before SQLite did.
     stored: std::collections::HashMap<SearchTarget, SearchIndexRevision>,
+    /// The targets the last applied closure was published to.
+    published: Vec<SearchTarget>,
 }
 
 #[derive(Clone)]
@@ -66,6 +68,10 @@ impl Double {
             .unwrap()
             .stored
             .insert(target, revision);
+    }
+
+    fn published(&self) -> Vec<SearchTarget> {
+        self.recorded.lock().unwrap().published.clone()
     }
 
     fn rollbacks(&self) -> usize {
@@ -113,9 +119,14 @@ struct DoubleWrite {
 }
 
 impl SearchIndexWrite for DoubleWrite {
-    fn apply(&mut self, closure: AcceptedGraphClosure) -> SearchIndexFuture<()> {
+    fn apply(
+        &mut self,
+        closure: AcceptedGraphClosure,
+        published_to: Vec<SearchTarget>,
+    ) -> SearchIndexFuture<()> {
         let behaviour = self.index.behaviour;
         self.layers = closure.layers.len();
+        self.index.recorded.lock().unwrap().published = published_to;
         Box::pin(async move {
             match behaviour {
                 Behaviour::FailOnApply => Err(GraphError::Internal(
@@ -518,4 +529,36 @@ async fn an_import_the_store_rejects_leaves_nothing_imported() {
     assert_eq!(index.committed(), vec![]);
     assert_eq!(database.search_index_revision(target).await.unwrap(), None);
     assert!(no_accepted_closure(&database).await);
+}
+
+#[tokio::test]
+async fn a_closure_in_a_project_is_published_to_its_project_and_its_thread() {
+    let index = Double::new(Behaviour::Commit);
+    let database = database(index.clone()).await;
+
+    submit(&database, ProjectId::new(7), 41, "a").await.unwrap();
+
+    // Ordering is against the project, but a thread-scoped search has to find it
+    // too. Publishing only the project would let thread 41 see all of project 7;
+    // publishing only the thread would hide it from a project-scoped search.
+    assert_eq!(
+        index.published(),
+        vec![
+            SearchTarget::Project(ProjectId::new(7).unwrap()),
+            SearchTarget::Thread(ThreadId::new(41).unwrap()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_standalone_thread_publishes_to_its_thread_alone() {
+    let index = Double::new(Behaviour::Commit);
+    let database = database(index.clone()).await;
+
+    submit(&database, None, 99, "a").await.unwrap();
+
+    assert_eq!(
+        index.published(),
+        vec![SearchTarget::Thread(ThreadId::new(99).unwrap())]
+    );
 }

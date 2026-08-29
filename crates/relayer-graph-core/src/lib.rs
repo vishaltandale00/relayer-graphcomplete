@@ -17,5 +17,6 @@ pub use graph::{
     ProjectId, PublishedPersonalPresentationVersion, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES,
     RecordState, ResolvedLayer, ResolvedPersonalPresentation, SearchIndex, SearchIndexComponent,
     SearchIndexFuture, SearchIndexRevision, SearchIndexWrite, SearchTarget, ThreadId,
-    interaction_input_digest, is_supported_icon, normalize_icon_name, resolve_icon_name,
+    interaction_input_digest, is_supported_icon, normalize_icon_name, publication_targets,
+    resolve_icon_name,
 };

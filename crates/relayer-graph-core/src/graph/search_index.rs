@@ -48,9 +48,30 @@ impl SearchTarget {
 }
 
 impl fmt::Display for SearchTarget {
+    /// The spelling the frozen query contract uses for a published target, so
+    /// what the store holds and what a request names are the same string.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} {}", self.kind(), self.id())
+        write!(formatter, "{}:{}", self.kind(), self.id())
     }
+}
+
+/// Every target a closure is visible to: its project when it has one, and always
+/// its thread.
+///
+/// This is not the same as the ordering target. A closure in thread 41 of project
+/// 7 is ordered against `project:7`, but is searchable from both `project:7` and
+/// `thread:41` — which is what the frozen contract's own dataset publishes. One
+/// target alone would let a thread-scoped search see the whole project.
+pub fn publication_targets(
+    project_id: Option<ProjectId>,
+    thread_id: ThreadId,
+) -> Vec<SearchTarget> {
+    let mut targets = Vec::with_capacity(2);
+    if let Some(project_id) = project_id {
+        targets.push(SearchTarget::Project(project_id));
+    }
+    targets.push(SearchTarget::Thread(thread_id));
+    targets
 }
 
 /// Which revision of a target's closures the search store holds.
@@ -121,9 +142,14 @@ pub trait SearchIndex: Send + Sync + 'static {
 /// One open transaction against the search store. Committing or rolling back
 /// consumes it, so a write cannot be committed twice or silently abandoned.
 pub trait SearchIndexWrite: Send + 'static {
-    /// Write one accepted closure into the open transaction. Nothing is visible
-    /// to search until the transaction commits.
-    fn apply(&mut self, closure: AcceptedGraphClosure) -> SearchIndexFuture<()>;
+    /// Write one accepted closure into the open transaction, visible to every
+    /// target in `published_to`. Nothing is visible to search until the
+    /// transaction commits.
+    fn apply(
+        &mut self,
+        closure: AcceptedGraphClosure,
+        published_to: Vec<SearchTarget>,
+    ) -> SearchIndexFuture<()>;
 
     /// Commit, returning the revision now durable in the store. This is the point
     /// after which a crash leaves an orphan rather than a lost closure.
@@ -164,7 +190,11 @@ struct NoSearchIndexWrite {
 }
 
 impl SearchIndexWrite for NoSearchIndexWrite {
-    fn apply(&mut self, _closure: AcceptedGraphClosure) -> SearchIndexFuture<()> {
+    fn apply(
+        &mut self,
+        _closure: AcceptedGraphClosure,
+        _published_to: Vec<SearchTarget>,
+    ) -> SearchIndexFuture<()> {
         Box::pin(async { Ok(()) })
     }
 
@@ -283,7 +313,7 @@ mod tests {
             .begin(target, SearchIndexRevision::FIRST)
             .await
             .unwrap();
-        write.apply(closure()).await.unwrap();
+        write.apply(closure(), vec![target]).await.unwrap();
         assert_eq!(write.commit().await.unwrap(), SearchIndexRevision::FIRST);
     }
 

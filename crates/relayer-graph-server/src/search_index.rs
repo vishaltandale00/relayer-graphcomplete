@@ -141,12 +141,15 @@ impl Drop for LadybugWrite {
 }
 
 impl SearchIndexWrite for LadybugWrite {
-    fn apply(&mut self, closure: AcceptedGraphClosure) -> SearchIndexFuture<()> {
+    fn apply(
+        &mut self,
+        closure: AcceptedGraphClosure,
+        published_to: Vec<SearchTarget>,
+    ) -> SearchIndexFuture<()> {
         let store = self.store.clone();
-        let target = self.target;
         Box::pin(async move {
             store
-                .run(move |connection| schema::apply_closure(connection, target, &closure))
+                .run(move |connection| schema::apply_closure(connection, &published_to, &closure))
                 .await
                 .map_err(internal)
         })

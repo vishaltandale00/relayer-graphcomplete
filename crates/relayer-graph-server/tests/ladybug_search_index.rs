@@ -169,7 +169,7 @@ async fn a_committed_closure_is_searchable_with_its_identities_intact() {
         .begin(target(), SearchIndexRevision::FIRST)
         .await
         .unwrap();
-    write.apply(closure.clone()).await.unwrap();
+    write.apply(closure.clone(), vec![target()]).await.unwrap();
     assert_eq!(
         write.commit().await.unwrap(),
         SearchIndexRevision::FIRST,
@@ -226,7 +226,7 @@ async fn applying_the_same_closure_again_converges_rather_than_duplicating() {
         SearchIndexRevision::FIRST.next(),
     ] {
         let mut write = index.begin(target(), revision).await.unwrap();
-        write.apply(closure.clone()).await.unwrap();
+        write.apply(closure.clone(), vec![target()]).await.unwrap();
         write.commit().await.unwrap();
     }
 
@@ -261,7 +261,7 @@ async fn a_rolled_back_write_leaves_the_store_untouched() {
         .begin(target(), SearchIndexRevision::FIRST)
         .await
         .unwrap();
-    write.apply(closure).await.unwrap();
+    write.apply(closure, vec![target()]).await.unwrap();
     write.rollback().await.unwrap();
 
     assert_eq!(
@@ -285,7 +285,7 @@ async fn a_committed_closure_survives_closing_and_reopening_the_store() {
             .begin(target(), SearchIndexRevision::FIRST)
             .await
             .unwrap();
-        write.apply(closure).await.unwrap();
+        write.apply(closure, vec![target()]).await.unwrap();
         write.commit().await.unwrap();
     }
 
@@ -328,7 +328,7 @@ async fn every_v1_value_type_round_trips_losslessly() {
         .begin(target(), SearchIndexRevision::FIRST)
         .await
         .unwrap();
-    write.apply(closure).await.unwrap();
+    write.apply(closure, vec![target()]).await.unwrap();
     write.commit().await.unwrap();
 
     // Scalars, null, and the i64 extrema, with negative zero canonicalised.
@@ -536,7 +536,10 @@ async fn an_abandoned_write_releases_its_transaction_so_the_next_save_still_work
         .begin(target(), SearchIndexRevision::FIRST)
         .await
         .unwrap();
-    abandoned.apply(closure.clone()).await.unwrap();
+    abandoned
+        .apply(closure.clone(), vec![target()])
+        .await
+        .unwrap();
     drop(abandoned);
 
     // Without the drop rollback this BEGIN fails, and so does every save after
@@ -545,7 +548,7 @@ async fn an_abandoned_write_releases_its_transaction_so_the_next_save_still_work
         .begin(target(), SearchIndexRevision::FIRST)
         .await
         .unwrap();
-    write.apply(closure).await.unwrap();
+    write.apply(closure, vec![target()]).await.unwrap();
     write.commit().await.unwrap();
 
     assert_eq!(
@@ -573,7 +576,7 @@ async fn the_store_reports_the_revision_it_holds_for_reconciliation() {
         .begin(target(), SearchIndexRevision::FIRST)
         .await
         .unwrap();
-    write.apply(closure).await.unwrap();
+    write.apply(closure, vec![target()]).await.unwrap();
     write.commit().await.unwrap();
 
     // This is what the write ordering clears its next revision against, and what

@@ -30,7 +30,7 @@ pub use personal_presentation::{
 };
 pub use search_index::{
     NoSearchIndex, SearchIndex, SearchIndexComponent, SearchIndexFuture, SearchIndexRevision,
-    SearchIndexWrite, SearchTarget,
+    SearchIndexWrite, SearchTarget, publication_targets,
 };
 pub use writer::GraphWriter;
 

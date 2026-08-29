@@ -662,9 +662,15 @@ impl crate::GraphDatabase {
             }
         }
         if !closures.is_empty()
-            && let Err(error) =
-                completion::index_and_record(self, &mut tx, target, closures, self.import_expiry())
-                    .await
+            && let Err(error) = completion::index_and_record(
+                self,
+                &mut tx,
+                target,
+                closures,
+                crate::publication_targets(metadata.project_id, metadata.thread_id),
+                self.import_expiry(),
+            )
+            .await
         {
             tx.rollback().await?;
             return Err(error);

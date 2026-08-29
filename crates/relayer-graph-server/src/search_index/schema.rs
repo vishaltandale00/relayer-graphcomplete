@@ -66,10 +66,10 @@ pub fn layer_id(layer: &GraphLayer) -> String {
 /// what lets an exact retry after a crash reach the same state.
 pub fn apply_closure(
     connection: &Connection<'_>,
-    target: SearchTarget,
+    published_to: &[SearchTarget],
     closure: &AcceptedGraphClosure,
 ) -> Result<()> {
-    let targets = published_targets(target);
+    let targets = published_targets(published_to);
     // Nodes first, then everything that joins them. A relationship write is a
     // MERGE behind a MATCH, so an endpoint that does not exist yet makes it match
     // nothing and write nothing, silently. The closure's layers arrive in
@@ -130,8 +130,16 @@ pub fn read_revision(
     }
 }
 
-fn published_targets(target: SearchTarget) -> Value {
-    Value::List(LogicalType::String, vec![Value::String(target.to_string())])
+/// Every target the closure is searchable from, as the engine list the query
+/// path filters on.
+fn published_targets(published_to: &[SearchTarget]) -> Value {
+    Value::List(
+        LogicalType::String,
+        published_to
+            .iter()
+            .map(|target| Value::String(target.to_string()))
+            .collect(),
+    )
 }
 
 fn write_layer_node(
