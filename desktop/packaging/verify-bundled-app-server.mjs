@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
-import { access, readFile, stat, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import * as tar from "tar";
@@ -336,6 +336,34 @@ async function digestPrimeArchive(path) {
   return { treeDigest: digestFileEntries(entries), metadataDigest };
 }
 
+// Signed CI builds packaged the bundle with a restrictive umask, shipping a
+// 0700 application. Spotlight and Launch Services cannot traverse a bundle they
+// cannot read, so the installed app never appeared in search, and no other
+// account on the machine could launch it. Local builds were already 0755, so
+// this only ever reproduced from a release DMG.
+//
+// Widen group and other to match the owner the way `chmod -R go+rX` does: read
+// everywhere the owner can read, traverse or execute only for directories and
+// files that are already executable.
+export async function normalizePackagedBundlePermissions(bundlePath) {
+  const changed = [];
+  const entries = await readdir(bundlePath, { withFileTypes: true, recursive: true });
+  for (const entry of [{ parentPath: bundlePath, name: "", isDirectory: () => true }, ...entries]) {
+    const path = entry.name ? join(entry.parentPath, entry.name) : bundlePath;
+    const info = await lstat(path);
+    // Never follow a symlink: chmod would retarget onto the linked file.
+    if (info.isSymbolicLink()) continue;
+    const mode = info.mode & 0o7777;
+    let next = mode;
+    if (mode & 0o400) next |= 0o044;
+    if (info.isDirectory() || (mode & 0o100)) next |= 0o011;
+    if (next === mode) continue;
+    await chmod(path, next);
+    changed.push(path);
+  }
+  return changed;
+}
+
 export default async function verifyElectronBuilderBundledAppServer(context) {
   const productFilename = String(context?.packager?.appInfo?.productFilename || "").trim();
   const appOutDir = String(context?.appOutDir || "").trim();
@@ -349,6 +377,11 @@ export default async function verifyElectronBuilderBundledAppServer(context) {
   if (target.platform === "darwin") {
     const resourcesPath = join(appPath, "Contents", "Resources");
     await writePrimeAgentSigningClosureSnapshot(resourcesPath, `${target.platform}-${target.architecture}`);
+    // Last, so every file this hook wrote is covered, and before
+    // electron-builder signs: the signature is then taken over the bundle users
+    // actually receive. Windows governs access through ACLs rather than POSIX
+    // modes, so normalising there would be work without an effect.
+    await normalizePackagedBundlePermissions(appPath);
   }
   return result;
 }
