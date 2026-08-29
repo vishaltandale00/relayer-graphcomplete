@@ -476,6 +476,123 @@ async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable()
 }
 
 #[tokio::test]
+async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurrence() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    let view = input.turns[0].accepted_view.as_mut().unwrap();
+    // A second accepted node in the same layer. It is a perfectly valid node that
+    // simply never authored the input action.
+    let resolved = &mut view.layers[0];
+    resolved.layer.nodes.push("node-2".into());
+    resolved
+        .layer
+        .layout
+        .as_mut()
+        .unwrap()
+        .placements
+        .push(ImportedNodePlacement {
+            node_id: "node-2".into(),
+            x: 0.75,
+            y: 0.25,
+        });
+    resolved.nodes.push(ImportedNode {
+        id: "node-2".into(),
+        kind: "concept".into(),
+        icon: "box".into(),
+        title: "Worker".into(),
+        detail: "A worker".into(),
+    });
+    // Two input actions, both genuinely authored by node-1.
+    for id in ["input-action-1", "input-action-2"] {
+        resolved.actions.push(ImportedAction {
+            id: id.into(),
+            source_node_id: "node-1".into(),
+            source_layer_id: Some("layer-1".into()),
+            kind: "input".into(),
+            relation: None,
+            label: "".into(),
+            variant: "pill".into(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+        });
+    }
+
+    let action = InputAction {
+        control: InputControl::SingleSelect,
+        prompt: "Choose".into(),
+        options: vec![InputOption {
+            key: "one".into(),
+            label: "One".into(),
+            unsupported_fields: Default::default(),
+        }],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    let value = SubmittedInputValue::Selected {
+        selected: vec![InputOption {
+            key: "one".into(),
+            label: "One".into(),
+            unsupported_fields: Default::default(),
+        }],
+    };
+    let honest = ImportedSubmittedInput {
+        id: "input-child-honest".into(),
+        root_turn_id: "turn-2".into(),
+        source: ImportedInputSource {
+            interaction_node_id: "interaction-1".into(),
+            layer_id: "layer-1".into(),
+            action_id: "input-action-1".into(),
+            node_id: "node-1".into(),
+        },
+        action: action.clone(),
+        value: value.clone(),
+    };
+    // A distinct occurrence, so the unique index over
+    // (parent, interaction, layer, action) cannot catch this incidentally -- the
+    // provenance check is the only thing standing between this and the database.
+    // Every identifier resolves on its own; only the tuple is a lie, claiming a node
+    // that never asked the question.
+    let spliced = ImportedSubmittedInput {
+        id: "input-child-spliced".into(),
+        source: ImportedInputSource {
+            action_id: "input-action-2".into(),
+            node_id: "node-2".into(),
+            ..honest.source.clone()
+        },
+        ..honest.clone()
+    };
+    input.turns.push(ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "".into(),
+        interaction_node_id: Some("input-root-2".into()),
+        invoke_origin: None,
+        contexts: vec![],
+        submitted_inputs: vec![honest, spliced],
+        accepted_view: None,
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+
+    // The spliced answer is dropped, and dropping it is visible rather than silent.
+    assert_eq!(receipt.skipped_submitted_inputs.len(), 1);
+    let skipped = &receipt.skipped_submitted_inputs[0];
+    assert_eq!(skipped.submitted_input_id, "input-child-spliced");
+    assert_eq!(skipped.source_turn_id, "turn-2");
+    assert!(skipped.reason.contains("source node"));
+
+    // The honest answer on the same turn still imports.
+    let root = NodeId::new(receipt.turns[1].graph_node_id.unwrap()).unwrap();
+    let writer = database.writer_for_subgraph(root).await.unwrap();
+    let projected = writer.interaction_input().await.unwrap();
+    assert_eq!(
+        projected.submitted_inputs,
+        vec![SubmittedInput { action, value }]
+    );
+}
+
+#[tokio::test]
 async fn imported_action_origin_reconstructs_resolved_invoke_navigation() {
     let database = GraphDatabase::in_memory().await.unwrap();
     let receipt = database

@@ -3,8 +3,9 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    GraphError, InputAction, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId,
-    SubmittedInputValue, ThreadId,
+    ActionId, ActionKind, GraphError, InputAction, LayerId, NodeId,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
+    SubmittedInputValue, ThreadId, graph::InteractionScope, storage::sqlite::actions::ActionTable,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -172,6 +173,19 @@ pub struct ImportedTurnReceipt {
 pub struct ImportedConversationReceipt {
     pub import_id: String,
     pub turns: Vec<ImportedTurnReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_submitted_inputs: Vec<SkippedSubmittedInput>,
+}
+
+/// One submitted input dropped during import because its claimed provenance could
+/// not be proven against the materialized graph. The rest of the conversation is
+/// still imported, so this record is how the drop stays visible.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedSubmittedInput {
+    pub source_turn_id: String,
+    pub submitted_input_id: String,
+    pub reason: String,
 }
 
 impl crate::GraphDatabase {
@@ -555,66 +569,6 @@ impl crate::GraphDatabase {
             }
         }
 
-        for position in 0..turn_count {
-            let turn = load_turn(&mut tx, import_id, position).await?;
-            if turn.submitted_inputs.is_empty() {
-                continue;
-            }
-            let portable_parent = turn.interaction_node_id.as_ref().ok_or_else(|| {
-                GraphError::Internal(
-                    "imported submitted input turn is missing its interaction root".into(),
-                )
-            })?;
-            let parent = *node_ids.get(portable_parent).ok_or_else(|| {
-                GraphError::Internal("imported submitted input root was not materialized".into())
-            })?;
-            for (child_position, submitted) in turn.submitted_inputs.iter().enumerate() {
-                if submitted.root_turn_id != turn.source_turn_id {
-                    return Err(GraphError::Internal(
-                        "imported submitted input names a different root turn".into(),
-                    ));
-                }
-                let presenting_interaction = *node_ids
-                    .get(&submitted.source.interaction_node_id)
-                    .ok_or_else(|| {
-                    GraphError::Internal(
-                        "imported submitted input source interaction is missing".into(),
-                    )
-                })?;
-                let presenting_layer =
-                    *layer_ids.get(&submitted.source.layer_id).ok_or_else(|| {
-                        GraphError::Internal(
-                            "imported submitted input source layer is missing".into(),
-                        )
-                    })?;
-                let source_action =
-                    *action_ids.get(&submitted.source.action_id).ok_or_else(|| {
-                        GraphError::Internal(
-                            "imported submitted input source action is missing".into(),
-                        )
-                    })?;
-                let source_node = *node_ids.get(&submitted.source.node_id).ok_or_else(|| {
-                    GraphError::Internal("imported submitted input source node is missing".into())
-                })?;
-                sqlx::query(
-                    "INSERT INTO interaction_input_children(parent_interaction_node_id,position,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_snapshot_json,value_snapshot_json,attempt_key,authority_digest,semantic_digest) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'authority-stripped','semantic-read-only')",
-                )
-                .bind(parent)
-                .bind(i64::try_from(child_position).map_err(|_| {
-                    GraphError::Internal("imported submitted input position exceeds SQLite range".into())
-                })?)
-                .bind(presenting_interaction)
-                .bind(presenting_layer)
-                .bind(source_action)
-                .bind(source_node)
-                .bind(serde_json::to_string(&submitted.action).map_err(|error| GraphError::Internal(error.to_string()))?)
-                .bind(serde_json::to_string(&submitted.value).map_err(|error| GraphError::Internal(error.to_string()))?)
-                .bind(format!("imported-inert:{position}"))
-                .execute(&mut *tx)
-                .await?;
-            }
-        }
-
         seen_layers.clear();
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
@@ -654,6 +608,73 @@ impl crate::GraphDatabase {
             let receipt = &mut receipts[usize::try_from(position).unwrap()];
             receipt.root_layer_id = Some(layer_ids[&view.root_layer_id]);
             receipt.root_action_id = Some(action_ids[&view.root_action.id]);
+        }
+
+        // Submitted-input provenance has to resolve as one exact accepted occurrence,
+        // which needs layer membership and completions to already exist -- hence this
+        // runs after both. Checking the interaction, layer, action, and node IDs
+        // independently would accept individually valid IDs spliced into provenance
+        // that never happened. An occurrence that will not resolve drops that one
+        // answer and leaves the rest of the conversation importable.
+        let mut skipped_submitted_inputs = Vec::new();
+        for position in 0..turn_count {
+            let turn = load_turn(&mut tx, import_id, position).await?;
+            if turn.submitted_inputs.is_empty() {
+                continue;
+            }
+            let portable_parent = turn.interaction_node_id.as_ref().ok_or_else(|| {
+                GraphError::Internal(
+                    "imported submitted input turn is missing its interaction root".into(),
+                )
+            })?;
+            let parent = *node_ids.get(portable_parent).ok_or_else(|| {
+                GraphError::Internal("imported submitted input root was not materialized".into())
+            })?;
+            let scope = InteractionScope {
+                project_id: metadata.project_id,
+                thread_id: metadata.thread_id,
+                root_node_id: imported_node_id(parent)?,
+                read_only: false,
+            };
+            let mut child_position = 0i64;
+            for submitted in &turn.submitted_inputs {
+                let resolved = resolve_imported_input_occurrence(
+                    &mut tx,
+                    &scope,
+                    &turn.source_turn_id,
+                    submitted,
+                    &node_ids,
+                    &layer_ids,
+                    &action_ids,
+                )
+                .await?;
+                let resolution = match resolved {
+                    ImportedInputResolution::Resolved(resolution) => resolution,
+                    ImportedInputResolution::Rejected(reason) => {
+                        skipped_submitted_inputs.push(SkippedSubmittedInput {
+                            source_turn_id: turn.source_turn_id.clone(),
+                            submitted_input_id: submitted.id.clone(),
+                            reason: reason.to_owned(),
+                        });
+                        continue;
+                    }
+                };
+                sqlx::query(
+                    "INSERT INTO interaction_input_children(parent_interaction_node_id,position,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_snapshot_json,value_snapshot_json,attempt_key,authority_digest,semantic_digest) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'authority-stripped','semantic-read-only')",
+                )
+                .bind(parent)
+                .bind(child_position)
+                .bind(resolution.presenting_interaction_node_id)
+                .bind(resolution.presenting_layer_id)
+                .bind(resolution.action_id)
+                .bind(resolution.source_node_id)
+                .bind(serde_json::to_string(&submitted.action).map_err(|error| GraphError::Internal(error.to_string()))?)
+                .bind(serde_json::to_string(&submitted.value).map_err(|error| GraphError::Internal(error.to_string()))?)
+                .bind(format!("imported-inert:{position}"))
+                .execute(&mut *tx)
+                .await?;
+                child_position += 1;
+            }
         }
 
         // V1 exports retain the authored invoke shape (`targetLayerId: null`). The
@@ -734,6 +755,7 @@ impl crate::GraphDatabase {
         Ok(ImportedConversationReceipt {
             import_id: import_id.to_owned(),
             turns: receipts,
+            skipped_submitted_inputs,
         })
     }
 
@@ -948,4 +970,105 @@ async fn insert_action(
     }
     ids.insert(action.id.clone(), action_id);
     Ok(())
+}
+
+/// Materialized identifiers for one imported submitted input, with the asking node
+/// taken from the accepted action rather than from the imported file.
+struct ResolvedImportedInput {
+    presenting_interaction_node_id: i64,
+    presenting_layer_id: i64,
+    action_id: i64,
+    source_node_id: i64,
+}
+
+enum ImportedInputResolution {
+    Resolved(ResolvedImportedInput),
+    Rejected(&'static str),
+}
+
+/// Proves one imported submitted input against the materialized graph.
+///
+/// `canonical_input_occurrence` is the same authority the live send path uses, so
+/// import cannot drift from it: the presenting layer must be reachable from that
+/// interaction's accepted root, the action must belong to that layer, and the source
+/// node is derived from the action. A rejection names the reason and never fails the
+/// surrounding import.
+async fn resolve_imported_input_occurrence(
+    connection: &mut sqlx::SqliteConnection,
+    scope: &InteractionScope,
+    source_turn_id: &str,
+    submitted: &ImportedSubmittedInput,
+    node_ids: &HashMap<String, i64>,
+    layer_ids: &HashMap<String, i64>,
+    action_ids: &HashMap<String, i64>,
+) -> Result<ImportedInputResolution, GraphError> {
+    if submitted.root_turn_id != source_turn_id {
+        return Ok(ImportedInputResolution::Rejected(
+            "submitted input names a different root turn",
+        ));
+    }
+    let (
+        Some(&presenting_interaction_node_id),
+        Some(&presenting_layer_id),
+        Some(&action_id),
+        Some(&claimed_source_node_id),
+    ) = (
+        node_ids.get(&submitted.source.interaction_node_id),
+        layer_ids.get(&submitted.source.layer_id),
+        action_ids.get(&submitted.source.action_id),
+        node_ids.get(&submitted.source.node_id),
+    )
+    else {
+        return Ok(ImportedInputResolution::Rejected(
+            "submitted input provenance names a record that was not materialized",
+        ));
+    };
+    let occurrence = PresentingInputOccurrence {
+        presenting_interaction_node_id: imported_node_id(presenting_interaction_node_id)?,
+        presenting_layer_id: imported_layer_id(presenting_layer_id)?,
+        action_id: imported_action_id(action_id)?,
+    };
+    let accepted = match ActionTable::new(connection)
+        .canonical_input_occurrence(scope, &occurrence)
+        .await
+    {
+        Ok(accepted) => accepted,
+        Err(GraphError::Validation { .. }) => {
+            return Ok(ImportedInputResolution::Rejected(
+                "submitted input provenance is not one accepted input occurrence",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    if accepted.kind != ActionKind::Input || accepted.input.as_ref() != Some(&submitted.action) {
+        return Ok(ImportedInputResolution::Rejected(
+            "submitted input action snapshot does not match the accepted action",
+        ));
+    }
+    if accepted.source_node_id.value() != claimed_source_node_id {
+        return Ok(ImportedInputResolution::Rejected(
+            "submitted input names a source node that did not author the action",
+        ));
+    }
+    Ok(ImportedInputResolution::Resolved(ResolvedImportedInput {
+        presenting_interaction_node_id,
+        presenting_layer_id,
+        action_id,
+        source_node_id: accepted.source_node_id.value(),
+    }))
+}
+
+fn imported_node_id(value: i64) -> Result<NodeId, GraphError> {
+    NodeId::new(value)
+        .ok_or_else(|| GraphError::Internal("imported node identifier is invalid".into()))
+}
+
+fn imported_layer_id(value: i64) -> Result<LayerId, GraphError> {
+    LayerId::new(value)
+        .ok_or_else(|| GraphError::Internal("imported layer identifier is invalid".into()))
+}
+
+fn imported_action_id(value: i64) -> Result<ActionId, GraphError> {
+    ActionId::new(value)
+        .ok_or_else(|| GraphError::Internal("imported action identifier is invalid".into()))
 }
