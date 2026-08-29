@@ -28,6 +28,10 @@ import {
   resolveRunProfile,
   summarizeRun,
 } from "./recursive-live-run-model.mjs";
+import {
+  completionMetadata,
+  productRequest,
+} from "./recursive-live-run-transport.mjs";
 
 const OPT_IN = "RELAYER_RECURSIVE_LIVE_RUN";
 const repositoryRoot = resolve(import.meta.dirname, "..");
