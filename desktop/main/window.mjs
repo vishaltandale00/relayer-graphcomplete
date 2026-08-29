@@ -61,11 +61,17 @@ export function createWindowFactory({
       if (channel !== "relayer:renderer-unhandled-error") return;
       Promise.resolve(reporterState.reporter?.report(record)).catch(() => undefined);
     };
-    window.webContents.on("render-process-gone", reportRendererTermination);
-    window.webContents.on("ipc-message", reportRendererUnhandledError);
+    const reportingContents = window.webContents;
+    reportingContents.on("render-process-gone", reportRendererTermination);
+    reportingContents.on("ipc-message", reportRendererUnhandledError);
     window.once?.("closed", () => {
-      window.webContents.removeListener?.("render-process-gone", reportRendererTermination);
-      window.webContents.removeListener?.("ipc-message", reportRendererUnhandledError);
+      // "closed" fires after the window is destroyed, and the webContents
+      // getter throws on a destroyed BrowserWindow. Use the reference captured
+      // above, and skip removal once the contents are gone with it.
+      if (reportingContents.isDestroyed?.() !== true) {
+        reportingContents.removeListener?.("render-process-gone", reportRendererTermination);
+        reportingContents.removeListener?.("ipc-message", reportRendererUnhandledError);
+      }
       revokeReporter(reporterState);
     });
     onWindowCreated(window);

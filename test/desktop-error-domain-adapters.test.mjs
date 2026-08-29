@@ -308,6 +308,50 @@ describe("desktop failure-domain adapters", () => {
     expect(revoke).toHaveBeenCalledOnce();
   });
 
+  it("revokes the reporter without touching webContents on a destroyed window", async () => {
+    const revoke = vi.fn();
+    // Electron destroys the window before emitting "closed", and the
+    // webContents getter throws on a destroyed BrowserWindow. Reading it from
+    // the closed handler raised an uncaught main-process exception.
+    class DestroyedOnCloseBrowserWindow extends EventEmitter {
+      constructor() {
+        super();
+        this.destroyed = false;
+        this.contents = Object.assign(new EventEmitter(), {
+          setWindowOpenHandler: vi.fn(),
+          session: { cookies: { set: vi.fn(async () => undefined) } },
+          isDestroyed: () => this.destroyed,
+        });
+        this.loadURL = vi.fn(async () => undefined);
+      }
+
+      get webContents() {
+        if (this.destroyed) throw new TypeError("Object has been destroyed");
+        return this.contents;
+      }
+
+      close() {
+        this.destroyed = true;
+        this.emit("closed");
+      }
+    }
+    const createWindow = createWindowFactory({
+      BrowserWindow: DestroyedOnCloseBrowserWindow,
+      desktopDirectory: "/immutable-desktop",
+      getAppearance: () => "dark",
+      updater: { status: () => ({ phase: "development" }) },
+      issueErrorReporter: () => ({ report: vi.fn(), revoke }),
+    });
+
+    const window = await createWindow({
+      origin: "http://127.0.0.1:4321/session",
+      cookie: { name: "session", value: "private" },
+    });
+
+    expect(() => window.close()).not.toThrow();
+    expect(revoke).toHaveBeenCalledOnce();
+  });
+
   it("revokes the prior renderer generation on replacement and ignores expected termination", async () => {
     const reporters = [
       { report: vi.fn(), revoke: vi.fn() },
