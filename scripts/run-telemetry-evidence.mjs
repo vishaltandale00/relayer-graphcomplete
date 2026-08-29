@@ -14,7 +14,7 @@ import { createDesktopErrorReporterIssuer } from "../desktop/main/services/authe
 import { createSentryErrorTransport } from "../desktop/main/services/sentry-error-transport.mjs";
 
 const require = createRequire(import.meta.url);
-const { installRendererErrorReporting } = require("../desktop/preload/error-reporting.cjs");
+const { installRendererErrorReporting } = require("../desktop/preload/index.cjs");
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const desktopPackage = JSON.parse(await readFile(join(repositoryRoot, "desktop/package.json"), "utf8"));
