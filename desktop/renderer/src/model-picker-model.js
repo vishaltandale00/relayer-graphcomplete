@@ -232,7 +232,11 @@ export function resolveUnsentModelIntent(settings, candidate) {
 }
 
 export function selectCandidateHarness(settings, currentSelection, harnessId) {
-  const selection = normalizePickerSelection(settings, { harnessId });
+  // The configured default family belongs to the app default harness, so a candidate harness
+  // with different model rules may not be able to use it. That is not "no models" — fall back
+  // to the first family this harness can actually use before rolling the switch back.
+  const selection = normalizePickerSelection(settings, { harnessId })
+    ?? firstAvailableSelection(settings, harnessId);
   if (selection) return { selection, error: null };
   return { selection: currentSelection, error: NO_MODELS_FOR_HARNESS };
 }

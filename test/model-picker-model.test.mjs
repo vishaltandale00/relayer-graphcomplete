@@ -168,6 +168,47 @@ describe("composer model picker selection", () => {
     expect(pickerSelectionIsAvailable(catalog, { harnessId: "prime-agent-basic" })).toBe(false);
   });
 
+  it("switches to a harness whose only usable family is not the configured default family", () => {
+    const catalog = settings();
+    catalog.defaults.familyId = 1;
+    catalog.providers[0].adapterId = "codex-subscription";
+    catalog.providers.push({
+      id: "router",
+      adapterId: "openrouter",
+      connected: true,
+      models: [{ id: "qwen", visible: true, available: true }],
+    });
+    catalog.families.push({
+      id: 3,
+      name: "OpenRouter",
+      enabled: true,
+      position: 2,
+      members: [{ providerId: "router", modelId: "qwen", position: 0 }],
+    });
+    catalog.harnesses.push({
+      id: "prime-agent-basic",
+      label: "Prime Agent Basic",
+      available: true,
+      modelRules: {
+        allow: [{ adapterId: "openrouter", modelIdRegex: ".*" }],
+        deny: [],
+      },
+      executionAccessContracts: ["secret@1"],
+    });
+    const current = normalizePickerSelection(catalog, null);
+    expect(current).toMatchObject({ harnessId: "codex-basic", familyId: 1 });
+    expect(availablePickerFamilies(catalog, "prime-agent-basic").map(({ id }) => id)).toEqual([3]);
+    expect(selectCandidateHarness(catalog, current, "prime-agent-basic")).toEqual({
+      selection: {
+        harnessId: "prime-agent-basic",
+        familyId: 3,
+        providerId: "router",
+        modelId: "qwen",
+      },
+      error: null,
+    });
+  });
+
   it("keeps the first family's first available member authoritative over a later preferred model", () => {
     const catalog = settings();
     catalog.providers[0].models[1].available = true;
