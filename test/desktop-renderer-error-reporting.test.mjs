@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { installRendererErrorReporting, sameOriginFrames } = require("../desktop/preload/error-reporting.cjs");
+const { installRendererErrorReporting, sameOriginFrames } = require("../desktop/preload/index.cjs");
 
 describe("renderer typed error-reporting capability", () => {
   it("submits only same-origin application-relative frames for an unhandled renderer error", () => {
