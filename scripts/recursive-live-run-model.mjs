@@ -11,45 +11,71 @@ import { resolve } from "node:path";
 export const LIVE_RUN_AUTH = Object.freeze({
   openrouter: { adapterId: "openrouter", contract: "secret@1", endpoint: "https://openrouter.ai/api/v1" },
   "openai-api": { adapterId: "openai-api", contract: "secret@1", endpoint: "https://api.openai.com/v1" },
+  "anthropic-api": { adapterId: "anthropic-api", contract: "secret@1", endpoint: "https://api.anthropic.com/v1" },
   "codex-subscription": { adapterId: "codex-subscription", contract: "managed-runtime@1" },
 });
 
+/** Harness implementations that run a task through the managed Codex executable. */
+const CODEX_IMPLEMENTATIONS = new Set(["codex.basic"]);
+
+/** Names the profiles a credentials document defines, for an error a human can act on. */
+export function liveRunProfileNames(document) {
+  const runs = document?.runs;
+  return runs === null || typeof runs !== "object" || Array.isArray(runs) ? [] : Object.keys(runs);
+}
+
 /**
- * Validates one credentials document.
+ * Validates one named run profile against the harness it selects.
  *
  * Errors name the field and never quote its value, because the value may be the key. A
  * subscription carries no key at all: the provider CLI holds that login inside its own home.
  */
-export function resolveCredentials(document, path = "live-run.local.json") {
-  const kind = String(document?.auth?.kind ?? "").trim();
-  const auth = LIVE_RUN_AUTH[kind];
-  if (auth === undefined) {
-    throw new Error(`${path} needs auth.kind set to one of: ${Object.keys(LIVE_RUN_AUTH).join(", ")}.`);
+export function resolveRunProfile(document, name, { implementation, path = "live-run.local.json" }) {
+  const profile = document?.runs?.[name];
+  if (profile === null || typeof profile !== "object" || Array.isArray(profile)) {
+    const known = liveRunProfileNames(document);
+    throw new Error(`${path} has no run profile ${name}.${known.length === 0 ? "" : ` It defines: ${known.join(", ")}.`}`);
   }
   const required = (field, value) => {
     const trimmed = String(value ?? "").trim();
-    if (!trimmed) throw new Error(`${path} needs ${field}.`);
+    if (!trimmed) throw new Error(`${path} run ${name} needs ${field}.`);
     return trimmed;
   };
-  const apiKey = String(document?.auth?.apiKey ?? "").trim();
+  const kind = String(profile.auth?.kind ?? "").trim();
+  const auth = LIVE_RUN_AUTH[kind];
+  if (auth === undefined) {
+    throw new Error(`${path} run ${name} needs auth.kind set to one of: ${Object.keys(LIVE_RUN_AUTH).join(", ")}.`);
+  }
+  const apiKey = String(profile.auth?.apiKey ?? "").trim();
   if (auth.contract === "secret@1" && !apiKey) {
-    throw new Error(`${path} needs auth.apiKey for ${kind}.`);
+    throw new Error(`${path} run ${name} needs auth.apiKey for ${kind}.`);
   }
   if (auth.contract === "managed-runtime@1" && apiKey) {
-    throw new Error(`${path} must leave auth.apiKey null for ${kind}; its login lives in codexHome.`);
+    throw new Error(`${path} run ${name} must leave auth.apiKey null for ${kind}; its login lives in codexHome.`);
+  }
+  const codex = CODEX_IMPLEMENTATIONS.has(implementation);
+  if (!codex && auth.contract === "managed-runtime@1") {
+    throw new Error(`${path} run ${name} selects ${implementation}, which accepts a key rather than a ${kind} login.`);
   }
   return {
     ...auth,
+    name,
+    harness: required("harness", profile.harness),
+    implementation,
     // The Codex harness declares compatibility with the built-in `codex` provider, so the
     // definition keeps that id while its adapter varies.
-    providerId: String(document?.providerId ?? "codex").trim(),
-    codexExecutable: resolve(required("codexExecutable", document?.codexExecutable)),
-    codexHome: resolve(required("codexHome", document?.codexHome)),
-    modelId: required("modelId", document?.modelId),
+    providerId: String(profile.providerId ?? "codex").trim(),
+    modelId: required("modelId", profile.modelId),
+    ...(codex
+      ? {
+        codexExecutable: resolve(required("codexExecutable", profile.codexExecutable)),
+        codexHome: resolve(required("codexHome", profile.codexHome)),
+      }
+      : {}),
     ...(apiKey ? { apiKey } : {}),
     ...(auth.endpoint === undefined
       ? {}
-      : { endpoint: String(document?.auth?.endpoint ?? "").trim() || auth.endpoint }),
+      : { endpoint: String(profile.auth?.endpoint ?? "").trim() || auth.endpoint }),
   };
 }
 

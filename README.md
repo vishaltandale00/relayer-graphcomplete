@@ -140,20 +140,25 @@ Credentials live in one local file. Copy the template and fill it in;
 cp live-run.example.json live-run.local.json
 ```
 
-Set `auth.kind` to `openrouter`, `openai-api`, or `codex-subscription`. The two
-key kinds read `auth.apiKey` from the file and reach the provider directly. The
+Each entry under `runs` is one named profile pairing a harness with a provider.
+`auth.kind` is one of `openrouter`, `openai-api`, `anthropic-api`, or
+`codex-subscription`. The key kinds read `auth.apiKey` from the file. The
 subscription kind keeps every secret out of the file: log in once against the
 isolated provider home the file names, and leave `auth.apiKey` null.
 
+Select one profile per invocation, so a run never spends more than intended:
+
 ```sh
-CODEX_HOME=/absolute/path/to/codex-home codex login   # subscription only
-RELAYER_RECURSIVE_LIVE_RUN=1 npm run live:recursive-complete
+RELAYER_RECURSIVE_LIVE_RUN=1 npm run live:recursive-complete -- --profile prime-openrouter
+RELAYER_RECURSIVE_LIVE_RUN=1 npm run live:recursive-complete -- --profile codex-openai
 ```
 
-Every kind runs through the managed Codex executable inside the `codexHome` the
-file names, so a run never touches an unrelated provider login.
+A `codex.basic` profile also needs `codexExecutable` and `codexHome`, and runs
+inside that home so it never picks up an unrelated provider login. A
+`prime.agent` profile needs neither; it reaches its provider directly and
+accepts only a key.
 
-It writes `run.json` under `.relayer/live/recursive-complete/`, recording what
+It writes `run.json` under `.relayer/live/recursive-complete/<profile>/`, recording what
 ran and never how it authenticated. The run spends real inference and is
 excluded from `npm run check`; its analysis and pass rules run in the default
 deterministic suite. Semantic coherence is graded separately and blocks merge on

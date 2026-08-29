@@ -2,21 +2,32 @@
   "_comment": [
     "Copy this file to live-run.local.json and fill it in. That filename is gitignored.",
     "Never commit a real key, and never paste one into a chat, an issue, or a PR.",
-    "Set auth.kind to one of: openrouter, openai-api, codex-subscription."
+    "Each entry under `runs` is one named profile. Select one with --profile <name>.",
+    "auth.kind is one of: openrouter, openai-api, anthropic-api, codex-subscription.",
+    "codexExecutable and codexHome are required only by codex.basic harnesses."
   ],
 
-  "codexExecutable": "/absolute/path/to/managed/codex",
-  "codexHome": "/absolute/path/to/an/empty/codex-home",
-  "modelId": "openai/gpt-5",
+  "runs": {
+    "prime-openrouter": {
+      "harness": "prime-agent-basic",
+      "modelId": "openai/gpt-5",
+      "auth": {
+        "kind": "openrouter",
+        "apiKey": "REPLACE_WITH_YOUR_OPENROUTER_KEY",
+        "endpoint": null
+      }
+    },
 
-  "_authComment": [
-    "openrouter and openai-api read a key from this file and reach the provider directly.",
-    "codex-subscription keeps every secret out of this file: run",
-    "`CODEX_HOME=<codexHome above> codex login` once, and leave apiKey null."
-  ],
-  "auth": {
-    "kind": "openrouter",
-    "apiKey": "REPLACE_WITH_YOUR_KEY",
-    "endpoint": null
+    "codex-openai": {
+      "harness": "codex-basic",
+      "modelId": "gpt-5-codex",
+      "codexExecutable": "/absolute/path/to/managed/codex",
+      "codexHome": "/absolute/path/to/an/empty/codex-home",
+      "auth": {
+        "kind": "openai-api",
+        "apiKey": "REPLACE_WITH_YOUR_OPENAI_KEY",
+        "endpoint": null
+      }
+    }
   }
 }

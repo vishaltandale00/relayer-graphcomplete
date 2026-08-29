@@ -4,7 +4,8 @@ import {
   LIVE_RUN_AUTH,
   RECURSIVE_LIVE_RUN_TASK,
   compareRuns,
-  resolveCredentials,
+  liveRunProfileNames,
+  resolveRunProfile,
   orderedRevisions,
   revisionFindings,
   semanticChildren,
@@ -167,70 +168,117 @@ describe("recursive live run analysis", () => {
 });
 
 describe("live run credentials", () => {
-  const openRouter = {
-    codexExecutable: "/managed/codex",
-    codexHome: "/isolated/codex-home",
-    modelId: "openai/gpt-5",
-    auth: { kind: "openrouter", apiKey: "test-key" },
+  const document = {
+    runs: {
+      "prime-openrouter": {
+        harness: "prime-agent-basic",
+        modelId: "openai/gpt-5",
+        auth: { kind: "openrouter", apiKey: "test-key" },
+      },
+      "codex-openai": {
+        harness: "codex-basic",
+        modelId: "gpt-5-codex",
+        codexExecutable: "/managed/codex",
+        codexHome: "/isolated/codex-home",
+        auth: { kind: "openai-api", apiKey: "test-key" },
+      },
+    },
   };
+  const prime = { implementation: "prime.agent" };
+  const codex = { implementation: "codex.basic" };
 
-  it("resolves an OpenRouter key onto the secret execution contract", () => {
-    expect(resolveCredentials(openRouter)).toEqual({
+  it("resolves an OpenRouter key for Prime onto the secret contract, with no Codex runtime", () => {
+    const resolved = resolveRunProfile(document, "prime-openrouter", prime);
+
+    expect(resolved).toEqual({
+      name: "prime-openrouter",
+      harness: "prime-agent-basic",
+      implementation: "prime.agent",
       adapterId: "openrouter",
       contract: "secret@1",
       endpoint: "https://openrouter.ai/api/v1",
       providerId: "codex",
-      codexExecutable: "/managed/codex",
-      codexHome: "/isolated/codex-home",
       modelId: "openai/gpt-5",
       apiKey: "test-key",
     });
+    expect(resolved).not.toHaveProperty("codexExecutable");
   });
 
-  it("keeps the harness-compatible provider id while the adapter varies", () => {
-    for (const kind of Object.keys(LIVE_RUN_AUTH)) {
-      const apiKey = LIVE_RUN_AUTH[kind].contract === "secret@1" ? "test-key" : null;
-      const resolved = resolveCredentials({ ...openRouter, auth: { kind, apiKey } });
-      expect(resolved.providerId).toBe("codex");
-      expect(resolved.adapterId).toBe(LIVE_RUN_AUTH[kind].adapterId);
-    }
+  it("resolves an OpenAI key for Codex with its isolated executable and home", () => {
+    expect(resolveRunProfile(document, "codex-openai", codex)).toMatchObject({
+      adapterId: "openai-api",
+      contract: "secret@1",
+      endpoint: "https://api.openai.com/v1",
+      codexExecutable: "/managed/codex",
+      codexHome: "/isolated/codex-home",
+      modelId: "gpt-5-codex",
+    });
+  });
+
+  it("requires the Codex executable and home only for a Codex harness", () => {
+    const withoutCodex = {
+      runs: { plain: { ...document.runs["codex-openai"], codexExecutable: null, codexHome: null } },
+    };
+
+    expect(() => resolveRunProfile(withoutCodex, "plain", codex)).toThrow(/needs codexExecutable/);
+    expect(resolveRunProfile(withoutCodex, "plain", prime).modelId).toBe("gpt-5-codex");
+  });
+
+  it("refuses a subscription login for a harness that takes a key", () => {
+    const subscription = {
+      runs: { sub: { harness: "prime-agent-basic", modelId: "m", auth: { kind: "codex-subscription" } } },
+    };
+
+    expect(() => resolveRunProfile(subscription, "sub", prime))
+      .toThrow(/accepts a key rather than a codex-subscription login/);
   });
 
   it("honours an endpoint override and falls back to the provider default", () => {
-    expect(resolveCredentials({
-      ...openRouter,
-      auth: { ...openRouter.auth, endpoint: "https://gateway.internal/v1" },
-    }).endpoint).toBe("https://gateway.internal/v1");
-    expect(resolveCredentials({ ...openRouter, auth: { ...openRouter.auth, endpoint: null } }).endpoint)
+    const overridden = {
+      runs: {
+        gateway: {
+          ...document.runs["prime-openrouter"],
+          auth: { ...document.runs["prime-openrouter"].auth, endpoint: "https://gateway.internal/v1" },
+        },
+      },
+    };
+
+    expect(resolveRunProfile(overridden, "gateway", prime).endpoint).toBe("https://gateway.internal/v1");
+    expect(resolveRunProfile(document, "prime-openrouter", prime).endpoint)
       .toBe("https://openrouter.ai/api/v1");
   });
 
-  it("carries no key for a subscription, whose login lives in its provider home", () => {
-    const resolved = resolveCredentials({
-      ...openRouter,
-      auth: { kind: "codex-subscription", apiKey: null },
-    });
-
-    expect(resolved).not.toHaveProperty("apiKey");
-    expect(resolved.contract).toBe("managed-runtime@1");
+  it("lists the profiles a document defines so an unknown name is actionable", () => {
+    expect(liveRunProfileNames(document)).toEqual(["prime-openrouter", "codex-openai"]);
+    expect(liveRunProfileNames({})).toEqual([]);
+    expect(() => resolveRunProfile(document, "typo", prime))
+      .toThrow(/It defines: prime-openrouter, codex-openai/);
   });
 
   it("names the missing field without ever quoting the key", () => {
+    const withRun = (run) => ({ runs: { only: { ...document.runs["codex-openai"], ...run } } });
     const cases = [
-      [{ ...openRouter, auth: { kind: "nope" } }, /auth.kind set to one of/],
-      [{ ...openRouter, auth: { kind: "openrouter" } }, /needs auth.apiKey for openrouter/],
-      [{ ...openRouter, auth: { kind: "codex-subscription", apiKey: "test-key" } }, /leave auth.apiKey null/],
-      [{ ...openRouter, codexExecutable: "  " }, /needs codexExecutable/],
-      [{ ...openRouter, codexHome: null }, /needs codexHome/],
-      [{ ...openRouter, modelId: "" }, /needs modelId/],
+      [withRun({ auth: { kind: "nope", apiKey: "test-key" } }), /auth.kind set to one of/],
+      [withRun({ auth: { kind: "openrouter" } }), /needs auth.apiKey for openrouter/],
+      [withRun({ auth: { kind: "codex-subscription", apiKey: "test-key" } }), /leave auth.apiKey null/],
+      [withRun({ modelId: "" }), /needs modelId/],
+      [withRun({ harness: "  " }), /needs harness/],
     ];
-    for (const [document, expected] of cases) {
-      expect(() => resolveCredentials(document)).toThrow(expected);
+    for (const [candidate, expected] of cases) {
+      expect(() => resolveRunProfile(candidate, "only", codex)).toThrow(expected);
       try {
-        resolveCredentials(document);
+        resolveRunProfile(candidate, "only", codex);
       } catch (error) {
         expect(error.message).not.toContain("test-key");
       }
+    }
+  });
+
+  it("covers every auth kind the file offers", () => {
+    for (const kind of Object.keys(LIVE_RUN_AUTH)) {
+      const apiKey = LIVE_RUN_AUTH[kind].contract === "secret@1" ? "test-key" : null;
+      const candidate = { runs: { only: { ...document.runs["codex-openai"], auth: { kind, apiKey } } } };
+      expect(resolveRunProfile(candidate, "only", codex).adapterId).toBe(LIVE_RUN_AUTH[kind].adapterId);
     }
   });
 });

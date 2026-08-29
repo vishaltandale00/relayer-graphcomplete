@@ -19,10 +19,13 @@ import {
   RECURSIVE_TEMPORAL_FEATURES,
 } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import { loadHarnessConfigurations } from "@relayer/harness-host";
+
 import {
   RECURSIVE_LIVE_RUN_TASK,
   compareRuns,
-  resolveCredentials,
+  liveRunProfileNames,
+  resolveRunProfile,
   summarizeRun,
 } from "./recursive-live-run-model.mjs";
 
@@ -34,15 +37,26 @@ function singleArgument(name, fallback) {
   return index === -1 ? fallback : process.argv[index + 1];
 }
 
-/** Reads and validates the local credentials file. */
-function readCredentials(path) {
+/** Reads one named run profile, validated against the harness it selects. */
+async function readProfile(path, name) {
   let raw;
   try {
     raw = readFileSync(path, "utf8");
   } catch {
     throw new Error(`The live run needs ${path}. Copy live-run.example.json to it and fill it in.`);
   }
-  return resolveCredentials(JSON.parse(raw), path);
+  const document = JSON.parse(raw);
+  if (!name) {
+    const known = liveRunProfileNames(document);
+    throw new Error(`Select a run profile with --profile. ${path} defines: ${known.join(", ") || "none"}.`);
+  }
+  const harness = String(document?.runs?.[name]?.harness ?? "").trim();
+  if (!harness) throw new Error(`${path} run ${name} needs harness.`);
+  const configurationPath = join(repositoryRoot, "harnesses", `${harness}.yaml`);
+  const configurations = await loadHarnessConfigurations([configurationPath]);
+  const implementation = configurations.get(harness)?.implementation;
+  if (implementation === undefined) throw new Error(`${configurationPath} does not define harness ${harness}.`);
+  return { profile: resolveRunProfile(document, name, { implementation, path }), configurationPath };
 }
 
 /** Reads the provenance of the exact executable this run will spend money through. */
@@ -58,28 +72,29 @@ function codexVersion(executable) {
  * Leases one real provider execution, over the two contracts the desktop supports.
  *
  * A subscription resolves to the managed runtime environment that isolates the provider
- * login. A key resolves to the secret contract, which the Codex harness turns into an
- * API key and base URL. Both keep the run inside its own provider home.
+ * login. A key resolves to the secret contract. Only a Codex harness carries a runtime
+ * descriptor: Prime reaches its provider directly and needs exactly the key field.
  */
-function providerExecution(credentials) {
-  const secret = credentials.contract === "secret@1";
-  const environment = {
-    CODEX_HOME: credentials.codexHome,
-    RELAYER_CODEX_BINARY: credentials.codexExecutable,
-    ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
-  };
-  const runtime = {
-    runtimeId: "codex",
-    version: codexVersion(credentials.codexExecutable),
-    executable: credentials.codexExecutable,
-    environment,
-  };
+function providerExecution(profile) {
+  const secret = profile.contract === "secret@1";
+  const runtime = profile.codexExecutable === undefined
+    ? undefined
+    : {
+      runtimeId: "codex",
+      version: codexVersion(profile.codexExecutable),
+      executable: profile.codexExecutable,
+      environment: {
+        CODEX_HOME: profile.codexHome,
+        RELAYER_CODEX_BINARY: profile.codexExecutable,
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+      },
+    };
   const definition = {
-    id: credentials.providerId,
-    adapterId: credentials.adapterId,
-    accessContract: credentials.contract,
-    ...(secret ? { endpoint: credentials.endpoint } : {}),
+    id: profile.providerId,
+    adapterId: profile.adapterId,
+    accessContract: profile.contract,
+    ...(secret ? { endpoint: profile.endpoint } : {}),
   };
   return async () => ({
     definition,
@@ -90,47 +105,17 @@ function providerExecution(credentials) {
     },
     runtime: {
       async executionAccess() {
-        return secret
-          ? {
-            kind: "secret",
-            endpoint: credentials.endpoint,
-            fields: { "api-key": credentials.apiKey },
-            runtime,
-          }
-          : { kind: "managed-runtime", ...runtime };
+        if (!secret) return { kind: "managed-runtime", ...runtime };
+        return {
+          kind: "secret",
+          endpoint: profile.endpoint,
+          fields: { "api-key": profile.apiKey },
+          ...(runtime === undefined ? {} : { runtime }),
+        };
       },
     },
     async release() {},
   });
-}
-
-async function productRequest(session, path, init = {}) {
-  const response = await fetch(new URL(path, session.origin), {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      cookie: `${session.cookie.name}=${session.cookie.value}`,
-      ...init.headers,
-    },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(`${init.method ?? "GET"} ${path} failed with ${response.status}: ${JSON.stringify(body)}`);
-  }
-  return body;
-}
-
-async function completionMetadata(runtimeSession, completionIds) {
-  const metadata = [];
-  for (const nodeId of completionIds) {
-    const response = await fetch(
-      new URL(`api/control/interactions/${nodeId}`, `${runtimeSession.graphUrl}/`),
-      { headers: { authorization: `Bearer ${runtimeSession.graphControlToken}` } },
-    );
-    if (!response.ok) continue;
-    metadata.push(await response.json());
-  }
-  return metadata;
 }
 
 /**
@@ -179,15 +164,15 @@ async function observeUntilSettled(session, threadId, rootInteractionId, timeout
   }
 }
 
-async function runOnce({ recursionEnabled, harnessConfiguration, credentials, timeoutMs }) {
+async function runOnce({ recursionEnabled, profile, configurationPath, timeoutMs }) {
   const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-recursive-live-"));
   const runtime = new GraphCompleteRuntimeService({
     userDataDirectory: dataDirectory,
     graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-    configurationPaths: [join(repositoryRoot, "harnesses", `${harnessConfiguration}.yaml`)],
-    codexPathOverride: credentials.codexExecutable,
+    configurationPaths: [configurationPath],
+    ...(profile.codexExecutable === undefined ? {} : { codexPathOverride: profile.codexExecutable }),
     temporalFeatures: recursionEnabled ? RECURSIVE_TEMPORAL_FEATURES : {},
-    acquireProviderExecution: providerExecution(credentials),
+    acquireProviderExecution: providerExecution(profile),
   });
   const productServer = new RelayerAppServerService({
     userDataDirectory: dataDirectory,
@@ -195,12 +180,12 @@ async function runOnce({ recursionEnabled, harnessConfiguration, credentials, ti
     webDirectory: join(repositoryRoot, "desktop", "renderer"),
     permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
     runtimeSession: await runtime.start(),
-    defaultHarnessConfiguration: harnessConfiguration,
+    defaultHarnessConfiguration: profile.harness,
     allowHarnessOverride: true,
   });
   try {
     const session = await productServer.start();
-    const { providerId, modelId } = credentials;
+    const { providerId, modelId } = profile;
     await productServer.publishProviderCatalog({
       providerId,
       label: providerId,
@@ -229,7 +214,7 @@ async function runOnce({ recursionEnabled, harnessConfiguration, credentials, ti
       body: JSON.stringify({
         title: "Recursive Complete live run",
         initialMessage: RECURSIVE_LIVE_RUN_TASK,
-        harnessId: harnessConfiguration,
+        harnessId: profile.harness,
         permissionProfileId: "auto",
         modelSelection: { familyId: family.id, providerId, modelId },
       }),
@@ -255,10 +240,16 @@ async function main() {
   if (!["on", "off", "both"].includes(requested)) {
     throw new Error("--recursion must be on, off, or both");
   }
-  const outputDirectory = resolve(singleArgument("--output-dir", ".relayer/live/recursive-complete"));
+  const { profile, configurationPath } = await readProfile(
+    resolve(singleArgument("--credentials", "live-run.local.json")),
+    singleArgument("--profile", ""),
+  );
+  const outputDirectory = resolve(
+    singleArgument("--output-dir", join(".relayer", "live", "recursive-complete", profile.name)),
+  );
   const options = {
-    harnessConfiguration: singleArgument("--harness", "codex-basic"),
-    credentials: readCredentials(resolve(singleArgument("--credentials", "live-run.local.json"))),
+    profile,
+    configurationPath,
     timeoutMs: Number(singleArgument("--timeout-ms", "900000")),
   };
   mkdirSync(outputDirectory, { recursive: true });
@@ -269,8 +260,11 @@ async function main() {
   // The artifact records what ran, never how it authenticated.
   const artifact = {
     task: RECURSIVE_LIVE_RUN_TASK,
-    harnessConfiguration: options.harnessConfiguration,
-    modelId: options.credentials.modelId,
+    profile: profile.name,
+    harnessConfiguration: profile.harness,
+    implementation: profile.implementation,
+    adapterId: profile.adapterId,
+    modelId: profile.modelId,
     runs,
     ...(runs.enabled && runs.disabled ? { comparison: compareRuns(runs.enabled, runs.disabled) } : {}),
   };
