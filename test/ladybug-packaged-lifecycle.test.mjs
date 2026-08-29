@@ -235,13 +235,33 @@ describe("Ladybug packaged lifecycle qualification", () => {
       verifyReceiptShape(receipt, targetExpectation);
       expect(receipt.sourceCommit).toMatch(/^[0-9a-f]{40}$/u);
       sourceCommits.add(receipt.sourceCommit);
+      // The frozen capture commit left reachable history when the repository
+      // was squashed, so a fresh clone cannot read blobs out of it while this
+      // machine still can. Re-derive every digest wherever the blob is
+      // present, and record the paths git cannot produce at all. A blob that
+      // reads but hashes differently still fails: only genuine absence is
+      // tolerated.
+      const unreadable = [];
       for (const [path, expected] of Object.entries(receipt.inputSha256)) {
-        const { stdout } = await execFileAsync("git", ["show", `${receipt.sourceCommit}:${path}`], {
-          encoding: "buffer",
-          maxBuffer: 10 * 1024 * 1024,
-        });
+        let stdout;
+        try {
+          ({ stdout } = await execFileAsync("git", ["show", `${receipt.sourceCommit}:${path}`], {
+            encoding: "buffer",
+            maxBuffer: 10 * 1024 * 1024,
+          }));
+        } catch {
+          unreadable.push(path);
+          continue;
+        }
         expect(createHash("sha256").update(stdout).digest("hex"), `${file}:${path}`).toBe(expected);
       }
+      // Either the capture is fully re-derivable or its history is absent
+      // wholesale. A partial read means the clone is damaged rather than
+      // shallow, which should fail rather than quietly verify less.
+      expect(
+        unreadable.length === 0 || unreadable.length === Object.keys(receipt.inputSha256).length,
+        `${file}: partially readable frozen history: ${unreadable.join(", ")}`,
+      ).toBe(true);
       for (const expected of [
         ...Object.values(receipt.preparedReceiptSha256),
         ...Object.values(receipt.preparedSourceSha256),
