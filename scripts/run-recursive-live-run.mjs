@@ -9,6 +9,7 @@
  * semantic child by its own decision, the ordered sequence of current-pointer revisions,
  * and wall-clock timings with recursion enabled and disabled on the same build.
  */
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -21,6 +22,7 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 import {
   RECURSIVE_LIVE_RUN_TASK,
   compareRuns,
+  resolveCredentials,
   summarizeRun,
 } from "./recursive-live-run-model.mjs";
 
@@ -32,12 +34,7 @@ function singleArgument(name, fallback) {
   return index === -1 ? fallback : process.argv[index + 1];
 }
 
-/**
- * Reads the local credentials file.
- *
- * Credentials never reach the artifact, the transcript, or an argument list. A subscription
- * run carries no key at all: the provider CLI holds that login inside its own home.
- */
+/** Reads and validates the local credentials file. */
 function readCredentials(path) {
   let raw;
   try {
@@ -45,37 +42,43 @@ function readCredentials(path) {
   } catch {
     throw new Error(`The live run needs ${path}. Copy live-run.example.json to it and fill it in.`);
   }
-  const credentials = JSON.parse(raw);
-  const codexExecutable = String(credentials.codexExecutable ?? "").trim();
-  const modelId = String(credentials.modelId ?? "").trim();
-  if (!codexExecutable) throw new Error(`${path} needs codexExecutable.`);
-  if (!modelId) throw new Error(`${path} needs modelId.`);
-  const codexHome = String(credentials.subscription?.codexHome ?? "").trim();
-  const apiKey = String(credentials.apiKey ?? "").trim();
-  if (Boolean(codexHome) === Boolean(apiKey)) {
-    throw new Error(`${path} needs exactly one of subscription.codexHome or apiKey.`);
+  return resolveCredentials(JSON.parse(raw), path);
+}
+
+/** Reads the provenance of the exact executable this run will spend money through. */
+function codexVersion(executable) {
+  try {
+    return execFileSync(executable, ["--version"], { encoding: "utf8" }).trim();
+  } catch (error) {
+    throw new Error(`Could not read a version from ${executable}: ${error?.message ?? error}`);
   }
-  return {
-    codexExecutable: resolve(codexExecutable),
-    modelId,
-    providerId: String(credentials.providerId ?? "codex").trim(),
-    ...(codexHome ? { codexHome: resolve(codexHome) } : { apiKey }),
-    endpoint: String(credentials.endpoint ?? "https://api.openai.com/v1").trim(),
-  };
 }
 
 /**
- * Leases one real provider execution, the same two contracts the desktop supports.
+ * Leases one real provider execution, over the two contracts the desktop supports.
  *
  * A subscription resolves to the managed runtime environment that isolates the provider
- * login. A key resolves to the secret contract instead.
+ * login. A key resolves to the secret contract, which the Codex harness turns into an
+ * API key and base URL. Both keep the run inside its own provider home.
  */
 function providerExecution(credentials) {
-  const secret = credentials.apiKey !== undefined;
+  const secret = credentials.contract === "secret@1";
+  const environment = {
+    CODEX_HOME: credentials.codexHome,
+    RELAYER_CODEX_BINARY: credentials.codexExecutable,
+    ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+  };
+  const runtime = {
+    runtimeId: "codex",
+    version: codexVersion(credentials.codexExecutable),
+    executable: credentials.codexExecutable,
+    environment,
+  };
   const definition = {
     id: credentials.providerId,
-    adapterId: secret ? "openai-api" : "codex-subscription",
-    accessContract: secret ? "secret@1" : "managed-runtime@1",
+    adapterId: credentials.adapterId,
+    accessContract: credentials.contract,
     ...(secret ? { endpoint: credentials.endpoint } : {}),
   };
   return async () => ({
@@ -87,22 +90,14 @@ function providerExecution(credentials) {
     },
     runtime: {
       async executionAccess() {
-        if (secret) {
-          return {
+        return secret
+          ? {
             kind: "secret",
             endpoint: credentials.endpoint,
             fields: { "api-key": credentials.apiKey },
-          };
-        }
-        return {
-          kind: "managed-runtime",
-          environment: {
-            CODEX_HOME: credentials.codexHome,
-            RELAYER_CODEX_BINARY: credentials.codexExecutable,
-            ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-            ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
-          },
-        };
+            runtime,
+          }
+          : { kind: "managed-runtime", ...runtime };
       },
     },
     async release() {},

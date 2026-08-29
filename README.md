@@ -140,13 +140,18 @@ Credentials live in one local file. Copy the template and fill it in;
 cp live-run.example.json live-run.local.json
 ```
 
-Prefer the subscription path, which keeps every secret out of that file. Log in
-once against an isolated provider home, then name that home in the file:
+Set `auth.kind` to `openrouter`, `openai-api`, or `codex-subscription`. The two
+key kinds read `auth.apiKey` from the file and reach the provider directly. The
+subscription kind keeps every secret out of the file: log in once against the
+isolated provider home the file names, and leave `auth.apiKey` null.
 
 ```sh
-CODEX_HOME=/absolute/path/to/codex-home codex login
+CODEX_HOME=/absolute/path/to/codex-home codex login   # subscription only
 RELAYER_RECURSIVE_LIVE_RUN=1 npm run live:recursive-complete
 ```
+
+Every kind runs through the managed Codex executable inside the `codexHome` the
+file names, so a run never touches an unrelated provider login.
 
 It writes `run.json` under `.relayer/live/recursive-complete/`, recording what
 ran and never how it authenticated. The run spends real inference and is

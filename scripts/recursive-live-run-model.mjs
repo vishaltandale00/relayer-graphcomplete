@@ -1,9 +1,57 @@
+import { resolve } from "node:path";
+
 /**
  * Deterministic analysis for the recursive Complete live run.
  *
  * The runner owns process boot and paid inference. Everything that decides whether a run
  * passed lives here so it can be proven without a provider.
  */
+
+/** Every provider definition the live run knows how to lease an execution from. */
+export const LIVE_RUN_AUTH = Object.freeze({
+  openrouter: { adapterId: "openrouter", contract: "secret@1", endpoint: "https://openrouter.ai/api/v1" },
+  "openai-api": { adapterId: "openai-api", contract: "secret@1", endpoint: "https://api.openai.com/v1" },
+  "codex-subscription": { adapterId: "codex-subscription", contract: "managed-runtime@1" },
+});
+
+/**
+ * Validates one credentials document.
+ *
+ * Errors name the field and never quote its value, because the value may be the key. A
+ * subscription carries no key at all: the provider CLI holds that login inside its own home.
+ */
+export function resolveCredentials(document, path = "live-run.local.json") {
+  const kind = String(document?.auth?.kind ?? "").trim();
+  const auth = LIVE_RUN_AUTH[kind];
+  if (auth === undefined) {
+    throw new Error(`${path} needs auth.kind set to one of: ${Object.keys(LIVE_RUN_AUTH).join(", ")}.`);
+  }
+  const required = (field, value) => {
+    const trimmed = String(value ?? "").trim();
+    if (!trimmed) throw new Error(`${path} needs ${field}.`);
+    return trimmed;
+  };
+  const apiKey = String(document?.auth?.apiKey ?? "").trim();
+  if (auth.contract === "secret@1" && !apiKey) {
+    throw new Error(`${path} needs auth.apiKey for ${kind}.`);
+  }
+  if (auth.contract === "managed-runtime@1" && apiKey) {
+    throw new Error(`${path} must leave auth.apiKey null for ${kind}; its login lives in codexHome.`);
+  }
+  return {
+    ...auth,
+    // The Codex harness declares compatibility with the built-in `codex` provider, so the
+    // definition keeps that id while its adapter varies.
+    providerId: String(document?.providerId ?? "codex").trim(),
+    codexExecutable: resolve(required("codexExecutable", document?.codexExecutable)),
+    codexHome: resolve(required("codexHome", document?.codexHome)),
+    modelId: required("modelId", document?.modelId),
+    ...(apiKey ? { apiKey } : {}),
+    ...(auth.endpoint === undefined
+      ? {}
+      : { endpoint: String(document?.auth?.endpoint ?? "").trim() || auth.endpoint }),
+  };
+}
 
 /**
  * The fixed synthetic task for Check 1.

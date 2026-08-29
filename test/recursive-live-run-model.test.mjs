@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  LIVE_RUN_AUTH,
   RECURSIVE_LIVE_RUN_TASK,
   compareRuns,
+  resolveCredentials,
   orderedRevisions,
   revisionFindings,
   semanticChildren,
@@ -161,5 +163,74 @@ describe("recursive live run analysis", () => {
       timeToFirstObservableGraphMs: { enabled: 3_500, disabled: 39_000 },
       totalTaskMs: { enabled: 60_000, disabled: 45_000, overheadMs: 15_000 },
     });
+  });
+});
+
+describe("live run credentials", () => {
+  const openRouter = {
+    codexExecutable: "/managed/codex",
+    codexHome: "/isolated/codex-home",
+    modelId: "openai/gpt-5",
+    auth: { kind: "openrouter", apiKey: "test-key" },
+  };
+
+  it("resolves an OpenRouter key onto the secret execution contract", () => {
+    expect(resolveCredentials(openRouter)).toEqual({
+      adapterId: "openrouter",
+      contract: "secret@1",
+      endpoint: "https://openrouter.ai/api/v1",
+      providerId: "codex",
+      codexExecutable: "/managed/codex",
+      codexHome: "/isolated/codex-home",
+      modelId: "openai/gpt-5",
+      apiKey: "test-key",
+    });
+  });
+
+  it("keeps the harness-compatible provider id while the adapter varies", () => {
+    for (const kind of Object.keys(LIVE_RUN_AUTH)) {
+      const apiKey = LIVE_RUN_AUTH[kind].contract === "secret@1" ? "test-key" : null;
+      const resolved = resolveCredentials({ ...openRouter, auth: { kind, apiKey } });
+      expect(resolved.providerId).toBe("codex");
+      expect(resolved.adapterId).toBe(LIVE_RUN_AUTH[kind].adapterId);
+    }
+  });
+
+  it("honours an endpoint override and falls back to the provider default", () => {
+    expect(resolveCredentials({
+      ...openRouter,
+      auth: { ...openRouter.auth, endpoint: "https://gateway.internal/v1" },
+    }).endpoint).toBe("https://gateway.internal/v1");
+    expect(resolveCredentials({ ...openRouter, auth: { ...openRouter.auth, endpoint: null } }).endpoint)
+      .toBe("https://openrouter.ai/api/v1");
+  });
+
+  it("carries no key for a subscription, whose login lives in its provider home", () => {
+    const resolved = resolveCredentials({
+      ...openRouter,
+      auth: { kind: "codex-subscription", apiKey: null },
+    });
+
+    expect(resolved).not.toHaveProperty("apiKey");
+    expect(resolved.contract).toBe("managed-runtime@1");
+  });
+
+  it("names the missing field without ever quoting the key", () => {
+    const cases = [
+      [{ ...openRouter, auth: { kind: "nope" } }, /auth.kind set to one of/],
+      [{ ...openRouter, auth: { kind: "openrouter" } }, /needs auth.apiKey for openrouter/],
+      [{ ...openRouter, auth: { kind: "codex-subscription", apiKey: "test-key" } }, /leave auth.apiKey null/],
+      [{ ...openRouter, codexExecutable: "  " }, /needs codexExecutable/],
+      [{ ...openRouter, codexHome: null }, /needs codexHome/],
+      [{ ...openRouter, modelId: "" }, /needs modelId/],
+    ];
+    for (const [document, expected] of cases) {
+      expect(() => resolveCredentials(document)).toThrow(expected);
+      try {
+        resolveCredentials(document);
+      } catch (error) {
+        expect(error.message).not.toContain("test-key");
+      }
+    }
   });
 });
