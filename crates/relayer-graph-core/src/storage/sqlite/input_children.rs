@@ -145,7 +145,7 @@ impl<'connection> InputChildTable<'connection> {
     }
 }
 
-fn validate_value(
+pub(crate) fn validate_value(
     index: usize,
     action: &InputAction,
     value: &SubmittedInputValue,

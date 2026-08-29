@@ -593,6 +593,108 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
 }
 
 #[tokio::test]
+async fn imported_submitted_input_value_must_satisfy_the_accepted_action() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    let resolved = &mut input.turns[0].accepted_view.as_mut().unwrap().layers[0];
+    // Two input actions, both genuinely authored by node-1, so each answer below
+    // carries provenance that actually happened.
+    for id in ["input-action-1", "input-action-2"] {
+        resolved.actions.push(ImportedAction {
+            id: id.into(),
+            source_node_id: "node-1".into(),
+            source_layer_id: Some("layer-1".into()),
+            kind: "input".into(),
+            relation: None,
+            label: "".into(),
+            variant: "pill".into(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+        });
+    }
+
+    let action = InputAction {
+        control: InputControl::SingleSelect,
+        prompt: "Choose".into(),
+        options: vec![InputOption {
+            key: "one".into(),
+            label: "One".into(),
+            unsupported_fields: Default::default(),
+        }],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    let value = SubmittedInputValue::Selected {
+        selected: vec![InputOption {
+            key: "one".into(),
+            label: "One".into(),
+            unsupported_fields: Default::default(),
+        }],
+    };
+    let honest = ImportedSubmittedInput {
+        id: "input-child-honest".into(),
+        root_turn_id: "turn-2".into(),
+        source: ImportedInputSource {
+            interaction_node_id: "interaction-1".into(),
+            layer_id: "layer-1".into(),
+            action_id: "input-action-1".into(),
+            node_id: "node-1".into(),
+        },
+        action: action.clone(),
+        value: value.clone(),
+    };
+    // Provenance here is entirely honest: node-1 really did author input-action-2 in
+    // this layer. Only the answer is fabricated -- an option key and label the accepted
+    // action never offered. The live send path rejects exactly this as
+    // `input_option_unknown`, so import must not accept it either.
+    let forged = ImportedSubmittedInput {
+        id: "input-child-forged".into(),
+        source: ImportedInputSource {
+            action_id: "input-action-2".into(),
+            ..honest.source.clone()
+        },
+        value: SubmittedInputValue::Selected {
+            selected: vec![InputOption {
+                key: "two".into(),
+                label: "Wire the money".into(),
+                unsupported_fields: Default::default(),
+            }],
+        },
+        ..honest.clone()
+    };
+    input.turns.push(ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "".into(),
+        interaction_node_id: Some("input-root-2".into()),
+        invoke_origin: None,
+        contexts: vec![],
+        submitted_inputs: vec![honest, forged],
+        accepted_view: None,
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+
+    // The fabricated answer is dropped, and dropping it is visible rather than silent.
+    assert_eq!(receipt.skipped_submitted_inputs.len(), 1);
+    let skipped = &receipt.skipped_submitted_inputs[0];
+    assert_eq!(skipped.submitted_input_id, "input-child-forged");
+    assert_eq!(skipped.source_turn_id, "turn-2");
+    assert!(skipped.reason.contains("value"));
+
+    // The honest answer on the same turn still imports, and nothing the file claimed
+    // about the fabricated option reached the projection.
+    let root = NodeId::new(receipt.turns[1].graph_node_id.unwrap()).unwrap();
+    let writer = database.writer_for_subgraph(root).await.unwrap();
+    let projected = writer.interaction_input().await.unwrap();
+    assert_eq!(
+        projected.submitted_inputs,
+        vec![SubmittedInput { action, value }]
+    );
+}
+
+#[tokio::test]
 async fn imported_action_origin_reconstructs_resolved_invoke_navigation() {
     let database = GraphDatabase::in_memory().await.unwrap();
     let receipt = database
