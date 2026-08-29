@@ -2422,7 +2422,10 @@ describe("desktop skeleton", () => {
     // because runner images carry different tool caches. .node-version is now
     // the only place the version is written; this test keeps it that way.
     const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
-    const workflowNames = (await readdir(workflowDirectory)).filter((name) => name.endsWith(".yml"));
+    // GitHub accepts .yaml as well as .yml. Matching only .yml would let a
+    // workflow added under the other spelling skip this guard entirely, which
+    // is precisely the case globbing the directory is meant to cover.
+    const workflowNames = (await readdir(workflowDirectory)).filter((name) => /\.ya?ml$/.test(name));
     expect(workflowNames.length).toBeGreaterThan(0);
 
     const pinnedVersion = await readFile(new URL("../.node-version", import.meta.url), "utf8");
@@ -2447,7 +2450,11 @@ describe("desktop skeleton", () => {
     // Every setup-node step reads the pinned file. Asserting the count, not just
     // the absence of literals, is what catches a step that declares no version
     // at all and silently inherits the runner default.
-    expect(setupNodeSteps).toBeGreaterThanOrEqual(10);
+    // Deliberately not asserting a fixed count of ten. Removing a workflow is a
+    // legitimate change — #305 may retire the Intel canary — and it must not
+    // fail a test about Node pinning. Greater-than-zero only guards against the
+    // glob silently matching nothing and the assertions below passing vacuously.
+    expect(setupNodeSteps).toBeGreaterThan(0);
     expect(versionFileReferences).toBe(setupNodeSteps);
   });
 
