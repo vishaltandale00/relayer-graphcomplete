@@ -31,4 +31,5 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Stora
 
 [dev-dependencies]
 relayer-graph-server = { path = "../relayer-graph-server" }
+tokio = { workspace = true, features = ["sync", "time", "test-util"] }
 tower = { version = "0.5", features = ["util"] }

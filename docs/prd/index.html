@@ -456,8 +456,19 @@ interface CompletionTerminalError extends Error {
 }
 </code></pre>
 <p>Complete returns one handle after trusted preparation establishes or recovers the canonical completion identity.</p>
+<p>Preparation is a separate step, and it is the authority step. Agent code publishes an accepted invoke action, calls <code>prepareComplete(action)</code>, then calls Complete.</p>
+<p><code>complete(inputGraph)</code> establishes no identity of its own. It requires an already-prepared <code>interactionNode</code> and rejects anything else.</p>
+<p>Server-side capability derives from the published invoke occurrence. Exact-retry recovery keys off that same occurrence.</p>
 <p><code>current</code> observes the durable GraphComplete pointer. <code>result</code> resolves only from GraphComplete <code>succeeded</code> state and its canonical final layer.</p>
 <p>A model turn or provider process ending does not resolve it. Stopped and failed completions retain their last current and reject <code>result</code> with a structured terminal error. They never fabricate a final layer.</p>
+<p>A never-settling promise is not the contract. An awaiting agent must be able to observe child termination.</p>
+<p>The parent's own invoke action stays unresolved and navigable to the child's retained current. An unresolved invoke never means an unsettled handle.</p>
+<p>An agent may stop a completion whose invocation names it as the direct source. Grandchildren, siblings, and human or product callers may not.</p>
+<p><code>handle.stop(reason)</code> is that agent-only control. The stopped child retains its current and reports <code>stopped</code>.</p>
+<p>Observation is delivered as current-pointer revisions only. There is no token streaming, no partial-layer publication, and no additional event kind.</p>
+<p>An awaiting agent performs no repeated polling. The server holds one observation open and answers when the awaited completion advances, filtered to that caller's grant.</p>
+<p>Restart never reattaches. Interrupted active completions fail safely with <code>application_restart</code> and keep their retained current.</p>
+<p>No provider is asked whether its execution survived. Complete is never re-called as crash recovery for an already-started execution.</p>
 <p>The app server creates the human-root interaction and passes its pointer to Complete. A supported recursive provider adapter derives the prepared pointer from the invoking completion and exact published invoke occurrence. It then passes that same pointer to Complete. The selected harness uses its bound graph client to construct nodes, edges, layers, and actions, then returns with <code>current.return(layer)</code> or the compatible <code>graph.submit(interactionNode)</code>. The accepted result includes the fully resolved first layer so the desktop can display it immediately without a second request. The graph engine persists the same layer and serves later navigation. A model turn ending without Return is failure, never success.</p>
 <p>The product stores one named harness on the thread. Model is the primary composer choice. Advanced shows compatible harness configurations before thread creation. The pinned harness becomes read-only after creation.</p>
 <p>The selected harness owns model execution and provider-session reuse. Each explicitly supported recursive adapter, including Codex and Prime Agent, owns its provider-native child launch or binding, concurrency, waiting, messaging, and session behavior. GraphComplete, Relayer product, and the harness host do not add a recursive runnable queue, automatic parent wakeup, or incorporation policy. Provider adapters own authentication and model discovery. Relayer product records do not expose raw credentials, provider flags, runtime sessions, or implementation-specific recursion policy.</p>

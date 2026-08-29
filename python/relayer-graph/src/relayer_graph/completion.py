@@ -64,19 +64,40 @@ class CompletionCurrent:
         return CompletionCurrentSnapshot.from_dict(value)
 
 
-@dataclass(frozen=True, slots=True)
 class CompletionHandle:
-    completion_id: int
-    current: CompletionCurrent
-    result: Awaitable[Mapping[str, Any]]
+    """One live semantic child: its identity, its durable current, and its awaited result."""
+
+    def __init__(self, transport: "_CompletionTransport") -> None:
+        self._transport = transport
+        self._observation: "asyncio.Task[Mapping[str, Any]] | None" = None
+        self.completion_id = transport.completion_id
+        self.current = CompletionCurrent(transport)
+
+    @property
+    def result(self) -> Awaitable[Mapping[str, Any]]:
+        """Observation starts on the first read, so an unawaited child costs nothing."""
+        if self._observation is None:
+            self._observation = asyncio.get_running_loop().create_task(
+                self._transport.observe_result()
+            )
+        return self._observation
+
+    async def stop(self, reason: str) -> None:
+        """Stop this child from the execution that invoked it.
+
+        Only the direct parent may stop a completion. The child keeps its retained
+        current and reports stopped; the parent's own invoke stays navigable.
+        """
+        await self._transport.started
+        await self._transport.request(
+            "POST", f"/{self.completion_id}/stop", {"reason": reason}
+        )
 
 
 def complete(input_graph: CompletionInputGraph) -> CompletionHandle:
     if not isinstance(input_graph, CompletionInputGraph) or input_graph.interaction_node < 1:
         raise ValueError("complete() requires an already-prepared CompletionInputGraph")
-    transport = _CompletionTransport(input_graph.interaction_node)
-    result = asyncio.get_running_loop().create_task(transport.observe_result())
-    return CompletionHandle(input_graph.interaction_node, CompletionCurrent(transport), result)
+    return CompletionHandle(_CompletionTransport(input_graph.interaction_node))
 
 
 class _CompletionTransport:
@@ -85,6 +106,9 @@ class _CompletionTransport:
         self.url = ""
         self.token = ""
         self.started = asyncio.get_running_loop().create_task(self._start())
+        # A fire-and-forget child is never awaited, so absorb its start failure rather
+        # than leaving asyncio to report a never-retrieved task exception.
+        self.started.add_done_callback(_absorb_unobserved_failure)
 
     async def _start(self) -> None:
         self.url, self.token = await _current_broker()
@@ -93,13 +117,25 @@ class _CompletionTransport:
             raise TransportError("completion broker returned a different completion identity")
 
     async def observe_result(self) -> Mapping[str, Any]:
+        """Observe this child until it settles, one request per delivered revision.
+
+        The broker holds each observation open until the completion advances past the
+        last revision this caller saw, so waiting never polls on a timer.
+        """
         await self.started
+        after_revision: int | None = None
         while True:
-            status, value = await self.request_with_status("GET", f"/{self.completion_id}/result")
+            path = f"/{self.completion_id}/result"
+            if after_revision is not None:
+                path = f"{path}?afterRevision={after_revision}"
+            status, value = await self.request_with_status("GET", path)
             if status == 200:
                 return value
             if status == 202:
-                await asyncio.sleep(0.1)
+                current = value.get("current") if isinstance(value, Mapping) else None
+                if not isinstance(current, Mapping):
+                    raise TransportError("completion broker delivered an observation without a current")
+                after_revision = CompletionCurrentSnapshot.from_dict(current).revision
                 continue
             if status == 409:
                 current = CompletionCurrentSnapshot.from_dict(value["current"])
@@ -132,6 +168,11 @@ class _CompletionTransport:
                 raise TransportError(f"could not reach the completion broker at {self.url}") from error
 
         return await asyncio.to_thread(send)
+
+
+def _absorb_unobserved_failure(task: "asyncio.Task[Any]") -> None:
+    if not task.cancelled():
+        task.exception()
 
 
 async def _current_broker() -> tuple[str, str]:

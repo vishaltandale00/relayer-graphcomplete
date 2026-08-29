@@ -49,29 +49,55 @@ function completionRuntimeFromEnvironment(environment: NodeJS.ProcessEnv = proce
           throw new Error("Completion broker returned a different completion identity");
         }
       });
+      // Nothing awaits a fire-and-forget child, so its start failure must not surface
+      // as an unhandled rejection. Every reader of the handle still observes it.
+      started.catch(() => {});
       const snapshot = async (): Promise<CompletionCurrentSnapshot> => {
         await started;
         const response = await brokerRequest(url, token, `/${completionId}/current`);
         if (response.status !== 200) throw brokerError(response);
         return normalizeCurrent(await response.json());
       };
-      const result = started.then(() => observeResult(url, token, completionId));
+      let observation: Promise<ResolvedGraphLayer> | undefined;
       return Object.freeze({
         completionId,
         current: Object.freeze({ snapshot }),
-        result,
+        // Observation begins on the first read, so an unawaited handle costs nothing.
+        get result(): Promise<ResolvedGraphLayer> {
+          observation ??= started.then(() => observeResult(url, token, completionId));
+          return observation;
+        },
+        async stop(reason: string): Promise<void> {
+          await started;
+          const response = await brokerRequest(url, token, `/${completionId}/stop`, {
+            method: "POST",
+            body: JSON.stringify({ reason }),
+          });
+          if (response.status !== 200) throw brokerError(response);
+        },
       });
     },
   });
 }
 
+/**
+ * Observes one child until it settles, one request per delivered revision.
+ *
+ * The broker holds each observation open until the completion advances past the last
+ * revision this caller saw, so waiting costs one request per advance rather than a timer.
+ */
 async function observeResult(url: string, token: string, completionId: number): Promise<ResolvedGraphLayer> {
+  let afterRevision: number | undefined;
   for (;;) {
-    const response = await brokerRequest(url, token, `/${completionId}/result`);
+    const query = afterRevision === undefined ? "" : `?afterRevision=${afterRevision}`;
+    const response = await brokerRequest(url, token, `/${completionId}/result${query}`);
     const value = await response.json() as unknown;
     if (response.status === 200) return value as ResolvedGraphLayer;
     if (response.status === 202) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (!isRecord(value) || !isRecord(value.current)) {
+        throw new Error("Completion broker delivered an observation without a current");
+      }
+      afterRevision = normalizeCurrent(value.current).revision;
       continue;
     }
     if (response.status === 409 && isRecord(value) && isRecord(value.current)) {

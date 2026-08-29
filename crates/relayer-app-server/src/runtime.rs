@@ -1453,15 +1453,44 @@ impl RuntimeClient {
         operation_key: &str,
         reason: &str,
     ) -> Result<relayer_graph_core::CurrentTransitionReceipt, RuntimeError> {
+        self.terminate_graph_completion(
+            interaction_node_id,
+            operation_key,
+            relayer_graph_core::CurrentTransition::Fail {
+                reason: reason.to_owned(),
+            },
+        )
+        .await
+    }
+
+    /// Settles one completion as explicitly stopped while retaining its last published current.
+    pub(crate) async fn stop_graph_completion(
+        &self,
+        interaction_node_id: i64,
+        operation_key: &str,
+    ) -> Result<relayer_graph_core::CurrentTransitionReceipt, RuntimeError> {
+        self.terminate_graph_completion(
+            interaction_node_id,
+            operation_key,
+            relayer_graph_core::CurrentTransition::Stop {
+                reason: "cancelled_by_user".to_owned(),
+            },
+        )
+        .await
+    }
+
+    async fn terminate_graph_completion(
+        &self,
+        interaction_node_id: i64,
+        operation_key: &str,
+        transition: relayer_graph_core::CurrentTransition,
+    ) -> Result<relayer_graph_core::CurrentTransitionReceipt, RuntimeError> {
         let current: relayer_graph_core::CompletionState = serde_json::from_value(
             self.control_get(&format!(
                 "api/control/interactions/{interaction_node_id}/current"
             ))
             .await?,
         )?;
-        let transition = relayer_graph_core::CurrentTransition::Fail {
-            reason: reason.to_owned(),
-        };
         let expected_revision = match current.lifecycle {
             relayer_graph_core::CompletionLifecycle::Active => current.head_revision,
             _ => current.head_revision.checked_sub(1).ok_or_else(|| {
@@ -1517,6 +1546,23 @@ impl RuntimeClient {
         Ok(serde_json::from_value(
             response_json(response, StatusCode::OK).await?,
         )?)
+    }
+
+    /// Reads one completion's durable current from the projection surface that orders revisions.
+    pub(crate) async fn observed_completion_state(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<relayer_graph_core::CompletionState, RuntimeError> {
+        self.current_projection_page(&[interaction_node_id], 0, 1)
+            .await?
+            .states
+            .into_iter()
+            .find(|state| state.completion_id.value() == interaction_node_id)
+            .ok_or_else(|| {
+                RuntimeError::Protocol(format!(
+                    "canonical current projection is missing for completion {interaction_node_id}"
+                ))
+            })
     }
 
     pub(crate) async fn current_projection_page(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import pickle
@@ -37,6 +38,11 @@ class Handler(BaseHTTPRequestHandler):
         Handler.next_id += 1
         if self.path == "/api/completions":
             self._reply({"completionId": body["interactionNode"]}, 201)
+        elif self.path == "/api/completions/91/stop":
+            self._reply({
+                "cancelled": True, "completionId": 91, "lifecycle": "stopped",
+                "revision": 4, "reason": body["reason"],
+            })
         elif self.path.endswith("/nodes") and body["title"] == "server-error":
             self._reply({"error": {"message": "database failed"}}, 500)
         elif self.path.endswith("/nodes") and not body["title"].strip():
@@ -79,6 +85,11 @@ class Handler(BaseHTTPRequestHandler):
                 "currentLayerId": 8, "finalLayerId": None,
             })
         elif self.path == "/api/completions/91/result":
+            self._reply({"current": {
+                "completionId": 91, "lifecycle": "active", "headRevision": 3,
+                "currentLayerId": 8, "finalLayerId": None,
+            }}, 202)
+        elif self.path == "/api/completions/91/result?afterRevision=3":
             self._reply({"layer": {"id": 9}, "nodes": [], "edges": [], "actions": []})
         elif self.path.endswith("/input"):
             self._reply({
@@ -304,6 +315,55 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((current.lifecycle, current.revision, current.current_layer_id), ("active", 2, 8))
             result = await handle.result
             self.assertEqual(result["layer"]["id"], 9)
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+
+    async def test_complete_observes_nothing_until_the_child_result_is_awaited(self):
+        previous = os.environ.copy()
+        try:
+            os.environ["RELAYER_COMPLETE_URL"] = self.url + "/api/completions"
+            os.environ["RELAYER_COMPLETE_TOKEN"] = "broker-token"
+            handle = complete(CompletionInputGraph(91))
+            await handle.current.snapshot()
+            self.assertEqual(
+                [path for path, _, _ in Handler.requests if "/result" in path], []
+            )
+            await handle.result
+            self.assertEqual(
+                [path for path, _, _ in Handler.requests if "/result" in path],
+                ["/api/completions/91/result", "/api/completions/91/result?afterRevision=3"],
+            )
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+
+    async def test_complete_awaits_one_observation_however_often_the_result_is_read(self):
+        previous = os.environ.copy()
+        try:
+            os.environ["RELAYER_COMPLETE_URL"] = self.url + "/api/completions"
+            os.environ["RELAYER_COMPLETE_TOKEN"] = "broker-token"
+            handle = complete(CompletionInputGraph(91))
+            first, second = await asyncio.gather(handle.result, handle.result)
+            self.assertIs(first, second)
+            self.assertEqual(
+                len([path for path, _, _ in Handler.requests if "/result" in path]), 2
+            )
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+
+    async def test_stop_asks_the_broker_to_stop_the_child_it_invoked(self):
+        previous = os.environ.copy()
+        try:
+            os.environ["RELAYER_COMPLETE_URL"] = self.url + "/api/completions"
+            os.environ["RELAYER_COMPLETE_TOKEN"] = "broker-token"
+            handle = complete(CompletionInputGraph(91))
+            await handle.stop("the parent no longer needs this branch")
+            path, headers, body = Handler.requests[-1]
+            self.assertEqual(path, "/api/completions/91/stop")
+            self.assertEqual(headers["Authorization"], "Bearer broker-token")
+            self.assertEqual(body, {"reason": "the parent no longer needs this branch"})
         finally:
             os.environ.clear()
             os.environ.update(previous)

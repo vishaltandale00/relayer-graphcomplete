@@ -21,7 +21,7 @@ import { createConversationExportService } from "./services/conversation-export.
 import { inspectCodexBrowserMcpRuntime } from "./services/codex-browser-mcp-runtime.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
-import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
+import { GraphCompleteRuntimeService, developerTemporalFeatures } from "./services/graphcomplete-runtime.mjs";
 import { inspectPrimeAgentRuntime, requirePrimeAgentRuntime } from "./services/prime-agent-runtime.mjs";
 import { resolveDesktopHarnessConfiguration } from "./services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
@@ -158,6 +158,7 @@ if (primaryInstance) {
       diagnostics: primeAgentRuntime.diagnostics,
     })),
     codexBasicClientModuleUrl: graphClientModuleUrl,
+    temporalFeatures: developerTemporalFeatures(),
     ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
     acquireProviderExecution: (providerId) => {
       if (!providerSetup) throw new Error("Provider execution broker is not ready.");

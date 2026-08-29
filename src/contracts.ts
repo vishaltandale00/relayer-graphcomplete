@@ -87,8 +87,15 @@ export interface CompletionCurrent {
 export interface CompletionHandle {
   readonly completionId: GraphId;
   readonly current: CompletionCurrent;
-  /** Resolves only from durable GraphComplete success. */
+  /** Resolves only from durable GraphComplete success. Observed lazily, on first read. */
   readonly result: Promise<ResolvedGraphLayer>;
+  /**
+   * Stops this child from the execution that invoked it.
+   *
+   * Only the direct parent may stop a completion. The child keeps its retained current
+   * and reports `stopped`; the parent's own invoke stays unresolved and navigable.
+   */
+  stop(reason: string): Promise<void>;
 }
 
 /** Injected implementation of trusted preparation, execution, and durable settlement. */

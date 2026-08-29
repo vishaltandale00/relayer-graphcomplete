@@ -53,7 +53,7 @@ export const PRIME_AGENT_ASSET_SHA256 = Object.freeze({
     "prime-agent-basic.yaml": "55e720e4628a3cab25e149a80325b804f247830b0bc00e5c472400d382fb9775",
     "prime-agent-deep.yaml": "b91e705d99197419deecd5455ce4715b05246f8cc927dc5ba88c1eb4b50acad7",
   }),
-  pythonPackageTree: "6c7d769ba810f17eb66205d487de28299219763d077fee8cd21db2c40b91f4bb",
+  pythonPackageTree: "9c089dfe3cb50adbf0e513f9a3ec9de482c99d07a6b2d21581048cdd6d493de2",
 });
 
 export async function inspectPrimeAgentRuntime({

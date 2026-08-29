@@ -118,6 +118,31 @@ The live command is not part of `npm run check` and is the only part of this
 case that invokes inference; its evidence parser and grader run in the default
 deterministic test suite.
 
+### Recursive Complete live run
+
+Recursive `complete(inputGraph)` is off in the shipped app. A developer-only
+switch enables the whole persisted feature chain it depends on. It is not a
+product setting and has no user-visible control:
+
+```sh
+RELAYER_DEV_PROVIDER_RECURSION=1 npm run desktop:dev
+```
+
+The opt-in live run drives one fixed synthetic task through the same runtime and
+app server the desktop uses, with recursion enabled and disabled on the same
+build. It records whether the agent created a semantic child by its own
+decision, the ordered sequence of current-pointer revisions, and both timings:
+
+```sh
+RELAYER_RECURSIVE_LIVE_RUN=1 RELAYER_CODEX_BINARY=/absolute/path/to/managed/codex \
+  RELAYER_LIVE_MODEL_ID=<model-id> npm run live:recursive-complete
+```
+
+It writes `run.json` under `.relayer/live/recursive-complete/`. The run spends
+real inference and is excluded from `npm run check`; its analysis and pass rules
+run in the default deterministic suite. Semantic coherence is graded separately
+and blocks merge on its own.
+
 The opt-in Ask-profile desktop proof intentionally bypasses npm so inherited
 `NODE_OPTIONS` cannot execute before its trust boundary. Invoke the fixed system
 shell by its repository path with an explicit, operator-trusted absolute path

@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     approval::{ApprovalDecision, ApprovalDecisionSubmission, ApprovalReceipt},
-    completion_broker::{CompletionBrokerGrant, CompletionBrokerLease},
+    completion_broker::{CompletionBrokerGrant, CompletionBrokerLease, CompletionObservations},
     product::{
         AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionContextIntent,
         InteractionId, InteractionModelSelection, InvokeActionOutcome, ModelFamilyId,
@@ -28,7 +28,7 @@ use crate::{
 use axum::{
     Json,
     body::Body,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::Response,
 };
@@ -1330,10 +1330,22 @@ pub(super) async fn completion_current(
     ))
 }
 
+/// How long one awaited observation stays open before it answers with the unchanged current.
+const COMPLETION_OBSERVATION_HOLD: std::time::Duration = std::time::Duration::from_secs(25);
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct CompletionResultQuery {
+    /// Revision the caller has already observed. The observation stays open past it.
+    #[serde(default)]
+    after_revision: Option<u64>,
+}
+
 pub(super) async fn completion_result(
     State(state): State<ApiState>,
     headers: HeaderMap,
     Path(completion_id): Path<i64>,
+    Query(query): Query<CompletionResultQuery>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let grant = authorize_completion_broker(&state, &headers)?;
     authorize_child_completion(&state, grant, completion_id).await?;
@@ -1341,7 +1353,19 @@ pub(super) async fn completion_result(
         .runtime
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
-    let current = runtime.completion_current(completion_id).await?;
+    let mut current = runtime.completion_current(completion_id).await?;
+    if let Some(after_revision) = query.after_revision
+        && current.lifecycle == relayer_graph_core::CompletionLifecycle::Active
+        && current.head_revision <= after_revision
+    {
+        current = hold_completion_observation(
+            &state.completion_observations,
+            completion_id,
+            after_revision,
+            current,
+        )
+        .await;
+    }
     match current.lifecycle {
         relayer_graph_core::CompletionLifecycle::Succeeded => {
             let output = runtime
@@ -1369,20 +1393,100 @@ pub(super) async fn completion_result(
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct StopCompletionRequest {
+    /// Caller-supplied context for its own record. The durable safe reason stays canonical.
+    #[serde(default)]
+    reason: Option<String>,
+}
+
 pub(super) async fn stop_completion(
     State(state): State<ApiState>,
     headers: HeaderMap,
     Path(completion_id): Path<i64>,
+    request: Option<Json<StopCompletionRequest>>,
 ) -> Result<Json<Value>, ApiError> {
+    let reason = request
+        .and_then(|Json(body)| body.reason)
+        .unwrap_or_default();
+    if reason.len() > 200 || reason.chars().any(char::is_control) {
+        return Err(ApiError::invalid(
+            "stop reason must be at most 200 non-control characters",
+        ));
+    }
     let grant = authorize_completion_broker(&state, &headers)?;
     let interaction = authorize_child_completion(&state, grant, completion_id).await?;
-    let cancelled = state
+    let runtime = state
         .runtime
         .as_ref()
-        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let cancelled = runtime
         .cancel_invoked_completion(interaction.thread_id.value(), completion_id)
         .await?;
-    Ok(Json(serde_json::json!({ "cancelled": cancelled })))
+    // Cancelling the provider alone would settle the child as a failure. An explicit
+    // parent stop is a terminal stop that retains the child's last published current.
+    let stopped = runtime
+        .stop_graph_completion(
+            completion_id,
+            &format!("completion-stop:{}:{completion_id}", interaction.id),
+        )
+        .await;
+    let (lifecycle, revision) = match stopped {
+        Ok(receipt) => (receipt.lifecycle, receipt.revision),
+        // A racing child can settle between the parent's decision and this transition.
+        // An already terminal completion is the outcome the caller asked for, not an error.
+        Err(error) => {
+            let current = runtime.completion_current(completion_id).await?;
+            if current.lifecycle == relayer_graph_core::CompletionLifecycle::Active {
+                return Err(error.into());
+            }
+            (current.lifecycle, current.head_revision)
+        }
+    };
+    Ok(Json(serde_json::json!({
+        "cancelled": cancelled,
+        "completionId": completion_id,
+        "lifecycle": lifecycle,
+        "revision": revision,
+        "reason": reason,
+    })))
+}
+
+/// Answers when the awaited completion advances past the caller's revision.
+///
+/// Delivery is sourced from the supervising observer's projection reads, so an awaiting
+/// execution never polls. An unobserved completion answers immediately with its current.
+async fn hold_completion_observation(
+    observations: &CompletionObservations,
+    completion_id: i64,
+    after_revision: u64,
+    current: relayer_graph_core::CompletionState,
+) -> relayer_graph_core::CompletionState {
+    let Some(mut observation) = observations.subscribe(completion_id) else {
+        return current;
+    };
+    let deadline = tokio::time::Instant::now() + COMPLETION_OBSERVATION_HOLD;
+    loop {
+        let observed = observation.borrow_and_update().clone();
+        if observed.head_revision > after_revision
+            || observed.lifecycle != relayer_graph_core::CompletionLifecycle::Active
+        {
+            return observed;
+        }
+        if !matches!(
+            tokio::time::timeout_at(deadline, observation.changed()).await,
+            Ok(Ok(()))
+        ) {
+            // The hold elapsed, or the completion stopped being supervised. Answer with
+            // whichever view is furthest ahead so the caller's cursor never moves backwards.
+            return if observed.head_revision > current.head_revision {
+                observed
+            } else {
+                current
+            };
+        }
+    }
 }
 
 fn authorize_completion_broker(
@@ -1472,12 +1576,19 @@ fn spawn_recursive_completion_observers(
     let completion_id = prepared.graph_node_id;
     let semantic_origin_digest = permission_origin_digest.clone();
     tokio::spawn(async move {
+        let _observation = semantic_state.completion_observations.guard(completion_id);
         let mut observation_failures = 0_u8;
         loop {
             let Some(runtime) = semantic_state.runtime.as_ref() else {
                 return;
             };
-            match runtime.completion_current(completion_id).await {
+            let observed = runtime.observed_completion_state(completion_id).await;
+            if let Ok(current) = observed.as_ref() {
+                semantic_state
+                    .completion_observations
+                    .publish(current.clone());
+            }
+            match observed {
                 Ok(current)
                     if current.lifecycle == relayer_graph_core::CompletionLifecycle::Active =>
                 {
@@ -2288,14 +2399,49 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    #[tokio::test]
-    async fn broker_exact_retries_launch_once_after_the_durable_fence() {
+    /// One recursive child bound to its parent execution, with a controllable graph fake.
+    struct BrokerFixture {
+        state: ApiState,
+        product: ProductService,
+        thread: Thread,
+        root: std::path::PathBuf,
+        starts: Arc<AtomicUsize>,
+        headers: HeaderMap,
+        current: Arc<Mutex<Value>>,
+        transitions: Arc<Mutex<Vec<Value>>>,
+        cancellations: Arc<AtomicUsize>,
+        _lease: CompletionBrokerLease,
+        graph_task: tokio::task::JoinHandle<Result<(), std::io::Error>>,
+        harness_task: tokio::task::JoinHandle<Result<(), std::io::Error>>,
+    }
+
+    impl BrokerFixture {
+        fn finish(self) {
+            self.graph_task.abort();
+            self.harness_task.abort();
+            fs::remove_dir_all(self.root).unwrap();
+        }
+    }
+
+    fn child_current(lifecycle: &str, head_revision: u64) -> Value {
+        serde_json::json!({
+            "completionId":202,"lifecycle":lifecycle,"headRevision":head_revision,
+            "currentLayerId":1,
+            "finalLayerId":(lifecycle == "succeeded").then_some(1),
+            "safeReason":null,
+            "temporalFeatures":{"configVersion":1,"schemaRead":true,
+                "rootCurrentWrite":true,"projectionUi":true,
+                "invokeResolution":true,"providerRecursion":true}
+        })
+    }
+
+    async fn broker_fixture(label: &str, lifecycle: &str) -> BrokerFixture {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "relayer-completion-broker-{}-{unique}",
+            "relayer-completion-broker-{label}-{}-{unique}",
             std::process::id()
         ));
         fs::create_dir_all(&root).unwrap();
@@ -2348,7 +2494,13 @@ mod tests {
         .unwrap();
         pool.close().await;
 
+        let current = Arc::new(Mutex::new(child_current(lifecycle, 1)));
+        let transitions = Arc::new(Mutex::new(Vec::new()));
         let activation_database = database.clone();
+        let read_current = current.clone();
+        let projected_current = current.clone();
+        let transitioned_current = current.clone();
+        let recorded_transitions = transitions.clone();
         let graph = Router::new()
             .route(
                 "/api/control/interactions",
@@ -2401,14 +2553,59 @@ mod tests {
             )
             .route(
                 "/api/control/interactions/202/current",
-                routing::get(|| async {
-                    axum::Json(serde_json::json!({
-                        "completionId":202,"lifecycle":"succeeded","headRevision":1,
-                        "currentLayerId":1,"finalLayerId":1,"safeReason":null,
-                        "temporalFeatures":{"configVersion":1,"schemaRead":true,
-                            "rootCurrentWrite":true,"projectionUi":true,
-                            "invokeResolution":true,"providerRecursion":true}
-                    }))
+                routing::get(move || {
+                    let current = read_current.clone();
+                    async move { axum::Json(current.lock().unwrap().clone()) }
+                }),
+            )
+            .route(
+                "/api/control/current-projections",
+                routing::post(move || {
+                    let current = projected_current.clone();
+                    async move {
+                        axum::Json(serde_json::json!({
+                            "cursor":0,"hasMore":false,
+                            "states":[current.lock().unwrap().clone()],"events":[]
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/api/control/interactions/202/current/receipts",
+                routing::post(|| async {
+                    (
+                        StatusCode::NOT_FOUND,
+                        axum::Json(
+                            serde_json::json!({"error":{"code":"receipt_not_found","message":"none"}}),
+                        ),
+                    )
+                }),
+            )
+            .route(
+                "/api/control/interactions/202/current/transitions",
+                routing::post(move |axum::Json(body): axum::Json<Value>| {
+                    let current = transitioned_current.clone();
+                    let recorded = recorded_transitions.clone();
+                    async move {
+                        let revision = body["expectedRevision"].as_u64().unwrap_or(0) + 1;
+                        let lifecycle =
+                            if body["transition"]["kind"] == "stop" { "stopped" } else { "failed" };
+                        let reason = body["transition"]["reason"].clone();
+                        recorded.lock().unwrap().push(body.clone());
+                        {
+                            let mut state = current.lock().unwrap();
+                            state["lifecycle"] = lifecycle.into();
+                            state["headRevision"] = revision.into();
+                            state["safeReason"] = reason;
+                        }
+                        axum::Json(serde_json::json!({
+                            "completionId":202,"revision":revision,"lifecycle":lifecycle,
+                            "currentLayerId":1,"finalLayerId":null,
+                            "operationKey":body["operationKey"],
+                            "requestDigest":"sha256:test","snapshotDigest":"sha256:test",
+                            "projectionSequence":revision
+                        }))
+                    }
                 }),
             )
             .route(
@@ -2421,7 +2618,9 @@ mod tests {
                 }),
             );
         let starts = Arc::new(AtomicUsize::new(0));
+        let cancellations = Arc::new(AtomicUsize::new(0));
         let observed_starts = starts.clone();
+        let observed_cancellations = cancellations.clone();
         let harness = Router::new()
             .route(
                 "/sessions/{id}/invoked-completions",
@@ -2443,6 +2642,16 @@ mod tests {
             .route(
                 "/sessions/{id}/invoked-completions/202",
                 routing::get(|| async { axum::Json(serde_json::json!({"settled":true})) }),
+            )
+            .route(
+                "/sessions/{id}/cancel",
+                routing::post(move || {
+                    let cancellations = observed_cancellations.clone();
+                    async move {
+                        cancellations.fetch_add(1, Ordering::SeqCst);
+                        axum::Json(serde_json::json!({"cancelled":true}))
+                    }
+                }),
             );
         let (graph_url, graph_task) = serve(graph).await;
         let (harness_url, harness_task) = serve(harness).await;
@@ -2536,6 +2745,11 @@ mod tests {
             source_interaction_id: thread.root_interaction_id,
             source_completion_id: 101,
         });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {}", lease.token()).parse().unwrap(),
+        );
         let state = ApiState {
             product: product.clone(),
             authenticator: DesktopSessionAuthenticator::new("control", None),
@@ -2561,22 +2775,38 @@ mod tests {
             annotations_enabled: false,
             environment_inspector: crate::environment::EnvironmentInspector::new(),
             completion_brokers,
+            completion_observations: CompletionObservations::default(),
         };
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            format!("Bearer {}", lease.token()).parse().unwrap(),
-        );
+        BrokerFixture {
+            state,
+            product,
+            thread,
+            root,
+            starts,
+            headers,
+            current,
+            transitions,
+            cancellations,
+            _lease: lease,
+            graph_task,
+            harness_task,
+        }
+    }
+
+    #[tokio::test]
+    async fn broker_exact_retries_launch_once_after_the_durable_fence() {
+        let fixture = broker_fixture("retries", "succeeded").await;
+
         let first = complete_prepared_child(
-            State(state.clone()),
-            headers.clone(),
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
             Json(CompletePreparedChildRequest {
                 interaction_node: 202,
             }),
         );
         let second = complete_prepared_child(
-            State(state.clone()),
-            headers,
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
             Json(CompletePreparedChildRequest {
                 interaction_node: 202,
             }),
@@ -2588,12 +2818,13 @@ mod tests {
             second.unwrap_or_else(|error| panic!("second broker call failed: {}", error.message()));
         let statuses = [first.0, second.0];
         assert!(statuses.contains(&StatusCode::CREATED));
-        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.starts.load(Ordering::SeqCst), 1);
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
-            let child = product
-                .get_action_invocation(thread.root_interaction_id, 41)
+            let child = fixture
+                .product
+                .get_action_invocation(fixture.thread.root_interaction_id, 41)
                 .await
                 .unwrap()
                 .unwrap()
@@ -2605,9 +2836,228 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        graph_task.abort();
-        harness_task.abort();
-        fs::remove_dir_all(root).unwrap();
+        fixture.finish();
+    }
+
+    #[tokio::test]
+    async fn explicit_stop_settles_the_child_as_stopped_with_its_retained_current() {
+        let fixture = broker_fixture("stop", "active").await;
+        let _started = complete_prepared_child(
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
+            Json(CompletePreparedChildRequest {
+                interaction_node: 202,
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("broker call failed: {}", error.message()));
+
+        let stopped = stop_completion(
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
+            Path(202),
+            Some(Json(StopCompletionRequest {
+                reason: Some("the parent no longer needs this branch".into()),
+            })),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("stop failed: {}", error.message()))
+        .0;
+
+        assert_eq!(stopped["lifecycle"], "stopped");
+        assert_eq!(stopped["cancelled"], true);
+        assert_eq!(stopped["reason"], "the parent no longer needs this branch");
+        assert_eq!(fixture.cancellations.load(Ordering::SeqCst), 1);
+        let transitions = fixture.transitions.lock().unwrap().clone();
+        assert_eq!(transitions.len(), 1, "one trusted stop transition");
+        assert_eq!(transitions[0]["transition"]["kind"], "stop");
+        assert_eq!(transitions[0]["transition"]["reason"], "cancelled_by_user");
+        let retained = fixture.current.lock().unwrap().clone();
+        assert_eq!(retained["lifecycle"], "stopped");
+        assert_eq!(
+            retained["currentLayerId"], 1,
+            "stop retains the last current"
+        );
+        assert!(
+            retained["finalLayerId"].is_null(),
+            "stop fabricates no final layer"
+        );
+        fixture.finish();
+    }
+
+    #[tokio::test]
+    async fn stopping_a_child_that_already_settled_reports_its_terminal_state() {
+        let fixture = broker_fixture("stop-race", "succeeded").await;
+        let _started = complete_prepared_child(
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
+            Json(CompletePreparedChildRequest {
+                interaction_node: 202,
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("broker call failed: {}", error.message()));
+
+        let stopped = stop_completion(
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
+            Path(202),
+            None,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("stop raced a settled child: {}", error.message()))
+        .0;
+
+        assert_eq!(stopped["lifecycle"], "succeeded");
+        assert!(
+            fixture.transitions.lock().unwrap().is_empty(),
+            "a settled completion is never transitioned again"
+        );
+        fixture.finish();
+    }
+
+    #[tokio::test]
+    async fn only_the_direct_parent_execution_may_stop_a_child() {
+        let fixture = broker_fixture("stop-authority", "active").await;
+        let _started = complete_prepared_child(
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
+            Json(CompletePreparedChildRequest {
+                interaction_node: 202,
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("broker call failed: {}", error.message()));
+        // A grandchild or sibling execution holds a grant naming a different source completion.
+        let foreign = fixture
+            .state
+            .completion_brokers
+            .issue(CompletionBrokerGrant {
+                thread_id: fixture.thread.id,
+                source_interaction_id: fixture.thread.root_interaction_id,
+                source_completion_id: 909,
+            });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {}", foreign.token()).parse().unwrap(),
+        );
+
+        let refused = stop_completion(State(fixture.state.clone()), headers, Path(202), None)
+            .await
+            .expect_err("a foreign execution must not stop this child");
+
+        assert!(
+            refused
+                .message()
+                .contains("does not belong to this execution"),
+            "unexpected refusal: {}",
+            refused.message()
+        );
+        assert!(fixture.transitions.lock().unwrap().is_empty());
+        assert_eq!(fixture.cancellations.load(Ordering::SeqCst), 0);
+        fixture.finish();
+    }
+
+    fn observed_state(
+        lifecycle: relayer_graph_core::CompletionLifecycle,
+        head_revision: u64,
+    ) -> relayer_graph_core::CompletionState {
+        serde_json::from_value(serde_json::json!({
+            "completionId":202,"lifecycle":lifecycle,"headRevision":head_revision,
+            "currentLayerId":1,"finalLayerId":null,"safeReason":null,
+            "temporalFeatures":{"configVersion":1,"schemaRead":true,
+                "rootCurrentWrite":true,"projectionUi":true,
+                "invokeResolution":true,"providerRecursion":true}
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_held_observation_answers_when_the_awaited_pointer_advances() {
+        let observations = CompletionObservations::default();
+        let _guard = observations.guard(202);
+        observations.publish(observed_state(
+            relayer_graph_core::CompletionLifecycle::Active,
+            2,
+        ));
+        let publisher = observations.clone();
+        tokio::spawn(async move {
+            publisher.publish(observed_state(
+                relayer_graph_core::CompletionLifecycle::Active,
+                3,
+            ));
+        });
+
+        let delivered = hold_completion_observation(
+            &observations,
+            202,
+            2,
+            observed_state(relayer_graph_core::CompletionLifecycle::Active, 2),
+        )
+        .await;
+
+        assert_eq!(delivered.head_revision, 3);
+    }
+
+    #[tokio::test]
+    async fn a_held_observation_answers_immediately_once_the_child_is_terminal() {
+        let observations = CompletionObservations::default();
+        let _guard = observations.guard(202);
+        observations.publish(observed_state(
+            relayer_graph_core::CompletionLifecycle::Stopped,
+            2,
+        ));
+
+        let delivered = hold_completion_observation(
+            &observations,
+            202,
+            9,
+            observed_state(relayer_graph_core::CompletionLifecycle::Active, 2),
+        )
+        .await;
+
+        assert_eq!(
+            delivered.lifecycle,
+            relayer_graph_core::CompletionLifecycle::Stopped
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_held_observation_releases_its_caller_when_the_hold_elapses() {
+        let observations = CompletionObservations::default();
+        let _guard = observations.guard(202);
+        observations.publish(observed_state(
+            relayer_graph_core::CompletionLifecycle::Active,
+            4,
+        ));
+        let started = tokio::time::Instant::now();
+
+        let delivered = hold_completion_observation(
+            &observations,
+            202,
+            4,
+            observed_state(relayer_graph_core::CompletionLifecycle::Active, 4),
+        )
+        .await;
+
+        assert_eq!(delivered.head_revision, 4);
+        assert!(started.elapsed() >= COMPLETION_OBSERVATION_HOLD);
+    }
+
+    #[tokio::test]
+    async fn an_unobserved_completion_answers_with_its_own_current() {
+        let observations = CompletionObservations::default();
+
+        let delivered = hold_completion_observation(
+            &observations,
+            202,
+            9,
+            observed_state(relayer_graph_core::CompletionLifecycle::Active, 5),
+        )
+        .await;
+
+        assert_eq!(delivered.head_revision, 5);
     }
 
     async fn serve(app: Router) -> (String, tokio::task::JoinHandle<Result<(), std::io::Error>>) {

@@ -12,7 +12,7 @@ mod types;
 
 use crate::{approval::ApprovalDecision, runtime::RuntimeClient};
 use crate::{
-    completion_broker::CompletionBrokerRegistry,
+    completion_broker::{CompletionBrokerRegistry, CompletionObservations},
     permissions::PermissionCatalog,
     product::{InteractionExecutionService, NodeContextDraftConfirmationService, ProductService},
 };
@@ -52,6 +52,7 @@ pub(crate) struct ApiState {
     pub(crate) annotations_enabled: bool,
     pub(crate) environment_inspector: crate::environment::EnvironmentInspector,
     pub(crate) completion_brokers: CompletionBrokerRegistry,
+    pub(crate) completion_observations: CompletionObservations,
 }
 
 pub(crate) struct ApiRuntime {
@@ -107,6 +108,7 @@ pub(crate) fn router(
         annotations_enabled,
         environment_inspector: crate::environment::EnvironmentInspector::new(),
         completion_brokers,
+        completion_observations: CompletionObservations::default(),
     };
     if state.runtime.is_some() {
         let recovery_state = state.clone();

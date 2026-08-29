@@ -55,6 +55,7 @@
     "eval:basic": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js",
     "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --judge-configuration codex-structured",
     "eval:graph-repair:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --case graph-authoring.replay-repair --judge-configuration none",
+    "live:recursive-complete": "npm run build && node scripts/run-recursive-live-run.mjs",
     "desktop:pack": "node desktop/packaging/build-development.mjs",
     "eval-app:pack": "npm run build && node desktop/packaging/build-development.mjs --eval",
     "desktop:dist": "node desktop/release/build-release.mjs stable",

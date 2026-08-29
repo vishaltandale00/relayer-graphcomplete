@@ -1,8 +1,10 @@
 use crate::product::{InteractionId, ThreadId};
+use relayer_graph_core::CompletionState;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
+use tokio::sync::watch;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +59,67 @@ impl CompletionBrokerRegistry {
             .lock()
             .expect("completion broker registry poisoned")
             .remove(token);
+    }
+}
+
+/// Delivers current-pointer revisions to execution-scoped awaiters without repeated polling.
+///
+/// One live completion owns one channel. The supervising observer publishes each projection
+/// state it reads; awaiting broker requests hold their observation open on the same channel.
+#[derive(Clone, Default)]
+pub(crate) struct CompletionObservations {
+    channels: Arc<Mutex<HashMap<i64, watch::Sender<CompletionState>>>>,
+}
+
+impl CompletionObservations {
+    pub(crate) fn publish(&self, state: CompletionState) {
+        let completion_id = state.completion_id.value();
+        let mut channels = self
+            .channels
+            .lock()
+            .expect("completion observation registry poisoned");
+        match channels.get(&completion_id) {
+            Some(sender) => {
+                sender.send_replace(state);
+            }
+            None => {
+                channels.insert(completion_id, watch::channel(state).0);
+            }
+        }
+    }
+
+    pub(crate) fn subscribe(&self, completion_id: i64) -> Option<watch::Receiver<CompletionState>> {
+        self.channels
+            .lock()
+            .expect("completion observation registry poisoned")
+            .get(&completion_id)
+            .map(watch::Sender::subscribe)
+    }
+
+    /// Holds one completion's channel open for as long as its observer supervises it.
+    pub(crate) fn guard(&self, completion_id: i64) -> CompletionObservationGuard {
+        CompletionObservationGuard {
+            observations: self.clone(),
+            completion_id,
+        }
+    }
+
+    fn forget(&self, completion_id: i64) {
+        self.channels
+            .lock()
+            .expect("completion observation registry poisoned")
+            .remove(&completion_id);
+    }
+}
+
+pub(crate) struct CompletionObservationGuard {
+    observations: CompletionObservations,
+    completion_id: i64,
+}
+
+impl Drop for CompletionObservationGuard {
+    fn drop(&mut self) {
+        self.observations.forget(self.completion_id);
     }
 }
 
