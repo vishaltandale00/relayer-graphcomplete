@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { parse as parseYaml } from "yaml";
 import {
   CodexCredentialAdapter,
   findCodexExecutable,
@@ -2413,6 +2414,52 @@ describe("desktop skeleton", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("pins one Node toolchain across CI and release workflows", async () => {
+    // Node was declared in ten places across five workflows: ci.yml floated on
+    // "22" while the release path pinned "22.22.0". Floating "22" is not even
+    // self-consistent — one run resolved 22.23.1 on macOS and 22.23.2 on Linux,
+    // because runner images carry different tool caches. .node-version is now
+    // the only place the version is written; this test keeps it that way.
+    const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+    // GitHub accepts .yaml as well as .yml. Matching only .yml would let a
+    // workflow added under the other spelling skip this guard entirely, which
+    // is precisely the case globbing the directory is meant to cover.
+    const workflowNames = (await readdir(workflowDirectory)).filter((name) => /\.ya?ml$/.test(name));
+    expect(workflowNames.length).toBeGreaterThan(0);
+
+    const pinnedVersion = await readFile(new URL("../.node-version", import.meta.url), "utf8");
+    // An exact patch version, not a floating major: setup-node resolves "22" to
+    // whatever the runner happens to cache, which is how the drift started.
+    expect(pinnedVersion).toMatch(/^\d+\.\d+\.\d+\n$/);
+
+    // Parsed rather than string-matched. A line-anchored regex misses
+    // `with: { node-version: 20 }`, and reports a mismatched step count instead
+    // of naming the offending step — which is the wrong thing to hand someone
+    // who has just reintroduced the bug this test exists to prevent.
+    let setupNodeSteps = 0;
+    for (const name of workflowNames) {
+      const workflow = parseYaml(await readFile(new URL(name, workflowDirectory), "utf8"));
+      for (const [jobName, job] of Object.entries(workflow?.jobs ?? {})) {
+        for (const step of job?.steps ?? []) {
+          if (!String(step?.uses ?? "").startsWith("actions/setup-node@")) continue;
+          setupNodeSteps += 1;
+          const where = `${name} → job "${jobName}" → ${step.uses}`;
+          expect(step.with?.["node-version"], `${where} declares a literal node-version`).toBeUndefined();
+          // Asserting the file is named, rather than only that no literal
+          // exists, is what catches a step declaring no version at all and
+          // silently inheriting whatever Node the runner preinstalled.
+          expect(step.with?.["node-version-file"], `${where} must read .node-version`).toBe(".node-version");
+        }
+      }
+    }
+
+    // Deliberately not asserting a fixed count of ten. Removing a workflow is a
+    // legitimate change — #305 may retire the Intel canary — and it must not
+    // fail a test about Node pinning. Greater-than-zero only guards against the
+    // glob silently matching nothing and the assertions above never running.
+    expect(setupNodeSteps).toBeGreaterThan(0);
   });
 
   it("gates Preview publication on one immutable candidate and one monotonic pointer", () => {
