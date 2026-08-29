@@ -3182,6 +3182,169 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_carries_submitted_input_children_and_a_personal_presentation_together() {
+        // Submitted inputs and a personal-presentation attachment are prepared on the
+        // same interaction, in the same call. Each has its own coverage; this proves
+        // they still both land when they arrive together.
+        let attachments = Arc::new(AtomicUsize::new(0));
+        let observed_attachments = attachments.clone();
+        let graph = Router::new()
+            .route(
+                "/api/control/interactions",
+                routing::post(move |Json(body): Json<serde_json::Value>| async move {
+                    assert_eq!(body["inputIdentity"], "product:77");
+                    assert_eq!(body["submittedInputs"][0]["actionId"], 23);
+                    assert_eq!(body["submittedInputs"][0]["value"]["text"], "exact");
+                    Json(json!({
+                        "node": { "id": 42 }, "graphToken": "",
+                        "inputIdentity": "product:77", "inputDigest": "sha256:v1:stable",
+                        "inputChildren": [{
+                            "id": "interaction-input-child:1",
+                            "parentInteractionNodeId": 42,
+                            "occurrence": {
+                                "presentingInteractionNodeId": 17,
+                                "presentingLayerId": 19,
+                                "actionId": 23
+                            },
+                            "sourceNodeId": 21,
+                            "action": { "control": "text", "prompt": "Explain" },
+                            "value": { "text": "exact" },
+                            "attemptKey": "product:77",
+                            "authorityDigest": "sha256:v1:stable",
+                            "semanticDigest": "sha256:semantic"
+                        }]
+                    }))
+                }),
+            )
+            .route(
+                "/api/control/interactions/42/personal-presentation",
+                routing::post(move |Json(body): Json<serde_json::Value>| {
+                    let observed_attachments = observed_attachments.clone();
+                    async move {
+                        assert_eq!(body["versionInteractionNodeId"], 31);
+                        observed_attachments.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({
+                            "interactionNodeId": 42,
+                            "versionInteractionNodeId": 31,
+                            "rootLayerId": 37
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/api/control/capabilities",
+                routing::delete(|| async { Json(json!({ "revoked": true })) }),
+            );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(Router::new()).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-runtime-input-with-presentation-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({
+                "schemaVersion":1,
+                "configurations":[{"configuration":{
+                    "schemaVersion":1,"name":"test","implementation":"test",
+                    "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+                },"digest":"sha256:test"}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+        let permission_profile = PermissionProfile {
+            id: "auto".into(),
+            label: "Approve for me".into(),
+            authority: "bounded".into(),
+            reviewer: "automatic".into(),
+        };
+        let submitted_inputs = [relayer_graph_core::SubmittedInputDraft {
+            occurrence: relayer_graph_core::PresentingInputOccurrence {
+                presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+                presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+                action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+            },
+            action: relayer_graph_core::InputAction {
+                control: relayer_graph_core::InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: relayer_graph_core::SubmittedInputValue::Text {
+                text: "exact".into(),
+            },
+        }];
+        let personal_presentation = super::PersonalPresentationExecution {
+            version_key: "personal-presentation-v1".into(),
+            version_interaction_node_id: 31,
+            root_layer_id: 37,
+        };
+        let command = CompleteInteraction {
+            project_id: None,
+            product_interaction_id: 77,
+            thread_id: 1,
+            interaction_id: 77,
+            text: "question",
+            working_directory: root.to_str().unwrap(),
+            harness_configuration_name: "test",
+            permission_profile: &permission_profile,
+            model_selection: None,
+            model_plan: None,
+            attempt_admission_id: None,
+            execution_lease_id: None,
+            harness_policy: None,
+            invocation: None,
+            input_identity: Some("product:77"),
+            input_digest: Some("sha256:v1:stable"),
+            contexts: &[],
+            personal_presentation: Some(&personal_presentation),
+            submitted_inputs: &submitted_inputs,
+        };
+
+        let prepared = runtime.prepare(&command).await.unwrap();
+        assert_eq!(prepared.graph_node_id, 42);
+        assert_eq!(prepared.input_children.len(), 1);
+        assert_eq!(prepared.personal_presentation_version_id, Some(31));
+        assert_eq!(attachments.load(Ordering::SeqCst), 1);
+        // The pinned presentation still reaches the execution digest when submitted
+        // inputs share the same prepare.
+        assert_ne!(
+            prepared.effective_execution_digest,
+            super::effective_execution_digest("sha256:test", "auto", None, None)
+        );
+        assert_eq!(
+            prepared.effective_execution_digest,
+            super::effective_execution_digest(
+                "sha256:test",
+                "auto",
+                None,
+                Some(&personal_presentation),
+            )
+        );
+        runtime.discard_prepared(prepared).await.unwrap();
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn retries_personal_presentation_publication_with_stable_identity() {
         let publications = Arc::new(AtomicUsize::new(0));
         let observed = publications.clone();
