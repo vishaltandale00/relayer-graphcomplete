@@ -252,6 +252,40 @@ async fn applying_the_same_closure_again_converges_rather_than_duplicating() {
 }
 
 #[tokio::test]
+async fn replaying_a_stable_identity_unions_its_publication_targets() {
+    let directory = tempfile::tempdir().unwrap();
+    let index = index(&directory);
+    let closure = accepted_closure().await;
+    let first = SearchTarget::Thread(ThreadId::new(41).unwrap());
+    let second = SearchTarget::Thread(ThreadId::new(42).unwrap());
+
+    for (target, revision) in [
+        (first, SearchIndexRevision::FIRST),
+        (second, SearchIndexRevision::FIRST),
+    ] {
+        let mut write = index.begin(target, revision).await.unwrap();
+        write.apply(closure.clone(), vec![target]).await.unwrap();
+        write.commit().await.unwrap();
+    }
+
+    for target in [first, second] {
+        let rows = index
+            .normalized_rows(&format!(
+                "MATCH (n:Content) WHERE list_contains(n.published_targets, '{}') \
+                 RETURN count(n) AS visible",
+                target
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![vec![json!({"type": "integer", "value": "3"})]],
+            "replaying the closure erased visibility for {target}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_rolled_back_write_leaves_the_store_untouched() {
     let directory = tempfile::tempdir().unwrap();
     let index = index(&directory);

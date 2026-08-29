@@ -152,7 +152,9 @@ fn write_layer_node(
     let mut statement = connection.prepare(
         "MERGE (l:Layer {id: $id}) \
          SET l.state = $state, l.layout_version = $layout_version, \
-             l.has_layout = $has_layout, l.published_targets = $targets",
+             l.has_layout = $has_layout, \
+             l.published_targets = CASE WHEN l.published_targets IS NULL THEN $targets \
+                 ELSE list_distinct(list_concat(l.published_targets, $targets)) END",
     )?;
     connection.execute(
         &mut statement,
@@ -188,7 +190,9 @@ fn write_layer_relationships(
             "MATCH (l:Layer), (n:Content) WHERE l.id = $layer AND n.id = $content \
              MERGE (l)-[m:CONTAINS {id: $id}]->(n) \
              SET m.member_order = $member_order, m.x = $x, m.y = $y, \
-                 m.has_xy = $has_xy, m.published_targets = $targets",
+                 m.has_xy = $has_xy, \
+                 m.published_targets = CASE WHEN m.published_targets IS NULL THEN $targets \
+                     ELSE list_distinct(list_concat(m.published_targets, $targets)) END",
         )?;
         connection.execute(
             &mut statement,
@@ -220,7 +224,9 @@ fn write_node(connection: &Connection<'_>, targets: &Value, node: &GraphNode) ->
     let mut statement = connection.prepare(
         "MERGE (n:Content {id: $id}) \
          SET n.kind = $kind, n.icon = $icon, n.title = $title, n.detail = $detail, \
-             n.state = $state, n.published_targets = $targets",
+             n.state = $state, \
+             n.published_targets = CASE WHEN n.published_targets IS NULL THEN $targets \
+                 ELSE list_distinct(list_concat(n.published_targets, $targets)) END",
     )?;
     connection.execute(
         &mut statement,
@@ -241,7 +247,9 @@ fn write_edge(connection: &Connection<'_>, targets: &Value, edge: &GraphEdge) ->
     let mut statement = connection.prepare(
         "MATCH (a:Content), (b:Content) WHERE a.id = $from AND b.id = $to \
          MERGE (a)-[r:CONNECTED {id: $id}]->(b) \
-         SET r.state = $state, r.published_targets = $targets",
+         SET r.state = $state, \
+             r.published_targets = CASE WHEN r.published_targets IS NULL THEN $targets \
+                 ELSE list_distinct(list_concat(r.published_targets, $targets)) END",
     )?;
     connection.execute(
         &mut statement,
@@ -281,7 +289,9 @@ fn write_action(connection: &Connection<'_>, targets: &Value, action: &GraphActi
          MERGE (n)-[a:{table} {{id: $id}}]->(l) \
          SET a.source_layer_id = $source_layer_id, a.label = $label, a.variant = $variant, \
              a.icon = $icon, a.description = $description, a.relation = $relation, \
-             a.state = $state, a.published_targets = $targets"
+             a.state = $state, \
+             a.published_targets = CASE WHEN a.published_targets IS NULL THEN $targets \
+                 ELSE list_distinct(list_concat(a.published_targets, $targets)) END"
     ))?;
     connection.execute(
         &mut statement,
