@@ -74,11 +74,10 @@ fn every_frozen_positive_case_either_plans_or_is_named_unsupported() {
         planned.len(),
         planned.len() + unsupported.len()
     );
-    assert!(
-        planned.len() >= 8,
-        "only {} of {} frozen cases plan: {planned:?}",
-        planned.len(),
-        planned.len() + unsupported.len()
+    assert_eq!(
+        unsupported,
+        vec!["property-absence".to_owned()],
+        "IS ABSENT is the only construct this slice still refuses"
     );
     for required in [
         "whole-target-scan",
@@ -87,6 +86,8 @@ fn every_frozen_positive_case_either_plans_or_is_named_unsupported() {
         "two-hop-connected",
         "membership-placement",
         "root-action-query",
+        "aggregate-allowlist",
+        "distinct-list-record-comparisons-comment-semicolon",
     ] {
         assert!(
             planned.contains(&required.to_owned()),

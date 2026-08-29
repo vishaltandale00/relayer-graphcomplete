@@ -52,6 +52,7 @@ pub enum QueryCode {
     DynamicSchemaForbidden,
     QueryTypeMismatch,
     DuplicateOutputColumn,
+    InvalidAggregate,
     AstDepthExceeded,
     VariableLimitExceeded,
     PatternPartLimitExceeded,
@@ -82,6 +83,7 @@ impl QueryCode {
             Self::DynamicSchemaForbidden => "dynamic_schema_forbidden",
             Self::QueryTypeMismatch => "query_type_mismatch",
             Self::DuplicateOutputColumn => "duplicate_output_column",
+            Self::InvalidAggregate => "invalid_aggregate",
             Self::AstDepthExceeded => "ast_depth_exceeded",
             Self::VariableLimitExceeded => "variable_limit_exceeded",
             Self::PatternPartLimitExceeded => "pattern_part_limit_exceeded",
@@ -114,6 +116,7 @@ impl QueryCode {
             | Self::DynamicSchemaForbidden
             | Self::QueryTypeMismatch
             | Self::DuplicateOutputColumn
+            | Self::InvalidAggregate
             | Self::AstDepthExceeded
             | Self::VariableLimitExceeded
             | Self::PatternPartLimitExceeded

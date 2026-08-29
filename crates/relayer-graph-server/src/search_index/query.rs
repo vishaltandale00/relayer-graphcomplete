@@ -14,12 +14,13 @@ use lbug::{Connection, Value};
 use relayer_graph_core::{
     SearchTarget,
     query::{
-        Column, CompareOp, Expression, Limit, NullPlacement, PatternPart, Predicate, PropertyRef,
-        QueryCode, QueryError, QueryLimits, QueryPlan, RelationshipType, SortDirection,
+        AggregateFunction, Column, CompareOp, Expression, Limit, NullPlacement, PatternPart,
+        Predicate, PropertyRef, QueryCode, QueryError, QueryLimits, QueryPlan, RelationshipType,
+        SortDirection,
     },
 };
 use serde_json::{Value as JsonValue, json};
-use std::{cmp::Ordering as Sort, collections::BTreeMap};
+use std::cmp::Ordering as Sort;
 
 use super::{
     store::{endpoint_index, rows_with},
@@ -139,6 +140,33 @@ fn lower(
             conditions.push(format!(
                 "list_contains({binding}.published_targets, $__target)"
             ));
+        }
+    }
+
+    // One row per authored undirected edge. The engine reports both
+    // orientations; the contract says to consider bindings established by
+    // endpoint predicates first, and only when both orientations remain to take
+    // the one with the lower public identity on the left. So a rooted traversal
+    // out of a constrained vertex keeps both directions available, while an
+    // unrooted scan emits each edge exactly once.
+    let constrained: std::collections::HashSet<&str> = plan
+        .predicates
+        .iter()
+        .map(|predicate| match predicate {
+            Predicate::PropertyComparison { property, .. }
+            | Predicate::NullTest { property, .. } => property.binding.as_str(),
+        })
+        .collect();
+    for pattern in &plan.patterns {
+        for relationship in &pattern.relationships {
+            if !relationship.relationship_type.is_undirected() {
+                continue;
+            }
+            let rooted = constrained.contains(relationship.from.as_str())
+                || constrained.contains(relationship.to.as_str());
+            if !rooted {
+                conditions.push(format!("{}.id < {}.id", relationship.from, relationship.to));
+            }
         }
     }
 
@@ -360,6 +388,42 @@ fn lower_expression(plan: &QueryPlan, expression: &Expression) -> String {
         Expression::Binding { binding } => binding.clone(),
         Expression::Property { property } => physical_reference(plan, property),
         Expression::Parameter { name } => format!("${name}"),
+        Expression::List { items } => format!(
+            "[{}]",
+            items
+                .iter()
+                .map(|item| lower_expression(plan, item))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Expression::Record { fields } => format!(
+            "{{{}}}",
+            fields
+                .iter()
+                .map(|field| format!("{}:{}", field.name, lower_expression(plan, &field.value)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Expression::Aggregate {
+            function,
+            distinct,
+            argument,
+        } => {
+            let Some(argument) = argument else {
+                return "count(*)".to_owned();
+            };
+            let inner = format!(
+                "{}{}",
+                if *distinct { "DISTINCT " } else { "" },
+                lower_expression(plan, argument)
+            );
+            match function {
+                // `collect` preserves the deterministic pre-aggregation canonical
+                // order, which the engine does not guarantee on its own.
+                AggregateFunction::Collect => format!("list_sort(collect({inner}))"),
+                other => format!("{}({inner})", other.as_str()),
+            }
+        }
     }
 }
 
@@ -385,13 +449,6 @@ pub fn execute(
     let raw = rows_with(connection, &lowering.text, lowering.parameters).map_err(engine_failure)?;
 
     let mut rows = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let undirected = plan.patterns.iter().any(|pattern| {
-        pattern
-            .relationships
-            .iter()
-            .any(|relationship| relationship.relationship_type.is_undirected())
-    });
     for row in &raw {
         let normalized: Vec<JsonValue> = row
             .iter()
@@ -400,12 +457,6 @@ pub fn execute(
             .map_err(|error| {
                 QueryError::new(QueryCode::InvalidEngineValue, "result", error.to_string())
             })?;
-        // The engine reports an undirected relationship in both orientations.
-        // The contract projects one physical/public relationship, so a matching
-        // row is emitted once.
-        if undirected && !seen.insert(canonical_key(&normalized)) {
-            continue;
-        }
         rows.push(normalized);
     }
 
@@ -418,6 +469,12 @@ pub fn execute(
                 limits.intermediate_rows
             ),
         ));
+    }
+    if plan.projection.distinct {
+        // DISTINCT compares the complete typed projected row, which only exists
+        // after normalization — engine-level DISTINCT compares engine values.
+        rows.sort_by(|left, right| compare_rows(left, right));
+        rows.dedup_by(|left, right| compare_rows(left, right) == Sort::Equal);
     }
     order_rows(plan, &mut rows);
     let mut truncated = rows.len() > cap;
@@ -448,16 +505,6 @@ pub fn execute(
         rows,
         truncated,
     })
-}
-
-/// A stable key for one normalized row, used to collapse the two orientations of
-/// an undirected relationship.
-fn canonical_key(row: &[JsonValue]) -> String {
-    let mut parts = BTreeMap::new();
-    for (index, value) in row.iter().enumerate() {
-        parts.insert(index, value.to_string());
-    }
-    parts.values().cloned().collect::<Vec<_>>().join("\u{1f}")
 }
 
 fn engine_failure(error: anyhow::Error) -> QueryError {

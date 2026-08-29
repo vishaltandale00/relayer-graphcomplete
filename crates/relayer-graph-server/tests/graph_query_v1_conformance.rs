@@ -231,14 +231,13 @@ async fn frozen_positive_cases_reproduce_the_contract_results() {
             serde_json::to_string(actual).unwrap_or_default()
         );
     }
-    // Every case this slice admits reproduces the contract's exact bytes. The
-    // five it does not admit are aggregates, DISTINCT, list and record
-    // expressions, and IS ABSENT, each refused as query_construct_unsupported.
+    // Every case this slice admits reproduces the contract's exact bytes. The one
+    // it does not admit is IS ABSENT, refused as query_construct_unsupported.
     assert_eq!(
         mismatched.len(),
         0,
         "a case the slice admits no longer reproduces the contract"
     );
-    assert_eq!(matched.len(), 15, "matched: {matched:?}");
-    assert_eq!(unsupported.len(), 5, "unsupported: {unsupported:?}");
+    assert_eq!(matched.len(), 19, "matched: {matched:?}");
+    assert_eq!(unsupported.len(), 1, "unsupported: {unsupported:?}");
 }

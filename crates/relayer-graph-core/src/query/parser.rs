@@ -578,13 +578,6 @@ impl Parser {
 
     fn return_clause(&mut self) -> Result<Projection, QueryError> {
         let distinct = self.eat_word("distinct");
-        if distinct {
-            return Err(QueryError::new(
-                QueryCode::QueryConstructUnsupported,
-                "query",
-                "DISTINCT is contract v1 but is not implemented yet",
-            ));
-        }
         let mut columns = vec![self.return_item()?];
         while self.eat_symbol(",") {
             columns.push(self.return_item()?);
@@ -604,6 +597,16 @@ impl Parser {
 
     fn return_item(&mut self) -> Result<Column, QueryError> {
         let expression = self.expression()?;
+        // A bare empty list has nothing to give it an element type. Nested in
+        // another list it is fine, because a sibling types it.
+        if matches!(&expression, Expression::List { items } if items.is_empty()) {
+            return Err(QueryError::new(
+                QueryCode::QueryTypeMismatch,
+                "query",
+                "an empty list literal has no element type",
+            ));
+        }
+        self.check_homogeneous(&expression)?;
         let name = if self.eat_word("as") {
             self.identifier()?
         } else {
@@ -611,18 +614,58 @@ impl Parser {
                 Expression::Property { property } => property.name.clone(),
                 Expression::Binding { binding } => binding.clone(),
                 Expression::Parameter { name } => name.clone(),
+                Expression::Aggregate { function, .. } => function.as_str().to_owned(),
+                Expression::List { .. } => "list".to_owned(),
+                Expression::Record { .. } => "record".to_owned(),
             }
         };
         Ok(Column { name, expression })
     }
 
     fn expression(&mut self) -> Result<Expression, QueryError> {
-        if matches!(self.peek(), Some(Token::Symbol(symbol)) if symbol == "[" || symbol == "{") {
+        self.expression_at(0)
+    }
+
+    /// Expressions nest, so depth is bounded here rather than by counting tokens.
+    fn expression_at(&mut self, depth: usize) -> Result<Expression, QueryError> {
+        if depth > self.limits.ast_depth {
             return Err(QueryError::new(
-                QueryCode::QueryConstructUnsupported,
+                QueryCode::AstDepthExceeded,
                 "query",
-                "list and record expressions are contract v1 but are not implemented yet",
+                format!("expressions nest at most {} deep", self.limits.ast_depth),
             ));
+        }
+        if self.eat_symbol("[") {
+            let mut items = Vec::new();
+            if !self.eat_symbol("]") {
+                items.push(self.expression_at(depth + 1)?);
+                while self.eat_symbol(",") {
+                    items.push(self.expression_at(depth + 1)?);
+                }
+                self.expect_symbol("]")?;
+            }
+            return Ok(Expression::List { items });
+        }
+        if self.eat_symbol("{") {
+            let mut fields = Vec::new();
+            loop {
+                let name = self.identifier()?;
+                self.expect_symbol(":")?;
+                let value = self.expression_at(depth + 1)?;
+                if fields.iter().any(|field: &RecordField| field.name == name) {
+                    return Err(QueryError::new(
+                        QueryCode::DuplicateOutputColumn,
+                        "query",
+                        format!("record field `{name}` appears twice"),
+                    ));
+                }
+                fields.push(RecordField { name, value });
+                if !self.eat_symbol(",") {
+                    break;
+                }
+            }
+            self.expect_symbol("}")?;
+            return Ok(Expression::Record { fields });
         }
         if let Some(Token::Parameter(name)) = self.peek().cloned() {
             self.position += 1;
@@ -630,11 +673,7 @@ impl Parser {
         }
         let binding = self.identifier()?;
         if matches!(self.peek(), Some(Token::Symbol(symbol)) if symbol == "(") {
-            return Err(QueryError::new(
-                QueryCode::QueryConstructUnsupported,
-                "query",
-                format!("`{binding}(...)` is contract v1 but is not implemented yet"),
-            ));
+            return self.aggregate(&binding, depth);
         }
         if self.eat_symbol(".") {
             let name = self.identifier()?;
@@ -646,7 +685,6 @@ impl Parser {
         if !self.bindings.contains_key(&binding)
             && !self.relationship_bindings.contains_key(&binding)
         {
-            // Path bindings are legal to project; anything else is not bound.
             let bound_path = self
                 .tokens
                 .iter()
@@ -660,6 +698,114 @@ impl Parser {
             }
         }
         Ok(Expression::Binding { binding })
+    }
+
+    /// Lists are homogeneous: every element carries the same type. A list mixing
+    /// a string with a node has no element type the wire algebra can name.
+    fn check_homogeneous(&self, expression: &Expression) -> Result<(), QueryError> {
+        if let Expression::List { items } = expression {
+            let mut kinds = items.iter().filter_map(|item| self.static_type(item));
+            if let Some(first) = kinds.next()
+                && let Some(other) = kinds.find(|kind| *kind != first)
+            {
+                return Err(QueryError::new(
+                    QueryCode::QueryTypeMismatch,
+                    "query",
+                    format!("a list cannot mix {first} and {other} elements"),
+                ));
+            }
+        }
+        match expression {
+            Expression::List { items } => {
+                for item in items {
+                    self.check_homogeneous(item)?;
+                }
+            }
+            Expression::Record { fields } => {
+                for field in fields {
+                    self.check_homogeneous(&field.value)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// The type an expression carries, where it can be known without running the
+    /// query. A parameter's type is not known here, so it is left open rather
+    /// than guessed.
+    fn static_type(&self, expression: &Expression) -> Option<&'static str> {
+        match expression {
+            Expression::Property { property } => match self.bindings.get(&property.binding) {
+                Some(Some(NodeLabel::Layer)) if property.name == "layout_version" => {
+                    Some("integer")
+                }
+                Some(Some(_)) => Some("string"),
+                _ => match self.relationship_bindings.get(&property.binding)? {
+                    RelationshipType::Contains if property.name == "order" => Some("integer"),
+                    RelationshipType::Contains if matches!(property.name.as_str(), "x" | "y") => {
+                        Some("float")
+                    }
+                    _ => Some("string"),
+                },
+            },
+            Expression::Binding { binding } => match self.bindings.get(binding) {
+                Some(Some(NodeLabel::Content)) => Some("node"),
+                Some(Some(NodeLabel::Layer)) => Some("layer"),
+                Some(None) => None,
+                None => self
+                    .relationship_bindings
+                    .get(binding)
+                    .map(|_| "relationship")
+                    .or(Some("path")),
+            },
+            Expression::List { .. } => Some("list"),
+            Expression::Record { .. } => Some("record"),
+            Expression::Parameter { .. } | Expression::Aggregate { .. } => None,
+        }
+    }
+
+    /// `count(*)` is the only aggregate admitted without an argument, and
+    /// aggregates may not nest.
+    fn aggregate(&mut self, name: &str, depth: usize) -> Result<Expression, QueryError> {
+        let function = AggregateFunction::parse(name).ok_or_else(|| {
+            QueryError::new(
+                QueryCode::QueryConstructForbidden,
+                "query",
+                format!("`{name}` is not an admitted function"),
+            )
+        })?;
+        self.expect_symbol("(")?;
+        let distinct = self.eat_word("distinct");
+        if self.eat_symbol("*") {
+            self.expect_symbol(")")?;
+            if function != AggregateFunction::Count || distinct {
+                return Err(QueryError::new(
+                    QueryCode::InvalidAggregate,
+                    "query",
+                    "only count(*) takes a star, and it does not take DISTINCT",
+                ));
+            }
+            return Ok(Expression::Aggregate {
+                function,
+                distinct: false,
+                argument: None,
+            });
+        }
+        let argument = self.expression_at(depth + 1)?;
+        self.expect_symbol(")")?;
+        if argument.has_aggregate() {
+            return Err(QueryError::new(
+                QueryCode::InvalidAggregate,
+                "query",
+                "aggregates do not nest",
+            ));
+        }
+        Ok(Expression::Aggregate {
+            function,
+            distinct,
+            argument: Some(Box::new(argument)),
+        })
     }
 
     fn order_clause(&mut self, projection: &Projection) -> Result<Vec<Ordering>, QueryError> {

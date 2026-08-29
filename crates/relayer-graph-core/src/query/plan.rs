@@ -151,12 +151,88 @@ pub enum Predicate {
     },
 }
 
+/// The aggregates v1 admits. Anything else is `invalid_aggregate`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AggregateFunction {
+    Count,
+    Min,
+    Max,
+    Sum,
+    Avg,
+    Collect,
+}
+
+impl AggregateFunction {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "count" => Some(Self::Count),
+            "min" => Some(Self::Min),
+            "max" => Some(Self::Max),
+            "sum" => Some(Self::Sum),
+            "avg" => Some(Self::Avg),
+            "collect" => Some(Self::Collect),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Count => "count",
+            Self::Min => "min",
+            Self::Max => "max",
+            Self::Sum => "sum",
+            Self::Avg => "avg",
+            Self::Collect => "collect",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordField {
+    pub name: String,
+    pub value: Expression,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Expression {
-    Binding { binding: String },
-    Property { property: PropertyRef },
-    Parameter { name: String },
+    Binding {
+        binding: String,
+    },
+    Property {
+        property: PropertyRef,
+    },
+    Parameter {
+        name: String,
+    },
+    List {
+        items: Vec<Expression>,
+    },
+    Record {
+        fields: Vec<RecordField>,
+    },
+    Aggregate {
+        function: AggregateFunction,
+        distinct: bool,
+        /// `None` is `count(*)`, the only aggregate admitted without an argument.
+        argument: Option<Box<Expression>>,
+    },
+}
+
+impl Expression {
+    /// Whether this expression contains an aggregate at any depth. Aggregates may
+    /// not nest, and a projection that mixes aggregates with plain expressions
+    /// groups by the plain ones.
+    pub fn has_aggregate(&self) -> bool {
+        match self {
+            Self::Aggregate { .. } => true,
+            Self::List { items } => items.iter().any(Self::has_aggregate),
+            Self::Record { fields } => fields.iter().any(|field| field.value.has_aggregate()),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

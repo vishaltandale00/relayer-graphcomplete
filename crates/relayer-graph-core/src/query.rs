@@ -19,9 +19,9 @@ pub mod plan;
 pub use error::{QueryCode, QueryError, QueryPhase};
 pub use limits::QueryLimits;
 pub use plan::{
-    Column, CompareOp, Direction, Expression, Limit, NodeLabel, NodePlan, NullPlacement, Ordering,
-    PatternPart, Predicate, Projection, PropertyRef, QueryPlan, RelationshipPlan, RelationshipType,
-    SortDirection,
+    AggregateFunction, Column, CompareOp, Direction, Expression, Limit, NodeLabel, NodePlan,
+    NullPlacement, Ordering, PatternPart, Predicate, Projection, PropertyRef, QueryPlan,
+    RecordField, RelationshipPlan, RelationshipType, SortDirection,
 };
 
 use serde::{Deserialize, Serialize};
