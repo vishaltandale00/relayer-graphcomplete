@@ -162,7 +162,7 @@ Do not create the host pool until the user-access license is assigned and the Az
 
 Start VM on Connect is enabled only after the host pool exists. Its post-deployment step assigns the `Desktop Virtualization Power On Off Contributor` role to the Azure Virtual Desktop service principal at subscription scope, as Microsoft requires, then directly assigns the one healthy session host to the test user. Review that role assignment with `-WhatIf` before applying it. The Azure Virtual Desktop control plane does not replace the per-user license requirement.
 
-On the signed-in desktop, install Git, Node 22, and GitHub CLI, then check out the exact reviewed repository commit. Download the seed candidate, target candidate, and target publication receipt from their signed workflow runs:
+On the signed-in desktop, install Git and GitHub CLI, then check out the exact reviewed repository commit and install the Node version recorded in `.node-version` at that commit. Do not install "latest Node 22": this procedure reproduces a signed build, and the release workflows resolve their Node from that file, so any other version verifies something the pipeline never produced. Download the seed candidate, target candidate, and target publication receipt from their signed workflow runs:
 
 ```powershell
 gh run download <seed-run-id> --name relayer-desktop-preview-windows-x64-<seed-commit> --dir seed

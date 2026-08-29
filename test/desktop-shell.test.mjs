@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { parse as parseYaml } from "yaml";
 import {
   CodexCredentialAdapter,
   findCodexExecutable,
@@ -2433,29 +2434,32 @@ describe("desktop skeleton", () => {
     // whatever the runner happens to cache, which is how the drift started.
     expect(pinnedVersion).toMatch(/^\d+\.\d+\.\d+\n$/);
 
+    // Parsed rather than string-matched. A line-anchored regex misses
+    // `with: { node-version: 20 }`, and reports a mismatched step count instead
+    // of naming the offending step — which is the wrong thing to hand someone
+    // who has just reintroduced the bug this test exists to prevent.
     let setupNodeSteps = 0;
-    let versionFileReferences = 0;
     for (const name of workflowNames) {
-      const workflow = await readFile(new URL(name, workflowDirectory), "utf8");
-      // Globbing the directory rather than listing files by hand is the point:
-      // a workflow added later is covered without anyone remembering this test.
-      expect(
-        workflow,
-        `${name} declares a literal node-version; use node-version-file: .node-version`,
-      ).not.toMatch(/^\s*node-version:/m);
-      setupNodeSteps += workflow.match(/uses: actions\/setup-node@/g)?.length ?? 0;
-      versionFileReferences += workflow.match(/^\s*node-version-file: \.node-version$/gm)?.length ?? 0;
+      const workflow = parseYaml(await readFile(new URL(name, workflowDirectory), "utf8"));
+      for (const [jobName, job] of Object.entries(workflow?.jobs ?? {})) {
+        for (const step of job?.steps ?? []) {
+          if (!String(step?.uses ?? "").startsWith("actions/setup-node@")) continue;
+          setupNodeSteps += 1;
+          const where = `${name} → job "${jobName}" → ${step.uses}`;
+          expect(step.with?.["node-version"], `${where} declares a literal node-version`).toBeUndefined();
+          // Asserting the file is named, rather than only that no literal
+          // exists, is what catches a step declaring no version at all and
+          // silently inheriting whatever Node the runner preinstalled.
+          expect(step.with?.["node-version-file"], `${where} must read .node-version`).toBe(".node-version");
+        }
+      }
     }
 
-    // Every setup-node step reads the pinned file. Asserting the count, not just
-    // the absence of literals, is what catches a step that declares no version
-    // at all and silently inherits the runner default.
     // Deliberately not asserting a fixed count of ten. Removing a workflow is a
     // legitimate change — #305 may retire the Intel canary — and it must not
     // fail a test about Node pinning. Greater-than-zero only guards against the
-    // glob silently matching nothing and the assertions below passing vacuously.
+    // glob silently matching nothing and the assertions above never running.
     expect(setupNodeSteps).toBeGreaterThan(0);
-    expect(versionFileReferences).toBe(setupNodeSteps);
   });
 
   it("gates Preview publication on one immutable candidate and one monotonic pointer", () => {

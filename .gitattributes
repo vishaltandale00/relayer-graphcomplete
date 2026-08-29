@@ -1,4 +1,5 @@
 .gitattributes text eol=lf
+.node-version text eol=lf
 harnesses/*.yaml text eol=lf
 python/relayer-graph/src/relayer_graph/**/*.py text eol=lf
 desktop/packaging/build-development.mjs text eol=lf
