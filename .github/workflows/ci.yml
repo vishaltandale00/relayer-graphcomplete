@@ -75,9 +75,7 @@ jobs:
       - run: npm ci
       - name: Seed the locked Cargo dependency closure
         shell: pwsh
-        run: |
-          $env:CARGO_ENCODED_RUSTFLAGS = "--cfg$([char]0x1f)ladybug_qualification"
-          cargo fetch --locked --target x86_64-pc-windows-msvc
+        run: cargo fetch --locked --target x86_64-pc-windows-msvc
       - name: Fetch and prepare pinned Ladybug and static OpenSSL sources
         shell: pwsh
         run: |

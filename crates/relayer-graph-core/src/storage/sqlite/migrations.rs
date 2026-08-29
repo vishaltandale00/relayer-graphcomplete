@@ -136,6 +136,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn schema_10_graph_reopens_and_tracks_search_index_revisions_and_versions() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("sqlite://{}", file.path().display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let pre_search_index = Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 10)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        pre_search_index.run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO nodes(id,project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key,input_identity,input_digest) VALUES (1,7,1,'user-interaction','user','Legacy','Legacy interaction','accepted',NULL,NULL,'legacy-1','sha256:legacy')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let database = GraphDatabase::open(file.path()).await.unwrap();
+        let mut connection = database.storage.acquire().await.unwrap();
+        let legacy_title: String = sqlx::query("SELECT title FROM nodes WHERE id=1")
+            .fetch_one(&mut *connection)
+            .await
+            .unwrap()
+            .get("title");
+        assert_eq!(legacy_title, "Legacy");
+        drop(connection);
+
+        // A target carried across the migration has committed nothing yet, which
+        // is distinct from having committed revision zero.
+        let project = SearchTarget::new(ProjectId::new(7), ThreadId::new(1).unwrap());
+        let thread = SearchTarget::new(None, ThreadId::new(1).unwrap());
+        assert_eq!(database.search_index_revision(project).await.unwrap(), None);
+        assert_eq!(database.search_index_revision(thread).await.unwrap(), None);
+        assert_ne!(project, thread);
+
+        for (component, version) in SearchIndexComponent::ALL.iter().zip([
+            "lbug 0.18.0",
+            "42",
+            "11",
+            "relayer.graph-query 1",
+            "1",
+        ]) {
+            database
+                .record_search_index_version(*component, version)
+                .await
+                .unwrap();
+        }
+        database.storage.close().await;
+
+        // The five versions have to survive a reopen and be readable with no
+        // search store present at all, because that is exactly the state they are
+        // consulted in: a store that is corrupt or incompatible and will not open.
+        let reopened = GraphDatabase::open(file.path()).await.unwrap();
+        let versions = tracked_versions(&reopened).await;
+        assert_eq!(
+            versions,
+            vec![
+                Some("lbug 0.18.0".to_owned()),
+                Some("42".to_owned()),
+                Some("11".to_owned()),
+                Some("relayer.graph-query 1".to_owned()),
+                Some("1".to_owned()),
+            ]
+        );
+        assert!(!file.path().with_extension("ladybug").exists());
+    }
+
+    async fn tracked_versions(database: &GraphDatabase) -> Vec<Option<String>> {
+        let mut versions = Vec::new();
+        for component in SearchIndexComponent::ALL {
+            versions.push(database.search_index_version(component).await.unwrap());
+        }
+        versions
+    }
+
+    #[tokio::test]
     async fn action_presentation_migration_defaults_existing_actions_to_pill() {
         let mut connection = SqliteConnection::connect("sqlite::memory:").await.unwrap();
         sqlx::raw_sql(include_str!("migrations/0001_graph_schema.sql"))

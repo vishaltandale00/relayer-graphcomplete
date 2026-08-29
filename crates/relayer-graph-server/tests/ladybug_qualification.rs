@@ -1,4 +1,4 @@
-#![cfg(ladybug_qualification)]
+#![cfg(feature = "ladybug")]
 
 use std::{
     io::{BufRead, BufReader},

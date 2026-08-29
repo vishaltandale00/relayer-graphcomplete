@@ -405,34 +405,12 @@ describe("Ladybug packaged lifecycle qualification", () => {
       "--locked", "--offline",
     ]);
     expect(calls[0].options.env.RUSTFLAGS).toBeUndefined();
-    expect(calls[0].options.env.CARGO_ENCODED_RUSTFLAGS.split("\u001f")).toEqual([
-      "--cfg", "ladybug_qualification",
-      "-L", "native=/tmp/prepared-openssl/lib",
-      "-l", "static=ssl",
-      "-l", "static=crypto",
-    ]);
+    // The OpenSSL link directives are the build script's job now, so packaging
+    // hands it only the prepared prefix and no compiler flags at all.
+    expect(calls[0].options.env.CARGO_ENCODED_RUSTFLAGS).toBeUndefined();
+    expect(calls[0].options.env.OPENSSL_DIR).toBe("/tmp/prepared-openssl");
     expect(calls[0].options.cwd).toBe("/tmp/exact-source");
     expect(calls[1].args[0]).toBe("/tmp/dependencies/node_modules/electron-builder/out/cli/cli.js");
-  });
-
-  it("maps the prepared OpenSSL archives to MSVC static library names", async () => {
-    const calls = [];
-    await buildDevelopmentDesktop({
-      environment: {
-        RELAYER_DESKTOP_TARGET: "windows-x64",
-        RELAYER_LADYBUG_QUALIFICATION: "1",
-        OPENSSL_DIR: "/tmp/prepared-openssl",
-      },
-      execute: async (command, args, options) => calls.push({ command, args, options }),
-      repositoryRoot: "/tmp/exact-source",
-      dependencyRoot: "/tmp/dependencies",
-    });
-    expect(calls[0].options.env.CARGO_ENCODED_RUSTFLAGS.split("\u001f")).toEqual([
-      "--cfg", "ladybug_qualification",
-      "-L", "native=/tmp/prepared-openssl/lib",
-      "-l", "static=libssl",
-      "-l", "static=libcrypto",
-    ]);
   });
 
   it("rejects qualification without the prepared static OpenSSL prefix", async () => {

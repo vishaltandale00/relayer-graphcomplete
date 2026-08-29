@@ -21,6 +21,9 @@ use std::{
 };
 use uuid::Uuid;
 
+#[cfg(feature = "ladybug")]
+pub mod search_index;
+
 #[derive(Clone)]
 pub struct ServerState {
     graph: GraphDatabase,

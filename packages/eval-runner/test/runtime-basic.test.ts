@@ -271,7 +271,10 @@ describe("first runtime evaluation", () => {
       harnessCloseGraceMs: 25,
     })).rejects.toThrow("Harness host did not close within 25ms and was forcibly disconnected");
 
-    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    // The graph server now opens a Ladybug search store at startup, which costs
+    // roughly a quarter of a second on a fresh store. This budget bounds forced
+    // shutdown, not startup, so it is raised to keep covering the same boundary.
+    expect(Date.now() - startedAt).toBeLessThan(3_000);
     expect(runtimeDirectory).toBeDefined();
     await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
     releaseDispose();

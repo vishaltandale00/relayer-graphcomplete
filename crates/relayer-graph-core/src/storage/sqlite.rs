@@ -6,6 +6,7 @@ pub(crate) mod layers;
 pub(crate) mod migrations;
 pub(crate) mod nodes;
 pub(crate) mod personal_presentation;
+pub(crate) mod search_index;
 
 use std::{path::Path, str::FromStr, time::Duration};
 

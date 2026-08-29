@@ -4,10 +4,11 @@ mod import;
 mod interaction_scope;
 mod model;
 mod personal_presentation;
+mod search_index;
 mod writer;
 
 pub use completion::{AcceptedGraphClosure, CompletionOutput};
-pub use database::GraphDatabase;
+pub use database::{DEFAULT_IMPORT_INDEX_BUDGET, DEFAULT_SEARCH_INDEX_BUDGET, GraphDatabase};
 pub use import::{
     ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedConversationReceipt,
     ImportedConversationStage, ImportedEdge, ImportedInteractionContext, ImportedInvokeOrigin,
@@ -26,6 +27,10 @@ pub use model::{
 pub use personal_presentation::{
     PersonalPresentationAttachment, PublishedPersonalPresentationVersion,
     ResolvedPersonalPresentation,
+};
+pub use search_index::{
+    NoSearchIndex, SearchIndex, SearchIndexComponent, SearchIndexFuture, SearchIndexRevision,
+    SearchIndexWrite, SearchTarget,
 };
 pub use writer::GraphWriter;
 

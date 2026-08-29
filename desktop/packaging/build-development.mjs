@@ -36,19 +36,10 @@ export async function buildDevelopmentDesktop({
     if (!environment.OPENSSL_DIR) {
       throw new Error("Ladybug qualification requires the prepared static OPENSSL_DIR.");
     }
-    const opensslLibraryDirectory = resolve(environment.OPENSSL_DIR, "lib");
-    const opensslLibraries = target.platform === "win32"
-      ? ["libssl", "libcrypto"]
-      : ["ssl", "crypto"];
-    const encodedRustFlags = [
-      "--cfg", "ladybug_qualification",
-      "-L", `native=${opensslLibraryDirectory}`,
-      ...opensslLibraries.flatMap((library) => ["-l", `static=${library}`]),
-    ].join("\u001f");
-    environment = {
-      ...environment,
-      CARGO_ENCODED_RUSTFLAGS: encodedRustFlags,
-    };
+    // relayer-graph-server's build script turns OPENSSL_DIR into the static link
+    // directives. Passing them through RUSTFLAGS instead would apply them to the
+    // whole build graph and invalidate its cache.
+    environment = { ...environment };
     delete environment.RUSTFLAGS;
     cargoArguments.push("--locked", "--offline");
   }

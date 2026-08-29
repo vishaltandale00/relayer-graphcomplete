@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GraphError, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId};
+use crate::{
+    GraphError, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId,
+    graph::{InteractionScope, completion},
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -215,6 +218,21 @@ impl crate::GraphDatabase {
         &self,
         import_id: &str,
     ) -> Result<ImportedConversationReceipt, GraphError> {
+        // Taken before the write transaction, like every other accept path, so
+        // submissions to this target index in the order they commit.
+        let target = {
+            let mut connection = self.storage.acquire().await?;
+            let (project_id, thread_id): (Option<i64>, i64) =
+                sqlx::query_as("SELECT project_id,thread_id FROM graph_imports WHERE import_id=?1")
+                    .bind(import_id)
+                    .fetch_one(&mut *connection)
+                    .await?;
+            let thread_id = ThreadId::new(thread_id).ok_or_else(|| {
+                GraphError::Internal("imported conversation has an invalid thread".into())
+            })?;
+            crate::SearchTarget::new(project_id.and_then(ProjectId::new), thread_id)
+        };
+        let _order = self.order_writes_to(target).await;
         let mut tx = self.storage.begin_write().await?;
         let metadata = load_metadata(&mut tx, import_id).await?;
         let turn_count: i64 =
@@ -619,6 +637,37 @@ impl crate::GraphDatabase {
                     "imported invoke resolution could not be reconstructed exactly once".into(),
                 ));
             }
+        }
+        // An import is an accept path like any other, so its closures reach the
+        // search store before SQLite commits. The whole conversation goes in as
+        // one search transaction carrying one revision: the turns were authored
+        // together and there is no point at which a partial import is meaningful.
+        let mut closures = Vec::new();
+        for receipt in &receipts {
+            let Some(node_id) = receipt.graph_node_id else {
+                continue;
+            };
+            let node_id = crate::NodeId::new(node_id)
+                .ok_or_else(|| GraphError::Internal("invalid imported root node ID".into()))?;
+            let scope = InteractionScope {
+                project_id: metadata.project_id,
+                thread_id: metadata.thread_id,
+                root_node_id: node_id,
+                read_only: false,
+            };
+            if let Some(closure) =
+                completion::read_accepted_closure_on(&mut tx, &scope, node_id).await?
+            {
+                closures.push(closure);
+            }
+        }
+        if !closures.is_empty()
+            && let Err(error) =
+                completion::index_and_record(self, &mut tx, target, closures, self.import_expiry())
+                    .await
+        {
+            tx.rollback().await?;
+            return Err(error);
         }
         tx.commit().await?;
         for receipt in &mut receipts {

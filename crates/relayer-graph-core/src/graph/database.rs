@@ -1,33 +1,171 @@
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use crate::{
     AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, InteractionContextAction,
     InteractionContextDraft, InteractionContextTarget, InteractionInputNode, InteractionInvocation,
-    NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId,
+    NoSearchIndex, NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, SearchIndex,
+    SearchIndexComponent, SearchIndexRevision, SearchTarget, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
     interaction_input_digest,
     storage::{
         SqliteGraphStore,
-        sqlite::{contexts::ContextTable, nodes::NodeTable},
+        sqlite::{contexts::ContextTable, nodes::NodeTable, search_index::SearchIndexTable},
     },
 };
+
+/// How long a search-index write may take before the save fails.
+///
+/// This is a ceiling, not a target: the SQLite write lock is held across the
+/// search write, so an unbounded one would stall every other writer. It matches
+/// the SQLite busy timeout, and #303 measures the latency that actually matters.
+pub const DEFAULT_SEARCH_INDEX_BUDGET: Duration = Duration::from_secs(5);
+
+/// How long indexing an imported conversation may take before the import fails.
+///
+/// An import is bulk and one-shot rather than interactive: it materializes every
+/// turn of a conversation and indexes them as one transaction, so it needs a
+/// ceiling of its own rather than the one sized for a single save.
+pub const DEFAULT_IMPORT_INDEX_BUDGET: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 pub struct GraphDatabase {
     pub(crate) storage: SqliteGraphStore,
+    pub(crate) search_index: Arc<dyn SearchIndex>,
+    pub(crate) search_index_budget: Duration,
+    pub(crate) import_index_budget: Duration,
+    /// One lock per logical target, so concurrent submissions to one target
+    /// index in the order they commit while unrelated targets stay independent.
+    write_order: Arc<Mutex<HashMap<SearchTarget, Arc<AsyncMutex<()>>>>>,
 }
 
 impl GraphDatabase {
+    /// Open a graph with no search store attached. Accepted closures are recorded
+    /// in SQLite but indexed nowhere; the shipped server uses
+    /// [`GraphDatabase::open_with_index`] instead.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, GraphError> {
+        Self::open_with_index(path, Arc::new(NoSearchIndex)).await
+    }
+
+    /// Open a graph that indexes every accepted closure into `search_index`.
+    pub async fn open_with_index(
+        path: impl AsRef<Path>,
+        search_index: Arc<dyn SearchIndex>,
+    ) -> Result<Self, GraphError> {
         Ok(Self {
             storage: SqliteGraphStore::open(path).await?,
+            search_index,
+            search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
+            import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
+            write_order: Arc::default(),
         })
     }
 
     pub async fn in_memory() -> Result<Self, GraphError> {
+        Self::in_memory_with_index(Arc::new(NoSearchIndex)).await
+    }
+
+    pub async fn in_memory_with_index(
+        search_index: Arc<dyn SearchIndex>,
+    ) -> Result<Self, GraphError> {
         Ok(Self {
             storage: SqliteGraphStore::in_memory().await?,
+            search_index,
+            search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
+            import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
+            write_order: Arc::default(),
         })
+    }
+
+    /// The search store this graph indexes into. Startup reconciliation reads it
+    /// without going through the write path.
+    pub fn search_index(&self) -> &Arc<dyn SearchIndex> {
+        &self.search_index
+    }
+
+    /// Bound how long a search-index write may take before the save fails.
+    pub fn with_search_index_budget(mut self, budget: Duration) -> Self {
+        self.search_index_budget = budget;
+        self
+    }
+
+    /// When the search-index work for a save that starts now must be done. One
+    /// deadline covers the whole sequence, because what it bounds is how long the
+    /// global SQLite write lock is held.
+    pub(crate) fn expiry(&self) -> tokio::time::Instant {
+        tokio::time::Instant::now() + self.search_index_budget
+    }
+
+    /// The deadline for indexing a whole imported conversation.
+    pub(crate) fn import_expiry(&self) -> tokio::time::Instant {
+        tokio::time::Instant::now() + self.import_index_budget
+    }
+
+    /// Bound how long indexing an imported conversation may take.
+    pub fn with_import_index_budget(mut self, budget: Duration) -> Self {
+        self.import_index_budget = budget;
+        self
+    }
+
+    /// Take this target's place in line. Submissions to one target are ordered
+    /// against each other and against nothing else.
+    pub(crate) async fn order_writes_to(&self, target: SearchTarget) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut write_order = self
+                .write_order
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            // Locks are only ever cloned under this guard, so an entry nobody
+            // else holds is idle and can go. Without this the map keeps one
+            // entry per target for the life of the process.
+            write_order.retain(|_, lock| Arc::strong_count(lock) > 1);
+            write_order.entry(target).or_default().clone()
+        };
+        lock.lock_owned().await
+    }
+
+    /// The last revision this target is known to have committed to the search
+    /// store, or `None` when it has never been indexed.
+    pub async fn search_index_revision(
+        &self,
+        target: SearchTarget,
+    ) -> Result<Option<SearchIndexRevision>, GraphError> {
+        let mut connection = self.storage.acquire().await?;
+        SearchIndexTable::new(&mut connection)
+            .revision(target)
+            .await
+    }
+
+    /// Read one tracked search-store version. These are answered from SQLite
+    /// alone, so they stay available exactly when the store is corrupt or
+    /// version-incompatible and cannot be opened.
+    pub async fn search_index_version(
+        &self,
+        component: SearchIndexComponent,
+    ) -> Result<Option<String>, GraphError> {
+        let mut connection = self.storage.acquire().await?;
+        SearchIndexTable::new(&mut connection)
+            .version(component)
+            .await
+    }
+
+    pub async fn record_search_index_version(
+        &self,
+        component: SearchIndexComponent,
+        version: &str,
+    ) -> Result<(), GraphError> {
+        let mut transaction = self.storage.begin_write().await?;
+        SearchIndexTable::new(&mut transaction)
+            .record_version(component, version)
+            .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn create_interaction(

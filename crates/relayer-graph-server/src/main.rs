@@ -23,10 +23,10 @@ struct Arguments {
     database: String,
     #[arg(long)]
     control_token: Option<String>,
-    #[cfg(ladybug_qualification)]
+    #[cfg(feature = "ladybug")]
     #[arg(long, hide = true)]
     ladybug_qualification: bool,
-    #[cfg(ladybug_qualification)]
+    #[cfg(feature = "ladybug")]
     #[arg(long, hide = true, requires = "ladybug_qualification")]
     ladybug_qualification_hold: bool,
     #[arg(long, default_value_t = false)]
@@ -36,7 +36,7 @@ struct Arguments {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut arguments = Arguments::parse();
-    #[cfg(ladybug_qualification)]
+    #[cfg(feature = "ladybug")]
     if arguments.ladybug_qualification {
         return run_ladybug_qualification(
             &arguments.database,
@@ -89,7 +89,7 @@ async fn run(
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("the v1 graph server only binds to 127.0.0.1");
     }
-    let graph = GraphDatabase::open(&arguments.database)
+    let graph = open_graph(&arguments.database)
         .await
         .context("open graph database")?;
     let listener =
@@ -105,7 +105,32 @@ async fn run(
     Ok(())
 }
 
-#[cfg(ladybug_qualification)]
+/// Open the graph with its search store attached, so an accepted closure is
+/// saved and made searchable as one action.
+#[cfg(feature = "ladybug")]
+async fn open_graph(path: &str) -> anyhow::Result<GraphDatabase> {
+    use relayer_graph_server::search_index::LadybugSearchIndex;
+    use std::{path::Path, sync::Arc};
+
+    // Opening the store is blocking work — it waits for the engine to open the
+    // database, which takes a couple of hundred milliseconds on a fresh store —
+    // so it must not run on a runtime thread.
+    let owned = path.to_owned();
+    let index = tokio::task::spawn_blocking(move || LadybugSearchIndex::open(Path::new(&owned)))
+        .await
+        .context("open the search index")?
+        .context("open the search index")?;
+    Ok(GraphDatabase::open_with_index(path, Arc::new(index)).await?)
+}
+
+/// Without the Ladybug feature there is no search store, so closures are saved
+/// to SQLite and indexed nowhere.
+#[cfg(not(feature = "ladybug"))]
+async fn open_graph(path: &str) -> anyhow::Result<GraphDatabase> {
+    Ok(GraphDatabase::open(path).await?)
+}
+
+#[cfg(feature = "ladybug")]
 fn run_ladybug_qualification(path: &str, hold: bool) -> anyhow::Result<()> {
     use lbug::{Connection, Database, SystemConfig, Value};
     use std::path::Path;
@@ -153,7 +178,7 @@ fn run_ladybug_qualification(path: &str, hold: bool) -> anyhow::Result<()> {
 /// so each caller decides whether to propagate or ignore it. Only the
 /// qualification path needs this; `watch_parent_connection` drains the handle it
 /// already holds rather than locking stdin a second time.
-#[cfg(ladybug_qualification)]
+#[cfg(feature = "ladybug")]
 fn drain_stdin_until_eof() -> io::Result<()> {
     let mut input = io::stdin().lock();
     let mut buffer = [0_u8; 256];
