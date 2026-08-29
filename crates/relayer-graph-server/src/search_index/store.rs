@@ -547,6 +547,28 @@ pub fn rows(connection: &Connection<'_>, query: &str) -> Result<Vec<Vec<Value>>>
     Ok((&mut result).map(|row| row.to_vec()).collect())
 }
 
+/// Collect a parameterized read-only query's rows, refusing anything the engine
+/// does not parse as read-only. This is the only path a planned query reaches
+/// the engine through.
+pub fn rows_with(
+    connection: &Connection<'_>,
+    query: &str,
+    parameters: Vec<(String, Value)>,
+) -> Result<Vec<Vec<Value>>> {
+    let mut prepared = connection
+        .prepare(query)
+        .with_context(|| format!("prepare {query}"))?;
+    if !prepared.is_read_only() {
+        return Err(anyhow!("query was not parsed read-only: {query}"));
+    }
+    let bound: Vec<(&str, Value)> = parameters
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.clone()))
+        .collect();
+    let mut result = connection.execute(&mut prepared, bound)?;
+    Ok((&mut result).map(|row| row.to_vec()).collect())
+}
+
 /// Map every stored node's engine-internal identity to its Relayer identity, so
 /// relationships can name their endpoints.
 pub fn endpoint_index(connection: &Connection<'_>) -> Result<EndpointIds> {

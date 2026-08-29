@@ -9,6 +9,7 @@
 //! This crate is the only one that names `lbug`.
 
 mod lifecycle;
+pub mod query;
 pub mod schema;
 pub mod store;
 pub mod value;

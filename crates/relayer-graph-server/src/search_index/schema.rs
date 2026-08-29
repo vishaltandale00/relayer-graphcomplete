@@ -615,7 +615,12 @@ fn write_layer_relationships(
                 ("content", Value::String(format!("content:{node_id}"))),
                 (
                     "id",
-                    Value::String(format!("membership:{}:{node_id}", layer.layer.id)),
+                    // membership:<layer>:<zero-based order>:<content>, per the
+                    // contract's stable identity for derived membership.
+                    Value::String(format!(
+                        "membership:{}:{position}:{node_id}",
+                        layer.layer.id
+                    )),
                 ),
                 ("member_order", Value::Int64(position as i64)),
                 ("x", Value::Double(placement.map_or(0.0, |p| p.x))),
