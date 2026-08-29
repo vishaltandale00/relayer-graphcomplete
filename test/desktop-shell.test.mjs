@@ -2415,6 +2415,42 @@ describe("desktop skeleton", () => {
     }
   });
 
+  it("pins one Node toolchain across CI and release workflows", async () => {
+    // Node was declared in ten places across five workflows: ci.yml floated on
+    // "22" while the release path pinned "22.22.0". Floating "22" is not even
+    // self-consistent — one run resolved 22.23.1 on macOS and 22.23.2 on Linux,
+    // because runner images carry different tool caches. .node-version is now
+    // the only place the version is written; this test keeps it that way.
+    const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+    const workflowNames = (await readdir(workflowDirectory)).filter((name) => name.endsWith(".yml"));
+    expect(workflowNames.length).toBeGreaterThan(0);
+
+    const pinnedVersion = await readFile(new URL("../.node-version", import.meta.url), "utf8");
+    // An exact patch version, not a floating major: setup-node resolves "22" to
+    // whatever the runner happens to cache, which is how the drift started.
+    expect(pinnedVersion).toMatch(/^\d+\.\d+\.\d+\n$/);
+
+    let setupNodeSteps = 0;
+    let versionFileReferences = 0;
+    for (const name of workflowNames) {
+      const workflow = await readFile(new URL(name, workflowDirectory), "utf8");
+      // Globbing the directory rather than listing files by hand is the point:
+      // a workflow added later is covered without anyone remembering this test.
+      expect(
+        workflow,
+        `${name} declares a literal node-version; use node-version-file: .node-version`,
+      ).not.toMatch(/^\s*node-version:/m);
+      setupNodeSteps += workflow.match(/uses: actions\/setup-node@/g)?.length ?? 0;
+      versionFileReferences += workflow.match(/^\s*node-version-file: \.node-version$/gm)?.length ?? 0;
+    }
+
+    // Every setup-node step reads the pinned file. Asserting the count, not just
+    // the absence of literals, is what catches a step that declares no version
+    // at all and silently inherits the runner default.
+    expect(setupNodeSteps).toBeGreaterThanOrEqual(10);
+    expect(versionFileReferences).toBe(setupNodeSteps);
+  });
+
   it("gates Preview publication on one immutable candidate and one monotonic pointer", () => {
     const version = "0.2.0";
     const sourceCommit = "b".repeat(40);

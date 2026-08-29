@@ -27,8 +27,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22.22.0"
+          node-version-file: .node-version
           cache: npm
+
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
 
       - name: Require main or a matching desktop release tag
         shell: bash
@@ -83,8 +86,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22.22.0"
+          node-version-file: .node-version
           cache: npm
+
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
 
       - name: Install locked dependencies
         run: npm ci
@@ -177,8 +183,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22.22.0"
+          node-version-file: .node-version
           cache: npm
+
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
 
       - name: Install locked dependencies
         run: npm ci
@@ -286,8 +295,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22.22.0"
+          node-version-file: .node-version
           cache: npm
+
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
 
       - name: Install publication dependencies only
         run: npm ci --ignore-scripts
