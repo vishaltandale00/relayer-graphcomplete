@@ -577,7 +577,13 @@ fn write_layer_node(
             ("state", Value::String(wire(layer.layer.state)?)),
             (
                 "layout_version",
-                Value::Int64(layout.map_or(0, |layout| i64::from(layout.version))),
+                // A layer with no authored layout has no version. The contract
+                // says absent, not null and not a synthesized zero, so nothing is
+                // stored for it to project.
+                match layout {
+                    Some(layout) => Value::Int64(i64::from(layout.version)),
+                    None => Value::Null(LogicalType::Int64),
+                },
             ),
             ("has_layout", Value::Bool(layout.is_some())),
             ("targets", targets.clone()),

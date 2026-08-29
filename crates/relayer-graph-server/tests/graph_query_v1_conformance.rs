@@ -61,13 +61,17 @@ fn load_contract_dataset(store: &LadybugStore) {
         }
         for layer in supergraph["layers"].as_array().expect("layers") {
             let has_layout = layer["layoutVersion"].is_number();
+            // A legacy layer with no authored layout stores no version at all.
+            let version = match layer["layoutVersion"].as_i64() {
+                Some(version) => version.to_string(),
+                None => "NULL".to_owned(),
+            };
             exec(
                 connection,
                 &format!(
-                    "CREATE (:Layer {{id:'{}',state:'{}',layout_version:{},has_layout:{has_layout},published_targets:{}}})",
+                    "CREATE (:Layer {{id:'{}',state:'{}',layout_version:{version},has_layout:{has_layout},published_targets:{}}})",
                     quote(&layer["id"]),
                     quote(&layer["state"]),
-                    layer["layoutVersion"].as_i64().unwrap_or(0),
                     list(&layer["publishedTargets"]),
                 ),
             )?;
@@ -227,15 +231,14 @@ async fn frozen_positive_cases_reproduce_the_contract_results() {
             serde_json::to_string(actual).unwrap_or_default()
         );
     }
-    // The slice reproduces the contract exactly for these. The rest are named
-    // gaps, not unknowns: relationship-unique trail semantics (two-hop-connected,
-    // reverse-edge-reuse-no-match), property absence for a layer with no authored
-    // layout (explicit-order-null-last), the deterministic order a query with no
-    // ORDER BY still has (implicit-canonical-order), and ordering by a property
-    // that is not projected (structural-candidate-source).
-    assert!(
-        matched.len() >= 10,
-        "only {} frozen cases reproduce the contract: {matched:?}",
-        matched.len()
+    // Every case this slice admits reproduces the contract's exact bytes. The
+    // five it does not admit are aggregates, DISTINCT, list and record
+    // expressions, and IS ABSENT, each refused as query_construct_unsupported.
+    assert_eq!(
+        mismatched.len(),
+        0,
+        "a case the slice admits no longer reproduces the contract"
     );
+    assert_eq!(matched.len(), 15, "matched: {matched:?}");
+    assert_eq!(unsupported.len(), 5, "unsupported: {unsupported:?}");
 }

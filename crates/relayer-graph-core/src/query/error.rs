@@ -61,6 +61,7 @@ pub enum QueryCode {
     ScopeNotGranted,
     QueryCancelled,
     WallTimeExceeded,
+    IntermediateRowsExceeded,
     InvalidEngineValue,
     IntegerOverflow,
     ResultRowTooLarge,
@@ -90,6 +91,7 @@ impl QueryCode {
             Self::ScopeNotGranted => "scope_not_granted",
             Self::QueryCancelled => "query_cancelled",
             Self::WallTimeExceeded => "wall_time_exceeded",
+            Self::IntermediateRowsExceeded => "intermediate_rows_exceeded",
             Self::InvalidEngineValue => "invalid_engine_value",
             Self::IntegerOverflow => "integer_overflow",
             Self::ResultRowTooLarge => "result_row_too_large",
@@ -118,7 +120,9 @@ impl QueryCode {
             | Self::TraversalLimitExceeded
             | Self::RowLimitExceeded => QueryPhase::Plan,
             Self::InaccessibleOrMissing | Self::ScopeNotGranted => QueryPhase::Authorize,
-            Self::QueryCancelled | Self::WallTimeExceeded => QueryPhase::Execute,
+            Self::QueryCancelled | Self::WallTimeExceeded | Self::IntermediateRowsExceeded => {
+                QueryPhase::Execute
+            }
             Self::InvalidEngineValue | Self::IntegerOverflow => QueryPhase::Normalize,
             Self::ResultRowTooLarge => QueryPhase::Encode,
         }

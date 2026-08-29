@@ -14,13 +14,12 @@ use lbug::{Connection, Value};
 use relayer_graph_core::{
     SearchTarget,
     query::{
-        Column, CompareOp, Expression, Limit, NullPlacement, Ordering, PatternPart, Predicate,
-        PropertyRef, QueryCode, QueryError, QueryLimits, QueryPlan, RelationshipType,
-        SortDirection,
+        Column, CompareOp, Expression, Limit, NullPlacement, PatternPart, Predicate, PropertyRef,
+        QueryCode, QueryError, QueryLimits, QueryPlan, RelationshipType, SortDirection,
     },
 };
 use serde_json::{Value as JsonValue, json};
-use std::collections::BTreeMap;
+use std::{cmp::Ordering as Sort, collections::BTreeMap};
 
 use super::{
     store::{endpoint_index, rows_with},
@@ -121,25 +120,43 @@ fn lower(
         if index > 0 {
             text.push_str(", ");
         }
-        text.push_str(&lower_pattern(pattern));
+        text.push_str(&lower_pattern(index, pattern));
     }
 
     // Every binding is confined to the caller's target. This is added to the
     // query the caller wrote, never in place of anything they asked for, so a
     // query cannot widen its own visibility.
     let mut conditions = Vec::new();
-    for pattern in &plan.patterns {
+    for (pattern_index, pattern) in plan.patterns.iter().enumerate() {
         for node in &pattern.nodes {
             conditions.push(format!(
                 "list_contains({}.published_targets, $__target)",
                 node.binding
             ));
         }
-        for relationship in &pattern.relationships {
-            if let Some(binding) = &relationship.binding {
-                conditions.push(format!(
-                    "list_contains({binding}.published_targets, $__target)"
-                ));
+        for (index, relationship) in pattern.relationships.iter().enumerate() {
+            let binding = relationship_binding(pattern_index, index, &relationship.binding);
+            conditions.push(format!(
+                "list_contains({binding}.published_targets, $__target)"
+            ));
+        }
+    }
+
+    // Relationship-unique trail: a walk may not traverse the same relationship
+    // twice, so it cannot arrive back where it started by reusing an edge. The
+    // contract's pathMatchMode names this exactly.
+    for (pattern_index, pattern) in plan.patterns.iter().enumerate() {
+        let bindings: Vec<String> = pattern
+            .relationships
+            .iter()
+            .enumerate()
+            .map(|(index, relationship)| {
+                relationship_binding(pattern_index, index, &relationship.binding)
+            })
+            .collect();
+        for (left, first) in bindings.iter().enumerate() {
+            for second in bindings.iter().skip(left + 1) {
+                conditions.push(format!("{first}.id <> {second}.id"));
             }
         }
     }
@@ -221,30 +238,12 @@ fn lower(
         .collect();
     text.push_str(&projected.join(", "));
 
-    if !plan.ordering.is_empty() {
-        // The engine rejects NULLS FIRST and NULLS LAST, so null placement is
-        // lowered as an explicit sort key ahead of the column itself.
-        let keys: Vec<String> = plan
-            .ordering
-            .iter()
-            .flat_map(|ordering| {
-                let alias = plan
-                    .projection
-                    .columns
-                    .iter()
-                    .position(|column| column.name == ordering.column)
-                    .map(internal_alias)
-                    .unwrap_or_else(|| ordering.column.clone());
-                lower_ordering(ordering, &alias)
-            })
-            .collect();
-        text.push_str(" ORDER BY ");
-        text.push_str(&keys.join(", "));
-    }
-
-    // One row beyond the cap, so truncation is observed rather than guessed.
-    let cap = row_cap(plan, parameters, limits)?;
-    text.push_str(&format!(" LIMIT {}", cap.saturating_add(1)));
+    // Ordering is the contract's, not the engine's: rows are ordered after
+    // normalization, so the engine is asked only to bound how many come back.
+    text.push_str(&format!(
+        " LIMIT {}",
+        limits.intermediate_rows.saturating_add(1)
+    ));
 
     Ok(Lowering {
         text,
@@ -297,7 +296,16 @@ fn row_cap(
     Ok(requested)
 }
 
-fn lower_pattern(pattern: &PatternPart) -> String {
+/// A binding for every relationship, generated when the query did not name one.
+/// Without this an anonymous relationship escapes both the publication filter and
+/// the trail constraint.
+fn relationship_binding(pattern_index: usize, index: usize, binding: &Option<String>) -> String {
+    binding
+        .clone()
+        .unwrap_or_else(|| format!("relayer_rel_{pattern_index}_{index}"))
+}
+
+fn lower_pattern(pattern_index: usize, pattern: &PatternPart) -> String {
     let mut text = String::new();
     if let Some(binding) = &pattern.path_binding {
         text.push_str(&format!("{binding} = "));
@@ -306,7 +314,7 @@ fn lower_pattern(pattern: &PatternPart) -> String {
         if index > 0 {
             let relationship = &pattern.relationships[index - 1];
             let name = relationship.relationship_type.as_str();
-            let binding = relationship.binding.clone().unwrap_or_default();
+            let binding = relationship_binding(pattern_index, index - 1, &relationship.binding);
             text.push_str(&match relationship.relationship_type {
                 RelationshipType::Connected => format!("-[{binding}:{name}]-"),
                 _ => {
@@ -359,19 +367,6 @@ fn internal_alias(index: usize) -> String {
     format!("relayer_column_{index}")
 }
 
-fn lower_ordering(ordering: &Ordering, alias: &str) -> Vec<String> {
-    let direction = match ordering.direction {
-        SortDirection::Asc => "ASC",
-        SortDirection::Desc => "DESC",
-    };
-    // `IS NULL` sorts false before true, so ASC puts present values first.
-    let nulls = match ordering.nulls {
-        NullPlacement::Last => format!("{alias} IS NULL ASC"),
-        NullPlacement::First => format!("{alias} IS NULL DESC"),
-    };
-    vec![nulls, format!("{alias} {direction}")]
-}
-
 fn compare(operator: CompareOp) -> &'static str {
     operator.as_str()
 }
@@ -414,6 +409,17 @@ pub fn execute(
         rows.push(normalized);
     }
 
+    if rows.len() > limits.intermediate_rows {
+        return Err(QueryError::new(
+            QueryCode::IntermediateRowsExceeded,
+            "query",
+            format!(
+                "the query matched more than {} rows before ordering",
+                limits.intermediate_rows
+            ),
+        ));
+    }
+    order_rows(plan, &mut rows);
     let mut truncated = rows.len() > cap;
     rows.truncate(cap);
 
@@ -463,4 +469,134 @@ fn engine_failure(error: anyhow::Error) -> QueryError {
     } else {
         QueryError::new(QueryCode::InvalidEngineValue, "query", text)
     }
+}
+
+/// The contract's value type order:
+/// null < boolean < integer < float < string < node < layer < relationship <
+/// path < list < record.
+fn type_rank(value: &JsonValue) -> u8 {
+    match value.get("type").and_then(JsonValue::as_str) {
+        Some("null") => 0,
+        Some("boolean") => 1,
+        Some("integer") => 2,
+        Some("float") => 3,
+        Some("string") => 4,
+        Some("node") => 5,
+        Some("layer") => 6,
+        Some("relationship") => 7,
+        Some("path") => 8,
+        Some("list") => 9,
+        Some("record") => 10,
+        _ => 11,
+    }
+}
+
+/// Compare two tagged values in the contract's canonical total order. No locale,
+/// insertion order, physical row identity, or engine default order is
+/// observable through this.
+fn compare_values(left: &JsonValue, right: &JsonValue) -> Sort {
+    let ranks = type_rank(left).cmp(&type_rank(right));
+    if ranks != Sort::Equal {
+        return ranks;
+    }
+    match left.get("type").and_then(JsonValue::as_str) {
+        Some("null") => Sort::Equal,
+        Some("boolean") => left["value"].as_bool().cmp(&right["value"].as_bool()),
+        // Integers travel as strings; compare them mathematically, not lexically.
+        Some("integer") => {
+            let parse = |value: &JsonValue| {
+                value["value"]
+                    .as_str()
+                    .and_then(|text| text.parse::<i64>().ok())
+            };
+            parse(left).cmp(&parse(right))
+        }
+        Some("float") => left["value"]
+            .as_f64()
+            .partial_cmp(&right["value"].as_f64())
+            .unwrap_or(Sort::Equal),
+        Some("string") => left["value"].as_str().cmp(&right["value"].as_str()),
+        // Vertices compare identity then canonical properties; relationships
+        // compare kind, identity, endpoints, then properties. Serializing after
+        // those keys preserves the declared order without restating it.
+        Some("node") | Some("layer") => (left["id"].as_str(), left["properties"].to_string())
+            .cmp(&(right["id"].as_str(), right["properties"].to_string())),
+        Some("relationship") => (
+            left["kind"].as_str(),
+            left["id"].as_str(),
+            left["start"].as_str(),
+            left["end"].as_str(),
+            left["properties"].to_string(),
+        )
+            .cmp(&(
+                right["kind"].as_str(),
+                right["id"].as_str(),
+                right["start"].as_str(),
+                right["end"].as_str(),
+                right["properties"].to_string(),
+            )),
+        _ => left.to_string().cmp(&right.to_string()),
+    }
+}
+
+/// Compare complete projected rows in canonical order.
+fn compare_rows(left: &[JsonValue], right: &[JsonValue]) -> Sort {
+    for (left_value, right_value) in left.iter().zip(right.iter()) {
+        let comparison = compare_values(left_value, right_value);
+        if comparison != Sort::Equal {
+            return comparison;
+        }
+    }
+    left.len().cmp(&right.len())
+}
+
+/// Apply the plan's explicit ordering, then break ties canonically.
+///
+/// Nulls are always last unless the query said otherwise, and direction does not
+/// change that default.
+fn order_rows(plan: &QueryPlan, rows: &mut [Vec<JsonValue>]) {
+    rows.sort_by(|left, right| {
+        for ordering in &plan.ordering {
+            let Some(index) = plan
+                .projection
+                .columns
+                .iter()
+                .position(|column| column.name == ordering.column)
+            else {
+                continue;
+            };
+            let (left_value, right_value) = (&left[index], &right[index]);
+            let left_null = type_rank(left_value) == 0;
+            let right_null = type_rank(right_value) == 0;
+            if left_null != right_null {
+                return match ordering.nulls {
+                    NullPlacement::Last => {
+                        if left_null {
+                            Sort::Greater
+                        } else {
+                            Sort::Less
+                        }
+                    }
+                    NullPlacement::First => {
+                        if left_null {
+                            Sort::Less
+                        } else {
+                            Sort::Greater
+                        }
+                    }
+                };
+            }
+            let comparison = compare_values(left_value, right_value);
+            let comparison = match ordering.direction {
+                SortDirection::Asc => comparison,
+                SortDirection::Desc => comparison.reverse(),
+            };
+            if comparison != Sort::Equal {
+                return comparison;
+            }
+        }
+        // Ties break by the canonical total order of the complete projected row,
+        // so equivalent physical plans cannot reorder equal visible rows.
+        compare_rows(left, right)
+    });
 }

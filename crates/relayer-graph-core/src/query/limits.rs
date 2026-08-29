@@ -12,6 +12,10 @@ pub struct QueryLimits {
     pub traversal_hops: usize,
     pub default_rows: usize,
     pub hard_rows: usize,
+    /// How many matched rows may be brought back to be ordered before the row
+    /// cap applies. Ordering is Relayer's, not the engine's, so rows have to be
+    /// in hand to sort — and this is the budget that stops that being unbounded.
+    pub intermediate_rows: usize,
     pub encoded_result_bytes: usize,
     pub wall_time: Duration,
 }
@@ -27,6 +31,7 @@ impl Default for QueryLimits {
             traversal_hops: 2,
             default_rows: 5,
             hard_rows: 8,
+            intermediate_rows: 1024,
             encoded_result_bytes: 16 * 1024,
             wall_time: Duration::from_millis(250),
         }

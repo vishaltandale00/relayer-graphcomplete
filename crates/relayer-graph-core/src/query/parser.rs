@@ -699,10 +699,9 @@ impl Parser {
             } else {
                 return Err(self.syntax("expected FIRST or LAST after NULLS"));
             }
-        } else if direction == SortDirection::Asc {
-            NullPlacement::Last
         } else {
-            NullPlacement::First
+            // Nulls are always last unless stated; direction does not flip it.
+            NullPlacement::Last
         };
         Ok(Ordering {
             column,
