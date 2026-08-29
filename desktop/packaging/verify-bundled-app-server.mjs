@@ -377,9 +377,11 @@ export default async function verifyElectronBuilderBundledAppServer(context) {
   if (target.platform === "darwin") {
     const resourcesPath = join(appPath, "Contents", "Resources");
     await writePrimeAgentSigningClosureSnapshot(resourcesPath, `${target.platform}-${target.architecture}`);
+    // Last, so every file this hook wrote is covered, and before
+    // electron-builder signs: the signature is then taken over the bundle users
+    // actually receive. Windows governs access through ACLs rather than POSIX
+    // modes, so normalising there would be work without an effect.
+    await normalizePackagedBundlePermissions(appPath);
   }
-  // Last, so every file this hook wrote is covered, and before electron-builder
-  // signs: the signature is then taken over the bundle users actually receive.
-  await normalizePackagedBundlePermissions(appPath);
   return result;
 }
