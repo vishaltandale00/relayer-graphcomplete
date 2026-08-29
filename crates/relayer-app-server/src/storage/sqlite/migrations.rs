@@ -129,6 +129,162 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn schema_23_personal_presentation_state_survives_input_migrations() {
+        // Starts from the merged personal-presentation predecessor and upgrades
+        // through the input migrations (24/25). Published versions, the active
+        // policy, a per-thread version override, and already-pinned interactions
+        // must all come through unchanged.
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("sqlite://{}", file.path().display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let pre_input_actions = Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 23)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        pre_input_actions.run(&pool).await.unwrap();
+
+        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Pinned','1','1','codex-basic','auto'),(2,'Overridden','1','1','codex-basic','auto')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (key, node_id, layer_id) in [
+            ("personal-presentation-v0", 501, 601),
+            ("personal-presentation-v1", 502, 602),
+        ] {
+            sqlx::query(
+                "UPDATE personal_presentation_versions SET graph_node_id=?1,root_layer_id=?2,published_at='2' WHERE version_key=?3",
+            )
+            .bind(node_id)
+            .bind(layer_id)
+            .bind(key)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        // Thread 2 pins the older version explicitly; thread 1 follows the policy.
+        sqlx::query("UPDATE threads SET personal_presentation_version_key='personal-presentation-v0' WHERE id=2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (1,1,1,'Policy turn','3','accepted','auto'),(2,2,1,'Overridden turn','3','accepted','auto')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let pinned_before: Vec<(i64, String, i64, i64)> = sqlx::query(
+            "SELECT interaction_id,version_key,version_interaction_node_id,root_layer_id FROM interaction_personal_presentation_pins ORDER BY interaction_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
+        .collect();
+        assert_eq!(
+            pinned_before,
+            vec![
+                (1, "personal-presentation-v1".to_owned(), 502, 602),
+                (2, "personal-presentation-v0".to_owned(), 501, 601),
+            ]
+        );
+        pool.close().await;
+
+        // Opening the store runs migrations 24 and 25.
+        let store = SqliteProductStore::open(file.path()).await.unwrap();
+        let version: i64 =
+            sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations WHERE success=1")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(version, 25);
+
+        let pinned_after: Vec<(i64, String, i64, i64)> = sqlx::query(
+            "SELECT interaction_id,version_key,version_interaction_node_id,root_layer_id FROM interaction_personal_presentation_pins ORDER BY interaction_id",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
+        .collect();
+        assert_eq!(pinned_after, pinned_before);
+
+        let active: String = sqlx::query_scalar(
+            "SELECT active_version_key FROM personal_presentation_policy WHERE singleton=1",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(active, "personal-presentation-v1");
+        let override_key: Option<String> =
+            sqlx::query_scalar("SELECT personal_presentation_version_key FROM threads WHERE id=2")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(override_key.as_deref(), Some("personal-presentation-v0"));
+
+        // Existing pins are still readable, and the per-thread override still wins
+        // for a turn created after the upgrade.
+        assert_eq!(
+            store
+                .prepare_personal_presentation_pin(
+                    crate::product::InteractionId::from_database(1),
+                    None,
+                    "4",
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .version_key,
+            "personal-presentation-v1"
+        );
+        let upgraded_thread_turn = store
+            .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                title: "After upgrade",
+                project_id: None,
+                initial_message: "New turn",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: None,
+                timestamp: "5",
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .prepare_personal_presentation_pin(
+                    upgraded_thread_turn.root_interaction_id,
+                    None,
+                    "5",
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .version_key,
+            "personal-presentation-v1"
+        );
+
+        // The input migrations really did land alongside the preserved profile state.
+        store
+            .pool
+            .execute(
+                "INSERT INTO action_input_drafts(thread_id,revision,updated_at) VALUES (1,1,'6')",
+            )
+            .await
+            .unwrap();
+        store.pool.close().await;
+    }
+
+    #[tokio::test]
     async fn legacy_prime_threads_migrate_to_full_access() {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
