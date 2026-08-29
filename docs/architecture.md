@@ -282,6 +282,70 @@ settings for an existing account. The Account panel contains only concise status
 and the applicable sign-in or logout action. Stable or Preview is not part of the
 account UX; callback-pool diagnostics remain main-owned.
 
+## Authenticated desktop error-reporting boundary
+
+Electron main is the only Sentry authority. It owns admission, pseudonymous
+identity, event validation, the encrypted retry queue, SDK configuration, release
+metadata, and outbound transport. The renderer, Node harness host, Rust app
+server, and Rust graph server receive only constrained local reporting
+capabilities. Each capability is bound to one account generation and one process
+generation. A child restart or account-generation change invalidates the old
+capability. No child receives Auth0 material, a DSN, upload credentials, or direct
+Sentry network authority. Renderer records cross one private preload IPC channel;
+Rust capabilities cross the existing private startup stdin and are removed when
+the supervised process exits. No reporting capability is placed in argv or the
+environment. The same private stdin carries replacement or null capabilities
+after sign-in, account replacement, logout, or restored-account verification;
+telemetry rotation never restarts the product process.
+
+Admission requires the current verified Auth0 account generation from the account
+service. Electron main derives the stable Sentry user identifier as
+`SHA-256("graphcomplete-sentry-user-v1\0" || UTF-8(Auth0 sub))`. The domain
+separator prevents reuse as another product identity. The result is stable across
+installations for the same Auth0 subject. Renderer presentation state is never an
+authority input.
+
+V1 reports only unhandled process crashes, supervised-child startup failures, and
+supervised-child unexpected exits. Handled operation failures and expected product
+states are excluded. Every adapter emits a closed record with stable component,
+operation, and failure codes plus a code-owned message. JavaScript frames are
+application-relative, limited to 32, and limited to 256 characters per module
+name. Rust frames name only approved workspace crates and modules. Absolute paths,
+third-party frames, arbitrary maps, and raw errors are rejected. Module names must
+also occur in the checked-in packaged-module inventory, so a caller cannot encode
+private data inside a valid-looking application path. The final event is validated
+again immediately before transport.
+
+Authenticated transport failures may enter one `safeStorage`-encrypted queue. The
+queue holds at most 32 records and 256 KiB of encrypted bytes. Records expire after
+seven days. Overflow evicts the oldest record. Any corrupt queue is deleted rather
+than repaired or partially uploaded. Retry requires a fresh verification of the
+same Auth0 subject. Unsigned, uncertain, expired, revoked, or replaced generations
+never create deferred records. Logout or account replacement disables admission
+and deletes the old queue before the new presentation state appears. Rejection,
+queue failure, and transport failure never report themselves.
+
+Runtime events take immutable candidate and release identity only from sealed
+package metadata. Electron main validates the current update channel and supplies
+`development`, `preview`, or `stable` as the Sentry environment. Callers cannot
+supply either identity. Symbol and source-map upload remains a release-authority
+operation and never places upload credentials in application bytes. Preview and
+Stable packaging produces a hash-verified telemetry manifest with JavaScript
+source maps and native Rust debug artifacts; only the target-matched release CI
+step receives the upload token and may publish that manifest. Packaging compares
+each mapped source byte with the packaged ASAR or resource byte and correlates each
+dSYM UUID or PDB identity with its packaged Rust executable before upload.
+
+The versioned shared privacy corpus is the common contract across all five failure
+domains and both repositories. `npm run evidence:telemetry` is the deterministic,
+zero-inference local portfolio for admission, privacy, queueing, restart, and
+release identity. Live Auth0, packaged protected storage, real system-browser,
+artifact upload, and symbolication proof run only for Preview or Stable release
+candidates. macOS Apple Silicon, macOS Intel, and Windows x64 evidence is
+target-specific. Missing native target evidence remains indeterminate and cannot
+be replaced by another platform. See
+[ADR 0009](decisions/0009-authenticated-desktop-error-reporting.md).
+
 ## Desktop release boundary
 
 Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13.3 or newer plus Windows x64 and begin at version `0.2.0`.

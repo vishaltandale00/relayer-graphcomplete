@@ -5,8 +5,24 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 import { terminateChildProcess } from "./child-process.mjs";
+import {
+  acquireAuthenticatedErrorCapability,
+  authenticatedErrorCapabilityBootstrap,
+  revokeAuthenticatedErrorCapability,
+} from "./authenticated-error-capability-bootstrap.mjs";
 
 const RUNTIME_CLOSING_ERROR = "RELAYER_RUNTIME_CLOSING";
+const ALLOWED_EXCEPTION_CLASSES = new Set([
+  "AggregateError", "Error", "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError",
+]);
+
+function sanitizedExceptionClass(error) {
+  try {
+    return ALLOWED_EXCEPTION_CLASSES.has(error?.name) ? error.name : null;
+  } catch {
+    return null;
+  }
+}
 
 function runtimeClosingError(cause) {
   if (cause?.code === RUNTIME_CLOSING_ERROR) return cause;
@@ -232,6 +248,8 @@ export class GraphCompleteRuntimeService {
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
     onUnexpectedStop = () => {},
+    issueErrorReporter = () => null,
+    issueErrorCapability = () => null,
   }) {
     this.userDataDirectory = userDataDirectory;
     this.graphServerBinary = graphServerBinary;
@@ -250,6 +268,11 @@ export class GraphCompleteRuntimeService {
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.onUnexpectedStop = onUnexpectedStop;
+    this.issueErrorReporter = issueErrorReporter;
+    this.issueErrorCapability = issueErrorCapability;
+    this.graphReporterGeneration = 0;
+    this.graphErrorReporter = null;
+    this.graphErrorCapability = null;
     this.graphProcess = null;
     this.harnessHost = null;
     this.session = null;
@@ -308,19 +331,44 @@ export class GraphCompleteRuntimeService {
 
       const graphControlToken = randomBytes(32).toString("hex");
       const harnessControlToken = randomBytes(32).toString("hex");
-      const graphProcess = this.spawnProcess(this.graphServerBinary, [
-        "--database", join(runtimeDirectory, "graph.sqlite3"),
-        "--port", "0",
-      ], { stdio: ["pipe", "pipe", "pipe"] });
-      this.graphProcess = graphProcess;
-      graphProcess.stdin?.on("error", () => {});
-      graphProcess.stdin?.write(`${graphControlToken}\n`);
-      const graphUrl = await this.#awaitStartupOperation(this.#waitForGraph(graphProcess));
+      this.graphErrorReporter?.revoke();
+      revokeAuthenticatedErrorCapability(this.graphErrorCapability);
+      this.graphReporterGeneration += 1;
+      try {
+        this.graphErrorReporter = this.issueErrorReporter("rust-graph-server", this.graphReporterGeneration);
+      } catch {
+        this.graphErrorReporter = null;
+      }
+      this.graphErrorCapability = acquireAuthenticatedErrorCapability(
+        this.issueErrorCapability,
+        "rust-graph-server",
+        this.graphReporterGeneration,
+      );
+      let graphProcess;
+      let graphUrl;
+      try {
+        graphProcess = this.spawnProcess(this.graphServerBinary, [
+          "--database", join(runtimeDirectory, "graph.sqlite3"),
+          "--port", "0",
+          "--authenticated-error-capability-stdin",
+        ], { stdio: ["pipe", "pipe", "pipe"] });
+        this.graphProcess = graphProcess;
+        graphProcess.stdin?.on("error", () => {});
+        graphProcess.stdin?.write(
+          `${graphControlToken}\n${authenticatedErrorCapabilityBootstrap(this.graphErrorCapability)}`,
+        );
+        graphUrl = await this.#awaitStartupOperation(this.#waitForGraph(graphProcess));
+      } catch (error) {
+        if (!this.closing) this.#reportGraphStartupFailure(error);
+        throw error;
+      }
       this.#superviseGraph(graphProcess);
       if (graphProcess.exitCode !== null || graphProcess.signalCode !== null) {
         throw new Error(`Relayer graph server stopped after readiness (${graphProcess.signalCode || graphProcess.exitCode || "unknown"}).`);
       }
-      const harnessHost = await this.#awaitStartupOperation(startHarnessHost({
+      let harnessHost;
+      try {
+        harnessHost = await this.#awaitStartupOperation(startHarnessHost({
         implementations: productHarnessImplementations({
           ...(this.codexBasicClientModuleUrl || this.codexBrowserMcpRuntime || this.graphAuthoringLauncherPath || this.codexPathOverride || this.resolveCodexRuntime ? {
             "codex.basic": createCodexBasicFactory({
@@ -339,9 +387,10 @@ export class GraphCompleteRuntimeService {
         ...(this.acquireProviderExecution ? {
           accessBroker: createProviderExecutionAccessBroker(this.acquireProviderExecution),
         } : {}),
-      }), async (lateHarnessHost) => {
-        await lateHarnessHost.close();
-      }, (lateHarnessHost) => lateHarnessHost.forceClose());
+        }), async (lateHarnessHost) => {
+          await lateHarnessHost.close();
+        }, (lateHarnessHost) => lateHarnessHost.forceClose());
+      } catch (error) { throw error; }
       this.harnessHost = harnessHost;
       this.session = Object.freeze({
         graphUrl,
@@ -374,6 +423,28 @@ export class GraphCompleteRuntimeService {
   candidateTracePersonalPresentationVersionId(productInteractionId) {
     if (!this.harnessHost) return undefined;
     return this.harnessHost.host.candidateTracePersonalPresentationVersionId(productInteractionId);
+  }
+
+  refreshErrorCapability() {
+    const child = this.graphProcess;
+    if (this.closing || !child?.stdin || this.graphReporterGeneration < 1) return false;
+    const next = acquireAuthenticatedErrorCapability(
+      this.issueErrorCapability,
+      "rust-graph-server",
+      this.graphReporterGeneration,
+    );
+    const previous = this.graphErrorCapability;
+    this.graphErrorCapability = null;
+    try {
+      child.stdin.write(authenticatedErrorCapabilityBootstrap(next));
+      this.graphErrorCapability = next;
+      revokeAuthenticatedErrorCapability(previous);
+      return true;
+    } catch {
+      revokeAuthenticatedErrorCapability(next);
+      revokeAuthenticatedErrorCapability(previous);
+      return false;
+    }
   }
 
   close() {
@@ -551,6 +622,10 @@ export class GraphCompleteRuntimeService {
   }
 
   async #closeResources(deadline = Date.now() + this.shutdownTimeoutMs) {
+    this.graphErrorReporter?.revoke();
+    this.graphErrorReporter = null;
+    revokeAuthenticatedErrorCapability(this.graphErrorCapability);
+    this.graphErrorCapability = null;
     const harnessHost = this.harnessHost;
     const graphProcess = this.graphProcess;
     this.harnessHost = null;
@@ -571,6 +646,16 @@ export class GraphCompleteRuntimeService {
       }
     }
     if (errors.length) throw new AggregateError(errors, "GraphComplete runtime resources did not close cleanly.");
+  }
+
+  #reportGraphStartupFailure(error) {
+    const startupReporter = this.graphErrorReporter;
+    this.graphErrorReporter = null;
+    Promise.resolve(startupReporter?.report({
+      code: "rust_graph_server.startup_failure",
+      exceptionClass: sanitizedExceptionClass(error),
+      frames: [],
+    })).catch(() => undefined).finally(() => startupReporter?.revoke());
   }
 
   async #closeHarnessHost(harnessHost, deadline) {
@@ -669,16 +754,26 @@ export class GraphCompleteRuntimeService {
   #superviseGraph(child) {
     const onStopped = (code, signal) => {
       const expected = this.closing || this.graphProcess !== child;
+      const stoppedReporter = this.graphErrorReporter;
+      const stoppedCapability = this.graphErrorCapability;
+      this.graphErrorReporter = null;
+      this.graphErrorCapability = null;
+      revokeAuthenticatedErrorCapability(stoppedCapability);
       if (this.graphProcess === child) {
         this.graphProcess = null;
         this.session = null;
       }
       if (!expected) {
+        Promise.resolve(stoppedReporter?.report({
+          code: "rust_graph_server.unexpected_exit",
+          exceptionClass: null,
+          frames: [],
+        })).catch(() => undefined).finally(() => stoppedReporter?.revoke());
         console.error(`Relayer graph server stopped (${signal || code || "unknown"}).`);
         Promise.resolve(this.onUnexpectedStop({ code, signal })).catch((error) => {
           console.error("Relayer graph-server stop handler failed:", error);
         });
-      }
+      } else stoppedReporter?.revoke();
     };
     child.once("exit", onStopped);
   }

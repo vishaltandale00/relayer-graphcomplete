@@ -3,6 +3,7 @@ members = [
   "crates/relayer-app-server",
   "crates/relayer-graph-core",
   "crates/relayer-graph-server",
+  "crates/relayer-telemetry-capability",
 ]
 resolver = "2"
 

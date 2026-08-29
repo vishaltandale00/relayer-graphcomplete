@@ -1519,6 +1519,7 @@ dependencies = [
  "regex",
  "relayer-graph-core",
  "relayer-graph-server",
+ "relayer-telemetry-capability",
  "reqwest",
  "serde",
  "serde_json",
@@ -1557,12 +1558,22 @@ dependencies = [
  "clap",
  "lbug",
  "relayer-graph-core",
+ "relayer-telemetry-capability",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tower",
  "uuid",
+]
+
+[[package]]
+name = "relayer-telemetry-capability"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "url",
 ]
 
 [[package]]

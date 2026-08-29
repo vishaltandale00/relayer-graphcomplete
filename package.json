@@ -45,6 +45,7 @@
     "evidence:provider-ux": "node scripts/capture-provider-ux-video.mjs",
     "evidence:prime-family:packaged": "node scripts/capture-packaged-prime-family-evidence.mjs",
     "evidence:human-eval-annotations": "npm run build && RELAYER_CAPTURE_HUMAN_ANNOTATION_EVIDENCE=1 electron scripts/capture-human-eval-annotation-evidence.mjs",
+    "evidence:telemetry": "node scripts/run-telemetry-evidence.mjs",
     "test:desktop:approval": "npm run build && electron scripts/test-desktop-approval.mjs",
     "prd": "node docs/prd/server.mjs",
     "prd:check-readability": "node docs/prd/check-readability.mjs",

@@ -113,6 +113,7 @@ export function createDesktopAccountService({
   timeoutMs = LOGIN_TIMEOUT_MS,
   emit = () => {},
   beforeCredentialCommit = async () => {},
+  telemetry = null,
 }) {
   if (initialChannel !== "stable" && initialChannel !== "preview") throw new TypeError("Desktop account channel must be stable or preview.");
   for (const candidate of ["stable", "preview"]) {
@@ -127,6 +128,10 @@ export function createDesktopAccountService({
   const issuer = new URL(auth0.issuer).href;
   if (!issuer.endsWith("/")) throw new TypeError("Auth0 issuer must end with a slash.");
   if (typeof auth0.clientId !== "string" || !auth0.clientId) throw new TypeError("Auth0 public client ID is required.");
+  if (telemetry !== null && (
+    typeof telemetry?.transitionIdentity !== "function"
+    || typeof telemetry?.retireIdentity !== "function"
+  )) throw new TypeError("Desktop account telemetry authority is invalid.");
 
   let currentChannel = initialChannel;
   let state = publicState(currentChannel, "signed-out");
@@ -154,6 +159,16 @@ export function createDesktopAccountService({
     state = next;
     emit(next);
     return next;
+  }
+
+  async function projectTelemetryIdentity(next, { retire = false } = {}) {
+    if (!telemetry) return;
+    try {
+      if (retire) await telemetry.retireIdentity();
+      else await telemetry.transitionIdentity(next);
+    } catch {
+      // Optional error reporting cannot change account or local product behavior.
+    }
   }
 
   async function readCredential() {
@@ -275,6 +290,7 @@ export function createDesktopAccountService({
     const nextCredential = { refreshToken: tokens.refresh_token ?? saved.refreshToken, subject };
     if (!await writeCredential(nextCredential, atGeneration)) return state;
     credential = nextCredential;
+    await projectTelemetryIdentity({ generation: atGeneration, subject });
     return transition(publicState(currentChannel, "signed-in", { subject }));
   }
 
@@ -362,6 +378,7 @@ export function createDesktopAccountService({
         if (!await writeCredential(nextCredential, current.generation) ||
             attempt !== current || generation !== current.generation) return;
         credential = nextCredential;
+        await projectTelemetryIdentity({ generation: current.generation, subject });
         await finishAttempt(current, publicState(current.channel, "signed-in", { subject }));
       } catch {
         await finishAttempt(current, publicState(current.channel, "error", { reason: "authentication-failed" }));
@@ -385,10 +402,12 @@ export function createDesktopAccountService({
           if (error instanceof InvalidRefreshError) {
             generation += 1;
             credential = null;
+            await projectTelemetryIdentity(null, { retire: true });
             await removeCredential();
             return transition(publicState(currentChannel, "signed-out"));
           }
           const reason = error instanceof UnverifiableTokenError ? "unverifiable" : "offline";
+          await projectTelemetryIdentity(null);
           return transition(publicState(currentChannel, "uncertain", { subject: credential.subject, reason }));
         }
       })();
@@ -409,8 +428,10 @@ export function createDesktopAccountService({
         if (nextChannel === currentChannel) return state;
         generation += 1;
         await cancelAttempt();
+        await projectTelemetryIdentity(null);
         currentChannel = nextChannel;
         if (state.status === "signed-in" && credential) {
+          await projectTelemetryIdentity({ generation, subject: credential.subject });
           return transition(publicState(currentChannel, "signed-in", { subject: credential.subject }));
         }
         if (state.status === "uncertain" && credential) {
@@ -437,6 +458,7 @@ export function createDesktopAccountService({
         await startupPromise;
         generation += 1;
         await cancelAttempt();
+        await projectTelemetryIdentity(null, { retire: Boolean(credential) });
         const atGeneration = generation;
         const attemptChannel = currentChannel;
         const stateValue = randomBytes(32).toString("base64url");
@@ -492,8 +514,9 @@ export function createDesktopAccountService({
         await cancelAttempt();
         const retiring = credential;
         credential = null;
-        transition(publicState(currentChannel, "signed-out"));
+        await projectTelemetryIdentity(null, { retire: true });
         await removeCredential();
+        transition(publicState(currentChannel, "signed-out"));
         if (retiring?.refreshToken) {
           try {
             await fetchJson(new URL("oauth/revoke", issuer), {
@@ -516,6 +539,7 @@ export function createDesktopAccountService({
       return queueControlOperation(async () => {
         generation += 1;
         await cancelAttempt();
+        await projectTelemetryIdentity(null);
         await pendingCredentialMutation;
       });
     },

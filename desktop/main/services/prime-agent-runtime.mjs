@@ -26,9 +26,9 @@ export const PRIME_AGENT_PACKAGE_TREE_SHA256 = Object.freeze({
   "@earendil-works/pi-tui": "f86a8ab553edaf05e1fc4f4d6cb48c313e5a93f2f3490f74e510661c52d74447",
 });
 export const PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET = Object.freeze({
-  "darwin-arm64": "bdbbff636ced9f4eca35ea16bb7a594cc89352c32dc0e1c039ccae753dc4fcea",
-  "darwin-x64": "958556efec9f1d899f74d33a4dde357c5901168c7b3ae36e42380d494d40a917",
-  "win32-x64": "d9457c3a442be1705e9d42d4640a187d7030dc1de5a332ea3643a15a1e70186b",
+  "darwin-arm64": "da92908f0d08ec84e0481fbb4d5cf9938c6fe9a89fbd8f553defad9c38a14dc7",
+  "darwin-x64": "921f4b0394bebdcf87cc88602b65a98777568c3a6c7df8d650196ca33ec9859c",
+  "win32-x64": "dd0774fa26307495e71cd2e44239d1521734cd6d0f0e4c64a854df1df22605f4",
 });
 export const PRIME_AGENT_HARNESS_CONFIGURATIONS = Object.freeze([
   "prime-agent-basic.yaml",

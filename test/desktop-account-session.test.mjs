@@ -84,7 +84,7 @@ async function fakeAuth0({ clientId = "desktop-client", tokenHandler } = {}) {
   return { issuer, clientId, requests, privateKey };
 }
 
-async function fixture({ auth0, channel = "stable", portsByChannel, openExternal, now = () => 1_900_000_000_000, timeoutMs = 2_000, beforeCredentialCommit } = {}) {
+async function fixture({ auth0, channel = "stable", portsByChannel, openExternal, now = () => 1_900_000_000_000, timeoutMs = 2_000, beforeCredentialCommit, telemetry, emit } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "relayer-account-"));
   directories.push(directory);
   const encrypted = [];
@@ -107,6 +107,8 @@ async function fixture({ auth0, channel = "stable", portsByChannel, openExternal
     now,
     timeoutMs,
     beforeCredentialCommit,
+    telemetry,
+    emit,
   });
   return { directory, service, encrypted };
 }
@@ -432,10 +434,47 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await callbackFromLauncher(launchUrl);
     await commitEntered;
     const logout = service.logout();
-    await vi.waitFor(async () => expect(service.account()).resolves.toEqual({ status: "signed-out", channel: "stable" }));
+    await expect(service.account()).resolves.toEqual({ status: "signing-in", channel: "stable" });
     releaseCommit();
     await logout;
+    await expect(service.account()).resolves.toEqual({ status: "signed-out", channel: "stable" });
     await expect(readFile(join(directory, "account.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await service.close();
+  });
+
+  it("retires telemetry and credentials before publishing logout and binds each verified generation before signed-in", async () => {
+    const auth0 = await fakeAuth0();
+    const order = [];
+    let launchUrl;
+    let signedOutCredentialCheck;
+    const telemetry = {
+      transitionIdentity: vi.fn(async (identity) => { order.push(identity === null ? "telemetry-disabled" : `telemetry-enabled:${identity.generation}`); }),
+      retireIdentity: vi.fn(async () => { order.push("telemetry-retired"); }),
+    };
+    const { service, directory } = await fixture({
+      auth0,
+      telemetry,
+      openExternal: async (value) => { launchUrl = value; },
+      emit: (state) => {
+        order.push(`state:${state.status}`);
+        if (state.status === "signed-out") {
+          signedOutCredentialCheck = readFile(join(directory, "account.json"), "utf8")
+            .then(() => ({ exists: true }), (error) => ({ error }));
+        }
+      },
+    });
+
+    await service.start();
+    await service.login();
+    await callbackFromLauncher(launchUrl);
+    await service.waitForIdle();
+    expect(order).toContain("telemetry-enabled:1");
+    expect(order.indexOf("telemetry-enabled:1")).toBeLessThan(order.indexOf("state:signed-in"));
+
+    order.length = 0;
+    await service.logout();
+    expect(order).toEqual(["telemetry-retired", "state:signed-out"]);
+    await expect(signedOutCredentialCheck).resolves.toMatchObject({ error: { code: "ENOENT" } });
     await service.close();
   });
 
@@ -555,6 +594,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await vi.waitFor(async () => expect(service.account()).resolves.toEqual({ status: "signed-out", channel: "stable" }));
     expect(service.telemetryIdentity()).toBeNull();
     await expect(readFile(join(directory, "account.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await vi.waitFor(() => expect(releaseRevoke).toBeTypeOf("function"));
     releaseRevoke();
     await expect(logout).resolves.toEqual({ status: "signed-out", channel: "stable" });
     await service.close();

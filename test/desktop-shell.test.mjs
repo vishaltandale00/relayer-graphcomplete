@@ -224,6 +224,11 @@ describe("desktop skeleton", () => {
     expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => {');
     expect(rendererMain).toContain('openNewThreadModelPicker("model")');
     expect(desktopMain).toContain("RelayerAppServerService");
+    expect(desktopMain.match(/issueErrorCapability,/gu)).toHaveLength(2);
+    expect(desktopMain).toContain("authenticatedErrorReporting?.issueCapability({ component, processGeneration }) ?? null");
+    expect(desktopMain).toContain("createDesktopAccountTelemetry");
+    expect(desktopMain).toContain("graphRuntime.refreshErrorCapability()");
+    expect(desktopMain).toContain("productServer?.refreshErrorCapability()");
     expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
@@ -570,8 +575,12 @@ describe("desktop skeleton", () => {
         "--producer-platform", process.platform,
         "--producer-architecture", process.arch,
         "--read-only-control-token-stdin",
+        "--authenticated-error-capability-stdin",
       ]);
-      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n`);
+      expect(suppliedToken).toBe(
+        `${session.cookie.value}\n${session.readOnlyCookie.value}\n`
+        + '{"schema":"relayer.authenticated-error-capability/v1","capability":null}\n',
+      );
       expect(child.stdin.writableEnded).toBe(false);
       expect(invocations[0].args).not.toContain(session.cookie.value);
       expect(invocations[0].args).not.toContain(session.readOnlyCookie.value);
@@ -814,7 +823,11 @@ describe("desktop skeleton", () => {
         reason: expect.objectContaining({ code: "prime_agent_boundary_unsupported" }),
         diagnostics: expect.objectContaining({ sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c" }),
       })]);
-      expect(suppliedToken).toBe(`${session.graphControlToken}\n`);
+      expect(suppliedToken).toBe(
+        `${session.graphControlToken}\n`
+        + '{"schema":"relayer.authenticated-error-capability/v1","capability":null}\n',
+      );
+      expect(invocations[0].args).toContain("--authenticated-error-capability-stdin");
       expect(invocations[0].args).not.toContain("--control-token");
       expect(invocations[0].args).not.toContain(session.graphControlToken);
       expect(invocations[0].args).not.toContain(session.harnessControlToken);

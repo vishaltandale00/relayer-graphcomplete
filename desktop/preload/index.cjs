@@ -1,4 +1,11 @@
 const { contextBridge, ipcRenderer } = require("electron");
+const { installRendererErrorReporting } = require("./error-reporting.cjs");
+
+installRendererErrorReporting({
+  windowTarget: window,
+  locationTarget: location,
+  send: (record) => ipcRenderer.send("relayer:renderer-unhandled-error", record),
+});
 
 function subscribe(channel, callback) {
   const listener = (_event, value) => callback(value);

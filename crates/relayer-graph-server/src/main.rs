@@ -2,9 +2,14 @@ use anyhow::Context;
 use clap::Parser;
 use relayer_graph_core::GraphDatabase;
 use relayer_graph_server::{ServerState, router};
+use relayer_telemetry_capability::{
+    PanicEventDefinition, PanicReporter, install_panic_reporter, read_capability_bootstrap,
+    read_capability_update,
+};
 use std::{
     io::{self, BufRead, Read},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    panic,
 };
 use tokio::sync::oneshot;
 
@@ -24,11 +29,13 @@ struct Arguments {
     #[cfg(ladybug_qualification)]
     #[arg(long, hide = true, requires = "ladybug_qualification")]
     ladybug_qualification_hold: bool,
+    #[arg(long, default_value_t = false)]
+    authenticated_error_capability_stdin: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let arguments = Arguments::parse();
+    let mut arguments = Arguments::parse();
     #[cfg(ladybug_qualification)]
     if arguments.ladybug_qualification {
         return run_ladybug_qualification(
@@ -36,13 +43,49 @@ async fn main() -> anyhow::Result<()> {
             arguments.ladybug_qualification_hold,
         );
     }
-    let (control_token, parent_disconnected) = match arguments.control_token {
-        Some(token) => (token, None),
-        None => {
-            let token = read_control_token()?;
-            (token, Some(watch_parent_connection()))
-        }
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let control_token_from_stdin = arguments.control_token.is_none();
+    let control_token = match arguments.control_token.take() {
+        Some(token) => token,
+        None => read_control_token(&mut input)?,
     };
+    let error_capability = arguments
+        .authenticated_error_capability_stdin
+        .then(|| read_capability_bootstrap(&mut input).ok().flatten())
+        .flatten();
+    drop(input);
+    let panic_reporter = arguments.authenticated_error_capability_stdin.then(|| {
+        install_panic_reporter(
+            error_capability,
+            PanicEventDefinition {
+                code: "rust_graph_server.unexpected_exit",
+                approved_module_prefix: "crates/relayer-graph-server/",
+            },
+        )
+    });
+    let parent_disconnected =
+        control_token_from_stdin.then(|| watch_parent_connection(panic_reporter.clone()));
+    let execution = tokio::spawn(run(arguments, control_token, parent_disconnected)).await;
+    match execution {
+        Ok(result) => result,
+        Err(error) if error.is_panic() => {
+            panic_reporter
+                .as_ref()
+                .map(PanicReporter::report_terminal_panic);
+            panic::resume_unwind(error.into_panic());
+        }
+        Err(error) => Err(anyhow::anyhow!(
+            "graph server task stopped unexpectedly: {error}"
+        )),
+    }
+}
+
+async fn run(
+    arguments: Arguments,
+    control_token: String,
+    parent_disconnected: Option<oneshot::Receiver<()>>,
+) -> anyhow::Result<()> {
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("the v1 graph server only binds to 127.0.0.1");
     }
@@ -107,7 +150,10 @@ fn run_ladybug_qualification(path: &str, hold: bool) -> anyhow::Result<()> {
 }
 
 /// Read stdin to EOF, retrying through interrupts. Returns the first real error
-/// so each caller decides whether to propagate or ignore it.
+/// so each caller decides whether to propagate or ignore it. Only the
+/// qualification path needs this; `watch_parent_connection` drains the handle it
+/// already holds rather than locking stdin a second time.
+#[cfg(ladybug_qualification)]
 fn drain_stdin_until_eof() -> io::Result<()> {
     let mut input = io::stdin().lock();
     let mut buffer = [0_u8; 256];
@@ -121,9 +167,9 @@ fn drain_stdin_until_eof() -> io::Result<()> {
     }
 }
 
-fn read_control_token() -> anyhow::Result<String> {
+fn read_control_token(input: &mut impl BufRead) -> anyhow::Result<String> {
     let mut token = String::new();
-    io::stdin().lock().read_line(&mut token)?;
+    input.read_line(&mut token)?;
     if !token.ends_with('\n') {
         anyhow::bail!("graph control token must be newline terminated");
     }
@@ -134,11 +180,23 @@ fn read_control_token() -> anyhow::Result<String> {
     Ok(token)
 }
 
-fn watch_parent_connection() -> oneshot::Receiver<()> {
+fn watch_parent_connection(reporter: Option<PanicReporter>) -> oneshot::Receiver<()> {
     let (disconnected, parent_disconnected) = oneshot::channel();
     std::thread::spawn(move || {
-        // A parent that vanishes is an ordinary shutdown, not an error.
-        let _ = drain_stdin_until_eof();
+        let mut input = io::stdin().lock();
+        if let Some(reporter) = reporter {
+            while read_capability_update(&mut input, &reporter).is_ok() {}
+            reporter.replace_capability(None);
+        }
+        let mut buffer = [0_u8; 256];
+        loop {
+            match input.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
         let _ = disconnected.send(());
     });
     parent_disconnected

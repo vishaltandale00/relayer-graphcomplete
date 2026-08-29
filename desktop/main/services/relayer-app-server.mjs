@@ -4,9 +4,26 @@ import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { terminateChildProcess } from "./child-process.mjs";
+import {
+  acquireAuthenticatedErrorCapability,
+  authenticatedErrorCapabilityBootstrap,
+  revokeAuthenticatedErrorCapability,
+} from "./authenticated-error-capability-bootstrap.mjs";
 import { toProductCatalogSnapshot } from "../models/model-catalog-adapter.mjs";
 
 export const RELAYER_CONTROL_COOKIE = "relayer_control";
+
+const ALLOWED_EXCEPTION_CLASSES = new Set([
+  "AggregateError", "Error", "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError",
+]);
+
+function sanitizedExceptionClass(error) {
+  try {
+    return ALLOWED_EXCEPTION_CLASSES.has(error?.name) ? error.name : null;
+  } catch {
+    return null;
+  }
+}
 
 function distinctToken(excludedTokens) {
   let token;
@@ -61,6 +78,8 @@ export class RelayerAppServerService {
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
     onUnexpectedStop = () => {},
+    issueErrorReporter = () => null,
+    issueErrorCapability = () => null,
   }) {
     this.userDataDirectory = userDataDirectory;
     this.binaryPath = binaryPath;
@@ -81,6 +100,11 @@ export class RelayerAppServerService {
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.onUnexpectedStop = onUnexpectedStop;
+    this.issueErrorReporter = issueErrorReporter;
+    this.issueErrorCapability = issueErrorCapability;
+    this.errorReporterGeneration = 0;
+    this.errorReporter = null;
+    this.errorCapability = null;
     this.child = null;
     this.listening = null;
     this.startPromise = null;
@@ -134,10 +158,32 @@ export class RelayerAppServerService {
       if (this.allowConversationImport) serverArguments.push("--allow-conversation-import");
     }
     if (readOnlyControlToken) serverArguments.push("--read-only-control-token-stdin");
-    const child = this.spawnProcess(this.binaryPath, serverArguments, {
-      env: { ...process.env },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    serverArguments.push("--authenticated-error-capability-stdin");
+    this.errorReporter?.revoke();
+    revokeAuthenticatedErrorCapability(this.errorCapability);
+    this.errorReporterGeneration += 1;
+    try {
+      this.errorReporter = this.issueErrorReporter("rust-app-server", this.errorReporterGeneration);
+    } catch {
+      this.errorReporter = null;
+    }
+    this.errorCapability = acquireAuthenticatedErrorCapability(
+      this.issueErrorCapability,
+      "rust-app-server",
+      this.errorReporterGeneration,
+    );
+    let child;
+    try {
+      child = this.spawnProcess(this.binaryPath, serverArguments, {
+        env: { ...process.env },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (error) {
+      this.#reportStartupFailure(error);
+      revokeAuthenticatedErrorCapability(this.errorCapability);
+      this.errorCapability = null;
+      throw error;
+    }
     this.child = child;
     const stderr = [];
     try {
@@ -145,7 +191,7 @@ export class RelayerAppServerService {
       child.stdin?.write([
         controlToken,
         ...(readOnlyControlToken ? [readOnlyControlToken] : []),
-      ].map((value) => `${value}\n`).join(""));
+      ].map((value) => `${value}\n`).join("") + authenticatedErrorCapabilityBootstrap(this.errorCapability));
       child.stderr?.on("data", (chunk) => {
         stderr.push(String(chunk));
         if (stderr.join("").length > 8_000) stderr.shift();
@@ -166,14 +212,24 @@ export class RelayerAppServerService {
       };
       const onStopped = (code, signal) => {
         const expected = this.closing;
+        const stoppedReporter = this.errorReporter;
+        const stoppedCapability = this.errorCapability;
+        this.errorReporter = null;
+        this.errorCapability = null;
+        revokeAuthenticatedErrorCapability(stoppedCapability);
         this.child = null;
         this.listening = null;
         if (!expected) {
+          Promise.resolve(stoppedReporter?.report({
+            code: "rust_app_server.unexpected_exit",
+            exceptionClass: null,
+            frames: [],
+          })).catch(() => undefined).finally(() => stoppedReporter?.revoke());
           console.error(`Relayer app server stopped (${signal || code || "unknown"}).`);
           Promise.resolve(this.onUnexpectedStop({ code, signal })).catch((error) => {
             console.error("Relayer app-server stop handler failed:", error);
           });
-        }
+        } else stoppedReporter?.revoke();
       };
       child.once("exit", onStopped);
       if (child.exitCode !== null || child.signalCode !== null) {
@@ -183,6 +239,9 @@ export class RelayerAppServerService {
       }
       return this.listening;
     } catch (error) {
+      this.#reportStartupFailure(error);
+      revokeAuthenticatedErrorCapability(this.errorCapability);
+      this.errorCapability = null;
       await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
       if (this.child === child) this.child = null;
       this.listening = null;
@@ -192,6 +251,10 @@ export class RelayerAppServerService {
 
   async close() {
     this.closing = true;
+    this.errorReporter?.revoke();
+    this.errorReporter = null;
+    revokeAuthenticatedErrorCapability(this.errorCapability);
+    this.errorCapability = null;
     const child = this.child;
     if (child) {
       await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
@@ -203,6 +266,38 @@ export class RelayerAppServerService {
     }
     if (this.child === child) this.child = null;
     this.listening = null;
+  }
+
+  refreshErrorCapability() {
+    const child = this.child;
+    if (this.closing || !child?.stdin || this.errorReporterGeneration < 1) return false;
+    const next = acquireAuthenticatedErrorCapability(
+      this.issueErrorCapability,
+      "rust-app-server",
+      this.errorReporterGeneration,
+    );
+    const previous = this.errorCapability;
+    this.errorCapability = null;
+    try {
+      child.stdin.write(authenticatedErrorCapabilityBootstrap(next));
+      this.errorCapability = next;
+      revokeAuthenticatedErrorCapability(previous);
+      return true;
+    } catch {
+      revokeAuthenticatedErrorCapability(next);
+      revokeAuthenticatedErrorCapability(previous);
+      return false;
+    }
+  }
+
+  #reportStartupFailure(error) {
+    const startupReporter = this.errorReporter;
+    this.errorReporter = null;
+    Promise.resolve(startupReporter?.report({
+      code: "rust_app_server.startup_failure",
+      exceptionClass: sanitizedExceptionClass(error),
+      frames: [],
+    })).catch(() => undefined).finally(() => startupReporter?.revoke());
   }
 
   async publishProviderCatalog(snapshot, { signal } = {}) {
