@@ -62,9 +62,10 @@ runtime API contract, production configurations, and Python graph client are
 installed and packaged by the ordinary repository build. Prime configurations
 are omitted from the runtime catalog unless that complete contract passes the
 desktop preflight. Unavailable packaged runtimes remain in the authoritative
-catalog with a stable reason, but ordinary Harness Settings, onboarding, and
-model selection show only harnesses with an exactly resolvable connected
-provider, available model, and enabled family. Prime Ask and Auto currently
+catalog with a stable reason. Harness Settings and model selection show only
+harnesses usable through an exactly resolvable connected provider, available
+model, and enabled family. Provider onboarding resolves its harness internally
+before deriving or requesting the default family. Prime Ask and Auto currently
 require the macOS boundary; Windows therefore records both packaged Prime
 configurations as unavailable.
 

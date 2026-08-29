@@ -5,7 +5,6 @@ import {
   bindRovingRadioGroup,
   harnessConfigurationsMarkup,
   onboardingFamilyOptionsMarkup,
-  onboardingHarnessOptionsMarkup,
   providerConnectionFormMarkup,
   providerDefinitionsMarkup,
   providerLogoMarkup,
@@ -23,6 +22,23 @@ const openAi = normalizeProviderDescriptor({
 });
 
 describe("provider and harness renderer markup", () => {
+  it("keeps harness identity out of onboarding while preserving the chat picker surface", async () => {
+    const [html, auth, providerUi, modelPicker] = await Promise.all([
+      readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/auth.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/provider-ui.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8"),
+    ]);
+    const familyStep = html.slice(
+      html.indexOf('id="providerFamilyStep"'),
+      html.indexOf("</section>", html.indexOf('id="providerFamilyStep"')),
+    );
+    expect(familyStep).not.toMatch(/harness|codex basic|claude basic|prime agent/i);
+    expect(auth).not.toMatch(/onboardingHarness|data-onboarding-harness|compatible harness/i);
+    expect(providerUi).not.toContain("onboardingHarnessOptionsMarkup");
+    expect(modelPicker).toContain("data-harness-option");
+  });
+
   it("stops accepting Cancel once provider commit precedes deferred default setup", async () => {
     const source = await readFile(new URL("../desktop/renderer/src/auth.js", import.meta.url), "utf8");
     const committed = source.indexOf('if (result.status !== "connected") return;');
@@ -138,25 +154,8 @@ describe("provider and harness renderer markup", () => {
     expect(radio.focus).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the incompatible app default but selects only an authoritative compatible initial harness", () => {
-    const projection = {
-      appDefaultHarnessId: "codex-basic",
-      harnesses: [
-        { id: "codex-basic", label: "Codex", selectable: false, incompatibilityReason: { code: "access_contract_mismatch", message: "Requires managed access." } },
-        { id: "universal", label: "Universal", selectable: true, selectedInitially: false, matchingAccessContract: "secret@1" },
-      ],
-    };
-    const withoutSelection = onboardingHarnessOptionsMarkup(projection, null);
-    expect(withoutSelection).toContain('data-onboarding-harness="codex-basic" disabled');
-    expect(withoutSelection).toContain("Requires managed access.");
-    expect(withoutSelection).not.toContain('aria-checked="true"');
-    const explicitlySelected = onboardingHarnessOptionsMarkup(projection, "universal");
-    expect(explicitlySelected).toContain('aria-checked="true" tabindex="0" data-onboarding-harness="universal"');
-  });
-
   it("separates existing, managed, and custom family choices without silently checking a model", () => {
-    const harness = {
-      label: "Universal",
+    const options = {
       existingCustomFamilies: [{ id: 12, name: "Work", members: [{ providerId: "work", modelId: "large" }] }],
       existingManagedFamilies: [],
       managedFamilyCandidate: { name: "Provider defaults", members: [{ providerId: "work", modelId: "large" }] },
@@ -165,14 +164,16 @@ describe("provider and harness renderer markup", () => {
         { providerId: "work", modelId: "small", label: "Small" },
       ],
     };
-    const unselected = onboardingFamilyOptionsMarkup(harness, {});
+    const unselected = onboardingFamilyOptionsMarkup(options, {});
     expect(unselected).toContain('data-onboarding-family-kind="existing"');
     expect(unselected).toContain('data-onboarding-family-kind="managed"');
     expect(unselected).toContain('data-onboarding-family-kind="create"');
     expect(unselected).toContain("Existing custom families");
     expect(unselected).toContain("Managed family candidate");
+    expect(unselected).toContain("Managed default");
+    expect(unselected).not.toContain("Universal");
     expect(unselected).not.toContain('type="checkbox"');
-    const creating = onboardingFamilyOptionsMarkup(harness, { kind: "create", name: "Work choices", members: [] });
+    const creating = onboardingFamilyOptionsMarkup(options, { kind: "create", name: "Work choices", members: [] });
     expect(creating.match(/type="checkbox"/g)).toHaveLength(2);
     expect(creating).not.toContain("checked />");
   });

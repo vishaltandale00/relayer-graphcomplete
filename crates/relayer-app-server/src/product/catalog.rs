@@ -441,13 +441,28 @@ pub(crate) struct ProviderOnboardingHarness {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingFamilyOptions {
+    pub(crate) existing_custom_families: Vec<ProviderOnboardingFamily>,
+    pub(crate) existing_managed_families: Vec<ProviderOnboardingFamily>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) managed_family_candidate: Option<ProviderOnboardingManagedFamily>,
+    pub(crate) eligible_models: Vec<ProviderOnboardingModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderOnboardingProjection {
     pub(crate) provider: ProviderOnboardingProvider,
+    #[serde(skip_serializing)]
     pub(crate) app_default_harness_id: String,
+    #[serde(skip_serializing)]
     pub(crate) initial_harness_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
     pub(crate) app_default_reason: Option<UnavailableReason>,
+    #[serde(skip_serializing)]
     pub(crate) harnesses: Vec<ProviderOnboardingHarness>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) family_options: Option<ProviderOnboardingFamilyOptions>,
     pub(crate) projection_revision: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) blocking_reason: Option<UnavailableReason>,
@@ -471,7 +486,6 @@ pub(crate) enum ProviderOnboardingFamilyIntent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CompleteProviderOnboardingCommand {
     pub(crate) provider_id: ProviderId,
-    pub(crate) harness_id: String,
     pub(crate) expected_projection_revision: String,
     pub(crate) family: ProviderOnboardingFamilyIntent,
 }
@@ -486,8 +500,28 @@ pub(crate) struct ProviderOnboardingResolution {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingDefaults {
+    pub(crate) provider_id: ProviderId,
+    #[serde(skip_serializing)]
+    pub(crate) harness_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) family_id: Option<ModelFamilyId>,
+}
+
+impl From<ModelSettingsDefaults> for ProviderOnboardingDefaults {
+    fn from(defaults: ModelSettingsDefaults) -> Self {
+        Self {
+            provider_id: defaults.provider_id,
+            harness_id: defaults.harness_id,
+            family_id: defaults.family_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderOnboardingCompletion {
-    pub(crate) defaults: ModelSettingsDefaults,
+    pub(crate) defaults: ProviderOnboardingDefaults,
     pub(crate) resolution: ProviderOnboardingResolution,
 }
 
@@ -495,7 +529,7 @@ pub(crate) struct ProviderOnboardingCompletion {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderOnboardingStatus {
     pub(crate) complete: bool,
-    pub(crate) defaults: ModelSettingsDefaults,
+    pub(crate) defaults: ProviderOnboardingDefaults,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) resolution: Option<ProviderOnboardingResolution>,
     #[serde(skip_serializing_if = "Option::is_none")]

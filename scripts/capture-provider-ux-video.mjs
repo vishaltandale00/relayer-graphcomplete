@@ -23,7 +23,6 @@ const scenes = [
   ["onboarding", "Choose a provider"],
   ["endpoint", "Configure an editable API endpoint"],
   ["family", "Choose the default model family"],
-  ["alternate-harness", "Explicitly choose a compatible alternate harness"],
   ["providers", "Manage independent provider connections"],
   ["families", "Configure harness-agnostic model families"],
   ["harnesses", "Inspect currently usable harnesses"],
@@ -39,7 +38,7 @@ const variants = [
   { scene: "unavailable", caption: "Unavailable provider", width: 1280, required: ["Connection unavailable", "OpenAI Work"] },
   { scene: "stale", caption: "Stale catalog member", width: 1280, required: ["This model is no longer in the provider catalog", "Work coding"] },
   { scene: "removed", caption: "Provider removal in progress", width: 1280, required: ["Finishing removal", "Removing"] },
-  { scene: "no-compatible", caption: "No compatible harness recovery", width: 1280, required: ["No compatible harness", "Connect another provider", "OpenAI Work"] },
+  { scene: "no-compatible", caption: "Unsupported provider recovery", width: 1280, required: ["cannot currently use models from this connection", "Connect another provider", "OpenAI Work"] },
   { scene: "authorization", caption: "Authorization pending", width: 1280, required: ["Complete sign-in in your browser", "Claude subscription"] },
 ];
 
@@ -133,6 +132,7 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
     try {
       await cdp.call("Runtime.enable");
       await cdp.call("Page.enable");
+      await cdp.call("Accessibility.enable");
       await cdp.call("Emulation.setDeviceMetricsOverride", {
         width,
         height: 800,
@@ -195,20 +195,25 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
                 && options.filter((button) => button.tabIndex === 0).length === 1
                 && options.filter((button) => button.getAttribute("aria-checked") === "true").length === 1;
             })(),
-            onboardingHarnessChoiceIsExplicit: (() => {
-              const choices = [...document.querySelectorAll("[data-onboarding-harness]")];
-              return choices.length > 1
-                && choices.every((choice) => choice.getAttribute("role") === "radio")
-                && choices.filter((choice) => choice.getAttribute("aria-checked") === "true").length <= 1;
+            onboardingHarnessIdentityHidden: (() => {
+              const step = document.querySelector("#providerFamilyStep");
+              return !step?.querySelector("[data-onboarding-harness]")
+                && !/harness|codex basic|claude basic|prime agent/i.test(step?.innerText ?? "");
             })(),
             firstInvalidFocused: invalidInputs.length > 0 && document.activeElement === invalidInputs[0],
+            noCompatibleFocusActionable: document.activeElement?.id === "providerFamilyBack",
             connectedProviderRetained: Boolean(window.__providerEvidence?.definitions?.some((definition) => definition.id === "openai-work")),
             harnessMarkup: document.querySelector("#harnessConfigurationList")?.innerHTML ?? "",
           };
         })()`,
         returnByValue: true,
       });
-      return { dom: dom.result.value, audit: audit.result.value };
+      const accessibility = await cdp.call("Accessibility.getFullAXTree");
+      const accessibilityNames = accessibility.nodes
+        .filter((node) => node.ignored !== true)
+        .map((node) => node.name?.value)
+        .filter(Boolean);
+      return { dom: dom.result.value, audit: audit.result.value, accessibilityNames };
     } finally {
       cdp.close();
     }
@@ -286,7 +291,7 @@ async function recordBrowserFlow(url, directory, profile) {
       await type('[data-provider-field="api-key"]', ["evidence-", "secret"]);
       await click("#connectProvider");
       await waitFor("!document.querySelector('#providerFamilyStep').classList.contains('hidden')", "default family step");
-      await caption("2 · Confirm a compatible harness and explicitly create a family");
+      await caption("2 · Explicitly create a default model family");
       await click('[data-onboarding-family-kind="create"]');
       await click('[data-onboarding-member-model="gpt-5.2-mini"]');
       await click("#finishProviderSetup");
@@ -511,21 +516,9 @@ const modelSettings = (scene) => ({
 });
 
 const onboardingProjection = (scene, providerId = "openai-work") => ({
-  provider: scene === "alternate-harness"
-    ? { id: providerId, label: "Claude Work", adapterId: "claude-subscription", accessContract: "managed-runtime@1" }
-    : { id: providerId, label: "OpenAI Work", adapterId: "openai-api", accessContract: "secret@1" },
-  appDefaultHarnessId: "codex-basic",
-  initialHarnessId: ["family", "no-compatible", "alternate-harness"].includes(scene) ? null : "codex-basic",
-  harnesses: [
-    {
-      id: "codex-basic",
-      label: "Codex basic",
-      configurationRevision: 7,
-      selectable: !["family", "no-compatible", "alternate-harness"].includes(scene),
-      selectedInitially: !["family", "no-compatible", "alternate-harness"].includes(scene),
-      ...(["family", "no-compatible", "alternate-harness"].includes(scene)
-        ? { incompatibilityReason: { code: "model_rules_denied", message: "The app default does not allow this provider's models." } }
-        : { matchingAccessContract: "secret@1" }),
+  provider: { id: providerId, label: "OpenAI Work", adapterId: "openai-api", accessContract: "secret@1" },
+  ...(scene === "no-compatible" ? {} : {
+    familyOptions: {
       existingCustomFamilies: [],
       existingManagedFamilies: [],
       eligibleModels: [
@@ -533,39 +526,10 @@ const onboardingProjection = (scene, providerId = "openai-work") => ({
         { providerId, modelId: "gpt-5.2-mini", label: "GPT-5.2 mini" },
       ],
     },
-    ...(scene === "family" ? [{
-      id: "universal-coding",
-      label: "Universal coding",
-      configurationRevision: 3,
-      selectable: true,
-      selectedInitially: false,
-      matchingAccessContract: "secret@1",
-      existingCustomFamilies: [],
-      existingManagedFamilies: [],
-      eligibleModels: [
-        { providerId, modelId: "gpt-5.2", label: "GPT-5.2" },
-        { providerId, modelId: "gpt-5.2-mini", label: "GPT-5.2 mini" },
-      ],
-    }] : []),
-    {
-      id: "claude-basic",
-      label: "Claude basic",
-      configurationRevision: 2,
-      selectable: scene === "alternate-harness",
-      selectedInitially: false,
-      ...(scene === "alternate-harness"
-        ? { matchingAccessContract: "managed-runtime@1" }
-        : { incompatibilityReason: { code: "access_contract_mismatch", message: "This harness requires managed runtime access." } }),
-      existingCustomFamilies: [],
-      existingManagedFamilies: [],
-      eligibleModels: scene === "alternate-harness"
-        ? [{ providerId, modelId: "claude-sonnet-4", label: "Claude Sonnet" }]
-        : [],
-    },
-  ],
+  }),
   projectionRevision: "sha256:evidence-projection",
   ...(scene === "no-compatible" ? {
-    blockingReason: { code: "no_compatible_harness", message: "No compatible harness is available. Connect another provider to continue." },
+    blockingReason: { code: "provider_models_unsupported", message: "Relayer cannot currently use models from this connection. Connect another provider to continue." },
   } : {}),
 });
 
@@ -670,7 +634,7 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/provider-onboarding/complete" && request.method === "POST") {
       const intent = await requestJson(request);
       const member = intent.family?.members?.[0] ?? { providerId: intent.providerId, modelId: "gpt-5.2" };
-      flowState.defaults = { harnessId: intent.harnessId, providerId: intent.providerId, familyId: 21 };
+      flowState.defaults = { harnessId: "codex-basic", providerId: intent.providerId, familyId: 21 };
       flowState.family = {
         id: 21,
         name: intent.family?.name ?? "OpenAI Work default",
@@ -681,12 +645,15 @@ const server = createServer(async (request, response) => {
         members: (intent.family?.members ?? [member]).map((value, position) => ({ ...value, position })),
       };
       return json(response, {
-        defaults: { providerId: intent.providerId, harnessId: intent.harnessId, familyId: 21 },
+        defaults: { providerId: intent.providerId, familyId: 21 },
         resolution: { familyId: 21, familyRevision: 1, resolvableMembers: [{ ...member, position: 0 }] },
       });
     }
     if (url.pathname === "/api/provider-onboarding/status") {
-      return json(response, { complete: flowState.defaults.familyId != null, defaults: flowState.defaults });
+      return json(response, {
+        complete: flowState.defaults.familyId != null,
+        defaults: { providerId: flowState.defaults.providerId, familyId: flowState.defaults.familyId },
+      });
     }
     if (url.pathname === "/api/model-settings/defaults") {
       if (scene === "flow" && request.method === "PUT") {
@@ -750,7 +717,7 @@ try {
     const url = `http://127.0.0.1:${port}/evidence.html?scene=${encodeURIComponent(scene)}&caption=${encodeURIComponent(caption)}${scene === "recovery" ? "&threadId=1" : ""}`;
     const frame = join(framesDirectory, `${scene}.png`);
     await rm(frame, { force: true });
-    const { dom, audit } = await captureBrowserScene(url, frame, join(browserProfile, scene));
+    const { dom, audit, accessibilityNames } = await captureBrowserScene(url, frame, join(browserProfile, scene));
     const { size } = await stat(frame);
     if (size < 20_000) throw new Error(`Evidence frame ${scene} is unexpectedly small (${size} bytes).`);
     if (!dom.includes('data-evidence-ready="true"')) {
@@ -765,7 +732,6 @@ try {
       ],
       endpoint: ["Endpoint", "gateway.example.com/openai/v1"],
       family: ["Choose your default model family", "GPT-5.2"],
-      "alternate-harness": ["Choose your default model family", "Claude basic", "Claude Sonnet"],
       providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Default provider"],
       families: ["Work coding", "Fast review", "GPT-5.6 Sol"],
       harnesses: ["Harnesses", "Codex basic", "Default harness"],
@@ -782,8 +748,11 @@ try {
     if (scene === "onboarding" && !audit.providerOptionsUseRovingRadio) {
       throw new Error("Provider choices do not use a single-tab-stop roving radio group.");
     }
-    if (scene === "family" && !audit.onboardingHarnessChoiceIsExplicit) {
-      throw new Error("Onboarding harness choices do not expose explicit radio semantics.");
+    if (scene === "family" && !audit.onboardingHarnessIdentityHidden) {
+      throw new Error("Provider onboarding exposes harness identity in the family step.");
+    }
+    if (scene === "family" && accessibilityNames.some((name) => /harness|codex basic|claude basic|prime agent/i.test(name))) {
+      throw new Error(`Provider onboarding accessibility tree exposes harness identity: ${JSON.stringify(accessibilityNames)}`);
     }
     if (scene === "family" && !audit.customFamilyHasNoImplicitMembers) {
       throw new Error("Onboarding silently selected a custom-family member.");
@@ -812,6 +781,9 @@ try {
     }
     if (scene === "error" && !audit.authErrorAnnounced) {
       throw new Error("Authentication failure is not announced as an alert.");
+    }
+    if (scene === "no-compatible" && !audit.noCompatibleFocusActionable) {
+      throw new Error("Unsupported-provider recovery did not focus the actionable provider control.");
     }
     if (scene === "loading" && !audit.onboardingBusyLocksControls) {
       throw new Error("Provider onboarding controls are editable while connection is busy.");

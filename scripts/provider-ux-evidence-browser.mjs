@@ -44,7 +44,7 @@ const connectedDefinitions = [
   },
 ];
 
-const onboardingScenes = new Set(["onboarding", "endpoint", "family", "alternate-harness", "loading", "invalid", "error", "no-compatible", "authorization", "flow"]);
+const onboardingScenes = new Set(["onboarding", "endpoint", "family", "loading", "invalid", "error", "no-compatible", "authorization", "flow"]);
 let definitions = onboardingScenes.has(scene) ? [] : structuredClone(connectedDefinitions);
 let onboardingComplete = !onboardingScenes.has(scene);
 if (scene === "long-label") {
@@ -183,14 +183,6 @@ async function prepareScene() {
     endpoint.setAttribute("value", endpoint.value);
     endpoint.dispatchEvent(new Event("input", { bubbles: true }));
   }
-  if (scene === "alternate-harness") {
-    (await waitFor('[data-provider-adapter="claude-subscription"]')).click();
-    document.querySelector("#providerSetupForm").requestSubmit();
-    await waitFor("#providerFamilyStep:not(.hidden)");
-    (await waitFor('[data-onboarding-harness="claude-basic"]')).click();
-    (await waitFor('[data-onboarding-family-kind="create"]')).click();
-    await waitFor('[data-onboarding-member-model="claude-sonnet-4"]');
-  }
   if (["family", "loading", "error", "no-compatible"].includes(scene)) {
     document.querySelector("#providerField-label").value = "OpenAI Work";
     document.querySelector('[data-provider-field="api-key"]').value = "evidence-secret";
@@ -204,7 +196,6 @@ async function prepareScene() {
       const setupError = document.querySelector("#authStatus.error")?.textContent;
       if (setupError) throw new Error(`Family setup failed: ${setupError}`);
       if (scene === "family") {
-        (await waitFor('[data-onboarding-harness="universal-coding"]')).click();
         (await waitFor('[data-onboarding-family-kind="create"]')).click();
         await waitFor('[data-onboarding-member-model="gpt-5.2"]');
       }

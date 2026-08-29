@@ -741,6 +741,9 @@ type CompleteResult =
 <p>Relayer uses one implicit local profile. First launch opens Agent setup and, after a valid configuration is saved, opens the normal New thread window. An optional Relayer account offer may appear only after that local workspace is usable. Folder, project, and account choice are not blocking onboarding steps.</p>
 <p>The setup surface is one focused <strong>Agent login</strong> card. Codex and API key are presented as horizontal login-method choices, followed by the credential and model controls for the selected method. The form should not split setup into equal Harness and Agent login columns or stack alternative methods into a long vertical option list.</p>
 <p>Agent setup does not require a harness choice. After connection, the New Thread composer presents Model as the primary execution control. Its Advanced tab contains compatible harness configurations.</p>
+<p>After a provider connects and model discovery succeeds, the Rust product boundary resolves the first compatible product harness from a code-owned order. That order is <code>codex-basic</code>, <code>claude-basic</code>, <code>prime-agent-basic</code>, then <code>prime-agent-deep</code>. Resolution uses current product visibility, runtime and permission availability, execution-access contract, model availability, and harness rules. It happens before family resolution and is independent of renderer order, labels, filenames, catalog order, and managed-family availability.</p>
+<p>If the resolved harness has one applicable managed default family, setup saves it automatically. Otherwise setup presents only existing model families and explicit custom-family creation; a custom family requires a name and at least one explicitly selected model. If no preferred compatible harness can use the connection, Relayer preserves the provider and offers provider selection without exposing harness terminology or compatibility internals.</p>
+<p>Resuming unfinished legacy onboarding discards pending harness intent and resolves again from current catalog policy. Family intent survives only when it remains valid for the newly resolved harness. Completed onboarding, saved defaults outside an active onboarding flow, existing threads, interactions, receipts, and harness sessions do not migrate.</p>
 <p>The packaged application includes <code>codex-basic</code> as its Codex product harness. <code>codex-basic-high</code> remains available only to internal Eval and code workflows. Prime Agent configurations remain development targets until a clean installation can load the upstream package.</p>
 <h3>2.2 Login methods</h3>
 <h4>Codex</h4>
@@ -830,13 +833,13 @@ type InteractionModelBinding = {
 <h3>2.7 Product requirements</h3>
 <ul>
 <li><strong>AGT-001:</strong> Agent-provider login remains independent from the optional Relayer account. No avatar or cloud-sync promise appears in V1.</li>
-<li><strong>AGT-002:</strong> Agent login is the primary setup task. Harness selection does not compete with credential setup.</li>
+<li><strong>AGT-002:</strong> Agent login is the primary setup task. Onboarding never exposes harness identity or selection; the product resolves it internally before family setup.</li>
 <li><strong>AGT-003:</strong> Model is the primary composer choice. Advanced selects a compatible harness before thread creation. A harness change applies only to new threads.</li>
 <li><strong>AGT-004:</strong> Codex and API key are the enabled V1 login methods.</li>
 <li><strong>AGT-005:</strong> Provider-specific controls appear only after API key is chosen.</li>
 <li><strong>AGT-006:</strong> <code>Other</code> requires provider name and a valid HTTPS API URL, except explicitly permitted local development URLs in developer mode.</li>
 <li><strong>AGT-007:</strong> Secrets are stored through the OS credential store and are redacted from every persistence and diagnostic path.</li>
-<li><strong>AGT-008:</strong> Continue is disabled until the preselected or advanced-selected harness, credential, provider, and initial model form a valid configuration.</li>
+<li><strong>AGT-008:</strong> Onboarding Continue is disabled until the credential, provider, and explicit model-family intent form a valid configuration. New Thread separately validates its Model and Advanced harness choices.</li>
 <li><strong>AGT-009:</strong> The composer exposes the model for the next interaction. Changing it affects that interaction and later defaults, never prior interaction records.</li>
 <li><strong>AGT-010:</strong> An existing thread cannot switch harnesses in place. To use a different harness, the user starts or forks into a new thread.</li>
 <li><strong>ACC-001:</strong> Optional account login is direct Auth0 Authorization Code plus PKCE with no Relayer API or database dependency.</li>

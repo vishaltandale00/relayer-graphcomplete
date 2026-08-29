@@ -10,34 +10,18 @@ import {
 
 const projection = {
   projectionRevision: "sha256:projection",
-  initialHarnessId: null,
-  harnesses: [
-    { id: "packaged-default", selectable: false },
-    { id: "compatible", selectable: true },
-  ],
+  familyOptions: {
+    existingCustomFamilies: [{ id: 12 }],
+    existingManagedFamilies: [],
+    managedFamilyCandidate: { policyId: "managed", policyVersion: 3 },
+    eligibleModels: [{ providerId: "work", modelId: "large" }],
+  },
 };
 
 describe("provider onboarding renderer state", () => {
-  it("does not silently choose an alternate harness when the app default is incompatible", () => {
-    expect(reconcileProviderOnboardingState(projection)).toEqual({ harnessId: null, family: null });
-  });
-
-  it("uses only the authoritative initial harness and preserves an explicit compatible choice on refresh", () => {
-    const initiallyCompatible = {
-      ...projection,
-      initialHarnessId: "compatible",
-      harnesses: projection.harnesses.map((harness) => harness.id === "compatible" ? {
-        ...harness,
-        existingCustomFamilies: [{ id: 12 }],
-      } : harness),
-    };
-    expect(reconcileProviderOnboardingState(initiallyCompatible)).toEqual({
-      harnessId: "compatible",
-      family: null,
-    });
+  it("preserves only family intent that remains valid for the authoritative resolved options", () => {
     const family = { kind: "existing", familyId: 12 };
-    expect(reconcileProviderOnboardingState(initiallyCompatible, { harnessId: "compatible", family })).toEqual({
-      harnessId: "compatible",
+    expect(reconcileProviderOnboardingState(projection, { harnessId: "legacy-choice", family })).toEqual({
       family,
     });
   });
@@ -45,13 +29,12 @@ describe("provider onboarding renderer state", () => {
   it("reconciles preserved family intent against the refreshed authoritative choices", () => {
     const withChoices = {
       ...projection,
-      harnesses: projection.harnesses.map((harness) => harness.id === "compatible" ? {
-        ...harness,
+      familyOptions: {
         existingCustomFamilies: [{ id: 12 }],
         existingManagedFamilies: [],
         managedFamilyCandidate: { policyId: "managed", policyVersion: 3 },
         eligibleModels: [{ providerId: "work", modelId: "large" }],
-      } : harness),
+      },
     };
     expect(reconcileProviderOnboardingState(withChoices, {
       harnessId: "compatible",
@@ -87,18 +70,17 @@ describe("provider onboarding renderer state", () => {
     ] })).toEqual([{ id: "work", connected: true, lifecycleState: "active" }]);
   });
 
-  it("clears family intent when a refreshed projection makes its harness unavailable", () => {
+  it("clears family intent when refreshed product resolution has no usable options", () => {
     expect(reconcileProviderOnboardingState({
       ...projection,
-      harnesses: projection.harnesses.map((harness) => ({ ...harness, selectable: false })),
+      familyOptions: null,
     }, { harnessId: "compatible", family: { kind: "existing", familyId: 12 } })).toEqual({
-      harnessId: null,
       family: null,
     });
   });
 
   it("requires explicit custom members and preserves the optimistic projection revision", () => {
-    const base = { providerId: "work", projection, harnessId: "compatible" };
+    const base = { providerId: "work", projection, harnessId: "ignored-legacy-choice" };
     expect(providerOnboardingCompletionIntent({
       ...base,
       family: { kind: "create", name: "Work", members: [] },
@@ -108,7 +90,6 @@ describe("provider onboarding renderer state", () => {
       family: { kind: "create", name: "  Work choices  ", members: [{ providerId: "work", modelId: "large" }] },
     })).toEqual({
       providerId: "work",
-      harnessId: "compatible",
       expectedProjectionRevision: "sha256:projection",
       family: { kind: "create", name: "Work choices", members: [{ providerId: "work", modelId: "large" }] },
     });

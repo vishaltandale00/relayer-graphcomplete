@@ -23,7 +23,7 @@ describe("packaged Prime family evidence contract", () => {
     const source = await readFile(resolve(root, "scripts/capture-packaged-prime-family-evidence.mjs"), "utf8");
     for (const token of [
       "01-clean-profile-incompatible-default",
-      "02-explicit-prime-choice",
+      "02-internal-prime-resolution",
       "03-family-members-selected",
       "04-explicit-root-selection",
       "05-root-child-accepted-graph",

@@ -6,17 +6,27 @@ use crate::product::{
     ModelFamily, ModelFamilyId, ModelFamilyKind, ModelFamilyMember, ModelSettings,
     ModelSettingsDefaults, ProductHarness, Provider, ProviderCatalogSnapshot, ProviderDefinition,
     ProviderId, ProviderModel, ProviderOnboardingCompletion, ProviderOnboardingFamily,
-    ProviderOnboardingFamilyIntent, ProviderOnboardingHarness, ProviderOnboardingManagedFamily,
-    ProviderOnboardingModel, ProviderOnboardingProjection, ProviderOnboardingProvider,
-    ProviderOnboardingResolution, ProviderOnboardingStatus, ReorderModelFamiliesCommand,
-    RuntimeProductHarness, SystemFamilySnapshot, UnavailableReason, UpdateHarnessModelRulesCommand,
-    UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
-    validate_family,
+    ProviderOnboardingFamilyIntent, ProviderOnboardingFamilyOptions, ProviderOnboardingHarness,
+    ProviderOnboardingManagedFamily, ProviderOnboardingModel, ProviderOnboardingProjection,
+    ProviderOnboardingProvider, ProviderOnboardingResolution, ProviderOnboardingStatus,
+    ReorderModelFamiliesCommand, RuntimeProductHarness, SystemFamilySnapshot, UnavailableReason,
+    UpdateHarnessModelRulesCommand, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
+    ValidateModelSelectionCommand, validate_family,
 };
 use crate::storage::StorageError;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqliteConnection, SqlitePool, sqlite::SqliteRow};
 use std::collections::{HashMap, HashSet};
+
+// Product onboarding resolves one exact catalog identity from this total order.
+// Prime Basic precedes Prime Deep so the policy remains deterministic within
+// the product's Prime tier without consulting labels, filenames, or catalog order.
+const PROVIDER_ONBOARDING_HARNESS_PREFERENCE: &[&str] = &[
+    "codex-basic",
+    "claude-basic",
+    "prime-agent-basic",
+    "prime-agent-deep",
+];
 
 impl SqliteProductStore {
     pub(crate) async fn update_harness_model_rules(
@@ -820,18 +830,22 @@ impl SqliteProductStore {
         if projection.projection_revision != command.expected_projection_revision {
             return Err(StorageError::Catalog(CatalogError::invalid(
                 "onboarding_projection_conflict",
-                "Provider, harness, or model-family settings changed. Review the current choices before finishing setup.",
+                "Provider or model-family settings changed. Review the current choices before finishing setup.",
             )));
         }
         let harness = projection
-            .harnesses
-            .iter()
-            .find(|harness| harness.id == command.harness_id)
-            .filter(|harness| harness.selectable)
+            .initial_harness_id
+            .as_deref()
+            .and_then(|harness_id| {
+                projection
+                    .harnesses
+                    .iter()
+                    .find(|harness| harness.id == harness_id && harness.selectable)
+            })
             .ok_or_else(|| {
                 StorageError::Catalog(CatalogError::invalid(
-                    "onboarding_harness_incompatible",
-                    "The selected harness is not currently compatible with this provider.",
+                    "onboarding_provider_unsupported",
+                    "Relayer cannot currently use models from this connection. Connect another provider to continue.",
                 ))
             })?;
         let family_id = match &command.family {
@@ -844,7 +858,7 @@ impl SqliteProductStore {
                 .ok_or_else(|| {
                     StorageError::Catalog(CatalogError::invalid(
                         "onboarding_family_incompatible",
-                        "The selected family is no longer resolvable by this harness and provider.",
+                        "The selected family is no longer valid for this provider setup.",
                     ))
                 })?,
             ProviderOnboardingFamilyIntent::Managed {
@@ -937,13 +951,13 @@ impl SqliteProductStore {
         };
         let resolution = onboarding_resolution_on(
             &mut transaction,
-            &command.harness_id,
+            &harness.id,
             &command.provider_id,
             family_id,
         )
         .await?;
         sqlx::query("UPDATE product_model_preferences SET default_harness_configuration_name=?1,default_provider_id=?2,default_family_id=?3,defaults_modified=1 WHERE singleton=1")
-            .bind(&command.harness_id)
+            .bind(&harness.id)
             .bind(command.provider_id.as_str())
             .bind(family_id.value())
             .execute(&mut *transaction)
@@ -951,7 +965,7 @@ impl SqliteProductStore {
         let defaults = load_defaults(&mut transaction).await?;
         transaction.commit().await?;
         Ok(ProviderOnboardingCompletion {
-            defaults,
+            defaults: defaults.into(),
             resolution,
         })
     }
@@ -961,7 +975,8 @@ impl SqliteProductStore {
         permission_available_harnesses: &HashSet<String>,
     ) -> Result<ProviderOnboardingStatus, StorageError> {
         let mut transaction = self.pool.begin().await?;
-        let defaults = load_defaults(&mut transaction).await?;
+        let defaults: crate::product::ProviderOnboardingDefaults =
+            load_defaults(&mut transaction).await?.into();
         let blocking = |code: &str, message: &str| ProviderOnboardingStatus {
             complete: false,
             defaults: defaults.clone(),
@@ -974,8 +989,8 @@ impl SqliteProductStore {
         if !permission_available_harnesses.contains(&defaults.harness_id) {
             transaction.commit().await?;
             return Ok(blocking(
-                "onboarding_harness_permission_unavailable",
-                "The saved harness has no enabled permission profile.",
+                "onboarding_execution_unavailable",
+                "The saved setup is not currently available.",
             ));
         }
         let provider_ready: bool = sqlx::query_scalar(
@@ -1019,7 +1034,7 @@ impl SqliteProductStore {
                 transaction.commit().await?;
                 Ok(blocking(
                     "onboarding_defaults_unresolvable",
-                    "The saved provider, harness, and family defaults do not currently resolve.",
+                    "The saved provider and model-family defaults do not currently resolve.",
                 ))
             }
             Err(error) => Err(error),
@@ -1307,10 +1322,22 @@ async fn provider_onboarding_projection_on(
         .iter()
         .position(|harness| harness.id == app_default_harness_id)
         .expect("the app-default harness is projected");
-    let initial_harness_id = harnesses[app_default_index]
-        .selectable
-        .then(|| app_default_harness_id.to_owned());
-    harnesses[app_default_index].selected_initially = initial_harness_id.is_some();
+    let initial_harness_id =
+        PROVIDER_ONBOARDING_HARNESS_PREFERENCE
+            .iter()
+            .find_map(|preferred_id| {
+                harnesses
+                    .iter()
+                    .find(|harness| harness.id == *preferred_id && harness.selectable)
+                    .map(|harness| harness.id.clone())
+            });
+    if let Some(resolved_id) = initial_harness_id.as_deref()
+        && let Some(resolved) = harnesses
+            .iter_mut()
+            .find(|harness| harness.id == resolved_id)
+    {
+        resolved.selected_initially = true;
+    }
     let app_default_reason = harnesses[app_default_index].incompatibility_reason.clone();
     harnesses.sort_by(|left, right| {
         (left.id != app_default_harness_id, &left.label, &left.id).cmp(&(
@@ -1320,25 +1347,49 @@ async fn provider_onboarding_projection_on(
         ))
     });
     let blocking_reason =
-        (!harnesses.iter().any(|harness| harness.selectable)).then_some(UnavailableReason {
-            code: "no_compatible_harness".into(),
-            message: "No product-visible harness currently supports this provider.".into(),
+        initial_harness_id.is_none().then_some(UnavailableReason {
+            code: "provider_models_unsupported".into(),
+            message: "Relayer cannot currently use models from this connection. Connect another provider to continue.".into(),
         });
+    let family_options = initial_harness_id.as_deref().and_then(|resolved_id| {
+        harnesses
+            .iter()
+            .find(|harness| harness.id == resolved_id)
+            .map(|harness| ProviderOnboardingFamilyOptions {
+                existing_custom_families: harness.existing_custom_families.clone(),
+                existing_managed_families: harness.existing_managed_families.clone(),
+                managed_family_candidate: harness.managed_family_candidate.clone(),
+                eligible_models: harness.eligible_models.clone(),
+            })
+    });
     let mut projection = ProviderOnboardingProjection {
         provider,
         app_default_harness_id: app_default_harness_id.into(),
         initial_harness_id,
         app_default_reason,
         harnesses,
+        family_options,
         projection_revision: String::new(),
         blocking_reason,
     };
     let mut digest = Sha256::new();
-    digest.update(b"relayer.provider-onboarding-projection.v1\0");
+    digest.update(b"relayer.provider-onboarding-projection.v2\0");
     digest.update(
         serde_json::to_vec(&projection)
             .map_err(|error| StorageError::Serialization(error.to_string()))?,
     );
+    if let Some(resolved_id) = projection.initial_harness_id.as_deref()
+        && let Some(resolved) = projection
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == resolved_id)
+    {
+        digest.update(b"\0resolved-harness\0");
+        digest.update(
+            serde_json::to_vec(resolved)
+                .map_err(|error| StorageError::Serialization(error.to_string()))?,
+        );
+    }
     projection.projection_revision = format!("sha256:{:x}", digest.finalize());
     Ok(projection)
 }
@@ -3218,11 +3269,19 @@ mod provider_definition_tests {
     }
 
     #[tokio::test]
-    async fn onboarding_projection_uses_exact_rules_access_and_app_default_without_fallback() {
+    async fn onboarding_resolver_uses_product_preference_before_family_resolution() {
         let (store, path, provider_id) = onboarding_store().await;
-        let allowed = HashSet::from(["codex-basic".to_owned(), "claude-basic".to_owned()]);
+        sqlx::query("UPDATE product_harnesses SET label=CASE configuration_name WHEN 'prime-agent-basic' THEN 'AAA first label' WHEN 'claude-basic' THEN 'BBB middle label' WHEN 'codex-basic' THEN 'ZZZ last label' ELSE label END")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let allowed = HashSet::from([
+            "prime-agent-basic".to_owned(),
+            "claude-basic".to_owned(),
+            "codex-basic".to_owned(),
+        ]);
         let projection = store
-            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .provider_onboarding_projection(&provider_id, "prime-agent-basic", &allowed)
             .await
             .unwrap();
         assert_eq!(
@@ -3243,11 +3302,36 @@ mod provider_definition_tests {
             .iter()
             .find(|harness| harness.id == "claude-basic")
             .unwrap();
-        assert!(!claude.selectable);
-        assert_eq!(
-            claude.incompatibility_reason.as_ref().unwrap().code,
-            "harness_access_contract_incompatible"
+        assert!(claude.selectable);
+        assert!(claude.managed_family_candidate.is_some());
+        assert!(
+            projection
+                .harnesses
+                .iter()
+                .any(|harness| { harness.id == "prime-agent-basic" && harness.selectable })
         );
+        assert!(
+            projection
+                .family_options
+                .as_ref()
+                .unwrap()
+                .managed_family_candidate
+                .is_none()
+        );
+        let service = crate::product::ProductService::new(store.clone(), true);
+        assert!(
+            service
+                .complete_default_provider_onboarding(&provider_id, "prime-agent-basic", &allowed,)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let serialized = serde_json::to_value(&projection).unwrap();
+        assert!(serialized.get("harnesses").is_none());
+        assert!(serialized.get("initialHarnessId").is_none());
+        assert!(serialized.get("appDefaultHarnessId").is_none());
+        assert!(serialized.to_string().find("codex-basic").is_none());
 
         store
             .update_harness_model_rules(&UpdateHarnessModelRulesCommand {
@@ -3255,12 +3339,12 @@ mod provider_definition_tests {
                 expected_revision: 1,
                 rules: HarnessModelRules {
                     allow: vec![HarnessModelRule {
-                        adapter_id: "openai-api".into(),
+                        adapter_id: "codex-subscription".into(),
                         model_id_exact: None,
                         model_id_regex: Some("^gpt-".into()),
                     }],
                     deny: vec![HarnessModelRule {
-                        adapter_id: "openai-api".into(),
+                        adapter_id: "codex-subscription".into(),
                         model_id_exact: Some("gpt-work".into()),
                         model_id_regex: None,
                     }],
@@ -3269,10 +3353,10 @@ mod provider_definition_tests {
             .await
             .unwrap();
         let denied = store
-            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .provider_onboarding_projection(&provider_id, "prime-agent-basic", &allowed)
             .await
             .unwrap();
-        assert!(denied.initial_harness_id.is_none());
+        assert_eq!(denied.initial_harness_id.as_deref(), Some("claude-basic"));
         assert_eq!(
             denied
                 .harnesses
@@ -3285,13 +3369,77 @@ mod provider_definition_tests {
                 .code,
             "harness_model_incompatible"
         );
+        let prime = store
+            .provider_onboarding_projection(
+                &provider_id,
+                "prime-agent-deep",
+                &HashSet::from([
+                    "prime-agent-deep".to_owned(),
+                    "prime-agent-basic".to_owned(),
+                ]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            prime.initial_harness_id.as_deref(),
+            Some("prime-agent-basic")
+        );
+        let deep = store
+            .provider_onboarding_projection(
+                &provider_id,
+                "prime-agent-basic",
+                &HashSet::from(["prime-agent-deep".to_owned()]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(deep.initial_harness_id.as_deref(), Some("prime-agent-deep"));
         std::fs::remove_file(path).unwrap();
     }
 
     #[tokio::test]
-    async fn onboarding_create_and_defaults_commit_together_and_status_uses_saved_harness() {
+    async fn onboarding_without_a_preferred_compatible_harness_preserves_the_provider() {
+        let (store, path, provider_id) = onboarding_store().await;
+        let before = store.load_model_settings().await.unwrap().defaults;
+        let projection = store
+            .provider_onboarding_projection(
+                &provider_id,
+                "codex-basic",
+                &HashSet::from(["codex-alternate".to_owned()]),
+            )
+            .await
+            .unwrap();
+
+        assert!(projection.initial_harness_id.is_none());
+        assert!(projection.family_options.is_none());
+        let reason = projection.blocking_reason.as_ref().unwrap();
+        assert_eq!(reason.code, "provider_models_unsupported");
+        assert!(!reason.message.to_ascii_lowercase().contains("harness"));
+        let serialized = serde_json::to_string(&projection).unwrap();
+        assert!(!serialized.to_ascii_lowercase().contains("harness"));
+        assert!(
+            store
+                .load_provider_definitions()
+                .await
+                .unwrap()
+                .iter()
+                .any(|definition| definition.id == provider_id)
+        );
+        assert_eq!(store.load_model_settings().await.unwrap().defaults, before);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn onboarding_create_and_defaults_commit_together_and_status_uses_resolved_harness() {
         let (store, path, provider_id) = onboarding_store().await;
         let allowed = HashSet::from(["codex-basic".to_owned(), "codex-alternate".to_owned()]);
+        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (901,'Existing pinned thread','1','1','codex-alternate','auto')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name) VALUES (901,901,1,'Existing root','1','accepted','codex-alternate')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
         let projection = store
             .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
             .await
@@ -3300,7 +3448,6 @@ mod provider_definition_tests {
             .complete_provider_onboarding(
                 &CompleteProviderOnboardingCommand {
                     provider_id: provider_id.clone(),
-                    harness_id: "codex-alternate".into(),
                     expected_projection_revision: projection.projection_revision,
                     family: ProviderOnboardingFamilyIntent::Create {
                         name: "Work default".into(),
@@ -3317,7 +3464,7 @@ mod provider_definition_tests {
             .await
             .unwrap();
         assert_eq!(completion.defaults.provider_id, provider_id);
-        assert_eq!(completion.defaults.harness_id, "codex-alternate");
+        assert_eq!(completion.defaults.harness_id, "codex-basic");
         assert_eq!(
             completion.defaults.family_id,
             Some(completion.resolution.family_id)
@@ -3325,8 +3472,32 @@ mod provider_definition_tests {
         assert_eq!(completion.resolution.resolvable_members.len(), 1);
         let status = store.provider_onboarding_status(&allowed).await.unwrap();
         assert!(status.complete);
-        assert_eq!(status.defaults.harness_id, "codex-alternate");
+        assert_eq!(status.defaults.harness_id, "codex-basic");
         assert_eq!(status.resolution.unwrap(), completion.resolution);
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT harness_configuration_name FROM threads WHERE id=901",
+            )
+            .fetch_one(&store.pool)
+            .await
+            .unwrap(),
+            "codex-alternate"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT harness_configuration_name FROM interactions WHERE id=901",
+            )
+            .fetch_one(&store.pool)
+            .await
+            .unwrap(),
+            "codex-alternate"
+        );
+        drop(store);
+        let reopened = SqliteProductStore::open(&path).await.unwrap();
+        let reopened_status = reopened.provider_onboarding_status(&allowed).await.unwrap();
+        assert!(reopened_status.complete);
+        assert_eq!(reopened_status.defaults.harness_id, "codex-basic");
+        drop(reopened);
         std::fs::remove_file(path).unwrap();
     }
 
@@ -3338,6 +3509,23 @@ mod provider_definition_tests {
             .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
             .await
             .unwrap();
+        let invalid_family = store
+            .complete_provider_onboarding(
+                &CompleteProviderOnboardingCommand {
+                    provider_id: provider_id.clone(),
+                    expected_projection_revision: projection.projection_revision.clone(),
+                    family: ProviderOnboardingFamilyIntent::Existing {
+                        family_id: ModelFamilyId::try_from_value(999).unwrap(),
+                    },
+                },
+                "codex-basic",
+                &allowed,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(invalid_family.contains("no longer valid for this provider setup"));
+        assert!(!invalid_family.to_ascii_lowercase().contains("harness"));
         sqlx::query(
             "UPDATE provider_models SET available=0 WHERE provider_id=?1 AND model_id='gpt-work'",
         )
@@ -3350,7 +3538,6 @@ mod provider_definition_tests {
             .complete_provider_onboarding(
                 &CompleteProviderOnboardingCommand {
                     provider_id,
-                    harness_id: "codex-basic".into(),
                     expected_projection_revision: projection.projection_revision,
                     family: ProviderOnboardingFamilyIntent::Create {
                         name: "Must not persist".into(),
@@ -3398,10 +3585,10 @@ mod provider_definition_tests {
         };
         store
             .initialize_model_catalog(
-                "plain-basic",
+                "unranked-default",
                 &[
                     RuntimeProductHarness {
-                        id: "plain-basic".into(),
+                        id: "unranked-default".into(),
                         configuration_digest: "sha256:plain".into(),
                         model_compatibility: Vec::new(),
                         configuration_revision: 1,
@@ -3412,7 +3599,7 @@ mod provider_definition_tests {
                         unavailable_reason: None,
                     },
                     RuntimeProductHarness {
-                        id: "managed-codex".into(),
+                        id: "codex-basic".into(),
                         configuration_digest: "sha256:managed".into(),
                         model_compatibility: Vec::new(),
                         configuration_revision: 1,
@@ -3453,11 +3640,11 @@ mod provider_definition_tests {
         .execute(&store.pool)
         .await
         .unwrap();
-        let allowed = HashSet::from(["plain-basic".into(), "managed-codex".into()]);
+        let allowed = HashSet::from(["unranked-default".into(), "codex-basic".into()]);
         let projection = store
             .provider_onboarding_projection(
                 &ProviderId::parse("codex").unwrap(),
-                "plain-basic",
+                "unranked-default",
                 &allowed,
             )
             .await
@@ -3466,7 +3653,7 @@ mod provider_definition_tests {
             projection
                 .harnesses
                 .iter()
-                .find(|harness| harness.id == "plain-basic")
+                .find(|harness| harness.id == "unranked-default")
                 .unwrap()
                 .managed_family_candidate
                 .is_none()
@@ -3474,7 +3661,7 @@ mod provider_definition_tests {
         let candidate = projection
             .harnesses
             .iter()
-            .find(|harness| harness.id == "managed-codex")
+            .find(|harness| harness.id == "codex-basic")
             .unwrap()
             .managed_family_candidate
             .clone()
@@ -3485,19 +3672,18 @@ mod provider_definition_tests {
             .complete_provider_onboarding(
                 &CompleteProviderOnboardingCommand {
                     provider_id: ProviderId::parse("codex").unwrap(),
-                    harness_id: "managed-codex".into(),
                     expected_projection_revision: projection.projection_revision,
                     family: ProviderOnboardingFamilyIntent::Managed {
                         policy_id: candidate.policy_id,
                         policy_version: candidate.policy_version,
                     },
                 },
-                "plain-basic",
+                "unranked-default",
                 &allowed,
             )
             .await
             .unwrap();
-        assert_eq!(completion.defaults.harness_id, "managed-codex");
+        assert_eq!(completion.defaults.harness_id, "codex-basic");
         assert_eq!(
             completion.resolution.resolvable_members[0].model_id,
             "default"
@@ -3522,6 +3708,10 @@ mod provider_definition_tests {
     #[tokio::test]
     async fn model_settings_project_only_exactly_executable_harnesses_as_usable_now() {
         let (store, path, provider_id) = onboarding_store().await;
+        sqlx::query("UPDATE product_harnesses SET execution_access_contracts_json='[\"managed-runtime@1\"]' WHERE configuration_name='claude-basic'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
         let allowed = HashSet::from(["codex-basic".to_owned(), "claude-basic".to_owned()]);
         let projection = store
             .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
@@ -3531,7 +3721,6 @@ mod provider_definition_tests {
             .complete_provider_onboarding(
                 &CompleteProviderOnboardingCommand {
                     provider_id: provider_id.clone(),
-                    harness_id: "codex-basic".into(),
                     expected_projection_revision: projection.projection_revision,
                     family: ProviderOnboardingFamilyIntent::Create {
                         name: "Work models".into(),
@@ -3584,7 +3773,6 @@ mod provider_definition_tests {
             .complete_provider_onboarding(
                 &CompleteProviderOnboardingCommand {
                     provider_id: provider_id.clone(),
-                    harness_id: "codex-basic".into(),
                     expected_projection_revision: projection.projection_revision,
                     family: ProviderOnboardingFamilyIntent::Create {
                         name: "Work models".into(),
@@ -3641,7 +3829,7 @@ mod provider_definition_tests {
         let store = SqliteProductStore::open(&path).await.unwrap();
         let allow = HarnessModelRules {
             allow: vec![HarnessModelRule {
-                adapter_id: "openai-api".into(),
+                adapter_id: "codex-subscription".into(),
                 model_id_exact: None,
                 model_id_regex: Some("^gpt-".into()),
             }],
@@ -3668,19 +3856,40 @@ mod provider_definition_tests {
                         model_compatibility: Vec::new(),
                         configuration_revision: 1,
                         model_rules: Some(allow),
-                        execution_access_contracts: vec!["managed-runtime@1".into()],
+                        execution_access_contracts: vec!["secret@1".into()],
+                        family_policy: Some(FamilyPolicyReference {
+                            id: "codex-default-family".into(),
+                            version: 1,
+                        }),
+                        runtime_available: true,
+                        unavailable_reason: None,
+                    },
+                    RuntimeProductHarness {
+                        id: "prime-agent-basic".into(),
+                        configuration_digest: "sha256:onboarding-prime".into(),
+                        model_compatibility: Vec::new(),
+                        configuration_revision: 1,
+                        model_rules: Some(HarnessModelRules {
+                            allow: vec![HarnessModelRule {
+                                adapter_id: "codex-subscription".into(),
+                                model_id_exact: None,
+                                model_id_regex: Some("^gpt-".into()),
+                            }],
+                            deny: Vec::new(),
+                        }),
+                        execution_access_contracts: vec!["secret@1".into()],
                         family_policy: None,
                         runtime_available: true,
                         unavailable_reason: None,
                     },
                     RuntimeProductHarness {
-                        id: "codex-alternate".into(),
-                        configuration_digest: "sha256:onboarding-codex-alternate".into(),
+                        id: "prime-agent-deep".into(),
+                        configuration_digest: "sha256:onboarding-prime-deep".into(),
                         model_compatibility: Vec::new(),
                         configuration_revision: 1,
                         model_rules: Some(HarnessModelRules {
                             allow: vec![HarnessModelRule {
-                                adapter_id: "openai-api".into(),
+                                adapter_id: "codex-subscription".into(),
                                 model_id_exact: None,
                                 model_id_regex: Some("^gpt-".into()),
                             }],
@@ -3698,7 +3907,7 @@ mod provider_definition_tests {
         let provider_id = ProviderId::parse("work-openai").unwrap();
         let definition = ProviderDefinition {
             id: provider_id.clone(),
-            adapter_id: "openai-api".into(),
+            adapter_id: "codex-subscription".into(),
             label: "Work OpenAI".into(),
             endpoint: Some("https://api.openai.com/v1".into()),
             access_contract: "secret@1".into(),
@@ -3718,7 +3927,7 @@ mod provider_definition_tests {
                 visible: true,
                 available: true,
                 unavailable_reason: None,
-                provider_default: false,
+                provider_default: true,
                 replacement_model_id: None,
                 metadata: serde_json::json!({}),
             }],

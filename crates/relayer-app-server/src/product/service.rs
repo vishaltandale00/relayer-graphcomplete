@@ -481,36 +481,24 @@ impl ProductService {
                 permission_available_harnesses,
             )
             .await?;
-        let mut candidates = projection
-            .harnesses
-            .iter()
-            .filter(|harness| harness.selectable)
-            .filter_map(|harness| {
-                harness
-                    .managed_family_candidate
-                    .as_ref()
-                    .map(|family| (harness, family))
+        let Some(harness) = projection
+            .initial_harness_id
+            .as_deref()
+            .and_then(|harness_id| {
+                projection
+                    .harnesses
+                    .iter()
+                    .find(|harness| harness.id == harness_id && harness.selectable)
             })
-            .collect::<Vec<_>>();
-        let Some((_, policy)) = candidates.first().copied() else {
+        else {
             return Ok(None);
         };
-        if candidates.iter().any(|(_, candidate)| {
-            candidate.policy_id != policy.policy_id
-                || candidate.policy_version != policy.policy_version
-        }) {
+        let Some(policy) = harness.managed_family_candidate.as_ref() else {
             return Ok(None);
-        }
-        candidates.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
-        let (harness, policy) = candidates
-            .iter()
-            .copied()
-            .find(|(harness, _)| harness.id == projection.app_default_harness_id)
-            .unwrap_or(candidates[0]);
+        };
         self.complete_provider_onboarding(
             &super::CompleteProviderOnboardingCommand {
                 provider_id: provider_id.clone(),
-                harness_id: harness.id.clone(),
                 expected_projection_revision: projection.projection_revision,
                 family: super::ProviderOnboardingFamilyIntent::Managed {
                     policy_id: policy.policy_id.clone(),
