@@ -470,12 +470,14 @@ export function createDesktopTelemetryUploadPlan({ manifest, environment = proce
     || (manifest.candidateChannel !== "preview" && manifest.candidateChannel !== "stable")) {
     throw new Error("Desktop telemetry upload release identity is invalid.");
   }
-  const prefix = ["--org", organization, "--project", project];
+  // sentry-cli scopes --org/--project to each subcommand; they are not global
+  // options, so they must follow the subcommand rather than precede it.
+  const scope = ["--org", organization, "--project", project];
   return Object.freeze([
-    Object.freeze({ command: sentryCliBinary, args: Object.freeze([...prefix, "releases", "new", manifest.release]) }),
-    Object.freeze({ command: sentryCliBinary, args: Object.freeze([...prefix, "sourcemaps", "upload", "--release", manifest.release, "--url-prefix", "", "--validate", "--strict", "--wait", resolve(artifactsRoot, "source-maps")]) }),
-    Object.freeze({ command: sentryCliBinary, args: Object.freeze([...prefix, "debug-files", "upload", "--include-sources", "--wait", resolve(artifactsRoot, "debug")]) }),
-    Object.freeze({ command: sentryCliBinary, args: Object.freeze([...prefix, "releases", "finalize", manifest.release]) }),
+    Object.freeze({ command: sentryCliBinary, args: Object.freeze(["releases", "new", ...scope, manifest.release]) }),
+    Object.freeze({ command: sentryCliBinary, args: Object.freeze(["sourcemaps", "upload", ...scope, "--release", manifest.release, "--url-prefix", "", "--validate", "--strict", "--wait", resolve(artifactsRoot, "source-maps")]) }),
+    Object.freeze({ command: sentryCliBinary, args: Object.freeze(["debug-files", "upload", ...scope, "--include-sources", "--wait", resolve(artifactsRoot, "debug")]) }),
+    Object.freeze({ command: sentryCliBinary, args: Object.freeze(["releases", "finalize", ...scope, manifest.release]) }),
   ]);
 }
 

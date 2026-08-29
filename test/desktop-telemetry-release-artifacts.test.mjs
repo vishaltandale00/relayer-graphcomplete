@@ -251,6 +251,20 @@ describe("desktop telemetry release artifacts", () => {
     expect(plan.flatMap((step) => step.args)).toContain(manifest.release);
     expect(JSON.stringify(plan)).not.toContain(environment.SENTRY_AUTH_TOKEN);
     expect(plan.every((step) => step.command === environment.SENTRY_CLI_BINARY)).toBe(true);
+    // sentry-cli scopes --org/--project to the subcommand. Passing them as
+    // global options ahead of it aborts with "unexpected argument '--org'",
+    // which only surfaces during a signed release, so pin the order here.
+    expect(plan.map((step) => step.args.slice(0, 4))).toEqual([
+      ["releases", "new", "--org", environment.SENTRY_ORG],
+      ["sourcemaps", "upload", "--org", environment.SENTRY_ORG],
+      ["debug-files", "upload", "--org", environment.SENTRY_ORG],
+      ["releases", "finalize", "--org", environment.SENTRY_ORG],
+    ]);
+    for (const step of plan) {
+      expect(step.args[step.args.indexOf("--org") + 1]).toBe(environment.SENTRY_ORG);
+      expect(step.args[step.args.indexOf("--project") + 1]).toBe(environment.SENTRY_PROJECT);
+      expect(step.args.findIndex((argument) => argument.startsWith("--"))).toBeGreaterThan(1);
+    }
     expect(() => createDesktopTelemetryUploadPlan({
       manifest,
       environment: { ...environment, RELAYER_DESKTOP_CHANNEL: "stable" },
