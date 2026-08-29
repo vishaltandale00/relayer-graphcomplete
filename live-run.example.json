@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Copy this file to live-run.local.json and fill it in. That filename is gitignored.",
+    "Never commit a real key, and never paste one into an issue, a PR, or a transcript.",
+    "Two ways to authenticate. Fill in exactly one of `subscription` or `apiKey`."
+  ],
+
+  "codexExecutable": "/absolute/path/to/managed/codex",
+  "modelId": "gpt-5-codex",
+
+  "_subscriptionComment": [
+    "Preferred. No key lives in this file at all.",
+    "Run `CODEX_HOME=/absolute/path/to/codex-home codex login` once, then point at that home.",
+    "The run reuses that login the same way `npm run eval:basic:live` does."
+  ],
+  "subscription": {
+    "codexHome": "/absolute/path/to/codex-home"
+  },
+
+  "_apiKeyComment": [
+    "Alternative. Replace `subscription` above with this block if you would rather use a key.",
+    "This path is not yet proven end to end; see the live-run notes in README.md."
+  ],
+  "apiKey": null
+}

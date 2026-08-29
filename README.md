@@ -131,17 +131,32 @@ RELAYER_DEV_PROVIDER_RECURSION=1 npm run desktop:dev
 The opt-in live run drives one fixed synthetic task through the same runtime and
 app server the desktop uses, with recursion enabled and disabled on the same
 build. It records whether the agent created a semantic child by its own
-decision, the ordered sequence of current-pointer revisions, and both timings:
+decision, the ordered sequence of current-pointer revisions, and both timings.
+
+Credentials live in one local file. Copy the template and fill it in;
+`live-run.local.json` is gitignored and must never be committed:
 
 ```sh
-RELAYER_RECURSIVE_LIVE_RUN=1 RELAYER_CODEX_BINARY=/absolute/path/to/managed/codex \
-  RELAYER_LIVE_MODEL_ID=<model-id> npm run live:recursive-complete
+cp live-run.example.json live-run.local.json
 ```
 
-It writes `run.json` under `.relayer/live/recursive-complete/`. The run spends
-real inference and is excluded from `npm run check`; its analysis and pass rules
-run in the default deterministic suite. Semantic coherence is graded separately
-and blocks merge on its own.
+Prefer the subscription path, which keeps every secret out of that file. Log in
+once against an isolated provider home, then name that home in the file:
+
+```sh
+CODEX_HOME=/absolute/path/to/codex-home codex login
+RELAYER_RECURSIVE_LIVE_RUN=1 npm run live:recursive-complete
+```
+
+It writes `run.json` under `.relayer/live/recursive-complete/`, recording what
+ran and never how it authenticated. The run spends real inference and is
+excluded from `npm run check`; its analysis and pass rules run in the default
+deterministic suite. Semantic coherence is graded separately and blocks merge on
+its own.
+
+The run itself has never been executed. Its provider wiring is written but
+unproven, so expect the first attempt to surface gaps the way the deterministic
+end-to-end proof did.
 
 The opt-in Ask-profile desktop proof intentionally bypasses npm so inherited
 `NODE_OPTIONS` cannot execute before its trust boundary. Invoke the fixed system

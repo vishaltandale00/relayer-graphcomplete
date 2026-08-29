@@ -14,3 +14,6 @@ docs/prd/comments.json
 docs/prd/annotations.json
 docs/prd/assets/evidence/ask-profile-approval/*
 !docs/prd/assets/evidence/ask-profile-approval/README.md
+
+# Local live-run credentials. Never commit this file.
+live-run.local.json
