@@ -92,6 +92,8 @@ export interface SimulatedUserJudgeRunOptions {
   readonly workingDirectory?: string;
   readonly artifact?: JudgeArtifactContext;
   readonly artifactEvidence?: JudgeArtifactEvidence;
+  /** Enables separately authorized input answers and Send during this review. Judge-only reruns omit it. */
+  readonly inputOperatorAvailable?: boolean;
   readonly additionalDirectories?: readonly string[];
   readonly signal?: AbortSignal;
   readonly threadFactory?: JudgeThreadFactory;
@@ -153,6 +155,15 @@ export async function runSimulatedUserJudge(
   const rubric = structuredClone(options.configuration.rubric ?? (
     recursive ? GRAPH_PRESENTATION_RUBRIC_V11 : DEFAULT_SIMULATED_USER_RUBRIC
   ));
+  if (recursive && (
+    rubric.rubricVersion !== "graph-presentation-rubric-v11"
+    || rubric.recursiveJudgment?.contractId !== "recursive-presentation-judge-v6"
+  )) {
+    throw new Error("Recursive presentation contract v6 requires graph-presentation-rubric-v11");
+  }
+  if (!recursive && rubric.rubricVersion === "graph-presentation-rubric-v11") {
+    throw new Error("graph-presentation-rubric-v11 requires recursive presentation contract v6");
+  }
   const promptVersion = options.configuration.promptVersion ?? SIMULATED_USER_PROMPT_VERSION;
   if (promptVersion !== SIMULATED_USER_PROMPT_VERSION) {
     throw new Error(`Unsupported simulated-user prompt version: ${promptVersion}`);
@@ -163,6 +174,7 @@ export async function runSimulatedUserJudge(
         rubric,
         options.reviewStore.inventory,
         options.artifactEvidence,
+        options.inputOperatorAvailable ?? false,
       )
     : buildSimulatedUserJudgePrompt(
         options.originalRequest,
@@ -280,13 +292,15 @@ export function buildSimulatedUserJudgePrompt(
     "Gather whatever artifact and UI evidence each rubric criterion needs. The rubric is the contract; do not follow a fixed investigation checklist.",
     "Explore only through visible controls. Element references allow interaction but are not evidence.",
     "Capture screenshots before rating. Recursively review every expansion layer with the same rubric; root and expansion layers have no different rules.",
-    "At every node, rate its recursive disclosure and record whether expansion, reference, or invoke affordances are none, helpful, or required. Penalize missing needed disclosure on that parent node. If an expansion exists, traverse it and grade the child layer recursively.",
+    "At every node, rate its recursive disclosure and record whether expansion, reference, invoke, or input affordances are none, helpful, or required. Penalize missing needed disclosure on that parent node. If an expansion exists, traverse it and grade the child layer recursively.",
     "For a reference action, grade whether the reference was needed and whether its reached destination supports the source action. Do not regrade the reference destination node by node unless it is independently reachable by expansion.",
     "Treat node count as qualitative context only, never as an automatic threshold.",
-    "Write layer and node reviews incrementally. Include every visible navigate or invoke action inside its source node review.",
+    "Write layer and node reviews incrementally. Include every visible navigate, invoke, or input action inside its source node review.",
     "A navigate action requires source and traversed destination evidence. An invoke action requires visible source evidence and remains disabled.",
+    "For every input action, capture its presented control before any answer and rate prompt answerability, option-set quality, and control fit. Text correctly has no authored options; single-select choices should be mutually exclusive; multi-select choices should be distinct without pretending only one may apply.",
+    "Set structure.input to the observed need and result for the node, and include the input-action assessment before finalizing coverage.",
     "Use null only when UI evidence genuinely cannot assess a criterion, and provide a criterion-specific justification.",
-    "In submitReview, separately grade whether expansion and references were needed and whether each worked. Need is independent of execution: absent navigation can be correct when need is none.",
+    "In submitReview, separately grade whether expansion, references, and input were needed and whether each worked. Need is independent of execution: an absent affordance can be correct when need is none.",
     "Call submitReview only after complete lower-subject coverage. Do not put new layer or node assessments in submitReview.",
     "Set scoreCeiling to 1 for a contradicted critical answer or absent main result, 2 for any absent critical user need, 3 when multiple critical needs remain only partial, and 4 when no such ceiling applies.",
     "",
@@ -311,6 +325,7 @@ export function buildRecursivePresentationJudgePrompt(
   rubric: SimulatedUserRubricManifest,
   inventory: ReviewSubjectInventory,
   artifactEvidence?: JudgeArtifactEvidence,
+  inputOperatorAvailable = false,
 ): string {
   return [
     "You are the simulated user building one recursive semantic graph-presentation judgment over an immutable accepted GraphComplete turn.",
@@ -324,11 +339,16 @@ export function buildRecursivePresentationJudgePrompt(
     "Create one allocation step for every authored action in inventory order, plus one final implicit stop step. If stop becomes preferred early, still review every remaining authored action as an extra allocation. Multiple actions and repeated action kinds are independent semantic signals.",
     "A flat graph does not escape recursive judgment. At every implicit stop, ask what the best plausible absent expand, reference, invoke, or input action would contribute to the user's understanding, exploration, ability to act, or ability to supply a necessary decision. Do not treat a node as self-contained merely because it contains a dense conclusion.",
     "Judge this as a graph-native user experience, not only as a textual handoff rendered in boxes. At each node ask separately: what would a user reasonably want to inspect next, what would a user reasonably want to do next, and what genuinely necessary user decision is unavailable? Consider expand or reference for inspection, invoke for a useful follow-on task, and input only when the node cannot proceed well without a user answer.",
-    "Rate every authored input action from the immutable action as presented, before any answer is committed. Judge exactly three dimensions: whether its prompt is answerable, whether its authored option set is exhaustive enough and mutually exclusive (with an explicit empty option set correct for text), and whether text, single-select, or multi-select fits the question.",
-    "For an input action, capture its `input-action-<actionId>` element and persist the node review before calling interact with a value. That successful rating commissions a separate scoped product operator; the judge retains no direct write authority. Supply `{text}`, `{selectedKey}`, or `{selectedKeys}` as the interact value. Activate `send-interaction` only after every intended value is committed.",
-    "When the required inventory contains an input action, exercising the round trip is mandatory: capture and rate every authored input action, provide one valid answer per action, then activate `send-interaction`. Do not finalize the review while an inventoried input action remains unanswered.",
-    "A successful input-bearing reviewNode call commissions the answers but does not finish the review. Continue with reviewLayer and submitReview; never end the turn immediately after reviewNode.",
-    "Each capture carries a stable threadRevision. The capture-and-rate lock blocks its operator write until the rating cites that exact frame and revision; never reuse an older capture after the thread moves.",
+    "Rate every authored input action from the immutable action as presented, before any answer is committed. Judge exactly three dimensions: whether its prompt is answerable; whether its authored option set is exhaustive enough, single-select choices are mutually exclusive, and multi-select choices are distinct and non-overlapping while allowing several to apply together (with an explicit empty option set correct for text); and whether text, single-select, or multi-select fits the question.",
+    ...(inputOperatorAvailable ? [
+      "For an input action, read its occurrence IDs from inventory, capture the exact `input-action-<presentingInteractionNodeId>-<presentingLayerId>-<actionId>` element, and persist the node review before calling interact with a value. That successful rating commissions a separate scoped product operator; the judge retains no direct write authority. Supply `{text}`, `{selectedKey}`, or `{selectedKeys}` as the interact value. Activate `send-interaction` only after every intended value is committed.",
+      "When the required inventory contains an input action, exercising the round trip is mandatory: capture and rate every authored input action, provide one valid answer per action, then activate `send-interaction`. Do not finalize the review while an inventoried input action remains unanswered.",
+      "A successful input-bearing reviewNode call commissions the answers but does not finish the review. Continue with reviewLayer and submitReview; never end the turn immediately after reviewNode.",
+      "Each capture carries a stable threadRevision. The capture-and-rate lock blocks its operator write until the rating cites that exact frame and revision; never reuse an older capture after the thread moves.",
+    ] : [
+      "For every input action, read its occurrence IDs from inventory and capture the exact `input-action-<presentingInteractionNodeId>-<presentingLayerId>-<actionId>` element before persisting its immutable source review.",
+      "No input operator is available for this judge-only rerun. Review every inventoried input action as presented, but do not supply an answer or send another interaction; the accepted turn and product workspace must remain immutable.",
+    ]),
     "Necessity is an allocation counterweight, not an input-action quality score. Penalize over-asking in all three forms: asking for what the artifact already states; asking to dodge a judgment the node should have made; and fragmenting one decision into a separate question per node. Prefer stop or another action whenever the node could proceed well without asking.",
     "Prefer meaningful, distinct, easy-to-discover choices over action count. Penalize an absent obvious path, a useful action hidden on an unrelated node, a generic label, a destination that duplicates the source, or action spam that makes the next step harder to choose. Do not impose a minimum number of actions.",
     "Judge layer layout and edges for semantic communication. When the subject contains sequence, dependency, branching, alternatives, comparison, or evidence relationships, a visually arbitrary row, line, ring, or hub whose edges do not encode those relationships deserves little relationship_clarity credit even when every node is readable. Do not reward decorative complexity that communicates no relationship.",

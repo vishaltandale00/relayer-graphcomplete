@@ -7,6 +7,7 @@ import {
   createNodeInputDraftController,
   initialInputStageValue,
   inspectedInputDraftRevision,
+  inputActionReviewRef,
   inputOccurrenceKey,
   inputStageValueForApi,
   inputStageValuesEqual,
@@ -36,6 +37,11 @@ function draft(revision, attachments = []) {
 }
 
 describe("node input control state", () => {
+  it("gives every presenting input occurrence a distinct review reference", () => {
+    expect(inputActionReviewRef(createInputOccurrence(41, 52, 63))).toBe("input-action-41-52-63");
+    expect(inputActionReviewRef(createInputOccurrence(41, 53, 63))).toBe("input-action-41-53-63");
+  });
+
   it("locks send to the inspected revision even when the draft is empty", () => {
     expect(inspectedInputDraftRevision(draft(0))).toBe(0);
     expect(inspectedInputDraftRevision(draft(7))).toBe(7);

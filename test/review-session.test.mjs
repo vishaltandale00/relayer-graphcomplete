@@ -107,6 +107,62 @@ describe("ReviewSession", () => {
     );
   });
 
+  it("uses a stable no-draft revision for imported read-only threads", async () => {
+    const electron = fakeElectron({ snapshot: async () => reviewState() });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: "/unused",
+      ipc: electron.ipc,
+      loadInputDraftRevision: vi.fn(async () => null),
+    });
+
+    expect((await session.open()).threadRevision).toBe(
+      "thread:thread-1:revision:1:server-input-draft:none",
+    );
+    expect((await session.state()).threadRevision).toBe(
+      "thread:thread-1:revision:1:server-input-draft:none",
+    );
+  });
+
+  it("enables operator Send only when the production renderer confirms committed input state", async () => {
+    const updateInputOperatorState = vi.fn(async ({ committed }) => reviewState({
+      controls: [{
+        elementRef: "send-interaction",
+        kind: "input-operator-send",
+        disabled: !committed,
+      }],
+    }));
+    const electron = fakeElectron({
+      snapshot: async () => reviewState(),
+      updateInputOperatorState,
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: "/unused",
+      ipc: electron.ipc,
+    });
+    await session.open();
+
+    await expect(session.setInputOperatorCommitted(true)).resolves.toMatchObject({
+      controls: [{ elementRef: "send-interaction", disabled: false }],
+    });
+    await expect(session.setInputOperatorCommitted(false)).resolves.toMatchObject({
+      controls: [{ elementRef: "send-interaction", disabled: true }],
+    });
+    expect(updateInputOperatorState).toHaveBeenNthCalledWith(1, { committed: true });
+    expect(updateInputOperatorState).toHaveBeenNthCalledWith(2, { committed: false });
+
+    updateInputOperatorState.mockResolvedValueOnce(reviewState({
+      controls: [{ elementRef: "send-interaction", kind: "input-operator-send", disabled: true }],
+    }));
+    await expect(session.setInputOperatorCommitted(true))
+      .rejects.toThrow("did not reflect the commissioned input state");
+  });
+
   it("captures viewport and full-element tiles with immutable state and content digests", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
     directories.push(directory);

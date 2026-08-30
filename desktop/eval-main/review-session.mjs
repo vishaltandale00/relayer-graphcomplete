@@ -242,6 +242,19 @@ export class ReviewSession {
     return structuredClone(await this.#snapshot());
   }
 
+  async setInputOperatorCommitted(committed) {
+    this.#assertOpen();
+    const state = await this.#validateState(await this.#rendererCommand(
+      "updateInputOperatorState",
+      { committed: committed === true },
+    ));
+    const control = state.controls?.find((candidate) => candidate.elementRef === "send-interaction");
+    if (!control || control.kind !== "input-operator-send" || control.disabled !== !(committed === true)) {
+      throw new Error("The production review did not reflect the commissioned input state.");
+    }
+    return structuredClone(state);
+  }
+
   async inspectElement(elementRef) {
     if (typeof elementRef !== "string" || !elementRef) throw new Error("Element inspection requires a reference.");
     const state = await this.state();
@@ -334,12 +347,12 @@ export class ReviewSession {
       return validateState(this.executionId, rawState);
     }
     const revision = await this.loadInputDraftRevision(rawState?.threadId);
-    if (!Number.isSafeInteger(revision) || revision < 0) {
+    if (revision !== null && (!Number.isSafeInteger(revision) || revision < 0)) {
       throw new Error("The read-only product state returned an invalid input-draft revision.");
     }
     return validateState(this.executionId, {
       ...rawState,
-      threadRevision: `${rawState.threadRevision}:server-input-draft:${revision}`,
+      threadRevision: `${rawState.threadRevision}:server-input-draft:${revision ?? "none"}`,
     });
   }
 

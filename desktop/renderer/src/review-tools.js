@@ -116,6 +116,7 @@ export function createReviewPresentationAdapter({
   executionId,
   getPresentationState,
   navigateHistory,
+  setInputOperatorCommitted = null,
   root = document,
   windowObject = window,
 }) {
@@ -343,6 +344,15 @@ export function createReviewPresentationAdapter({
     return snapshot();
   }
 
+  async function updateInputOperatorState({ committed } = {}) {
+    if (typeof setInputOperatorCommitted !== "function") {
+      throw new Error("This review has no input operator presentation capability.");
+    }
+    setInputOperatorCommitted(committed === true);
+    await nextFrame(windowObject);
+    return snapshot();
+  }
+
   return Object.freeze({
     snapshot,
     capturePlan,
@@ -350,5 +360,6 @@ export function createReviewPresentationAdapter({
     restoreCapture,
     activate,
     history,
+    updateInputOperatorState,
   });
 }

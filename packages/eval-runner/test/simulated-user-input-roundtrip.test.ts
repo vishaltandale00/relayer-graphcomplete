@@ -3,6 +3,7 @@ import {
   assertInputGroundingTrace,
   gradeInputRoundTrip,
   gradeInputRoundTripControlSet,
+  gradeInputRoundTripSet,
   runInputGroundingJudge,
 } from "../src/simulated-user/input-roundtrip.js";
 
@@ -39,13 +40,18 @@ function evidence() {
 
 describe("input round-trip structural gate", () => {
   const requiredControls = [
-    { presentingInteractionNodeId: 41, presentingLayerId: 10, sourceNodeId: 2, actionId: 13, control: "text", options: [] },
+    {
+      presentingInteractionNodeId: 41, presentingLayerId: 10, sourceNodeId: 2, actionId: 13,
+      control: "text", prompt: "What deployment window should we use?", options: [],
+    },
     {
       presentingInteractionNodeId: 41, presentingLayerId: 10, sourceNodeId: 2, actionId: 14, control: "single_select",
+      prompt: "Which rollout strategy should we use?",
       options: [{ key: "canary", label: "Canary" }, { key: "full-rollout", label: "Full rollout" }],
     },
     {
       presentingInteractionNodeId: 41, presentingLayerId: 10, sourceNodeId: 2, actionId: 15, control: "multi_select",
+      prompt: "Which validation signals should we monitor?",
       options: [
         { key: "health-metrics", label: "Health metrics" },
         { key: "logs", label: "Logs" },
@@ -69,6 +75,39 @@ describe("input round-trip structural gate", () => {
     }));
     expect(gradeInputRoundTripControlSet(underscored, underscored).passed).toBe(true);
     expect(gradeInputRoundTripControlSet(underscored, requiredControls).checks[1]!.passed).toBe(false);
+  });
+
+  it("rejects controls that preserve the option matrix but ask unrelated questions", () => {
+    const unrelated = requiredControls.map((entry) => ({
+      ...entry,
+      prompt: entry.control === "text"
+        ? "What should the launch announcement say?"
+        : entry.control === "single_select"
+          ? "Which team owns this?"
+          : "Which documents should we attach?",
+    }));
+    expect(gradeInputRoundTripControlSet(unrelated, unrelated).checks[0]!.passed).toBe(false);
+  });
+
+  it.each([
+    ["text", "Why does the deployment window affect rollback?"],
+    ["single_select", "Is the rollout strategy documented?"],
+    ["multi_select", "Are the validation signals visible?"],
+  ] as const)("rejects a %s keyword-bearing prompt that does not ask for the required decision", (control, prompt) => {
+    const misleading = requiredControls.map((entry) => entry.control === control ? { ...entry, prompt } : entry);
+    expect(gradeInputRoundTripControlSet(misleading, misleading).checks[0]!.passed).toBe(false);
+  });
+
+  it("accepts direct imperative phrasing for each required decision", () => {
+    const imperative = requiredControls.map((entry) => ({
+      ...entry,
+      prompt: entry.control === "text"
+        ? "Enter the deployment window we should use."
+        : entry.control === "single_select"
+          ? "Select the rollout strategy we should use."
+          : "Choose the validation signals to monitor.",
+    }));
+    expect(gradeInputRoundTripControlSet(imperative, imperative).checks[0]!.passed).toBe(true);
   });
 
   it.each([
@@ -97,6 +136,24 @@ describe("input round-trip structural gate", () => {
         { name: "input-roundtrip:normalized-harness-input:action-13", passed: true },
       ],
     });
+  });
+
+  it("rejects an extra or duplicate materialized input outside the complete commissioned multiset", () => {
+    const value = evidence();
+    expect(gradeInputRoundTripSet([expectation], value).passed).toBe(true);
+    value.interaction.submittedInputs.push(semantic);
+    value.inputChildren.push({ ...value.inputChildren[0]!, id: 2 });
+    value.harnessTraceEvents = [{
+      type: "prompt",
+      data: { text: prompt.replace('"submittedInputs": [', '"submittedInputs": [\n    ' + `${JSON.stringify(semantic)},`) },
+    }];
+
+    const result = gradeInputRoundTripSet([expectation], value);
+    expect(result.passed).toBe(false);
+    expect(result.checks).toContainEqual(expect.objectContaining({
+      name: "input-roundtrip:exact-materialized-input-set",
+      passed: false,
+    }));
   });
 
   it("scopes mandatory gate identities to each input action", () => {

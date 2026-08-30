@@ -493,8 +493,45 @@ pub(super) async fn create_interaction(
     Path(id): Path<i64>,
     Json(request): Json<CreateInteractionRequest>,
 ) -> Result<(StatusCode, Json<InteractionResponse>), ApiError> {
-    authorize_write(&state, &headers)?;
+    let operator = if state.authenticator.is_control(&headers) {
+        authorize_write(&state, &headers)?;
+        None
+    } else if state.authenticator.input_operator_token(&headers).is_some() {
+        Some(super::input_operator_sessions::authorize_thread(
+            &state, &headers, id,
+        )?)
+    } else {
+        authorize_write(&state, &headers)?;
+        None
+    };
     let thread_id = ThreadId::try_from(id)?;
+    if let Some(operator) = operator.as_ref() {
+        if !request.text.trim().is_empty()
+            || request.model_selection.is_some()
+            || !request.contexts.is_empty()
+            || !request.context_confirmation_ids.is_empty()
+            || request.input_id.is_none()
+            || request.input_draft_revision.is_none()
+        {
+            return Err(ApiError::invalid(
+                "input operator Send may submit only its scoped committed input draft",
+            ));
+        }
+        let draft = state.product.action_input_draft(thread_id).await?;
+        if draft.attachments.is_empty()
+            || draft.attachments.iter().any(|attachment| {
+                !operator
+                    .occurrences
+                    .contains(&super::input_operator_sessions::occurrence_key(
+                        &attachment.occurrence,
+                    ))
+            })
+        {
+            return Err(ApiError::not_found(
+                "input draft contains values outside this operator session",
+            ));
+        }
+    }
     let thread_detail = state.product.get_thread(thread_id).await?;
     let privileged_model_less_thread = state.allow_harness_override
         && thread_detail

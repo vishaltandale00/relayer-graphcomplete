@@ -1,4 +1,4 @@
-use super::{ApiState, auth::authorize_write, error::ApiError};
+use super::{ApiState, auth::authorize_write, error::ApiError, input_operator_sessions};
 use crate::product::{ActionInputDraft, ActionInputValue, ThreadId};
 use axum::{
     Json,
@@ -68,14 +68,32 @@ pub(super) async fn get(
     headers: HeaderMap,
     Path(thread_id): Path<i64>,
 ) -> Result<Json<ActionInputDraftResponse>, ApiError> {
-    authorize_write(&state, &headers)?;
-    Ok(Json(
-        state
-            .product
-            .action_input_draft(ThreadId::try_from(thread_id)?)
-            .await?
-            .into(),
-    ))
+    let operator = if state.authenticator.is_control(&headers) {
+        authorize_write(&state, &headers)?;
+        None
+    } else if state.authenticator.input_operator_token(&headers).is_some() {
+        Some(input_operator_sessions::authorize_thread(
+            &state, &headers, thread_id,
+        )?)
+    } else {
+        authorize_write(&state, &headers)?;
+        None
+    };
+    let mut response: ActionInputDraftResponse = state
+        .product
+        .action_input_draft(ThreadId::try_from(thread_id)?)
+        .await?
+        .into();
+    if let Some(operator) = operator {
+        response.attachments.retain(|attachment| {
+            operator
+                .occurrences
+                .contains(&input_operator_sessions::occurrence_key(
+                    &attachment.occurrence,
+                ))
+        });
+    }
+    Ok(Json(response))
 }
 
 pub(super) async fn commit(
@@ -84,7 +102,20 @@ pub(super) async fn commit(
     Path(thread_id): Path<i64>,
     Json(request): Json<CommitActionInputRequest>,
 ) -> Result<Json<ActionInputDraftResponse>, ApiError> {
-    authorize_write(&state, &headers)?;
+    let operator = if state.authenticator.is_control(&headers) {
+        authorize_write(&state, &headers)?;
+        None
+    } else if state.authenticator.input_operator_token(&headers).is_some() {
+        Some(input_operator_sessions::authorize_occurrence(
+            &state,
+            &headers,
+            thread_id,
+            &request.occurrence,
+        )?)
+    } else {
+        authorize_write(&state, &headers)?;
+        None
+    };
     let thread_id = ThreadId::try_from(thread_id)?;
     let runtime = state.runtime.as_ref().ok_or_else(|| {
         ApiError::internal("graph runtime is unavailable for input occurrence validation")
@@ -103,19 +134,27 @@ pub(super) async fn commit(
             &request.occurrence,
         )
         .await?;
-    Ok(Json(
-        state
-            .product
-            .commit_action_input_attachment(
-                thread_id,
-                &request.occurrence,
-                &action,
-                &request.value,
-                request.expected_revision,
-            )
-            .await?
-            .into(),
-    ))
+    let mut response: ActionInputDraftResponse = state
+        .product
+        .commit_action_input_attachment(
+            thread_id,
+            &request.occurrence,
+            &action,
+            &request.value,
+            request.expected_revision,
+        )
+        .await?
+        .into();
+    if let Some(operator) = operator {
+        response.attachments.retain(|attachment| {
+            operator
+                .occurrences
+                .contains(&input_operator_sessions::occurrence_key(
+                    &attachment.occurrence,
+                ))
+        });
+    }
+    Ok(Json(response))
 }
 
 pub(super) async fn detach(

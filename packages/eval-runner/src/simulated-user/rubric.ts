@@ -88,7 +88,7 @@ const inputActionCriteria = {
   },
   option_set_quality: {
     label: "Option-set quality",
-    description: "A select action offers authored options that are collectively exhaustive enough and mutually exclusive for the decision. For a text action, having no authored options is the correct assessable state.",
+    description: "A select action offers authored options that are collectively exhaustive enough for the decision. Single-select options should be mutually exclusive; multi-select options should be distinct and non-overlapping while allowing several to apply together. For a text action, having no authored options is the correct assessable state.",
   },
   control_fit: {
     label: "Control fit",

@@ -28,6 +28,7 @@ import {
   createInputOccurrence,
   createNodeInputDraftController,
   initialInputStageValue,
+  inputActionReviewRef,
   inspectedInputDraftRevision,
   inputOccurrenceKey,
   inputStageValuesEqual,
@@ -1219,6 +1220,7 @@ export function createProductWorkspace({
   annotationApi = null,
   contextDraftApi = null,
   inputDraftApi = null,
+  inputOperatorAvailable = false,
 }) {
   const capabilities = workspaceModeCapabilities(mode);
   let graphNodes = [];
@@ -1234,6 +1236,7 @@ export function createProductWorkspace({
   let inspectorFitFrame = null;
   let turnPopoverOpen = false;
   let settingsMenuOpen = false;
+  let inputOperatorCommitted = false;
   let exportPending = false;
   let renderedInteractionStatusKey = null;
   const approvalSelections = new Map();
@@ -4183,7 +4186,7 @@ export function createProductWorkspace({
       const fieldset = graphDocument.createElement("fieldset");
       fieldset.className = "node-input-editor";
       fieldset.dataset.inputOccurrenceKey = stageKey;
-      fieldset.dataset.reviewCapture = `input-action-${action.id}`;
+      fieldset.dataset.reviewCapture = inputActionReviewRef(occurrence);
       fieldset.dataset.reviewActionId = String(action.id);
       fieldset.setAttribute("aria-label", `Input action: ${semantic.prompt}`);
       const legend = graphDocument.createElement("legend");
@@ -4341,7 +4344,20 @@ export function createProductWorkspace({
       sync();
       return fieldset;
     });
-    host.replaceChildren(...sections);
+    const operatorSend = immutableReviewInput && inputOperatorAvailable
+      ? (() => {
+          const button = graphDocument.createElement("button");
+          button.type = "button";
+          button.className = "node-input-operator-send";
+          button.dataset.reviewRef = "send-interaction";
+          button.dataset.reviewKind = "input-operator-send";
+          button.setAttribute("aria-label", "Send committed input answers");
+          button.textContent = "Send answers";
+          button.disabled = !inputOperatorCommitted;
+          return button;
+        })()
+      : null;
+    host.replaceChildren(...sections, ...(operatorSend ? [operatorSend] : []));
     for (const rail of host.querySelectorAll("[data-input-rail-key]")) {
       rail.scrollLeft = inputRailScroll.get(rail.dataset.inputRailKey) || 0;
     }
@@ -4615,10 +4631,17 @@ export function createProductWorkspace({
     selectedContextTarget = null;
   }
 
+  function setInputOperatorCommitted(committed) {
+    inputOperatorCommitted = committed === true;
+    const button = $("#nodeInputActions .node-input-operator-send");
+    if (button) button.disabled = !inputOperatorCommitted;
+  }
+
   return Object.freeze({
     mode,
     capabilities,
     render,
+    setInputOperatorCommitted,
     prepareSelectionChange: prepareNodeContextSelectionChange,
     modelSelectionPayload: () => modelPicker?.isReady()
       ? pickerSelectionPayload(modelPicker.getSelection())

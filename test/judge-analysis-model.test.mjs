@@ -204,4 +204,63 @@ describe("judge analysis view model", () => {
     });
     expect(recursive.layers[1].nodes[0].evidenceIds).toContain("shot-missing-action");
   });
+
+  it("projects v6 input-action criterion judgments and their screenshots", () => {
+    const run = fixture();
+    const turn = run.executions[0].turns.find((candidate) => candidate.interactionId === 11);
+    const judgment = (score, reason, evidence) => ({ score, reason, evidence });
+    turn.judgeResults = [{
+      id: "recursive-input-judge",
+      status: "completed",
+      review: {
+        schemaVersion: 6,
+        contractId: "recursive-presentation-judge-v6",
+        inventory: {
+          turn: { turnId: "11" },
+          layers: [{ layerId: "root", depth: 0 }],
+          nodes: [{ layerId: "root", nodeId: "root-node", actionIds: ["input-a"] }],
+          actions: [{ layerId: "root", nodeId: "root-node", actionId: "input-a", actionKind: "input" }],
+        },
+        layers: [],
+        nodes: [{ subject: { layerId: "root", nodeId: "root-node" }, history: { current: {
+          layerId: "root",
+          nodeId: "root-node",
+          evidence: { context: ["shot-root"], detail: ["shot-input"] },
+          score: { nodeId: "root-node" },
+          semantic: { delivered: "A question is visible.", effectOnLayer: "Collects a decision.", evidence: ["shot-root"] },
+          allocationSteps: [],
+          actions: [{
+            actionId: "input-a",
+            kind: "input",
+            allocationStep: 0,
+            labelAndPlacement: "Placed at the blocked decision.",
+            delivery: null,
+            recursiveContribution: null,
+            targetLayerId: null,
+            reusedLayerId: null,
+            evidence: ["shot-input"],
+            inputActionJudgments: {
+              prompt_answerability: judgment(7, "One concrete question.", ["shot-prompt"]),
+              option_set_quality: judgment(8, "Text correctly has no options.", ["shot-options"]),
+              control_fit: judgment(6, "Free text fits.", ["shot-control"]),
+            },
+          }],
+          findings: [],
+        } } }],
+        turn: null,
+        coverage: { complete: false },
+      },
+    }];
+
+    const action = buildJudgeAnalysis(run, "execution-1").turns[0].layers[0].nodes[0].actions[0];
+    expect(action.review).toMatchObject({
+      ratings: { prompt_answerability: 7, option_set_quality: 8, control_fit: 6 },
+      criterionJudgments: {
+        prompt_answerability: { reason: "One concrete question." },
+        option_set_quality: { reason: "Text correctly has no options." },
+        control_fit: { reason: "Free text fits." },
+      },
+    });
+    expect(action.evidenceIds).toEqual(["shot-input", "shot-prompt", "shot-options", "shot-control"]);
+  });
 });

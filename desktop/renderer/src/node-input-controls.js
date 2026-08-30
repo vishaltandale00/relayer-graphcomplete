@@ -50,6 +50,15 @@ export function createInputOccurrence(
   });
 }
 
+export function inputActionReviewRef(occurrence) {
+  const value = createInputOccurrence(
+    occurrence?.presentingInteractionNodeId,
+    occurrence?.presentingLayerId,
+    occurrence?.actionId,
+  );
+  return `input-action-${value.presentingInteractionNodeId}-${value.presentingLayerId}-${value.actionId}`;
+}
+
 export function inputOccurrenceKey(occurrence) {
   return JSON.stringify([
     String(requiredIdentity(occurrence?.presentingInteractionNodeId, "presentingInteractionNodeId")),

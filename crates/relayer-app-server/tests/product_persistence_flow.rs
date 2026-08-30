@@ -36,6 +36,322 @@ use std::{
 };
 use tower::ServiceExt;
 const ANNOTATION_COOKIE: &str = "relayer_annotation";
+const INPUT_OPERATOR_COOKIE: &str = "relayer_input_operator";
+
+#[tokio::test]
+async fn eval_input_operator_session_is_server_scoped_to_one_thread_and_occurrence() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-input-operator-scope-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let seed_app = open_app(&database, &root).await;
+    let first = response_json(
+        seed_app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({
+                    "initialMessage": "First thread"
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let second = response_json(
+        seed_app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({
+                    "initialMessage": "Second thread"
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let first_id = first["id"].as_i64().unwrap();
+    let second_id = second["id"].as_i64().unwrap();
+    drop(seed_app);
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE interactions SET completion_status='failed',completion_error='fixture terminal state'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    let graph = Router::new()
+        .route(
+            "/api/control/input-action-occurrences/canonical",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| async move {
+                assert_eq!(body["destinationThreadId"], first_id);
+                assert_eq!(
+                    body["occurrence"],
+                    json!({
+                        "presentingInteractionNodeId": 101,
+                        "presentingLayerId": 201,
+                        "actionId": 301
+                    })
+                );
+                axum::Json(json!({
+                    "id": 301,
+                    "sourceNodeId": 401,
+                    "sourceLayerId": 201,
+                    "kind": "input",
+                    "label": "Add constraint",
+                    "variant": "pill",
+                    "control": "text",
+                    "prompt": "What constraint applies?",
+                    "state": "accepted"
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                let submitted_inputs = serde_json::from_value::<
+                    Vec<relayer_graph_core::SubmittedInputDraft>,
+                >(body["submittedInputs"].clone())
+                .unwrap();
+                let semantic_digest = relayer_graph_core::interaction_input_semantic_digest(
+                    body["text"].as_str().unwrap(),
+                    &submitted_inputs,
+                )
+                .unwrap();
+                let submitted = &body["submittedInputs"][0];
+                axum::Json(json!({
+                    "node": {"id": 501},
+                    "graphToken": "",
+                    "inputIdentity": body["inputIdentity"],
+                    "inputDigest": body["inputDigest"],
+                    "inputChildren": [{
+                        "id": "interaction-input-child:1",
+                        "parentInteractionNodeId": 501,
+                        "occurrence": {
+                            "presentingInteractionNodeId": submitted["presentingInteractionNodeId"],
+                            "presentingLayerId": submitted["presentingLayerId"],
+                            "actionId": submitted["actionId"]
+                        },
+                        "sourceNodeId": 401,
+                        "action": submitted["action"],
+                        "value": submitted["value"],
+                        "attemptKey": body["inputIdentity"],
+                        "authorityDigest": body["inputDigest"],
+                        "semanticDigest": semantic_digest
+                    }]
+                }))
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({"graphToken": body["graphToken"]}))
+            })
+            .delete(|| async { axum::Json(json!({"revoked": true})) }),
+        );
+    let harness = Router::new()
+        .route(
+            "/sessions",
+            axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
+        )
+        .route(
+            "/sessions/{id}/complete",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                let node_id = body["graph"]["nodeId"].as_i64().unwrap();
+                axum::Json(json!({
+                    "output": {
+                        "nodeId": node_id,
+                        "rootLayer": {"layer": {"id": 1}, "nodes": [], "edges": [], "actions": []}
+                    }
+                }))
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1,
+                    "name": "codex-basic",
+                    "implementation": "test",
+                    "implementationVersion": 1,
+                    "permissionBindings": {"ask": {}, "auto": {}},
+                    "settings": {}
+                },
+                "digest": "sha256:test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
+    let token = "input-operator-session-token-000000000001";
+    let occurrence = json!({
+        "presentingInteractionNodeId": 101,
+        "presentingLayerId": 201,
+        "actionId": 301
+    });
+    let registered = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/internal/input-operator-sessions",
+            Some(json!({
+                "token": token,
+                "threadId": first_id,
+                "occurrences": [occurrence]
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(registered.status(), StatusCode::NO_CONTENT);
+
+    let allowed_read = app
+        .clone()
+        .oneshot(input_operator_request(
+            "GET",
+            &format!("/api/threads/{first_id}/input-draft"),
+            None,
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(allowed_read.status(), StatusCode::OK);
+    let cross_thread = app
+        .clone()
+        .oneshot(input_operator_request(
+            "GET",
+            &format!("/api/threads/{second_id}/input-draft"),
+            None,
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cross_thread.status(), StatusCode::NOT_FOUND);
+    let generic_write = app
+        .clone()
+        .oneshot(input_operator_request(
+            "POST",
+            "/api/projects",
+            Some(json!({ "path": root.join("forged"), "name": "forged" })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(generic_write.status(), StatusCode::FORBIDDEN);
+    let scoped_send_without_commit = app
+        .clone()
+        .oneshot(input_operator_request(
+            "POST",
+            &format!("/api/threads/{first_id}/interactions"),
+            Some(json!({
+                "text": "",
+                "inputId": "operator-send-1",
+                "inputDraftRevision": 0
+            })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(scoped_send_without_commit.status(), StatusCode::NOT_FOUND);
+    let scoped_commit = app
+        .clone()
+        .oneshot(input_operator_request(
+            "PUT",
+            &format!("/api/threads/{first_id}/input-draft/attachments"),
+            Some(json!({
+                "occurrence": occurrence,
+                "value": {"text": "Keep support load flat"},
+                "expectedRevision": 0
+            })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(scoped_commit.status(), StatusCode::OK);
+    assert_eq!(response_json(scoped_commit).await["revision"], 1);
+    let scoped_send = app
+        .clone()
+        .oneshot(input_operator_request(
+            "POST",
+            &format!("/api/threads/{first_id}/interactions"),
+            Some(json!({
+                "text": "",
+                "inputId": "operator-send-1",
+                "inputDraftRevision": 1
+            })),
+            token,
+        ))
+        .await
+        .unwrap();
+    let scoped_send_status = scoped_send.status();
+    let scoped_send = response_json(scoped_send).await;
+    assert_eq!(scoped_send_status, StatusCode::CREATED, "{scoped_send}");
+    assert_eq!(scoped_send["text"], "");
+    let forged_occurrence = app
+        .clone()
+        .oneshot(input_operator_request(
+            "PUT",
+            &format!("/api/threads/{first_id}/input-draft/attachments"),
+            Some(json!({
+                "occurrence": {
+                    "presentingInteractionNodeId": 101,
+                    "presentingLayerId": 202,
+                    "actionId": 301
+                },
+                "value": {"text": "forged"},
+                "expectedRevision": 0
+            })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forged_occurrence.status(), StatusCode::NOT_FOUND);
+
+    let revoked = app
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            "/api/internal/input-operator-sessions",
+            Some(json!({ "token": token })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
+    let after_revoke = app
+        .oneshot(input_operator_request(
+            "GET",
+            &format!("/api/threads/{first_id}/input-draft"),
+            None,
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(after_revoke.status(), StatusCode::UNAUTHORIZED);
+    graph_task.abort();
+    harness_task.abort();
+    let _ = fs::remove_dir_all(root);
+}
 
 #[tokio::test]
 async fn node_context_drafts_are_thread_scoped_and_survive_reopen() {
@@ -7125,6 +7441,26 @@ fn annotation_request(method: &str, uri: &str, body: Option<Value>, token: &str)
     let mut builder = Request::builder().method(method).uri(uri).header(
         "cookie",
         format!("{CONTROL_COOKIE}=review; {ANNOTATION_COOKIE}={token}"),
+    );
+    if body.is_some() {
+        builder = builder.header("content-type", "application/json");
+    }
+    builder
+        .body(Body::from(
+            body.map(|value| value.to_string()).unwrap_or_default(),
+        ))
+        .unwrap()
+}
+
+fn input_operator_request(
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> Request<Body> {
+    let mut builder = Request::builder().method(method).uri(uri).header(
+        "cookie",
+        format!("{CONTROL_COOKIE}=review; {INPUT_OPERATOR_COOKIE}={token}"),
     );
     if body.is_some() {
         builder = builder.header("content-type", "application/json");

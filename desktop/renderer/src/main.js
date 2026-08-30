@@ -373,6 +373,7 @@ async function boot() {
         };
       },
       navigateHistory,
+      setInputOperatorCommitted: (committed) => workspace().setInputOperatorCommitted(committed),
     }));
   }
   connectEvents();

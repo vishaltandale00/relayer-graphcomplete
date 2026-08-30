@@ -1730,6 +1730,7 @@ export class EvalService {
             interaction,
             turn,
             reviewSequence: { index, count: eligibleTurns.length },
+            allowInputOperator: definition.requiredChecks?.includes("input-roundtrip") === true,
           });
           if (result.status !== "completed") simulatedUserCompleted = false;
           if (definition.requiredChecks?.includes("input-roundtrip")) {
@@ -1928,7 +1929,15 @@ export class EvalService {
     return { thread, humanInteractionIds, detail, semanticChildren };
   }
 
-  async #judgeAcceptedTurn({ execution, thread, interaction, turn, reviewSequence, provenance = null }) {
+  async #judgeAcceptedTurn({
+    execution,
+    thread,
+    interaction,
+    turn,
+    reviewSequence,
+    provenance = null,
+    allowInputOperator = false,
+  }) {
     const judgeConfigurationId = execution.judgeConfiguration.name;
     const judgeResultId = randomUUID();
     const previousTurnIds = execution.turns
@@ -1992,6 +2001,7 @@ export class EvalService {
           status: interaction.completionStatus,
         },
         reviewSequence: copy(reviewSequence),
+        allowInputOperator,
         request: {
           text: interaction.text,
           followUp: previousTurnIds.length > 0,

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -10,6 +10,7 @@ import {
   inventoryReviewSubjects,
   runSimulatedUserJudge,
 } from "@relayer/eval-runner";
+import { inputActionReviewRef, inputOccurrenceKey } from "../renderer/src/node-input-controls.js";
 
 export const LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION = Object.freeze({
   model: "gpt-5.6-sol",
@@ -24,6 +25,44 @@ export const PRODUCT_PRESENTATION_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_PRODUCT_PR
 export const PRODUCT_PRESENTATION_AUTORUN_FLAG = "--relayer-eval-autorun-product-presentation";
 export const INPUT_ROUNDTRIP_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_INPUT_ROUNDTRIP";
 export const INPUT_ROUNDTRIP_AUTORUN_FLAG = "--relayer-eval-autorun-input-roundtrip";
+
+export function operatorInteractionIsTerminal(status) {
+  return ["accepted", "failed", "cancelled", "stopped"].includes(status);
+}
+
+export function groundingRootNodeIds(interaction) {
+  return (interaction?.completionOutput?.rootLayer?.nodes ?? [])
+    .map((node) => String(node?.id ?? ""))
+    .filter(Boolean);
+}
+
+export function createInputOperatorLease({ operator, revoke }) {
+  if (!operator || typeof revoke !== "function") {
+    throw new Error("Input operator lease requires an operator and revocation callback.");
+  }
+  let released = false;
+  let releaseAttempt = null;
+  return Object.freeze({
+    operator,
+    release: async () => {
+      if (released) return;
+      releaseAttempt ??= Promise.resolve()
+        .then(revoke)
+        .then(() => { released = true; })
+        .finally(() => { releaseAttempt = null; });
+      await releaseAttempt;
+    },
+  });
+}
+
+export async function releaseInputOperatorLease(lease) {
+  if (!lease?.release) return;
+  try {
+    await lease.release();
+  } catch {
+    await lease.release();
+  }
+}
 
 export function resolveLocalSimulatedUserAutorun({
   environment = process.env,
@@ -118,7 +157,8 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
     throw new Error("Simulated-user review requires a complete ReviewSession controller.");
   }
   const captureByScreenshot = new Map();
-  const commissionedByAction = new Map();
+  const commissionedByOccurrence = new Map();
+  const committedOccurrences = new Set();
   const operatorEvents = [];
   const inputRatingReceiptRefs = [];
   return Object.freeze({
@@ -133,44 +173,51 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
           threadRevision: state.threadRevision,
         });
       }
-      let output;
+      let capturedScreenshotId;
       try {
-        output = await reviewSession.screenshot(input);
+        const output = await reviewSession.screenshot(input);
+        if (!output?.ok) return { output, images: [] };
+        const screenshot = output.screenshot;
+        capturedScreenshotId = screenshot.screenshotId;
+        if (operatorCapture) {
+          captureByScreenshot.set(screenshot.screenshotId, {
+            captureId: operatorCapture.captureId,
+            occurrence: structuredClone(binding.occurrence),
+          });
+        }
+        screenshotMetadata.set(screenshot.screenshotId, structuredClone(screenshot));
+        const directory = reviewSession.artifactDirectoryFor(screenshot.screenshotId);
+        if (!directory) throw new Error(`Screenshot artifact directory is missing: ${screenshot.screenshotId}`);
+        const images = await Promise.all([...screenshot.tiles]
+          .sort((left, right) => left.index - right.index)
+          .map(async (tile) => ({
+            data: (await readFile(join(
+              directory,
+              `${screenshot.screenshotId}-${String(tile.index + 1).padStart(3, "0")}.png`,
+            ))).toString("base64"),
+            mimeType: "image/png",
+          })));
+        if (images.length !== screenshot.tileCount) {
+          throw new Error(`Screenshot tile count does not match metadata: ${screenshot.screenshotId}`);
+        }
+        return { output, images };
       } catch (error) {
-        if (operatorCapture) inputOperator.failCapture(operatorCapture.captureId);
+        if (operatorCapture) {
+          inputOperator.failCapture(operatorCapture.captureId);
+          if (capturedScreenshotId !== undefined) {
+            captureByScreenshot.delete(capturedScreenshotId);
+            screenshotMetadata.delete(capturedScreenshotId);
+          }
+        }
         throw error;
       }
-      if (!output?.ok) return { output, images: [] };
-      const screenshot = output.screenshot;
-      if (operatorCapture) {
-        captureByScreenshot.set(screenshot.screenshotId, {
-          captureId: operatorCapture.captureId,
-          occurrence: structuredClone(binding.occurrence),
-        });
-      }
-      screenshotMetadata.set(screenshot.screenshotId, structuredClone(screenshot));
-      const directory = reviewSession.artifactDirectoryFor(screenshot.screenshotId);
-      if (!directory) throw new Error(`Screenshot artifact directory is missing: ${screenshot.screenshotId}`);
-      const images = await Promise.all([...screenshot.tiles]
-        .sort((left, right) => left.index - right.index)
-        .map(async (tile) => ({
-          data: (await readFile(join(
-            directory,
-            `${screenshot.screenshotId}-${String(tile.index + 1).padStart(3, "0")}.png`,
-          ))).toString("base64"),
-          mimeType: "image/png",
-        })));
-      if (images.length !== screenshot.tileCount) {
-        throw new Error(`Screenshot tile count does not match metadata: ${screenshot.screenshotId}`);
-      }
-      return { output, images };
     },
     interact: async (input) => {
       if (input.value !== undefined) {
         if (!inputOperator) throw new Error("This review has no separately authorized input operator.");
         const binding = inputBindings.get(input.elementRef);
         if (!binding) throw new Error(`Interact value requires a visible input-action target: ${input.elementRef}`);
-        const captureId = commissionedByAction.get(String(binding.occurrence.actionId));
+        const captureId = commissionedByOccurrence.get(inputOccurrenceKey(binding.occurrence));
         if (!captureId) throw new Error("Input-action quality must be rated before the operator is commissioned.");
         const value = "text" in input.value
           ? { text: input.value.text }
@@ -185,6 +232,8 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
                 .sort((left, right) => Buffer.from(left.key).compare(Buffer.from(right.key))),
             };
         const inputDraftRevision = await inputOperator.commit({ captureId, value });
+        committedOccurrences.add(inputOccurrenceKey(binding.occurrence));
+        await reviewSession.setInputOperatorCommitted?.(true);
         const state = await reviewSession.state();
         operatorEvents.push({
           operation: "input_commit",
@@ -198,7 +247,18 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
         return { ok: true, state: reviewUiStateForOperator(state), operator: { operation: "input_commit", inputDraftRevision } };
       }
       if (input.elementRef === "send-interaction" && inputOperator) {
+        const before = await reviewSession.state();
+        const control = before.controls?.find((candidate) => candidate.elementRef === input.elementRef);
+        if (!control || control.kind !== "input-operator-send") {
+          throw new Error("The production review has no visible operator Send control.");
+        }
+        if (committedOccurrences.size === 0) {
+          throw new Error("The input operator requires at least one committed input before Send.");
+        }
+        if (control.disabled) throw new Error("The production review operator Send control is disabled.");
         const response = await inputOperator.send({});
+        committedOccurrences.clear();
+        await reviewSession.setInputOperatorCommitted?.(false);
         operatorEvents.push({ operation: "send", response: structuredClone(response) });
         const state = await reviewSession.state();
         return { ok: true, state: reviewUiStateForOperator(state), operator: { operation: "send", response } };
@@ -218,9 +278,18 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
           ...(action.evidence ?? []),
           ...Object.values(action.inputActionJudgments ?? {}).flatMap((judgment) => judgment.evidence ?? []),
         ])];
-        const capture = screenshotIds
-          .map((id) => captureByScreenshot.get(id))
-          .find((candidate) => candidate && String(candidate.occurrence.actionId) === String(action.actionId));
+        const citedScreenshotIds = new Set(screenshotIds);
+        const operatorCaptureState = inputOperator.state?.();
+        const activeCaptureIds = new Set((operatorCaptureState?.captures ?? [])
+          .filter(({ status }) => status === "capturing")
+          .map(({ captureId }) => captureId));
+        const capture = [...captureByScreenshot.entries()]
+          .filter(([screenshotId, candidate]) => citedScreenshotIds.has(screenshotId)
+            && String(candidate.occurrence.actionId) === String(action.actionId)
+            && String(candidate.occurrence.presentingLayerId) === String(review.layerId)
+            && (operatorCaptureState === undefined || activeCaptureIds.has(candidate.captureId)))
+          .map(([, candidate]) => candidate)
+          .findLast(() => true);
         if (!capture) throw new Error(`Input action ${action.actionId} has no occurrence-matched versioned capture-and-rate lock.`);
         const { captureId } = capture;
         const capturedScreenshotId = screenshotIds.find((id) => captureByScreenshot.get(id)?.captureId === captureId);
@@ -232,27 +301,40 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
           captureId,
           threadRevision: metadata.threadRevision,
           actionId: String(action.actionId),
+          occurrence: structuredClone(capture.occurrence),
         });
       }
       if (commissions.length === 0) return;
-      const receiptId = await persistInputRatingReceipt({
+      const persistedReceipt = await persistInputRatingReceipt({
         schemaVersion: 1,
         reviewRevision: revision,
         review: structuredClone(review),
-        captures: commissions.map(({ captureId, threadRevision, actionId }) => ({
+        captures: commissions.map(({ captureId, threadRevision, actionId, occurrence }) => ({
           captureId,
           threadRevision,
           actionId,
+          occurrence,
         })),
       });
+      const receiptId = typeof persistedReceipt === "string"
+        ? persistedReceipt
+        : persistedReceipt?.ref;
+      if (typeof receiptId !== "string" || !receiptId) {
+        throw new Error("Input rating receipt storage returned no durable reference.");
+      }
+      try {
+        inputOperator.rateCaptures(commissions.map(({ captureId, threadRevision }) => ({
+          captureId,
+          ratingId: receiptId,
+          threadRevision,
+        })));
+      } catch (error) {
+        await persistedReceipt?.discard?.();
+        throw error;
+      }
       inputRatingReceiptRefs.push(receiptId);
-      inputOperator.rateCaptures(commissions.map(({ captureId, threadRevision }) => ({
-        captureId,
-        ratingId: receiptId,
-        threadRevision,
-      })));
-      for (const { actionId, captureId } of commissions) {
-        commissionedByAction.set(actionId, captureId);
+      for (const { occurrence, captureId } of commissions) {
+        commissionedByOccurrence.set(inputOccurrenceKey(occurrence), captureId);
       }
     },
     operatorTrace: () => structuredClone(operatorEvents),
@@ -490,7 +572,7 @@ export function createLocalSimulatedUserJudgeRunner({
     const inventory = inventoryReviewSubjects(topology);
     const inputBindings = new Map(inventory.actions.flatMap((subject) => (
         subject.actionKind !== "input" || subject.occurrence === undefined ? [] : [[
-          `input-action-${subject.actionId}`,
+          inputActionReviewRef(subject.occurrence),
           {
             occurrence: subject.occurrence,
             sourceNodeId: Number(subject.nodeId),
@@ -509,14 +591,20 @@ export function createLocalSimulatedUserJudgeRunner({
       )));
     const screenshots = new Map();
     let opened;
+    let inputOperatorLease;
     let completed = false;
     try {
+      inputOperatorLease = typeof createInputOperator === "function" && context.allowInputOperator === true
+        ? await createInputOperator({ context, inputBindings })
+        : undefined;
+      const inputOperator = inputOperatorLease?.operator ?? inputOperatorLease;
       opened = await openReviewSession({
         executionId: context.execution.id,
         threadId: context.thread.id,
         turnId: context.turn.id,
         rootLayerId,
         artifactDirectory: join(context.artifactDirectory, "screenshots"),
+        inputOperatorAvailable: Boolean(inputOperator),
       });
       assertExactOpenedTurn(opened.state, {
         executionId: context.execution.id,
@@ -524,9 +612,6 @@ export function createLocalSimulatedUserJudgeRunner({
         turnId: context.turn.id,
         rootLayerId,
       });
-      const inputOperator = typeof createInputOperator === "function"
-        ? createInputOperator({ context, inputBindings })
-        : undefined;
       const controller = createReviewSessionController(opened.session, screenshots, {
         inputOperator,
         inputBindings,
@@ -566,6 +651,7 @@ export function createLocalSimulatedUserJudgeRunner({
           additionalDirectories: [],
           codexPathOverride: codexRuntime.executable,
           environment: codexRuntime.environment,
+          inputOperatorAvailable: Boolean(inputOperator),
         });
       } catch (error) {
         return persistJudgeArtifacts({
@@ -608,10 +694,14 @@ export function createLocalSimulatedUserJudgeRunner({
       completed = true;
       return output;
     } finally {
-      if (opened) {
-        const lastReview = context.reviewSequence === undefined
-          || context.reviewSequence.index === context.reviewSequence.count - 1;
-        await opened.release({ close: !completed || lastReview });
+      try {
+        await releaseInputOperatorLease(inputOperatorLease);
+      } finally {
+        if (opened) {
+          const lastReview = context.reviewSequence === undefined
+            || context.reviewSequence.index === context.reviewSequence.count - 1;
+          await opened.release({ close: !completed || lastReview });
+        }
       }
     }
   };
@@ -715,11 +805,15 @@ async function persistInputRatingReceipt(context, receipt) {
   const directoryName = "input-rating-receipts";
   const filename = `node-${nodeId}-revision-${receipt.reviewRevision}.json`;
   await mkdir(join(context.artifactDirectory, directoryName), { recursive: true, mode: 0o700 });
-  await writeJson(join(context.artifactDirectory, directoryName, filename), {
+  const path = join(context.artifactDirectory, directoryName, filename);
+  await writeJson(path, {
     ...receipt,
     executionId: String(context.execution.id),
     threadId: String(context.thread.id),
     turnId: String(context.turn.id),
   });
-  return `${directoryName}/${filename}`;
+  return {
+    ref: `${directoryName}/${filename}`,
+    discard: () => rm(path, { force: true }),
+  };
 }

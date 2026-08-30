@@ -134,6 +134,7 @@ html[data-theme="light"] .tutorial-target{outline-color:#527baa!important;box-sh
 .node-input-symbols button{width:26px;height:26px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:13px;line-height:1}
 .node-input-symbols button:hover:not(:disabled){background:var(--hover);color:var(--text)}
 .node-input-symbols button:disabled{opacity:.34}
+.node-input-operator-send{width:100%;margin-top:10px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:8px;background:var(--raised);color:var(--text);font-size:10px;font-weight:700}
 .node-input-committed{color:var(--green)}
 .composer-input-pills{display:flex;flex-wrap:nowrap;gap:7px;overflow-x:auto;padding-top:7px;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
 .composer-input-pill{border-style:dashed}

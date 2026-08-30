@@ -5,6 +5,7 @@ mod conversation_imports;
 mod environment;
 mod error;
 mod input_drafts;
+mod input_operator_sessions;
 mod model_settings;
 mod projects;
 mod state;
@@ -29,6 +30,12 @@ use tower_http::services::ServeDir;
 pub const CONTROL_COOKIE: &str = "relayer_control";
 
 #[derive(Clone)]
+pub(crate) struct InputOperatorSession {
+    pub(crate) thread_id: i64,
+    pub(crate) occurrences: HashSet<(i64, i64, i64)>,
+}
+
+#[derive(Clone)]
 pub(crate) struct AnnotationSession {
     pub(crate) thread_ids: HashSet<i64>,
     pub(crate) author_id: String,
@@ -50,6 +57,7 @@ pub(crate) struct ApiState {
     pub(crate) export_producer: crate::conversation_export::ExportProducer,
     pub(crate) approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
     pub(crate) annotation_sessions: Arc<Mutex<HashMap<String, AnnotationSession>>>,
+    pub(crate) input_operator_sessions: Arc<Mutex<HashMap<String, InputOperatorSession>>>,
     pub(crate) annotations_enabled: bool,
     pub(crate) environment_inspector: crate::environment::EnvironmentInspector,
     pub(crate) completion_brokers: CompletionBrokerRegistry,
@@ -110,6 +118,7 @@ pub(crate) fn router(
         export_producer: runtime.export_producer,
         approval_decisions,
         annotation_sessions: Arc::new(Mutex::new(HashMap::new())),
+        input_operator_sessions: Arc::new(Mutex::new(HashMap::new())),
         annotations_enabled,
         environment_inspector: crate::environment::EnvironmentInspector::new(),
         completion_brokers,
@@ -248,6 +257,11 @@ pub(crate) fn router(
             "/api/internal/annotation-sessions",
             axum::routing::post(annotations::register_session)
                 .delete(annotations::revoke_session),
+        )
+        .route(
+            "/api/internal/input-operator-sessions",
+            axum::routing::post(input_operator_sessions::register_session)
+                .delete(input_operator_sessions::revoke_session),
         )
         .route(
             "/api/annotations/snapshot",

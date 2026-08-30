@@ -138,6 +138,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "crates/relayer-app-server/src/api/environment.rs",
     "crates/relayer-app-server/src/api/error.rs",
     "crates/relayer-app-server/src/api/input_drafts.rs",
+    "crates/relayer-app-server/src/api/input_operator_sessions.rs",
     "crates/relayer-app-server/src/api/model_settings.rs",
     "crates/relayer-app-server/src/api/projects.rs",
     "crates/relayer-app-server/src/api/state.rs",

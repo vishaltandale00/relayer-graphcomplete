@@ -97,19 +97,28 @@ export function createRecursiveScreenshotEvidenceValidator(
           `Action evidence must show source node ${request.subject.nodeId} or its traversed destination`,
         );
         if (action.kind === "input") {
+          const occurrence = subject?.occurrence;
+          const expectedElementRef = occurrence === undefined ? undefined : [
+            "input-action",
+            occurrence.presentingInteractionNodeId,
+            occurrence.presentingLayerId,
+            occurrence.actionId,
+          ].join("-");
+          const showsRenderedInputControl = (shot: ScreenshotMetadata): boolean => shot.layerId === request.subject.layerId
+            && shot.selectedNodeId === request.subject.nodeId
+            && shot.captureTarget.kind === "element"
+            && shot.captureTarget.elementRef === expectedElementRef;
           validate(
             action.evidence,
             ["actions", index, "evidence"],
-            (shot) => shot.layerId === request.subject.layerId
-              && shot.selectedNodeId === request.subject.nodeId,
+            showsRenderedInputControl,
             `Input action ${action.actionId} evidence must show the selected source node and its rendered controls`,
           );
           for (const [criterion, judgment] of Object.entries(action.inputActionJudgments ?? {})) {
             validate(
               judgment.evidence,
               ["actions", index, "inputActionJudgments", criterion, "evidence"],
-              (shot) => shot.layerId === request.subject.layerId
-                && shot.selectedNodeId === request.subject.nodeId,
+              showsRenderedInputControl,
               `Input action ${action.actionId} ${criterion} evidence must show the selected source node and its rendered controls`,
             );
           }
@@ -130,7 +139,10 @@ export function createRecursiveScreenshotEvidenceValidator(
           ...node.semantic.evidence,
           ...node.allocationSteps.flatMap((step) => step.evidence),
           ...(node.missingActionOpportunities ?? []).flatMap((opportunity) => opportunity.evidence),
-          ...node.actions.flatMap((action) => action.evidence),
+          ...node.actions.flatMap((action) => [
+            ...action.evidence,
+            ...Object.values(action.inputActionJudgments ?? {}).flatMap((judgment) => judgment.evidence),
+          ]),
           ...node.findings.flatMap((finding) => finding.evidence),
         ]),
       ]);

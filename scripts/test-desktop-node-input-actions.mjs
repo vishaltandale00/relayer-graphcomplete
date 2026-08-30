@@ -450,11 +450,39 @@ async function run() {
     document.querySelectorAll('#nodeInputActions button:not(:disabled), #nodeInputActions textarea:not(:disabled)').length === 0
   ))()`));
   releaseSecondCompletion();
-  await waitForAcceptedInteractions(thread.id, 2);
+  const acceptedThread = await waitForAcceptedInteractions(thread.id, 2);
   await waitFor("submitted inputs rendered read-only", () => evaluate(`(() => (
     document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length === 3
       && document.querySelectorAll('.composer-input-pill').length === 0
   ))()`));
+
+  const authoredTurnId = acceptedThread.interactions[0].id;
+  await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(thread.id)}&interactionId=${encodeURIComponent(authoredTurnId)}&review=1`);
+  await waitFor("read-only review workspace", () => evaluate(`(() => (
+    !document.body.classList.contains('desktop-account-pending')
+      && document.querySelectorAll('.graph-node').length === 1
+  ))()`));
+  await clickNode("Input grammar");
+  await waitFor("accepted input controls render without mutation authority", () => evaluate(`(() => {
+    const editors = [...document.querySelectorAll('#nodeInputActions .node-input-editor')];
+    const controls = editors.flatMap((editor) => [...editor.querySelectorAll('button, textarea')]);
+    return editors.length === 3
+      && controls.length > 0
+      && controls.every((control) => control.disabled)
+      && !document.querySelector('.node-input-operator-send');
+  })()`));
+
+  await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(thread.id)}&interactionId=${encodeURIComponent(authoredTurnId)}&review=1&inputOperator=1`);
+  await waitFor("operator-capable review workspace", () => evaluate(`(() => (
+    !document.body.classList.contains('desktop-account-pending')
+      && document.querySelectorAll('.graph-node').length === 1
+  ))()`));
+  await clickNode("Input grammar");
+  await waitFor("operator Send starts disabled while accepted inputs remain read-only", () => evaluate(`(() => {
+    const send = document.querySelector('.node-input-operator-send');
+    const controls = [...document.querySelectorAll('#nodeInputActions .node-input-editor button, #nodeInputActions .node-input-editor textarea')];
+    return Boolean(send?.disabled) && controls.length > 0 && controls.every((control) => control.disabled);
+  })()`));
   process.stdout.write("Node-input Electron proof passed with 0 paid inference calls.\n");
 }
 

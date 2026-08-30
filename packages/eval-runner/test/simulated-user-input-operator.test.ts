@@ -101,6 +101,50 @@ describe("InputOperatorController", () => {
     await expect(controller.send({ inputId: "attempt-1" })).rejects.toMatchObject({ code: "input_operator_commit_required" });
   });
 
+  it("reuses its generated Send identity after an ambiguous response loss", async () => {
+    const sendBodies: Readonly<Record<string, unknown>>[] = [];
+    let sendAttempts = 0;
+    const controller = createController(async (path, request) => {
+      if (path.endsWith("attachments")) return draftResponse(actions.text, request, 8);
+      sendBodies.push(request.body!);
+      sendAttempts += 1;
+      if (sendAttempts === 1) throw new Error("response lost after product acceptance");
+      return { id: 99 };
+    });
+    const capture = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
+    controller.rateCapture({ ...capture, ratingId: "rating-1" });
+    await controller.commit({ captureId: capture.captureId, value: { text: "Exact" }, expectedRevision: 7 });
+
+    await expect(controller.send({})).rejects.toThrow("response lost after product acceptance");
+    await expect(controller.send({})).resolves.toEqual({ id: 99 });
+    expect(sendBodies).toHaveLength(2);
+    expect(sendBodies[0]!.inputId).toBe("capture-2");
+    expect(sendBodies[1]!.inputId).toBe(sendBodies[0]!.inputId);
+  });
+
+  it("reserves the Send write fence while an active capture is still settling", async () => {
+    const transport = vi.fn(async (path, request) => (
+      path.endsWith("attachments") ? draftResponse(actions.text, request, 8) : { id: 99 }
+    ));
+    const controller = createController(transport);
+    const commissioned = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
+    controller.rateCapture({ ...commissioned, ratingId: "rating-1" });
+    await controller.commit({ captureId: commissioned.captureId, value: { text: "Exact" }, expectedRevision: 7 });
+    const blocking = controller.beginCapture({
+      occurrence: { ...occurrence, actionId: 14 },
+      action: actions.text,
+      threadRevision: "thread-r1",
+    });
+
+    const send = controller.send({});
+    await Promise.resolve();
+    expect(controller.state().writeInFlight).toBe(true);
+    await expect(controller.send({})).rejects.toMatchObject({ code: "input_operator_write_active" });
+
+    controller.rateCapture({ ...blocking, ratingId: "rating-2" });
+    await expect(send).resolves.toEqual({ id: 99 });
+  });
+
   it("reads the current draft revision before an operator-commissioned optimistic commit", async () => {
     const requests: { path: string; method: string; body?: Readonly<Record<string, unknown>> }[] = [];
     const controller = createController(async (path, request) => {
@@ -152,6 +196,30 @@ describe("InputOperatorController", () => {
       .toThrow(expect.objectContaining({ code: "input_operator_write_active" }));
     releaseWrite();
     await commit;
+  });
+
+  it("reserves the write fence before waiting for an already-active capture", async () => {
+    const transport = vi.fn(async (_path, request) => draftResponse(actions.text, request, 1));
+    const controller = createController(transport);
+    const commissioned = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
+    controller.rateCapture({ ...commissioned, ratingId: "rating-1" });
+    const blocking = controller.beginCapture({
+      occurrence: { ...occurrence, actionId: 14 },
+      action: actions.text,
+      threadRevision: "thread-r1",
+    });
+
+    const commit = controller.commit({ captureId: commissioned.captureId, value: { text: "Exact" }, expectedRevision: 0 });
+    await Promise.resolve();
+    expect(() => controller.beginCapture({
+      occurrence: { ...occurrence, actionId: 15 },
+      action: actions.text,
+      threadRevision: "thread-r1",
+    })).toThrow(expect.objectContaining({ code: "input_operator_write_active" }));
+    expect(transport).not.toHaveBeenCalled();
+
+    controller.rateCapture({ ...blocking, ratingId: "rating-2" });
+    await expect(commit).resolves.toBe(1);
   });
 
   it("holds independent capture locks for two input actions on one node and commissions them atomically", async () => {

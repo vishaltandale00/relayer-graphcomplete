@@ -8,6 +8,7 @@ import {
 import {
   assertReviewOnlyCodexTrace,
   buildRecursivePresentationJudgePrompt,
+  buildSimulatedUserJudgePrompt,
   runSimulatedUserJudge,
   sanitizeJudgeEnvironment,
   type JudgeThreadResult,
@@ -15,12 +16,40 @@ import {
   type JudgeThreadStartRequest,
 } from "../src/simulated-user/judge-runner.js";
 import { inventoryReviewSubjects } from "../src/simulated-user/inventory.js";
-import { GRAPH_PRESENTATION_RUBRIC_V11 } from "../src/simulated-user/rubric.js";
+import {
+  GRAPH_PRESENTATION_RUBRIC_V10,
+  GRAPH_PRESENTATION_RUBRIC_V11,
+  SIMULATED_USER_RUBRIC_V1,
+} from "../src/simulated-user/rubric.js";
 import { IncrementalReviewStore } from "../src/simulated-user/review-store.js";
 import { RecursivePresentationReviewStore } from "../src/simulated-user/recursive-review.js";
 import type { LayerReview, NodeReview, TurnReview } from "../src/simulated-user/contracts.js";
 
 describe("simulated-user Codex judge runner", () => {
+  it("guides legacy judges through required input-action coverage", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-input",
+      rootLayerId: "layer-input",
+      layers: [{
+        id: "layer-input",
+        nodeIds: ["node-input"],
+        actions: [{
+          id: "action-input",
+          sourceNodeId: "node-input",
+          kind: "input",
+          control: "text",
+          prompt: "What deployment window should we use?",
+          options: [],
+        }],
+      }],
+    });
+
+    const prompt = buildSimulatedUserJudgePrompt("Prepare the deployment.", SIMULATED_USER_RUBRIC_V1, inventory);
+    expect(prompt).toContain("every visible navigate, invoke, or input action");
+    expect(prompt).toContain("prompt answerability, option-set quality, and control fit");
+    expect(prompt).toContain("structure.input");
+  });
+
   it("requires first-class artifact-grounded findings for materially absent actions", () => {
     const inventory = inventoryReviewSubjects({
       turnId: "turn-1",
@@ -31,6 +60,8 @@ describe("simulated-user Codex judge runner", () => {
       "Explain the completed repair.",
       GRAPH_PRESENTATION_RUBRIC_V11,
       inventory,
+      undefined,
+      true,
     );
 
     expect(prompt).toContain("A flat graph does not escape recursive judgment");
@@ -57,12 +88,55 @@ describe("simulated-user Codex judge runner", () => {
     expect(prompt).toContain("Two or more material missing opportunities cap all three at 4");
     expect(prompt).toContain("expand, reference, invoke, input, and stop");
     expect(prompt).toContain("before any answer is committed");
+    expect(prompt).toContain("input-action-<presentingInteractionNodeId>-<presentingLayerId>-<actionId>");
+    expect(prompt).not.toContain("`input-action-<actionId>`");
     expect(prompt).toContain("never end the turn immediately after reviewNode");
     expect(prompt).toContain("asking for what the artifact already states");
     expect(prompt).toContain("asking to dodge a judgment the node should have made");
     expect(prompt).toContain("fragmenting one decision into a separate question per node");
     expect(prompt).toContain("Necessity is an allocation counterweight, not an input-action quality score");
+    expect(prompt).toContain("single-select choices are mutually exclusive");
+    expect(prompt).toContain("multi-select choices are distinct and non-overlapping");
+    expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria.option_set_quality.description).toContain(
+      "Single-select options should be mutually exclusive",
+    );
+    expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria.option_set_quality.description).toContain(
+      "multi-select options should be distinct and non-overlapping",
+    );
     expect(prompt).not.toContain("Shell, filesystem, web, network, graph mutation, and invoke execution are unavailable");
+  });
+
+  it("keeps judge-only rerun instructions immutable when no input operator is available", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-input",
+      rootLayerId: "layer-input",
+      layers: [{
+        id: "layer-input",
+        nodeIds: ["node-input"],
+        actions: [{
+          id: "63",
+          sourceNodeId: "node-input",
+          kind: "input",
+          control: "text",
+          prompt: "What deployment window should we use?",
+          options: [],
+          occurrence: { presentingInteractionNodeId: 41, presentingLayerId: 52, actionId: 63 },
+        }],
+      }],
+    });
+
+    const prompt = buildRecursivePresentationJudgePrompt(
+      "Prepare the deployment.",
+      GRAPH_PRESENTATION_RUBRIC_V11,
+      inventory,
+      undefined,
+      false,
+    );
+    expect(prompt).toContain("No input operator is available for this judge-only rerun");
+    expect(prompt).toContain("remain immutable");
+    expect(prompt).not.toContain("provide one valid answer per action");
+    expect(prompt).not.toContain("activate `send-interaction`");
+    expect(prompt).not.toContain("commissions the answers");
   });
 
   it("starts a locked-down injected Codex thread and records an immutable audit artifact", async () => {
@@ -259,6 +333,53 @@ describe("simulated-user Codex judge runner", () => {
 
     expect(capturedPrompt).toContain("Graph-presentation rubric (graph-presentation-rubric-v11)");
     expect(capturedPrompt).toContain('"contractId": "recursive-presentation-judge-v6"');
+    expect(capturedPrompt).toContain("No input operator is available for this judge-only rerun");
+    expect(capturedPrompt).not.toContain("provide one valid answer per action");
+  });
+
+  it("rejects a historical rubric at the recursive v6 runner boundary before inference", async () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-recursive",
+      rootLayerId: "layer-recursive",
+      layers: [{ id: "layer-recursive", nodeIds: ["node-recursive"], actions: [] }],
+    });
+    const start = vi.fn<JudgeThreadFactory["start"]>();
+
+    await expect(runSimulatedUserJudge({
+      executionId: "execution-recursive",
+      originalRequest: "Review the response.",
+      configuration: {
+        model: "gpt-test",
+        modelReasoningEffort: "high",
+        rubric: GRAPH_PRESENTATION_RUBRIC_V10,
+      },
+      controller: unusedController(),
+      reviewStore: new RecursivePresentationReviewStore({ inventory }),
+      workingDirectory: process.cwd(),
+      threadFactory: { start },
+      mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
+    })).rejects.toThrow("Recursive presentation contract v6 requires graph-presentation-rubric-v11");
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("rejects the v11 recursive rubric with a legacy review store before inference", async () => {
+    const start = vi.fn<JudgeThreadFactory["start"]>();
+
+    await expect(runSimulatedUserJudge({
+      executionId: "execution-legacy",
+      originalRequest: "Review the response.",
+      configuration: {
+        model: "gpt-test",
+        modelReasoningEffort: "high",
+        rubric: GRAPH_PRESENTATION_RUBRIC_V11,
+      },
+      controller: unusedController(),
+      reviewStore: finalizedStore(),
+      workingDirectory: process.cwd(),
+      threadFactory: { start },
+      mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
+    })).rejects.toThrow("graph-presentation-rubric-v11 requires recursive presentation contract v6");
+    expect(start).not.toHaveBeenCalled();
   });
 });
 

@@ -37,6 +37,9 @@ describe("simulated-user MCP server", () => {
     const tools = await client.listTools();
     expect(tools.tools.map(({ name }) => name)).toEqual(SIMULATED_USER_MCP_TOOL_NAMES);
     expect(tools.tools.every((tool) => !["shell", "openLayer", "scroll"].includes(tool.name))).toBe(true);
+    expect(tools.tools.find(({ name }) => name === "reviewNode")?.description).toContain(
+      "input-action criteria and structure.input",
+    );
     await transport.close();
   });
 
@@ -139,7 +142,7 @@ describe("simulated-user MCP server", () => {
       { selectedKey: "preview" },
       { selectedKeys: ["unit", "electron"] },
     ]) {
-      const result = await client.callTool({ name: "interact", arguments: { elementRef: "input-action-9", value } });
+      const result = await client.callTool({ name: "interact", arguments: { elementRef: "input-action-41-52-9", value } });
       expect(result.structuredContent).toMatchObject({ ok: true, operator: { operation: "input_commit" } });
     }
     expect(interact.mock.calls.map(([input]) => input.value)).toEqual([

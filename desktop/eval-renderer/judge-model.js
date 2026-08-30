@@ -44,9 +44,13 @@ function presentationReview(review, kind) {
     };
   }
   if (kind === "action" && review.kind && "allocationStep" in review) {
+    const criterionJudgments = review.kind === "input" ? review.inputActionJudgments : undefined;
     return {
       ...review,
-      ratings: {},
+      ratings: criterionJudgments
+        ? Object.fromEntries(Object.entries(criterionJudgments).map(([key, judgment]) => [key, judgment?.score ?? null]))
+        : {},
+      ...(criterionJudgments ? { criterionJudgments } : {}),
       summary: [review.labelAndPlacement, review.delivery, review.recursiveContribution].filter(Boolean).join(" "),
       findings: [],
     };
@@ -90,6 +94,7 @@ export function evidenceIdsForReview(review) {
   collectEvidence(review.semantic?.evidence, evidence);
   for (const step of asArray(review.allocationSteps)) collectEvidence(step?.evidence, evidence);
   for (const action of asArray(review.actions)) collectEvidence(action?.evidence, evidence);
+  collectEvidence(review.criterionJudgments, evidence);
   collectEvidence(review.scoreCeiling?.evidence, evidence);
   return [...evidence];
 }

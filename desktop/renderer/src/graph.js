@@ -103,6 +103,7 @@ function workspace() {
     annotationApi,
     contextDraftApi: nextMode === "interactive" ? createNodeContextDraftApi() : null,
     inputDraftApi: nextMode === "interactive" ? createNodeInputDraftApi() : null,
+    inputOperatorAvailable: nextMode === "review" && query.get("inputOperator") === "1",
   });
   return productWorkspace;
 }

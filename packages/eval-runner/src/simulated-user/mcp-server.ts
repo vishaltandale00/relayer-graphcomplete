@@ -536,7 +536,7 @@ function createMcpServer(
   }));
 
   server.registerTool("reviewNode", {
-    description: "Create or revise one node assessment, including every visible action and whether expansion, reference, or invoke affordances are needed even when absent.",
+    description: "Create or revise one node assessment, including every visible action, input-action criteria and structure.input, and whether expansion, reference, invoke, or input affordances are needed even when absent.",
     inputSchema: z.object({ review: nodeReviewSchema }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ review }) => traced(trace, now, "reviewNode", { review }, async () => {

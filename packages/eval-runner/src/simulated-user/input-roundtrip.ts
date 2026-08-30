@@ -25,6 +25,7 @@ export interface InputRoundTripCheck {
     | `input-roundtrip:normalized-harness-input:action-${number}`
     | "input-roundtrip:required-control-inventory"
     | "input-roundtrip:complete-commit-set"
+    | "input-roundtrip:exact-materialized-input-set"
     | "input-roundtrip:visible-follow-up-use";
   readonly passed: boolean;
   readonly detail: string;
@@ -36,6 +37,7 @@ export interface InputRoundTripControlIdentity {
   readonly sourceNodeId: number;
   readonly actionId: number;
   readonly control: "text" | "single_select" | "multi_select";
+  readonly prompt: string;
   readonly options: readonly InputOptionSnapshot[];
   readonly minimumSelections?: number;
 }
@@ -241,6 +243,40 @@ export function gradeInputRoundTrip(
   return { passed: checks.every((check) => check.passed), checks };
 }
 
+export function gradeInputRoundTripSet(
+  expectations: readonly InputRoundTripExpectation[],
+  evidence: InputRoundTripEvidence,
+): { readonly passed: boolean; readonly checks: readonly InputRoundTripCheck[] } {
+  if (expectations.length === 0) throw new Error("Input round-trip set requires at least one commissioned input.");
+  expectations.forEach(validateExpectation);
+  const perInputChecks = expectations.flatMap((expectation) => gradeInputRoundTrip(expectation, evidence).checks);
+  const expectedSemantic = expectations.map(({ action, value }) => ({ action, value }));
+  const expectedChildren = expectations.map((expectation) => ({
+    occurrence: expectation.occurrence,
+    parentInteractionNodeId: evidence.interaction.graphNodeId,
+    sourceNodeId: expectation.sourceNodeId,
+    action: expectation.action,
+    value: expectation.value,
+  }));
+  const actualChildren = evidence.inputChildren.map(childSetIdentity);
+  const traceSets = evidence.harnessTraceEvents.flatMap(normalizedInputSetsFromTraceEvent);
+  const exact = evidence.authoredAccepted
+    && positiveId(evidence.interaction.graphNodeId)
+    && sameCanonicalMultiset(evidence.interaction.submittedInputs, expectedSemantic)
+    && !actualChildren.includes(null)
+    && sameCanonicalMultiset(actualChildren, expectedChildren)
+    && traceSets.some((inputs) => sameCanonicalMultiset(inputs, expectedSemantic));
+  const exactCheck: InputRoundTripCheck = {
+    name: "input-roundtrip:exact-materialized-input-set",
+    passed: exact,
+    detail: exact
+      ? "Submitted inputs, provenance-exact children, and normalized harness context equal the complete commissioned multiset."
+      : "Submitted inputs, input children, or normalized harness context contain a missing, extra, duplicate, or mismatched commissioned value.",
+  };
+  const checks = [...perInputChecks, exactCheck];
+  return { passed: checks.every(({ passed }) => passed), checks };
+}
+
 export function gradeInputRoundTripControlSet(
   authored: readonly InputRoundTripControlIdentity[],
   committed: readonly InputRoundTripControlIdentity[],
@@ -264,12 +300,15 @@ export function gradeInputRoundTripControlSet(
     && authored.every(({ presentingInteractionNodeId, presentingLayerId, sourceNodeId, actionId }) => (
       [presentingInteractionNodeId, presentingLayerId, sourceNodeId, actionId].every(positiveId)
     ))
-    && text !== undefined && text.options.length === 0 && text.minimumSelections === undefined
-    && single !== undefined && single.minimumSelections === undefined && exactOptions(single.options, [
+    && text !== undefined && requiredDecisionPrompt(text.control, text.prompt)
+    && text.options.length === 0 && text.minimumSelections === undefined
+    && single !== undefined && requiredDecisionPrompt(single.control, single.prompt)
+    && single.minimumSelections === undefined && exactOptions(single.options, [
       { key: "canary", label: "Canary" },
       { key: "full-rollout", label: "Full rollout" },
     ])
-    && multi !== undefined && multi.minimumSelections === 2 && exactOptions(multi.options, [
+    && multi !== undefined && requiredDecisionPrompt(multi.control, multi.prompt)
+    && multi.minimumSelections === 2 && exactOptions(multi.options, [
       { key: "health-metrics", label: "Health metrics" },
       { key: "logs", label: "Logs" },
       { key: "synthetic-checks", label: "Synthetic checks" },
@@ -299,6 +338,31 @@ export function gradeInputRoundTripControlSet(
   return { passed: checks.every(({ passed }) => passed), checks };
 }
 
+function requiredDecisionPrompt(
+  control: InputRoundTripControlIdentity["control"],
+  prompt: string,
+): boolean {
+  if (typeof prompt !== "string") return false;
+  const tokens = prompt.normalize("NFKC").toLocaleLowerCase("en-US").split(/[^a-z0-9]+/u).filter(Boolean);
+  const words = new Set(tokens);
+  const asksForDecision = (verbs: readonly string[]): boolean => {
+    const decisionVerb = verbs.some((verb) => words.has(verb));
+    const interrogative = ["what", "which", "when"].some((word) => words.has(word));
+    const imperative = tokens.length > 0 && verbs.includes(tokens[0]!);
+    return decisionVerb && ((prompt.includes("?") && interrogative) || imperative);
+  };
+  if (control === "text") {
+    return words.has("deployment") && words.has("window")
+      && asksForDecision(["choose", "enter", "prefer", "schedule", "select", "set", "target", "use"]);
+  }
+  if (control === "single_select") {
+    return words.has("rollout") && words.has("strategy")
+      && asksForDecision(["adopt", "choose", "follow", "prefer", "select", "use"]);
+  }
+  return words.has("validation") && (words.has("signal") || words.has("signals"))
+    && asksForDecision(["choose", "monitor", "select", "track", "use", "watch"]);
+}
+
 function validateExpectation(expectation: InputRoundTripExpectation): void {
   if (!Object.values(expectation.occurrence).every((id) => positiveId(id)) || !positiveId(expectation.sourceNodeId)) {
     throw new Error("Input round-trip expectation requires positive provenance identities.");
@@ -309,6 +373,10 @@ function validateExpectation(expectation: InputRoundTripExpectation): void {
 }
 
 function normalizedInputsFromTraceEvent(event: unknown): unknown[] {
+  return normalizedInputSetsFromTraceEvent(event).flat();
+}
+
+function normalizedInputSetsFromTraceEvent(event: unknown): unknown[][] {
   if (!isRecord(event) || event.type !== "prompt" || !isRecord(event.data) || typeof event.data.text !== "string") return [];
   const marker = "Normalized interaction input:\n";
   const start = event.data.text.indexOf(marker);
@@ -317,10 +385,27 @@ function normalizedInputsFromTraceEvent(event: unknown): unknown[] {
   if (json === null) return [];
   try {
     const parsed: unknown = JSON.parse(json);
-    return isRecord(parsed) && Array.isArray(parsed.submittedInputs) ? parsed.submittedInputs : [];
+    return isRecord(parsed) && Array.isArray(parsed.submittedInputs) ? [parsed.submittedInputs] : [];
   } catch {
     return [];
   }
+}
+
+function childSetIdentity(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return null;
+  return {
+    occurrence: candidate.occurrence ?? occurrenceFromFlatChild(candidate),
+    parentInteractionNodeId: candidate.parentInteractionNodeId,
+    sourceNodeId: candidate.sourceNodeId,
+    action: candidate.action,
+    value: candidate.value,
+  };
+}
+
+function sameCanonicalMultiset(actual: readonly unknown[], expected: readonly unknown[]): boolean {
+  if (actual.length !== expected.length) return false;
+  const canonicalOrder = (values: readonly unknown[]) => values.map(canonical).sort();
+  return canonical(canonicalOrder(actual)) === canonical(canonicalOrder(expected));
 }
 
 function extractJsonObject(text: string, offset: number): string | null {

@@ -63,6 +63,7 @@ export interface InputOperatorState {
     readonly failure: "capture_failed" | "capture_timeout" | null;
   }[];
   readonly committedDraftRevision: number | null;
+  readonly pendingSendInputId: string | null;
 }
 
 export class InputOperatorError extends Error {
@@ -98,6 +99,7 @@ export class InputOperatorController {
   readonly #activeCaptureIds = new Set<string>();
   #writeInFlight = false;
   #committedDraftRevision: number | null = null;
+  #pendingSendInputId: string | null = null;
 
   constructor(options: InputOperatorOptions) {
     if (options.authority.kind !== "scoped_product_write") {
@@ -254,15 +256,23 @@ export class InputOperatorController {
     readonly text?: string;
     readonly modelSelection?: Readonly<Record<string, unknown>>;
   }): Promise<unknown> {
-    const inputId = input.inputId ?? this.#createId();
-    if (!inputId.trim()) {
+    if (input.inputId !== undefined && !input.inputId.trim()) {
       throw new InputOperatorError("input_operator_input_id_required", "Send requires a stable input identity.");
     }
+    if (this.#pendingSendInputId !== null
+      && input.inputId !== undefined
+      && input.inputId !== this.#pendingSendInputId) {
+      throw new InputOperatorError(
+        "input_operator_input_id_conflict",
+        "Retry the ambiguous Send with its original stable input identity.",
+      );
+    }
+    const inputId = this.#pendingSendInputId ?? input.inputId ?? this.#createId();
     const revision = this.#committedDraftRevision;
     if (revision === null) {
       throw new InputOperatorError("input_operator_commit_required", "At least one commissioned input must be committed before Send.");
     }
-    await this.#waitForCaptureRelease();
+    this.#pendingSendInputId = inputId;
     const response = await this.#withWriteFence(() => this.#transport.request(
       `/api/threads/${encodeURIComponent(String(this.authority.threadId))}/interactions`,
       {
@@ -276,6 +286,7 @@ export class InputOperatorController {
       },
     ));
     this.#committedDraftRevision = null;
+    this.#pendingSendInputId = null;
     return response;
   }
 
@@ -293,6 +304,7 @@ export class InputOperatorController {
         failure: record.failure,
       })),
       committedDraftRevision: this.#committedDraftRevision,
+      pendingSendInputId: this.#pendingSendInputId,
     };
   }
 
@@ -322,12 +334,12 @@ export class InputOperatorController {
   }
 
   async #withWriteFence<Output>(write: () => Promise<Output>): Promise<Output> {
-    await this.#waitForCaptureRelease();
     if (this.#writeInFlight) {
       throw new InputOperatorError("input_operator_write_active", "Only one operator write may be in flight.");
     }
     this.#writeInFlight = true;
     try {
+      await this.#waitForCaptureRelease();
       return await write();
     } finally {
       this.#writeInFlight = false;

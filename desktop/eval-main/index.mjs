@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { nativeBinaryName } from "../shared/target.mjs";
 
 import {
-  gradeInputRoundTrip,
+  gradeInputRoundTripSet,
   gradeInputRoundTripControlSet,
   InputOperatorController,
   runInputGroundingJudge,
@@ -23,7 +23,11 @@ import { ReviewSession } from "./review-session.mjs";
 import { loadReadyReviewWorkspace } from "./review-workspace-readiness.mjs";
 import {
   LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION as LOCAL_INPUT_GROUNDING_JUDGE_CONFIGURATION,
+  createInputOperatorLease,
   createLocalSimulatedUserJudgeRunner,
+  groundingRootNodeIds,
+  operatorInteractionIsTerminal,
+  releaseInputOperatorLease,
   resolveLocalSimulatedUserAutorun,
 } from "./simulated-user-judge.mjs";
 import {
@@ -377,6 +381,7 @@ async function openAutomatedReviewSession({
   turnId,
   rootLayerId,
   artifactDirectory,
+  inputOperatorAvailable = false,
 }) {
   const context = evalService.reviewContext(executionId);
   const executionCase = context.cases.find((item) => item.executionId === executionId);
@@ -399,6 +404,7 @@ async function openAutomatedReviewSession({
     ipc: ipcMain,
     url: `${entry.productOrigin}/?threadId=${encodeURIComponent(threadId)}`
       + `&interactionId=${encodeURIComponent(turnId)}&review=1`
+      + `${inputOperatorAvailable ? "&inputOperator=1" : ""}`
       + `&reviewSession=${encodeURIComponent(navigationToken)}`,
     expected: {
       executionId,
@@ -515,16 +521,7 @@ async function start() {
       + `/layers/${encodeURIComponent(layerId)}`
     )),
     openReviewSession: openAutomatedReviewSession,
-    createInputOperator: ({ context }) => new InputOperatorController({
-      authority: {
-        kind: "scoped_product_write",
-        threadId: context.thread.id,
-        authorityId: `eval-input-operator:${context.execution.id}:${context.turn.id}`,
-      },
-      transport: {
-        request: (path, request) => operatorProductRequest(productSession, path, request),
-      },
-    }),
+    createInputOperator: (input) => createScopedInputOperator(productSession, input),
     captureInputRoundTrip: (input) => captureInputRoundTripEvidence(productSession, input),
   });
   evalService = await new EvalService({
@@ -572,14 +569,77 @@ async function productRequest(session, path) {
   return value;
 }
 
-async function operatorProductRequest(session, path, request) {
+async function createScopedInputOperator(session, { context, inputBindings }) {
+  const occurrences = [...new Map([...inputBindings.values()].map((binding) => [
+    JSON.stringify(binding.occurrence),
+    binding.occurrence,
+  ])).values()];
+  if (occurrences.length === 0) return undefined;
+  const authorityId = `eval-input-operator:${context.execution.id}:${context.turn.id}`;
+  const token = randomBytes(32).toString("hex");
+  const operator = new InputOperatorController({
+    authority: {
+      kind: "scoped_product_write",
+      threadId: context.thread.id,
+      authorityId,
+    },
+    transport: {
+      request: (path, request) => operatorProductRequest(session, token, path, request),
+    },
+  });
+  const lease = createInputOperatorLease({
+    operator,
+    revoke: () => controlProductRequest(session, "/api/internal/input-operator-sessions", {
+      method: "DELETE",
+      body: { token },
+    }),
+  });
+  try {
+    await controlProductRequest(session, "/api/internal/input-operator-sessions", {
+      method: "POST",
+      body: {
+        token,
+        threadId: Number(context.thread.id),
+        occurrences,
+      },
+    });
+  } catch (registrationError) {
+    try {
+      await releaseInputOperatorLease(lease);
+    } catch (revocationError) {
+      throw new AggregateError(
+        [registrationError, revocationError],
+        "Input operator session registration failed and its credential could not be revoked.",
+      );
+    }
+    throw registrationError;
+  }
+  return lease;
+}
+
+async function controlProductRequest(session, path, request) {
   const cookie = session.cookie;
-  if (!cookie) throw new Error("Relayer Eval input operator write authority is unavailable.");
+  if (!cookie) throw new Error("Relayer Eval product control authority is unavailable.");
+  return productWriteRequest(session, path, request, `${cookie.name}=${cookie.value}`);
+}
+
+async function operatorProductRequest(session, token, path, request) {
+  const cookie = session.readOnlyCookie;
+  if (!cookie) throw new Error("Relayer Eval read-only input operator authority is unavailable.");
+  return productWriteRequest(
+    session,
+    path,
+    request,
+    `${cookie.name}=${cookie.value}; relayer_input_operator=${token}`,
+  );
+}
+
+async function productWriteRequest(session, path, request, cookieHeader) {
   const response = await fetch(new URL(path, session.origin), {
     method: request.method,
     headers: {
       Accept: "application/json",
-      Cookie: `${cookie.name}=${cookie.value}`,
+      Cookie: cookieHeader,
       ...(request.body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
@@ -630,6 +690,7 @@ async function captureInputRoundTripEvidence(session, { context, topology, opera
       sourceNodeId: Number(action.sourceNodeId),
       actionId: Number(action.id),
       control: action.control,
+      prompt: action.prompt,
       options: action.options ?? [],
       ...(action.minimumSelections === undefined ? {} : { minimumSelections: action.minimumSelections }),
     })));
@@ -639,33 +700,32 @@ async function captureInputRoundTripEvidence(session, { context, topology, opera
     sourceNodeId: Number(commit.sourceNodeId),
     actionId: Number(commit.occurrence.actionId),
     control: commit.action.control,
+    prompt: commit.action.prompt,
     options: commit.action.options ?? [],
     ...(commit.action.minimumSelections === undefined ? {} : { minimumSelections: commit.action.minimumSelections }),
   })));
-  const results = commits.map((commit) => {
-    const authoredAccepted = topology.layers.some((layer) => layer.actions.some((action) => (
+  const authoredAccepted = commits.every((commit) => topology.layers.some((layer) => layer.actions.some((action) => (
       action.kind === "input"
       && String(action.id) === String(commit.occurrence.actionId)
       && String(layer.id) === String(commit.occurrence.presentingLayerId)
       && action.occurrence?.presentingInteractionNodeId === commit.occurrence.presentingInteractionNodeId
-    )));
-    return gradeInputRoundTrip({
+    ))));
+  const roundTripSet = gradeInputRoundTripSet(commits.map((commit) => ({
       occurrence: commit.occurrence,
       sourceNodeId: commit.sourceNodeId,
       action: commit.action,
       value: commit.value,
-    }, {
-      authoredAccepted,
-      interaction: {
-        id: interaction.id,
-        graphNodeId: interaction.graphNodeId,
-        submittedInputs: interaction.submittedInputs ?? [],
-      },
-      inputChildren: childrenResponse.children ?? [],
-      harnessTraceEvents: traceEvents,
-    });
+    })), {
+    authoredAccepted,
+    interaction: {
+      id: interaction.id,
+      graphNodeId: interaction.graphNodeId,
+      submittedInputs: interaction.submittedInputs ?? [],
+    },
+    inputChildren: childrenResponse.children ?? [],
+    harnessTraceEvents: traceEvents,
   });
-  const structuralPassed = controlSet.passed && results.every((result) => result.passed);
+  const structuralPassed = controlSet.passed && roundTripSet.passed;
   const groundingRating = structuralPassed
     ? await captureInputGroundingRating({ context, interaction, commits, artifactDirectory })
     : null;
@@ -685,7 +745,7 @@ async function captureInputRoundTripEvidence(session, { context, topology, opera
     candidateTrace: descriptor,
     operatorTrace,
     passed: structuralPassed && groundingPassed,
-    checks: [...controlSet.checks, ...results.flatMap((result) => result.checks), groundingCheck],
+    checks: [...controlSet.checks, ...roundTripSet.checks, groundingCheck],
     ...(groundingRating === null ? {} : { groundingRating }),
   };
 }
@@ -705,42 +765,57 @@ async function captureInputGroundingRating({ context, interaction, commits, arti
       rootLayerId,
       artifactDirectory: screenshotDirectory,
     });
-    const rootNodeId = interaction.completionOutput?.rootLayer?.nodes?.[0]?.id;
-    if (rootNodeId) {
+    const rootNodeIds = groundingRootNodeIds(interaction);
+    const captures = [];
+    for (const [index, rootNodeId] of rootNodeIds.entries()) {
       await opened.session.interact({ elementRef: `node-${rootNodeId}`, activate: true });
+      captures.push(await opened.session.screenshot({
+        target: { kind: "element", elementRef: "node-detail" },
+        mode: "full",
+        label: `Input round-trip response root ${index + 1}`,
+      }));
     }
-    const captured = await opened.session.screenshot({
-      target: rootNodeId
-        ? { kind: "element", elementRef: "node-detail" }
-        : { kind: "viewport" },
-      mode: rootNodeId ? "full" : "visible",
-      label: "Input round-trip response detail",
+    if (captures.length === 0) {
+      captures.push(await opened.session.screenshot({
+        target: { kind: "viewport" },
+        mode: "visible",
+        label: "Input round-trip response",
+      }));
+    }
+    if (captures.some((capture) => !capture?.ok || !capture.screenshot?.screenshotId)) {
+      throw new Error("Production review workspace did not capture every input response root.");
+    }
+    const screenshots = captures.map(({ screenshot }) => screenshot);
+    if (new Set(screenshots.map(({ threadRevision }) => threadRevision)).size !== 1) {
+      throw new Error("Input grounding captures do not share one stable response revision.");
+    }
+    const groundingImages = screenshots.flatMap((screenshot) => {
+      const directory = opened.session.artifactDirectoryFor(screenshot.screenshotId);
+      if (!directory) throw new Error("Input grounding screenshot artifact directory is missing.");
+      return [...screenshot.tiles]
+        .sort((left, right) => left.index - right.index)
+        .map((tile) => ({
+          screenshotId: screenshot.screenshotId,
+          path: join(
+            directory,
+            `${screenshot.screenshotId}-${String(tile.index + 1).padStart(3, "0")}.png`,
+          ),
+        }));
     });
-    if (!captured?.ok || !captured.screenshot?.screenshotId) {
-      throw new Error("Production review workspace did not capture the input response.");
-    }
-    const screenshot = captured.screenshot;
-    const directory = opened.session.artifactDirectoryFor(screenshot.screenshotId);
-    if (!directory) throw new Error("Input grounding screenshot artifact directory is missing.");
-    const imagePaths = [...screenshot.tiles]
-      .sort((left, right) => left.index - right.index)
-      .map((tile) => join(
-        directory,
-        `${screenshot.screenshotId}-${String(tile.index + 1).padStart(3, "0")}.png`,
-      ));
+    const imagePaths = groundingImages.map(({ path }) => path);
     const runtime = await managedCodexRuntime.resolve();
     return await runInputGroundingJudge({
       submittedInput: commits.length === 1
         ? commits[0].value
         : { values: commits.map((commit) => commit.value) },
       screenshot: {
-        screenshotId: screenshot.screenshotId,
-        threadRevision: screenshot.threadRevision,
+        screenshotId: screenshots.map(({ screenshotId }) => screenshotId).join("+"),
+        threadRevision: screenshots[0].threadRevision,
         imagePaths,
-        imageRefs: imagePaths.map((path) => [
+        imageRefs: groundingImages.map(({ path, screenshotId }) => [
           "input-roundtrip",
           "grounding-screenshot",
-          screenshot.screenshotId,
+          screenshotId,
           path.split(/[\\/]/).at(-1),
         ].join("/")),
       },
@@ -767,7 +842,7 @@ async function waitForOperatorInteraction(session, threadId, interactionId) {
     const detail = await productRequest(session, `/api/threads/${encodeURIComponent(threadId)}`);
     const interaction = detail.interactions?.find((candidate) => Number(candidate.id) === interactionId);
     if (!interaction) throw new Error(`Input operator interaction ${interactionId} disappeared.`);
-    if (["accepted", "failed", "stopped"].includes(interaction.completionStatus)) return interaction;
+    if (operatorInteractionIsTerminal(interaction.completionStatus)) return interaction;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`Timed out waiting for input operator interaction ${interactionId}.`);

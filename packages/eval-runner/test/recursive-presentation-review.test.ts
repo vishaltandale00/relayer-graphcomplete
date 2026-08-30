@@ -23,7 +23,14 @@ const ratings = {
 } as const;
 const screenshotDigest = `sha256:${"a".repeat(64)}` as const;
 
-function screenshotMetadata(screenshotId: string, layerId: string, selectedNodeId: string | null, viaActionId: string | null): ScreenshotMetadata {
+function screenshotMetadata(
+  screenshotId: string,
+  layerId: string,
+  selectedNodeId: string | null,
+  viaActionId: string | null,
+  captureTarget: ScreenshotMetadata["captureTarget"] = { kind: "viewport" },
+  mode: ScreenshotMetadata["mode"] = "visible",
+): ScreenshotMetadata {
   return {
     schemaVersion: 1,
     screenshotId,
@@ -38,9 +45,9 @@ function screenshotMetadata(screenshotId: string, layerId: string, selectedNodeI
       ...(layerId === "root" ? [] : [{ layerId, viaActionId }]),
     ],
     label: screenshotId,
-    mode: "visible",
+    mode,
     viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
-    captureTarget: { kind: "viewport" },
+    captureTarget,
     tileCount: 1,
     tiles: [{ index: 0, width: 1200, height: 800, contentDigest: screenshotDigest }],
     contentDigest: screenshotDigest,
@@ -223,12 +230,17 @@ describe("recursive semantic presentation review", () => {
         id: "layer-input",
         nodeIds: ["node-input"],
         actions: [{
-          id: "action-input",
+          id: "63",
           sourceNodeId: "node-input",
           kind: "input",
           control: "text",
           prompt: "What deployment window should we use?",
           options: [],
+          occurrence: {
+            presentingInteractionNodeId: 41,
+            presentingLayerId: 52,
+            actionId: 63,
+          },
         }],
       }],
     });
@@ -245,7 +257,7 @@ describe("recursive semantic presentation review", () => {
           ranking: ranking("input"),
           preferredChoice: "input",
           authoredChoice: "input",
-          authoredActionId: "action-input",
+          authoredActionId: "63",
           margin: "necessary",
           selectionFinding: "The user owns the deployment-window decision.",
           evidence: ["shot-input"],
@@ -262,7 +274,7 @@ describe("recursive semantic presentation review", () => {
         },
       ],
       actions: [{
-        actionId: "action-input",
+        actionId: "63",
         kind: "input",
         allocationStep: 0,
         labelAndPlacement: "The question is presented at its decision point.",
@@ -272,7 +284,7 @@ describe("recursive semantic presentation review", () => {
         reusedLayerId: null,
         evidence: ["shot-input"],
         inputActionJudgments: {
-          prompt_answerability: judgment(8, ["shot-input"]),
+          prompt_answerability: judgment(8, ["shot-input-criterion"]),
           option_set_quality: judgment(8, ["shot-input"]),
           control_fit: judgment(8, ["shot-input"]),
         },
@@ -299,6 +311,18 @@ describe("recursive semantic presentation review", () => {
     })).toThrow("requires input-action judgments");
 
     const selected = { ...screenshotMetadata("shot-input", "layer-input", "node-input", null), turnId: "turn-input" };
+    const capturedControl = {
+      ...screenshotMetadata(
+        "shot-input",
+        "layer-input",
+        "node-input",
+        null,
+        { kind: "element", elementRef: "input-action-41-52-63" },
+        "full",
+      ),
+      turnId: "turn-input",
+    };
+    const capturedCriterion = { ...capturedControl, screenshotId: "shot-input-criterion" };
     const layerOnly = { ...selected, selectedNodeId: null };
     const subject = inventory.nodes[0]!;
     const actionSubjects = inventory.actions;
@@ -311,7 +335,38 @@ describe("recursive semantic presentation review", () => {
     expect(() => validator(layerOnly)({ kind: "node", subject, actionSubjects, review })).toThrow(
       "rendered controls",
     );
-    expect(() => validator(selected)({ kind: "node", subject, actionSubjects, review })).not.toThrow();
+    expect(() => validator(selected)({ kind: "node", subject, actionSubjects, review })).toThrow(
+      "rendered controls",
+    );
+    const otherOccurrence = {
+      ...capturedControl,
+      captureTarget: { kind: "element" as const, elementRef: "input-action-42-52-63" },
+    };
+    expect(() => validator(otherOccurrence)({ kind: "node", subject, actionSubjects, review })).toThrow(
+      "rendered controls",
+    );
+    const captured = createRecursiveScreenshotEvidenceValidator({
+      executionId: "execution-1",
+      threadId: "thread-1",
+      turnId: "turn-input",
+      screenshots: new Map([
+        [capturedControl.screenshotId, capturedControl],
+        [capturedCriterion.screenshotId, capturedCriterion],
+      ]),
+    });
+    expect(() => captured({ kind: "node", subject, actionSubjects, review })).not.toThrow();
+
+    const representative = {
+      ...turnReview(layerResult("layer-input", 0, review)),
+      evidence: { representative: ["shot-input-criterion"] },
+      scoreCeiling: { maximum: 8 as const, reason: "No critical omission.", evidence: ["shot-input-criterion"] },
+    };
+    expect(() => captured({
+      kind: "turn",
+      review: representative,
+      currentLayerReviews: [],
+      currentNodeReviews: [review],
+    })).not.toThrow();
   });
 
   it("requires bottom-up LayerResults and preserves aligned eight-slot vectors", () => {
