@@ -309,15 +309,23 @@ or additive discriminants; old accepted actions retain identical reads. Unknown 
 control variants fail closed before acceptance instead of degrading to navigation, invocation, or
 plain text.
 
-Conversation V1 gains an optional additive `inputs` collection on a turn. Each entry uses
-export-local IDs and snapshots the child semantic content plus authority-free provenance. Entries
-are sorted canonically; repeated exported snapshots use the existing export-local deduplication
-rules. Unsent drafts, producer database IDs, paths, attempt keys, capability data, and local
-authority never export. Import allocates fresh inert child IDs, preserves accepted, failed,
-cancelled, and stopped attempt evidence, and cannot create a draft, capability, invocation, or
-completion. Absence of `inputs` means no child input, so old exports remain valid. An older reader
-that cannot ignore the additive field must reject the new document before mutation; silently
-flattening or dropping submitted input is not safe degradation.
+Conversation V1 gains an optional additive input payload on accepted `input` action records and an
+optional additive `inputs` collection on a turn. The action payload preserves authored controls
+even when no consuming turn answered them. Each child entry uses export-local IDs and snapshots the
+child semantic content plus authority-free provenance. Entries are sorted canonically; repeated
+exported snapshots use the existing export-local deduplication rules. Unsent drafts, producer
+database IDs, paths, attempt keys, capability data, and local authority never export. Import
+allocates fresh inert child IDs, preserves accepted, failed, cancelled, and stopped attempt
+evidence, and cannot create a draft, capability, invocation, or completion. Absence of `inputs`
+means no child input, so old exports remain valid. An older reader that cannot ignore the additive
+fields must reject the new document before mutation; silently flattening or dropping submitted
+input is not safe degradation.
+
+When import drops a submitted child whose occurrence, action snapshot, source node, or value cannot
+be proven, the publish receipt reports the child with a stable validation `code`, source `path`, and
+human-readable `message`. The sanitized portable turn is validated again before product state is
+written; if the removed child was the only valid content of an accepted or nonterminal turn, the
+entire staged import is cleaned up instead of publishing history that cannot be re-exported.
 
 Ordinary history stays compact and shows submitted input only under the consuming interaction.
 Selecting an earlier or later use of the same source action resolves that turn's immutable child

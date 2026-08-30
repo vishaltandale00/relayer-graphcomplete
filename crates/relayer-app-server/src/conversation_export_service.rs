@@ -980,7 +980,51 @@ fn export_action(
             None
         },
         interaction_text: redactor.optional(action.interaction_text.as_deref()),
+        input: action
+            .input
+            .as_ref()
+            .map(|input| export_input_action(input, redactor))
+            .transpose()?,
         state: ExportRecordState::Accepted,
+    })
+}
+
+fn export_input_action(
+    input: &relayer_graph_core::InputAction,
+    redactor: &ProjectPathRedactor,
+) -> Result<ExportInputActionSnapshot, ConversationExportBuildError> {
+    let control = match input.control {
+        relayer_graph_core::InputControl::Text => ExportInputControl::Text,
+        relayer_graph_core::InputControl::SingleSelect => ExportInputControl::SingleSelect,
+        relayer_graph_core::InputControl::MultiSelect => ExportInputControl::MultiSelect,
+        relayer_graph_core::InputControl::Unsupported => {
+            return Err(ConversationExportBuildError::Invalid(
+                "accepted input action has an unsupported control".into(),
+            ));
+        }
+    };
+    Ok(ExportInputActionSnapshot {
+        control,
+        prompt: redactor.text(&input.prompt),
+        options: input
+            .options
+            .iter()
+            .map(|option| ExportInputOption {
+                key: redactor.text(&option.key),
+                label: redactor.text(&option.label),
+                unsupported_fields: Default::default(),
+            })
+            .collect(),
+        minimum_selections: input
+            .minimum_selections
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| {
+                ConversationExportBuildError::Invalid(
+                    "accepted input action minimum exceeds portable range".into(),
+                )
+            })?,
+        unsupported_fields: Default::default(),
     })
 }
 
@@ -1442,6 +1486,50 @@ mod tests {
             exported.interaction_text.as_deref(),
             Some("Continue from here")
         );
+    }
+
+    #[test]
+    fn unanswered_input_action_exports_its_authored_payload() {
+        let action = GraphAction {
+            id: ActionId::new(1).unwrap(),
+            source_node_id: NodeId::new(2).unwrap(),
+            source_layer_id: Some(LayerId::new(3).unwrap()),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Choose".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::SingleSelect,
+                prompt: "Choose /workspace/project/target".into(),
+                options: vec![InputOption {
+                    key: "one".into(),
+                    label: "First /workspace/project target".into(),
+                    unsupported_fields: Default::default(),
+                }],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            }),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_action(
+            &action,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some("/workspace/project")),
+        )
+        .unwrap();
+
+        let input = exported.input.unwrap();
+        assert_eq!(
+            input.control,
+            crate::conversation_export::ExportInputControl::SingleSelect
+        );
+        assert_eq!(input.prompt, "Choose [project-path]/target");
+        assert_eq!(input.options[0].label, "First [project-path] target");
     }
 
     #[test]

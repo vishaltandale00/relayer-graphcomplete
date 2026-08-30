@@ -424,6 +424,8 @@ pub struct ExportAction {
     pub target_layer_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ExportInputActionSnapshot>,
     pub state: ExportRecordState,
 }
 
@@ -936,21 +938,7 @@ fn validate_turn(
             "A turn with submitted input must identify its authority-free interaction root.",
         ));
     }
-    if turn.text.trim().is_empty()
-        && turn.submitted_inputs.is_empty()
-        && !turn.contexts.iter().any(|context| {
-            context
-                .annotations
-                .iter()
-                .any(|annotation| !annotation.trim().is_empty())
-        })
-    {
-        return Err(ExportValidationError::new(
-            "interaction_input_empty",
-            format!("{path}.text"),
-            "A portable turn requires message text, an annotation, or submitted input.",
-        ));
-    }
+    validate_materialized_turn_content(turn, path)?;
     require_string(
         &turn.completion.permission_profile_id,
         format!("{path}.completion.permissionProfileId"),
@@ -1165,6 +1153,32 @@ fn validate_turn(
     }
 }
 
+pub(crate) fn validate_materialized_turn_content(
+    turn: &ConversationExportTurn,
+    path: &str,
+) -> Result<(), ExportValidationError> {
+    if turn.text.trim().is_empty()
+        && turn.submitted_inputs.is_empty()
+        && !turn.contexts.iter().any(|context| {
+            context
+                .annotations
+                .iter()
+                .any(|annotation| !annotation.trim().is_empty())
+        })
+        && !matches!(
+            turn.completion.status,
+            ExportCompletionStatus::Failed | ExportCompletionStatus::Stopped
+        )
+    {
+        return Err(ExportValidationError::new(
+            "interaction_input_empty",
+            format!("{path}.text"),
+            "A nonterminal or accepted portable turn requires message text, an annotation, or submitted input.",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_contexts(
     turn: &ConversationExportTurn,
     path: &str,
@@ -1302,147 +1316,26 @@ fn validate_submitted_inputs(
             ));
         }
         previous_sort_key = Some(sort_key);
-        if let Some(field) = submitted.action.unsupported_fields.keys().next() {
-            return Err(ExportValidationError::new(
-                "input_action_payload_unexpected",
-                format!("{submitted_path}.action.{field}"),
-                "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
-            ));
-        }
-        if submitted.action.control == ExportInputControl::Unsupported {
-            return Err(ExportValidationError::new(
-                "input_action_control_unsupported",
-                format!("{submitted_path}.action.control"),
-                "Use text, single_select, or multi_select.",
-            ));
-        }
-        if submitted.action.prompt.trim().is_empty() {
-            return Err(ExportValidationError::new(
-                "input_action_prompt_required",
-                format!("{submitted_path}.action.prompt"),
-                "Supply a non-whitespace prompt.",
-            ));
-        } else if submitted.action.prompt.len() > 2_000 {
-            return Err(ExportValidationError::new(
-                "input_action_prompt_too_long",
-                format!("{submitted_path}.action.prompt"),
-                "Shorten the UTF-8 prompt to 2,000 bytes.",
-            ));
-        }
-        if matches!(
-            submitted.action.control,
-            ExportInputControl::SingleSelect | ExportInputControl::MultiSelect
-        ) && submitted.action.options.is_empty()
-        {
-            return Err(ExportValidationError::new(
-                "input_action_options_required",
-                format!("{submitted_path}.action.options"),
-                "Supply 1 through 50 options for a select.",
-            ));
-        }
-        if submitted.action.control == ExportInputControl::Text
-            && !submitted.action.options.is_empty()
-        {
-            return Err(ExportValidationError::new(
-                "input_action_options_unexpected",
-                format!("{submitted_path}.action.options"),
-                "Remove options from a text action.",
-            ));
-        }
-        if submitted.action.options.len() > 50 {
-            return Err(ExportValidationError::new(
-                "input_action_option_count",
-                format!("{submitted_path}.action.options"),
-                "Keep the option count in 1..=50.",
-            ));
-        }
-        let mut option_keys = HashSet::new();
-        for (option_index, option) in submitted.action.options.iter().enumerate() {
-            if let Some(field) = option.unsupported_fields.keys().next() {
-                return Err(ExportValidationError::new(
-                    "input_action_payload_unexpected",
-                    format!("{submitted_path}.action.options[{option_index}].{field}"),
-                    "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
-                ));
-            }
-            if option.key.is_empty()
-                || option.key.trim() != option.key
-                || option.key.contains('\0')
-                || option.key.len() > 128
-            {
-                return Err(ExportValidationError::new(
-                    "input_action_option_key_invalid",
-                    format!("{submitted_path}.action.options[{option_index}].key"),
-                    "Use a nonempty, trimmed, NUL-free key of at most 128 bytes.",
-                ));
-            }
-            if option.label.trim().is_empty() {
-                return Err(ExportValidationError::new(
-                    "input_action_option_label_required",
-                    format!("{submitted_path}.action.options[{option_index}].label"),
-                    "Supply a non-whitespace label.",
-                ));
-            } else if option.label.len() > 512 {
-                return Err(ExportValidationError::new(
-                    "input_action_option_label_too_long",
-                    format!("{submitted_path}.action.options[{option_index}].label"),
-                    "Shorten the UTF-8 label to 512 bytes.",
-                ));
-            }
-            if !option_keys.insert(&option.key) {
-                return Err(ExportValidationError::new(
-                    "input_action_option_key_duplicate",
-                    format!("{submitted_path}.action.options[{option_index}].key"),
-                    "Give every option an exact unique key.",
-                ));
-            }
-        }
+        validate_input_action_snapshot(&submitted.action, &format!("{submitted_path}.action"))?;
         match submitted.action.control {
-            ExportInputControl::Text => {
-                if submitted.action.minimum_selections.is_some() {
+            ExportInputControl::Text => match &submitted.value {
+                ExportSubmittedInputValue::Text { text } if !text.trim().is_empty() => {}
+                ExportSubmittedInputValue::Text { .. } => {
                     return Err(ExportValidationError::new(
-                        "input_action_minimum_unexpected",
-                        format!("{submitted_path}.action.minimumSelections"),
-                        "Remove it unless the control is multi-select.",
+                        "input_text_blank",
+                        format!("{submitted_path}.value"),
+                        "Enter non-whitespace text or detach the input.",
                     ));
                 }
-                match &submitted.value {
-                    ExportSubmittedInputValue::Text { text } if !text.trim().is_empty() => {}
-                    ExportSubmittedInputValue::Text { .. } => {
-                        return Err(ExportValidationError::new(
-                            "input_text_blank",
-                            format!("{submitted_path}.value"),
-                            "Enter non-whitespace text or detach the input.",
-                        ));
-                    }
-                    ExportSubmittedInputValue::Selected { .. } => {
-                        return Err(ExportValidationError::new(
-                            "input_action_snapshot_mismatch",
-                            submitted_path,
-                            "Refresh the accepted action and recommit its value.",
-                        ));
-                    }
+                ExportSubmittedInputValue::Selected { .. } => {
+                    return Err(ExportValidationError::new(
+                        "input_action_snapshot_mismatch",
+                        submitted_path,
+                        "Refresh the accepted action and recommit its value.",
+                    ));
                 }
-            }
+            },
             ExportInputControl::SingleSelect | ExportInputControl::MultiSelect => {
-                if submitted.action.control == ExportInputControl::SingleSelect
-                    && submitted.action.minimum_selections.is_some()
-                {
-                    return Err(ExportValidationError::new(
-                        "input_action_minimum_unexpected",
-                        format!("{submitted_path}.action.minimumSelections"),
-                        "Remove it unless the control is multi-select.",
-                    ));
-                }
-                if let Some(minimum) = submitted.action.minimum_selections
-                    && (minimum == 0 || minimum as usize > submitted.action.options.len())
-                {
-                    return Err(ExportValidationError::new(
-                        "input_action_minimum_invalid",
-                        format!("{submitted_path}.action.minimumSelections"),
-                        "Use an integer in 1..=options.length.",
-                    ));
-                }
                 let ExportSubmittedInputValue::Selected { selected } = &submitted.value else {
                     return Err(ExportValidationError::new(
                         "input_action_snapshot_mismatch",
@@ -1506,6 +1399,128 @@ fn validate_submitted_inputs(
         }
     }
     Ok(())
+}
+
+fn validate_input_action_snapshot(
+    action: &ExportInputActionSnapshot,
+    path: &str,
+) -> Result<(), ExportValidationError> {
+    if let Some(field) = action.unsupported_fields.keys().next() {
+        return Err(ExportValidationError::new(
+            "input_action_payload_unexpected",
+            format!("{path}.{field}"),
+            "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
+        ));
+    }
+    if action.control == ExportInputControl::Unsupported {
+        return Err(ExportValidationError::new(
+            "input_action_control_unsupported",
+            format!("{path}.control"),
+            "Use text, single_select, or multi_select.",
+        ));
+    }
+    if action.prompt.trim().is_empty() {
+        return Err(ExportValidationError::new(
+            "input_action_prompt_required",
+            format!("{path}.prompt"),
+            "Supply a non-whitespace prompt.",
+        ));
+    } else if action.prompt.len() > 2_000 {
+        return Err(ExportValidationError::new(
+            "input_action_prompt_too_long",
+            format!("{path}.prompt"),
+            "Shorten the UTF-8 prompt to 2,000 bytes.",
+        ));
+    }
+    if matches!(
+        action.control,
+        ExportInputControl::SingleSelect | ExportInputControl::MultiSelect
+    ) && action.options.is_empty()
+    {
+        return Err(ExportValidationError::new(
+            "input_action_options_required",
+            format!("{path}.options"),
+            "Supply 1 through 50 options for a select.",
+        ));
+    }
+    if action.control == ExportInputControl::Text && !action.options.is_empty() {
+        return Err(ExportValidationError::new(
+            "input_action_options_unexpected",
+            format!("{path}.options"),
+            "Remove options from a text action.",
+        ));
+    }
+    if action.options.len() > 50 {
+        return Err(ExportValidationError::new(
+            "input_action_option_count",
+            format!("{path}.options"),
+            "Keep the option count in 1..=50.",
+        ));
+    }
+    let mut option_keys = HashSet::new();
+    for (option_index, option) in action.options.iter().enumerate() {
+        if let Some(field) = option.unsupported_fields.keys().next() {
+            return Err(ExportValidationError::new(
+                "input_action_payload_unexpected",
+                format!("{path}.options[{option_index}].{field}"),
+                "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
+            ));
+        }
+        if option.key.is_empty()
+            || option.key.trim() != option.key
+            || option.key.contains('\0')
+            || option.key.len() > 128
+        {
+            return Err(ExportValidationError::new(
+                "input_action_option_key_invalid",
+                format!("{path}.options[{option_index}].key"),
+                "Use a nonempty, trimmed, NUL-free key of at most 128 bytes.",
+            ));
+        }
+        if option.label.trim().is_empty() {
+            return Err(ExportValidationError::new(
+                "input_action_option_label_required",
+                format!("{path}.options[{option_index}].label"),
+                "Supply a non-whitespace label.",
+            ));
+        } else if option.label.len() > 512 {
+            return Err(ExportValidationError::new(
+                "input_action_option_label_too_long",
+                format!("{path}.options[{option_index}].label"),
+                "Shorten the UTF-8 label to 512 bytes.",
+            ));
+        }
+        if !option_keys.insert(&option.key) {
+            return Err(ExportValidationError::new(
+                "input_action_option_key_duplicate",
+                format!("{path}.options[{option_index}].key"),
+                "Give every option an exact unique key.",
+            ));
+        }
+    }
+    match action.control {
+        ExportInputControl::Text | ExportInputControl::SingleSelect
+            if action.minimum_selections.is_some() =>
+        {
+            Err(ExportValidationError::new(
+                "input_action_minimum_unexpected",
+                format!("{path}.minimumSelections"),
+                "Remove it unless the control is multi-select.",
+            ))
+        }
+        ExportInputControl::MultiSelect
+            if action
+                .minimum_selections
+                .is_some_and(|minimum| minimum == 0 || minimum as usize > action.options.len()) =>
+        {
+            Err(ExportValidationError::new(
+                "input_action_minimum_invalid",
+                format!("{path}.minimumSelections"),
+                "Use an integer in 1..=options.length.",
+            ))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_optional_strings(
@@ -1877,9 +1892,7 @@ fn validate_action(action: &ExportAction, path: &str) -> Result<(), ExportValida
     if let Some(source_layer_id) = &action.source_layer_id {
         require_id(source_layer_id, "layer", format!("{path}.sourceLayerId"))?;
     }
-    if action.kind != ExportActionKind::Input {
-        require_string(&action.label, format!("{path}.label"))?;
-    }
+    require_string(&action.label, format!("{path}.label"))?;
     if let Some(value) = &action.icon {
         require_string(value, format!("{path}.icon"))?;
     }
@@ -1890,10 +1903,12 @@ fn validate_action(action: &ExportAction, path: &str) -> Result<(), ExportValida
         ExportActionKind::Navigate
             if action.relation.is_some()
                 && action.target_layer_id.is_some()
-                && action.interaction_text.is_none() => {}
+                && action.interaction_text.is_none()
+                && action.input.is_none() => {}
         ExportActionKind::Invoke
             if action.relation.is_none()
                 && action.target_layer_id.is_none()
+                && action.input.is_none()
                 && action
                     .interaction_text
                     .as_deref()
@@ -1906,9 +1921,12 @@ fn validate_action(action: &ExportAction, path: &str) -> Result<(), ExportValida
             return Err(ExportValidationError::new(
                 "invalid_action_shape",
                 path,
-                "Navigate actions require relation and targetLayerId; invoke actions require interactionText; input actions carry their frozen control in consuming children.",
+                "Navigate actions require relation and targetLayerId; invoke actions require interactionText; input actions reject navigation and invocation fields.",
             ));
         }
+    }
+    if let Some(input) = &action.input {
+        validate_input_action_snapshot(input, &format!("{path}.input"))?;
     }
     if action.variant == ExportActionVariant::Card
         && action
