@@ -189,6 +189,79 @@ describe("local Electron simulated-user judge adapter", () => {
     });
   });
 
+  it("carries accepted text and select input questions into immutable review topology", async () => {
+    const layers = acceptedLayers();
+    layers.get("10").actions.push(
+      {
+        id: 13,
+        sourceNodeId: 2,
+        sourceLayerId: 10,
+        kind: "input",
+        label: "Explain",
+        control: "text",
+        prompt: "What constraint matters most?",
+        state: "accepted",
+      },
+      {
+        id: 14,
+        sourceNodeId: 2,
+        sourceLayerId: 10,
+        kind: "input",
+        label: "Choose one",
+        control: "single_select",
+        prompt: "Which environment?",
+        options: [{ key: "preview", label: "Preview" }, { key: "stable", label: "Stable" }],
+        state: "accepted",
+      },
+      {
+        id: 15,
+        sourceNodeId: 2,
+        sourceLayerId: 10,
+        kind: "input",
+        label: "Choose checks",
+        control: "multi_select",
+        prompt: "Which checks are required?",
+        options: [{ key: "unit", label: "Unit" }, { key: "electron", label: "Electron" }],
+        minimumSelections: 2,
+        state: "accepted",
+      },
+    );
+
+    const topology = await buildAcceptedReviewTopology({
+      turnId: 41,
+      rootLayerId: 10,
+      loadLayer: async (layerId) => layers.get(String(layerId)),
+    });
+
+    expect(topology.layers[0].actions.slice(2)).toEqual([
+      {
+        id: "13",
+        sourceNodeId: "2",
+        kind: "input",
+        control: "text",
+        prompt: "What constraint matters most?",
+        options: [],
+      },
+      {
+        id: "14",
+        sourceNodeId: "2",
+        kind: "input",
+        control: "single_select",
+        prompt: "Which environment?",
+        options: [{ key: "preview", label: "Preview" }, { key: "stable", label: "Stable" }],
+      },
+      {
+        id: "15",
+        sourceNodeId: "2",
+        kind: "input",
+        control: "multi_select",
+        prompt: "Which checks are required?",
+        options: [{ key: "unit", label: "Unit" }, { key: "electron", label: "Electron" }],
+        minimumSelections: 2,
+      },
+    ]);
+  });
+
   it("grades the complete accepted closure and requires a real grandchild for architecture", async () => {
     const layers = acceptedLayers({ includeGrandchild: true });
     const topology = await buildAcceptedReviewTopology({
@@ -416,7 +489,7 @@ describe("local Electron simulated-user judge adapter", () => {
     expect(release).toHaveBeenCalledWith({ close: true });
   });
 
-  it("selects the missing-action-aware recursive review store for rubric v5 and forwards artifact evidence", async () => {
+  it("selects the input-aware recursive review store for rubric v11 and forwards artifact evidence", async () => {
     const artifactDirectory = await temporaryDirectory();
     const evidence = {
       schemaVersion: 1,
@@ -426,8 +499,8 @@ describe("local Electron simulated-user judge adapter", () => {
     };
     const runJudge = vi.fn(async ({ reviewStore, artifactEvidence }) => {
       expect(reviewStore.snapshot()).toMatchObject({
-        schemaVersion: 5,
-        contractId: "recursive-presentation-judge-v5",
+        schemaVersion: 6,
+        contractId: "recursive-presentation-judge-v6",
       });
       expect(artifactEvidence).toEqual(evidence);
       throw new Error("fixture stops before paid inference");
@@ -449,12 +522,40 @@ describe("local Electron simulated-user judge adapter", () => {
       thread: { id: "7" },
       turn: { id: "41", rootLayerId: "10" },
       request: { text: "Explain." },
-      rubric: { rubricVersion: "graph-presentation-rubric-v10" },
+      rubric: { rubricVersion: "graph-presentation-rubric-v11" },
       artifactEvidence: evidence,
       reviewSequence: { index: 0, count: 1 },
     });
 
-    expect(result).toMatchObject({ status: "partial", review: { schemaVersion: 5 }, error: "fixture stops before paid inference" });
+    expect(result).toMatchObject({ status: "partial", review: { schemaVersion: 6 }, error: "fixture stops before paid inference" });
+  });
+
+  it("refuses to relabel a historical recursive rubric as the active v6 contract", async () => {
+    const artifactDirectory = await temporaryDirectory();
+    const release = vi.fn(async () => {});
+    const runJudge = vi.fn();
+    const runner = createLocalSimulatedUserJudgeRunner({
+      loadLayer: async ({ layerId }) => acceptedLayers().get(String(layerId)),
+      openReviewSession: async () => ({
+        session: fakeReviewSession(join(artifactDirectory, "screenshots")),
+        state: { executionId: "execution-1", threadId: "7", turnId: "41", layerId: "10" },
+        release,
+      }),
+      resolveCodexRuntime: async () => codexRuntime,
+      runJudge,
+    });
+
+    await expect(runner({
+      artifactDirectory,
+      execution: { id: "execution-1" },
+      thread: { id: "7" },
+      turn: { id: "41", rootLayerId: "10" },
+      request: { text: "Explain." },
+      rubric: { rubricVersion: "graph-presentation-rubric-v10" },
+      reviewSequence: { index: 0, count: 1 },
+    })).rejects.toThrow("remains readable but cannot start a new v6 judgment");
+    expect(runJudge).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith({ close: true });
   });
 });
 

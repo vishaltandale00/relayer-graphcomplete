@@ -131,6 +131,11 @@ const invokeActionRatingsSchema = z.object({
   label_expectation: ratingSchema,
   apparent_value: ratingSchema,
 }).strict();
+const inputActionRatingsSchema = z.object({
+  prompt_answerability: ratingSchema,
+  option_set_quality: ratingSchema,
+  control_fit: ratingSchema,
+}).strict();
 const turnRatingsSchema = z.object({
   answer_quality: ratingSchema,
   recursive_coherence: ratingSchema,
@@ -178,6 +183,16 @@ const invokeActionReviewSchema = z.object({
   findings: z.array(findingSchema),
 }).strict();
 
+const inputActionReviewSchema = z.object({
+  actionId: z.string().min(1),
+  kind: z.literal("input"),
+  evidence: z.object({ source: z.array(screenshotReferenceSchema).min(1) }).strict(),
+  ratings: inputActionRatingsSchema,
+  nullRatingJustifications: optionalJustifications(inputActionRatingsSchema.shape),
+  summary: z.string().min(1),
+  findings: z.array(findingSchema),
+}).strict();
+
 const nodeReviewSchema = z.object({
   nodeId: z.string().min(1),
   layerId: z.string().min(1),
@@ -187,12 +202,13 @@ const nodeReviewSchema = z.object({
   }).strict(),
   ratings: nodeRatingsSchema,
   nullRatingJustifications: optionalJustifications(nodeRatingsSchema.shape),
-  actions: z.array(z.discriminatedUnion("kind", [navigateActionReviewSchema, invokeActionReviewSchema])),
+  actions: z.array(z.discriminatedUnion("kind", [navigateActionReviewSchema, invokeActionReviewSchema, inputActionReviewSchema])),
   structure: z.object({
     rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     expansion: structureDimensionSchema,
     references: structureDimensionSchema,
     invoke: structureDimensionSchema,
+    input: structureDimensionSchema.default({ need: "none", result: "absent" }),
     reason: z.string().min(1),
     evidence: z.array(screenshotReferenceSchema).min(1),
   }).strict(),
@@ -211,6 +227,7 @@ const turnReviewSchema = z.object({
     overall: z.enum(["helps", "neutral", "mixed", "hurts"]),
     expansion: structureDimensionSchema,
     references: structureDimensionSchema,
+    input: structureDimensionSchema.default({ need: "none", result: "absent" }),
     reason: z.string().min(1),
     evidence: z.array(screenshotReferenceSchema).min(1),
   }).strict(),
@@ -225,7 +242,7 @@ const scoreValueSchema = z.union([
   z.literal(1), z.literal(2), z.literal(3), z.literal(4),
   z.literal(5), z.literal(6), z.literal(7), z.literal(8),
 ]);
-const allocationRankSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
+const allocationRankSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]);
 const criterionJudgmentSchema = z.object({
   score: scoreValueSchema,
   reason: z.string().min(1),
@@ -250,10 +267,10 @@ const recursiveSemanticSchema = z.object({
   effectOnLayer: z.string().min(1),
   evidence: z.array(screenshotReferenceSchema).min(1),
 }).strict();
-const allocationChoiceSchema = z.enum(["expand", "reference", "invoke", "stop"]);
+const allocationChoiceSchema = z.enum(["expand", "reference", "invoke", "input", "stop"]);
 const allocationStepSchema = z.object({
   step: z.number().int().nonnegative(),
-  ranking: z.array(z.object({ choice: allocationChoiceSchema, rank: allocationRankSchema }).strict()).length(4),
+  ranking: z.array(z.object({ choice: allocationChoiceSchema, rank: allocationRankSchema }).strict()).length(5),
   preferredChoice: allocationChoiceSchema,
   authoredChoice: allocationChoiceSchema,
   authoredActionId: z.string().min(1).nullable(),
@@ -263,24 +280,54 @@ const allocationStepSchema = z.object({
 }).strict();
 const missingActionOpportunitySchema = z.object({
   allocationStep: z.number().int().nonnegative(),
-  preferredChoice: z.enum(["expand", "reference", "invoke"]),
+  preferredChoice: z.enum(["expand", "reference", "invoke", "input"]),
   importance: z.enum(["material", "critical"]),
   unansweredQuestion: z.string().min(1),
   expectedContribution: z.string().min(1),
   artifactEvidence: z.array(z.string().min(1)).min(1),
   evidence: z.array(screenshotReferenceSchema).min(1),
 }).strict();
-const recursiveActionSchema = z.object({
+const recursiveActionBaseShape = {
   actionId: z.string().min(1),
-  kind: z.enum(["expand", "reference", "invoke"]),
   allocationStep: z.number().int().nonnegative(),
   labelAndPlacement: z.string().min(1),
-  delivery: z.string().min(1).nullable(),
-  recursiveContribution: z.string().min(1).nullable(),
-  targetLayerId: z.string().min(1).nullable(),
-  reusedLayerId: z.string().min(1).nullable(),
   evidence: z.array(screenshotReferenceSchema).min(1),
+} as const;
+const recursiveNavigateActionSchema = (kind: "expand" | "reference") => z.object({
+  ...recursiveActionBaseShape,
+  kind: z.literal(kind),
+  delivery: z.string().min(1),
+  recursiveContribution: kind === "expand" ? z.string().min(1) : z.null(),
+  targetLayerId: z.string().min(1),
+  reusedLayerId: kind === "reference" ? z.string().min(1).nullable() : z.null(),
 }).strict();
+const recursiveInvokeActionSchema = z.object({
+  ...recursiveActionBaseShape,
+  kind: z.literal("invoke"),
+  delivery: z.null(),
+  recursiveContribution: z.null(),
+  targetLayerId: z.null(),
+  reusedLayerId: z.null(),
+}).strict();
+const recursiveInputActionSchema = z.object({
+  ...recursiveActionBaseShape,
+  kind: z.literal("input"),
+  delivery: z.null(),
+  recursiveContribution: z.null(),
+  targetLayerId: z.null(),
+  reusedLayerId: z.null(),
+  inputActionJudgments: z.object({
+    prompt_answerability: criterionJudgmentSchema,
+    option_set_quality: criterionJudgmentSchema,
+    control_fit: criterionJudgmentSchema,
+  }).strict(),
+}).strict();
+const recursiveActionSchema = z.discriminatedUnion("kind", [
+  recursiveNavigateActionSchema("expand"),
+  recursiveNavigateActionSchema("reference"),
+  recursiveInvokeActionSchema,
+  recursiveInputActionSchema,
+]);
 const recursiveNodeReviewSchema = z.object({
   layerId: z.string().min(1),
   nodeId: z.string().min(1),
@@ -530,7 +577,7 @@ function registerRecursiveReviewTools(
   now: () => Date,
 ): void {
   server.registerTool("reviewNode", {
-    description: "Write or revise one node result after expansion children are finalized. A reference to an unfinished ancestor or a reference-only target is delivery-graded from screenshots with reusedLayerId null; other reviewable references reuse their finalized LayerResult. Rank expand, reference, invoke, and stop at every allocation step, and review every authored action.",
+    description: "Write or revise one node result after expansion children are finalized. A reference to an unfinished ancestor or a reference-only target is delivery-graded from screenshots with reusedLayerId null; other reviewable references reuse their finalized LayerResult. Rank expand, reference, invoke, input, and stop at every allocation step, and review every authored action. Input actions require source-screenshot judgments before any answer.",
     inputSchema: z.object({ review: recursiveNodeReviewSchema }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ review }) => traced(trace, now, "reviewNode", { review }, async () => {

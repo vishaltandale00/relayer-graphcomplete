@@ -90,6 +90,19 @@ describe("Eval dashboard run presentation", () => {
     });
   });
 
+  it("labels an incompatible presentation-rubric projection instead of showing a score", () => {
+    expect(projectExecutionCell({}, {
+      status: "passed",
+      presentationGrade: {
+        status: "partial",
+        score: null,
+        comparability: { status: "incompatible", contractIds: ["v5", "v6"], reason: "Changed rubric." },
+      },
+    })).toMatchObject({
+      presentation: { status: "partial", score: null, label: "Non-comparable rubric versions" },
+    });
+  });
+
   it("projects a complete execution dossier with evidence and action eligibility", () => {
     const run = { kind: "local-eval", bundleRef: "runs/run-1/bundle.json" };
     const execution = {
@@ -125,7 +138,8 @@ describe("Eval dashboard run presentation", () => {
         comprehensionScore: 3,
         renderedScore: 4,
         rawScore: 3.35,
-        scoreCeiling: 3,
+        scoreCeiling: 6,
+        scoreScaleMaximum: 8,
         depthDecay: 0.5,
         layers: [{ layerId: "layer-1", score: 4 }, { layerId: "layer-2", score: 2 }],
         aggregation: [{ layerId: "layer-1", assignedWeight: 0.67 }, { layerId: "layer-2", assignedWeight: 0.33 }],
@@ -148,10 +162,10 @@ describe("Eval dashboard run presentation", () => {
       },
       presentation: {
         score: 3.6,
+        scoreCeiling: 6,
         comprehensionScore: 3,
         renderedScore: 4,
         rawScore: 3.35,
-        scoreCeiling: 3,
         decay: 0.5,
         layers: [{ layerId: "layer-1", score: 4 }, { layerId: "layer-2", score: 2 }],
         aggregation: [{ layerId: "layer-1", assignedWeight: 0.67 }, { layerId: "layer-2", assignedWeight: 0.33 }],

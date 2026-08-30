@@ -74,6 +74,64 @@ function nodeReview(
 }
 
 describe("recursive simulated-user review state", () => {
+  it("inventories immutable text, single-select, and multi-select input snapshots as action subjects", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-input",
+      rootLayerId: "layer-input",
+      layers: [{
+        id: "layer-input",
+        nodeIds: ["node-input"],
+        actions: [
+          {
+            id: "input-text",
+            sourceNodeId: "node-input",
+            kind: "input",
+            control: "text",
+            prompt: "What constraint is missing?",
+            options: [],
+          },
+          {
+            id: "input-single",
+            sourceNodeId: "node-input",
+            kind: "input",
+            control: "single_select",
+            prompt: "Which environment?",
+            options: [{ key: "preview", label: "Preview" }, { key: "stable", label: "Stable" }],
+          },
+          {
+            id: "input-multi",
+            sourceNodeId: "node-input",
+            kind: "input",
+            control: "multi_select",
+            prompt: "Which platforms?",
+            options: [{ key: "mac", label: "macOS" }, { key: "win", label: "Windows" }],
+            minimumSelections: 1,
+          },
+        ],
+      }],
+    });
+
+    expect(inventory.actions).toEqual([
+      expect.objectContaining({ actionId: "input-text", actionKind: "input", control: "text", options: [] }),
+      expect.objectContaining({
+        actionId: "input-single",
+        actionKind: "input",
+        control: "single_select",
+        options: [{ key: "preview", label: "Preview" }, { key: "stable", label: "Stable" }],
+      }),
+      expect.objectContaining({
+        actionId: "input-multi",
+        actionKind: "input",
+        control: "multi_select",
+        minimumSelections: 1,
+      }),
+    ]);
+    const store = new IncrementalReviewStore<TestLayerReview, TestNodeReview, TestTurnReview>({ inventory });
+    expect(store.coverage().missingSubjects.map(formatMissingSubject)).toContain(
+      "input-action(\"layer-input\"/\"node-input\"/\"input-text\")",
+    );
+  });
+
   it("requires disclosure results to agree with the authored action inventory", () => {
     const store = new IncrementalReviewStore<TestLayerReview, TestNodeReview, TestTurnReview>({
       inventory: inventoryReviewSubjects(topology),

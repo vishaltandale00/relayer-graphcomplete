@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
+  InputActionReview,
   LayerReview,
   NodeReview,
   ScreenshotMetadata,
@@ -202,6 +203,71 @@ function makeStore(): IncrementalReviewStore {
 }
 
 describe("screenshot evidence validation", () => {
+  it("binds an unanswered input-action rating to its immutable selected source node", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-1",
+      rootLayerId: "layer-root",
+      layers: [{
+        id: "layer-root",
+        nodeIds: ["node-root", "node-other"],
+        actions: [{
+          id: "action-input",
+          sourceNodeId: "node-root",
+          kind: "input",
+          control: "text",
+          prompt: "What deployment window should we use?",
+          options: [],
+        }],
+      }],
+    });
+    const shots = [
+      screenshot("shot-root", "layer-root", null),
+      screenshot("shot-input", "layer-root", "node-root", { target: "element", mode: "full" }),
+      screenshot("shot-other", "layer-root", "node-other", { target: "element", mode: "full" }),
+    ];
+    const store = new IncrementalReviewStore({
+      inventory,
+      validateEvidence: createScreenshotEvidenceValidator({
+        executionId: "execution-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        screenshots: new Map(shots.map((shot) => [shot.screenshotId, shot])),
+      }),
+    });
+    const inputActionReview: InputActionReview = {
+      actionId: "action-input",
+      kind: "input",
+      evidence: { source: ["shot-input"] },
+      ratings: { prompt_answerability: 4, option_set_quality: 4, control_fit: 4 },
+      summary: "The unanswered text question is well formed.",
+      findings: [],
+    };
+    const review: NodeReview = {
+      nodeId: "node-root",
+      layerId: "layer-root",
+      evidence: { context: ["shot-root"], detail: ["shot-input"] },
+      ratings: { layer_fit: 4, title_detail_alignment: 4, substance: 4, detail_presentation: 4 },
+      actions: [inputActionReview],
+      structure: {
+        rating: 4,
+        expansion: { need: "none", result: "absent" },
+        references: { need: "none", result: "absent" },
+        invoke: { need: "none", result: "absent" },
+        input: { need: "required", result: "works" },
+        reason: "The user-owned decision is collected at its source.",
+        evidence: ["shot-input"],
+      },
+      summary: "The source presents a necessary question.",
+      findings: [],
+    };
+
+    expect(store.reviewNode(review).revision).toBe(1);
+    expect(() => store.reviewNode({
+      ...review,
+      actions: [{ ...inputActionReview, evidence: { source: ["shot-other"] } }],
+    })).toThrow("Action action-input source evidence must show node node-root in layer layer-root");
+  });
+
   it("accepts matching layer, selected-node, traversed-action, and representative turn evidence", () => {
     const store = makeStore();
     store.reviewLayer(rootLayerReview);
