@@ -17,11 +17,19 @@ import {
   type HarnessTraceSupport,
 } from "@relayer/harness-host";
 
+export const graphMemorySearchQuery = "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $anchor RETURN l AS layer ORDER BY layer ASC";
+export const graphMemorySearchBudget = Object.freeze({ resultRows: 1 });
+
+export function graphMemorySearchParameters(anchor: string) {
+  return { anchor: { type: "string" as const, value: anchor } };
+}
+
 export const graphMemoryFixtureConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
   name: "fixture-graph-memory",
   implementation: "fixture.graph-memory",
   implementationVersion: 1,
+  graphCapabilityProfile: { search: "query-v1" },
   permissionBindings: { ask: {}, auto: {}, full: {} },
   settings: {},
 };
@@ -76,9 +84,9 @@ async function authorFirstTurn(
 ): Promise<void> {
   const beforeAcknowledgement = await graph.search({
     queryContractVersion: 1,
-    query: "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $anchor RETURN l AS layer ORDER BY layer ASC",
-    parameters: { anchor: { type: "string", value: anchor } },
-    budget: {},
+    query: graphMemorySearchQuery,
+    parameters: graphMemorySearchParameters(anchor),
+    budget: graphMemorySearchBudget,
   });
   if (beforeAcknowledgement.rows.length !== 0) {
     throw new Error("Graph-memory anchor unexpectedly existed before first-turn acknowledgement");
@@ -121,9 +129,9 @@ async function authorFirstTurn(
   await graph.submit(context.inputGraph.id);
   const afterAcknowledgement = await graph.search({
     queryContractVersion: 1,
-    query: "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $anchor RETURN l AS layer ORDER BY layer ASC",
-    parameters: { anchor: { type: "string", value: anchor } },
-    budget: {},
+    query: graphMemorySearchQuery,
+    parameters: graphMemorySearchParameters(anchor),
+    budget: graphMemorySearchBudget,
   });
   if (afterAcknowledgement.rows.length !== 1 || afterAcknowledgement.rows[0]?.[0]?.type !== "layer") {
     throw new Error("Graph-memory anchor was not searchable after first-turn acknowledgement");
@@ -152,9 +160,9 @@ async function searchAndReferenceFirstTurn(
   await graph.submitLayer(draftDecoyLayer);
   const result = await graph.search({
     queryContractVersion: 1,
-    query: "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $anchor RETURN l AS layer ORDER BY layer ASC",
-    parameters: { anchor: { type: "string", value: anchor } },
-    budget: {},
+    query: graphMemorySearchQuery,
+    parameters: graphMemorySearchParameters(anchor),
+    budget: graphMemorySearchBudget,
   });
   if (result.rows.length !== 1 || result.rows[0]?.length !== 1) {
     throw new Error(`Expected one prior accepted layer for graph-memory anchor, received ${result.rows.length}`);

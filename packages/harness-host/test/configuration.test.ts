@@ -9,6 +9,7 @@ import {
   loadHarnessConfiguration,
   loadHarnessConfigurations,
   parseHarnessConfiguration,
+  resolveGraphCapabilityProfile,
   sameHarnessExecutionConfiguration,
 } from "../src/configuration.js";
 
@@ -16,6 +17,43 @@ const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.ur
 const permissionBindings = { ask: {}, auto: {}, full: {} };
 
 describe("harness configuration", () => {
+  it("defaults graph search authority off and admits only the versioned query-v1 profile", () => {
+    const base = {
+      schemaVersion: 1,
+      name: "capability-profile",
+      implementation: "test",
+      implementationVersion: 1,
+      permissionBindings,
+      settings: {},
+    } as const;
+    const omitted = parseHarnessConfiguration(base);
+    const disabled = parseHarnessConfiguration({
+      ...base,
+      graphCapabilityProfile: { search: "disabled" },
+    });
+    const enabled = parseHarnessConfiguration({
+      ...base,
+      graphCapabilityProfile: { search: "query-v1" },
+    });
+
+    expect(resolveGraphCapabilityProfile(omitted)).toEqual({ search: "disabled" });
+    expect(resolveGraphCapabilityProfile(disabled)).toEqual({ search: "disabled" });
+    expect(resolveGraphCapabilityProfile(enabled)).toEqual({ search: "query-v1" });
+    expect(digestHarnessConfiguration(omitted)).toBe(digestHarnessConfiguration(disabled));
+    expect(digestHarnessConfiguration(enabled)).not.toBe(digestHarnessConfiguration(disabled));
+    expect(sameHarnessExecutionConfiguration(omitted, disabled)).toBe(true);
+    expect(sameHarnessExecutionConfiguration(disabled, enabled)).toBe(false);
+    expect(sameHarnessExecutionConfiguration(enabled, disabled)).toBe(false);
+    expect(() => parseHarnessConfiguration({
+      ...base,
+      graphCapabilityProfile: { search: "query-v2" },
+    })).toThrow("graphCapabilityProfile.search");
+    expect(() => parseHarnessConfiguration({
+      ...base,
+      graphCapabilityProfile: { search: "query-v1", target: "project" },
+    })).toThrow("Unknown graphCapabilityProfile field");
+  });
+
   it("validates every checked-in harness configuration", async () => {
     const harnessDirectory = join(repositoryRoot, "harnesses");
     const paths = (await readdir(harnessDirectory))
@@ -27,7 +65,18 @@ describe("harness configuration", () => {
   });
 
   it.each([
-    ["codex-basic", "medium", 4, "layered-navigation-multi-agent-v1"],
+    "codex-basic",
+    "claude-basic",
+    "prime-agent-basic",
+    "prime-agent-deep",
+  ])("ships %s as a search-disabled baseline", async (name) => {
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
+    expect(configuration.graphCapabilityProfile).toEqual({ search: "disabled" });
+    expect(resolveGraphCapabilityProfile(configuration)).toEqual({ search: "disabled" });
+  });
+
+  it.each([
+    ["codex-basic", "medium", 5, "layered-navigation-multi-agent-v1"],
     ["codex-basic-high", "high", 2, undefined],
   ])("loads the checked-in %s configuration", async (name, modelReasoningEffort, revision, promptProfile) => {
     await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
@@ -53,6 +102,7 @@ describe("harness configuration", () => {
       },
       executionAccessContracts: ["managed-runtime@1", "secret@1"],
       modelDefaults: { familyPolicy: { id: "codex-default-family", version: 2 } },
+      ...(name === "codex-basic" ? { graphCapabilityProfile: { search: "disabled" } } : {}),
       settings: {
         modelReasoningEffort,
         ...(promptProfile === undefined ? {} : { promptProfile }),

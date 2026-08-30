@@ -9,6 +9,11 @@ import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CompletionOutput, GraphCapability, GraphNode, ResolvedLayer } from "@relayer/graph-client";
 import { digestHarnessConfiguration, startHarnessHost, type HarnessConfiguration, type HarnessFactory, type HarnessImplementationMap, type RunningHarnessHost } from "@relayer/harness-host";
+import {
+  graphMemorySearchBudget,
+  graphMemorySearchParameters,
+  graphMemorySearchQuery,
+} from "./fixtures/graph-memory.js";
 import type { TestExecutionPlan } from "./run-plan.js";
 
 export const basicEvalCaseId = "empty-project.task-system.two-turn";
@@ -38,7 +43,7 @@ export function graphMemoryEvalPrompts(testRunId: string): readonly [string, str
   const anchor = graphMemoryAnchor(testRunId);
   return [
     `Create and submit a useful accepted graph explaining acknowledgement-level graph-search freshness. Include one visible node whose title is exactly ${anchor}. This exact title must be unique in the accepted answer.`,
-    `Follow up in the same provider session using prior accepted graph state. Before authoring the response, invoke graph.search() with query contract version 1 and a tagged string parameter to find the accepted Layer containing the Content whose title is exactly ${anchor}. Use this bounded query: MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $anchor RETURN l AS layer ORDER BY layer ASC. Then submit a new accepted response layer with a typed navigate action whose relation is reference, whose sourceLayer is the new response layer, and whose target is the exact prior Layer identity returned by search. Finish with graph.submit(interactionNode). Do not hard-code or infer the prior layer ID.`,
+    `Follow up in the same provider session using prior accepted graph state. Before authoring the response, invoke graph.search() with query contract version 1 and exactly parameters ${JSON.stringify(graphMemorySearchParameters(anchor))} and budget ${JSON.stringify(graphMemorySearchBudget)} to find the accepted Layer containing the Content whose title is exactly ${anchor}. Use exactly this query text:\n${graphMemorySearchQuery}\nThen submit a new accepted response layer with a typed navigate action whose relation is reference, whose sourceLayer is the new response layer, and whose target is the exact prior Layer identity returned by search. Finish with graph.submit(interactionNode). Do not hard-code or infer the prior layer ID.`,
   ];
 }
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
@@ -127,6 +132,10 @@ export interface ReplayRepairAuditEvent {
   readonly completionNodeId?: number;
   readonly completionRootLayerId?: number;
   readonly searchLayerIds?: readonly number[];
+  readonly queryContractVersion?: number;
+  readonly query?: string;
+  readonly parameters?: Readonly<Record<string, unknown>>;
+  readonly budget?: Readonly<Record<string, unknown>>;
   readonly actionKind?: string;
   readonly actionRelation?: string | null;
   readonly actionSourceNodeId?: number;
@@ -139,6 +148,12 @@ export interface GraphMemoryEvidence {
   readonly secondTurnStartSequence: number;
   readonly searchedLayerIds: readonly number[];
   readonly searchSequence?: number;
+  readonly searchRequest?: {
+    readonly queryContractVersion: number | undefined;
+    readonly query: string | undefined;
+    readonly parameters: Readonly<Record<string, unknown>> | undefined;
+    readonly budget: Readonly<Record<string, unknown>> | undefined;
+  };
   readonly draftDecoyLayerId?: number;
   readonly referenceActionId?: number;
   readonly referenceActionSequence?: number;
@@ -203,7 +218,12 @@ export async function runBasicRuntimeEval(options: {
         : [basicEvalPrompt, basicEvalFollowUpPrompt];
     for (const prompt of prompts) {
       turnStartSequences.push(graphAuditProxy?.events().at(-1)?.sequence ?? 0);
-      const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, graphControlToken, { projectId, threadId, text: prompt });
+      const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, graphControlToken, {
+        projectId,
+        threadId,
+        text: prompt,
+        graphCapabilityProfile: configuration.graphCapabilityProfile ?? { search: "disabled" },
+      });
       const capability = { url: graphAuditProxy?.url ?? graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
       const complete = await completeWithCapabilityCleanup(async () => {
@@ -466,6 +486,14 @@ export function readGraphMemoryEvidence(
     secondTurnStartSequence,
     searchedLayerIds,
     ...(search === undefined ? {} : { searchSequence: search.sequence }),
+    ...(search === undefined ? {} : {
+      searchRequest: {
+        queryContractVersion: search.queryContractVersion,
+        query: search.query,
+        parameters: structuredClone(search.parameters),
+        budget: structuredClone(search.budget),
+      },
+    }),
     ...(draftDecoy?.recordId === undefined ? {} : { draftDecoyLayerId: draftDecoy.recordId }),
     ...(reference?.recordId === undefined ? {} : { referenceActionId: reference.recordId }),
     ...(reference === undefined ? {} : { referenceActionSequence: reference.sequence }),
@@ -552,6 +580,12 @@ export function checkGraphMemorySecondTurn(
         && evidence.searchedLayerIds[0] === priorLayerId,
       detail: "The one audited graph.search call returned exactly the first accepted root Layer identity.",
     },
+    {
+      name: "search-request-contract",
+      passed: successfulSearches.length === 1
+        && matchesRequiredGraphMemorySearch(evidence.searchRequest, evidence.anchor),
+      detail: "The audited search used the exact admitted query contract, query text, typed run anchor, and bounded budget.",
+    },
     ...(requireDraftDecoy ? [{
       name: "draft-decoy-hidden",
       passed: evidence.draftDecoyLayerId !== undefined
@@ -571,6 +605,24 @@ export function checkGraphMemorySecondTurn(
       detail: "Server response order proves first submit acknowledgement before second-turn search, the matching reference action, and second submit acknowledgement.",
     },
   ];
+}
+
+function matchesRequiredGraphMemorySearch(
+  request: GraphMemoryEvidence["searchRequest"],
+  anchor: string,
+): boolean {
+  if (request?.queryContractVersion !== 1 || request.query !== graphMemorySearchQuery
+    || !isRecord(request.parameters) || !isRecord(request.budget)) return false;
+  const parameterKeys = Object.keys(request.parameters);
+  const anchorParameter = request.parameters.anchor;
+  return parameterKeys.length === 1
+    && parameterKeys[0] === "anchor"
+    && isRecord(anchorParameter)
+    && Object.keys(anchorParameter).length === 2
+    && anchorParameter.type === "string"
+    && anchorParameter.value === anchor
+    && Object.keys(request.budget).length === 1
+    && request.budget.resultRows === graphMemorySearchBudget.resultRows;
 }
 
 export function parseReportedReplayRepairEvidence(output: CompletionOutput): ReportedReplayRepairEvidence | undefined {
@@ -820,6 +872,7 @@ async function forwardAuditedGraphRequest(
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const requestBody = Buffer.concat(chunks);
+  const requestValue = parseJsonObject(requestBody);
   const headers = new Headers();
   for (const name of ["accept", "authorization", "content-type"] as const) {
     const value = request.headers[name];
@@ -836,13 +889,20 @@ async function forwardAuditedGraphRequest(
   response.writeHead(upstreamResponse.status, contentType === null ? {} : { "content-type": contentType });
   response.end(responseBytes);
   const responseValue = parseJsonObject(responseBytes);
-  record(sanitizeGraphAuditEvent(method, requestUrl.pathname, upstreamResponse.status, responseValue));
+  record(sanitizeGraphAuditEvent(
+    method,
+    requestUrl.pathname,
+    upstreamResponse.status,
+    requestValue,
+    responseValue,
+  ));
 }
 
 function sanitizeGraphAuditEvent(
   method: string,
   path: string,
   status: number,
+  request: Record<string, unknown> | undefined,
   response: Record<string, unknown> | undefined,
 ): Omit<ReplayRepairAuditEvent, "sequence"> {
   const event: Omit<ReplayRepairAuditEvent, "sequence"> = { method, path, status };
@@ -851,13 +911,34 @@ function sanitizeGraphAuditEvent(
   if (method === "POST" && path === "/api/graph/layers") return withRecord(event, "layer", response?.layer);
   if (method === "POST" && path === "/api/graph/actions") return withAction(event, response?.action);
   if (method === "POST" && /^\/api\/graph\/layers\/\d+\/discard$/.test(path)) return withRecord(event, "layer", response?.layer);
-  if (method === "POST" && path === "/api/graph/search" && status >= 200 && status < 300) return withSearchResult(event, response);
+  if (method === "POST" && path === "/api/graph/search" && status >= 200 && status < 300) {
+    return withSearchResult(withSearchRequest(event, request), response);
+  }
   if (method === "POST" && path === "/api/graph/submit" && status >= 200 && status < 300) return withCompletion(event, response);
   const error = isRecord(response?.error) ? response.error : undefined;
   const issues = Array.isArray(error?.issues) ? error.issues : [];
   const errorCodes = [error?.code, ...issues.map((issue) => isRecord(issue) ? issue.code : undefined)]
     .filter((code): code is string => typeof code === "string");
-  return errorCodes.length === 0 ? event : { ...event, errorCodes: [...new Set(errorCodes)] };
+  const withRequest = method === "POST" && path === "/api/graph/search"
+    ? withSearchRequest(event, request)
+    : event;
+  return errorCodes.length === 0 ? withRequest : { ...withRequest, errorCodes: [...new Set(errorCodes)] };
+}
+
+function withSearchRequest(
+  event: Omit<ReplayRepairAuditEvent, "sequence">,
+  request: Record<string, unknown> | undefined,
+): Omit<ReplayRepairAuditEvent, "sequence"> {
+  if (!isRecord(request)) return event;
+  return {
+    ...event,
+    ...(Number.isSafeInteger(request.queryContractVersion)
+      ? { queryContractVersion: request.queryContractVersion as number }
+      : {}),
+    ...(typeof request.query === "string" ? { query: request.query } : {}),
+    ...(isRecord(request.parameters) ? { parameters: structuredClone(request.parameters) } : {}),
+    ...(isRecord(request.budget) ? { budget: structuredClone(request.budget) } : {}),
+  };
 }
 
 function withAction(

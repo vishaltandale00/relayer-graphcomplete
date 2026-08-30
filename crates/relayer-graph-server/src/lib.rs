@@ -29,12 +29,32 @@ pub mod search_index;
 #[derive(Clone)]
 pub struct ServerState {
     graph: GraphDatabase,
-    sessions: Arc<Mutex<HashMap<String, NodeId>>>,
+    sessions: Arc<Mutex<HashMap<String, GraphCapabilityBinding>>>,
     control_token: Arc<str>,
     #[cfg(feature = "ladybug")]
     search_index: Option<Arc<search_index::LadybugSearchIndex>>,
     #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
     search_cancellations: Arc<Mutex<VecDeque<search_index::QueryCancellation>>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum GraphSearchCapability {
+    #[default]
+    Disabled,
+    QueryV1,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GraphCapabilityProfile {
+    search: GraphSearchCapability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GraphCapabilityBinding {
+    node_id: NodeId,
+    profile: GraphCapabilityProfile,
 }
 
 impl ServerState {
@@ -180,7 +200,11 @@ async fn search(
     // The complete target-free contract boundary precedes all transport
     // authority and store observations.
     let preflight = preflight_public_request_json(&body).map_err(ApiError::query_contract)?;
-    let interaction_node_id = session(&state, &headers)?;
+    let capability = capability(&state, &headers)?;
+    if capability.profile.search != GraphSearchCapability::QueryV1 {
+        return Err(ApiError::capability_not_granted());
+    }
+    let interaction_node_id = capability.node_id;
     let permit = state
         .graph
         .current_thread_query_permit(interaction_node_id)
@@ -221,7 +245,10 @@ async fn search(
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let _ = preflight_public_request_json(&body).map_err(ApiError::query_contract)?;
-    let _ = session(&state, &headers)?;
+    let capability = capability(&state, &headers)?;
+    if capability.profile.search != GraphSearchCapability::QueryV1 {
+        return Err(ApiError::capability_not_granted());
+    }
     Err(ApiError::search_unavailable())
 }
 
@@ -396,6 +423,8 @@ struct CreateInteractionRequest {
     mint_capability: bool,
     #[serde(default)]
     personal_presentation_profile: bool,
+    #[serde(default)]
+    graph_capability_profile: GraphCapabilityProfile,
 }
 
 fn default_mint_capability() -> bool {
@@ -501,7 +530,14 @@ async fn create_interaction(
     };
     let graph_token = input
         .mint_capability
-        .then(|| mint_capability(&state, interaction.id, None))
+        .then(|| {
+            mint_capability_with_profile(
+                &state,
+                interaction.id,
+                None,
+                input.graph_capability_profile,
+            )
+        })
         .transpose()?;
     Ok(Json(CreateInteractionResponse {
         node: interaction,
@@ -645,6 +681,8 @@ struct RemintCapabilityRequest {
     node_id: NodeId,
     #[serde(default)]
     graph_token: Option<String>,
+    #[serde(default)]
+    graph_capability_profile: GraphCapabilityProfile,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -661,14 +699,34 @@ async fn remint_capability(
     require_bearer(&headers, &state.control_token)?;
     state.graph.writer_for_subgraph(input.node_id).await?;
     Ok(Json(RemintCapabilityResponse {
-        graph_token: mint_capability(&state, input.node_id, input.graph_token)?,
+        graph_token: mint_capability_with_profile(
+            &state,
+            input.node_id,
+            input.graph_token,
+            input.graph_capability_profile,
+        )?,
     }))
 }
 
+#[cfg(test)]
 fn mint_capability(
     state: &ServerState,
     node_id: NodeId,
     requested_token: Option<String>,
+) -> Result<String, ApiError> {
+    mint_capability_with_profile(
+        state,
+        node_id,
+        requested_token,
+        GraphCapabilityProfile::default(),
+    )
+}
+
+fn mint_capability_with_profile(
+    state: &ServerState,
+    node_id: NodeId,
+    requested_token: Option<String>,
+    profile: GraphCapabilityProfile,
 ) -> Result<String, ApiError> {
     let graph_token = requested_token.unwrap_or_else(|| Uuid::new_v4().to_string());
     if graph_token.is_empty() {
@@ -678,17 +736,18 @@ fn mint_capability(
         .sessions
         .lock()
         .map_err(|_| ApiError::internal("session lock poisoned"))?;
-    if let Some(active_node_id) = sessions.get(&graph_token) {
-        if *active_node_id != node_id {
+    let binding = GraphCapabilityBinding { node_id, profile };
+    if let Some(active_binding) = sessions.get(&graph_token) {
+        if *active_binding != binding {
             return Err(ApiError::conflict(
                 "capability_token_conflict",
-                "graphToken is already bound to a different interaction",
+                "graphToken is already bound to a different interaction or capability profile",
             ));
         }
         return Ok(graph_token);
     }
-    sessions.retain(|_, active_node_id| *active_node_id != node_id);
-    sessions.insert(graph_token.clone(), node_id);
+    sessions.retain(|_, active_binding| active_binding.node_id != node_id);
+    sessions.insert(graph_token.clone(), binding);
     Ok(graph_token)
 }
 
@@ -715,7 +774,7 @@ async fn revoke_capability(
         (Some(graph_token), None) => sessions.remove(&graph_token).is_some() as usize,
         (None, Some(node_id)) => {
             let before = sessions.len();
-            sessions.retain(|_, active_node_id| *active_node_id != node_id);
+            sessions.retain(|_, active_binding| active_binding.node_id != node_id);
             before - sessions.len()
         }
         _ => {
@@ -1042,7 +1101,10 @@ fn require_bearer(headers: &HeaderMap, expected: &str) -> Result<(), ApiError> {
         ))
     }
 }
-fn session(state: &ServerState, headers: &HeaderMap) -> Result<NodeId, ApiError> {
+fn capability(
+    state: &ServerState,
+    headers: &HeaderMap,
+) -> Result<GraphCapabilityBinding, ApiError> {
     let token = bearer(headers).ok_or_else(|| {
         ApiError(
             StatusCode::UNAUTHORIZED,
@@ -1061,6 +1123,10 @@ fn session(state: &ServerState, headers: &HeaderMap) -> Result<NodeId, ApiError>
                 json!({"error":{"code":"invalid_capability","message":"This graph capability is unknown or expired."}}),
             )
         })
+}
+
+fn session(state: &ServerState, headers: &HeaderMap) -> Result<NodeId, ApiError> {
+    Ok(capability(state, headers)?.node_id)
 }
 
 pub struct ApiError(StatusCode, Value);
@@ -1090,6 +1156,13 @@ impl ApiError {
         Self(
             StatusCode::SERVICE_UNAVAILABLE,
             json!({"error":{"code":"search_unavailable","message":"Graph search is temporarily unavailable."}}),
+        )
+    }
+
+    fn capability_not_granted() -> Self {
+        Self(
+            StatusCode::FORBIDDEN,
+            json!({"error":{"code":"capability_not_granted","message":"This graph capability does not grant search access."}}),
         )
     }
 
@@ -1736,7 +1809,7 @@ mod tests {
             .unwrap()
             .get(&body.graph_token)
             .unwrap()
-            .to_owned();
+            .node_id;
         assert_eq!(node_id, body.node.id);
     }
 
@@ -1838,8 +1911,13 @@ mod tests {
             .unwrap();
         assert_eq!(conflict.status(), StatusCode::CONFLICT);
         assert_eq!(
-            state.sessions.lock().unwrap().get(token),
-            Some(&created.node.id)
+            state
+                .sessions
+                .lock()
+                .unwrap()
+                .get(token)
+                .map(|binding| binding.node_id),
+            Some(created.node.id)
         );
 
         let invalidated = app

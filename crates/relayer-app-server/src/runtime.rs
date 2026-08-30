@@ -40,7 +40,23 @@ pub(crate) struct HarnessConfiguration {
     execution_access_contracts: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model_defaults: Option<HarnessModelDefaults>,
+    #[serde(default)]
+    graph_capability_profile: GraphCapabilityProfile,
     settings: Value,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum GraphSearchCapability {
+    #[default]
+    Disabled,
+    QueryV1,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GraphCapabilityProfile {
+    search: GraphSearchCapability,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -648,6 +664,7 @@ impl RuntimeClient {
         let body = serde_json::json!({
             "nodeId": prepared.graph_node_id,
             "graphToken": &prepared.graph_token,
+            "graphCapabilityProfile": prepared.configuration.graph_capability_profile,
         });
         let mut attempt = 0;
         loop {
@@ -2678,6 +2695,10 @@ mod tests {
             .route(
                 "/api/control/capabilities",
                 routing::post(|Json(body): Json<Value>| async move {
+                    assert_eq!(
+                        body["graphCapabilityProfile"],
+                        json!({ "search": "query-v1" })
+                    );
                     Json(json!({"graphToken": body["graphToken"]}))
                 })
                 .delete(move |headers: HeaderMap| {
@@ -2724,6 +2745,7 @@ mod tests {
                         "implementation": "test",
                         "implementationVersion": 1,
                         "permissionBindings": { "auto": {} },
+                        "graphCapabilityProfile": { "search": "query-v1" },
                         "settings": {}
                     },
                     "digest": "sha256:test"
@@ -2813,6 +2835,10 @@ mod tests {
             .route(
                 "/api/control/capabilities",
                 routing::post(|Json(body): Json<Value>| async move {
+                    assert_eq!(
+                        body["graphCapabilityProfile"],
+                        json!({ "search": "disabled" })
+                    );
                     Json(json!({"graphToken": body["graphToken"]}))
                 })
                 .delete(move |headers: HeaderMap| {

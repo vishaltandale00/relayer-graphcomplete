@@ -2,7 +2,7 @@ schemaVersion: 1
 name: codex-basic
 implementation: codex.basic
 implementationVersion: 1
-revision: 4
+revision: 5
 permissionBindings:
   ask:
     sandboxMode: workspace-write
@@ -35,6 +35,8 @@ modelDefaults:
   familyPolicy:
     id: codex-default-family
     version: 2
+graphCapabilityProfile:
+  search: disabled
 settings:
   modelReasoningEffort: medium
   promptProfile: layered-navigation-multi-agent-v1

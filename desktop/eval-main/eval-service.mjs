@@ -33,6 +33,12 @@ import {
   calibrationAutonomousCaseIds,
   materializeCalibrationFixture,
   gradeCalibrationWorkspace,
+  graphMemoryEvalCaseId,
+  graphMemoryEvalPrompts,
+  graphMemoryAnchor,
+  checkGraphMemoryFirstTurn,
+  checkGraphMemorySecondTurn,
+  readGraphMemoryEvidence,
   materializeFrontierProjectFixture,
   materializeH3ProjectFixture,
   projectDeterministicChecksToOutcome,
@@ -46,6 +52,13 @@ import {
 } from "./simulated-user-judge.mjs";
 
 export const evalCases = Object.freeze([
+  Object.freeze({
+    id: graphMemoryEvalCaseId,
+    name: "Graph memory · prior accepted reference",
+    description: "Searches a prior accepted layer in a second turn and retains the typed reference in one real product thread.",
+    promptsForRun: graphMemoryEvalPrompts,
+    gradeExecution: gradeGraphMemoryExecution,
+  }),
   Object.freeze({
     id: basicEvalCaseId,
     name: "Task system · two turns",
@@ -84,6 +97,42 @@ export const evalCases = Object.freeze([
     caseSnapshotDigest: entry.snapshotDigest,
   })),
 ]);
+
+export function resolveEvalCasePrompts(definition, testRunId) {
+  if (!definition) throw new Error("Cannot resolve prompts for an unknown Eval case.");
+  const prompts = typeof definition.promptsForRun === "function"
+    ? definition.promptsForRun(testRunId)
+    : definition.prompts;
+  if (!Array.isArray(prompts) || prompts.length === 0 || prompts.some((prompt) => typeof prompt !== "string" || prompt.trim() === "")) {
+    throw new Error(`Eval case ${definition.id} has no valid prompts.`);
+  }
+  return [...prompts];
+}
+
+async function gradeGraphMemoryExecution({ execution, interactions, loadGraphOperations }) {
+  if (interactions.length !== 2) throw new Error("Graph-memory grading requires exactly two product turns.");
+  const [first, second] = interactions.map(({ interaction }) => interaction);
+  if (!first.completionOutput || !second.completionOutput) {
+    throw new Error("Graph-memory grading requires two completed graph outputs.");
+  }
+  const firstEvents = await loadGraphOperations(execution.turns[0]);
+  const secondEvents = await loadGraphOperations(execution.turns[1]);
+  const auditEvents = [...firstEvents, ...secondEvents].sort((left, right) => left.sequence - right.sequence);
+  const secondTurnStartSequence = firstEvents.reduce((maximum, event) => Math.max(maximum, event.sequence), 0);
+  const evidence = readGraphMemoryEvidence(
+    graphMemoryAnchor(execution.testRunId),
+    first.completionOutput,
+    second.completionOutput,
+    auditEvents,
+    secondTurnStartSequence,
+  );
+  return {
+    turns: [
+      { checks: checkGraphMemoryFirstTurn(first.completionOutput, graphMemoryAnchor(execution.testRunId), first.graphNodeId) },
+      { checks: checkGraphMemorySecondTurn(second.completionOutput, first.completionOutput, evidence, second.graphNodeId, false), evidence },
+    ],
+  };
+}
 
 const h3CaseIds = new Set([
   H3_PROJECT_CASE_ID,
@@ -593,7 +642,7 @@ export class EvalService {
 
   catalog() {
     return {
-      cases: copy(evalCases),
+      cases: copy(evalCases.map(({ promptsForRun: _promptsForRun, gradeExecution: _gradeExecution, ...definition }) => definition)),
       harnessConfigurations: [...this.configurations.values()].map((configuration) => ({
         name: configuration.name,
         implementation: configuration.implementation,
@@ -706,7 +755,18 @@ export class EvalService {
         "manifest.json",
       ].join("/");
       if (turn.candidateTrace?.ref !== expectedRef) {
-        return { execution: copy(execution), turn: copy(turn), manifest: null, events: [] };
+        return {
+          execution: copy(execution),
+          turn: copy(turn),
+          manifest: null,
+          events: [],
+          graphOperations: [],
+          graphOperationsEvidence: {
+            status: "unavailable",
+            error: "Candidate trace artifact is unavailable for this turn.",
+            descriptor: copy(turn.candidateTrace?.graphOperations ?? null),
+          },
+        };
       }
       const directory = join(dirname(this.stateFile), "runs", encodeURIComponent(run.id), ...expectedRef.split("/").slice(0, -1));
       const manifest = JSON.parse(await readFile(join(directory, "manifest.json"), "utf8"));
@@ -714,6 +774,23 @@ export class EvalService {
         .split("\n")
         .filter(Boolean)
         .map((line) => JSON.parse(line));
+      let graphOperations = [];
+      let graphOperationsEvidence;
+      try {
+        graphOperations = await this.#loadGraphOperations(execution, turn);
+        graphOperationsEvidence = {
+          status: "complete",
+          error: null,
+          descriptor: copy(turn.candidateTrace.graphOperations),
+        };
+      } catch (error) {
+        const descriptor = turn.candidateTrace?.graphOperations;
+        graphOperationsEvidence = {
+          status: descriptor?.status === "complete" ? "invalid" : "unavailable",
+          error: error instanceof Error ? error.message : String(error),
+          descriptor: copy(descriptor ?? null),
+        };
+      }
       return {
         run: { id: run.id },
         execution: {
@@ -730,6 +807,8 @@ export class EvalService {
         turn: copy(turn),
         manifest,
         events,
+        graphOperations,
+        graphOperationsEvidence,
       };
     }
     throw new Error(`Unknown execution: ${executionId}`);
@@ -1308,6 +1387,27 @@ export class EvalService {
       }));
       delete execution.candidateTraceCaptures;
       execution.promotable = execution.turns.every((turn) => !this.candidateTraceRequired || turn.candidateTrace.status === "complete");
+      let caseGrade = null;
+      if (typeof definition.gradeExecution === "function") {
+        try {
+          caseGrade = await definition.gradeExecution({
+            execution,
+            interactions,
+            loadGraphOperations: (turn) => this.#loadGraphOperations(execution, turn),
+          });
+        } catch (error) {
+          execution.promotable = false;
+          caseGrade = {
+            turns: execution.turns.map(() => ({
+              checks: [{
+                name: "case-evidence",
+                passed: false,
+                detail: error instanceof Error ? error.message : String(error),
+              }],
+            })),
+          };
+        }
+      }
       const checks = [];
       for (const [turnIndex, executedTurn] of interactions.entries()) {
         const { interaction, threadDefinition, workspaceChecks } = executedTurn;
@@ -1323,10 +1423,13 @@ export class EvalService {
             detail: interaction.completionError || `Turn ended as ${interaction.completionStatus}.`,
           });
         } else {
-          turnChecks.push(...checkBasicOutput(interaction.completionOutput, interaction.graphNodeId).map((check) => ({
+          const caseChecks = caseGrade?.turns?.[turnIndex]?.checks;
+          turnChecks.push(...(Array.isArray(caseChecks) ? caseChecks : checkBasicOutput(interaction.completionOutput, interaction.graphNodeId)).map((check) => ({
             ...check,
             name: `${checkPrefix}:${check.name}`,
           })));
+          const caseEvidence = caseGrade?.turns?.[turnIndex]?.evidence;
+          if (caseEvidence !== undefined) turn.caseEvidence = copy(caseEvidence);
           if (definition.requiredChecks?.includes("node-navigation")) {
             turnChecks.push(...checkNodeNavigation(interaction.completionOutput).map((check) => ({
               ...check,
@@ -1441,7 +1544,7 @@ export class EvalService {
     const thread = await this.#createAndRunThread({
       execution,
       title: definition.name,
-      prompts: definition.prompts,
+      prompts: resolveEvalCasePrompts(definition, execution.testRunId),
       permissionProfileId: selectStandalonePermissionProfile(execution.harnessConfiguration),
     });
     const detail = await this.#productRequest(`/api/threads/${thread.id}`);
@@ -1543,7 +1646,7 @@ export class EvalService {
         modelSettings,
         execution.harnessConfigurationName,
       );
-      const modelLessEvalFixture = execution.harnessConfiguration.implementation === "fixture.task-system";
+      const modelLessEvalFixture = execution.harnessConfiguration.implementation.startsWith("fixture.");
       if (productModelSelection && selectedModel === null && !modelLessEvalFixture) {
         throw new Error(`Eval has no available model for ${execution.harnessConfigurationName}.`);
       }
@@ -1743,6 +1846,42 @@ export class EvalService {
       };
     }
     await this.#changed();
+  }
+
+  async #loadGraphOperations(execution, turn) {
+    const descriptor = turn?.candidateTrace?.graphOperations;
+    if (descriptor?.status !== "complete" || descriptor.format !== "relayer-graph-operations-v1"
+      || descriptor.ref !== "graph-operations.jsonl" || descriptor.truncated !== false) {
+      throw new Error("Candidate trace lacks a complete graph-operation ledger.");
+    }
+    const path = join(
+      dirname(this.stateFile),
+      "runs",
+      encodeURIComponent(execution.testRunId),
+      "executions",
+      encodeURIComponent(execution.id),
+      "turns",
+      encodeURIComponent(String(turn.interactionId)),
+      "candidate-trace",
+      descriptor.ref,
+    );
+    const bytes = await readFile(path);
+    if (bytes.byteLength !== descriptor.byteLength || sha256(bytes) !== descriptor.sha256) {
+      throw new Error("Candidate trace graph-operation ledger failed digest validation.");
+    }
+    const lines = bytes.toString("utf8").split("\n").filter(Boolean);
+    if (lines.length !== descriptor.eventCount) {
+      throw new Error("Candidate trace graph-operation ledger event count does not match its descriptor.");
+    }
+    return lines.map((line) => {
+      const event = JSON.parse(line);
+      if (event?.schemaVersion !== 1 || !Number.isSafeInteger(event.sequence) || event.sequence < 1
+        || event.interactionNodeId !== turn.graphNodeId || typeof event.method !== "string"
+        || typeof event.path !== "string" || !Number.isSafeInteger(event.status)) {
+        throw new Error("Candidate trace graph-operation ledger contains an invalid receipt.");
+      }
+      return event;
+    });
   }
 
   async #productRequest(path, options = {}) {

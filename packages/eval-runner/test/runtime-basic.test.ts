@@ -5,10 +5,16 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { productHarnessImplementations, type HarnessFactory } from "@relayer/harness-host";
 import type { CompletionOutput } from "@relayer/graph-client";
-import { graphMemoryFixtureConfiguration, graphMemoryFixtureFactory } from "../src/fixtures/graph-memory.js";
+import {
+  graphMemoryFixtureConfiguration,
+  graphMemoryFixtureFactory,
+  graphMemorySearchBudget,
+  graphMemorySearchParameters,
+  graphMemorySearchQuery,
+} from "../src/fixtures/graph-memory.js";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, graphMemoryAnchor, graphMemoryEvalCaseId, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkGraphMemorySecondTurn, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, graphMemoryAnchor, graphMemoryEvalCaseId, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -434,6 +440,7 @@ describe("first runtime evaluation", () => {
     ))).toHaveLength(1);
     expect(artifact.turns[1]!.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: true }),
       expect.objectContaining({ name: "draft-decoy-hidden", passed: true }),
       expect.objectContaining({ name: "typed-reference-target", passed: true }),
       expect.objectContaining({ name: "ack-search-submit-order", passed: true }),
@@ -445,6 +452,12 @@ describe("first runtime evaluation", () => {
       expect.objectContaining({ name: "same-provider-session", passed: true }),
     ]));
     const evidence = artifact.turns[1]!.graphMemoryEvidence!;
+    expect(evidence.searchRequest).toEqual({
+      queryContractVersion: 1,
+      query: graphMemorySearchQuery,
+      parameters: graphMemorySearchParameters(graphMemoryAnchor(execution.testRunId)),
+      budget: graphMemorySearchBudget,
+    });
     const firstLayerId = artifact.turns[0]!.output.rootLayer.layer.id;
     expect(evidence.searchedLayerIds).toEqual([firstLayerId]);
     const acceptedReference = artifact.turns[1]!.output.rootLayer.actions.find((action) => (
@@ -468,6 +481,23 @@ describe("first runtime evaluation", () => {
     expect(submits[0]!.sequence).toBeLessThan(search.sequence);
     expect(search.sequence).toBeLessThan(reference.sequence);
     expect(reference.sequence).toBeLessThan(submits[1]!.sequence);
+    const launderedChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          ...evidence.searchRequest!,
+          query: "MATCH (l:Layer) RETURN l AS layer ORDER BY layer ASC",
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      true,
+    );
+    expect(launderedChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
   }, 30_000);
 
   it("uses the explicit managed Codex executable for every structured judge turn", async () => {

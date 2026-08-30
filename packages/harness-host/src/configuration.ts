@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
 import type {
   HarnessConfiguration,
+  GraphCapabilityProfile,
   HarnessModelCompatibility,
   HarnessModelRule,
   HarnessModelRules,
@@ -38,6 +39,7 @@ export function parseHarnessConfiguration(value: unknown): HarnessConfiguration 
     modelRules,
     executionAccessContracts,
     modelDefaults,
+    graphCapabilityProfile,
     settings,
   } = value;
   if (schemaVersion !== 1) throw new Error(`Unsupported harness configuration schema version: ${String(schemaVersion)}`);
@@ -65,6 +67,7 @@ export function parseHarnessConfiguration(value: unknown): HarnessConfiguration 
     throw new Error("Model-selecting harness configurations require executionAccessContracts so a selected provider cannot fall back to ambient credentials");
   }
   const parsedModelDefaults = parseModelDefaults(modelDefaults);
+  const parsedGraphCapabilityProfile = parseGraphCapabilityProfile(graphCapabilityProfile);
   if (!isJsonObject(settings)) throw new Error("Harness implementation settings must be a JSON object");
   return {
     schemaVersion,
@@ -77,8 +80,25 @@ export function parseHarnessConfiguration(value: unknown): HarnessConfiguration 
     ...(parsedModelRules ? { modelRules: parsedModelRules } : {}),
     ...(parsedAccessContracts ? { executionAccessContracts: parsedAccessContracts } : {}),
     ...(parsedModelDefaults ? { modelDefaults: parsedModelDefaults } : {}),
+    ...(parsedGraphCapabilityProfile ? { graphCapabilityProfile: parsedGraphCapabilityProfile } : {}),
     settings,
   };
+}
+
+function parseGraphCapabilityProfile(value: unknown): GraphCapabilityProfile | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("Harness graphCapabilityProfile must be an object");
+  for (const key of Object.keys(value)) {
+    if (key !== "search") throw new Error(`Unknown graphCapabilityProfile field: ${key}`);
+  }
+  if (value.search !== "disabled" && value.search !== "query-v1") {
+    throw new Error("Harness graphCapabilityProfile.search must be disabled or query-v1");
+  }
+  return { search: value.search };
+}
+
+export function resolveGraphCapabilityProfile(configuration: HarnessConfiguration): GraphCapabilityProfile {
+  return configuration.graphCapabilityProfile ?? { search: "disabled" };
 }
 
 function parseModelRules(value: unknown): HarnessModelRules | undefined {
@@ -219,7 +239,7 @@ function parseModelCompatibility(value: unknown): readonly HarnessModelCompatibi
 }
 
 export function sameHarnessConfiguration(left: HarnessConfiguration, right: HarnessConfiguration): boolean {
-  return canonicalJson(left) === canonicalJson(right);
+  return canonicalHarnessJson(left) === canonicalHarnessJson(right);
 }
 
 /**
@@ -245,11 +265,24 @@ export function sameHarnessExecutionConfiguration(
     modelDefaults: _rightModelDefaults,
     ...rightExecution
   } = right;
-  return canonicalJson(leftExecution) === canonicalJson(rightExecution);
+  return canonicalJson({
+    ...leftExecution,
+    graphCapabilityProfile: resolveGraphCapabilityProfile(left),
+  }) === canonicalJson({
+    ...rightExecution,
+    graphCapabilityProfile: resolveGraphCapabilityProfile(right),
+  });
 }
 
 export function digestHarnessConfiguration(configuration: HarnessConfiguration): string {
-  return `sha256:${createHash("sha256").update(canonicalJson(configuration)).digest("hex")}`;
+  return `sha256:${createHash("sha256").update(canonicalHarnessJson(configuration)).digest("hex")}`;
+}
+
+function canonicalHarnessJson(configuration: HarnessConfiguration): string {
+  return canonicalJson({
+    ...configuration,
+    graphCapabilityProfile: resolveGraphCapabilityProfile(configuration),
+  });
 }
 
 function canonicalJson(value: JsonValue | HarnessConfiguration): string {

@@ -9,6 +9,7 @@ export function evalHarnessConfigurationPaths({
 }) {
   const paths = [
     join(harnessDirectory, "fixture-task-system.yaml"),
+    join(harnessDirectory, "fixture-graph-memory.yaml"),
     join(harnessDirectory, "codex-basic.yaml"),
     join(harnessDirectory, "codex-basic-high.yaml"),
     join(harnessDirectory, "codex-layered-navigation-luna.yaml"),

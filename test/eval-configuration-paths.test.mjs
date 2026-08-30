@@ -19,6 +19,7 @@ describe("Eval harness configuration availability", () => {
       packageAvailable,
     }))).toEqual([
       "fixture-task-system.yaml",
+      "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
       "codex-layered-navigation-luna.yaml",
@@ -40,6 +41,7 @@ describe("Eval harness configuration availability", () => {
       packageAvailable: () => false,
     }))).toEqual([
       "fixture-task-system.yaml",
+      "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
       "codex-layered-navigation-luna.yaml",
@@ -59,6 +61,7 @@ describe("Eval harness configuration availability", () => {
       packageAvailable,
     }))).toEqual([
       "fixture-task-system.yaml",
+      "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
       "codex-layered-navigation-luna.yaml",

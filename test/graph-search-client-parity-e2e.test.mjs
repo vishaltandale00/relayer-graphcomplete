@@ -226,7 +226,11 @@ asyncio.run(main())
 }
 
 async function createInteraction(url, controlToken, threadId, text) {
-  return controlRequest(url, controlToken, "/api/control/interactions", { threadId, text });
+  return controlRequest(url, controlToken, "/api/control/interactions", {
+    threadId,
+    text,
+    graphCapabilityProfile: { search: "query-v1" },
+  });
 }
 
 async function startGraphServer(database, controlToken) {

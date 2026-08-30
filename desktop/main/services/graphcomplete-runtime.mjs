@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 import { terminateChildProcess } from "./child-process.mjs";
+import { startGraphOperationRecorder } from "./graph-operation-recorder.mjs";
 import {
   acquireAuthenticatedErrorCapability,
   authenticatedErrorCapabilityBootstrap,
@@ -274,6 +275,7 @@ export class GraphCompleteRuntimeService {
     this.graphErrorReporter = null;
     this.graphErrorCapability = null;
     this.graphProcess = null;
+    this.graphOperationRecorder = null;
     this.harnessHost = null;
     this.session = null;
     this.closing = false;
@@ -366,6 +368,11 @@ export class GraphCompleteRuntimeService {
       if (graphProcess.exitCode !== null || graphProcess.signalCode !== null) {
         throw new Error(`Relayer graph server stopped after readiness (${graphProcess.signalCode || graphProcess.exitCode || "unknown"}).`);
       }
+      const graphOperationRecorder = await this.#awaitStartupOperation(
+        startGraphOperationRecorder({ upstreamUrl: graphUrl }),
+        (lateRecorder) => lateRecorder.close(),
+      );
+      this.graphOperationRecorder = graphOperationRecorder;
       let harnessHost;
       try {
         harnessHost = await this.#awaitStartupOperation(startHarnessHost({
@@ -393,7 +400,7 @@ export class GraphCompleteRuntimeService {
       } catch (error) { throw error; }
       this.harnessHost = harnessHost;
       this.session = Object.freeze({
-        graphUrl,
+        graphUrl: graphOperationRecorder.url,
         harnessUrl: harnessHost.url,
         graphControlToken,
         harnessControlToken,
@@ -416,8 +423,26 @@ export class GraphCompleteRuntimeService {
   }
 
   async exportCandidateTrace(productInteractionId, targetDirectory, correlation) {
-    if (!this.harnessHost) throw new Error("GraphComplete runtime is not running.");
-    return this.harnessHost.host.exportCandidateTrace(productInteractionId, targetDirectory, correlation);
+    if (!this.harnessHost || !this.graphOperationRecorder) throw new Error("GraphComplete runtime is not running.");
+    const descriptor = await this.harnessHost.host.exportCandidateTrace(productInteractionId, targetDirectory, correlation);
+    const manifest = JSON.parse(await readFile(join(targetDirectory, "manifest.json"), "utf8"));
+    if (!Number.isSafeInteger(manifest?.interactionNodeId) || manifest.interactionNodeId < 1
+      || manifest.productInteractionId !== productInteractionId) {
+      throw new Error("Candidate trace manifest does not match its product interaction.");
+    }
+    const graphOperations = await this.graphOperationRecorder.exportInteraction(
+      manifest.interactionNodeId,
+      targetDirectory,
+    );
+    return {
+      ...descriptor,
+      ...(graphOperations.status === "complete" ? {} : {
+        status: "partial",
+        promotable: false,
+        error: "Graph-operation evidence was truncated.",
+      }),
+      graphOperations,
+    };
   }
 
   candidateTracePersonalPresentationVersionId(productInteractionId) {
@@ -627,13 +652,22 @@ export class GraphCompleteRuntimeService {
     revokeAuthenticatedErrorCapability(this.graphErrorCapability);
     this.graphErrorCapability = null;
     const harnessHost = this.harnessHost;
+    const graphOperationRecorder = this.graphOperationRecorder;
     const graphProcess = this.graphProcess;
     this.harnessHost = null;
+    this.graphOperationRecorder = null;
     this.graphProcess = null;
     this.session = null;
     const errors = [];
     if (harnessHost) {
       errors.push(...await this.#closeHarnessHost(harnessHost, deadline));
+    }
+    if (graphOperationRecorder) {
+      try {
+        await graphOperationRecorder.close();
+      } catch (error) {
+        errors.push(error);
+      }
     }
     if (graphProcess) {
       try {

@@ -475,12 +475,15 @@ describe("CodexBasicHarness", () => {
   });
 
   it("teaches capability-scoped bounded search and typed references through executable JavaScript", () => {
-    const prompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
+    const disabledPrompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
+    const prompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client", undefined, true, true);
     const searchGuidance = prompt.slice(
       prompt.indexOf("Graph search is available"),
       prompt.indexOf("Navigation has two meanings:"),
     );
 
+    expect(disabledPrompt).not.toContain("Graph search is available");
+    expect(disabledPrompt).not.toContain("await graph.search(request, options)");
     expect(searchGuidance).toContain("await graph.search(request, options)");
     expect(searchGuidance).toContain("It is not a provider-native tool or MCP function");
     expect(searchGuidance).toContain("queryContractVersion: 1");

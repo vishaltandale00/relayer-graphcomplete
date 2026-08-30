@@ -77,18 +77,171 @@ async fn post(
 }
 
 async fn interaction(app: &Router, thread_id: i64) -> CreateInteractionResponse {
+    interaction_with_profile(app, thread_id, Some("query-v1")).await
+}
+
+async fn interaction_with_profile(
+    app: &Router,
+    thread_id: i64,
+    search_profile: Option<&str>,
+) -> CreateInteractionResponse {
+    let mut request = json!({
+        "threadId": thread_id,
+        "text": "Search this answer",
+    });
+    if let Some(search) = search_profile {
+        request["graphCapabilityProfile"] = json!({ "search": search });
+    }
     let response = post(
         app,
         "/api/control/interactions",
         Some("control"),
-        Body::from(format!(
-            r#"{{"threadId":{thread_id},"text":"Search this answer"}}"#
-        )),
+        Body::from(request.to_string()),
     )
     .await;
     let (status, body) = json_response(response).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     serde_json::from_value(body).unwrap()
+}
+
+#[tokio::test]
+async fn disabled_capability_denies_valid_search_before_index_readiness_but_not_preflight() {
+    let directory = tempfile::tempdir().unwrap();
+    let graph = GraphDatabase::open(directory.path().join("graph.db"))
+        .await
+        .unwrap();
+    let app = router(ServerState::new(graph, "control"));
+    let interaction = interaction_with_profile(&app, 79, None).await;
+
+    let denied = post(
+        &app,
+        "/api/graph/search",
+        Some(&interaction.graph_token),
+        query_body(json!({})),
+    )
+    .await;
+    let (status, body) = json_response(denied).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "capability_not_granted");
+
+    let malformed = post(
+        &app,
+        "/api/graph/search",
+        Some(&interaction.graph_token),
+        Body::from(
+            json!({
+                "queryContractVersion": 1,
+                "query": "CREATE (n:Content)",
+                "parameters": {},
+                "budget": {},
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    let (status, body) = json_response(malformed).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "query_construct_forbidden");
+}
+
+#[tokio::test]
+async fn disabled_authoring_capability_still_projects_for_a_later_enabled_turn() {
+    let fixture = fixture().await;
+    let author = interaction_with_profile(&fixture.app, 81, None).await;
+    author_answer(&fixture.graph, &author).await;
+
+    let submitted = post(
+        &fixture.app,
+        "/api/graph/submit",
+        Some(&author.graph_token),
+        Body::from(json!({"nodeId": author.node.id}).to_string()),
+    )
+    .await;
+    assert_eq!(submitted.status(), StatusCode::OK);
+
+    let denied = post(
+        &fixture.app,
+        "/api/graph/search",
+        Some(&author.graph_token),
+        query_body(json!({})),
+    )
+    .await;
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+    let reader = interaction_with_profile(&fixture.app, 81, Some("query-v1")).await;
+    let searched = post(
+        &fixture.app,
+        "/api/graph/search",
+        Some(&reader.graph_token),
+        query_body(json!({})),
+    )
+    .await;
+    let (status, body) = json_response(searched).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body,
+        json!({
+            "queryContractVersion": 1,
+            "columns": ["title"],
+            "rows": [[{"type":"string","value":"Searchable answer"}]],
+            "truncated": false,
+        })
+    );
+}
+
+#[tokio::test]
+async fn remint_is_idempotent_only_for_the_exact_capability_profile() {
+    let fixture = fixture().await;
+    let created = post(
+        &fixture.app,
+        "/api/control/interactions",
+        Some("control"),
+        Body::from(
+            json!({
+                "threadId": 80,
+                "text": "Prepare without capability",
+                "mintCapability": false,
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    let (status, body) = json_response(created).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let created: CreateInteractionResponse = serde_json::from_value(body).unwrap();
+    let remint_body = json!({
+        "nodeId": created.node.id,
+        "graphToken": "fixed-profile-token",
+        "graphCapabilityProfile": { "search": "disabled" },
+    });
+    for _ in 0..2 {
+        let response = post(
+            &fixture.app,
+            "/api/control/capabilities",
+            Some("control"),
+            Body::from(remint_body.to_string()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let conflict = post(
+        &fixture.app,
+        "/api/control/capabilities",
+        Some("control"),
+        Body::from(
+            json!({
+                "nodeId": created.node.id,
+                "graphToken": "fixed-profile-token",
+                "graphCapabilityProfile": { "search": "query-v1" },
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    let (status, body) = json_response(conflict).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "capability_token_conflict");
 }
 
 fn query_body(budget: Value) -> Body {

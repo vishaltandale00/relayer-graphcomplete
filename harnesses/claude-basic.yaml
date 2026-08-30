@@ -2,7 +2,7 @@ schemaVersion: 1
 name: claude-basic
 implementation: claude.basic
 implementationVersion: 1
-revision: 1
+revision: 2
 permissionBindings:
   ask:
     approvalMode: default
@@ -26,4 +26,6 @@ modelDefaults:
   familyPolicy:
     id: claude-default-family
     version: 1
+graphCapabilityProfile:
+  search: disabled
 settings: {}

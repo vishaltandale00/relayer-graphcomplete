@@ -67,6 +67,10 @@ const testConfiguration: HarnessConfiguration = {
   permissionBindings: { ask: {}, auto: {}, full: {} },
   settings: {},
 };
+const graphSearchConfiguration = (search: "disabled" | "query-v1"): HarnessConfiguration => ({
+  ...testConfiguration,
+  graphCapabilityProfile: { search },
+});
 const legacyConfiguration = (configuration: HarnessConfiguration) => {
   const { permissionBindings: _permissionBindings, ...legacy } = configuration;
   return legacy;
@@ -359,6 +363,47 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("refreshes an omitted profile as explicit disabled but rejects a live search-authority change", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-live-graph-profile-"));
+    let factoryCalls = 0;
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => {
+          factoryCalls += 1;
+          return { async complete() {}, state: emptyState };
+        } },
+      });
+      await host.initialize();
+      const descriptor = { threadId: 1, permissionProfileId: "auto", workingDirectory: directory };
+
+      await host.createSession({ ...descriptor, configuration: testConfiguration });
+      await host.createSession({ ...descriptor, configuration: graphSearchConfiguration("disabled") });
+      expect(factoryCalls).toBe(1);
+      await expect(host.createSession({
+        ...descriptor,
+        configuration: graphSearchConfiguration("query-v1"),
+      })).rejects.toThrow("already pinned");
+      expect(factoryCalls).toBe(1);
+
+      await host.createSession({
+        ...descriptor,
+        threadId: 2,
+        configuration: graphSearchConfiguration("query-v1"),
+      });
+      expect(factoryCalls).toBe(2);
+      await expect(host.createSession({
+        ...descriptor,
+        threadId: 2,
+        configuration: graphSearchConfiguration("disabled"),
+      })).rejects.toThrow("already pinned");
+      expect(factoryCalls).toBe(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("disposes a harness that finishes starting after the host closes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-close-during-factory-"));
     let releaseFactory!: () => void;
@@ -445,6 +490,49 @@ describe("HarnessHost", () => {
       await expect(restored.complete(1, 1, graph())).rejects.toThrow("must be registered");
       await restored.createSession(descriptor);
       expect(restoredState).toEqual({ sessionId: "saved" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves saved provider state across omitted-to-disabled normalization but rejects query-v1", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-saved-graph-profile-"));
+    const stateFile = join(directory, "sessions.json");
+    const descriptor = { threadId: 1, permissionProfileId: "auto", workingDirectory: directory };
+    try {
+      const first = new HarnessHost({
+        stateFile,
+        controlToken: "control",
+        implementations: { test: () => ({ async complete() {}, state: () => ({ providerSessionId: "saved" }) }) },
+      });
+      await first.initialize();
+      await first.createSession({ ...descriptor, configuration: testConfiguration });
+      await first.close();
+
+      let factoryCalls = 0;
+      let restoredState: HarnessSessionState | undefined;
+      const restored = new HarnessHost({
+        stateFile,
+        controlToken: "control",
+        implementations: { test: (context) => {
+          factoryCalls += 1;
+          restoredState = context.savedState;
+          return { async complete() {}, state: () => context.savedState ?? emptyState() };
+        } },
+      });
+      await restored.initialize();
+      await expect(restored.createSession({
+        ...descriptor,
+        configuration: graphSearchConfiguration("query-v1"),
+      })).rejects.toThrow("already pinned");
+      expect(factoryCalls).toBe(0);
+
+      await restored.createSession({
+        ...descriptor,
+        configuration: graphSearchConfiguration("disabled"),
+      });
+      expect(factoryCalls).toBe(1);
+      expect(restoredState).toEqual({ providerSessionId: "saved" });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

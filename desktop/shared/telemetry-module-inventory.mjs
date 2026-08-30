@@ -95,6 +95,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/main/services/desktop-harness-configuration.mjs",
     "desktop/main/services/electron-main-error-adapter.mjs",
     "desktop/main/services/folder-service.mjs",
+    "desktop/main/services/graph-operation-recorder.mjs",
     "desktop/main/services/graphcomplete-runtime.mjs",
     "desktop/main/services/prime-agent-runtime.mjs",
     "desktop/main/services/relayer-app-server.mjs",

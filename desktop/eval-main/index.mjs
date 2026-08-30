@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { nativeBinaryName } from "../shared/target.mjs";
 
-import { taskSystemFixtureFactory } from "@relayer/eval-runner";
+import { graphMemoryFixtureFactory, taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { evalHarnessConfigurationPaths } from "./configuration-paths.mjs";
 import { EvalService } from "./eval-service.mjs";
 import { loadAtomicAnnotationSnapshots } from "./annotation-snapshot-loader.mjs";
@@ -96,7 +96,10 @@ const graphRuntime = new GraphCompleteRuntimeService({
   userDataDirectory,
   graphServerBinary,
   configurationPaths,
-  additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
+  additionalImplementations: {
+    "fixture.task-system": taskSystemFixtureFactory,
+    "fixture.graph-memory": graphMemoryFixtureFactory,
+  },
   codexBasicClientModuleUrl: graphClientModuleUrl,
   ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
   resolveCodexRuntime: () => managedCodexRuntime.resolve(),

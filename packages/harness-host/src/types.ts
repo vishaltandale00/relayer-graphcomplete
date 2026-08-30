@@ -31,6 +31,10 @@ export interface HarnessModelDefaults {
   readonly familyPolicy: HarnessFamilyPolicyReference;
 }
 
+export interface GraphCapabilityProfile {
+  readonly search: "disabled" | "query-v1";
+}
+
 export interface HarnessConfiguration {
   readonly schemaVersion: 1;
   readonly name: string;
@@ -43,6 +47,8 @@ export interface HarnessConfiguration {
   readonly modelRules?: HarnessModelRules;
   readonly executionAccessContracts?: readonly string[];
   readonly modelDefaults?: HarnessModelDefaults;
+  /** Product-owned graph authority. Omission is equivalent to search disabled. */
+  readonly graphCapabilityProfile?: GraphCapabilityProfile;
   readonly settings: JsonObject;
 }
 
