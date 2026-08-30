@@ -34,6 +34,7 @@ export const openRouterDescriptor = Object.freeze({
   catalog: { source: "provider-discovery" },
   create: ({ definition, fetch, secrets, managedRuntime, environment }) => new SecretApiProviderAdapter({
     definition, fetch, credentials: { apiKey: secrets?.["api-key"] }, headers: bearerHeaders,
+    connectionProbePath: "/key",
     modelCapabilities: tokenCapabilities,
     modelEligibility: openRouterModelEligibility,
     requireCatalogBeforeExecution: true,

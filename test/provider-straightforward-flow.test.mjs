@@ -23,28 +23,50 @@ const flows = [
     harnessId: "codex-basic",
     accessContract: "managed-runtime@1",
     endpoint: null,
-    modelId: "gpt-5.6-sol",
+    modelIds: ["gpt-5.6-sol"],
   },
   {
     adapterId: "openai-api",
     harnessId: "codex-basic",
     accessContract: "secret@1",
     endpoint: "https://api.openai.com/v1",
-    modelId: "gpt-5.6-sol",
+    modelIds: ["gpt-5.6-sol"],
   },
   {
     adapterId: "claude-subscription",
     harnessId: "claude-basic",
     accessContract: "managed-runtime@1",
     endpoint: null,
-    modelId: "sonnet",
+    modelIds: ["sonnet"],
   },
   {
     adapterId: "anthropic-api",
     harnessId: "claude-basic",
     accessContract: "secret@1",
     endpoint: "https://api.anthropic.com/v1",
-    modelId: "claude-sonnet-5",
+    modelIds: ["claude-sonnet-5"],
+  },
+  {
+    adapterId: "openrouter",
+    harnessId: "prime-agent-basic",
+    accessContract: "secret@1",
+    endpoint: "https://openrouter.ai/api/v1",
+    modelIds: [
+      "deepseek/deepseek-v4-pro-0813",
+      "qwen/qwen3.8-max",
+      "z-ai/glm-5.3",
+    ],
+  },
+  {
+    adapterId: "vercel-ai-router",
+    harnessId: "prime-agent-basic",
+    accessContract: "secret@1",
+    endpoint: "https://ai-gateway.vercel.sh/v1",
+    modelIds: [
+      "deepseek/deepseek-v4-pro-0813",
+      "alibaba/qwen3.8-max",
+      "zai/glm-5.3",
+    ],
   },
 ];
 
@@ -70,26 +92,21 @@ describe("straightforward discovered-model provider flows", () => {
         providerId: onboardingProviderId,
         familyId: completion.resolution.familyId,
       });
-      expect(completion.resolution.resolvableMembers).toEqual([{
-        providerId: onboardingProviderId,
-        modelId: flow.modelId,
-        position: 0,
-      }]);
+      expect(completion.resolution.resolvableMembers).toEqual(familyMembers(
+        onboardingProviderId,
+        flow.modelIds,
+      ));
 
       const afterOnboarding = await productRequest(session, "/api/model-settings");
       const onboardingFamily = familyForProvider(afterOnboarding, onboardingProviderId);
       expect(onboardingFamily).toMatchObject({ kind: "system", enabled: true });
-      expect(onboardingFamily.members).toEqual([{
-        providerId: onboardingProviderId,
-        modelId: flow.modelId,
-        position: 0,
-      }]);
+      expect(onboardingFamily.members).toEqual(familyMembers(onboardingProviderId, flow.modelIds));
       expect(readyComposerRequest(afterOnboarding, flow.harnessId, onboardingFamily.id)).toMatchObject({
         harnessId: flow.harnessId,
         modelSelection: {
           familyId: onboardingFamily.id,
           providerId: onboardingProviderId,
-          modelId: flow.modelId,
+          modelId: flow.modelIds[0],
         },
       });
 
@@ -105,7 +122,7 @@ describe("straightforward discovered-model provider flows", () => {
         modelSelection: {
           familyId: settingsFamily.id,
           providerId: settingsProviderId,
-          modelId: flow.modelId,
+          modelId: flow.modelIds[0],
         },
       });
       expect(afterSettings.families.filter(({ kind }) => kind === "custom")).toEqual([]);
@@ -123,6 +140,7 @@ async function productFixture() {
     configurationPaths: [
       join(repositoryRoot, "harnesses", "codex-basic.yaml"),
       join(repositoryRoot, "harnesses", "claude-basic.yaml"),
+      join(repositoryRoot, "harnesses", "prime-agent-basic.yaml"),
     ],
     acquireProviderExecution: async () => {
       throw new Error("Provider execution is outside this zero-inference selector test.");
@@ -153,13 +171,13 @@ async function addDiscoveredProvider(product, flow, providerId) {
     credentialReference: flow.accessContract === "secret@1" ? `provider:${providerId}` : null,
     lifecycleState: "active",
     removedAt: null,
-  }, catalogSnapshot(providerId, flow.modelId));
+  }, catalogSnapshot(providerId, flow.modelIds));
 }
 
-function catalogSnapshot(providerId, modelId) {
+function catalogSnapshot(providerId, modelIds) {
   return {
     provider: { id: providerId, label: providerId, status: "available", unavailableReason: null },
-    models: [{
+    models: modelIds.map((modelId, position) => ({
       id: modelId,
       catalogId: modelId,
       executionModel: modelId,
@@ -170,7 +188,7 @@ function catalogSnapshot(providerId, modelId) {
       unavailableReason: null,
       unavailableReasonCode: null,
       availabilityNotice: null,
-      isDefault: true,
+      isDefault: position === 0,
       replacementModelId: null,
       upgradeInfo: null,
       supportedEfforts: [],
@@ -180,13 +198,17 @@ function catalogSnapshot(providerId, modelId) {
       serviceTiers: [],
       defaultServiceTier: null,
       catalogSource: "deterministic-provider-fixture",
-    }],
+    })),
     systemFamily: {
       id: `${providerId}-reported`,
       label: `${providerId} reported`,
-      modelIds: [modelId],
+      modelIds,
     },
   };
+}
+
+function familyMembers(providerId, modelIds) {
+  return modelIds.map((modelId, position) => ({ providerId, modelId, position }));
 }
 
 function familyForProvider(settings, providerId) {

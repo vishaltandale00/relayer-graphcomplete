@@ -295,6 +295,27 @@ describe("secret-backed API adapters", () => {
     })]);
   });
 
+  it("rejects an expired OpenRouter key before accepting its public model catalog", async () => {
+    const fetch = vi.fn(async (url) => url.endsWith("/key")
+      ? { ok: false, status: 401 }
+      : {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [{ id: "deepseek/deepseek-v4-pro-0813", architecture: { output_modalities: ["text"] } }] }),
+        });
+    const descriptor = productionProviderAdapterRegistry.get("openrouter");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", descriptor.defaultEndpoint),
+      { fetch, secrets: { "api-key": "expired" }, managedRuntime: codexRuntime, environment: {} },
+    );
+
+    await expect(adapter.connect()).resolves.toMatchObject({
+      provider: { status: "unavailable", unavailableReason: "Provider credentials were rejected." },
+      models: [],
+    });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["https://openrouter.ai/api/v1/key"]);
+  });
+
   it("fails closed for an unknown model that merely uses an OpenAI agent-family prefix", async () => {
     const descriptor = productionProviderAdapterRegistry.get("openai-api");
     const adapter = productionProviderAdapterRegistry.create(
@@ -365,9 +386,11 @@ describe("secret-backed API adapters", () => {
 
       const snapshot = await adapter.connect();
 
-      expect(fetch).toHaveBeenCalledOnce();
-      expect(fetch.mock.calls[0][0]).toBe(expectedEndpoint);
-      expect(Object.keys(fetch.mock.calls[0][1].headers).map((key) => key.toLowerCase())).toContain(expectedHeader);
+      const expectedUrls = adapterId === "openrouter"
+        ? ["https://openrouter.ai/api/v1/key", expectedEndpoint]
+        : [expectedEndpoint];
+      expect(fetch.mock.calls.map(([url]) => url)).toEqual(expectedUrls);
+      expect(Object.keys(fetch.mock.calls.at(-1)[1].headers).map((key) => key.toLowerCase())).toContain(expectedHeader);
       expect(snapshot.models[0]).toMatchObject({ id: modelId, executionModel: modelId });
       expect(snapshot.systemFamily.modelIds).toEqual([]);
     });

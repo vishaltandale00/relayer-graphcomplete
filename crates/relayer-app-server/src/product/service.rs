@@ -2837,8 +2837,12 @@ mod tests {
         for (adapter_id, model_id, access_contract) in [
             ("openai-api", "gpt-5.4", "secret@1"),
             ("anthropic-api", "claude-sonnet-4-20250514", "secret@1"),
-            ("openrouter", "openai/gpt-5.4", "secret@1"),
-            ("vercel-ai-router", "openai/gpt-5.4", "secret@1"),
+            ("openrouter", "deepseek/deepseek-v4-pro-0813", "secret@1"),
+            (
+                "vercel-ai-router",
+                "deepseek/deepseek-v4-pro-0813",
+                "secret@1",
+            ),
         ] {
             let provider_id = ProviderId::parse(format!("family-{adapter_id}")).unwrap();
             service
@@ -2886,8 +2890,15 @@ mod tests {
                 .expect("provider-scoped managed family");
             assert!(family.managed_policy.as_ref().is_some_and(|policy| {
                 policy.provider_id == provider_id
-                    && policy.policy_id
-                        == super::super::model_policy::PROVIDER_DEFAULT_FAMILY_POLICY_ID
+                    && policy.policy_id == match adapter_id {
+                        "openrouter" => {
+                            super::super::model_policy::OPENROUTER_DEFAULT_FAMILY_POLICY_ID
+                        }
+                        "vercel-ai-router" => {
+                            super::super::model_policy::VERCEL_AI_ROUTER_DEFAULT_FAMILY_POLICY_ID
+                        }
+                        _ => super::super::model_policy::PROVIDER_DEFAULT_FAMILY_POLICY_ID,
+                    }
                     && policy.policy_version == 1
             }));
         }

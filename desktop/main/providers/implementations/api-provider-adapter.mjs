@@ -79,6 +79,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     credentials,
     headers,
     modelsPath = "/models",
+    connectionProbePath = null,
     modelCapabilities = () => null,
     requireCatalogBeforeExecution = false,
     managedRuntime,
@@ -93,6 +94,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     this.credentials = Object.freeze({ ...credentials });
     this.headers = headers;
     this.modelsPath = modelsPath;
+    this.connectionProbePath = connectionProbePath;
     this.readModelCapabilities = modelCapabilities;
     this.modelCapabilities = Object.freeze({});
     this.requireCatalogBeforeExecution = requireCatalogBeforeExecution;
@@ -159,7 +161,44 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
   }
 
   async connect(options) {
+    if (this.connectionProbePath !== null) {
+      const connected = await this.verifyConnection(options);
+      if (!connected) return this.credentialsRejectedSnapshot();
+    }
     return this.discover(options);
+  }
+
+  async verifyConnection({ signal } = {}) {
+    signal?.throwIfAborted();
+    let response;
+    try {
+      response = await this.fetch(`${this.definition.endpoint}${this.connectionProbePath}`, {
+        method: "GET",
+        headers: Object.freeze({ Accept: "application/json", ...this.headers(this.credentials) }),
+        signal,
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      throw new ProviderHttpError("Provider connection check failed.", { code: error?.code ?? "transport" });
+    }
+    if (response?.ok) return true;
+    if (response?.status === 401 || response?.status === 403) return false;
+    throw new ProviderHttpError(`Provider connection check failed with HTTP ${response?.status ?? "unknown"}.`, {
+      status: Number.isInteger(response?.status) ? response.status : null,
+    });
+  }
+
+  credentialsRejectedSnapshot() {
+    return sanitizeModelCatalogSnapshot({
+      provider: {
+        id: this.providerId,
+        label: this.providerLabel,
+        status: "unavailable",
+        unavailableReason: "Provider credentials were rejected.",
+      },
+      models: [],
+      systemFamily: { id: this.providerId, label: this.providerLabel, modelIds: [] },
+    });
   }
 
   executionAccess({ signal } = {}) {

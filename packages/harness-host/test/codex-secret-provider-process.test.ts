@@ -126,6 +126,9 @@ describe("Codex secret-provider process boundary", () => {
       ]);
       expect(shellOutput).toContain("OPENAI_API_KEY_ABSENT");
       expect(shellOutput).toContain("OPENAI_BASE_URL_ABSENT");
+      expect(shellOutput).toContain("RELAYER_GRAPH_URL_PRESENT");
+      expect(shellOutput).toContain("RELAYER_GRAPH_TOKEN_PRESENT");
+      expect(shellOutput).toContain("RELAYER_NODE_ID_PRESENT");
       expect(shellOutput).not.toContain(SYNTHETIC_API_KEY);
       await expect(completion).resolves.toBeUndefined();
     } finally {
@@ -218,9 +221,9 @@ function respondWithEnvironmentProbe(response: import("node:http").ServerRespons
 
 function environmentProbeCommand(): string {
   if (process.platform === "win32") {
-    return "cmd.exe /d /s /c \"if defined OPENAI_API_KEY (echo OPENAI_API_KEY_PRESENT) else (echo OPENAI_API_KEY_ABSENT) & if defined OPENAI_BASE_URL (echo OPENAI_BASE_URL_PRESENT) else (echo OPENAI_BASE_URL_ABSENT)\"";
+    return "cmd.exe /d /s /c \"if defined OPENAI_API_KEY (echo OPENAI_API_KEY_PRESENT) else (echo OPENAI_API_KEY_ABSENT) & if defined OPENAI_BASE_URL (echo OPENAI_BASE_URL_PRESENT) else (echo OPENAI_BASE_URL_ABSENT) & if defined RELAYER_GRAPH_URL (echo RELAYER_GRAPH_URL_PRESENT) else (echo RELAYER_GRAPH_URL_ABSENT) & if defined RELAYER_GRAPH_TOKEN (echo RELAYER_GRAPH_TOKEN_PRESENT) else (echo RELAYER_GRAPH_TOKEN_ABSENT) & if defined RELAYER_NODE_ID (echo RELAYER_NODE_ID_PRESENT) else (echo RELAYER_NODE_ID_ABSENT)\"";
   }
-  return "if env | grep -q ^OPENAI_API_KEY=; then echo OPENAI_API_KEY_PRESENT; else echo OPENAI_API_KEY_ABSENT; fi; if env | grep -q ^OPENAI_BASE_URL=; then echo OPENAI_BASE_URL_PRESENT; else echo OPENAI_BASE_URL_ABSENT; fi";
+  return "if env | grep -q ^OPENAI_API_KEY=; then echo OPENAI_API_KEY_PRESENT; else echo OPENAI_API_KEY_ABSENT; fi; if env | grep -q ^OPENAI_BASE_URL=; then echo OPENAI_BASE_URL_PRESENT; else echo OPENAI_BASE_URL_ABSENT; fi; if env | grep -q ^RELAYER_GRAPH_URL=; then echo RELAYER_GRAPH_URL_PRESENT; else echo RELAYER_GRAPH_URL_ABSENT; fi; if env | grep -q ^RELAYER_GRAPH_TOKEN=; then echo RELAYER_GRAPH_TOKEN_PRESENT; else echo RELAYER_GRAPH_TOKEN_ABSENT; fi; if env | grep -q ^RELAYER_NODE_ID=; then echo RELAYER_NODE_ID_PRESENT; else echo RELAYER_NODE_ID_ABSENT; fi";
 }
 
 function respondWithFinalMessage(response: import("node:http").ServerResponse): void {

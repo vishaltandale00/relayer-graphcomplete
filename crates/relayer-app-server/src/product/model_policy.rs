@@ -3,6 +3,9 @@ use super::{CatalogError, FamilyPolicyReference, ModelFamilyMember, ProviderCata
 pub(crate) const CODEX_DEFAULT_FAMILY_POLICY_ID: &str = "codex-default-family";
 pub(crate) const CLAUDE_DEFAULT_FAMILY_POLICY_ID: &str = "claude-default-family";
 pub(crate) const PROVIDER_DEFAULT_FAMILY_POLICY_ID: &str = "provider-default-family";
+pub(crate) const OPENROUTER_DEFAULT_FAMILY_POLICY_ID: &str = "openrouter-default-family";
+pub(crate) const VERCEL_AI_ROUTER_DEFAULT_FAMILY_POLICY_ID: &str =
+    "vercel-ai-router-default-family";
 const CODEX_DEFAULT_FAMILY_V2_MODELS: [&str; 3] = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 const OPENAI_API_DEFAULT_FAMILY_V1_MODELS: [&str; 5] = [
     "gpt-5.6-sol",
@@ -10,6 +13,16 @@ const OPENAI_API_DEFAULT_FAMILY_V1_MODELS: [&str; 5] = [
     "gpt-5.6-luna",
     "gpt-5.5",
     "gpt-5.4",
+];
+const OPENROUTER_DEFAULT_FAMILY_V1_MODELS: [&str; 3] = [
+    "deepseek/deepseek-v4-pro-0813",
+    "qwen/qwen3.8-max",
+    "z-ai/glm-5.3",
+];
+const VERCEL_AI_ROUTER_DEFAULT_FAMILY_V1_MODELS: [&str; 3] = [
+    "deepseek/deepseek-v4-pro-0813",
+    "alibaba/qwen3.8-max",
+    "zai/glm-5.3",
 ];
 
 pub(crate) fn applies_to_adapter(policy: &FamilyPolicyReference, adapter_id: &str) -> bool {
@@ -19,20 +32,32 @@ pub(crate) fn applies_to_adapter(policy: &FamilyPolicyReference, adapter_id: &st
             | (CLAUDE_DEFAULT_FAMILY_POLICY_ID, "claude-subscription")
             | (
                 PROVIDER_DEFAULT_FAMILY_POLICY_ID,
-                "openai-api" | "anthropic-api" | "openrouter" | "vercel-ai-router"
+                "openai-api" | "anthropic-api"
+            )
+            | (OPENROUTER_DEFAULT_FAMILY_POLICY_ID, "openrouter")
+            | (
+                VERCEL_AI_ROUTER_DEFAULT_FAMILY_POLICY_ID,
+                "vercel-ai-router"
             )
     )
 }
 
 pub(crate) fn fallback_for_adapter(adapter_id: &str) -> Option<FamilyPolicyReference> {
-    matches!(
-        adapter_id,
-        "openai-api" | "anthropic-api" | "openrouter" | "vercel-ai-router"
-    )
-    .then(|| FamilyPolicyReference {
-        id: PROVIDER_DEFAULT_FAMILY_POLICY_ID.into(),
-        version: 1,
-    })
+    match adapter_id {
+        "openrouter" => Some(FamilyPolicyReference {
+            id: OPENROUTER_DEFAULT_FAMILY_POLICY_ID.into(),
+            version: 1,
+        }),
+        "vercel-ai-router" => Some(FamilyPolicyReference {
+            id: VERCEL_AI_ROUTER_DEFAULT_FAMILY_POLICY_ID.into(),
+            version: 1,
+        }),
+        "openai-api" | "anthropic-api" => Some(FamilyPolicyReference {
+            id: PROVIDER_DEFAULT_FAMILY_POLICY_ID.into(),
+            version: 1,
+        }),
+        _ => None,
+    }
 }
 
 /// Product-owned managed-family policy registry. Provider adapters normalize
@@ -134,6 +159,38 @@ pub(crate) fn derive_managed_family_members(
             Ok(models
                 .into_iter()
                 .take(super::catalog::MAX_MODELS_PER_FAMILY)
+                .enumerate()
+                .map(|(position, model)| ModelFamilyMember {
+                    provider_id: snapshot.provider_id.clone(),
+                    model_id: model.id.clone(),
+                    position,
+                })
+                .collect())
+        }
+        (OPENROUTER_DEFAULT_FAMILY_POLICY_ID, 1) => Ok(OPENROUTER_DEFAULT_FAMILY_V1_MODELS
+            .iter()
+            .filter_map(|model_id| {
+                snapshot
+                    .models
+                    .iter()
+                    .find(|model| model.visible && model.available && model.id == *model_id)
+            })
+            .enumerate()
+            .map(|(position, model)| ModelFamilyMember {
+                provider_id: snapshot.provider_id.clone(),
+                model_id: model.id.clone(),
+                position,
+            })
+            .collect()),
+        (VERCEL_AI_ROUTER_DEFAULT_FAMILY_POLICY_ID, 1) => {
+            Ok(VERCEL_AI_ROUTER_DEFAULT_FAMILY_V1_MODELS
+                .iter()
+                .filter_map(|model_id| {
+                    snapshot
+                        .models
+                        .iter()
+                        .find(|model| model.visible && model.available && model.id == *model_id)
+                })
                 .enumerate()
                 .map(|(position, model)| ModelFamilyMember {
                     provider_id: snapshot.provider_id.clone(),
@@ -310,18 +367,91 @@ mod tests {
     }
 
     #[test]
-    fn every_api_adapter_has_the_same_versioned_fail_closed_fallback_policy() {
-        for adapter_id in [
-            "openai-api",
-            "anthropic-api",
-            "openrouter",
-            "vercel-ai-router",
-        ] {
+    fn openrouter_policy_uses_only_the_reviewed_latest_general_models() {
+        let members = derive_managed_family_members(
+            &FamilyPolicyReference {
+                id: OPENROUTER_DEFAULT_FAMILY_POLICY_ID.into(),
+                version: 1,
+            },
+            &snapshot(vec![
+                model("tencent/hy4-preview", 0, true, true),
+                model("qwen/qwen3.8-flash", 1, true, true),
+                model("deepseek/deepseek-v4-pro-0813", 2, true, false),
+                model("z-ai/glm-5.3", 3, true, false),
+                model("qwen/qwen3.8-max", 4, true, false),
+                model("z-ai/glm-5.3-flash", 5, true, true),
+                model("deepseek/deepseek-v4-flash-vision-exp", 6, true, true),
+            ]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "deepseek/deepseek-v4-pro-0813",
+                "qwen/qwen3.8-max",
+                "z-ai/glm-5.3"
+            ]
+        );
+    }
+
+    #[test]
+    fn vercel_router_policy_uses_equivalent_reviewed_latest_general_models() {
+        let members = derive_managed_family_members(
+            &FamilyPolicyReference {
+                id: VERCEL_AI_ROUTER_DEFAULT_FAMILY_POLICY_ID.into(),
+                version: 1,
+            },
+            &snapshot(vec![
+                model("openai/gpt-5.4", 0, true, true),
+                model("alibaba/qwen3.8-flash", 1, true, true),
+                model("deepseek/deepseek-v4-pro-0813", 2, true, false),
+                model("zai/glm-5.3", 3, true, false),
+                model("alibaba/qwen3.8-max", 4, true, false),
+                model("zai/glm-5.3-flash", 5, true, true),
+            ]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "deepseek/deepseek-v4-pro-0813",
+                "alibaba/qwen3.8-max",
+                "zai/glm-5.3"
+            ]
+        );
+    }
+
+    #[test]
+    fn every_api_adapter_has_a_versioned_fail_closed_fallback_policy() {
+        for adapter_id in ["openai-api", "anthropic-api"] {
             let policy = fallback_for_adapter(adapter_id).expect("API adapter fallback policy");
             assert_eq!(policy.id, PROVIDER_DEFAULT_FAMILY_POLICY_ID);
             assert_eq!(policy.version, 1);
             assert!(applies_to_adapter(&policy, adapter_id));
         }
+        let openrouter = fallback_for_adapter("openrouter").expect("OpenRouter fallback policy");
+        assert_eq!(openrouter.id, OPENROUTER_DEFAULT_FAMILY_POLICY_ID);
+        assert_eq!(openrouter.version, 1);
+        assert!(applies_to_adapter(&openrouter, "openrouter"));
+        let vercel = fallback_for_adapter("vercel-ai-router").expect("Vercel fallback policy");
+        assert_eq!(vercel.id, VERCEL_AI_ROUTER_DEFAULT_FAMILY_POLICY_ID);
+        assert_eq!(vercel.version, 1);
+        assert!(applies_to_adapter(&vercel, "vercel-ai-router"));
+        assert!(!applies_to_adapter(
+            &FamilyPolicyReference {
+                id: PROVIDER_DEFAULT_FAMILY_POLICY_ID.into(),
+                version: 1,
+            },
+            "openrouter"
+        ));
         assert!(fallback_for_adapter("codex-subscription").is_none());
         assert!(fallback_for_adapter("claude-subscription").is_none());
     }

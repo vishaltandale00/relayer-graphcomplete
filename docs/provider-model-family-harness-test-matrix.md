@@ -70,6 +70,8 @@ This policy is versioned as `provider-default-family/v1` and is owned by PRD sec
 4. After the reviewed roster, the family selects provider-declared eligible defaults and then remaining eligible models in provider order; the family is truncated after five members. Unreviewed IDs, dates, price, and names do not otherwise influence ordering.
 5. On refresh, an eligible selected model remains selected even if its position changes. If it becomes ineligible or disappears, a preserved draft shows it as unavailable and blocks Send; no substitute is committed without an explicit user choice.
 6. Zero eligible models is a stable recoverable state. The credential may be saved as connected, but no enabled family is created. Onboarding cannot finish and shows `provider_no_eligible_execution_models`. Settings addition preserves existing defaults and points to refresh, endpoint, or provider recovery. A later eligible refresh creates the family under the same provider definition.
+7. OpenRouter family V1 contains only the reviewed general-agent roster `deepseek/deepseek-v4-pro-0813`, `qwen/qwen3.8-max`, and `z-ai/glm-5.3`, in that order. Missing or unavailable entries are omitted; unrelated provider-default or catalog-first models do not fill the family.
+8. Vercel AI Gateway family V1 contains the equivalent reviewed roster using Vercel catalog identities: `deepseek/deepseek-v4-pro-0813`, `alibaba/qwen3.8-max`, and `zai/glm-5.3`, in that order. It has the same fail-closed omission behavior.
 
 The deterministic fixtures must include embeddings, moderation, speech recognition, text-to-speech, image-generation-only, realtime-only, batch-only, malformed entries, unknown capability metadata, duplicate IDs, multiple declared defaults, no declared default, and zero eligible models. A successful `/models` response alone does not make every returned ID executable.
 
@@ -365,9 +367,9 @@ The provider-to-question experience is ready only when:
 
 These observations are diagnostic inputs, not completion claims:
 
-- API-key providers currently do not automatically receive a usable product-managed, provider-scoped family; onboarding requires custom-family construction and Settings addition leaves the new provider unusable until a family is created.
-- Codex Basic currently admits OpenRouter and Vercel, contrary to the strict target table above.
-- The generic API adapter currently projects every returned model as visible text, which can expose embeddings, speech, TTS, image-generation, batch, or otherwise incompatible models.
+- API-key providers now automatically receive a product-managed, provider-scoped family when the discovered catalog contains eligible models.
+- Codex Basic and Claude Basic now reject OpenRouter and Vercel; Prime Agent Basic is the tested router route.
+- API adapters now classify discovered execution eligibility from provider metadata and fail closed when capability evidence is unknown.
 - Managed Codex and Claude subscription paths still require the manual M1 run.
 - The default-harness/default-family Settings interaction needs a separate explicit UX decision; this matrix does not authorize silent family replacement.
 - The PRD reconciliation, complete 36-cell D2 runner, and evidence-redaction checker are still undefined certification blockers.

@@ -87,7 +87,7 @@ export function forceTerminateCodexProcessTree(
 export async function runCodexAppServerTurn(options: CodexAppServerTurnOptions): Promise<CodexAppServerTurnResult> {
   const executable = resolveCodexExecutable(options.codexPathOverride);
   const configArguments = (options.codexConfigOverrides ?? []).flatMap((value) => ["-c", value]);
-  const child = (options.spawnProcess ?? spawn)(executable, ["app-server", "--listen", "stdio://", ...configArguments], {
+  const child = (options.spawnProcess ?? spawn)(executable, [...configArguments, "app-server", "--listen", "stdio://"], {
     detached: process.platform !== "win32",
     env: { ...options.environment },
     stdio: ["pipe", "pipe", "pipe"],

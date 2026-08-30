@@ -124,7 +124,7 @@ describe("Codex app-server transport", () => {
     });
     expect(fake.spawn).toEqual({
       command: process.execPath,
-      args: ["app-server", "--listen", "stdio://", "-c", 'model_provider="relayer_execution_provider"'],
+      args: ["-c", 'model_provider="relayer_execution_provider"', "app-server", "--listen", "stdio://"],
     });
     expect(fake.spawnOptions?.detached).toBe(process.platform !== "win32");
     expect(fake.killed).toBe(true);
