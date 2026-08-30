@@ -25,5 +25,10 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+sha2.workspace = true
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
+
+[[bench]]
+name = "ladybug_index_save_latency"
+harness = false

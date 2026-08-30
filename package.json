@@ -45,6 +45,7 @@
     "evidence:model-selector": "RELAYER_CAPTURE_MODEL_SELECTOR_EVIDENCE=1 electron scripts/capture-model-selector-evidence.mjs",
     "evidence:provider-ux": "node scripts/capture-provider-ux-video.mjs",
     "evidence:prime-family:packaged": "node scripts/capture-packaged-prime-family-evidence.mjs",
+    "evidence:ladybug-index-latency": "node scripts/capture-ladybug-index-latency.mjs",
     "evidence:human-eval-annotations": "npm run build && RELAYER_CAPTURE_HUMAN_ANNOTATION_EVIDENCE=1 electron scripts/capture-human-eval-annotation-evidence.mjs",
     "evidence:telemetry": "node scripts/run-telemetry-evidence.mjs",
     "test:desktop:approval": "npm run build && electron scripts/test-desktop-approval.mjs",
