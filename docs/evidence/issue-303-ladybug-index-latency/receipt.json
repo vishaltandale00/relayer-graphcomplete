@@ -1,0 +1,2870 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "5db4714740e2d13aaaa53d71cd656ec81af1be69",
+  "targetOs": "macos",
+  "targetArch": "aarch64",
+  "profile": "release",
+  "lbugVersion": "0.18.0",
+  "corpusVersion": 1,
+  "seed": 5928228328057426481,
+  "manifestSha256": "sha256:496da26c1ade0ebe7e5c295b4afa9c2e37f1502fc2599740902797fde7f3ee32",
+  "warmups": 10,
+  "measuredSamples": 200,
+  "storeOpenNs": 70053667,
+  "percentileAlgorithm": "nearest-rank",
+  "thresholdNs": 100000000,
+  "percentiles": {
+    "p50Ns": 56016291,
+    "p90Ns": 101676000,
+    "p95Ns": 143322000,
+    "p99Ns": 162950208,
+    "maxNs": 207225209
+  },
+  "overThresholdOrdinals": [
+    17,
+    18,
+    21,
+    23,
+    32,
+    57,
+    74,
+    77,
+    85,
+    88,
+    95,
+    98,
+    105,
+    113,
+    134,
+    137,
+    141,
+    145,
+    148,
+    174,
+    176
+  ],
+  "tukeyUpperFenceNs": 108224148,
+  "tukeyOutlierOrdinals": [
+    17,
+    21,
+    32,
+    57,
+    74,
+    77,
+    85,
+    88,
+    95,
+    105,
+    113,
+    134,
+    137,
+    141,
+    145,
+    148,
+    174,
+    176
+  ],
+  "samples": [
+    {
+      "ordinal": 10,
+      "caseId": "v1-52454c4159455231-0010",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10010,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 48087417
+    },
+    {
+      "ordinal": 11,
+      "caseId": "v1-52454c4159455231-0011",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51773084
+    },
+    {
+      "ordinal": 12,
+      "caseId": "v1-52454c4159455231-0012",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 57217417
+    },
+    {
+      "ordinal": 13,
+      "caseId": "v1-52454c4159455231-0013",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 94065125
+    },
+    {
+      "ordinal": 14,
+      "caseId": "v1-52454c4159455231-0014",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 83999291
+    },
+    {
+      "ordinal": 15,
+      "caseId": "v1-52454c4159455231-0015",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10015,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50978041
+    },
+    {
+      "ordinal": 16,
+      "caseId": "v1-52454c4159455231-0016",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54662834
+    },
+    {
+      "ordinal": 17,
+      "caseId": "v1-52454c4159455231-0017",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 113510041
+    },
+    {
+      "ordinal": 18,
+      "caseId": "v1-52454c4159455231-0018",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 102510791
+    },
+    {
+      "ordinal": 19,
+      "caseId": "v1-52454c4159455231-0019",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49992625
+    },
+    {
+      "ordinal": 20,
+      "caseId": "v1-52454c4159455231-0020",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10020,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50205292
+    },
+    {
+      "ordinal": 21,
+      "caseId": "v1-52454c4159455231-0021",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 111189750
+    },
+    {
+      "ordinal": 22,
+      "caseId": "v1-52454c4159455231-0022",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52897084
+    },
+    {
+      "ordinal": 23,
+      "caseId": "v1-52454c4159455231-0023",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 107177917
+    },
+    {
+      "ordinal": 24,
+      "caseId": "v1-52454c4159455231-0024",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53078042
+    },
+    {
+      "ordinal": 25,
+      "caseId": "v1-52454c4159455231-0025",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10025,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 58609000
+    },
+    {
+      "ordinal": 26,
+      "caseId": "v1-52454c4159455231-0026",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56457875
+    },
+    {
+      "ordinal": 27,
+      "caseId": "v1-52454c4159455231-0027",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 68656541
+    },
+    {
+      "ordinal": 28,
+      "caseId": "v1-52454c4159455231-0028",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 79852084
+    },
+    {
+      "ordinal": 29,
+      "caseId": "v1-52454c4159455231-0029",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53647000
+    },
+    {
+      "ordinal": 30,
+      "caseId": "v1-52454c4159455231-0030",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10030,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 59637917
+    },
+    {
+      "ordinal": 31,
+      "caseId": "v1-52454c4159455231-0031",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 72220500
+    },
+    {
+      "ordinal": 32,
+      "caseId": "v1-52454c4159455231-0032",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 128540291
+    },
+    {
+      "ordinal": 33,
+      "caseId": "v1-52454c4159455231-0033",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55894292
+    },
+    {
+      "ordinal": 34,
+      "caseId": "v1-52454c4159455231-0034",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50732791
+    },
+    {
+      "ordinal": 35,
+      "caseId": "v1-52454c4159455231-0035",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10035,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 63930750
+    },
+    {
+      "ordinal": 36,
+      "caseId": "v1-52454c4159455231-0036",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49037834
+    },
+    {
+      "ordinal": 37,
+      "caseId": "v1-52454c4159455231-0037",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 75934084
+    },
+    {
+      "ordinal": 38,
+      "caseId": "v1-52454c4159455231-0038",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 47957583
+    },
+    {
+      "ordinal": 39,
+      "caseId": "v1-52454c4159455231-0039",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53679333
+    },
+    {
+      "ordinal": 40,
+      "caseId": "v1-52454c4159455231-0040",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10040,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53038333
+    },
+    {
+      "ordinal": 41,
+      "caseId": "v1-52454c4159455231-0041",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54903250
+    },
+    {
+      "ordinal": 42,
+      "caseId": "v1-52454c4159455231-0042",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49398917
+    },
+    {
+      "ordinal": 43,
+      "caseId": "v1-52454c4159455231-0043",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 72954750
+    },
+    {
+      "ordinal": 44,
+      "caseId": "v1-52454c4159455231-0044",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 81565375
+    },
+    {
+      "ordinal": 45,
+      "caseId": "v1-52454c4159455231-0045",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10045,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50357709
+    },
+    {
+      "ordinal": 46,
+      "caseId": "v1-52454c4159455231-0046",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 48224208
+    },
+    {
+      "ordinal": 47,
+      "caseId": "v1-52454c4159455231-0047",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49843958
+    },
+    {
+      "ordinal": 48,
+      "caseId": "v1-52454c4159455231-0048",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 48997959
+    },
+    {
+      "ordinal": 49,
+      "caseId": "v1-52454c4159455231-0049",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 67711917
+    },
+    {
+      "ordinal": 50,
+      "caseId": "v1-52454c4159455231-0050",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10050,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 94974042
+    },
+    {
+      "ordinal": 51,
+      "caseId": "v1-52454c4159455231-0051",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54647125
+    },
+    {
+      "ordinal": 52,
+      "caseId": "v1-52454c4159455231-0052",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 71007041
+    },
+    {
+      "ordinal": 53,
+      "caseId": "v1-52454c4159455231-0053",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54658666
+    },
+    {
+      "ordinal": 54,
+      "caseId": "v1-52454c4159455231-0054",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51317417
+    },
+    {
+      "ordinal": 55,
+      "caseId": "v1-52454c4159455231-0055",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10055,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53721916
+    },
+    {
+      "ordinal": 56,
+      "caseId": "v1-52454c4159455231-0056",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49188000
+    },
+    {
+      "ordinal": 57,
+      "caseId": "v1-52454c4159455231-0057",
+      "shape": "legal-stress",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 207225209
+    },
+    {
+      "ordinal": 58,
+      "caseId": "v1-52454c4159455231-0058",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51315375
+    },
+    {
+      "ordinal": 59,
+      "caseId": "v1-52454c4159455231-0059",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51013125
+    },
+    {
+      "ordinal": 60,
+      "caseId": "v1-52454c4159455231-0060",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10060,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49922083
+    },
+    {
+      "ordinal": 61,
+      "caseId": "v1-52454c4159455231-0061",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49780083
+    },
+    {
+      "ordinal": 62,
+      "caseId": "v1-52454c4159455231-0062",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51704417
+    },
+    {
+      "ordinal": 63,
+      "caseId": "v1-52454c4159455231-0063",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52583208
+    },
+    {
+      "ordinal": 64,
+      "caseId": "v1-52454c4159455231-0064",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 48873667
+    },
+    {
+      "ordinal": 65,
+      "caseId": "v1-52454c4159455231-0065",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10065,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 72944625
+    },
+    {
+      "ordinal": 66,
+      "caseId": "v1-52454c4159455231-0066",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52678500
+    },
+    {
+      "ordinal": 67,
+      "caseId": "v1-52454c4159455231-0067",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56028208
+    },
+    {
+      "ordinal": 68,
+      "caseId": "v1-52454c4159455231-0068",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51152250
+    },
+    {
+      "ordinal": 69,
+      "caseId": "v1-52454c4159455231-0069",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50737708
+    },
+    {
+      "ordinal": 70,
+      "caseId": "v1-52454c4159455231-0070",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10070,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 72161500
+    },
+    {
+      "ordinal": 71,
+      "caseId": "v1-52454c4159455231-0071",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50608667
+    },
+    {
+      "ordinal": 72,
+      "caseId": "v1-52454c4159455231-0072",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53688625
+    },
+    {
+      "ordinal": 73,
+      "caseId": "v1-52454c4159455231-0073",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50937708
+    },
+    {
+      "ordinal": 74,
+      "caseId": "v1-52454c4159455231-0074",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 143322000
+    },
+    {
+      "ordinal": 75,
+      "caseId": "v1-52454c4159455231-0075",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10075,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 71755750
+    },
+    {
+      "ordinal": 76,
+      "caseId": "v1-52454c4159455231-0076",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49999416
+    },
+    {
+      "ordinal": 77,
+      "caseId": "v1-52454c4159455231-0077",
+      "shape": "legal-stress",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 139731584
+    },
+    {
+      "ordinal": 78,
+      "caseId": "v1-52454c4159455231-0078",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 72987875
+    },
+    {
+      "ordinal": 79,
+      "caseId": "v1-52454c4159455231-0079",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55165708
+    },
+    {
+      "ordinal": 80,
+      "caseId": "v1-52454c4159455231-0080",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10080,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 77237833
+    },
+    {
+      "ordinal": 81,
+      "caseId": "v1-52454c4159455231-0081",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 57952375
+    },
+    {
+      "ordinal": 82,
+      "caseId": "v1-52454c4159455231-0082",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 62598250
+    },
+    {
+      "ordinal": 83,
+      "caseId": "v1-52454c4159455231-0083",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51381042
+    },
+    {
+      "ordinal": 84,
+      "caseId": "v1-52454c4159455231-0084",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55866875
+    },
+    {
+      "ordinal": 85,
+      "caseId": "v1-52454c4159455231-0085",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10085,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 118439667
+    },
+    {
+      "ordinal": 86,
+      "caseId": "v1-52454c4159455231-0086",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 75663500
+    },
+    {
+      "ordinal": 87,
+      "caseId": "v1-52454c4159455231-0087",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 58864416
+    },
+    {
+      "ordinal": 88,
+      "caseId": "v1-52454c4159455231-0088",
+      "shape": "legal-stress",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 176552542
+    },
+    {
+      "ordinal": 89,
+      "caseId": "v1-52454c4159455231-0089",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54910916
+    },
+    {
+      "ordinal": 90,
+      "caseId": "v1-52454c4159455231-0090",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10090,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 74970500
+    },
+    {
+      "ordinal": 91,
+      "caseId": "v1-52454c4159455231-0091",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51145625
+    },
+    {
+      "ordinal": 92,
+      "caseId": "v1-52454c4159455231-0092",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54285166
+    },
+    {
+      "ordinal": 93,
+      "caseId": "v1-52454c4159455231-0093",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 59304959
+    },
+    {
+      "ordinal": 94,
+      "caseId": "v1-52454c4159455231-0094",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 63213458
+    },
+    {
+      "ordinal": 95,
+      "caseId": "v1-52454c4159455231-0095",
+      "shape": "legal-stress",
+      "projectId": null,
+      "threadId": 10095,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 162950208
+    },
+    {
+      "ordinal": 96,
+      "caseId": "v1-52454c4159455231-0096",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52951542
+    },
+    {
+      "ordinal": 97,
+      "caseId": "v1-52454c4159455231-0097",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56809500
+    },
+    {
+      "ordinal": 98,
+      "caseId": "v1-52454c4159455231-0098",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 101676000
+    },
+    {
+      "ordinal": 99,
+      "caseId": "v1-52454c4159455231-0099",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52054958
+    },
+    {
+      "ordinal": 100,
+      "caseId": "v1-52454c4159455231-0100",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10100,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56016291
+    },
+    {
+      "ordinal": 101,
+      "caseId": "v1-52454c4159455231-0101",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 75735167
+    },
+    {
+      "ordinal": 102,
+      "caseId": "v1-52454c4159455231-0102",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52687083
+    },
+    {
+      "ordinal": 103,
+      "caseId": "v1-52454c4159455231-0103",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53348458
+    },
+    {
+      "ordinal": 104,
+      "caseId": "v1-52454c4159455231-0104",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56715792
+    },
+    {
+      "ordinal": 105,
+      "caseId": "v1-52454c4159455231-0105",
+      "shape": "legal-stress",
+      "projectId": null,
+      "threadId": 10105,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 143718041
+    },
+    {
+      "ordinal": 106,
+      "caseId": "v1-52454c4159455231-0106",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 75019792
+    },
+    {
+      "ordinal": 107,
+      "caseId": "v1-52454c4159455231-0107",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 57496125
+    },
+    {
+      "ordinal": 108,
+      "caseId": "v1-52454c4159455231-0108",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 89445333
+    },
+    {
+      "ordinal": 109,
+      "caseId": "v1-52454c4159455231-0109",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55982250
+    },
+    {
+      "ordinal": 110,
+      "caseId": "v1-52454c4159455231-0110",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10110,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53931000
+    },
+    {
+      "ordinal": 111,
+      "caseId": "v1-52454c4159455231-0111",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55250625
+    },
+    {
+      "ordinal": 112,
+      "caseId": "v1-52454c4159455231-0112",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55699458
+    },
+    {
+      "ordinal": 113,
+      "caseId": "v1-52454c4159455231-0113",
+      "shape": "legal-stress",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 157560291
+    },
+    {
+      "ordinal": 114,
+      "caseId": "v1-52454c4159455231-0114",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56948250
+    },
+    {
+      "ordinal": 115,
+      "caseId": "v1-52454c4159455231-0115",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10115,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 74977792
+    },
+    {
+      "ordinal": 116,
+      "caseId": "v1-52454c4159455231-0116",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 72867083
+    },
+    {
+      "ordinal": 117,
+      "caseId": "v1-52454c4159455231-0117",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 74839584
+    },
+    {
+      "ordinal": 118,
+      "caseId": "v1-52454c4159455231-0118",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 48334875
+    },
+    {
+      "ordinal": 119,
+      "caseId": "v1-52454c4159455231-0119",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54749084
+    },
+    {
+      "ordinal": 120,
+      "caseId": "v1-52454c4159455231-0120",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10120,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49514625
+    },
+    {
+      "ordinal": 121,
+      "caseId": "v1-52454c4159455231-0121",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 59013666
+    },
+    {
+      "ordinal": 122,
+      "caseId": "v1-52454c4159455231-0122",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 59502334
+    },
+    {
+      "ordinal": 123,
+      "caseId": "v1-52454c4159455231-0123",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 58490792
+    },
+    {
+      "ordinal": 124,
+      "caseId": "v1-52454c4159455231-0124",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56473084
+    },
+    {
+      "ordinal": 125,
+      "caseId": "v1-52454c4159455231-0125",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10125,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 75458500
+    },
+    {
+      "ordinal": 126,
+      "caseId": "v1-52454c4159455231-0126",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 77416041
+    },
+    {
+      "ordinal": 127,
+      "caseId": "v1-52454c4159455231-0127",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52393167
+    },
+    {
+      "ordinal": 128,
+      "caseId": "v1-52454c4159455231-0128",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56939375
+    },
+    {
+      "ordinal": 129,
+      "caseId": "v1-52454c4159455231-0129",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 58540792
+    },
+    {
+      "ordinal": 130,
+      "caseId": "v1-52454c4159455231-0130",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10130,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51020500
+    },
+    {
+      "ordinal": 131,
+      "caseId": "v1-52454c4159455231-0131",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54463958
+    },
+    {
+      "ordinal": 132,
+      "caseId": "v1-52454c4159455231-0132",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54064167
+    },
+    {
+      "ordinal": 133,
+      "caseId": "v1-52454c4159455231-0133",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49948500
+    },
+    {
+      "ordinal": 134,
+      "caseId": "v1-52454c4159455231-0134",
+      "shape": "legal-stress",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 146254125
+    },
+    {
+      "ordinal": 135,
+      "caseId": "v1-52454c4159455231-0135",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10135,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 62332541
+    },
+    {
+      "ordinal": 136,
+      "caseId": "v1-52454c4159455231-0136",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 60630875
+    },
+    {
+      "ordinal": 137,
+      "caseId": "v1-52454c4159455231-0137",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 112160583
+    },
+    {
+      "ordinal": 138,
+      "caseId": "v1-52454c4159455231-0138",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 74488667
+    },
+    {
+      "ordinal": 139,
+      "caseId": "v1-52454c4159455231-0139",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53419416
+    },
+    {
+      "ordinal": 140,
+      "caseId": "v1-52454c4159455231-0140",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10140,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 72751000
+    },
+    {
+      "ordinal": 141,
+      "caseId": "v1-52454c4159455231-0141",
+      "shape": "legal-stress",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 162101667
+    },
+    {
+      "ordinal": 142,
+      "caseId": "v1-52454c4159455231-0142",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55089583
+    },
+    {
+      "ordinal": 143,
+      "caseId": "v1-52454c4159455231-0143",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 48983500
+    },
+    {
+      "ordinal": 144,
+      "caseId": "v1-52454c4159455231-0144",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 79521750
+    },
+    {
+      "ordinal": 145,
+      "caseId": "v1-52454c4159455231-0145",
+      "shape": "legal-stress",
+      "projectId": null,
+      "threadId": 10145,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 143627208
+    },
+    {
+      "ordinal": 146,
+      "caseId": "v1-52454c4159455231-0146",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50563834
+    },
+    {
+      "ordinal": 147,
+      "caseId": "v1-52454c4159455231-0147",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55522542
+    },
+    {
+      "ordinal": 148,
+      "caseId": "v1-52454c4159455231-0148",
+      "shape": "legal-stress",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 141990417
+    },
+    {
+      "ordinal": 149,
+      "caseId": "v1-52454c4159455231-0149",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54865125
+    },
+    {
+      "ordinal": 150,
+      "caseId": "v1-52454c4159455231-0150",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10150,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 49872417
+    },
+    {
+      "ordinal": 151,
+      "caseId": "v1-52454c4159455231-0151",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50943083
+    },
+    {
+      "ordinal": 152,
+      "caseId": "v1-52454c4159455231-0152",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56932917
+    },
+    {
+      "ordinal": 153,
+      "caseId": "v1-52454c4159455231-0153",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 58727250
+    },
+    {
+      "ordinal": 154,
+      "caseId": "v1-52454c4159455231-0154",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51685959
+    },
+    {
+      "ordinal": 155,
+      "caseId": "v1-52454c4159455231-0155",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10155,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 75842750
+    },
+    {
+      "ordinal": 156,
+      "caseId": "v1-52454c4159455231-0156",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51181833
+    },
+    {
+      "ordinal": 157,
+      "caseId": "v1-52454c4159455231-0157",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 77599750
+    },
+    {
+      "ordinal": 158,
+      "caseId": "v1-52454c4159455231-0158",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53072875
+    },
+    {
+      "ordinal": 159,
+      "caseId": "v1-52454c4159455231-0159",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 76838875
+    },
+    {
+      "ordinal": 160,
+      "caseId": "v1-52454c4159455231-0160",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10160,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52832959
+    },
+    {
+      "ordinal": 161,
+      "caseId": "v1-52454c4159455231-0161",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54626000
+    },
+    {
+      "ordinal": 162,
+      "caseId": "v1-52454c4159455231-0162",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51638416
+    },
+    {
+      "ordinal": 163,
+      "caseId": "v1-52454c4159455231-0163",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 79806084
+    },
+    {
+      "ordinal": 164,
+      "caseId": "v1-52454c4159455231-0164",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 57239125
+    },
+    {
+      "ordinal": 165,
+      "caseId": "v1-52454c4159455231-0165",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10165,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 82685667
+    },
+    {
+      "ordinal": 166,
+      "caseId": "v1-52454c4159455231-0166",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 94420750
+    },
+    {
+      "ordinal": 167,
+      "caseId": "v1-52454c4159455231-0167",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 70898959
+    },
+    {
+      "ordinal": 168,
+      "caseId": "v1-52454c4159455231-0168",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54768250
+    },
+    {
+      "ordinal": 169,
+      "caseId": "v1-52454c4159455231-0169",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52890125
+    },
+    {
+      "ordinal": 170,
+      "caseId": "v1-52454c4159455231-0170",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10170,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54628166
+    },
+    {
+      "ordinal": 171,
+      "caseId": "v1-52454c4159455231-0171",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53468125
+    },
+    {
+      "ordinal": 172,
+      "caseId": "v1-52454c4159455231-0172",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56385959
+    },
+    {
+      "ordinal": 173,
+      "caseId": "v1-52454c4159455231-0173",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55170583
+    },
+    {
+      "ordinal": 174,
+      "caseId": "v1-52454c4159455231-0174",
+      "shape": "legal-stress",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 160258208
+    },
+    {
+      "ordinal": 175,
+      "caseId": "v1-52454c4159455231-0175",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10175,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 87128458
+    },
+    {
+      "ordinal": 176,
+      "caseId": "v1-52454c4159455231-0176",
+      "shape": "legal-stress",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 41,
+        "edges": 35,
+        "layers": 5,
+        "actions": 5
+      },
+      "durationNs": 145572709
+    },
+    {
+      "ordinal": 177,
+      "caseId": "v1-52454c4159455231-0177",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 76716750
+    },
+    {
+      "ordinal": 178,
+      "caseId": "v1-52454c4159455231-0178",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52887958
+    },
+    {
+      "ordinal": 179,
+      "caseId": "v1-52454c4159455231-0179",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52057416
+    },
+    {
+      "ordinal": 180,
+      "caseId": "v1-52454c4159455231-0180",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10180,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55024458
+    },
+    {
+      "ordinal": 181,
+      "caseId": "v1-52454c4159455231-0181",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 60945750
+    },
+    {
+      "ordinal": 182,
+      "caseId": "v1-52454c4159455231-0182",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53538875
+    },
+    {
+      "ordinal": 183,
+      "caseId": "v1-52454c4159455231-0183",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56456000
+    },
+    {
+      "ordinal": 184,
+      "caseId": "v1-52454c4159455231-0184",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 52441875
+    },
+    {
+      "ordinal": 185,
+      "caseId": "v1-52454c4159455231-0185",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10185,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51870792
+    },
+    {
+      "ordinal": 186,
+      "caseId": "v1-52454c4159455231-0186",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53529834
+    },
+    {
+      "ordinal": 187,
+      "caseId": "v1-52454c4159455231-0187",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53144167
+    },
+    {
+      "ordinal": 188,
+      "caseId": "v1-52454c4159455231-0188",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 58357125
+    },
+    {
+      "ordinal": 189,
+      "caseId": "v1-52454c4159455231-0189",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 51687834
+    },
+    {
+      "ordinal": 190,
+      "caseId": "v1-52454c4159455231-0190",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10190,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 48300250
+    },
+    {
+      "ordinal": 191,
+      "caseId": "v1-52454c4159455231-0191",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 50986334
+    },
+    {
+      "ordinal": 192,
+      "caseId": "v1-52454c4159455231-0192",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 54084834
+    },
+    {
+      "ordinal": 193,
+      "caseId": "v1-52454c4159455231-0193",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 77552291
+    },
+    {
+      "ordinal": 194,
+      "caseId": "v1-52454c4159455231-0194",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 80771208
+    },
+    {
+      "ordinal": 195,
+      "caseId": "v1-52454c4159455231-0195",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10195,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 74599125
+    },
+    {
+      "ordinal": 196,
+      "caseId": "v1-52454c4159455231-0196",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55621541
+    },
+    {
+      "ordinal": 197,
+      "caseId": "v1-52454c4159455231-0197",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 46,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 58252583
+    },
+    {
+      "ordinal": 198,
+      "caseId": "v1-52454c4159455231-0198",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 55640875
+    },
+    {
+      "ordinal": 199,
+      "caseId": "v1-52454c4159455231-0199",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 48879708
+    },
+    {
+      "ordinal": 200,
+      "caseId": "v1-52454c4159455231-0200",
+      "shape": "ordinary",
+      "projectId": null,
+      "threadId": 10200,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56384958
+    },
+    {
+      "ordinal": 201,
+      "caseId": "v1-52454c4159455231-0201",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 78785584
+    },
+    {
+      "ordinal": 202,
+      "caseId": "v1-52454c4159455231-0202",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 43,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53182167
+    },
+    {
+      "ordinal": 203,
+      "caseId": "v1-52454c4159455231-0203",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 44,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 56701459
+    },
+    {
+      "ordinal": 204,
+      "caseId": "v1-52454c4159455231-0204",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 45,
+      "counts": {
+        "nodes": 5,
+        "edges": 3,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 53734000
+    },
+    {
+      "ordinal": 205,
+      "caseId": "v1-52454c4159455231-0205",
+      "shape": "recursive",
+      "projectId": null,
+      "threadId": 10205,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 78549375
+    },
+    {
+      "ordinal": 206,
+      "caseId": "v1-52454c4159455231-0206",
+      "shape": "recursive",
+      "projectId": 7,
+      "threadId": 47,
+      "counts": {
+        "nodes": 13,
+        "edges": 9,
+        "layers": 3,
+        "actions": 3
+      },
+      "durationNs": 77835542
+    },
+    {
+      "ordinal": 207,
+      "caseId": "v1-52454c4159455231-0207",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 48,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 59518750
+    },
+    {
+      "ordinal": 208,
+      "caseId": "v1-52454c4159455231-0208",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 41,
+      "counts": {
+        "nodes": 6,
+        "edges": 4,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 59855042
+    },
+    {
+      "ordinal": 209,
+      "caseId": "v1-52454c4159455231-0209",
+      "shape": "ordinary",
+      "projectId": 7,
+      "threadId": 42,
+      "counts": {
+        "nodes": 4,
+        "edges": 2,
+        "layers": 1,
+        "actions": 1
+      },
+      "durationNs": 48606500
+    }
+  ],
+  "passed": false
+}

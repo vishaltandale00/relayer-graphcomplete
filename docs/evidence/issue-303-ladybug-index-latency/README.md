@@ -25,3 +25,14 @@ p99, maximum, every sample at or above 100 ms, and Tukey high outliers. Store
 opening and draft authoring are outside the measured save boundary. Deterministic
 correctness remains in `crates/relayer-graph-server/tests/search_index_corpus.rs`;
 the hardware timing gate is intentionally separate from the default test suite.
+
+## Captured result
+
+The receipt was captured from source commit
+`5db4714740e2d13aaaa53d71cd656ec81af1be69` on macOS Apple Silicon with pinned
+`lbug` 0.18.0. It does **not** pass the gate: p50 was 56.0 ms, p90 was 101.7 ms,
+p95 was 143.3 ms, p99 was 163.0 ms, and the maximum was 207.2 ms. Twenty-one of
+200 measured acknowledgements took at least 100 ms. Shape-level inspection found
+ordinary p95 at 79.5 ms, recursive p95 at 113.5 ms, and legal-stress p95 at
+207.2 ms. The raw receipt retains all samples and outlier identities so a later
+optimization can be compared without changing the corpus.
