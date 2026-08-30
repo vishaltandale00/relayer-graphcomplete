@@ -280,7 +280,7 @@ describe("product workspace keyboard behavior", () => {
       .toBe("Not saved: disk full");
   });
 
-  it("mounts the annotation editor only in the bottom of Node Details", async () => {
+  it("reserves a stable annotation region at the bottom of Node Details", async () => {
     const markup = productWorkspaceMarkup();
     const detailContent = markup.indexOf('id="inspectorContent"');
     const dock = markup.indexOf('id="nodeContextDock"');
@@ -298,7 +298,7 @@ describe("product workspace keyboard behavior", () => {
 
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain(".node-context-dock{height:33.333%;min-height:0");
-    expect(styles).toContain(".inspector:has(.node-context-dock:not(.hidden)) .inspector-content{min-height:0}");
+    expect(styles).toContain(".inspector-content{min-height:0}.inspector>.node-context-dock.hidden{display:flex!important;visibility:hidden;pointer-events:none;border-top-color:transparent}");
     expect(styles).toContain(".app-shell:has(.desktop-account-corner-control:not(.hidden)) .node-context-dock-actions{padding-right:112px}");
     expect(styles).toContain(".node-context-dock textarea{min-height:0;flex:1;resize:none;overflow:auto");
     expect(styles).toContain("@media(forced-colors:active){.node-context-dock");

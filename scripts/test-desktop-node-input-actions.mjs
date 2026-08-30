@@ -233,6 +233,18 @@ async function run() {
     || grammar.symbols.some(({ text, label, width, height }) => !["✓", "↶"].includes(text) || !label || width > 30 || height > 30)) {
     throw new Error(`Node Details input grammar is wrong: ${JSON.stringify(grammar)}`);
   }
+  const detailViewportBeforeAnnotation = await evaluate(`(() => {
+    const detail = document.querySelector('#inspectorContent');
+    detail.scrollTop = Math.min(80, detail.scrollHeight - detail.clientHeight);
+    return {
+      clientHeight: detail.clientHeight,
+      scrollTop: detail.scrollTop,
+      inputAnchorTop: document.querySelector('#nodeInputActions').getBoundingClientRect().top,
+    };
+  })()`);
+  if (detailViewportBeforeAnnotation.scrollTop <= 0) {
+    throw new Error("Node Details fixture did not provide a nonzero pre-annotation scroll position.");
+  }
 
   await click("#attachNodeContext");
   await waitFor("annotation editor alongside node inputs", () => evaluate(`(() => (
@@ -240,6 +252,48 @@ async function run() {
       && Boolean(document.querySelector("[aria-label='Annotation for Input grammar']"))
       && document.querySelectorAll('#nodeInputActions .node-input-editor').length === 3
   ))()`));
+  const detailViewportWithAnnotation = await evaluate(`(() => {
+    const detail = document.querySelector('#inspectorContent');
+    return {
+      clientHeight: detail.clientHeight,
+      scrollTop: detail.scrollTop,
+      inputAnchorTop: document.querySelector('#nodeInputActions').getBoundingClientRect().top,
+    };
+  })()`);
+  if (Math.abs(detailViewportWithAnnotation.clientHeight - detailViewportBeforeAnnotation.clientHeight) > 1
+    || Math.abs(detailViewportWithAnnotation.scrollTop - detailViewportBeforeAnnotation.scrollTop) > 1
+    || Math.abs(detailViewportWithAnnotation.inputAnchorTop - detailViewportBeforeAnnotation.inputAnchorTop) > 1) {
+    throw new Error(`Opening an annotation shifted the Node Details viewport: ${JSON.stringify({ detailViewportBeforeAnnotation, detailViewportWithAnnotation })}`);
+  }
+  const annotationScrollReach = await evaluate(`(() => {
+    const detail = document.querySelector('#inspectorContent');
+    const dock = document.querySelector('#nodeContextDock');
+    const inspector = document.querySelector('#inspector');
+    const lastInput = document.querySelector('#nodeInputActions .node-input-editor:last-child');
+    const maximumScroll = detail.scrollHeight - detail.clientHeight;
+    const dockBoundsBefore = dock.getBoundingClientRect();
+    detail.scrollTop = detail.scrollHeight;
+    const detailBounds = detail.getBoundingClientRect();
+    const lastInputBounds = lastInput.getBoundingClientRect();
+    const dockBoundsAfter = dock.getBoundingClientRect();
+    const inspectorBounds = inspector.getBoundingClientRect();
+    return {
+      scrolledToBottom: maximumScroll > 1 && detail.scrollTop > 1
+        && Math.abs(detail.scrollTop - maximumScroll) <= 1,
+      lastInputContained: lastInputBounds.top >= detailBounds.top - 1
+        && lastInputBounds.bottom <= detailBounds.bottom + 1,
+      annotationContained: !dock.classList.contains('hidden')
+        && dockBoundsAfter.height > 0
+        && dockBoundsAfter.top >= inspectorBounds.top - 1
+        && dockBoundsAfter.bottom <= inspectorBounds.bottom + 1,
+      annotationStayedPut: Math.abs(dockBoundsAfter.top - dockBoundsBefore.top) <= 1
+        && Math.abs(dockBoundsAfter.bottom - dockBoundsBefore.bottom) <= 1,
+    };
+  })()`);
+  if (!annotationScrollReach.scrolledToBottom || !annotationScrollReach.lastInputContained
+    || !annotationScrollReach.annotationContained || !annotationScrollReach.annotationStayedPut) {
+    throw new Error(`Node Details cannot scroll fully while annotating: ${JSON.stringify(annotationScrollReach)}`);
+  }
   await setValue("[aria-label='Annotation for Input grammar']", "Keep this note alongside the input actions.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("confirmed annotation attached without hiding node inputs", () => evaluate(`(() => (
