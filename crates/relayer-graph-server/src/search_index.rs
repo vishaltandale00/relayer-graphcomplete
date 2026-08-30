@@ -65,7 +65,9 @@ pub enum SearchTargetReadiness {
 pub enum SearchIndexLifecycleFault {
     BeforePublish,
     ReplacePointerAfterOpen,
+    ReplacePointerBeforePublish,
     HoldLogicalRebuild,
+    DelayBeforeFinalOpen,
 }
 
 impl LadybugSearchIndex {
@@ -86,7 +88,14 @@ impl LadybugSearchIndex {
         database: &Path,
         graph: &relayer_graph_core::GraphDatabase,
     ) -> Result<Self, GraphError> {
-        lifecycle::open_reconciled(database, graph, DEFAULT_SEARCH_INDEX_BUDGET, None).await
+        lifecycle::open_reconciled(
+            database,
+            graph,
+            DEFAULT_SEARCH_INDEX_BUDGET,
+            relayer_graph_core::DEFAULT_IMPORT_INDEX_BUDGET,
+            None,
+        )
+        .await
     }
 
     #[cfg(feature = "crash-test-support")]
@@ -95,7 +104,31 @@ impl LadybugSearchIndex {
         graph: &relayer_graph_core::GraphDatabase,
         fault: SearchIndexLifecycleFault,
     ) -> Result<Self, GraphError> {
-        lifecycle::open_reconciled(database, graph, DEFAULT_SEARCH_INDEX_BUDGET, Some(fault)).await
+        lifecycle::open_reconciled(
+            database,
+            graph,
+            DEFAULT_SEARCH_INDEX_BUDGET,
+            relayer_graph_core::DEFAULT_IMPORT_INDEX_BUDGET,
+            Some(fault),
+        )
+        .await
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    pub async fn open_reconciled_with_rebuild_budget(
+        database: &Path,
+        graph: &relayer_graph_core::GraphDatabase,
+        fault: SearchIndexLifecycleFault,
+        rebuild_budget: Duration,
+    ) -> Result<Self, GraphError> {
+        lifecycle::open_reconciled(
+            database,
+            graph,
+            DEFAULT_SEARCH_INDEX_BUDGET,
+            rebuild_budget,
+            Some(fault),
+        )
+        .await
     }
 
     fn from_store(store: LadybugStore) -> Self {

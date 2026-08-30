@@ -252,6 +252,56 @@ async fn same_revision_missing_and_extra_topology_is_never_accepted_as_ready() {
 
 #[cfg(feature = "crash-test-support")]
 #[tokio::test]
+async fn same_revision_property_mutation_and_identical_relationship_duplicate_are_rebuilt() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("graph.db");
+    let database = accepted_sqlite_graph(&path).await;
+    let first = LadybugSearchIndex::open_reconciled(&path, &database)
+        .await
+        .unwrap();
+    first
+        .inject_lifecycle_corruption(
+            "MATCH (n:Content) WHERE n.title = 'Queue' SET n.detail = 'corrupted detail'",
+        )
+        .await
+        .unwrap();
+    first
+        .inject_lifecycle_corruption(
+            "MATCH (l:Layer), (n:Content) WHERE l.id = 'layer:1' AND n.id = 'content:2' CREATE (l)-[:CONTAINS {id: 'membership:1:2', member_order: 0, x: 0.5, y: 0.5, has_xy: true, published_targets: ['thread:41']}]->(n)",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        first
+            .normalized_rows("MATCH ()-[r:CONTAINS]->() RETURN count(r)")
+            .await
+            .unwrap(),
+        vec![vec![json!({"type": "integer", "value": "2"})]]
+    );
+    drop(first);
+
+    let repaired = LadybugSearchIndex::open_reconciled(&path, &database)
+        .await
+        .unwrap();
+    repaired.wait_until_reconciled().await.unwrap();
+    assert_eq!(
+        repaired
+            .normalized_rows("MATCH (n:Content) WHERE n.title = 'Queue' RETURN n.detail")
+            .await
+            .unwrap(),
+        vec![vec![json!({"type": "string", "value": "Pending work"})]]
+    );
+    assert_eq!(
+        repaired
+            .normalized_rows("MATCH ()-[r:CONTAINS]->() RETURN count(r)")
+            .await
+            .unwrap(),
+        vec![vec![json!({"type": "integer", "value": "1"})]]
+    );
+}
+
+#[cfg(feature = "crash-test-support")]
+#[tokio::test]
 async fn logical_damage_blocks_only_its_target_while_unaffected_target_stays_usable() {
     use relayer_graph_server::search_index::{SearchIndexLifecycleFault, SearchTargetReadiness};
 
@@ -571,6 +621,55 @@ async fn forced_validation_failure_leaves_the_prior_active_generation_intact() {
 
 #[cfg(feature = "crash-test-support")]
 #[tokio::test]
+async fn one_rebuild_deadline_includes_receipt_and_final_active_open() {
+    use std::time::Duration;
+
+    use relayer_graph_core::SearchIndexComponent;
+    use relayer_graph_server::search_index::SearchIndexLifecycleFault;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("graph.db");
+    let database = accepted_sqlite_graph(&path).await;
+    drop(
+        LadybugSearchIndex::open_reconciled(&path, &database)
+            .await
+            .unwrap(),
+    );
+    database
+        .record_search_index_version(SearchIndexComponent::DerivedIndex, "force-rebuild")
+        .await
+        .unwrap();
+
+    let error = match LadybugSearchIndex::open_reconciled_with_rebuild_budget(
+        &path,
+        &database,
+        SearchIndexLifecycleFault::DelayBeforeFinalOpen,
+        Duration::from_millis(25),
+    )
+    .await
+    {
+        Ok(_) => panic!("post-publication delay escaped the rebuild deadline"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("exceeded"), "{error}");
+
+    // The timeout may occur after atomic pointer publication. That state is
+    // deliberately restart-safe: the next ordinary open validates the selected
+    // generation and converges without trusting a partial acknowledgement.
+    let recovered = LadybugSearchIndex::open_reconciled(&path, &database)
+        .await
+        .unwrap();
+    assert_eq!(
+        recovered
+            .normalized_rows("MATCH (n:Content) RETURN count(n)")
+            .await
+            .unwrap(),
+        vec![vec![json!({"type": "integer", "value": "2"})]]
+    );
+}
+
+#[cfg(feature = "crash-test-support")]
+#[tokio::test]
 async fn active_pointer_replacement_after_open_is_detected_and_rebuilt() {
     use relayer_graph_server::search_index::SearchIndexLifecycleFault;
 
@@ -603,6 +702,60 @@ async fn active_pointer_replacement_after_open_is_detected_and_rebuilt() {
             .count(),
         2,
         "both the opened and raced generations are retained as evidence"
+    );
+}
+
+#[cfg(feature = "crash-test-support")]
+#[tokio::test]
+async fn active_pointer_replacement_before_publish_fails_closed_without_overwriting_it() {
+    use relayer_graph_core::SearchIndexComponent;
+    use relayer_graph_server::search_index::SearchIndexLifecycleFault;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("graph.db");
+    let database = accepted_sqlite_graph(&path).await;
+    let first = LadybugSearchIndex::open_reconciled(&path, &database)
+        .await
+        .unwrap();
+    let layout = first.layout().clone();
+    let prior_pointer = std::fs::read(layout.active()).unwrap();
+    drop(first);
+    database
+        .record_search_index_version(SearchIndexComponent::DerivedIndex, "force-rebuild")
+        .await
+        .unwrap();
+
+    let error = match LadybugSearchIndex::open_reconciled_with_fault(
+        &path,
+        &database,
+        SearchIndexLifecycleFault::ReplacePointerBeforePublish,
+    )
+    .await
+    {
+        Ok(_) => panic!("a pointer race must fail closed"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("changed during canonical rebuild"),
+        "{error}"
+    );
+    let raced_pointer = std::fs::read(layout.active()).unwrap();
+    assert_ne!(raced_pointer, prior_pointer);
+
+    // No competing-process protocol is invented here. The single primary's
+    // next startup treats the raced bytes as untrusted and converges from the
+    // canonical SQLite snapshot.
+    let recovered = LadybugSearchIndex::open_reconciled(&path, &database)
+        .await
+        .unwrap();
+    assert_eq!(
+        recovered
+            .normalized_rows("MATCH (n:Content) RETURN count(n)")
+            .await
+            .unwrap(),
+        vec![vec![json!({"type": "integer", "value": "2"})]]
     );
 }
 

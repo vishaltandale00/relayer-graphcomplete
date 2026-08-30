@@ -1,4 +1,12 @@
 //! Cold-start reconciliation of the derived Ladybug bytes from canonical SQLite.
+//!
+//! Product startup has one primary Electron process per desktop profile (see
+//! `docs/architecture.md`), and that process owns one graph-server child through
+//! its private standard-input control channel. This lifecycle relies on that
+//! authority: it serializes publication inside the process and fails closed if
+//! the active-generation pointer changes across a publication boundary. It does
+//! not claim a multi-process writer protocol; Ladybug's exclusive store lock is
+//! the remaining guard against unsupported competing processes.
 
 use std::{
     collections::HashSet,
@@ -47,6 +55,59 @@ async fn open_store(
         .await
         .map_err(|error| GraphError::Internal(format!("search index worker failed: {error}")))?
         .map_err(internal)
+}
+
+fn rebuild_timeout() -> GraphError {
+    GraphError::Internal("Ladybug canonical rebuild exceeded its 60 second deadline".into())
+}
+
+async fn until<T>(
+    deadline: Instant,
+    work: impl std::future::Future<Output = Result<T, GraphError>>,
+) -> Result<T, GraphError> {
+    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), work)
+        .await
+        .map_err(|_| rebuild_timeout())?
+}
+
+async fn blocking_until<T, F>(deadline: Instant, work: F) -> Result<T, GraphError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> anyhow::Result<T> + Send + 'static,
+{
+    until(deadline, async move {
+        tokio::task::spawn_blocking(work)
+            .await
+            .map_err(|error| {
+                GraphError::Internal(format!("search lifecycle worker failed: {error}"))
+            })?
+            .map_err(internal)
+    })
+    .await
+}
+
+async fn open_store_until(
+    layout: StoreLayout,
+    generation: PathBuf,
+    timeout: Duration,
+    deadline: Instant,
+) -> Result<LadybugStore, GraphError> {
+    until(deadline, open_store(layout, generation, timeout)).await
+}
+
+async fn require_unchanged_pointer(
+    layout: &StoreLayout,
+    expected: Option<&PathBuf>,
+    deadline: Instant,
+) -> Result<(), GraphError> {
+    let check_layout = layout.clone();
+    let current = blocking_until(deadline, move || check_layout.active_generation()).await?;
+    if current.as_ref() != expected {
+        return Err(GraphError::Internal(
+            "active Ladybug generation changed during canonical rebuild".into(),
+        ));
+    }
+    Ok(())
 }
 
 async fn versions_match(
@@ -137,43 +198,35 @@ async fn background_rebuild(
 ) {
     index.wait_for_background_gate().await;
     let deadline = Instant::now() + DEFAULT_IMPORT_INDEX_BUDGET;
-    let outcome = async {
+    let outcome = until(deadline, async {
         loop {
-            if Instant::now() >= deadline {
-                return Err(GraphError::Internal(
-                    "Ladybug canonical rebuild exceeded its 60 second deadline".into(),
-                ));
-            }
             let snapshot = graph.search_index_rebuild_snapshot().await?;
             let epoch = index.epoch();
-            let candidate = layout.create_generation().map_err(internal)?;
-            let attempt = async {
+            let create_layout = layout.clone();
+            let candidate =
+                blocking_until(deadline, move || create_layout.create_generation()).await?;
+            if let Err(error) = async {
                 let built =
                     build_generation(&layout, &candidate, timeout, &snapshot, deadline).await?;
                 drop(built);
                 let reopened = LadybugSearchIndex::from_store(
-                    open_store(layout.clone(), candidate.clone(), timeout).await?,
+                    open_store_until(layout.clone(), candidate.clone(), timeout, deadline).await?,
                 );
                 if !revisions_match(&reopened, &snapshot).await? {
                     return Err(GraphError::Internal(
                         "rebuilt search store failed reopen validation".into(),
                     ));
                 }
-                drop(reopened);
                 Ok::<_, GraphError>(())
-            };
-            match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), attempt).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    let _ = std::fs::remove_dir_all(&candidate);
-                    return Err(error);
-                }
-                Err(_) => {
-                    let _ = std::fs::remove_dir_all(&candidate);
-                    return Err(GraphError::Internal(
-                        "Ladybug canonical rebuild exceeded its 60 second deadline".into(),
-                    ));
-                }
+            }
+            .await
+            {
+                let cleanup = candidate.clone();
+                let _ = blocking_until(deadline, move || {
+                    std::fs::remove_dir_all(cleanup).map_err(anyhow::Error::from)
+                })
+                .await;
+                return Err(error);
             }
 
             // This barrier is held only for the final canonical comparison and
@@ -182,24 +235,51 @@ async fn background_rebuild(
             let _publication = graph.lock_search_rebuild().await;
             let latest = graph.search_index_rebuild_snapshot().await?;
             if latest != snapshot || index.epoch() != epoch {
-                let _ = std::fs::remove_dir_all(&candidate);
+                let cleanup = candidate.clone();
+                blocking_until(deadline, move || {
+                    std::fs::remove_dir_all(cleanup).map_err(anyhow::Error::from)
+                })
+                .await?;
                 continue;
             }
             let _operations = index.lock_operations().await;
             if index.epoch() != epoch {
-                let _ = std::fs::remove_dir_all(&candidate);
+                let cleanup = candidate.clone();
+                blocking_until(deadline, move || {
+                    std::fs::remove_dir_all(cleanup).map_err(anyhow::Error::from)
+                })
+                .await?;
                 continue;
             }
-            layout.publish(&candidate).map_err(internal)?;
-            let active = open_store(layout.clone(), candidate.clone(), timeout).await?;
+            if let Err(error) = require_unchanged_pointer(&layout, Some(&previous), deadline).await
+            {
+                let cleanup = candidate.clone();
+                let _ = blocking_until(deadline, move || {
+                    std::fs::remove_dir_all(cleanup).map_err(anyhow::Error::from)
+                })
+                .await;
+                return Err(error);
+            }
+            let publish_layout = layout.clone();
+            let publish_candidate = candidate.clone();
+            blocking_until(deadline, move || publish_layout.publish(&publish_candidate)).await?;
+            let active =
+                open_store_until(layout.clone(), candidate.clone(), timeout, deadline).await?;
             index.install_store(active);
-            layout.retain_previous(&previous, true).map_err(internal)?;
-            graph
-                .record_search_index_rebuild_receipt(&snapshot.targets, &expected_versions)
-                .await?;
+            let retain_layout = layout.clone();
+            let retain_previous = previous.clone();
+            blocking_until(deadline, move || {
+                retain_layout.retain_previous(&retain_previous, true)
+            })
+            .await?;
+            until(
+                deadline,
+                graph.record_search_index_rebuild_receipt(&snapshot.targets, &expected_versions),
+            )
+            .await?;
             return Ok(());
         }
-    }
+    })
     .await;
     index.finish_rebuild(outcome.is_ok());
 }
@@ -211,7 +291,7 @@ async fn build_generation(
     snapshot: &SearchIndexRebuildSnapshot,
     deadline: Instant,
 ) -> Result<LadybugSearchIndex, GraphError> {
-    let store = open_store(layout.clone(), generation.to_owned(), timeout).await?;
+    let store = open_store_until(layout.clone(), generation.to_owned(), timeout, deadline).await?;
     let index = LadybugSearchIndex::from_store(store);
     for (target, revision) in &snapshot.targets {
         let mut write = index.begin_until(*target, *revision, deadline).await?;
@@ -243,14 +323,21 @@ pub async fn open_reconciled(
     database: &Path,
     graph: &GraphDatabase,
     timeout: Duration,
+    rebuild_budget: Duration,
     fault: Option<SearchIndexLifecycleFault>,
 ) -> Result<LadybugSearchIndex, GraphError> {
     let layout = StoreLayout::beside(database);
+    let rebuild_deadline = Instant::now() + rebuild_budget;
     let snapshot = graph.search_index_rebuild_snapshot().await?;
     let expected = expected_versions();
     let (previous, legacy_active) = match layout.active_generation() {
         Ok(previous) => (previous, false),
-        Err(error) => match layout.snapshot_legacy_active().map_err(internal)? {
+        Err(error) => match blocking_until(rebuild_deadline, {
+            let layout = layout.clone();
+            move || layout.snapshot_legacy_active()
+        })
+        .await?
+        {
             Some(previous) => (Some(previous), true),
             None => return Err(internal(error)),
         },
@@ -301,9 +388,12 @@ pub async fn open_reconciled(
     }
     drop(existing);
 
-    let candidate = layout.create_generation().map_err(internal)?;
-    let rebuild_deadline = Instant::now() + DEFAULT_IMPORT_INDEX_BUDGET;
-    let rebuild = async {
+    let candidate = blocking_until(rebuild_deadline, {
+        let layout = layout.clone();
+        move || layout.create_generation()
+    })
+    .await?;
+    until(rebuild_deadline, async {
         let rebuilt =
             build_generation(&layout, &candidate, timeout, &snapshot, rebuild_deadline).await?;
         drop(rebuilt);
@@ -311,7 +401,7 @@ pub async fn open_reconciled(
         // Reopen before publication: a store that only validates through its
         // live writer is not durable proof of a restart-safe generation.
         let reopened = LadybugSearchIndex::from_store(
-            open_store(layout.clone(), candidate.clone(), timeout).await?,
+            open_store_until(layout.clone(), candidate.clone(), timeout, rebuild_deadline).await?,
         );
         if !revisions_match(&reopened, &snapshot).await? {
             return Err(GraphError::Internal(
@@ -319,52 +409,95 @@ pub async fn open_reconciled(
             ));
         }
         drop(reopened);
-        Ok::<_, GraphError>(())
-    };
-    match tokio::time::timeout_at(tokio::time::Instant::from_std(rebuild_deadline), rebuild).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => {
-            let _ = std::fs::remove_dir_all(&candidate);
-            return Err(error);
-        }
-        Err(_) => {
-            let _ = std::fs::remove_dir_all(&candidate);
+
+        #[cfg(feature = "crash-test-support")]
+        if fault == Some(SearchIndexLifecycleFault::BeforePublish) {
+            let cleanup = candidate.clone();
+            blocking_until(rebuild_deadline, move || {
+                std::fs::remove_dir_all(cleanup).map_err(anyhow::Error::from)
+            })
+            .await?;
             return Err(GraphError::Internal(
-                "Ladybug canonical rebuild exceeded its 60 second deadline".into(),
+                "injected rebuilt search validation failure".into(),
             ));
         }
-    }
 
-    #[cfg(feature = "crash-test-support")]
-    if fault == Some(SearchIndexLifecycleFault::BeforePublish) {
-        let _ = std::fs::remove_dir_all(&candidate);
-        return Err(GraphError::Internal(
-            "injected rebuilt search validation failure".into(),
-        ));
-    }
+        #[cfg(not(feature = "crash-test-support"))]
+        let _ = fault;
 
-    #[cfg(not(feature = "crash-test-support"))]
-    let _ = fault;
+        #[cfg(feature = "crash-test-support")]
+        if fault == Some(SearchIndexLifecycleFault::ReplacePointerBeforePublish) {
+            let replacement_layout = layout.clone();
+            blocking_until(rebuild_deadline, move || {
+                let replacement = replacement_layout.create_generation()?;
+                replacement_layout.publish(&replacement)
+            })
+            .await?;
+        }
 
-    layout.publish(&candidate).map_err(internal)?;
-    if legacy_active {
-        layout.remove_legacy_sidecars().map_err(internal)?;
-    }
-    if let Some(previous) = previous.as_deref() {
-        // A generation rejected by version, open, or revision validation is
-        // evidence, not rollback material.
-        layout.retain_previous(previous, true).map_err(internal)?;
-    }
-    if !pointer_stable
-        && let Some(raced) = observed_after_open.as_deref()
-        && Some(raced) != previous.as_deref()
-        && raced != candidate
-    {
-        layout.retain_previous(raced, true).map_err(internal)?;
-    }
-    graph
-        .record_search_index_rebuild_receipt(&snapshot.targets, &expected)
+        // A pre-generation Ladybug database occupies `active` with binary
+        // bytes, so it cannot participate in the text-pointer comparison. Its
+        // immutable snapshot above is the migration input; normal generation
+        // layouts always require the compare-before-publish guard.
+        if !legacy_active
+            && let Err(error) =
+                require_unchanged_pointer(&layout, observed_after_open.as_ref(), rebuild_deadline)
+                    .await
+        {
+            let cleanup = candidate.clone();
+            let _ = blocking_until(rebuild_deadline, move || {
+                std::fs::remove_dir_all(cleanup).map_err(anyhow::Error::from)
+            })
+            .await;
+            return Err(error);
+        }
+
+        let publish_layout = layout.clone();
+        let publish_candidate = candidate.clone();
+        blocking_until(rebuild_deadline, move || {
+            publish_layout.publish(&publish_candidate)
+        })
         .await?;
-    let active = open_store(layout, candidate, timeout).await?;
-    Ok(LadybugSearchIndex::from_store(active))
+        if legacy_active {
+            let legacy_layout = layout.clone();
+            blocking_until(rebuild_deadline, move || {
+                legacy_layout.remove_legacy_sidecars()
+            })
+            .await?;
+        }
+        if let Some(previous) = previous.as_ref() {
+            // A generation rejected by version, open, or revision validation is
+            // evidence, not rollback material.
+            let retain_layout = layout.clone();
+            let previous = previous.clone();
+            blocking_until(rebuild_deadline, move || {
+                retain_layout.retain_previous(&previous, true)
+            })
+            .await?;
+        }
+        if !pointer_stable
+            && let Some(raced) = observed_after_open.as_ref()
+            && Some(raced) != previous.as_ref()
+            && *raced != candidate
+        {
+            let retain_layout = layout.clone();
+            let raced = raced.clone();
+            blocking_until(rebuild_deadline, move || {
+                retain_layout.retain_previous(&raced, true)
+            })
+            .await?;
+        }
+        until(
+            rebuild_deadline,
+            graph.record_search_index_rebuild_receipt(&snapshot.targets, &expected),
+        )
+        .await?;
+        #[cfg(feature = "crash-test-support")]
+        if fault == Some(SearchIndexLifecycleFault::DelayBeforeFinalOpen) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let active = open_store_until(layout, candidate, timeout, rebuild_deadline).await?;
+        Ok(LadybugSearchIndex::from_store(active))
+    })
+    .await
 }

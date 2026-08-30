@@ -145,42 +145,46 @@ pub fn revision_targets(connection: &Connection<'_>) -> Result<Vec<String>> {
     (&mut result).map(|row| value_string(&row[0])).collect()
 }
 
-/// Exact searchable topology, stable identities, and target publication sets.
-/// Property values are protected by the frozen lowering tests; this inventory
-/// is the startup boundary that prevents a same-revision partial MATCH from
-/// being mistaken for a complete derived store.
+/// Exact physical multiset of searchable records. Every stored property that a
+/// query can observe is encoded, and duplicate relationships remain duplicate
+/// entries rather than collapsing behind their authored identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchInventory(pub Vec<String>);
 
 impl SearchInventory {
-    pub fn projection(&self, target: SearchTarget) -> Result<BTreeSet<Vec<String>>> {
+    pub fn projection(&self, target: SearchTarget) -> Result<Vec<String>> {
         let target = target.to_string();
-        self.0
+        let mut projection = self
+            .0
             .iter()
             .filter_map(|entry| {
-                let parsed = serde_json::from_str::<(Vec<String>, Vec<String>)>(entry)
-                    .context("decode search inventory entry");
+                let parsed = decode_inventory_entry(entry);
                 match parsed {
-                    Ok((key, targets)) if targets.contains(&target) => Some(Ok(key)),
+                    Ok((key, properties, targets)) if targets.contains(&target) => {
+                        Some(Ok(serde_json::to_string(&(key, properties))
+                            .expect("search inventory projection serializes")))
+                    }
                     Ok(_) => None,
                     Err(error) => Some(Err(error)),
                 }
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        projection.sort();
+        Ok(projection)
     }
 
     pub fn target_names(&self) -> Result<BTreeSet<String>> {
         let mut names = BTreeSet::new();
         for entry in &self.0 {
-            let (_, targets) = serde_json::from_str::<(Vec<String>, Vec<String>)>(entry)
-                .context("decode search inventory entry")?;
+            let (_, _, targets) = decode_inventory_entry(entry)?;
             names.extend(targets);
         }
         Ok(names)
     }
 }
 
-type InventoryMap = BTreeMap<Vec<String>, BTreeSet<String>>;
+type Properties = Vec<(String, String)>;
+type InventoryMap = BTreeMap<Vec<String>, (Properties, BTreeSet<String>, usize)>;
 
 pub fn canonical_inventory(snapshot: &SearchIndexRebuildSnapshot) -> SearchInventory {
     let mut inventory = InventoryMap::new();
@@ -197,23 +201,35 @@ pub fn canonical_inventory(snapshot: &SearchIndexRebuildSnapshot) -> SearchInven
                 "Content".into(),
                 content_id(&item.closure.interaction),
             ],
+            content_properties(&item.closure.interaction),
             &targets,
+            1,
         );
         for layer in &item.closure.layers {
             let layer_identity = layer_id(&layer.layer);
             add_inventory(
                 &mut inventory,
                 vec!["node".into(), "Layer".into(), layer_identity.clone()],
+                layer_properties(layer),
                 &targets,
+                1,
             );
             for node in &layer.nodes {
                 add_inventory(
                     &mut inventory,
                     vec!["node".into(), "Content".into(), content_id(node)],
+                    content_properties(node),
                     &targets,
+                    1,
                 );
             }
-            for node_id in &layer.layer.nodes {
+            for (position, node_id) in layer.layer.nodes.iter().enumerate() {
+                let placement = layer.layer.layout.as_ref().and_then(|layout| {
+                    layout
+                        .placements
+                        .iter()
+                        .find(|placement| placement.node_id == *node_id)
+                });
                 add_inventory(
                     &mut inventory,
                     vec![
@@ -223,7 +239,14 @@ pub fn canonical_inventory(snapshot: &SearchIndexRebuildSnapshot) -> SearchInven
                         layer_identity.clone(),
                         format!("content:{node_id}"),
                     ],
+                    vec![
+                        property("member_order", Value::Int64(position as i64)),
+                        property("x", Value::Double(placement.map_or(0.0, |value| value.x))),
+                        property("y", Value::Double(placement.map_or(0.0, |value| value.y))),
+                        property("has_xy", Value::Bool(placement.is_some())),
+                    ],
                     &targets,
+                    1,
                 );
             }
             for edge in &layer.edges {
@@ -241,7 +264,15 @@ pub fn canonical_inventory(snapshot: &SearchIndexRebuildSnapshot) -> SearchInven
                         endpoints[0].clone(),
                         endpoints[1].clone(),
                     ],
+                    vec![property(
+                        "state",
+                        Value::String(wire(edge.state).expect("edge state serializes")),
+                    )],
                     &targets,
+                    // Ladybug 0.18 reports one undirected CONNECTED record in
+                    // both orientations. An injected duplicate therefore adds
+                    // two more entries to the physical multiset.
+                    2,
                 );
             }
             for action in &layer.actions {
@@ -254,26 +285,63 @@ pub fn canonical_inventory(snapshot: &SearchIndexRebuildSnapshot) -> SearchInven
 }
 
 pub fn physical_inventory(connection: &Connection<'_>) -> Result<SearchInventory> {
-    let mut inventory = InventoryMap::new();
-    for (label, query) in [
-        (
-            "Content",
-            "MATCH (n:Content) RETURN n.id, n.published_targets",
-        ),
-        ("Layer", "MATCH (n:Layer) RETURN n.id, n.published_targets"),
-    ] {
-        let mut result = connection.query(query)?;
-        for row in &mut result {
-            add_inventory(
-                &mut inventory,
-                vec!["node".into(), label.into(), value_string(&row[0])?],
-                &value_string_set(&row[1])?,
-            );
-        }
+    let mut inventory = Vec::new();
+    let mut content = connection.query(
+        "MATCH (n:Content) RETURN n.id,n.kind,n.icon,n.title,n.detail,n.state,n.published_targets",
+    )?;
+    for row in &mut content {
+        inventory.push(encode_inventory_entry(
+            vec!["node".into(), "Content".into(), value_string(&row[0])?],
+            named_properties(&["kind", "icon", "title", "detail", "state"], &row[1..6])?,
+            value_string_list(&row[6])?,
+        ));
     }
-    for kind in ["CONNECTED", "CONTAINS", "EXPANDS", "REFERENCES"] {
-        let query =
-            format!("MATCH (a)-[r:{kind}]->(b) RETURN r.id, a.id, b.id, r.published_targets");
+    let mut layers = connection.query(
+        "MATCH (n:Layer) RETURN n.id,n.state,n.layout_version,n.has_layout,n.published_targets",
+    )?;
+    for row in &mut layers {
+        inventory.push(encode_inventory_entry(
+            vec!["node".into(), "Layer".into(), value_string(&row[0])?],
+            named_properties(&["state", "layout_version", "has_layout"], &row[1..4])?,
+            value_string_list(&row[4])?,
+        ));
+    }
+    for (kind, property_names) in [
+        ("CONNECTED", &["state"][..]),
+        ("CONTAINS", &["member_order", "x", "y", "has_xy"][..]),
+        (
+            "EXPANDS",
+            &[
+                "source_layer_id",
+                "label",
+                "variant",
+                "icon",
+                "description",
+                "relation",
+                "state",
+            ][..],
+        ),
+        (
+            "REFERENCES",
+            &[
+                "source_layer_id",
+                "label",
+                "variant",
+                "icon",
+                "description",
+                "relation",
+                "state",
+            ][..],
+        ),
+    ] {
+        let returned = property_names
+            .iter()
+            .map(|name| format!("r.{name}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let query = format!(
+            "MATCH (a)-[r:{kind}]->(b) RETURN r.id,a.id,b.id,{returned},r.published_targets"
+        );
         let mut result = connection.query(&query)?;
         for row in &mut result {
             let mut start = value_string(&row[1])?;
@@ -281,8 +349,10 @@ pub fn physical_inventory(connection: &Connection<'_>) -> Result<SearchInventory
             if kind == "CONNECTED" && start > end {
                 std::mem::swap(&mut start, &mut end);
             }
-            add_inventory(
-                &mut inventory,
+            let targets = row
+                .last()
+                .ok_or_else(|| anyhow::anyhow!("search inventory row omitted targets"))?;
+            inventory.push(encode_inventory_entry(
                 vec![
                     "relationship".into(),
                     kind.into(),
@@ -290,11 +360,13 @@ pub fn physical_inventory(connection: &Connection<'_>) -> Result<SearchInventory
                     start,
                     end,
                 ],
-                &value_string_set(&row[3])?,
-            );
+                named_properties(property_names, &row[3..row.len() - 1])?,
+                value_string_list(targets)?,
+            ));
         }
     }
-    Ok(finish_inventory(inventory))
+    inventory.sort();
+    Ok(SearchInventory(inventory))
 }
 
 fn add_action_inventory(
@@ -321,27 +393,141 @@ fn add_action_inventory(
             format!("content:{}", action.source_node_id),
             format!("layer:{target_layer}"),
         ],
+        action_properties(action, relation),
         targets,
+        1,
     );
 }
 
-fn add_inventory(inventory: &mut InventoryMap, key: Vec<String>, targets: &BTreeSet<String>) {
-    inventory
+fn add_inventory(
+    inventory: &mut InventoryMap,
+    key: Vec<String>,
+    properties: Properties,
+    targets: &BTreeSet<String>,
+    multiplicity: usize,
+) {
+    let entry = inventory
         .entry(key)
-        .or_default()
-        .extend(targets.iter().cloned());
+        .or_insert_with(|| (properties.clone(), BTreeSet::new(), multiplicity));
+    // Applying an immutable accepted identity again replaces the same physical
+    // properties and unions publication targets; it never creates another row.
+    entry.0 = properties;
+    entry.1.extend(targets.iter().cloned());
+    entry.2 = multiplicity;
 }
 
 fn finish_inventory(inventory: InventoryMap) -> SearchInventory {
-    SearchInventory(
-        inventory
-            .into_iter()
-            .map(|(key, targets)| {
-                serde_json::to_string(&(key, targets.into_iter().collect::<Vec<_>>()))
-                    .expect("search inventory strings are serializable")
-            })
-            .collect(),
+    let mut entries = Vec::new();
+    for (key, (properties, targets, multiplicity)) in inventory {
+        let encoded = encode_inventory_entry(key, properties, targets.into_iter().collect());
+        entries.extend(std::iter::repeat_n(encoded, multiplicity));
+    }
+    entries.sort();
+    SearchInventory(entries)
+}
+
+fn content_properties(node: &GraphNode) -> Properties {
+    vec![
+        property("kind", Value::String(node.kind.clone())),
+        property("icon", Value::String(node.icon.clone())),
+        property("title", Value::String(node.title.clone())),
+        property("detail", Value::String(node.detail.clone())),
+        property(
+            "state",
+            Value::String(wire(node.state).expect("node state serializes")),
+        ),
+    ]
+}
+
+fn layer_properties(layer: &ResolvedLayer) -> Properties {
+    let layout = layer.layer.layout.as_ref();
+    vec![
+        property(
+            "state",
+            Value::String(wire(layer.layer.state).expect("layer state serializes")),
+        ),
+        property(
+            "layout_version",
+            Value::Int64(layout.map_or(0, |value| i64::from(value.version))),
+        ),
+        property("has_layout", Value::Bool(layout.is_some())),
+    ]
+}
+
+fn action_properties(action: &GraphAction, relation: NavigateRelation) -> Properties {
+    vec![
+        property(
+            "source_layer_id",
+            Value::String(
+                action
+                    .source_layer_id
+                    .map_or_else(String::new, |id| format!("layer:{id}")),
+            ),
+        ),
+        property("label", Value::String(action.label.clone())),
+        property(
+            "variant",
+            Value::String(wire(&action.variant).expect("action variant serializes")),
+        ),
+        property(
+            "icon",
+            Value::String(action.icon.clone().unwrap_or_default()),
+        ),
+        property(
+            "description",
+            Value::String(action.description.clone().unwrap_or_default()),
+        ),
+        property(
+            "relation",
+            Value::String(wire(relation).expect("navigate relation serializes")),
+        ),
+        property(
+            "state",
+            Value::String(wire(action.state).expect("action state serializes")),
+        ),
+    ]
+}
+
+fn property(name: &str, value: Value) -> (String, String) {
+    (
+        name.into(),
+        serde_json::to_string(
+            &super::value::normalize_value(&value, &super::value::EndpointIds::new())
+                .expect("canonical inventory uses supported scalar values"),
+        )
+        .expect("normalized scalar serializes"),
     )
+}
+
+fn named_properties(names: &[&str], values: &[Value]) -> Result<Properties> {
+    if names.len() != values.len() {
+        bail!("search inventory property count did not match its schema");
+    }
+    names
+        .iter()
+        .zip(values)
+        .map(|(name, value)| {
+            Ok((
+                (*name).into(),
+                serde_json::to_string(&super::value::normalize_value(
+                    value,
+                    &super::value::EndpointIds::new(),
+                )?)?,
+            ))
+        })
+        .collect()
+}
+
+fn encode_inventory_entry(
+    key: Vec<String>,
+    properties: Properties,
+    targets: Vec<String>,
+) -> String {
+    serde_json::to_string(&(key, properties, targets)).expect("search inventory entry serializes")
+}
+
+fn decode_inventory_entry(entry: &str) -> Result<(Vec<String>, Properties, Vec<String>)> {
+    serde_json::from_str(entry).context("decode search inventory entry")
 }
 
 fn value_string(value: &Value) -> Result<String> {
@@ -351,10 +537,10 @@ fn value_string(value: &Value) -> Result<String> {
     }
 }
 
-fn value_string_set(value: &Value) -> Result<BTreeSet<String>> {
+fn value_string_list(value: &Value) -> Result<Vec<String>> {
     match value {
         Value::List(LogicalType::String, values) => values.iter().map(value_string).collect(),
-        other => bail!("search inventory publication set was not a string list: {other:?}"),
+        other => bail!("search inventory publication list was not a string list: {other:?}"),
     }
 }
 
