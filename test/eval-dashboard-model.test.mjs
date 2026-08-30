@@ -2,12 +2,48 @@ import { describe, expect, it } from "vitest";
 
 import {
   annotatedExecutionExportable,
+  authorizeRecursiveCompleteSelection,
+  isolateRecursiveCompleteSelection,
   projectExecutionCell,
   projectExecutionDossier,
   runPanelCopy,
 } from "../desktop/eval-renderer/run-model.js";
 
 describe("Eval dashboard run presentation", () => {
+  it("isolates the recursive pair and requires an explicit paid child-aware authorization", () => {
+    expect(isolateRecursiveCompleteSelection(
+      ["empty-project.task-system.single-turn", "empty-project.recursive-complete.comparison"],
+      ["fixture-task-system"],
+    )).toEqual({
+      testCaseIds: ["empty-project.recursive-complete.comparison"],
+      harnessConfigurationNames: [
+        "codex-eval-complete-disabled",
+        "codex-eval-complete-enabled",
+      ],
+    });
+    const selection = {
+      testCaseIds: ["empty-project.recursive-complete.comparison"],
+      harnessConfigurationNames: [
+        "codex-eval-complete-disabled",
+        "codex-eval-complete-enabled",
+      ],
+      judgeConfigurationName: "deterministic-graph-contract",
+    };
+    expect(authorizeRecursiveCompleteSelection(selection, () => false)).toBeNull();
+    expect(authorizeRecursiveCompleteSelection(selection, (message) => {
+      expect(message).toContain("additional agent-authored child execution");
+      return true;
+    })).toEqual({
+      ...selection,
+      liveAuthorization: {
+        confirmed: true,
+        credentialReference: "connected-product-provider",
+        rootProviderExecutions: 2,
+        agentAuthoredChildren: true,
+      },
+    });
+  });
+
   it("presents imported runs as external conversation review", () => {
     expect(runPanelCopy({ kind: "imported-conversation" })).toEqual({
       title: "Conversation review",
@@ -183,5 +219,44 @@ describe("Eval dashboard run presentation", () => {
     ]);
     expect(dossier.case.prompt).toBe("Fix it.");
     expect(dossier.presentation).toMatchObject({ score: null, label: "Unjudged" });
+  });
+
+  it("projects agent-authored Complete authority and semantic child evidence separately from human turns", () => {
+    const dossier = projectExecutionDossier({ kind: "local-eval" }, {
+      id: "recursive",
+      testCaseId: "empty-project.recursive-complete.comparison",
+      harnessConfiguration: {
+        implementation: "codex.basic",
+        complete: { agentAuthored: true },
+      },
+      turns: [{
+        interactionId: 10,
+        candidateTrace: { status: "complete", completionBrokerAvailable: true },
+      }],
+      semanticChildren: [{
+        interactionId: 11,
+        graphNodeId: 101,
+        sourceInteractionId: 10,
+        sourceActionId: 77,
+        status: "accepted",
+        candidateTrace: { status: "complete" },
+        projectionObservations: [{ revision: 0 }, { revision: 1 }],
+      }],
+    });
+    expect(dossier.recursiveComplete).toEqual({
+      declared: true,
+      configured: true,
+      brokerAvailable: true,
+      children: [{
+        interactionId: 11,
+        graphNodeId: 101,
+        sourceInteractionId: 10,
+        sourceActionId: 77,
+        status: "accepted",
+        traceStatus: "complete",
+        projectionCount: 2,
+      }],
+    });
+    expect(dossier.actions.traceable).toBe(true);
   });
 });

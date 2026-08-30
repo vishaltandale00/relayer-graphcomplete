@@ -1557,6 +1557,38 @@ impl ProductService {
             .await?)
     }
 
+    pub(crate) async fn finalize_completion_execution_accepted(
+        &self,
+        completion: AcceptedInteractionCompletion<'_>,
+        permission_origin_digest: &str,
+        timestamp: &str,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .finalize_completion_execution_accepted(completion, permission_origin_digest, timestamp)
+            .await?)
+    }
+
+    pub(crate) async fn finalize_completion_execution_failed(
+        &self,
+        interaction_id: InteractionId,
+        permission_origin_digest: &str,
+        harness_configuration_name: &str,
+        safe_reason: &str,
+        timestamp: &str,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .finalize_completion_execution_failed(
+                interaction_id,
+                permission_origin_digest,
+                harness_configuration_name,
+                safe_reason,
+                timestamp,
+            )
+            .await?)
+    }
+
     pub(crate) async fn stage_conversation_import(
         &self,
         input: NewConversationImport<'_>,

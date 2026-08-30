@@ -1802,14 +1802,7 @@ async fn remint_cuts_over_broker_epoch_and_terminal_state_denies_model_reads() {
             ..
         }
     ));
-    let terminal_output = third.completion_output().await.unwrap_err();
-    assert!(matches!(
-        terminal_output,
-        GraphError::Validation {
-            code: "authority_generation_expired",
-            ..
-        }
-    ));
+    assert!(third.completion_output().await.unwrap().is_none());
     assert!(database.current_completion(interaction.id).await.is_ok());
 }
 

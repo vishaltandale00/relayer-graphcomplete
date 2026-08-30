@@ -40,7 +40,23 @@ pub(crate) struct HarnessConfiguration {
     execution_access_contracts: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model_defaults: Option<HarnessModelDefaults>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    complete: Option<HarnessCompleteConfiguration>,
     settings: Value,
+}
+
+impl HarnessConfiguration {
+    pub(crate) fn allows_agent_authored_complete(&self) -> bool {
+        self.complete
+            .as_ref()
+            .is_some_and(|complete| complete.agent_authored)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HarnessCompleteConfiguration {
+    agent_authored: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -144,7 +160,7 @@ pub(crate) struct PreparedInvocation {
     pub(crate) source_action_id: i64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PreparedInteraction {
     pub(crate) graph_node_id: i64,
     graph_token: String,
@@ -414,6 +430,11 @@ impl RuntimeClient {
 
     pub(crate) fn temporal_features(&self) -> relayer_graph_core::TemporalFeatureConfig {
         self.temporal_features
+    }
+
+    pub(crate) fn agent_authored_complete_available(&self, prepared: &PreparedInteraction) -> bool {
+        self.temporal_features.provider_recursion
+            && prepared.configuration.allows_agent_authored_complete()
     }
 
     pub(crate) fn supports_personal_presentation(&self) -> bool {
@@ -751,6 +772,11 @@ impl RuntimeClient {
         prepared: PreparedInteraction,
         completion_broker: Option<RuntimeCompletionBroker<'_>>,
     ) -> Result<RuntimeCompletion, RuntimeError> {
+        if completion_broker.is_some() && !self.agent_authored_complete_available(&prepared) {
+            return Err(RuntimeError::Configuration(
+                "harness configuration does not allow agent-authored Complete".into(),
+            ));
+        }
         let graph = serde_json::json!({
             "url": self.graph_url.as_str().trim_end_matches('/'),
             "token": &prepared.graph_token,
@@ -870,6 +896,11 @@ impl RuntimeClient {
         {
             return Err(RuntimeError::Configuration(
                 "invoked completion binding identifiers must be positive".into(),
+            ));
+        }
+        if !self.agent_authored_complete_available(prepared) {
+            return Err(RuntimeError::Configuration(
+                "harness configuration does not allow agent-authored Complete".into(),
             ));
         }
         let mut body = serde_json::json!({
@@ -2303,8 +2334,8 @@ impl RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CONTROL_REQUEST_TIMEOUT, CompleteInteraction, HarnessConfiguration, PreparedInteraction,
-        PreparedInvocation, RuntimeClient, RuntimeError,
+        CONTROL_REQUEST_TIMEOUT, CompleteInteraction, HarnessCompleteConfiguration,
+        HarnessConfiguration, PreparedInteraction, PreparedInvocation, RuntimeClient, RuntimeError,
     };
     use crate::{permissions::PermissionProfile, product::ExecutionHarnessPolicy};
     use axum::{
@@ -2391,6 +2422,39 @@ mod tests {
             cleanup: Box::new(RuntimeError::Timeout("capability cleanup")),
         };
         assert!(!failure.is_retryable_startup_failure());
+    }
+
+    #[test]
+    fn harness_configuration_requires_explicit_well_formed_agent_complete_authority() {
+        let base = json!({
+            "schemaVersion": 1,
+            "name": "test",
+            "implementation": "test",
+            "implementationVersion": 1,
+            "permissionBindings": { "auto": {} },
+            "settings": {}
+        });
+        let absent: HarnessConfiguration = serde_json::from_value(base.clone()).unwrap();
+        assert!(!absent.allows_agent_authored_complete());
+        let mut disabled_value = base.clone();
+        disabled_value["complete"] = json!({ "agentAuthored": false });
+        let disabled: HarnessConfiguration = serde_json::from_value(disabled_value).unwrap();
+        assert!(!disabled.allows_agent_authored_complete());
+        let mut enabled_value = base.clone();
+        enabled_value["complete"] = json!({ "agentAuthored": true });
+        let enabled: HarnessConfiguration = serde_json::from_value(enabled_value).unwrap();
+        assert!(enabled.allows_agent_authored_complete());
+
+        for complete in [
+            json!(true),
+            json!({}),
+            json!({ "agentAuthored": "yes" }),
+            json!({ "agentAuthored": true, "depth": 2 }),
+        ] {
+            let mut malformed = base.clone();
+            malformed["complete"] = complete;
+            assert!(serde_json::from_value::<HarnessConfiguration>(malformed).is_err());
+        }
     }
 
     #[tokio::test]
@@ -2522,7 +2586,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let runtime = RuntimeClient::open(
+        let mut runtime = RuntimeClient::open(
             &graph_url,
             &harness_url,
             "graph-control".into(),
@@ -2551,11 +2615,18 @@ mod tests {
                 model_rules: None,
                 execution_access_contracts: vec![],
                 model_defaults: None,
+                complete: Some(HarnessCompleteConfiguration {
+                    agent_authored: true,
+                }),
                 settings: json!({}),
             },
             model_selection: None,
             personal_presentation_version_id: None,
         };
+        runtime.temporal_features.provider_recursion = false;
+        assert!(!runtime.agent_authored_complete_available(&prepared));
+        runtime.temporal_features.provider_recursion = true;
+        assert!(runtime.agent_authored_complete_available(&prepared));
 
         let invalid_attribution = runtime
             .start_invoked_completion(

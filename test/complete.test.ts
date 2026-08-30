@@ -170,6 +170,30 @@ describe("complete", () => {
     expect(requests[0]).toBe("POST http://127.0.0.1:43125/api/completions");
   });
 
+  it("preserves a safe broker error detail when child launch is rejected", async () => {
+    stubBroker([], {
+      start: new Response(JSON.stringify({ error: "The source interaction has no model selection to inherit." }), {
+        status: 422,
+        headers: { "content-type": "application/json" },
+      }),
+    });
+
+    await expect(complete(inputGraph).result).rejects.toThrow(
+      "Completion broker returned HTTP 422: The source interaction has no model selection to inherit.",
+    );
+  });
+
+  it("does not expose broker detail from a server failure", async () => {
+    stubBroker([], {
+      start: new Response(JSON.stringify({ error: "/private/runtime/provider-secret" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+    });
+
+    await expect(complete(inputGraph).result).rejects.toThrow(/^Completion broker returned HTTP 500$/u);
+  });
+
   it("observes nothing until the child result is actually awaited", async () => {
     const requests = stubBroker([new Response(JSON.stringify(layer), { status: 200 })]);
 

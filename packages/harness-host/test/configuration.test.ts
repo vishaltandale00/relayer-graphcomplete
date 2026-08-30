@@ -247,6 +247,34 @@ describe("harness configuration", () => {
     }).settings).toEqual({ root: { model: "luna" }, reviewers: [{ model: "sol", effort: "high" }] });
   });
 
+  it("treats agent-authored Complete as explicit execution authority", () => {
+    const disabled = parseHarnessConfiguration({
+      schemaVersion: 1,
+      name: "complete-disabled",
+      implementation: "test",
+      implementationVersion: 1,
+      permissionBindings,
+      settings: {},
+    });
+    const enabled = parseHarnessConfiguration({
+      ...disabled,
+      name: "complete-enabled",
+      complete: { agentAuthored: true },
+    });
+
+    expect(disabled.complete).toBeUndefined();
+    expect(enabled.complete).toEqual({ agentAuthored: true });
+    expect(sameHarnessExecutionConfiguration(disabled, { ...enabled, name: disabled.name })).toBe(false);
+    expect(digestHarnessConfiguration(disabled)).not.toBe(
+      digestHarnessConfiguration({ ...enabled, name: disabled.name }),
+    );
+
+    for (const complete of [true, {}, { agentAuthored: "yes" }, { agentAuthored: true, depth: 2 }]) {
+      expect(() => parseHarnessConfiguration({ ...disabled, complete }))
+        .toThrow("Harness complete must contain only a boolean agentAuthored field");
+    }
+  });
+
   it("creates a stable digest from the exact configuration snapshot", () => {
     const left = parseHarnessConfiguration({
       schemaVersion: 1,

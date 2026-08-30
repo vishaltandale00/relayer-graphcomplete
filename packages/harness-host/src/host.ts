@@ -14,6 +14,7 @@ import {
 import {
   isJsonObject,
   parseHarnessConfiguration,
+  harnessAllowsAgentAuthoredComplete,
   harnessAllowsModel,
   sameHarnessExecutionConfiguration,
 } from "./configuration.js";
@@ -111,9 +112,13 @@ export interface HarnessInvokedCompletionStart {
   readonly attachment?: JsonObject;
 }
 
+export interface HarnessInvokedCompletionObservation {
+  readonly completionId: GraphId;
+}
+
 interface InvokedCompletionRun {
   readonly invocationDigest: string;
-  readonly run: Promise<HarnessCompleteResult>;
+  readonly run: Promise<HarnessInvokedCompletionObservation>;
   readonly started: Promise<HarnessInvokedCompletionStart>;
 }
 
@@ -395,7 +400,7 @@ export class HarnessHost {
     threadId: number,
     invocation: HarnessInvokedCompletion,
     signal?: AbortSignal,
-  ): Promise<HarnessCompleteResult>;
+  ): Promise<HarnessInvokedCompletionObservation>;
   async complete(
     threadId: number,
     interactionId: number,
@@ -427,7 +432,7 @@ export class HarnessHost {
     inputPlan?: HarnessModelPlan,
     attemptAdmissionId?: string,
     completionBroker?: HarnessCompletionBrokerScope,
-  ): Promise<HarnessCompleteResult> {
+  ): Promise<HarnessCompleteResult | HarnessInvokedCompletionObservation> {
     if (this.closed) throw new Error("Harness host is closed");
     if (typeof interactionOrInvocation !== "number") {
       const invocationSignal = isAbortSignal(capabilityOrSignal) ? capabilityOrSignal : undefined;
@@ -447,6 +452,9 @@ export class HarnessHost {
     if (model !== undefined) validateInteractionModelSelection(model);
     const session = this.liveSession(threadId);
     const effectiveConfiguration = executionConfiguration(session, harnessPolicy);
+    if (completionBroker !== undefined && !harnessAllowsAgentAuthoredComplete(effectiveConfiguration)) {
+      throw new Error(`Harness configuration ${effectiveConfiguration.name} does not allow agent-authored Complete`);
+    }
     if (model !== undefined) validateConfiguredModelSelection(effectiveConfiguration, model);
     const runInput = {
       threadId,
@@ -476,7 +484,7 @@ export class HarnessHost {
     return this.invokedCompletion(threadId, invocation, signal).started;
   }
 
-  observeInvokedCompletion(threadId: number, completionId: GraphId): Promise<HarnessCompleteResult> {
+  observeInvokedCompletion(threadId: number, completionId: GraphId): Promise<HarnessInvokedCompletionObservation> {
     if (!Number.isSafeInteger(completionId) || completionId < 1) {
       throw new Error("Invoked completion ID must be a positive integer");
     }
@@ -495,6 +503,9 @@ export class HarnessHost {
     validateCompletionOrigin(origin);
     if (model !== undefined) validateInteractionModelSelection(model);
     const session = this.liveSession(threadId);
+    if (!harnessAllowsAgentAuthoredComplete(session.descriptor.configuration)) {
+      throw new Error(`Harness configuration ${session.descriptor.configuration.name} does not allow agent-authored Complete`);
+    }
     if (model !== undefined) {
       validateConfiguredModelSelection(executionConfiguration(session, harnessPolicy), model);
     }
@@ -538,7 +549,7 @@ export class HarnessHost {
           rejectStarted,
         );
       },
-    });
+    }).then(() => ({ completionId: capability.nodeId }));
     void run.catch((error) => {
       if (!nativeReported) rejectStarted(error);
     });
@@ -562,7 +573,7 @@ export class HarnessHost {
     readonly completionBroker?: HarnessCompletionBrokerScope;
     readonly origin: CompletionOrigin;
     readonly onNativeExecution?: (native: NativeExecutionHandle | undefined) => void;
-  }): Promise<HarnessCompleteResult> {
+  }): Promise<HarnessCompleteResult | HarnessInvokedCompletionObservation> {
     const { threadId, interactionId, session, capability } = input;
     const controller = new AbortController();
     const detachSignal = forwardAbort(input.signal, controller);
@@ -576,7 +587,7 @@ export class HarnessHost {
       "Harness completion ended before the approval was resolved.",
     );
     controller.signal.addEventListener("abort", abortApprovals, { once: true });
-    let result: HarnessCompleteResult | undefined;
+    let result: HarnessCompleteResult | HarnessInvokedCompletionObservation | undefined;
     let operationError: unknown;
     try {
       if (this.closed) throw new Error("Harness host is closed");
@@ -795,12 +806,13 @@ export class HarnessHost {
     origin: CompletionOrigin = { kind: "root" },
     completionBroker?: HarnessCompletionBrokerScope,
     onNativeExecution?: (native: NativeExecutionHandle | undefined) => void,
-  ): Promise<HarnessCompleteResult> {
+  ): Promise<HarnessCompleteResult | HarnessInvokedCompletionObservation> {
     const graph = new RelayerGraphClient(capability);
     const interactionNodeId = capability.nodeId;
     try {
       const output = await graph.getCompletionOutput(interactionNodeId);
       onNativeExecution?.(undefined);
+      if (origin.kind === "invoke") return { completionId: interactionNodeId };
       return { threadId, configurationName: session.descriptor.configuration.name, output, trace: disabledTraceDescriptor() };
     } catch (error) {
       if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
@@ -974,6 +986,10 @@ export class HarnessHost {
       });
       await sealTrace(trace, signal.aborted ? "partial" : "failed", errorMessage(completionError));
       throw completionError;
+    }
+    if (origin.kind === "invoke") {
+      await sealTrace(trace, "complete");
+      return { completionId: interactionNodeId };
     }
     try {
       const output = await graph.getCompletionOutput(interactionNodeId);

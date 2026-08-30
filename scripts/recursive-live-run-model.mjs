@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { RECURSIVE_COMPLETE_EVAL_PROMPT } from "@relayer/eval-runner";
 
 /**
  * Deterministic analysis for the recursive Complete live run.
@@ -85,14 +86,7 @@ export function resolveRunProfile(document, name, { implementation, path = "live
  * It is demanding enough that a capable agent delegates by its own judgment. It never
  * instructs delegation, because a run that only proves obedience proves nothing.
  */
-export const RECURSIVE_LIVE_RUN_TASK = [
-  "Compare three real approaches to running untrusted agent code on a developer laptop:",
-  "OS-level sandboxing, container isolation, and a separate virtual machine.",
-  "For each approach, cover the isolation boundary it actually enforces, the escape it",
-  "does not prevent, and the developer-experience cost of adopting it.",
-  "Ground every claim in a named mechanism rather than a general principle, and end with",
-  "a recommendation for a team shipping a desktop agent product.",
-].join(" ");
+export const RECURSIVE_LIVE_RUN_TASK = RECURSIVE_COMPLETE_EVAL_PROMPT;
 
 const TERMINAL_LIFECYCLES = new Set(["succeeded", "stopped", "failed"]);
 const PRE_TERMINAL_PRODUCT_STATUSES = new Set([

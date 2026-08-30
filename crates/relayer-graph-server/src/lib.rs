@@ -2062,10 +2062,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
-            terminal_output_read.status(),
-            StatusCode::UNPROCESSABLE_ENTITY
-        );
+        assert_eq!(terminal_output_read.status(), StatusCode::NOT_FOUND);
 
         let control_current = app
             .clone()

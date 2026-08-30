@@ -489,9 +489,7 @@ impl GraphWriter {
         let state = CurrentTable::new(&mut transaction)
             .state(self.scope.root_node_id)
             .await?;
-        if state.lifecycle != crate::CompletionLifecycle::Active
-            && !state.temporal_features.root_current_write
-        {
+        if state.lifecycle != crate::CompletionLifecycle::Active {
             self.scope
                 .require_generation_authority(&mut transaction)
                 .await?;

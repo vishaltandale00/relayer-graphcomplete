@@ -32,6 +32,10 @@ export interface HarnessModelDefaults {
   readonly familyPolicy: HarnessFamilyPolicyReference;
 }
 
+export interface HarnessCompleteConfiguration {
+  readonly agentAuthored: boolean;
+}
+
 export interface HarnessConfiguration {
   readonly schemaVersion: 1;
   readonly name: string;
@@ -44,6 +48,8 @@ export interface HarnessConfiguration {
   readonly modelRules?: HarnessModelRules;
   readonly executionAccessContracts?: readonly string[];
   readonly modelDefaults?: HarnessModelDefaults;
+  /** Explicit authority to expose agent-authored complete(inputGraph); root Complete is unaffected. */
+  readonly complete?: HarnessCompleteConfiguration;
   readonly settings: JsonObject;
 }
 

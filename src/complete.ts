@@ -41,8 +41,8 @@ function completionRuntimeFromEnvironment(environment: NodeJS.ProcessEnv = proce
       const started = brokerRequest(url, token, "", {
         method: "POST",
         body: JSON.stringify({ interactionNode: completionId }),
-      }).then((response) => {
-        if (response.status !== 200 && response.status !== 201) throw brokerError(response);
+      }).then(async (response) => {
+        if (response.status !== 200 && response.status !== 201) throw await brokerError(response);
         return response.json() as Promise<{ completionId: number }>;
       }).then((response) => {
         if (response.completionId !== completionId) {
@@ -55,7 +55,7 @@ function completionRuntimeFromEnvironment(environment: NodeJS.ProcessEnv = proce
       const snapshot = async (): Promise<CompletionCurrentSnapshot> => {
         await started;
         const response = await brokerRequest(url, token, `/${completionId}/current`);
-        if (response.status !== 200) throw brokerError(response);
+        if (response.status !== 200) throw await brokerError(response);
         return normalizeCurrent(await response.json());
       };
       let observation: Promise<ResolvedGraphLayer> | undefined;
@@ -73,7 +73,7 @@ function completionRuntimeFromEnvironment(environment: NodeJS.ProcessEnv = proce
             method: "POST",
             body: JSON.stringify({ reason }),
           });
-          if (response.status !== 200) throw brokerError(response);
+          if (response.status !== 200) throw await brokerError(response);
         },
       });
     },
@@ -112,7 +112,7 @@ async function observeResult(url: string, token: string, completionId: number): 
         );
       }
     }
-    throw new Error(`Completion broker returned HTTP ${response.status}`);
+    throw await brokerError(response, value);
   }
 }
 
@@ -156,8 +156,23 @@ function isNullableGraphId(value: unknown): value is number | null {
   return value === null || (Number.isSafeInteger(value) && Number(value) > 0);
 }
 
-function brokerError(response: Response): Error {
-  return new Error(`Completion broker returned HTTP ${response.status}`);
+async function brokerError(response: Response, parsed?: unknown): Promise<Error> {
+  let value = parsed;
+  if (value === undefined) {
+    try {
+      value = await response.json() as unknown;
+    } catch {
+      value = undefined;
+    }
+  }
+  const safeClientDetail = response.status >= 400
+    && response.status < 500
+    && isRecord(value)
+    && typeof value.error === "string"
+    && value.error.length <= 200
+    && !/[\u0000-\u001f\u007f]/u.test(value.error);
+  const detail = safeClientDetail && isRecord(value) ? `: ${String(value.error)}` : "";
+  return new Error(`Completion broker returned HTTP ${response.status}${detail}`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -368,7 +368,10 @@ impl InteractionExecutionService {
         };
         let expected_invocation = invocation;
         let prepared_graph_node_id = prepared.graph_node_id;
-        let broker_url = execution.completion_brokers.url();
+        let broker_url = runtime
+            .agent_authored_complete_available(&prepared)
+            .then(|| execution.completion_brokers.url())
+            .flatten();
         let broker_lease = broker_url.as_ref().map(|_| {
             execution.completion_brokers.issue(CompletionBrokerGrant {
                 thread_id: thread.id,

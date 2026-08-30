@@ -76,12 +76,55 @@ const testConfiguration: HarnessConfiguration = {
   permissionBindings: { ask: {}, auto: {}, full: {} },
   settings: {},
 };
+const completeEnabledConfiguration: HarnessConfiguration = {
+  ...testConfiguration,
+  name: "test-complete-enabled",
+  complete: { agentAuthored: true },
+};
 const legacyConfiguration = (configuration: HarnessConfiguration) => {
   const { permissionBindings: _permissionBindings, ...legacy } = configuration;
   return legacy;
 };
 
 describe("HarnessHost", () => {
+  it("rejects broker authority and invoke-origin execution when the pinned configuration disables agent-authored Complete", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-complete-authority-"));
+    let calls = 0;
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => ({
+        supportsInvokedComplete: true,
+        async complete() { calls += 1; },
+        state: emptyState,
+      }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      const completionBroker = {
+        url: "http://127.0.0.1:43125/api/completions",
+        token: "12345678901234567890123456789012",
+      };
+
+      await expect(host.complete(
+        1, 1, graph(), undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+        completionBroker,
+      )).rejects.toThrow("does not allow agent-authored Complete");
+      await expect(host.complete(1, { ...invoked(graph(2)), completionBroker }))
+        .rejects.toThrow("does not allow agent-authored Complete");
+      expect(calls).toBe(0);
+    } finally {
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("classifies and preserves partial streamed output without making the attempt replayable", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-partial-output-"));
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
@@ -1664,7 +1707,7 @@ describe("HarnessHost", () => {
       await host.createSession({
         threadId: 1,
         permissionProfileId: "auto",
-        configuration: testConfiguration,
+        configuration: completeEnabledConfiguration,
         workingDirectory: directory,
       });
 
@@ -1675,7 +1718,7 @@ describe("HarnessHost", () => {
       expect(host.cancel(1, 2)).toBe(true);
       releases.get(3)!();
       await expect(first).rejects.toThrow("cancelled for thread 1");
-      await expect(second).resolves.toMatchObject({ output: completion });
+      await expect(second).resolves.toEqual({ completionId: 3 });
       expect(host.cancel(1, 3)).toBe(false);
     } finally {
       vi.unstubAllGlobals();
@@ -1732,7 +1775,7 @@ describe("HarnessHost", () => {
       await running.host.createSession({
         threadId: 1,
         permissionProfileId: "auto",
-        configuration: testConfiguration,
+        configuration: completeEnabledConfiguration,
         workingDirectory: directory,
       });
       const invocation = {
@@ -1851,7 +1894,7 @@ describe("HarnessHost", () => {
       await host.createSession({
         threadId: 1,
         permissionProfileId: "auto",
-        configuration: testConfiguration,
+        configuration: completeEnabledConfiguration,
         workingDirectory: directory,
       });
       const capability = graph(2, "child-token");
@@ -1890,7 +1933,7 @@ describe("HarnessHost", () => {
       await host.createSession({
         threadId: 1,
         permissionProfileId: "auto",
-        configuration: testConfiguration,
+        configuration: completeEnabledConfiguration,
         workingDirectory: directory,
       });
       const capability = graph(2, "child-token");
@@ -1932,14 +1975,14 @@ describe("HarnessHost", () => {
       await host.createSession({
         threadId: 1,
         permissionProfileId: "auto",
-        configuration: testConfiguration,
+        configuration: completeEnabledConfiguration,
         workingDirectory: directory,
       });
 
       await expect(host.complete(1, invoked(graph(3, "unsupported-token"))))
         .rejects.toThrow("does not support agent-invoked Complete");
       await expect(host.complete(1, invoked(graph(2, "recovered-token"))))
-        .resolves.toMatchObject({ output: completion });
+        .resolves.toEqual({ completionId: 2 });
       expect(starts).toBe(0);
     } finally {
       vi.unstubAllGlobals();
@@ -1976,7 +2019,7 @@ describe("HarnessHost", () => {
       await host.createSession({
         threadId: 1,
         permissionProfileId: "auto",
-        configuration: testConfiguration,
+        configuration: completeEnabledConfiguration,
         workingDirectory: directory,
       });
       await expect(host.complete(1, {
@@ -2048,7 +2091,7 @@ describe("HarnessHost", () => {
       await host.createSession({
         threadId: 1,
         permissionProfileId: "auto",
-        configuration: testConfiguration,
+        configuration: completeEnabledConfiguration,
         workingDirectory: directory,
       });
       const running = host.complete(1, invoked(graph(2, "child-token")));

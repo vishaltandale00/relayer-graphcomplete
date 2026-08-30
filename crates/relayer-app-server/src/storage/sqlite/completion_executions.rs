@@ -1,5 +1,5 @@
 use super::SqliteProductStore;
-use crate::product::InteractionId;
+use crate::product::{AcceptedInteractionCompletion, InteractionId};
 use crate::storage::{
     CompletionExecution, CompletionExecutionBinding, CompletionExecutionPhase,
     CompletionExecutionReserveOutcome, CompletionExecutionRestartSettlement, StorageError,
@@ -235,6 +235,210 @@ impl SqliteProductStore {
         }
         transaction.commit().await?;
         Ok(true)
+    }
+
+    /// Atomically projects one live recursive success into the product interaction and
+    /// settles its provider execution. Exact retries are idempotent.
+    pub(crate) async fn finalize_completion_execution_accepted(
+        &self,
+        completion: AcceptedInteractionCompletion<'_>,
+        permission_origin_digest: &str,
+        timestamp: &str,
+    ) -> Result<bool, StorageError> {
+        let output = encode_json(completion.output)?;
+        let permission_receipt = encode_json(completion.effective_permission_receipt)?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let existing = fetch_execution(&mut *transaction, completion.interaction_id)
+            .await?
+            .ok_or_else(|| conflict("completion execution does not exist"))?;
+        require_origin(&existing, permission_origin_digest)?;
+        if existing.graph_completion_id != completion.graph_node_id
+            || existing.harness_configuration_name != completion.harness_configuration_name
+            || existing.harness_configuration_digest != completion.harness_configuration_digest
+            || existing.model_execution_digest != completion.effective_execution_digest
+        {
+            return Err(conflict(
+                "accepted completion does not match its durable execution binding",
+            ));
+        }
+        let execution_changed = match existing.phase {
+            CompletionExecutionPhase::Launching | CompletionExecutionPhase::Attached => {
+                let result = sqlx::query(
+                    "UPDATE completion_executions
+                     SET settlement_json=?1,safe_reason=NULL,phase='settled',updated_at=?2
+                     WHERE interaction_id=?3 AND permission_origin_digest=?4 AND phase=?5
+                       AND settlement_json IS NULL AND safe_reason IS NULL",
+                )
+                .bind(&output)
+                .bind(timestamp)
+                .bind(completion.interaction_id.value())
+                .bind(permission_origin_digest)
+                .bind(phase_name(existing.phase))
+                .execute(&mut *transaction)
+                .await?;
+                if result.rows_affected() != 1 {
+                    return Err(conflict(
+                        "accepted settlement compare-and-swap lost ownership",
+                    ));
+                }
+                true
+            }
+            CompletionExecutionPhase::Settled => {
+                if existing.settlement.as_ref() != Some(completion.output)
+                    || existing.safe_reason.is_some()
+                {
+                    return Err(conflict(
+                        "accepted settlement does not match durable history",
+                    ));
+                }
+                false
+            }
+            CompletionExecutionPhase::Reserved => {
+                return Err(conflict(
+                    "completion execution cannot settle before launch ownership",
+                ));
+            }
+        };
+        let interaction = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='accepted',completion_output_json=?1,completion_error=NULL
+             WHERE id=?2 AND graph_node_id=?3 AND completion_status='running'
+               AND harness_configuration_name=?4 AND harness_configuration_digest=?5
+               AND effective_execution_digest=?6 AND effective_permission_receipt_json=?7",
+        )
+        .bind(&output)
+        .bind(completion.interaction_id.value())
+        .bind(completion.graph_node_id)
+        .bind(completion.harness_configuration_name)
+        .bind(completion.harness_configuration_digest)
+        .bind(completion.effective_execution_digest)
+        .bind(permission_receipt)
+        .execute(&mut *transaction)
+        .await?;
+        if interaction.rows_affected() == 0 {
+            let stored: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+                "SELECT completion_status,completion_output_json,completion_error
+                 FROM interactions WHERE id=?1",
+            )
+            .bind(completion.interaction_id.value())
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if stored.as_ref() != Some(&("accepted".into(), Some(output.clone()), None)) {
+                return Err(conflict(
+                    "product interaction changed during accepted settlement",
+                ));
+            }
+        }
+        sqlx::query(
+            "UPDATE interaction_attempts
+             SET finished_at=?1,outcome='accepted',failure_category=NULL,effect_boundary='graph_write'
+             WHERE interaction_id=?2 AND outcome='running'",
+        )
+        .bind(timestamp)
+        .bind(completion.interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(execution_changed || interaction.rows_affected() == 1)
+    }
+
+    /// Atomically projects one live recursive failure into the product interaction and
+    /// settles its provider execution. Exact retries are idempotent.
+    pub(crate) async fn finalize_completion_execution_failed(
+        &self,
+        interaction_id: InteractionId,
+        permission_origin_digest: &str,
+        harness_configuration_name: &str,
+        safe_reason: &str,
+        timestamp: &str,
+    ) -> Result<bool, StorageError> {
+        if safe_reason.is_empty() {
+            return Err(conflict("failed settlement requires a safe reason"));
+        }
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let existing = fetch_execution(&mut *transaction, interaction_id)
+            .await?
+            .ok_or_else(|| conflict("completion execution does not exist"))?;
+        require_origin(&existing, permission_origin_digest)?;
+        if existing.harness_configuration_name != harness_configuration_name {
+            return Err(conflict(
+                "failed completion does not match its durable harness binding",
+            ));
+        }
+        let execution_changed = match existing.phase {
+            CompletionExecutionPhase::Launching | CompletionExecutionPhase::Attached => {
+                let result = sqlx::query(
+                    "UPDATE completion_executions
+                     SET settlement_json=NULL,safe_reason=?1,phase='settled',updated_at=?2
+                     WHERE interaction_id=?3 AND permission_origin_digest=?4 AND phase=?5
+                       AND settlement_json IS NULL AND safe_reason IS NULL",
+                )
+                .bind(safe_reason)
+                .bind(timestamp)
+                .bind(interaction_id.value())
+                .bind(permission_origin_digest)
+                .bind(phase_name(existing.phase))
+                .execute(&mut *transaction)
+                .await?;
+                if result.rows_affected() != 1 {
+                    return Err(conflict(
+                        "failed settlement compare-and-swap lost ownership",
+                    ));
+                }
+                true
+            }
+            CompletionExecutionPhase::Settled => {
+                if existing.settlement.is_some()
+                    || existing.safe_reason.as_deref() != Some(safe_reason)
+                {
+                    return Err(conflict("failed settlement does not match durable history"));
+                }
+                false
+            }
+            CompletionExecutionPhase::Reserved => {
+                return Err(conflict(
+                    "completion execution cannot settle before launch ownership",
+                ));
+            }
+        };
+        let interaction = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='failed',harness_configuration_name=COALESCE(harness_configuration_name,?1),
+                 completion_output_json=NULL,completion_error=?2
+             WHERE id=?3 AND graph_node_id=?4
+               AND completion_status IN ('not_started','running','submitted','waiting_for_approval')",
+        )
+        .bind(harness_configuration_name)
+        .bind(safe_reason)
+        .bind(interaction_id.value())
+        .bind(existing.graph_completion_id)
+        .execute(&mut *transaction)
+        .await?;
+        if interaction.rows_affected() == 0 {
+            let stored: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+                "SELECT completion_status,completion_output_json,completion_error
+                 FROM interactions WHERE id=?1",
+            )
+            .bind(interaction_id.value())
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if stored.as_ref() != Some(&("failed".into(), None, Some(safe_reason.to_owned()))) {
+                return Err(conflict(
+                    "product interaction changed during failed settlement",
+                ));
+            }
+        }
+        sqlx::query(
+            "UPDATE interaction_attempts
+             SET finished_at=?1,outcome='execution_failed',failure_category='recursive_completion',effect_boundary='unknown'
+             WHERE interaction_id=?2 AND outcome='running'",
+        )
+        .bind(timestamp)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(execution_changed || interaction.rows_affected() == 1)
     }
 
     /// Atomically makes an interrupted recursive execution non-launchable and projects the
@@ -660,6 +864,160 @@ mod tests {
             store.reserve_completion_execution(conflicting, "3").await,
             Err(StorageError::CompletionExecutionConflict(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn live_acceptance_atomically_projects_interaction_and_execution() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, interaction_id) =
+            bound_recursive_execution(&directory.path().join("product.sqlite3")).await;
+        store
+            .reserve_completion_execution(recursive_binding(interaction_id), "2")
+            .await
+            .unwrap();
+        store
+            .claim_completion_execution_launching(interaction_id, "sha256:permission-origin", "3")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let output = json!({"rootLayer":{"layer":{"id":77}}});
+        let permission_receipt = json!({});
+        let accepted = AcceptedInteractionCompletion {
+            interaction_id,
+            graph_node_id: 42,
+            harness_configuration_name: "codex-basic",
+            harness_configuration_digest: "sha256:config",
+            effective_execution_digest: "sha256:model",
+            effective_permission_receipt: &permission_receipt,
+            output: &output,
+        };
+        assert!(
+            store
+                .finalize_completion_execution_accepted(accepted, "sha256:permission-origin", "4",)
+                .await
+                .unwrap()
+        );
+        let execution = store
+            .get_completion_execution(interaction_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(execution.phase, CompletionExecutionPhase::Settled);
+        assert_eq!(execution.settlement, Some(output.clone()));
+        let interaction: (String, Option<String>) = sqlx::query_as(
+            "SELECT completion_status,completion_output_json FROM interactions WHERE id=?1",
+        )
+        .bind(interaction_id.value())
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(interaction, ("accepted".into(), Some(output.to_string())));
+    }
+
+    #[tokio::test]
+    async fn live_settlement_rolls_back_execution_when_product_projection_conflicts() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, interaction_id) =
+            bound_recursive_execution(&directory.path().join("product.sqlite3")).await;
+        store
+            .reserve_completion_execution(recursive_binding(interaction_id), "2")
+            .await
+            .unwrap();
+        store
+            .claim_completion_execution_launching(interaction_id, "sha256:permission-origin", "3")
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE interactions SET completion_status='failed',completion_error='other' WHERE id=?1",
+        )
+        .bind(interaction_id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let output = json!({"rootLayer":{"layer":{"id":77}}});
+        let permission_receipt = json!({});
+        let result = store
+            .finalize_completion_execution_accepted(
+                AcceptedInteractionCompletion {
+                    interaction_id,
+                    graph_node_id: 42,
+                    harness_configuration_name: "codex-basic",
+                    harness_configuration_digest: "sha256:config",
+                    effective_execution_digest: "sha256:model",
+                    effective_permission_receipt: &permission_receipt,
+                    output: &output,
+                },
+                "sha256:permission-origin",
+                "4",
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(StorageError::CompletionExecutionConflict(_))
+        ));
+        assert_eq!(
+            store
+                .get_completion_execution(interaction_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .phase,
+            CompletionExecutionPhase::Launching
+        );
+    }
+
+    #[tokio::test]
+    async fn live_failure_atomically_projects_interaction_and_execution() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, interaction_id) =
+            bound_recursive_execution(&directory.path().join("product.sqlite3")).await;
+        store
+            .reserve_completion_execution(recursive_binding(interaction_id), "2")
+            .await
+            .unwrap();
+        store
+            .claim_completion_execution_launching(interaction_id, "sha256:permission-origin", "3")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .finalize_completion_execution_failed(
+                    interaction_id,
+                    "sha256:permission-origin",
+                    "codex-basic",
+                    "provider_failed",
+                    "4",
+                )
+                .await
+                .unwrap()
+        );
+        let execution = store
+            .get_completion_execution(interaction_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(execution.phase, CompletionExecutionPhase::Settled);
+        assert_eq!(execution.safe_reason.as_deref(), Some("provider_failed"));
+        let interaction: (String, Option<String>) = sqlx::query_as(
+            "SELECT completion_status,completion_error FROM interactions WHERE id=?1",
+        )
+        .bind(interaction_id.value())
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            interaction,
+            ("failed".into(), Some("provider_failed".into()))
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

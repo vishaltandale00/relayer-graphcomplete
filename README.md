@@ -258,6 +258,25 @@ npm run eval-app:dev
 
 The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
 
+The dashboard also exposes the non-default **Agent-authored Complete · capability
+comparison** case and its required Codex pair:
+
+- `codex-eval-complete-disabled`
+- `codex-eval-complete-enabled`
+
+Selecting that case isolates and selects both configurations. They hold the Codex harness
+implementation, model settings, permissions, and task fixed; only the common
+`complete.agentAuthored` capability differs. Eval keeps the recursive temporal
+substrate active for both cells, while the disabled configuration receives no
+completion broker and cannot launch a semantic child. The execution dossier
+separates semantic children from human turns and exposes each child's source
+action, attached provider execution, successful settlement, terminal projection,
+and candidate trace. The deterministic fixture proves this comparison path without
+inference. A live run starts two Codex subscription root executions and the enabled
+root may start additional agent-authored child execution. That scope must be confirmed
+explicitly in the dashboard; the treatment is pinned to the control's resolved
+provider and model before it starts.
+
 The candidate catalog includes twelve deep calibration cases: seven coding cases, including three evaluator-owned greenfield products, and five research, planning, creative, and forecasting cases. They are a graph-presentation calibration corpus for recursive-judge tuning and human labeling, not the full verifiable-work benchmark. Each materializes an isolated Git workspace and records a sealed reference, lightweight deterministic completion gates, and an outcome rubric separately from graph-presentation judgment. Coding fixtures begin with a failing behavioral contract; open-research fixtures provide no curated source bundle and require the candidate to leave a durable deliverable and source trail. A passing completion gate does not claim that the implementation or artifact is substantively good. Candidate cases remain calibration-only until human review promotes them.
 
 To run the paid, opt-in personal-presentation comparison through the real Eval

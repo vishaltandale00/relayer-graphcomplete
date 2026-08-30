@@ -3,6 +3,8 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { afterEach, describe, expect, it } from "vitest";
+
 import {
   LayerLayoutObject,
   LayerObject,
@@ -10,20 +12,25 @@ import {
   NodePlacementObject,
   RelayerGraphClient,
 } from "@relayer/graph-client";
-import { afterEach, describe, expect, it } from "vitest";
 
 import {
   GraphCompleteRuntimeService,
   RECURSIVE_TEMPORAL_FEATURES,
 } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
-import { complete } from "../src/index.js";
+import {
+  RECURSIVE_FIXTURE_CHILD_TASK as CHILD_TASK,
+  recursiveCompleteFixtureFactory as recursiveFixtureFactory,
+} from "./support/recursive-complete-fixture.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const CHILD_TASK = "Handle the delegated half";
 const services = [];
 const directories = [];
 const closers = [];
+
+function centered(node) {
+  return new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]);
+}
 
 afterEach(async () => {
   for (const close of closers.splice(0).reverse()) await close();
@@ -63,35 +70,6 @@ async function countingBrokerProxy(targetOrigin) {
   return { requests, origin: `http://127.0.0.1:${server.address().port}` };
 }
 
-function centered(node) {
-  return new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]);
-}
-
-/**
- * A harness that exercises the real recursive seam without a provider.
- *
- * The parent publishes a current, authors an accepted invoke action, prepares a child from
- * it, and calls the exported `complete(inputGraph)` through the execution-scoped broker.
- */
-function recursiveFixtureFactory(observed, brokerOrigin) {
-  return () => ({
-    supportsInvokedComplete: true,
-    traceSupport: () => ({
-      prompt: "none", messages: "none", reasoningSummaries: "none", modelCalls: "none",
-      toolCalls: "none", usage: "none", childStreams: "none", nativeArtifacts: "none",
-    }),
-    state: () => ({}),
-    async complete(context, signal) {
-      try {
-        return await run(context, signal, observed, brokerOrigin);
-      } catch (error) {
-        (observed.errors ??= []).push(`${context.inputGraph.detail}: [${error?.code}] ${error?.message}`);
-        throw error;
-      }
-    },
-  });
-}
-
 /** Records only whether the production execution scope carried broker authority. */
 function brokerScopeFixtureFactory(observed) {
   return () => ({
@@ -120,67 +98,6 @@ function brokerScopeFixtureFactory(observed) {
   });
 }
 
-async function run(context, signal, observed, brokerOrigin) {
-  {
-      const graph = new RelayerGraphClient(context.graph.acquireCapability());
-      if (context.inputGraph.detail === CHILD_TASK) {
-        const current = await graph.getCurrent();
-        const finding = new NodeObject("info", "Delegated finding", "The child did its own half.", "concept", "finding");
-        await graph.submitNode(finding);
-        const layer = new LayerObject([finding], [], centered(finding), "child-layer");
-        await graph.submitLayer(layer);
-        await graph.addAction(context.inputGraph.id, {
-          kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "child-root",
-        });
-        await graph.advanceCurrent(layer, current.headRevision, "child-advance");
-        if (observed.childBlocks) {
-          await new Promise((abort) => signal.addEventListener("abort", abort, { once: true }));
-          throw new Error("child aborted");
-        }
-        await new Promise((wait) => setTimeout(wait, observed.childDelayMs ?? 0));
-        await graph.returnCurrent(layer, current.headRevision + 1, "child-return");
-        return;
-      }
-
-      const current = await graph.getCurrent();
-      observed.parentStartRevision = current.headRevision;
-      const plan = new NodeObject("box", "Plan", "Split the work in half.", "concept", "plan");
-      await graph.submitNode(plan);
-      const planLayer = new LayerObject([plan], [], centered(plan), "plan-layer");
-      await graph.submitLayer(planLayer);
-      await graph.addAction(context.inputGraph.id, {
-        kind: "navigate", relation: "expand", label: "Response", target: planLayer, clientKey: "parent-root",
-      });
-      const delegate = await graph.addAction(plan, {
-        kind: "invoke",
-        sourceLayer: planLayer,
-        label: "Delegate",
-        interactionText: CHILD_TASK,
-        clientKey: "delegate",
-      });
-      const advanced = await graph.advanceCurrent(planLayer, current.headRevision, "publish-plan");
-      observed.parentAdvancedRevision = advanced.revision;
-
-      const inputGraph = await graph.prepareComplete(delegate);
-      observed.preparedChild = inputGraph.interactionNode;
-      process.env.RELAYER_COMPLETE_URL = `${brokerOrigin()}/api/completions`;
-      process.env.RELAYER_COMPLETE_TOKEN = context.completionBroker.token;
-      const child = complete(inputGraph);
-      observed.childCompletionId = child.completionId;
-
-      if (observed.childBlocks) {
-        await new Promise((wait) => setTimeout(wait, 400));
-        await child.stop("the parent no longer needs this branch");
-        observed.stoppedChild = await child.current.snapshot();
-      } else {
-        const startedAt = Date.now();
-        observed.childRootLayer = await child.result;
-        observed.awaitedMs = Date.now() - startedAt;
-      }
-      await graph.returnCurrent(planLayer, advanced.revision, "return-plan");
-  }
-}
-
 async function startRecursiveStack(observed, {
   temporalFeatures = RECURSIVE_TEMPORAL_FEATURES,
   implementationFactory,
@@ -193,6 +110,8 @@ async function startRecursiveStack(observed, {
     "name: fixture-recursive",
     "implementation: fixture.recursive",
     "implementationVersion: 1",
+    "complete:",
+    "  agentAuthored: true",
     "permissionBindings:",
     "  ask: {}",
     "  auto: {}",
@@ -211,7 +130,10 @@ async function startRecursiveStack(observed, {
     configurationPaths: [configurationPath],
     temporalFeatures,
     additionalImplementations: {
-      "fixture.recursive": implementationFactory ?? recursiveFixtureFactory(observed, () => proxy.origin),
+      "fixture.recursive": implementationFactory ?? recursiveFixtureFactory(
+        observed,
+        () => `${proxy.origin}/api/completions`,
+      ),
     },
     acquireProviderExecution: async (providerId) => ({
       definition: { id: providerId, adapterId: "codex-subscription", accessContract: "managed-runtime@1" },

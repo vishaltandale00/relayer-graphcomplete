@@ -4,6 +4,7 @@ use crate::product::{
     Project, Thread, ThreadDetail, ThreadView,
 };
 use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -356,6 +357,8 @@ pub(crate) struct ActionInvocationResponse {
     pub(super) result_interaction_id: i64,
     pub(super) result_completion_status: String,
     pub(super) created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution: Option<CompletionExecutionEvidenceResponse>,
 }
 
 impl From<ActionInvocation> for ActionInvocationResponse {
@@ -366,6 +369,71 @@ impl From<ActionInvocation> for ActionInvocationResponse {
             result_interaction_id: invocation.result_interaction_id.value(),
             result_completion_status: invocation.result_completion_status,
             created_at: invocation.created_at,
+            execution: None,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletionExecutionEvidenceResponse {
+    interaction_id: i64,
+    graph_completion_id: i64,
+    harness_configuration_name: String,
+    harness_configuration_digest: String,
+    model_execution_digest: String,
+    phase: &'static str,
+    attached: bool,
+    attachment_schema_version: Option<u64>,
+    attachment_provider: Option<String>,
+    settled: bool,
+    settlement_node_id: Option<i64>,
+    settlement_root_layer_id: Option<i64>,
+    safe_reason: Option<String>,
+}
+
+impl From<crate::storage::CompletionExecution> for CompletionExecutionEvidenceResponse {
+    fn from(execution: crate::storage::CompletionExecution) -> Self {
+        let attachment_schema_version = execution
+            .attachment
+            .as_ref()
+            .and_then(|value| value.get("schemaVersion"))
+            .and_then(serde_json::Value::as_u64);
+        let attachment_provider = execution
+            .attachment
+            .as_ref()
+            .and_then(|value| value.get("provider"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        let settlement_node_id = execution
+            .settlement
+            .as_ref()
+            .and_then(|value| value.get("nodeId"))
+            .and_then(serde_json::Value::as_i64);
+        let settlement_root_layer_id = execution
+            .settlement
+            .as_ref()
+            .and_then(|value| value.pointer("/rootLayer/layer/id"))
+            .and_then(serde_json::Value::as_i64);
+        Self {
+            interaction_id: execution.interaction_id.value(),
+            graph_completion_id: execution.graph_completion_id,
+            harness_configuration_name: execution.harness_configuration_name,
+            harness_configuration_digest: execution.harness_configuration_digest,
+            model_execution_digest: execution.model_execution_digest,
+            phase: match execution.phase {
+                crate::storage::CompletionExecutionPhase::Reserved => "reserved",
+                crate::storage::CompletionExecutionPhase::Launching => "launching",
+                crate::storage::CompletionExecutionPhase::Attached => "attached",
+                crate::storage::CompletionExecutionPhase::Settled => "settled",
+            },
+            attached: execution.attachment.is_some(),
+            attachment_schema_version,
+            attachment_provider,
+            settled: execution.settlement.is_some() || execution.safe_reason.is_some(),
+            settlement_node_id,
+            settlement_root_layer_id,
+            safe_reason: execution.safe_reason,
         }
     }
 }
@@ -491,6 +559,21 @@ impl From<ThreadDetail> for ThreadDetailResponse {
                 .collect(),
             approvals: detail.approvals,
         }
+    }
+}
+
+impl ThreadDetailResponse {
+    pub(crate) fn with_completion_executions(
+        mut self,
+        executions: HashMap<i64, crate::storage::CompletionExecution>,
+    ) -> Self {
+        for invocation in &mut self.action_invocations {
+            invocation.execution = executions
+                .get(&invocation.result_interaction_id)
+                .cloned()
+                .map(Into::into);
+        }
+        self
     }
 }
 

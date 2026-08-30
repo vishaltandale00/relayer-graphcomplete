@@ -302,6 +302,16 @@ pub(super) async fn get(
     )
     .await;
     let imported_thread = detail.thread.imported;
+    let mut completion_executions = std::collections::HashMap::new();
+    for invocation in &detail.action_invocations {
+        if let Some(execution) = state
+            .product
+            .completion_execution(invocation.result_interaction_id)
+            .await?
+        {
+            completion_executions.insert(invocation.result_interaction_id.value(), execution);
+        }
+    }
     let interactions = project_interactions(
         &state,
         std::mem::take(&mut detail.interactions),
@@ -309,7 +319,9 @@ pub(super) async fn get(
         &stale,
     )
     .await?;
-    let response = ThreadDetailResponse::from(detail).with_interactions(interactions);
+    let response = ThreadDetailResponse::from(detail)
+        .with_interactions(interactions)
+        .with_completion_executions(completion_executions);
     Ok(Json(response))
 }
 
@@ -1041,8 +1053,6 @@ pub(super) struct CompletePreparedChildRequest {
 #[serde(rename_all = "camelCase")]
 pub(super) struct CompletePreparedChildResponse {
     completion_id: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    attachment: Option<serde_json::Map<String, Value>>,
 }
 
 pub(super) async fn complete_prepared_child(
@@ -1108,9 +1118,6 @@ pub(super) async fn complete_prepared_child(
                 StatusCode::OK,
                 Json(CompletePreparedChildResponse {
                     completion_id: existing.graph_completion_id,
-                    attachment: existing
-                        .attachment
-                        .and_then(|value| value.as_object().cloned()),
                 }),
             ));
         }
@@ -1142,9 +1149,6 @@ pub(super) async fn complete_prepared_child(
                         StatusCode::OK,
                         Json(CompletePreparedChildResponse {
                             completion_id: existing.graph_completion_id,
-                            attachment: existing
-                                .attachment
-                                .and_then(|value| value.as_object().cloned()),
                         }),
                     ));
                 }
@@ -1199,9 +1203,6 @@ pub(super) async fn complete_prepared_child(
             StatusCode::OK,
             Json(CompletePreparedChildResponse {
                 completion_id: existing.graph_completion_id,
-                attachment: existing
-                    .attachment
-                    .and_then(|value| value.as_object().cloned()),
             }),
         ));
     }
@@ -1247,16 +1248,25 @@ pub(super) async fn complete_prepared_child(
         }
     };
 
-    let child_broker_lease = state.completion_brokers.issue(CompletionBrokerGrant {
-        thread_id: thread.id,
-        source_interaction_id: outcome.interaction.id,
-        source_completion_id: prepared.graph_node_id,
+    let broker_url = runtime
+        .agent_authored_complete_available(&prepared)
+        .then(|| state.completion_brokers.url())
+        .flatten();
+    let child_broker_lease = broker_url.as_ref().map(|_| {
+        state.completion_brokers.issue(CompletionBrokerGrant {
+            thread_id: thread.id,
+            source_interaction_id: outcome.interaction.id,
+            source_completion_id: prepared.graph_node_id,
+        })
     });
-    let broker_url = state.completion_brokers.url();
-    let completion_broker = broker_url.as_deref().map(|url| RuntimeCompletionBroker {
-        url,
-        token: child_broker_lease.token(),
-    });
+    let completion_broker =
+        child_broker_lease
+            .as_ref()
+            .zip(broker_url.as_deref())
+            .map(|(lease, url)| RuntimeCompletionBroker {
+                url,
+                token: lease.token(),
+            });
     let started = runtime
         .start_invoked_completion(
             thread.id.value(),
@@ -1269,28 +1279,17 @@ pub(super) async fn complete_prepared_child(
     let started = match started {
         Ok(started) => started,
         Err(error) => {
-            let _ = state
-                .product
-                .settle_completion_execution(
-                    outcome.interaction.id,
-                    &permission_origin_digest,
-                    None,
-                    Some("provider_start_failed"),
-                    &completion_timestamp(),
-                )
-                .await;
-            let _ = runtime
-                .fail_graph_completion(
-                    prepared.graph_node_id,
-                    &format!("recursive-provider-start:{}", outcome.interaction.id),
-                    "provider_start_failed",
-                )
-                .await;
-            let _ = runtime.discard_prepared(prepared).await;
+            spawn_failed_recursive_start_cleanup(
+                state.clone(),
+                thread,
+                outcome.interaction,
+                prepared,
+                permission_origin_digest,
+            );
             return Err(error.into());
         }
     };
-    if let Some(attachment) = started.attachment.as_ref() {
+    let attachment_result = if let Some(attachment) = started.attachment.as_ref() {
         state
             .product
             .attach_completion_execution(
@@ -1299,9 +1298,14 @@ pub(super) async fn complete_prepared_child(
                 &Value::Object(attachment.clone()),
                 &completion_timestamp(),
             )
-            .await?;
-    }
+            .await
+            .map(|_| ())
+    } else {
+        Ok(())
+    };
 
+    let child_thread_id = thread.id.value();
+    let child_completion_id = prepared.graph_node_id;
     spawn_recursive_completion_observers(
         state.clone(),
         thread,
@@ -1310,13 +1314,96 @@ pub(super) async fn complete_prepared_child(
         permission_origin_digest,
         child_broker_lease,
     );
+    if let Err(error) = attachment_result {
+        let _ = runtime
+            .cancel_invoked_completion(child_thread_id, child_completion_id)
+            .await;
+        let _ = runtime
+            .fail_graph_completion(
+                child_completion_id,
+                &format!("recursive-attachment-persist:{child_completion_id}"),
+                "provider_attachment_persist_failed",
+            )
+            .await;
+        return Err(error.into());
+    }
     Ok((
         StatusCode::CREATED,
         Json(CompletePreparedChildResponse {
             completion_id: started.completion_id,
-            attachment: started.attachment,
         }),
     ))
+}
+
+fn spawn_failed_recursive_start_cleanup(
+    state: ApiState,
+    thread: Thread,
+    interaction: Interaction,
+    prepared: PreparedInteraction,
+    permission_origin_digest: String,
+) {
+    tokio::spawn(async move {
+        let completion_id = prepared.graph_node_id;
+        let Some(runtime) = state.runtime.as_ref() else {
+            return;
+        };
+        loop {
+            match runtime
+                .cancel_invoked_completion(thread.id.value(), completion_id)
+                .await
+            {
+                Ok(_) => break,
+                Err(error) => eprintln!(
+                    "recursive completion {completion_id} start-failure cancellation retry: {error}"
+                ),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        loop {
+            match runtime
+                .fail_graph_completion(
+                    completion_id,
+                    &format!("recursive-provider-start:{}", interaction.id),
+                    "provider_start_failed",
+                )
+                .await
+            {
+                Ok(_) => break,
+                Err(error) => eprintln!(
+                    "recursive completion {completion_id} start-failure graph retry: {error}"
+                ),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        loop {
+            match state
+                .product
+                .finalize_completion_execution_failed(
+                    interaction.id,
+                    &permission_origin_digest,
+                    &thread.harness_configuration_name,
+                    "provider_start_failed",
+                    &completion_timestamp(),
+                )
+                .await
+            {
+                Ok(_) => break,
+                Err(error) => eprintln!(
+                    "recursive completion {completion_id} start-failure settlement retry: {error}"
+                ),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        loop {
+            match runtime.discard_prepared(prepared.clone()).await {
+                Ok(_) => break,
+                Err(error) => eprintln!(
+                    "recursive completion {completion_id} start-failure discard retry: {error}"
+                ),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    });
 }
 
 pub(super) async fn completion_current(
@@ -1530,7 +1617,7 @@ fn spawn_recursive_completion_observers(
     interaction: Interaction,
     prepared: PreparedInteraction,
     permission_origin_digest: String,
-    broker_lease: CompletionBrokerLease,
+    broker_lease: Option<CompletionBrokerLease>,
 ) {
     let semantic_state = state.clone();
     let semantic_thread = thread.clone();
@@ -1584,8 +1671,17 @@ fn spawn_recursive_completion_observers(
                 Ok(current)
                     if current.lifecycle == relayer_graph_core::CompletionLifecycle::Succeeded =>
                 {
-                    let Ok(Some(output)) = runtime.completion_output(completion_id).await else {
-                        return;
+                    let output = loop {
+                        match runtime.completion_output(completion_id).await {
+                            Ok(Some(output)) => break output,
+                            Ok(None) => eprintln!(
+                                "recursive completion {completion_id} succeeded before its output receipt was readable"
+                            ),
+                            Err(error) => eprintln!(
+                                "recursive completion {completion_id} output receipt read failed: {error}"
+                            ),
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                     };
                     let accepted = AcceptedInteractionCompletion {
                         interaction_id: semantic_interaction.id,
@@ -1596,46 +1692,48 @@ fn spawn_recursive_completion_observers(
                         effective_permission_receipt: &permission_receipt,
                         output: &output,
                     };
-                    let _ = semantic_state
+                    match semantic_state
                         .product
-                        .accept_interaction_completion(accepted)
-                        .await;
-                    let _ = semantic_state
-                        .product
-                        .settle_completion_execution(
-                            semantic_interaction.id,
+                        .finalize_completion_execution_accepted(
+                            accepted,
                             &semantic_origin_digest,
-                            Some(&output),
-                            None,
                             &completion_timestamp(),
                         )
-                        .await;
-                    return;
+                        .await
+                    {
+                        Ok(_) => return,
+                        Err(error) => {
+                            eprintln!(
+                                "recursive completion {completion_id} accepted settlement failed: {error}"
+                            );
+                            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        }
+                    }
                 }
                 Ok(current) => {
                     let reason = current
                         .safe_reason
                         .as_deref()
                         .unwrap_or("completion_failed");
-                    let _ = semantic_state
+                    match semantic_state
                         .product
-                        .fail_interaction_completion(
-                            semantic_interaction.id,
-                            &semantic_thread.harness_configuration_name,
-                            reason,
-                        )
-                        .await;
-                    let _ = semantic_state
-                        .product
-                        .settle_completion_execution(
+                        .finalize_completion_execution_failed(
                             semantic_interaction.id,
                             &semantic_origin_digest,
-                            None,
-                            Some(reason),
+                            &semantic_thread.harness_configuration_name,
+                            reason,
                             &completion_timestamp(),
                         )
-                        .await;
-                    return;
+                        .await
+                    {
+                        Ok(_) => return,
+                        Err(error) => {
+                            eprintln!(
+                                "recursive completion {completion_id} failed settlement could not be projected: {error}"
+                            );
+                            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        }
+                    }
                 }
                 Err(error) => {
                     observation_failures += 1;
@@ -1650,28 +1748,26 @@ fn spawn_recursive_completion_observers(
                     eprintln!(
                         "recursive completion {completion_id} could not be observed: {error}"
                     );
-                    let _ = semantic_state
-                        .product
-                        .fail_interaction_completion(
-                            semantic_interaction.id,
-                            &semantic_thread.harness_configuration_name,
-                            reason,
-                        )
-                        .await;
-                    let _ = semantic_state
-                        .product
-                        .settle_completion_execution(
-                            semantic_interaction.id,
-                            &semantic_origin_digest,
-                            None,
-                            Some(reason),
-                            &completion_timestamp(),
-                        )
-                        .await;
                     let _ = runtime
                         .cancel_invoked_completion(semantic_thread.id.value(), completion_id)
                         .await;
-                    return;
+                    if let Err(transition_error) = runtime
+                        .fail_graph_completion(
+                            completion_id,
+                            &format!("recursive-observation-failed:{}", semantic_interaction.id),
+                            reason,
+                        )
+                        .await
+                    {
+                        eprintln!(
+                            "recursive completion {completion_id} observation failure could not terminalize graph state: {transition_error}"
+                        );
+                        observation_failures = 0;
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    } else {
+                        observation_failures = 0;
+                    }
+                    continue;
                 }
             }
         }
@@ -2425,6 +2521,23 @@ mod tests {
     }
 
     async fn broker_fixture(label: &str, lifecycle: &str) -> BrokerFixture {
+        broker_fixture_with_options(label, lifecycle, true, true).await
+    }
+
+    async fn broker_fixture_with_complete_authority(
+        label: &str,
+        lifecycle: &str,
+        agent_authored_complete: bool,
+    ) -> BrokerFixture {
+        broker_fixture_with_options(label, lifecycle, agent_authored_complete, true).await
+    }
+
+    async fn broker_fixture_with_options(
+        label: &str,
+        lifecycle: &str,
+        agent_authored_complete: bool,
+        valid_start_acknowledgement: bool,
+    ) -> BrokerFixture {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -2440,7 +2553,8 @@ mod tests {
             &catalog,
             serde_json::json!({"schemaVersion":1,"configurations":[{"configuration":{
                 "schemaVersion":1,"name":"test","implementation":"test",
-                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+                "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "complete":{"agentAuthored":agent_authored_complete},"settings":{}
             },"digest":"sha256:test"}]})
             .to_string(),
         )
@@ -2491,6 +2605,19 @@ mod tests {
         let transitioned_current = current.clone();
         let recorded_transitions = transitions.clone();
         let graph = Router::new()
+            .route(
+                "/api/control/temporal-features",
+                routing::get(|| async {
+                    axum::Json(serde_json::json!({
+                        "configVersion": 1,
+                        "schemaRead": true,
+                        "rootCurrentWrite": true,
+                        "projectionUi": true,
+                        "invokeResolution": true,
+                        "providerRecursion": true
+                    }))
+                }),
+            )
             .route(
                 "/api/control/interactions",
                 routing::post(|| async {
@@ -2622,13 +2749,18 @@ mod tests {
                             body["traceContext"]["productInteractionId"], 2,
                             "child trace attribution uses the product interaction, not graph identity"
                         );
-                        (
-                            StatusCode::CREATED,
-                            axum::Json(serde_json::json!({
+                        let response = if valid_start_acknowledgement {
+                            serde_json::json!({
                                 "completionId":202,
                                 "attachment":{"schemaVersion":1,"provider":"test"}
-                            })),
-                        )
+                            })
+                        } else {
+                            serde_json::json!({
+                                "completionId":999,
+                                "attachment":{"schemaVersion":1,"provider":"test"}
+                            })
+                        };
+                        (StatusCode::CREATED, axum::Json(response))
                     }
                 }),
             )
@@ -2811,6 +2943,13 @@ mod tests {
             second.unwrap_or_else(|error| panic!("second broker call failed: {}", error.message()));
         let statuses = [first.0, second.0];
         assert!(statuses.contains(&StatusCode::CREATED));
+        for response in [&first.1.0, &second.1.0] {
+            assert_eq!(
+                serde_json::to_value(response).unwrap(),
+                serde_json::json!({"completionId": 202}),
+                "the agent-scoped broker must not disclose native provider attachment identity"
+            );
+        }
         assert_eq!(fixture.starts.load(Ordering::SeqCst), 1);
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
@@ -2829,6 +2968,88 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
+        fixture.finish();
+    }
+
+    #[tokio::test]
+    async fn child_launch_fails_before_provider_execution_when_its_configuration_disables_complete()
+    {
+        let fixture = broker_fixture_with_complete_authority("disabled", "active", false).await;
+
+        let error = match complete_prepared_child(
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
+            Json(CompletePreparedChildRequest {
+                interaction_node: 202,
+            }),
+        )
+        .await
+        {
+            Ok(_) => panic!("disabled configuration launched an invoked completion"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .message()
+                .contains("does not allow agent-authored Complete"),
+            "unexpected error: {}",
+            error.message()
+        );
+        assert_eq!(fixture.starts.load(Ordering::SeqCst), 0);
+        fixture.finish();
+    }
+
+    #[tokio::test]
+    async fn lost_start_acknowledgement_cancels_and_durably_fails_the_keyed_native_run() {
+        let fixture = broker_fixture_with_options("lost-start-ack", "active", true, false).await;
+
+        let error = match complete_prepared_child(
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
+            Json(CompletePreparedChildRequest {
+                interaction_node: 202,
+            }),
+        )
+        .await
+        {
+            Ok(_) => panic!("mismatched start acknowledgement must fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .message()
+                .contains("different invoked completion identity"),
+            "{}",
+            error.message()
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let child = fixture
+                .product
+                .get_action_invocation(fixture.thread.root_interaction_id, 41)
+                .await
+                .unwrap()
+                .unwrap()
+                .interaction;
+            let execution = fixture
+                .product
+                .completion_execution(child.id)
+                .await
+                .unwrap()
+                .unwrap();
+            if fixture.cancellations.load(Ordering::SeqCst) == 1
+                && child.completion_status == "failed"
+                && execution.phase == CompletionExecutionPhase::Settled
+                && execution.safe_reason.as_deref() == Some("provider_start_failed")
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(fixture.starts.load(Ordering::SeqCst), 1);
         fixture.finish();
     }
 
