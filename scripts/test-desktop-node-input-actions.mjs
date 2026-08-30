@@ -234,6 +234,28 @@ async function run() {
     throw new Error(`Node Details input grammar is wrong: ${JSON.stringify(grammar)}`);
   }
 
+  await click("#attachNodeContext");
+  await waitFor("annotation editor alongside node inputs", () => evaluate(`(() => (
+    !document.querySelector('#nodeContextDock')?.classList.contains('hidden')
+      && Boolean(document.querySelector("[aria-label='Annotation for Input grammar']"))
+      && document.querySelectorAll('#nodeInputActions .node-input-editor').length === 3
+  ))()`));
+  await setValue("[aria-label='Annotation for Input grammar']", "Keep this note alongside the input actions.");
+  await click("[aria-label='Confirm annotation']");
+  await waitFor("confirmed annotation attached without hiding node inputs", () => evaluate(`(() => (
+    Boolean(document.querySelector("[aria-label='Show Input grammar annotations']"))
+      && document.querySelectorAll('#nodeInputActions .node-input-editor').length === 3
+  ))()`));
+  await click("[aria-label='Show Input grammar annotations']");
+  await click("[aria-label='Delete annotation 1 for Input grammar']");
+  await waitFor("annotation removed", () => evaluate(`(
+    !document.querySelector("[aria-label='Delete annotation 1 for Input grammar']")
+  )`));
+  await click("[aria-label='Detach Input grammar']");
+  await waitFor("temporary annotation context detached", () => evaluate(`(
+    !document.querySelector("[aria-label='Show Input grammar annotations']")
+  )`));
+
   await evaluate(`(() => {
     const option = document.querySelectorAll('.node-input-option-rail')[0].querySelector('.node-input-option');
     option.focus();
