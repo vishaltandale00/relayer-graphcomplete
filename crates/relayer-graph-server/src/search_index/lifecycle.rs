@@ -361,30 +361,38 @@ pub async fn open_reconciled(
         && versions_match(graph, &expected).await?
         && let Some(index) = existing.as_ref()
     {
-        if revisions_match(index, &snapshot).await? {
-            return Ok(index.clone());
+        match revisions_match(index, &snapshot).await {
+            Ok(true) => return Ok(index.clone()),
+            Ok(false) => {
+                // Only a decodable logical mismatch can be isolated by target.
+                // An inventory query or value-shape error means the shared
+                // physical store is corrupt even when Ladybug can open it, so
+                // startup must take the synchronous global rebuild path below.
+                if let Ok(damaged) = damaged_targets(index, &snapshot).await {
+                    let index = index.clone();
+                    index.mark_rebuilding(damaged);
+                    #[cfg(feature = "crash-test-support")]
+                    if fault == Some(SearchIndexLifecycleFault::HoldLogicalRebuild) {
+                        index
+                            .runtime
+                            .background_hold
+                            .store(true, std::sync::atomic::Ordering::Release);
+                    }
+                    tokio::spawn(background_rebuild(
+                        layout.clone(),
+                        graph.clone(),
+                        index.clone(),
+                        timeout,
+                        expected.clone(),
+                        previous
+                            .clone()
+                            .expect("an open existing generation has a path"),
+                    ));
+                    return Ok(index);
+                }
+            }
+            Err(_) => {}
         }
-        let damaged = damaged_targets(index, &snapshot).await?;
-        let index = index.clone();
-        index.mark_rebuilding(damaged);
-        #[cfg(feature = "crash-test-support")]
-        if fault == Some(SearchIndexLifecycleFault::HoldLogicalRebuild) {
-            index
-                .runtime
-                .background_hold
-                .store(true, std::sync::atomic::Ordering::Release);
-        }
-        tokio::spawn(background_rebuild(
-            layout.clone(),
-            graph.clone(),
-            index.clone(),
-            timeout,
-            expected.clone(),
-            previous
-                .clone()
-                .expect("an open existing generation has a path"),
-        ));
-        return Ok(index);
     }
     drop(existing);
 

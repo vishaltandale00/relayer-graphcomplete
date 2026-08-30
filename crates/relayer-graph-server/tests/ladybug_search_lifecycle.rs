@@ -10,6 +10,15 @@ use relayer_graph_server::search_index::LadybugSearchIndex;
 use serde_json::json;
 use sqlx::{Connection, Executor, SqliteConnection};
 
+// Ladybug 0.18 reserves a large shared mmap per open database. This integration
+// test binary exercises many independent stores, so serialize its scenarios
+// internally instead of requiring callers to know a special test-runner flag.
+static LIFECYCLE_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn lifecycle_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    LIFECYCLE_TEST.lock().await
+}
+
 async fn accepted_sqlite_graph(path: &std::path::Path) -> GraphDatabase {
     let database = GraphDatabase::open(path).await.unwrap();
     let thread = ThreadId::new(41).unwrap();
@@ -115,6 +124,7 @@ async fn add_second_accepted_target(database: &GraphDatabase) {
 
 #[tokio::test]
 async fn missing_store_rebuilds_every_accepted_closure_from_sqlite() {
+    let _guard = lifecycle_test_guard().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("graph.db");
     let database = accepted_sqlite_graph(&path).await;
@@ -155,6 +165,7 @@ async fn missing_store_rebuilds_every_accepted_closure_from_sqlite() {
 
 #[tokio::test]
 async fn accepted_history_without_search_receipts_is_rebuilt_and_receipted() {
+    let _guard = lifecycle_test_guard().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("graph.db");
     let database = accepted_sqlite_graph(&path).await;
@@ -191,6 +202,7 @@ async fn accepted_history_without_search_receipts_is_rebuilt_and_receipted() {
 #[cfg(feature = "crash-test-support")]
 #[tokio::test]
 async fn same_revision_missing_and_extra_topology_is_never_accepted_as_ready() {
+    let _guard = lifecycle_test_guard().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("graph.db");
     let database = accepted_sqlite_graph(&path).await;
@@ -253,6 +265,7 @@ async fn same_revision_missing_and_extra_topology_is_never_accepted_as_ready() {
 #[cfg(feature = "crash-test-support")]
 #[tokio::test]
 async fn same_revision_property_mutation_and_identical_relationship_duplicate_are_rebuilt() {
+    let _guard = lifecycle_test_guard().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("graph.db");
     let database = accepted_sqlite_graph(&path).await;
@@ -302,7 +315,62 @@ async fn same_revision_property_mutation_and_identical_relationship_duplicate_ar
 
 #[cfg(feature = "crash-test-support")]
 #[tokio::test]
+async fn malformed_openable_inventory_is_globally_rebuilt_before_startup_returns() {
+    let _guard = lifecycle_test_guard().await;
+    use relayer_graph_server::search_index::SearchTargetReadiness;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("graph.db");
+    let database = accepted_sqlite_graph(&path).await;
+    add_second_accepted_target(&database).await;
+    let first = LadybugSearchIndex::open_reconciled(&path, &database)
+        .await
+        .unwrap();
+    let layout = first.layout().clone();
+    first
+        .inject_lifecycle_corruption(
+            "MATCH (n:Content) WHERE n.title = 'Queue' SET n.published_targets = NULL",
+        )
+        .await
+        .unwrap();
+    drop(first);
+
+    // Ladybug can reopen these bytes, but the publication property has an
+    // impossible scalar shape. That is shared physical corruption, not a
+    // target-local mismatch: startup synchronously replaces it from SQLite.
+    let repaired = LadybugSearchIndex::open_reconciled(&path, &database)
+        .await
+        .unwrap();
+    for (thread, expected) in [(41, "2"), (42, "2")] {
+        let target = SearchTarget::Thread(ThreadId::new(thread).unwrap());
+        assert_eq!(
+            repaired.target_readiness(target),
+            SearchTargetReadiness::Ready
+        );
+        assert_eq!(
+            repaired
+                .normalized_rows_for(
+                    target,
+                    &format!(
+                        "MATCH (n:Content) WHERE list_contains(n.published_targets, 'thread:{thread}') RETURN count(n)"
+                    ),
+                )
+                .await
+                .unwrap(),
+            vec![vec![json!({"type": "integer", "value": expected})]]
+        );
+    }
+    assert_eq!(
+        std::fs::read_dir(layout.quarantine()).unwrap().count(),
+        1,
+        "the malformed shared store is retained as quarantine evidence"
+    );
+}
+
+#[cfg(feature = "crash-test-support")]
+#[tokio::test]
 async fn logical_damage_blocks_only_its_target_while_unaffected_target_stays_usable() {
+    let _guard = lifecycle_test_guard().await;
     use relayer_graph_server::search_index::{SearchIndexLifecycleFault, SearchTargetReadiness};
 
     let directory = tempfile::tempdir().unwrap();
@@ -383,6 +451,7 @@ async fn logical_damage_blocks_only_its_target_while_unaffected_target_stays_usa
 
 #[tokio::test]
 async fn unopenable_active_generation_is_quarantined_and_rebuilt_from_sqlite() {
+    let _guard = lifecycle_test_guard().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("graph.db");
     let database = accepted_sqlite_graph(&path).await;
@@ -433,6 +502,7 @@ async fn unopenable_active_generation_is_quarantined_and_rebuilt_from_sqlite() {
 
 #[tokio::test]
 async fn pointer_to_missing_generation_recovers_globally_from_sqlite() {
+    let _guard = lifecycle_test_guard().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("graph.db");
     let database = accepted_sqlite_graph(&path).await;
@@ -461,6 +531,7 @@ async fn pointer_to_missing_generation_recovers_globally_from_sqlite() {
 
 #[tokio::test]
 async fn incompatible_derived_version_rebuilds_side_by_side_under_the_same_engine_pin() {
+    let _guard = lifecycle_test_guard().await;
     use relayer_graph_core::SearchIndexComponent;
 
     let directory = tempfile::tempdir().unwrap();
@@ -510,6 +581,7 @@ async fn incompatible_derived_version_rebuilds_side_by_side_under_the_same_engin
 
 #[tokio::test]
 async fn orphan_revision_absent_from_sqlite_is_removed_by_canonical_rebuild() {
+    let _guard = lifecycle_test_guard().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("graph.db");
     let database = accepted_sqlite_graph(&path).await;
@@ -543,6 +615,7 @@ async fn orphan_revision_absent_from_sqlite_is_removed_by_canonical_rebuild() {
 
 #[tokio::test]
 async fn pre_generation_active_bytes_are_quarantined_and_rebuilt() {
+    let _guard = lifecycle_test_guard().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("graph.db");
     let database = accepted_sqlite_graph(&path).await;
@@ -579,6 +652,7 @@ async fn pre_generation_active_bytes_are_quarantined_and_rebuilt() {
 #[cfg(feature = "crash-test-support")]
 #[tokio::test]
 async fn forced_validation_failure_leaves_the_prior_active_generation_intact() {
+    let _guard = lifecycle_test_guard().await;
     use relayer_graph_server::search_index::SearchIndexLifecycleFault;
 
     let directory = tempfile::tempdir().unwrap();
@@ -622,6 +696,7 @@ async fn forced_validation_failure_leaves_the_prior_active_generation_intact() {
 #[cfg(feature = "crash-test-support")]
 #[tokio::test]
 async fn one_rebuild_deadline_includes_receipt_and_final_active_open() {
+    let _guard = lifecycle_test_guard().await;
     use std::time::Duration;
 
     use relayer_graph_core::SearchIndexComponent;
@@ -671,6 +746,7 @@ async fn one_rebuild_deadline_includes_receipt_and_final_active_open() {
 #[cfg(feature = "crash-test-support")]
 #[tokio::test]
 async fn active_pointer_replacement_after_open_is_detected_and_rebuilt() {
+    let _guard = lifecycle_test_guard().await;
     use relayer_graph_server::search_index::SearchIndexLifecycleFault;
 
     let directory = tempfile::tempdir().unwrap();
@@ -708,6 +784,7 @@ async fn active_pointer_replacement_after_open_is_detected_and_rebuilt() {
 #[cfg(feature = "crash-test-support")]
 #[tokio::test]
 async fn active_pointer_replacement_before_publish_fails_closed_without_overwriting_it() {
+    let _guard = lifecycle_test_guard().await;
     use relayer_graph_core::SearchIndexComponent;
     use relayer_graph_server::search_index::SearchIndexLifecycleFault;
 
@@ -762,6 +839,7 @@ async fn active_pointer_replacement_before_publish_fails_closed_without_overwrit
 #[cfg(all(feature = "crash-test-support", unix))]
 #[tokio::test]
 async fn symlink_pointer_and_generation_are_rejected_without_following_them() {
+    let _guard = lifecycle_test_guard().await;
     use std::os::unix::fs::symlink;
 
     for symlink_generation in [false, true] {
@@ -799,6 +877,7 @@ async fn symlink_pointer_and_generation_are_rejected_without_following_them() {
 #[cfg(all(feature = "crash-test-support", unix))]
 #[tokio::test]
 async fn quarantined_rollback_is_an_independent_durable_copy() {
+    let _guard = lifecycle_test_guard().await;
     use std::os::unix::fs::MetadataExt;
 
     let directory = tempfile::tempdir().unwrap();
