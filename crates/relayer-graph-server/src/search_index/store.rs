@@ -11,7 +11,11 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    sync::mpsc::{Sender, channel},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicPtr, AtomicU64, Ordering as AtomicOrdering},
+        mpsc::{Sender, channel},
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -20,7 +24,11 @@ use anyhow::{Context, Result, anyhow};
 use lbug::{Connection, Database, SystemConfig, Value};
 use tokio::sync::oneshot;
 
+#[cfg(feature = "crash-test-support")]
 use super::value::{EndpointIds, string_property};
+
+#[cfg(feature = "crash-test-support")]
+static ENDPOINT_INDEX_ROWS: AtomicU64 = AtomicU64::new(0);
 
 /// `<db>.ladybug/{active,quarantine}/`, a sibling of the SQLite file the store
 /// derives from, so the pair travels together.
@@ -324,6 +332,65 @@ pub struct LadybugStore {
     worker: Option<JoinHandle<()>>,
     layout: StoreLayout,
     query_timeout: Duration,
+    interrupt: Arc<InterruptHandle>,
+    next_job_id: AtomicU64,
+}
+
+struct InterruptHandle {
+    connection: AtomicPtr<Connection<'static>>,
+    active_job: Mutex<u64>,
+}
+
+impl InterruptHandle {
+    fn new() -> Self {
+        Self {
+            connection: AtomicPtr::new(std::ptr::null_mut()),
+            active_job: Mutex::new(0),
+        }
+    }
+
+    fn install(&self, connection: &Connection<'_>) {
+        self.connection.store(
+            std::ptr::from_ref(connection).cast_mut().cast(),
+            AtomicOrdering::Release,
+        );
+    }
+
+    fn clear(&self) {
+        self.connection
+            .store(std::ptr::null_mut(), AtomicOrdering::Release);
+    }
+
+    fn begin(&self, job_id: u64) {
+        *self.active_job.lock().expect("interrupt lock poisoned") = job_id;
+    }
+
+    fn end(&self, job_id: u64) {
+        let mut active = self.active_job.lock().expect("interrupt lock poisoned");
+        if *active == job_id {
+            *active = 0;
+        }
+    }
+
+    fn interrupt(&self, job_id: u64) -> Result<()> {
+        let active = self.active_job.lock().expect("interrupt lock poisoned");
+        if *active != job_id {
+            return Ok(());
+        }
+        let connection = self.connection.load(AtomicOrdering::Acquire);
+        if connection.is_null() {
+            return Ok(());
+        }
+        // SAFETY: lbug marks Connection Send + Sync. The worker installs this
+        // pointer after construction and clears it before dropping the
+        // connection. LadybugStore owns the handle and joins that worker on
+        // drop, so a live store cannot observe a dangling connection here.
+        let result = unsafe { &*connection }
+            .interrupt()
+            .context("interrupt Ladybug query");
+        drop(active);
+        result
+    }
 }
 
 impl LadybugStore {
@@ -360,6 +427,8 @@ impl LadybugStore {
         let existed = active.exists();
         let (ready, opened) = channel();
         let (jobs, queue) = channel::<Job>();
+        let interrupt = Arc::new(InterruptHandle::new());
+        let worker_interrupt = interrupt.clone();
         let worker = thread::Builder::new()
             .name("ladybug-search-index".into())
             .spawn(move || {
@@ -388,7 +457,9 @@ impl LadybugStore {
                     let _ = ready.send(Err(error));
                     return;
                 }
+                worker_interrupt.install(&connection);
                 if ready.send(Ok(())).is_err() {
+                    worker_interrupt.clear();
                     return;
                 }
                 // Ends when the last sender is dropped, which is what closes the
@@ -396,6 +467,7 @@ impl LadybugStore {
                 for job in queue {
                     job(&connection);
                 }
+                worker_interrupt.clear();
             })
             .context("start the Ladybug worker thread")?;
         match opened.recv() {
@@ -404,6 +476,8 @@ impl LadybugStore {
                 worker: Some(worker),
                 layout,
                 query_timeout,
+                interrupt,
+                next_job_id: AtomicU64::new(1),
             }),
             Ok(Err(error)) => {
                 let _ = worker.join();
@@ -439,6 +513,38 @@ impl LadybugStore {
         T: Send + 'static,
     {
         self.run_undoable_until(deadline, job, |_| {}).await
+    }
+
+    pub fn reserve_interruptible_job(&self) -> u64 {
+        self.next_job_id.fetch_add(1, AtomicOrdering::Relaxed)
+    }
+
+    pub async fn run_interruptible_until<T, F>(
+        &self,
+        job_id: u64,
+        deadline: Instant,
+        job: F,
+    ) -> Result<T>
+    where
+        F: for<'connection> FnOnce(&Connection<'connection>) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let interrupt = self.interrupt.clone();
+        self.run_undoable_until(
+            deadline,
+            move |connection| {
+                interrupt.begin(job_id);
+                let result = job(connection);
+                interrupt.end(job_id);
+                result
+            },
+            |_| {},
+        )
+        .await
+    }
+
+    pub fn interrupt_job(&self, job_id: u64) -> Result<()> {
+        self.interrupt.interrupt(job_id)
     }
 
     /// Run a job whose effect has to be undone when nobody is waiting for it any
@@ -569,12 +675,14 @@ pub fn rows_with(
     Ok((&mut result).map(|row| row.to_vec()).collect())
 }
 
-/// Map every stored node's engine-internal identity to its Relayer identity, so
-/// relationships can name their endpoints.
+/// Test-only raw-query normalization support. Product queries project only the
+/// bounded matched endpoints they need and never call this shared-store scan.
+#[cfg(feature = "crash-test-support")]
 pub fn endpoint_index(connection: &Connection<'_>) -> Result<EndpointIds> {
     let mut index = EndpointIds::new();
     for query in ["MATCH (n:Content) RETURN n", "MATCH (n:Layer) RETURN n"] {
         for row in rows(connection, query)? {
+            ENDPOINT_INDEX_ROWS.fetch_add(1, AtomicOrdering::Relaxed);
             let Value::Node(node) = &row[0] else {
                 return Err(anyhow!("endpoint index query returned a non-node"));
             };
@@ -585,4 +693,14 @@ pub fn endpoint_index(connection: &Connection<'_>) -> Result<EndpointIds> {
         }
     }
     Ok(index)
+}
+
+#[cfg(feature = "crash-test-support")]
+pub fn reset_endpoint_index_rows_for_test() {
+    ENDPOINT_INDEX_ROWS.store(0, AtomicOrdering::Relaxed);
+}
+
+#[cfg(feature = "crash-test-support")]
+pub fn endpoint_index_rows_for_test() -> u64 {
+    ENDPOINT_INDEX_ROWS.load(AtomicOrdering::Relaxed)
 }

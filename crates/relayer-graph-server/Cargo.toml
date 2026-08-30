@@ -30,6 +30,30 @@ sqlx.workspace = true
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
 
+[[test]]
+name = "graph_query_v1_conformance"
+required-features = ["crash-test-support"]
+
+[[test]]
+name = "ladybug_crash_reconciliation"
+required-features = ["crash-test-support"]
+
+[[test]]
+name = "ladybug_search_index"
+required-features = ["crash-test-support"]
+
+[[test]]
+name = "ladybug_search_lifecycle"
+required-features = ["crash-test-support"]
+
+[[test]]
+name = "search_index_corpus"
+required-features = ["crash-test-support"]
+
+[[example]]
+name = "search"
+required-features = ["crash-test-support"]
+
 [[bench]]
 name = "ladybug_index_save_latency"
 harness = false

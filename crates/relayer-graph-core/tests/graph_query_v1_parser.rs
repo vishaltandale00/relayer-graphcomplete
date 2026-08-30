@@ -6,7 +6,8 @@
 //! `query_construct_unsupported`, never be quietly accepted or misreported.
 
 use relayer_graph_core::query::{
-    QueryCode, QueryLimits, QueryRequest, RequestTarget, TargetScope, plan_request,
+    QueryCode, QueryLimits, QueryRequest, RequestTarget, TargetScope, parse_request_json,
+    plan_request,
 };
 use serde_json::Value;
 
@@ -27,6 +28,7 @@ fn request(query: &str) -> QueryRequest {
         },
         query: query.into(),
         parameters: serde_json::Map::new(),
+        budget: Default::default(),
     }
 }
 
@@ -74,10 +76,9 @@ fn every_frozen_positive_case_either_plans_or_is_named_unsupported() {
         planned.len(),
         planned.len() + unsupported.len()
     );
-    assert_eq!(
-        unsupported,
-        vec!["property-absence".to_owned()],
-        "IS ABSENT is the only construct this slice still refuses"
+    assert!(
+        unsupported.is_empty(),
+        "all v1 constructs must plan: {unsupported:?}"
     );
     for required in [
         "whole-target-scan",
@@ -94,6 +95,26 @@ fn every_frozen_positive_case_either_plans_or_is_named_unsupported() {
             "{required} must plan"
         );
     }
+}
+
+#[test]
+fn every_frozen_positive_plan_matches_the_contract_shape() {
+    let positive = fixture("positive.json");
+    let mut mismatches = Vec::new();
+    for case in positive["cases"].as_array().expect("cases") {
+        let id = case["id"].as_str().unwrap();
+        let mut envelope = request(case["query"].as_str().unwrap());
+        envelope.parameters = case["parameters"].as_object().cloned().unwrap_or_default();
+        let plan = plan_request(&envelope, &QueryLimits::default()).unwrap();
+        let actual = serde_json::to_value(plan).unwrap();
+        if actual != case["expectedPlan"] {
+            mismatches.push(format!(
+                "{id}: expected {} got {}",
+                case["expectedPlan"], actual
+            ));
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }
 
 #[test]
@@ -173,11 +194,11 @@ fn a_forbidden_construct_never_reaches_a_plan() {
     for (query, code) in [
         (
             "MATCH (n:Content) SET n.title = $t RETURN n",
-            QueryCode::QueryConstructUnsupported,
+            QueryCode::QueryConstructForbidden,
         ),
         (
             "CREATE NODE TABLE Forbidden(id INT64)",
-            QueryCode::QueryConstructUnsupported,
+            QueryCode::QueryConstructForbidden,
         ),
         (
             "MATCH (n:Content) RETURN n.title AS t; MATCH (m:Content) RETURN m.title AS u",
@@ -223,4 +244,21 @@ fn the_envelope_is_checked_before_the_query() {
     let error = plan_request(&broken, &QueryLimits::default()).expect_err("must fail");
     assert_eq!(error.code, QueryCode::UnsupportedQueryContractVersion);
     assert_eq!(error.phase.as_str(), "envelope");
+}
+
+#[test]
+fn duplicate_parameter_names_are_an_envelope_error() {
+    let error = parse_request_json(
+        br#"{
+        "queryContractVersion":1,
+        "target":{"scope":"thread","id":41},
+        "query":"MATCH (n:Content) RETURN n",
+        "parameters":{"title":{"type":"string","value":"a"},"title":{"type":"string","value":"b"}},
+        "budget":{}
+    }"#,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, QueryCode::InvalidRequest);
+    assert_eq!(error.phase.as_str(), "envelope");
+    assert_eq!(error.path, "request");
 }

@@ -8,11 +8,14 @@
 //!
 //! This crate is the only one that names `lbug`.
 
+#[cfg(feature = "crash-test-support")]
+#[doc(hidden)]
+pub mod contract_test_support;
 mod lifecycle;
-pub mod query;
-pub mod schema;
-pub mod store;
-pub mod value;
+mod query;
+pub(crate) mod schema;
+pub(crate) mod store;
+pub(crate) mod value;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -24,13 +27,22 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "crash-test-support")]
+use std::sync::{Condvar, Mutex};
+
+#[cfg(feature = "crash-test-support")]
 use serde_json::Value as JsonValue;
 use tokio::sync::{Notify, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as AsyncRwLock};
 
 use relayer_graph_core::{
     AcceptedGraphClosure, DEFAULT_SEARCH_INDEX_BUDGET, GraphError, SearchIndex, SearchIndexFuture,
     SearchIndexRevision, SearchIndexWrite, SearchTarget,
+    query::{
+        QueryCode, QueryError, QueryLimits, QueryReadPermit, parse_request_json, plan_request,
+    },
 };
+
+pub use self::query::QueryOutcome;
 
 use self::store::{LadybugStore, StoreLayout, exec};
 
@@ -49,6 +61,7 @@ struct LadybugRuntime {
     readiness: StdRwLock<HashMap<SearchTarget, SearchTargetReadiness>>,
     reconciling: AtomicBool,
     epoch: AtomicU64,
+    query_count: AtomicU64,
     notify: Notify,
     background_hold: AtomicBool,
     background_gate: Notify,
@@ -59,6 +72,130 @@ pub enum SearchTargetReadiness {
     Ready,
     Rebuilding,
     Failed,
+}
+
+#[derive(Clone, Default)]
+pub struct QueryCancellation {
+    inner: Arc<QueryCancellationInner>,
+}
+
+#[derive(Default)]
+struct QueryCancellationInner {
+    cancelled: AtomicBool,
+    notify: Notify,
+    started: AtomicBool,
+    started_notify: Notify,
+    #[cfg(feature = "crash-test-support")]
+    hold_after_started: Mutex<bool>,
+    #[cfg(feature = "crash-test-support")]
+    hold_after_started_gate: Condvar,
+}
+
+impl QueryCancellation {
+    pub fn cancel(&self) {
+        self.inner.cancelled.store(true, Ordering::Release);
+        self.inner.notify.notify_waiters();
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.cancelled.load(Ordering::Acquire)
+    }
+
+    fn mark_started(&self) {
+        self.inner.started.store(true, Ordering::Release);
+        self.inner.started_notify.notify_waiters();
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    fn wait_at_started_gate(&self) {
+        let mut held = self
+            .inner
+            .hold_after_started
+            .lock()
+            .expect("query start gate poisoned");
+        while *held {
+            held = self
+                .inner
+                .hold_after_started_gate
+                .wait(held)
+                .expect("query start gate poisoned");
+        }
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    #[doc(hidden)]
+    pub fn hold_after_started_for_test(&self) {
+        *self
+            .inner
+            .hold_after_started
+            .lock()
+            .expect("query start gate poisoned") = true;
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    #[doc(hidden)]
+    pub fn release_after_started_for_test(&self) {
+        *self
+            .inner
+            .hold_after_started
+            .lock()
+            .expect("query start gate poisoned") = false;
+        self.inner.hold_after_started_gate.notify_all();
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    #[doc(hidden)]
+    pub async fn wait_until_started(&self) {
+        loop {
+            let notified = self.inner.started_notify.notified();
+            if self.inner.started.load(Ordering::Acquire) {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    async fn cancelled(&self) {
+        loop {
+            let notified = self.inner.notify.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GraphQueryFailure {
+    Contract(QueryError),
+    TargetNotReady {
+        target: SearchTarget,
+        readiness: SearchTargetReadiness,
+    },
+}
+
+impl From<QueryError> for GraphQueryFailure {
+    fn from(error: QueryError) -> Self {
+        Self::Contract(error)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryDiagnostics {
+    pub target: SearchTarget,
+    pub cold: bool,
+    pub elapsed_micros: u128,
+    pub pattern_parts: usize,
+    pub traversal_hops: usize,
+    pub returned_rows: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphQueryResult {
+    pub outcome: QueryOutcome,
+    pub diagnostics: QueryDiagnostics,
 }
 
 #[cfg(feature = "crash-test-support")]
@@ -142,6 +279,7 @@ impl LadybugSearchIndex {
                 readiness: StdRwLock::new(HashMap::new()),
                 reconciling: AtomicBool::new(false),
                 epoch: AtomicU64::new(0),
+                query_count: AtomicU64::new(0),
                 notify: Notify::new(),
                 background_hold: AtomicBool::new(false),
                 background_gate: Notify::new(),
@@ -160,6 +298,8 @@ impl LadybugSearchIndex {
         self
     }
 
+    #[cfg(feature = "crash-test-support")]
+    #[doc(hidden)]
     pub fn layout(&self) -> &StoreLayout {
         &self.runtime.layout
     }
@@ -192,6 +332,107 @@ impl LadybugSearchIndex {
             .get(&target)
             .copied()
             .unwrap_or(SearchTargetReadiness::Ready)
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    #[doc(hidden)]
+    pub fn set_contract_test_readiness(
+        &self,
+        target: SearchTarget,
+        readiness: SearchTargetReadiness,
+    ) {
+        self.runtime
+            .readiness
+            .write()
+            .expect("search readiness lock poisoned")
+            .insert(target, readiness);
+    }
+
+    fn query_readiness(&self, target: SearchTarget) -> Result<(), GraphQueryFailure> {
+        let readiness = self.target_readiness(target);
+        if readiness == SearchTargetReadiness::Ready {
+            Ok(())
+        } else {
+            Err(GraphQueryFailure::TargetNotReady { target, readiness })
+        }
+    }
+
+    /// Execute the complete v1 boundary in its required authority order.
+    /// Parsing and planning happen before the sealed permit is intersected;
+    /// readiness and a pinned store generation are touched only after that.
+    pub async fn query(
+        &self,
+        permit: &QueryReadPermit,
+        request_json: &[u8],
+        cancellation: QueryCancellation,
+    ) -> Result<GraphQueryResult, GraphQueryFailure> {
+        let request = parse_request_json(request_json)?;
+        let limits = QueryLimits::default().narrowed(&request.budget);
+        let plan = plan_request(&request, &limits)?;
+        let target = permit.authorize(request.target)?;
+        self.query_readiness(target)?;
+        let operation = self.runtime.operations.clone().read_owned().await;
+        self.query_readiness(target)?;
+        let store = self.current_store();
+        let started = Instant::now();
+        let deadline = started + limits.wall_time;
+        let cold = self.runtime.query_count.fetch_add(1, Ordering::AcqRel) == 0;
+        let parameters = request.parameters;
+        let worker_plan = plan.clone();
+        let worker_limits = limits.clone();
+        let worker_cancellation = cancellation.clone();
+        let job_id = store.reserve_interruptible_job();
+        let work = store.run_interruptible_until(job_id, deadline, move |connection| {
+            worker_cancellation.mark_started();
+            #[cfg(feature = "crash-test-support")]
+            worker_cancellation.wait_at_started_gate();
+            Ok(query::execute(
+                connection,
+                &worker_plan,
+                &parameters,
+                target,
+                &worker_limits,
+                &worker_cancellation,
+            ))
+        });
+        let outcome = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {
+                store.interrupt_job(job_id).map_err(query::engine_failure)?;
+                Err(QueryError::new(
+                    QueryCode::QueryCancelled,
+                    "budget.cancellation",
+                    "the query was cancelled",
+                ))
+            },
+            result = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), work) => {
+                match result {
+                    Err(_) => {
+                        store.interrupt_job(job_id).map_err(query::engine_failure)?;
+                        Err(QueryError::new(
+                            QueryCode::WallTimeExceeded,
+                            "budget.wall_time_ms",
+                            "the query exceeded its wall-time budget",
+                        ))
+                    },
+                    Ok(Err(error)) => Err(query::engine_failure(error)),
+                    Ok(Ok(result)) => result,
+                }
+            }
+        }?;
+        drop(operation);
+        Ok(GraphQueryResult {
+            diagnostics: QueryDiagnostics {
+                target,
+                cold,
+                elapsed_micros: started.elapsed().as_micros(),
+                pattern_parts: plan.patterns.len(),
+                traversal_hops: plan.max_traversal_hops,
+                returned_rows: outcome.rows.len(),
+                truncated: outcome.truncated,
+            },
+            outcome,
+        })
     }
 
     pub async fn wait_until_reconciled(&self) -> Result<(), GraphError> {
@@ -287,10 +528,14 @@ impl LadybugSearchIndex {
     /// budgets. This is the narrow read the store is observed through: startup
     /// reconciliation, and the contract tests that keep the promoted value
     /// lowerings honest against a real engine.
+    #[cfg(feature = "crash-test-support")]
+    #[doc(hidden)]
     pub async fn normalized_rows(&self, query: &str) -> Result<Vec<Vec<JsonValue>>, GraphError> {
         self.normalized_rows_on(self.current_store(), query).await
     }
 
+    #[cfg(feature = "crash-test-support")]
+    #[doc(hidden)]
     pub async fn normalized_rows_for(
         &self,
         target: SearchTarget,
@@ -302,6 +547,7 @@ impl LadybugSearchIndex {
         self.normalized_rows_on(self.current_store(), query).await
     }
 
+    #[cfg(feature = "crash-test-support")]
     async fn normalized_rows_on(
         &self,
         store: Arc<LadybugStore>,
@@ -315,8 +561,11 @@ impl LadybugSearchIndex {
                     .iter()
                     .map(|row| {
                         row.iter()
-                            .map(|value| value::normalize_value(value, &endpoints))
-                            .collect()
+                            .map(|value| {
+                                value::normalize_value(value, &endpoints)
+                                    .map_err(anyhow::Error::from)
+                            })
+                            .collect::<anyhow::Result<Vec<_>>>()
                     })
                     .collect()
             })

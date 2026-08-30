@@ -60,11 +60,15 @@ pub enum QueryCode {
     RowLimitExceeded,
     InaccessibleOrMissing,
     ScopeNotGranted,
+    ForeignDraft,
     QueryCancelled,
     WallTimeExceeded,
+    ExaminedExpansionsExceeded,
     IntermediateRowsExceeded,
     InvalidEngineValue,
+    HeterogeneousList,
     IntegerOverflow,
+    DuplicateRecordField,
     ResultRowTooLarge,
 }
 
@@ -91,11 +95,15 @@ impl QueryCode {
             Self::RowLimitExceeded => "row_limit_exceeded",
             Self::InaccessibleOrMissing => "inaccessible_or_missing",
             Self::ScopeNotGranted => "scope_not_granted",
+            Self::ForeignDraft => "foreign_draft",
             Self::QueryCancelled => "query_cancelled",
             Self::WallTimeExceeded => "wall_time_exceeded",
+            Self::ExaminedExpansionsExceeded => "examined_expansions_exceeded",
             Self::IntermediateRowsExceeded => "intermediate_rows_exceeded",
             Self::InvalidEngineValue => "invalid_engine_value",
+            Self::HeterogeneousList => "heterogeneous_list",
             Self::IntegerOverflow => "integer_overflow",
+            Self::DuplicateRecordField => "duplicate_record_field",
             Self::ResultRowTooLarge => "result_row_too_large",
         }
     }
@@ -122,11 +130,17 @@ impl QueryCode {
             | Self::PatternPartLimitExceeded
             | Self::TraversalLimitExceeded
             | Self::RowLimitExceeded => QueryPhase::Plan,
-            Self::InaccessibleOrMissing | Self::ScopeNotGranted => QueryPhase::Authorize,
-            Self::QueryCancelled | Self::WallTimeExceeded | Self::IntermediateRowsExceeded => {
-                QueryPhase::Execute
+            Self::InaccessibleOrMissing | Self::ScopeNotGranted | Self::ForeignDraft => {
+                QueryPhase::Authorize
             }
-            Self::InvalidEngineValue | Self::IntegerOverflow => QueryPhase::Normalize,
+            Self::QueryCancelled
+            | Self::WallTimeExceeded
+            | Self::ExaminedExpansionsExceeded
+            | Self::IntermediateRowsExceeded => QueryPhase::Execute,
+            Self::InvalidEngineValue
+            | Self::HeterogeneousList
+            | Self::IntegerOverflow
+            | Self::DuplicateRecordField => QueryPhase::Normalize,
             Self::ResultRowTooLarge => QueryPhase::Encode,
         }
     }
@@ -149,6 +163,11 @@ impl QueryError {
             path: path.into(),
             message: message.into(),
         }
+    }
+
+    pub(crate) fn with_phase(mut self, phase: QueryPhase) -> Self {
+        self.phase = phase;
+        self
     }
 
     /// The error a caller should see when two are available. The contract says an

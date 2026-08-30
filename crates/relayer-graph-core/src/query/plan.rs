@@ -6,7 +6,9 @@
 //! publication predicates are injected by the executor and deliberately are not
 //! representable here, so query text cannot reach them.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use serde_json::{Value as JsonValue, json};
+use std::collections::BTreeMap;
 
 /// The only node labels v1 admits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +151,10 @@ pub enum Predicate {
         property: PropertyRef,
         negated: bool,
     },
+    AbsenceTest {
+        property: PropertyRef,
+        negated: bool,
+    },
 }
 
 /// The aggregates v1 admits. Anything else is `invalid_aggregate`.
@@ -271,7 +277,7 @@ pub enum Limit {
     Parameter { name: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryPlan {
     pub query_contract_version: u32,
@@ -288,6 +294,300 @@ pub struct QueryPlan {
     /// Content binding, which needs the occurrence constraint to avoid matching a
     /// node in one layer against an action authored from another.
     pub requires_occurrence_constraint: bool,
+    /// Recursive descriptors validated from the request envelope. This is
+    /// deliberately not a top-level public plan field; it types parameter
+    /// expressions and prevents lowering from discovering malformed values
+    /// after authorization.
+    pub parameter_types: BTreeMap<String, JsonValue>,
+}
+
+impl Serialize for QueryPlan {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        plan_json(self).serialize(serializer)
+    }
+}
+
+fn plan_json(plan: &QueryPlan) -> JsonValue {
+    let patterns = plan
+        .patterns
+        .iter()
+        .map(|pattern| {
+            json!({
+                "pathBinding": pattern.path_binding,
+                "nodes": pattern.nodes,
+                "relationships": pattern.relationships.iter().map(|relationship| json!({
+                    "binding": relationship.binding,
+                    "type": relationship.relationship_type.as_str(),
+                    "direction": match relationship.direction {
+                        Direction::Outgoing => "forward",
+                        Direction::Incoming => "reverse-text-normalized-forward",
+                        Direction::Undirected => "undirected",
+                    },
+                    "from": relationship.from,
+                    "to": relationship.to,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let predicates = plan
+        .predicates
+        .iter()
+        .map(|predicate| match predicate {
+            Predicate::PropertyComparison {
+                property,
+                operator,
+                parameter,
+            } => json!({
+                "kind": "propertyComparison",
+                "left": property_json(plan, property),
+                "operator": match operator {
+                    CompareOp::Equal => "eq",
+                    CompareOp::NotEqual => "ne",
+                    CompareOp::Less => "lt",
+                    CompareOp::LessOrEqual => "lte",
+                    CompareOp::Greater => "gt",
+                    CompareOp::GreaterOrEqual => "gte",
+                },
+                "right": {
+                    "kind": "parameter",
+                    "name": parameter,
+                    "valueType": property_value_type(plan, property),
+                },
+            }),
+            Predicate::NullTest { property, negated } => json!({
+                "kind": "nullTest",
+                "property": property_json(plan, property),
+                "negated": negated,
+            }),
+            Predicate::AbsenceTest { property, negated } => json!({
+                "kind": "absenceTest",
+                "property": property_json(plan, property),
+                "negated": negated,
+            }),
+        })
+        .collect::<Vec<_>>();
+    let columns = plan
+        .projection
+        .columns
+        .iter()
+        .map(|column| {
+            json!({
+                "name": column.name,
+                "expression": expression_json(plan, &column.expression, None),
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut aggregate_names = Vec::new();
+    let mut groups = Vec::new();
+    for column in &plan.projection.columns {
+        if column.expression.has_aggregate() {
+            collect_aggregate_names(&column.expression, &mut aggregate_names);
+        } else {
+            groups.push(column.name.clone());
+        }
+    }
+    let aggregation = if aggregate_names.is_empty() {
+        JsonValue::Null
+    } else {
+        json!({"groups": groups, "aggregates": aggregate_names})
+    };
+    let limit = match &plan.limit {
+        None => JsonValue::Null,
+        Some(Limit::Literal { value }) => json!({"kind": "literal", "value": value}),
+        Some(Limit::Parameter { name }) => {
+            json!({"kind": "parameter", "name": name, "valueType": "integer"})
+        }
+    };
+    json!({
+        "queryContractVersion": plan.query_contract_version,
+        "candidateSource": plan.candidate_source,
+        "patterns": patterns,
+        "predicates": predicates,
+        "projection": {"distinct": plan.projection.distinct, "columns": columns},
+        "aggregation": aggregation,
+        "ordering": plan.ordering,
+        "limit": limit,
+        "maxTraversalHops": plan.max_traversal_hops,
+        "requiresOccurrenceConstraint": plan.requires_occurrence_constraint,
+    })
+}
+
+fn relationship_type(plan: &QueryPlan, binding: &str) -> Option<RelationshipType> {
+    plan.patterns
+        .iter()
+        .flat_map(|pattern| &pattern.relationships)
+        .find_map(|relationship| {
+            (relationship.binding.as_deref() == Some(binding))
+                .then_some(relationship.relationship_type)
+        })
+}
+
+fn node_label(plan: &QueryPlan, binding: &str) -> Option<NodeLabel> {
+    plan.patterns
+        .iter()
+        .flat_map(|pattern| &pattern.nodes)
+        .find_map(|node| (node.binding == binding).then_some(node.label).flatten())
+}
+
+fn property_value_type(plan: &QueryPlan, property: &PropertyRef) -> &'static str {
+    match (
+        node_label(plan, &property.binding),
+        relationship_type(plan, &property.binding),
+        property.name.as_str(),
+    ) {
+        (Some(NodeLabel::Layer), _, "layout_version") => "integer",
+        (_, Some(RelationshipType::Contains), "order") => "integer",
+        (_, Some(RelationshipType::Contains), "x" | "y") => "float",
+        _ => "string",
+    }
+}
+
+fn property_json(plan: &QueryPlan, property: &PropertyRef) -> JsonValue {
+    json!({
+        "binding": property.binding,
+        "name": property.name,
+        "valueType": property_value_type(plan, property),
+    })
+}
+
+fn binding_value_type(plan: &QueryPlan, binding: &str) -> &'static str {
+    if let Some(label) = node_label(plan, binding) {
+        return match label {
+            NodeLabel::Content => "node",
+            NodeLabel::Layer => "layer",
+        };
+    }
+    if relationship_type(plan, binding).is_some() {
+        return "relationship";
+    }
+    "path"
+}
+
+fn expression_value_type(plan: &QueryPlan, expression: &Expression) -> &'static str {
+    match expression {
+        Expression::Binding { binding } => binding_value_type(plan, binding),
+        Expression::Property { property } => property_value_type(plan, property),
+        Expression::Parameter { name } => plan
+            .parameter_types
+            .get(name)
+            .and_then(|descriptor| descriptor.get("kind"))
+            .and_then(JsonValue::as_str)
+            .map(|kind| match kind {
+                "null" => "null",
+                "boolean" => "boolean",
+                "integer" => "integer",
+                "float" => "float",
+                "string" => "string",
+                "node" => "node",
+                "layer" => "layer",
+                "relationship" => "relationship",
+                "path" => "path",
+                "list" => "list",
+                "record" => "record",
+                _ => "string",
+            })
+            .unwrap_or("string"),
+        Expression::List { .. } => "list",
+        Expression::Record { .. } => "record",
+        Expression::Aggregate {
+            function, argument, ..
+        } => match function {
+            AggregateFunction::Count => "integer",
+            AggregateFunction::Avg => "float",
+            AggregateFunction::Collect => "list",
+            _ => argument
+                .as_deref()
+                .map_or("integer", |argument| expression_value_type(plan, argument)),
+        },
+    }
+}
+
+fn descriptor(plan: &QueryPlan, expression: &Expression) -> Option<JsonValue> {
+    match expression {
+        Expression::List { items } if items.is_empty() => None,
+        Expression::List { items } => {
+            let element = items.iter().find_map(|item| descriptor(plan, item))?;
+            Some(json!({"kind": "list", "elementType": element}))
+        }
+        Expression::Record { fields } => Some(json!({
+            "kind": "record",
+            "fields": fields.iter().map(|field| json!({
+                "name": field.name,
+                "type": descriptor(plan, &field.value).unwrap_or_else(|| json!({"kind": expression_value_type(plan, &field.value)})),
+            })).collect::<Vec<_>>(),
+        })),
+        Expression::Parameter { name } => plan.parameter_types.get(name).cloned(),
+        _ => Some(json!({"kind": expression_value_type(plan, expression)})),
+    }
+}
+
+fn expression_json(
+    plan: &QueryPlan,
+    expression: &Expression,
+    expected: Option<&JsonValue>,
+) -> JsonValue {
+    match expression {
+        Expression::Binding { binding } => json!({
+            "kind": "binding", "name": binding, "valueType": binding_value_type(plan, binding),
+        }),
+        Expression::Property { property } => {
+            let mut value = property_json(plan, property);
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("kind".into(), json!("property"));
+            value
+        }
+        Expression::Parameter { name } => json!({
+            "kind": "parameter", "name": name, "valueType": expression_value_type(plan, expression),
+        }),
+        Expression::List { items } => {
+            let element_type = items
+                .iter()
+                .find_map(|item| descriptor(plan, item))
+                .or_else(|| expected.and_then(|expected| expected.get("elementType").cloned()))
+                .unwrap_or_else(|| json!({"kind": "string"}));
+            json!({
+                "kind": "list",
+                "elementType": element_type,
+                "items": items.iter().map(|item| expression_json(plan, item, Some(&element_type))).collect::<Vec<_>>(),
+            })
+        }
+        Expression::Record { fields } => json!({
+            "kind": "record",
+            "fields": fields.iter().map(|field| json!({
+                "name": field.name,
+                "expression": expression_json(plan, &field.value, None),
+            })).collect::<Vec<_>>(),
+        }),
+        Expression::Aggregate {
+            function,
+            distinct,
+            argument,
+        } => json!({
+            "kind": "aggregate",
+            "function": function.as_str(),
+            "distinct": distinct,
+            "argument": argument.as_deref().map(|argument| expression_json(plan, argument, None)).unwrap_or_else(|| json!({"kind": "all"})),
+            "valueType": expression_value_type(plan, expression),
+        }),
+    }
+}
+
+fn collect_aggregate_names(expression: &Expression, names: &mut Vec<&'static str>) {
+    match expression {
+        Expression::Aggregate { function, .. } => names.push(function.as_str()),
+        Expression::List { items } => items
+            .iter()
+            .for_each(|item| collect_aggregate_names(item, names)),
+        Expression::Record { fields } => fields
+            .iter()
+            .for_each(|field| collect_aggregate_names(&field.value, names)),
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -33,8 +33,11 @@ const ACTION_PROPERTIES: &[&str] = &[
 /// syntax error, which is the difference between a caller learning the contract
 /// and guessing at it.
 const UNSUPPORTED_KEYWORDS: &[&str] = &[
+    "union", "unwind", "optional", "with", "foreach", "case", "exists",
+];
+const FORBIDDEN_KEYWORDS: &[&str] = &[
     "create", "merge", "delete", "set", "remove", "detach", "drop", "alter", "call", "install",
-    "load", "union", "unwind", "optional", "with", "foreach", "case", "exists",
+    "load",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +91,14 @@ impl Lexer {
             } else if character == '$' {
                 index += 1;
                 let start = index;
+                if !matches!(characters.get(index), Some(character) if character.is_ascii_alphabetic() || *character == '_')
+                {
+                    return Err(QueryError::new(
+                        QueryCode::QuerySyntaxInvalid,
+                        "query",
+                        "a parameter name begins with an ASCII letter or underscore",
+                    ));
+                }
                 while index < characters.len()
                     && (characters[index].is_ascii_alphanumeric() || characters[index] == '_')
                 {
@@ -210,6 +221,33 @@ impl Parser {
     }
 
     fn query(&mut self) -> Result<QueryPlan, QueryError> {
+        for token in &self.tokens {
+            if let Token::Word(word) = token
+                && FORBIDDEN_KEYWORDS.contains(&word.to_ascii_lowercase().as_str())
+            {
+                return Err(QueryError::new(
+                    QueryCode::QueryConstructForbidden,
+                    "query",
+                    format!("`{word}` is forbidden by query contract version 1"),
+                ));
+            }
+        }
+        if self.tokens.iter().any(|token| matches!(token, Token::Symbol(symbol) if symbol == "*"))
+            && !self.tokens.iter().any(|token| matches!(token, Token::Word(word) if word.eq_ignore_ascii_case("count") || word.eq_ignore_ascii_case("min")))
+        {
+            return Err(QueryError::new(
+                QueryCode::QueryConstructForbidden,
+                "query",
+                "variable-length relationships are forbidden",
+            ));
+        }
+        if self.tokens.iter().any(|token| matches!(token, Token::Word(word) if word.eq_ignore_ascii_case("vector_similarity"))) {
+            return Err(QueryError::new(
+                QueryCode::QueryConstructUnsupported,
+                "query.where",
+                "vector search is deferred from query contract version 1",
+            ));
+        }
         // A construct outside v1 is named as unsupported rather than reported as
         // a bare syntax error.
         for token in &self.tokens {
@@ -240,15 +278,15 @@ impl Parser {
         // A node whose label cannot be inferred from a relationship it takes part
         // in has to state one: an unlabelled zero-hop pattern is an untyped scan
         // of the whole store.
-        for pattern in &patterns {
-            for node in &pattern.nodes {
+        for (pattern_index, pattern) in patterns.iter().enumerate() {
+            for (node_index, node) in pattern.nodes.iter().enumerate() {
                 let anchored = pattern.relationships.iter().any(|relationship| {
                     relationship.from == node.binding || relationship.to == node.binding
                 });
                 if node.label.is_none() && !anchored {
                     return Err(QueryError::new(
                         QueryCode::QueryTypeMismatch,
-                        "query",
+                        format!("query.match[{pattern_index}].nodes[{node_index}]"),
                         format!("`{}` needs a node label", node.binding),
                     ));
                 }
@@ -258,11 +296,22 @@ impl Parser {
         if hops > self.limits.traversal_hops {
             return Err(QueryError::new(
                 QueryCode::TraversalLimitExceeded,
-                "query",
+                if patterns.len() == 1 {
+                    "query.match[0]"
+                } else {
+                    "query.match"
+                },
                 format!("at most {} traversal hops", self.limits.traversal_hops),
             ));
         }
-        if self.bindings.len() + self.relationship_bindings.len() > self.limits.variables {
+        let path_bindings = patterns
+            .iter()
+            .filter_map(|pattern| pattern.path_binding.as_ref())
+            .collect::<HashSet<_>>()
+            .len();
+        if self.bindings.len() + self.relationship_bindings.len() + path_bindings
+            > self.limits.variables
+        {
             return Err(QueryError::new(
                 QueryCode::VariableLimitExceeded,
                 "query",
@@ -298,19 +347,23 @@ impl Parser {
             return Err(self.syntax("unexpected trailing input"));
         }
 
-        let requires_occurrence_constraint = patterns.iter().any(|pattern| {
-            let has_contains = pattern
-                .relationships
-                .iter()
-                .any(|relationship| relationship.relationship_type == RelationshipType::Contains);
-            let has_action = pattern.relationships.iter().any(|relationship| {
+        let contains = patterns
+            .iter()
+            .flat_map(|pattern| &pattern.relationships)
+            .filter(|relationship| relationship.relationship_type == RelationshipType::Contains);
+        let actions = patterns
+            .iter()
+            .flat_map(|pattern| &pattern.relationships)
+            .filter(|relationship| {
                 matches!(
                     relationship.relationship_type,
                     RelationshipType::Expands | RelationshipType::References
                 )
-            });
-            has_contains && has_action
-        });
+            })
+            .collect::<Vec<_>>();
+        let requires_occurrence_constraint = contains
+            .into_iter()
+            .any(|membership| actions.iter().any(|action| membership.to == action.from));
 
         Ok(QueryPlan {
             query_contract_version: 1,
@@ -322,10 +375,12 @@ impl Parser {
             limit,
             max_traversal_hops: hops,
             requires_occurrence_constraint,
+            parameter_types: Default::default(),
         })
     }
 
     fn pattern_part(&mut self) -> Result<PatternPart, QueryError> {
+        self.occurrence = 0;
         // `p = (a)-[:CONNECTED]-(b)` binds the whole path.
         let path_binding = if matches!(self.peek(), Some(Token::Word(_)))
             && matches!(self.tokens.get(self.position + 1), Some(Token::Symbol(symbol)) if symbol == "=")
@@ -358,6 +413,29 @@ impl Parser {
                 to,
             });
             nodes.push(target);
+            let (from_label, to_label) = match relationship.2 {
+                RelationshipType::Connected => (NodeLabel::Content, NodeLabel::Content),
+                RelationshipType::Contains => (NodeLabel::Layer, NodeLabel::Content),
+                RelationshipType::Expands | RelationshipType::References => {
+                    (NodeLabel::Content, NodeLabel::Layer)
+                }
+            };
+            let relationship = relationships.last().expect("relationship was pushed");
+            for node in &mut nodes {
+                let inferred = if node.binding == relationship.from {
+                    Some(from_label)
+                } else if node.binding == relationship.to {
+                    Some(to_label)
+                } else {
+                    None
+                };
+                if node.label.is_none()
+                    && let Some(inferred) = inferred
+                {
+                    node.label = Some(inferred);
+                    self.bindings.insert(node.binding.clone(), Some(inferred));
+                }
+            }
         }
         Ok(PatternPart {
             path_binding,
@@ -370,11 +448,19 @@ impl Parser {
         self.expect_symbol("(")?;
         let binding = self.identifier()?;
         let label = if self.eat_symbol(":") {
+            if matches!(self.peek(), Some(Token::Parameter(_))) {
+                return Err(QueryError::new(
+                    QueryCode::DynamicSchemaForbidden,
+                    "query.match[0].label",
+                    "dynamic node labels are forbidden",
+                )
+                .with_phase(super::error::QueryPhase::Parse));
+            }
             let name = self.identifier()?;
             Some(NodeLabel::parse(&name).ok_or_else(|| {
                 QueryError::new(
                     QueryCode::UnknownLabel,
-                    "query",
+                    format!("query.match[0].nodes[{}].label", self.occurrence),
                     format!("`{name}` is not a v1 node label"),
                 )
             })?)
@@ -492,13 +578,9 @@ impl Parser {
                 return Ok(Predicate::NullTest { property, negated });
             }
             if self.eat_word("absent") {
-                return Err(QueryError::new(
-                    QueryCode::QueryConstructUnsupported,
-                    "query",
-                    "IS ABSENT is contract v1 but is not implemented yet",
-                ));
+                return Ok(Predicate::AbsenceTest { property, negated });
             }
-            return Err(self.syntax("expected NULL after IS"));
+            return Err(self.syntax("expected NULL or ABSENT after IS"));
         }
         let operator = match self.peek().cloned() {
             Some(Token::Symbol(symbol)) => {
@@ -578,16 +660,27 @@ impl Parser {
 
     fn return_clause(&mut self) -> Result<Projection, QueryError> {
         let distinct = self.eat_word("distinct");
-        let mut columns = vec![self.return_item()?];
+        let mut columns = vec![self.return_item().map_err(|mut error| {
+            if error.path == "query" {
+                error.path = "query.return[0]".into();
+            }
+            error
+        })?];
         while self.eat_symbol(",") {
-            columns.push(self.return_item()?);
+            let index = columns.len();
+            columns.push(self.return_item().map_err(|mut error| {
+                if error.path == "query" {
+                    error.path = format!("query.return[{index}]");
+                }
+                error
+            })?);
         }
         let mut seen = HashSet::new();
-        for column in &columns {
+        for (index, column) in columns.iter().enumerate() {
             if !seen.insert(column.name.clone()) {
                 return Err(QueryError::new(
                     QueryCode::DuplicateOutputColumn,
-                    "query",
+                    format!("query.return[{index}]"),
                     format!("output column `{}` appears twice", column.name),
                 ));
             }
@@ -613,10 +706,13 @@ impl Parser {
             match &expression {
                 Expression::Property { property } => property.name.clone(),
                 Expression::Binding { binding } => binding.clone(),
-                Expression::Parameter { name } => name.clone(),
-                Expression::Aggregate { function, .. } => function.as_str().to_owned(),
-                Expression::List { .. } => "list".to_owned(),
-                Expression::Record { .. } => "record".to_owned(),
+                _ => {
+                    return Err(QueryError::new(
+                        QueryCode::QuerySyntaxInvalid,
+                        "query",
+                        "parameter, aggregate, list, and record expressions require AS aliases",
+                    ));
+                }
             }
         };
         Ok(Column { name, expression })
@@ -672,6 +768,14 @@ impl Parser {
             return Ok(Expression::Parameter { name });
         }
         let binding = self.identifier()?;
+        if self.eat_symbol("[") {
+            return Err(QueryError::new(
+                QueryCode::DynamicSchemaForbidden,
+                "query",
+                "dynamic property lookup is forbidden",
+            )
+            .with_phase(super::error::QueryPhase::Parse));
+        }
         if matches!(self.peek(), Some(Token::Symbol(symbol)) if symbol == "(") {
             return self.aggregate(&binding, depth);
         }
@@ -864,7 +968,7 @@ impl Parser {
                 if value > self.limits.hard_rows {
                     return Err(QueryError::new(
                         QueryCode::RowLimitExceeded,
-                        "query",
+                        "query.limit",
                         format!("LIMIT may not exceed {}", self.limits.hard_rows),
                     ));
                 }

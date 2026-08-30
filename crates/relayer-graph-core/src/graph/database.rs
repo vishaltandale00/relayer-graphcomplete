@@ -19,6 +19,7 @@ use crate::{
     SearchIndexRevision, SearchTarget, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
     interaction_input_digest,
+    query::QueryReadPermit,
     storage::{
         SqliteGraphStore,
         sqlite::{contexts::ContextTable, nodes::NodeTable, search_index::SearchIndexTable},
@@ -519,6 +520,19 @@ impl GraphDatabase {
                 .await?
         };
         Ok(GraphWriter::new(self.clone(), scope))
+    }
+
+    /// Mint the current-thread search entitlement from canonical interaction
+    /// provenance. A public request never supplies the permitted identity.
+    pub async fn current_thread_query_permit(
+        &self,
+        interaction_node_id: NodeId,
+    ) -> Result<QueryReadPermit, GraphError> {
+        let mut connection = self.storage.acquire().await?;
+        let scope = NodeTable::new(&mut connection)
+            .interaction_scope(interaction_node_id)
+            .await?;
+        Ok(QueryReadPermit::current_thread(scope.thread_id))
     }
 
     pub async fn accepted_graph_closure(

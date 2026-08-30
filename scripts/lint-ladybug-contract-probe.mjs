@@ -88,9 +88,17 @@ assert.match(client, /prepared\.is_read_only\(\)/, "the parsed read-only gate is
 for (const lowering of [
   /fn normalize_value\(/, /fn normalize_node\(/, /fn normalize_relationship\(/, /fn list_descriptor\(/,
 ]) assert.match(client, lowering, `the promoted client lost ${lowering}`);
-assert.match(client, /bail!\("engine returned a nonfinite float"\)/, "nonfinite floats are no longer rejected");
+assert.match(
+  client,
+  /if !value\.is_finite\(\)[\s\S]*?invalid\("engine returned a nonfinite float"\)/,
+  "nonfinite floats are no longer rejected",
+);
 assert.match(client, /if value == 0\.0 \{ 0\.0 \} else \{ value \}/, "negative zero is no longer canonicalised");
-assert.match(client, /engine integer exceeded i64/, "int128 overflow is no longer rejected");
+assert.match(
+  client,
+  /i64::try_from\(\*value\)[\s\S]*?NormalizeFailureKind::IntegerOverflow/,
+  "int128 overflow is no longer rejected",
+);
 assert.doesNotMatch(client, /INSTALL\s|LOAD EXTENSION/i, "the client loads an engine extension");
 
 // And that the proofs the probe ran once now run on every build.

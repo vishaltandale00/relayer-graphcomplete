@@ -235,7 +235,7 @@ pub fn canonical_inventory(snapshot: &SearchIndexRebuildSnapshot) -> SearchInven
                     vec![
                         "relationship".into(),
                         "CONTAINS".into(),
-                        format!("membership:{}:{node_id}", layer.layer.id),
+                        format!("membership:{}:{position}:{node_id}", layer.layer.id),
                         layer_identity.clone(),
                         format!("content:{node_id}"),
                     ],
@@ -448,7 +448,10 @@ fn layer_properties(layer: &ResolvedLayer) -> Properties {
         ),
         property(
             "layout_version",
-            Value::Int64(layout.map_or(0, |value| i64::from(value.version))),
+            match layout {
+                Some(layout) => Value::Int64(i64::from(layout.version)),
+                None => Value::Null(LogicalType::Int64),
+            },
         ),
         property("has_layout", Value::Bool(layout.is_some())),
     ]
