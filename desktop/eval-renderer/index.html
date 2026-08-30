@@ -6,6 +6,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
   <title>Relayer Eval</title>
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./ablation.css" />
 </head>
 <body>
   <div class="shell">
@@ -22,6 +23,7 @@
       </section>
       <section id="configureView" class="view hidden">
         <header><span class="eyebrow">New test run</span><h1>Configure the matrix</h1><p>Each selected test case runs once against each selected harness configuration.</p></header>
+        <fieldset class="ablation-presets"><legend>Ablation presets</legend><p>Hold the case and provider setup constant while changing one product capability.</p><div id="ablationOptions" class="ablation-options"></div></fieldset>
         <div class="configuration-grid">
           <fieldset><legend>Test cases</legend><div id="caseOptions" class="option-list"></div></fieldset>
           <fieldset><legend>Harnesses under test</legend><div id="harnessOptions" class="option-list"></div></fieldset>

@@ -98,6 +98,18 @@ export const evalCases = Object.freeze([
   })),
 ]);
 
+const evalAblations = Object.freeze([Object.freeze({
+  id: "graph-search-query-v1",
+  name: "Graph search · query-v1",
+  description: "Run the same graph-memory case with indexing-only baselines and explicit query-v1 search treatments.",
+  testCaseIds: Object.freeze([graphMemoryEvalCaseId]),
+  harnessPairs: Object.freeze([
+    Object.freeze({ provider: "Codex", control: "codex-basic", treatment: "codex-basic-graph-search" }),
+    Object.freeze({ provider: "Claude", control: "claude-basic", treatment: "claude-basic-graph-search" }),
+    Object.freeze({ provider: "Prime Agent", control: "prime-agent-basic", treatment: "prime-agent-basic-graph-search" }),
+  ]),
+})]);
+
 export function resolveEvalCasePrompts(definition, testRunId) {
   if (!definition) throw new Error("Cannot resolve prompts for an unknown Eval case.");
   const prompts = typeof definition.promptsForRun === "function"
@@ -641,13 +653,21 @@ export class EvalService {
   }
 
   catalog() {
+    const availableConfigurations = new Set(this.configurations.keys());
     return {
       cases: copy(evalCases.map(({ promptsForRun: _promptsForRun, gradeExecution: _gradeExecution, ...definition }) => definition)),
       harnessConfigurations: [...this.configurations.values()].map((configuration) => ({
         name: configuration.name,
         implementation: configuration.implementation,
         settings: copy(configuration.settings),
+        graphCapabilityProfile: copy(configuration.graphCapabilityProfile ?? { search: "disabled" }),
       })),
+      ablations: copy(evalAblations.map((ablation) => ({
+        ...ablation,
+        harnessPairs: ablation.harnessPairs.filter(({ control, treatment }) => (
+          availableConfigurations.has(control) && availableConfigurations.has(treatment)
+        )),
+      })).filter(({ harnessPairs }) => harnessPairs.length > 0)),
       judges: copy(evalJudges.filter((judge) => (
         judge.id === deterministicJudgeId || this.simulatedUserJudgeRunner !== null
       ))),

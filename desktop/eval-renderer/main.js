@@ -3,6 +3,11 @@ import {
   projectExecutionDossier,
   runPanelCopy,
 } from "./run-model.js";
+import {
+  bindAblationControls,
+  createRunFromControls,
+  selectionFromControls,
+} from "./configuration-model.js";
 
 const api = window.relayerEval;
 const $ = (selector) => document.querySelector(selector);
@@ -38,22 +43,28 @@ function optionMarkup({ id, name, description, detail }, group, checked) {
 
 function configure() {
   $("#caseOptions").innerHTML = catalog.cases.map((item) => optionMarkup(item, "cases", true)).join("");
-  $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({ id: item.name, name: item.name, detail: item.implementation }, "harnesses", item.name === "fixture-task-system")).join("");
+  $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({
+    id: item.name,
+    name: item.name,
+    detail: `${item.implementation} · graph search ${item.graphCapabilityProfile?.search === "query-v1" ? "query-v1" : "off"}`,
+  }, "harnesses", item.name === "fixture-task-system")).join("");
   $("#judgeOptions").innerHTML = catalog.judges.map((item, index) => optionMarkup(item, "judge", index === 0)).join("");
+  $("#ablationOptions").innerHTML = (catalog.ablations || []).map((item) => `
+    <button type="button" class="ablation-preset" data-ablation="${escapeHtml(item.id)}">
+      <b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.description)}</small><span>${item.harnessPairs.length} provider pairs</span>
+    </button>`).join("");
+  bindAblationControls(document, catalog, (selection) => {
+    toast(`Selected ${selection.harnessConfigurationNames.length / 2} graph-search provider pairs.`);
+  });
   show("configureView");
 }
 
 async function startRun() {
-  const values = (name) => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map((input) => input.value);
-  const selection = {
-    testCaseIds: values("cases"),
-    harnessConfigurationNames: values("harnesses"),
-    judgeConfigurationName: values("judge")[0],
-  };
+  const selection = selectionFromControls(document);
   if (!selection.testCaseIds.length || !selection.harnessConfigurationNames.length) return toast("Select at least one case and one harness.");
   $("#startRun").disabled = true;
   try {
-    const run = await api.createRun(selection);
+    const run = await createRunFromControls(document, api);
     selectedRunId = run.id;
     selectedExecutionId = null;
     runs = await api.listRuns();

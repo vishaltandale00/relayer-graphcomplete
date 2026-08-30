@@ -21,13 +21,16 @@ describe("Eval harness configuration availability", () => {
       "fixture-task-system.yaml",
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
+      "codex-basic-graph-search.yaml",
       "codex-basic-high.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "claude-basic-graph-search.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
       "prime-agent-basic.yaml",
+      "prime-agent-basic-graph-search.yaml",
       "prime-agent-deep.yaml",
       "prime-agent-layered-navigation-luna.yaml",
     ]);
@@ -43,10 +46,12 @@ describe("Eval harness configuration availability", () => {
       "fixture-task-system.yaml",
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
+      "codex-basic-graph-search.yaml",
       "codex-basic-high.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "claude-basic-graph-search.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
     ]);
@@ -63,10 +68,12 @@ describe("Eval harness configuration availability", () => {
       "fixture-task-system.yaml",
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
+      "codex-basic-graph-search.yaml",
       "codex-basic-high.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "claude-basic-graph-search.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
     ]);
@@ -89,6 +96,36 @@ describe("Eval harness configuration availability", () => {
       implementation: "codex.basic",
       settings: { promptProfile: "layered-navigation-multi-agent-v1" },
     });
+  });
+
+  it("keeps each graph-search treatment identical to its baseline except for identity and query authority", async () => {
+    const catalog = await loadHarnessConfigurations(evalHarnessConfigurationPaths({
+      harnessDirectory: resolve(repositoryRoot, "harnesses"),
+      isPackaged: false,
+      packageAvailable: () => true,
+    }));
+
+    for (const [controlName, treatmentName] of [
+      ["codex-basic", "codex-basic-graph-search"],
+      ["claude-basic", "claude-basic-graph-search"],
+      ["prime-agent-basic", "prime-agent-basic-graph-search"],
+    ]) {
+      const control = structuredClone(catalog.get(controlName));
+      const treatment = structuredClone(catalog.get(treatmentName));
+      expect(control?.graphCapabilityProfile).toEqual({ search: "disabled" });
+      expect(treatment?.graphCapabilityProfile).toEqual({ search: "query-v1" });
+      if (control) {
+        control.name = "comparison";
+        control.revision = 1;
+        control.graphCapabilityProfile = { search: "comparison" };
+      }
+      if (treatment) {
+        treatment.name = "comparison";
+        treatment.revision = 1;
+        treatment.graphCapabilityProfile = { search: "comparison" };
+      }
+      expect(treatment).toEqual(control);
+    }
   });
 
   it("keeps the layered Codex harness product-facing and the high variant internal", async () => {

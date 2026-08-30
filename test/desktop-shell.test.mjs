@@ -408,10 +408,14 @@ describe("desktop skeleton", () => {
     expect(evalMain).toContain("process.env.PYTHONPATH");
     expect(evalDashboard).toContain("Test cases");
     expect(evalDashboard).toContain("Harnesses under test");
+    expect(evalDashboard).toContain("Ablation presets");
     expect(evalDashboard).toContain("Open the judge review or the read-only production workspace");
     expect(evalDashboard).not.toContain('id="judgeOutputPanel"');
     expect(evalDashboardMain).toContain("Judge review ↗");
     expect(evalDashboardMain).toContain("Product workspace ↗");
+    expect(evalDashboardMain).toContain("bindAblationControls");
+    expect(evalDashboardMain).toContain("selectionFromControls");
+    expect(evalDashboardMain).toContain("createRunFromControls");
     expect(evalDashboardMain).not.toContain("renderJudgeOutput");
     expect(evalPreload).toContain("openJudgeReview");
     expect(evalPreload).toContain("loadJudgeScreenshot");
