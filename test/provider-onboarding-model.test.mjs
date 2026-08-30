@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createProviderConnectionCancellationState,
   providerOnboardingCompletionIntent,
+  providerOnboardingRecoveryAction,
   reconcileProviderOnboardingState,
   resumableProviderDefinitions,
   setProviderOnboardingControlsBusy,
@@ -18,6 +19,18 @@ const projection = {
 };
 
 describe("provider onboarding renderer state", () => {
+  it("offers an exact-provider refresh when setup is blocked by zero eligible execution models", () => {
+    expect(providerOnboardingRecoveryAction({
+      blockingReason: {
+        code: "provider_no_eligible_execution_models",
+        message: "No supported text models are available.",
+      },
+    })).toEqual({ kind: "refresh_models", label: "Refresh models and set up defaults" });
+    expect(providerOnboardingRecoveryAction({
+      blockingReason: { code: "harness_unavailable", message: "Install the harness." },
+    })).toBeNull();
+  });
+
   it("does not silently choose an alternate harness when the app default is incompatible", () => {
     expect(reconcileProviderOnboardingState(projection)).toEqual({ harnessId: null, family: null });
   });

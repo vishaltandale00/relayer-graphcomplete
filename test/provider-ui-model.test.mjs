@@ -118,6 +118,21 @@ describe("provider renderer model", () => {
       .toEqual({ blocked: false, reason: null });
   });
 
+  it("directs a connected zero-eligible provider to model refresh instead of another connection", () => {
+    expect(firstRunGateState({
+      hasCompletedOnboarding: false,
+      providers: [{
+        lifecycleState: "active",
+        connected: true,
+        unavailableReason: { code: "provider_no_eligible_execution_models", message: "No supported text models." },
+      }],
+      defaultResolution: null,
+    })).toEqual({
+      blocked: true,
+      reason: "Refresh models and set up defaults for the connected provider.",
+    });
+  });
+
   it("labels pending and tombstoned definitions as unusable", () => {
     expect(providerDefinitionStatus({ lifecycleState: "removal_pending" })).toMatchObject({ usable: false, label: "Finishing removal" });
     expect(providerDefinitionStatus({ lifecycleState: "tombstoned" })).toMatchObject({ usable: false, label: "Removed provider" });

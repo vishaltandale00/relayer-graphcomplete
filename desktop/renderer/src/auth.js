@@ -6,6 +6,7 @@ import {
 import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
 import {
   providerOnboardingCompletionIntent,
+  providerOnboardingRecoveryAction,
   createProviderConnectionCancellationState,
   reconcileProviderOnboardingState,
   resumableProviderDefinitions,
@@ -206,6 +207,10 @@ function renderOnboardingChoices({ focus } = {}) {
     ? onboardingFamilyOptionsMarkup(harness, onboardingFamilyIntent ?? {})
     : `<p class="field-error" role="alert">${onboardingProjection.blockingReason?.message ?? "Choose a compatible harness to continue."}</p>`;
   $("#finishProviderSetup").disabled = !finishIntentValid();
+  const recovery = providerOnboardingRecoveryAction(onboardingProjection);
+  const recoveryButton = $("#refreshOnboardingProviderModels");
+  recoveryButton.classList.toggle("hidden", recovery === null);
+  recoveryButton.textContent = recovery?.label ?? "Refresh models and set up defaults";
   bindOnboardingChoices({ focus });
 }
 
@@ -324,6 +329,19 @@ function bindProviderSetup() {
       setBusy(false);
     }
     if (blockingError) focusRequiredOnboardingChoice();
+  };
+  $("#refreshOnboardingProviderModels").onclick = async () => {
+    if (!connectedDefinition) return;
+    setBusy(true);
+    try {
+      await desktop.models.refresh(connectedDefinition.id);
+      providerStatus = await desktop.providers.status();
+      await prepareFamilyStep(connectedDefinition);
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setBusy(false);
+    }
   };
 }
 

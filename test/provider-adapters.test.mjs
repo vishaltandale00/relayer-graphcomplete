@@ -22,6 +22,7 @@ import {
   providerRuntimeDirectory,
 } from "../desktop/main/providers/provider-runtime-state.mjs";
 import { ModelCatalogService } from "../desktop/main/models/model-catalog-service.mjs";
+import { toProductCatalogSnapshot } from "../desktop/main/models/model-catalog-adapter.mjs";
 import { withProviderRetry } from "../desktop/main/providers/provider-retry.mjs";
 import { ProviderHttpError } from "../desktop/main/providers/implementations/api-provider-adapter.mjs";
 import {
@@ -222,6 +223,127 @@ describe("authoritative provider adapter registry", () => {
 });
 
 describe("secret-backed API adapters", () => {
+  it.each([
+    ["openai-api", [{ id: "gpt-5.4" }, { id: "text-embedding-3-large" }], "gpt-5.4"],
+    ["anthropic-api", [{ id: "claude-sonnet-4-20250514" }, { id: "embedding-model" }], "claude-sonnet-4-20250514"],
+    ["openrouter", [
+      { id: "openai/gpt-5.4", architecture: { output_modalities: ["text"] } },
+      { id: "openai/text-embedding-3-large", architecture: { output_modalities: ["embeddings"] } },
+    ], "openai/gpt-5.4"],
+    ["vercel-ai-router", [{ id: "openai/gpt-5.4", type: "language" }, { id: "openai/sora", type: "video" }], "openai/gpt-5.4"],
+  ])("%s preserves catalog diagnostics but admits only capability-proven agent models", async (
+    adapterId,
+    models,
+    eligibleId,
+  ) => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [...models, { id: "unknown-model" }] }),
+    }));
+    const descriptor = productionProviderAdapterRegistry.get(adapterId);
+    const adapter = productionProviderAdapterRegistry.create(
+      definition(adapterId, descriptor.defaultEndpoint),
+      { fetch, secrets: { "api-key": "secret" }, managedRuntime: runtimeForAdapter(adapterId), environment: {} },
+    );
+
+    const snapshot = await adapter.connect();
+    const product = toProductCatalogSnapshot(snapshot);
+
+    expect(snapshot.models.map(({ id, visible }) => ({ id, visible }))).toEqual(
+      models.concat({ id: "unknown-model" }).map(({ id }) => ({ id, visible: true })),
+    );
+    expect(snapshot.models.filter(({ availability }) => availability === "available").map(({ id }) => id))
+      .toEqual([eligibleId]);
+    expect(product.models.filter(({ available }) => !available)).toEqual([
+      expect.objectContaining({
+        unavailableReason: {
+          code: "provider_model_not_execution_eligible",
+          message: "This provider model is not eligible for agent execution.",
+        },
+      }),
+      expect.objectContaining({
+        id: "unknown-model",
+        unavailableReason: {
+          code: "provider_model_capability_unknown",
+          message: "This provider model has no recognized agent-execution capability evidence.",
+        },
+      }),
+    ]);
+  });
+
+  it("keeps a provider connected when discovery has zero execution-eligible models", async () => {
+    const descriptor = productionProviderAdapterRegistry.get("openai-api");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("openai-api", descriptor.defaultEndpoint),
+      {
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "text-embedding-3-large" }] }) }),
+        secrets: { "api-key": "secret" },
+        managedRuntime: codexRuntime,
+        environment: {},
+      },
+    );
+
+    const snapshot = await adapter.connect();
+
+    expect(snapshot.provider.status).toBe("available");
+    expect(snapshot.models).toEqual([expect.objectContaining({
+      id: "text-embedding-3-large",
+      visible: true,
+      availability: "unavailable",
+      unavailableReasonCode: "provider_model_not_execution_eligible",
+    })]);
+  });
+
+  it("fails closed for an unknown model that merely uses an OpenAI agent-family prefix", async () => {
+    const descriptor = productionProviderAdapterRegistry.get("openai-api");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("openai-api", descriptor.defaultEndpoint),
+      {
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "gpt-made-up" }] }) }),
+        secrets: { "api-key": "secret" },
+        managedRuntime: codexRuntime,
+        environment: {},
+      },
+    );
+
+    await expect(adapter.connect()).resolves.toMatchObject({
+      provider: { status: "available" },
+      models: [{
+        id: "gpt-made-up",
+        availability: "unavailable",
+        unavailableReasonCode: "provider_model_capability_unknown",
+      }],
+    });
+  });
+
+  it("keeps a provider connected when every discovered model is provider-hidden and ineligible", async () => {
+    const descriptor = productionProviderAdapterRegistry.get("openai-api");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("openai-api", descriptor.defaultEndpoint),
+      {
+        fetch: async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [{ id: "text-embedding-3-large", hidden: true }] }),
+        }),
+        secrets: { "api-key": "secret" },
+        managedRuntime: codexRuntime,
+        environment: {},
+      },
+    );
+
+    await expect(adapter.connect()).resolves.toMatchObject({
+      provider: { status: "available" },
+      models: [{
+        id: "text-embedding-3-large",
+        visible: false,
+        availability: "unavailable",
+        unavailableReasonCode: "provider_model_not_execution_eligible",
+      }],
+    });
+  });
+
   for (const [adapterId, expectedEndpoint, expectedHeader] of [
     ["openai-api", "https://api.openai.com/v1/models", "authorization"],
     ["anthropic-api", "https://api.anthropic.com/v1/models", "x-api-key"],
@@ -229,10 +351,11 @@ describe("secret-backed API adapters", () => {
     ["vercel-ai-router", "https://ai-gateway.vercel.sh/v1/models", "authorization"],
   ]) {
     it(`${adapterId} discovers stable model ids through the common contract`, async () => {
+      const modelId = adapterId === "openai-api" ? "gpt-5.4" : "model-stable";
       const fetch = vi.fn(async () => ({
         ok: true,
         status: 200,
-        json: async () => ({ data: [{ id: "model-stable", name: "Model Stable" }] }),
+        json: async () => ({ data: [{ id: modelId, name: "Model Stable" }] }),
       }));
       const descriptor = productionProviderAdapterRegistry.get(adapterId);
       const adapter = productionProviderAdapterRegistry.create(
@@ -245,7 +368,7 @@ describe("secret-backed API adapters", () => {
       expect(fetch).toHaveBeenCalledOnce();
       expect(fetch.mock.calls[0][0]).toBe(expectedEndpoint);
       expect(Object.keys(fetch.mock.calls[0][1].headers).map((key) => key.toLowerCase())).toContain(expectedHeader);
-      expect(snapshot.models[0]).toMatchObject({ id: "model-stable", executionModel: "model-stable" });
+      expect(snapshot.models[0]).toMatchObject({ id: modelId, executionModel: modelId });
       expect(snapshot.systemFamily.modelIds).toEqual([]);
     });
   }

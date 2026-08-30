@@ -72,6 +72,21 @@ function renderDefinitions() {
       }
     };
   });
+  $$('[data-provider-family-recovery]', $("#providerDefinitionList")).forEach((button) => {
+    button.onclick = async () => {
+      setStatus("Refreshing provider models…");
+      try {
+        await desktop.models.refresh(button.dataset.providerFamilyRecovery);
+        await refreshProviderSettings();
+        await refreshModelFamilySettings();
+        refreshNewThreadModelPicker();
+        setStatus("Provider models and default family refreshed.", "success");
+      } catch (error) {
+        await refreshProviderSettings();
+        setStatus(error.message, "error");
+      }
+    };
+  });
   $$("[data-provider-remove]", $("#providerDefinitionList")).forEach((button) => {
     button.onclick = async () => {
       const definition = status.definitions.find((item) => item.id === button.dataset.providerRemove);

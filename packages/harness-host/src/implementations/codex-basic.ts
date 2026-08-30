@@ -162,8 +162,9 @@ export class CodexBasicHarness implements Harness {
       await run({
         environment,
         codexPathOverride: resolvedRuntime.executable,
+        ...this.codexConfigOverrides(context.access),
         ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
-        threadParams: this.threadParams(model, context),
+        threadParams: this.threadParams(model, context, context.access),
         turnParams: this.turnParams(sandboxPolicy, model),
         prompt,
         approvals: context.approvals,
@@ -230,7 +231,7 @@ export class CodexBasicHarness implements Harness {
         CODEX_MANAGED_RUNTIME_ENVIRONMENT.has(key)
       ))));
     } else if (access?.kind === "secret") {
-      if (!new Set(["openai-api", "openrouter", "vercel-ai-router"]).has(access.adapterId)) {
+      if (access.adapterId !== "openai-api") {
         throw new Error(`codex.basic cannot consume secret provider ${access.adapterId}`);
       }
       const apiKey = access.fields["api-key"];
@@ -288,18 +289,54 @@ export class CodexBasicHarness implements Harness {
     if (context.model === undefined) return this.resolved.settings.model;
     const adapterId = context.model.adapterId ?? (context.model.providerId === "codex" ? "codex-subscription" : undefined);
     if (!adapterId) throw new Error(`codex.basic cannot run provider ${context.model.providerId}`);
-    if (!new Set(["codex-subscription", "openai-api", "openrouter", "vercel-ai-router"]).has(adapterId)) {
+    if (!new Set(["codex-subscription", "openai-api"]).has(adapterId)) {
       throw new Error(`codex.basic cannot run provider adapter ${adapterId}`);
     }
     return context.model.modelId;
   }
 
-  private threadParams(model: string | undefined, context: HarnessRunContext): JsonObject {
+  private codexConfigOverrides(access: HarnessExecutionAccess | undefined): {
+    readonly codexConfigOverrides?: readonly string[];
+  } {
+    if (access?.kind !== "secret") return {};
+    return {
+      codexConfigOverrides: [
+        'model_provider="relayer_execution_provider"',
+        'model_providers.relayer_execution_provider.name="Relayer execution provider"',
+        `model_providers.relayer_execution_provider.base_url=${JSON.stringify(access.endpoint)}`,
+        'model_providers.relayer_execution_provider.env_key="OPENAI_API_KEY"',
+        'model_providers.relayer_execution_provider.wire_api="responses"',
+        "model_providers.relayer_execution_provider.requires_openai_auth=false",
+        "model_providers.relayer_execution_provider.supports_websockets=false",
+        'shell_environment_policy.filters.OPENAI_API_KEY="exclude"',
+        'shell_environment_policy.filters.OPENAI_BASE_URL="exclude"',
+      ],
+    };
+  }
+
+  private threadParams(
+    model: string | undefined,
+    context: HarnessRunContext,
+    access: HarnessExecutionAccess | undefined,
+  ): JsonObject {
     const { settings, permission } = this.resolved;
     const presentationInstructions = personalPresentationNativeInstructions(context);
     const config: Record<string, JsonObject[keyof JsonObject]> = {};
     if (settings.skipGitRepoCheck !== undefined) config.skip_git_repo_check = settings.skipGitRepoCheck;
     if (settings.webSearchMode !== undefined) config.web_search = settings.webSearchMode;
+    const executionModelProvider = access?.kind === "secret"
+      ? {
+          name: "Relayer execution provider",
+          base_url: access.endpoint,
+          env_key: "OPENAI_API_KEY",
+          wire_api: "responses",
+          requires_openai_auth: false,
+          supports_websockets: false,
+        }
+      : undefined;
+    if (executionModelProvider !== undefined) {
+      config.model_providers = { relayer_execution_provider: executionModelProvider };
+    }
     const browserMcpRuntime = this.dependencies.browserMcpRuntime;
     if (browserMcpRuntime !== undefined) {
       config.features = { tool_call_mcp_elicitation: false };
@@ -328,6 +365,7 @@ export class CodexBasicHarness implements Harness {
       sandbox: permission.sandboxMode,
       ...(permission.approvalsReviewer === undefined ? {} : { approvalsReviewer: permission.approvalsReviewer }),
       ...(model === undefined ? {} : { model }),
+      ...(executionModelProvider === undefined ? {} : { modelProvider: "relayer_execution_provider" }),
       ...(Object.keys(config).length === 0 ? {} : { config }),
       developerInstructions: presentationInstructions === "" ? null : presentationInstructions,
       serviceName: "relayer_graphcomplete",

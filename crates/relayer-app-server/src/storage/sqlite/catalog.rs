@@ -1216,10 +1216,14 @@ async fn provider_onboarding_projection_on(
                 }
             }
         }
-        let managed_family_candidate = harness
+        let managed_family_policy = harness
             .family_policy
             .as_ref()
             .filter(|policy| crate::product::applies_to_adapter(policy, &adapter_id))
+            .cloned()
+            .or_else(|| crate::product::fallback_for_adapter(&adapter_id));
+        let managed_family_candidate = managed_family_policy
+            .as_ref()
             .and_then(|policy| {
                 crate::product::derive_managed_family_members(policy, &snapshot)
                     .ok()
@@ -1319,11 +1323,23 @@ async fn provider_onboarding_projection_on(
             &right.id,
         ))
     });
-    let blocking_reason =
-        (!harnesses.iter().any(|harness| harness.selectable)).then_some(UnavailableReason {
+    let has_eligible_execution_model = snapshot
+        .models
+        .iter()
+        .any(|model| model.visible && model.available);
+    let blocking_reason = if !has_eligible_execution_model {
+        Some(UnavailableReason {
+            code: "provider_no_eligible_execution_models".into(),
+            message: "This provider is connected but has no models eligible for agent execution. Refresh its catalog or update the provider connection.".into(),
+        })
+    } else if !harnesses.iter().any(|harness| harness.selectable) {
+        Some(UnavailableReason {
             code: "no_compatible_harness".into(),
             message: "No product-visible harness currently supports this provider.".into(),
-        });
+        })
+    } else {
+        None
+    };
     let mut projection = ProviderOnboardingProjection {
         provider,
         app_default_harness_id: app_default_harness_id.into(),
@@ -2267,7 +2283,7 @@ async fn replace_system_family(
     // Move only an unset or managed default. A user-owned custom family is never replaced by
     // reconciliation. The entire catalog/family/default transition commits atomically.
     if reconcile_managed_default {
-        sqlx::query("UPDATE product_model_preferences SET default_family_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id IS NOT NULL) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?1 ELSE default_family_id END,default_provider_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id IS NOT NULL) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?2 ELSE default_provider_id END WHERE singleton=1")
+        sqlx::query("UPDATE product_model_preferences SET default_family_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id=?2) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?1 ELSE default_family_id END,default_provider_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id=?2) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?2 ELSE default_provider_id END WHERE singleton=1")
             .bind(id.value())
             .bind(snapshot.provider_id.as_str())
             .bind(legacy_default)

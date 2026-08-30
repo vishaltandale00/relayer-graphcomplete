@@ -1,6 +1,18 @@
 import { ModelCatalogAdapter, sanitizeModelCatalogSnapshot } from "../../models/model-catalog-adapter.mjs";
 import { managedRuntimeExecutionDetails, requireManagedRuntime } from "./managed-runtime-contract.mjs";
 
+export const EXECUTION_ELIGIBLE = Object.freeze({ eligible: true });
+export const MODEL_NOT_EXECUTION_ELIGIBLE = Object.freeze({
+  eligible: false,
+  reasonCode: "provider_model_not_execution_eligible",
+  reason: "This provider model is not eligible for agent execution.",
+});
+export const MODEL_CAPABILITY_UNKNOWN = Object.freeze({
+  eligible: false,
+  reasonCode: "provider_model_capability_unknown",
+  reason: "This provider model has no recognized agent-execution capability evidence.",
+});
+
 export class ProviderHttpError extends Error {
   constructor(message, { status = null, code = null } = {}) {
     super(message);
@@ -16,7 +28,7 @@ function requiredSecret(values, field) {
   return value;
 }
 
-function normalizeModel(value, index) {
+function normalizeModel(value, index, modelEligibility) {
   const id = typeof value?.id === "string" ? value.id : null;
   if (!id) throw new Error(`Provider catalog model ${index} has no stable id.`);
   const label = typeof value.name === "string" && value.name.trim() !== ""
@@ -24,6 +36,13 @@ function normalizeModel(value, index) {
     : typeof value.display_name === "string" && value.display_name.trim() !== ""
       ? value.display_name
       : id;
+  const eligibility = modelEligibility(value);
+  if (eligibility?.eligible !== true
+    && (eligibility?.eligible !== false
+      || typeof eligibility.reasonCode !== "string"
+      || typeof eligibility.reason !== "string")) {
+    throw new Error(`Provider catalog model ${index} has invalid execution eligibility.`);
+  }
   return {
     id,
     catalogId: id,
@@ -31,8 +50,9 @@ function normalizeModel(value, index) {
     label,
     description: typeof value.description === "string" ? value.description : "",
     visible: value.hidden !== true,
-    availability: "available",
-    unavailableReason: null,
+    availability: eligibility.eligible ? "available" : "unavailable",
+    unavailableReason: eligibility.eligible ? null : eligibility.reason,
+    unavailableReasonCode: eligibility.eligible ? null : eligibility.reasonCode,
     availabilityNotice: null,
     isDefault: value.is_default === true,
     replacementModelId: null,
@@ -64,6 +84,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     managedRuntime,
     runtimeId,
     environment,
+    modelEligibility = () => MODEL_CAPABILITY_UNKNOWN,
   }) {
     super({ providerId: definition.id, providerLabel: definition.label });
     if (typeof fetchImplementation !== "function") throw new Error("API provider adapter requires fetch().");
@@ -78,6 +99,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     this.catalogDiscovered = false;
     this.managedRuntime = requireManagedRuntime(managedRuntime, runtimeId);
     this.runtimeExecution = managedRuntimeExecutionDetails(this.managedRuntime, environment);
+    this.modelEligibility = modelEligibility;
   }
 
   async discover({ signal } = {}) {
@@ -118,8 +140,8 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
       throw new Error("Provider returned a malformed model catalog.");
     }
     const providerModels = modelArray(payload);
-    const models = providerModels.map(normalizeModel);
-    if (!models.some(({ visible }) => visible)) throw new Error("Provider did not report any visible models.");
+    const models = providerModels.map((model, index) => normalizeModel(model, index, this.modelEligibility));
+    if (models.length === 0) throw new Error("Provider did not report any visible models.");
     const snapshot = sanitizeModelCatalogSnapshot({
       provider: { id: this.providerId, label: this.providerLabel, status: "available", unavailableReason: null },
       models,

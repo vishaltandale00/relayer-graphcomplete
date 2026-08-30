@@ -1,4 +1,18 @@
-import { SecretApiProviderAdapter, bearerHeaders } from "./api-provider-adapter.mjs";
+import {
+  EXECUTION_ELIGIBLE,
+  MODEL_CAPABILITY_UNKNOWN,
+  MODEL_NOT_EXECUTION_ELIGIBLE,
+  SecretApiProviderAdapter,
+  bearerHeaders,
+} from "./api-provider-adapter.mjs";
+
+function openRouterModelEligibility(model) {
+  const outputs = model?.architecture?.output_modalities;
+  if (!Array.isArray(outputs) || outputs.some((value) => typeof value !== "string")) {
+    return MODEL_CAPABILITY_UNKNOWN;
+  }
+  return outputs.includes("text") ? EXECUTION_ELIGIBLE : MODEL_NOT_EXECUTION_ELIGIBLE;
+}
 
 function tokenCapabilities(model) {
   const contextWindow = model?.top_provider?.context_length;
@@ -10,7 +24,7 @@ function tokenCapabilities(model) {
 
 export const openRouterDescriptor = Object.freeze({
   adapterId: "openrouter",
-  implementationVersion: "1",
+  implementationVersion: "2",
   label: "OpenRouter",
   accessContract: "secret@1",
   definitionRuntimeState: true,
@@ -21,6 +35,7 @@ export const openRouterDescriptor = Object.freeze({
   create: ({ definition, fetch, secrets, managedRuntime, environment }) => new SecretApiProviderAdapter({
     definition, fetch, credentials: { apiKey: secrets?.["api-key"] }, headers: bearerHeaders,
     modelCapabilities: tokenCapabilities,
+    modelEligibility: openRouterModelEligibility,
     requireCatalogBeforeExecution: true,
     managedRuntime, runtimeId: "codex", environment,
   }),

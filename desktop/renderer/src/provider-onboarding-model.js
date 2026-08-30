@@ -45,6 +45,14 @@ export function resumableProviderDefinitions(providerStatus) {
   ));
 }
 
+export function providerOnboardingRecoveryAction(projection) {
+  if (projection?.blockingReason?.code !== "provider_no_eligible_execution_models") return null;
+  return Object.freeze({
+    kind: "refresh_models",
+    label: "Refresh models and set up defaults",
+  });
+}
+
 export function providerOnboardingCompletionIntent({ providerId, projection, harnessId, family }) {
   if (!providerId || !projection?.projectionRevision || !harnessId || !family) return null;
   if (family.kind === "create" && (!family.name?.trim() || !family.members?.length)) return null;

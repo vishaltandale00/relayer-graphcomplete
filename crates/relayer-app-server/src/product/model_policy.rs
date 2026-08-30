@@ -2,14 +2,37 @@ use super::{CatalogError, FamilyPolicyReference, ModelFamilyMember, ProviderCata
 
 pub(crate) const CODEX_DEFAULT_FAMILY_POLICY_ID: &str = "codex-default-family";
 pub(crate) const CLAUDE_DEFAULT_FAMILY_POLICY_ID: &str = "claude-default-family";
+pub(crate) const PROVIDER_DEFAULT_FAMILY_POLICY_ID: &str = "provider-default-family";
 const CODEX_DEFAULT_FAMILY_V2_MODELS: [&str; 3] = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+const OPENAI_API_DEFAULT_FAMILY_V1_MODELS: [&str; 5] = [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+];
 
 pub(crate) fn applies_to_adapter(policy: &FamilyPolicyReference, adapter_id: &str) -> bool {
     matches!(
         (policy.id.as_str(), adapter_id),
         (CODEX_DEFAULT_FAMILY_POLICY_ID, "codex-subscription")
             | (CLAUDE_DEFAULT_FAMILY_POLICY_ID, "claude-subscription")
+            | (
+                PROVIDER_DEFAULT_FAMILY_POLICY_ID,
+                "openai-api" | "anthropic-api" | "openrouter" | "vercel-ai-router"
+            )
     )
+}
+
+pub(crate) fn fallback_for_adapter(adapter_id: &str) -> Option<FamilyPolicyReference> {
+    matches!(
+        adapter_id,
+        "openai-api" | "anthropic-api" | "openrouter" | "vercel-ai-router"
+    )
+    .then(|| FamilyPolicyReference {
+        id: PROVIDER_DEFAULT_FAMILY_POLICY_ID.into(),
+        version: 1,
+    })
 }
 
 /// Product-owned managed-family policy registry. Provider adapters normalize
@@ -73,9 +96,41 @@ pub(crate) fn derive_managed_family_members(
             let mut models = snapshot
                 .models
                 .iter()
-                .filter(|model| model.visible)
+                .filter(|model| model.visible && model.available)
                 .collect::<Vec<_>>();
             models.sort_by_key(|model| model.order);
+            Ok(models
+                .into_iter()
+                .take(super::catalog::MAX_MODELS_PER_FAMILY)
+                .enumerate()
+                .map(|(position, model)| ModelFamilyMember {
+                    provider_id: snapshot.provider_id.clone(),
+                    model_id: model.id.clone(),
+                    position,
+                })
+                .collect())
+        }
+        (PROVIDER_DEFAULT_FAMILY_POLICY_ID, 1) => {
+            let mut models = OPENAI_API_DEFAULT_FAMILY_V1_MODELS
+                .iter()
+                .filter_map(|model_id| {
+                    snapshot
+                        .models
+                        .iter()
+                        .find(|model| model.visible && model.available && model.id == *model_id)
+                })
+                .collect::<Vec<_>>();
+            let mut remaining = snapshot
+                .models
+                .iter()
+                .filter(|model| {
+                    model.visible
+                        && model.available
+                        && !models.iter().any(|selected| selected.id == model.id)
+                })
+                .collect::<Vec<_>>();
+            remaining.sort_by_key(|model| (!model.provider_default, model.order));
+            models.extend(remaining);
             Ok(models
                 .into_iter()
                 .take(super::catalog::MAX_MODELS_PER_FAMILY)
@@ -222,6 +277,56 @@ mod tests {
     }
 
     #[test]
+    fn provider_policy_prefers_the_reviewed_openai_agent_family_over_legacy_catalog_order() {
+        let members = derive_managed_family_members(
+            &FamilyPolicyReference {
+                id: PROVIDER_DEFAULT_FAMILY_POLICY_ID.into(),
+                version: 1,
+            },
+            &snapshot(vec![
+                model("gpt-3.5-turbo", 0, true, false),
+                model("gpt-5.4", 110, true, false),
+                model("gpt-5.6-luna", 127, true, false),
+                model("gpt-5.5", 117, true, false),
+                model("gpt-5.6-sol", 125, true, false),
+                model("gpt-5.6-terra", 126, true, false),
+            ]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
+                "gpt-5.5",
+                "gpt-5.4"
+            ]
+        );
+    }
+
+    #[test]
+    fn every_api_adapter_has_the_same_versioned_fail_closed_fallback_policy() {
+        for adapter_id in [
+            "openai-api",
+            "anthropic-api",
+            "openrouter",
+            "vercel-ai-router",
+        ] {
+            let policy = fallback_for_adapter(adapter_id).expect("API adapter fallback policy");
+            assert_eq!(policy.id, PROVIDER_DEFAULT_FAMILY_POLICY_ID);
+            assert_eq!(policy.version, 1);
+            assert!(applies_to_adapter(&policy, adapter_id));
+        }
+        assert!(fallback_for_adapter("codex-subscription").is_none());
+        assert!(fallback_for_adapter("claude-subscription").is_none());
+    }
+
+    #[test]
     fn claude_policy_uses_all_visible_aliases_in_provider_order() {
         let policy = FamilyPolicyReference {
             id: CLAUDE_DEFAULT_FAMILY_POLICY_ID.into(),
@@ -230,13 +335,17 @@ mod tests {
         assert!(applies_to_adapter(&policy, "claude-subscription"));
         assert!(!applies_to_adapter(&policy, "anthropic-api"));
 
+        let mut unavailable = model("unavailable", 0, true, true);
+        unavailable.available = false;
+
         let members = derive_managed_family_members(
             &policy,
             &snapshot(vec![
                 model("opus", 1, true, false),
                 model("sonnet", 0, true, true),
-                model("fable", 2, true, false),
-                model("hidden", 3, false, true),
+                model("fable", 3, true, false),
+                model("hidden", 4, false, true),
+                unavailable,
             ]),
         )
         .unwrap();
