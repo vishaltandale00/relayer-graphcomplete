@@ -20,6 +20,7 @@ function presentationKey(state) {
   return canonicalJson({
     executionId: state.executionId,
     threadId: state.threadId,
+    threadRevision: state.threadRevision,
     turnId: state.turnId,
     layerId: state.layerId,
     selectedNodeId: state.selectedNodeId,
@@ -34,6 +35,9 @@ function validateState(executionId, state) {
   }
   if (!state.threadId || !state.turnId) {
     throw new Error("The production review workspace has no selected thread and turn.");
+  }
+  if (typeof state.threadRevision !== "string" || !state.threadRevision.trim()) {
+    throw new Error("The production review workspace has no stable thread revision.");
   }
   if (!Array.isArray(state.navigationPath) || state.navigationPath.some((entry) => (
     !entry?.layerId || !(entry.viaActionId === null || typeof entry.viaActionId === "string")
@@ -85,6 +89,7 @@ function validateScreenshotInput({ target, mode, label }) {
 
 function reviewUiState(state) {
   return {
+    threadRevision: state.threadRevision,
     turnId: state.turnId,
     layerId: state.layerId,
     selectedNodeId: state.selectedNodeId,
@@ -100,6 +105,7 @@ export class ReviewSession {
     webContents,
     artifactDirectory,
     ipc,
+    loadInputDraftRevision,
     commandTimeoutMs = 5_000,
   }) {
     if (!executionId) throw new Error("ReviewSession requires an execution ID.");
@@ -113,6 +119,7 @@ export class ReviewSession {
     this.webContents = webContents;
     this.artifactDirectory = artifactDirectory;
     this.ipc = ipc;
+    this.loadInputDraftRevision = loadInputDraftRevision;
     this.commandTimeoutMs = commandTimeoutMs;
     this.opened = false;
     this.interactionTrace = [];
@@ -128,7 +135,7 @@ export class ReviewSession {
     ) {
       throw new Error("ReviewSession requires the local production review workspace.");
     }
-    const state = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+    const state = await this.#snapshot();
     this.opened = true;
     this.interactionTrace.push({ type: "session-opened", at: new Date().toISOString(), state: structuredClone(state) });
     return structuredClone(state);
@@ -137,7 +144,7 @@ export class ReviewSession {
   async screenshot({ target, mode = "visible", label }) {
     validateScreenshotInput({ target, mode, label });
     this.#assertOpen();
-    const initialState = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+    const initialState = await this.#snapshot();
     let plan;
     let state;
     let ownsCapture = false;
@@ -145,7 +152,7 @@ export class ReviewSession {
     try {
       plan = await this.#rendererCommand("capturePlan", { target, mode });
       ownsCapture = target.kind === "element";
-      state = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+      state = await this.#snapshot();
       if (presentationKey(state) !== presentationKey(initialState)) {
         throw new Error("The production workspace changed presentation while preparing the screenshot.");
       }
@@ -182,6 +189,7 @@ export class ReviewSession {
       label: label.trim(),
       executionId: this.executionId,
       threadId: state.threadId,
+      threadRevision: state.threadRevision,
       turnId: state.turnId,
       layerId: state.layerId,
       selectedNodeId: state.selectedNodeId,
@@ -229,11 +237,24 @@ export class ReviewSession {
     };
   }
 
+  async state() {
+    this.#assertOpen();
+    return structuredClone(await this.#snapshot());
+  }
+
+  async inspectElement(elementRef) {
+    if (typeof elementRef !== "string" || !elementRef) throw new Error("Element inspection requires a reference.");
+    const state = await this.state();
+    const control = state.controls.find((candidate) => candidate.elementRef === elementRef);
+    if (!control) throw new Error(`Unknown or invisible review control: ${elementRef}`);
+    return { state, control: structuredClone(control) };
+  }
+
   async interact({ elementRef, activate }) {
     this.#assertOpen();
     if (typeof elementRef !== "string" || !elementRef) throw new Error("Interact requires an element reference.");
     if (activate !== true) throw new Error("The review interact tool supports activate only.");
-    const before = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+    const before = await this.#snapshot();
     const control = before.controls?.find((candidate) => candidate.elementRef === elementRef);
     if (!control) throw new Error(`Unknown or invisible review control: ${elementRef}`);
     if (control.kind === "capture-region") throw new Error(`Review element is a screenshot target, not an interactive control: ${elementRef}`);
@@ -256,11 +277,8 @@ export class ReviewSession {
     if (!Number.isSafeInteger(delta) || delta === 0) {
       throw new Error("History delta must be a non-zero signed integer.");
     }
-    const restored = validateState(
-      this.executionId,
-      await this.#rendererCommand("history", { delta }),
-    );
-    const observed = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+    const restored = await this.#validateState(await this.#rendererCommand("history", { delta }));
+    const observed = await this.#snapshot();
     if (presentationKey(observed) !== presentationKey(restored)) {
       throw new Error("The production workspace did not restore the requested review history state.");
     }
@@ -283,7 +301,7 @@ export class ReviewSession {
 
   async #waitForInteractionState(before, control) {
     const deadline = Date.now() + this.commandTimeoutMs;
-    let current = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+    let current = await this.#snapshot();
     const changedAsExpected = (state) => {
       if (control.kind === "node") return state.selectedNodeId !== before.selectedNodeId;
       if (control.kind === "navigate-action") return presentationKey(state) !== presentationKey(before);
@@ -294,7 +312,7 @@ export class ReviewSession {
     };
     while (!changedAsExpected(current) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25));
-      current = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+      current = await this.#snapshot();
     }
     if (!changedAsExpected(current)) {
       throw new Error(`Review control did not change the expected presentation: ${control.elementRef}`);
@@ -305,6 +323,24 @@ export class ReviewSession {
   #assertOpen() {
     if (!this.opened) throw new Error("ReviewSession must be opened before using tools.");
     if (this.webContents.isDestroyed?.()) throw new Error("The production review window is closed.");
+  }
+
+  async #snapshot() {
+    return this.#validateState(await this.#rendererCommand("snapshot"));
+  }
+
+  async #validateState(rawState) {
+    if (typeof this.loadInputDraftRevision !== "function") {
+      return validateState(this.executionId, rawState);
+    }
+    const revision = await this.loadInputDraftRevision(rawState?.threadId);
+    if (!Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("The read-only product state returned an invalid input-draft revision.");
+    }
+    return validateState(this.executionId, {
+      ...rawState,
+      threadRevision: `${rawState.threadRevision}:server-input-draft:${revision}`,
+    });
   }
 
   #rendererCommand(command, payload) {

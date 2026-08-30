@@ -371,6 +371,54 @@ describe("EvalService simulated-user result persistence", () => {
 
   });
 
+  it("fails the opt-in input round-trip execution when its structural gate was not exercised", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    globalThis.fetch = fakeAcceptedProduct();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      simulatedUserJudgeRunner: async () => ({
+        status: "completed",
+        rubricRef: "rubric.json",
+        configurationRef: "judge-configuration.json",
+        interactionTraceRef: "trace.json",
+        screenshotRefs: ["screenshots/shot-root.json"],
+        reviewRef: "reviews.json",
+        coverageRef: "coverage.json",
+        inputRoundTripRef: "input-roundtrip.json",
+        review: { turn: { ratings: { answer_quality: 4 } } },
+        coverage: { complete: true, missingSubjects: [] },
+        summary: "The visible turn was reviewed.",
+        inputRoundTrip: {
+          schemaVersion: 1,
+          status: "not_exercised",
+          passed: false,
+          checks: [],
+          detail: "The judge did not commit and Send.",
+        },
+      }),
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: ["empty-project.node-input-roundtrip.single-turn"],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "simulated-user",
+    });
+    const completed = await waitForCompletedRun(service, created.id);
+
+    expect(completed.status).toBe("failed");
+    expect(completed.executions[0]).toMatchObject({ status: "failed", passed: false });
+    expect(completed.executions[0].checks).toContainEqual(expect.objectContaining({
+      name: "turn-1:input-roundtrip:exercised",
+      passed: false,
+    }));
+    expect(completed.executions[0].turns[0].judgeResults[0].inputRoundTrip)
+      .toMatchObject({ status: "not_exercised", passed: false });
+    expect(completed.executions[0].turns[0].deterministicPassed).toBe(false);
+    expect(completed.executions[0].outcomeGrade).toMatchObject({ qualified: false });
+  });
+
   it("persists explicit partial and thrown-failure artifacts without losing deterministic evidence", async () => {
     const partialPaths = await testPaths();
     globalThis.fetch = fakeAcceptedProduct();

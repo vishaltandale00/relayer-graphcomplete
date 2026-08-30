@@ -71,6 +71,15 @@ export const evalCases = Object.freeze([
     requiredChecks: Object.freeze(["node-navigation"]),
   }),
   recursiveCompleteEvalCase,
+  Object.freeze({
+    id: "empty-project.node-input-roundtrip.single-turn",
+    name: "Node input · authored round trip",
+    description: "Asks the model to author text, single-select, and multi-select inputs, then lets the simulated user answer all three through the product.",
+    prompts: Object.freeze([
+      "We need to schedule a deployment, but I have not supplied (1) the exact deployment window, (2) the rollout strategy, or (3) the validation signals. Do not choose them for me. Present one decision node with exactly three input actions: a text input asking for the exact deployment window; a single-select asking for the rollout strategy with canary and full-rollout options; and a multi-select asking for validation signals with health metrics, logs, and synthetic checks as options and a minimum of two selections. Then stop. After I answer all three, produce a concise deployment plan that visibly applies the exact window, selected strategy, and every selected validation signal.",
+    ]),
+    requiredChecks: Object.freeze(["input-roundtrip"]),
+  }),
   h3ProjectEvalCase,
   ...h3AutonomousCases.map((entry) => Object.freeze({
     ...entry.definition,
@@ -1705,12 +1714,8 @@ export class EvalService {
         checks.push(...recursiveCompleteChecks(execution));
       }
       execution.checks = checks;
-      const deterministicPassed = checks.length > 0 && checks.every((check) => check.passed);
-      const outcomeChecks = execution.caseSnapshot
-        ? checks.filter((check) => check.name.includes(":workspace:"))
-        : checks;
-      execution.outcomeGrade = outcomeGradeFromChecks(outcomeChecks, execution.caseSnapshot);
       let simulatedUserCompleted = true;
+      let inputRoundTripCompleted = !definition.requiredChecks?.includes("input-roundtrip");
       if (simulatedUserJudgeIds.has(execution.judgeConfiguration.name)) {
         const eligibleTurns = interactions
           .map(({ thread, interaction }, turnIndex) => ({ thread, interaction, turn: execution.turns[turnIndex] }))
@@ -1727,14 +1732,38 @@ export class EvalService {
             reviewSequence: { index, count: eligibleTurns.length },
           });
           if (result.status !== "completed") simulatedUserCompleted = false;
+          if (definition.requiredChecks?.includes("input-roundtrip")) {
+            inputRoundTripCompleted = result.inputRoundTrip?.passed === true;
+            const roundTripChecks = (result.inputRoundTrip?.checks ?? []).map((check) => ({
+              ...copy(check),
+              name: `turn-${interaction.sequence}:${check.name}`,
+            }));
+            if (roundTripChecks.length === 0) {
+              roundTripChecks.push({
+                name: `turn-${interaction.sequence}:input-roundtrip:exercised`,
+                passed: false,
+                detail: result.inputRoundTrip?.detail || "The input round-trip live gate was not exercised.",
+              });
+            }
+            turn.deterministicChecks.push(...roundTripChecks);
+            execution.checks.push(...roundTripChecks);
+            turn.deterministicPassed = turn.deterministicChecks.length > 0
+              && turn.deterministicChecks.every((check) => check.passed);
+          }
         }
         if (eligibleTurns.length === 0) simulatedUserCompleted = false;
       }
+      const deterministicPassed = execution.checks.length > 0
+        && execution.checks.every((check) => check.passed);
+      const outcomeChecks = execution.caseSnapshot
+        ? execution.checks.filter((check) => check.name.includes(":workspace:"))
+        : execution.checks;
+      execution.outcomeGrade = outcomeGradeFromChecks(outcomeChecks, execution.caseSnapshot);
       execution.presentationGrade = presentationGradeFromTurns(
         execution.turns,
         simulatedUserJudgeIds.has(execution.judgeConfiguration.name),
       );
-      execution.passed = deterministicPassed && simulatedUserCompleted;
+      execution.passed = deterministicPassed && simulatedUserCompleted && inputRoundTripCompleted;
       execution.status = execution.passed ? "passed" : "failed";
       completeExecutionLifecycle(execution);
     } catch (error) {
@@ -2513,6 +2542,13 @@ function normalizeJudgeOutput(output, initial) {
       : [],
     reviews: optionalReference(output.reviewRef),
     coverage: optionalReference(output.coverageRef),
+    ...(output.inputRoundTripRef === undefined ? {} : {
+      inputRoundTrip: optionalReference(output.inputRoundTripRef),
+    }),
+    ...(Array.isArray(output.inputRatingReceiptRefs) && output.inputRatingReceiptRefs.length > 0 ? {
+      inputRatings: output.inputRatingReceiptRefs
+        .filter((reference) => typeof reference === "string" && reference.length > 0),
+    } : {}),
   };
   const requiredReferences = [
     references.rubric,
@@ -2538,6 +2574,11 @@ function normalizeJudgeOutput(output, initial) {
     review: output.review && typeof output.review === "object" ? copy(output.review) : null,
     coverage: output.coverage && typeof output.coverage === "object" ? copy(output.coverage) : null,
     summary: typeof output.summary === "string" ? output.summary : null,
+    ...(output.inputRoundTrip === undefined ? {} : {
+      inputRoundTrip: output.inputRoundTrip && typeof output.inputRoundTrip === "object"
+        ? copy(output.inputRoundTrip)
+        : null,
+    }),
     error: missingReferenceError
       ?? (typeof output.error === "string" && output.error.length > 0
         ? output.error

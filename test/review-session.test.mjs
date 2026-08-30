@@ -25,6 +25,7 @@ function reviewState(overrides = {}) {
   return {
     executionId: "execution-1",
     threadId: "thread-1",
+    threadRevision: "thread:thread-1:revision:1",
     turnId: "turn-1",
     layerId: "layer-1",
     selectedNodeId: null,
@@ -85,6 +86,27 @@ describe("ReviewSession", () => {
     await expect(session.open()).rejects.toThrow("local production review workspace");
   });
 
+  it("folds the live read-only input-draft revision into every presentation revision", async () => {
+    const electron = fakeElectron({ snapshot: async () => reviewState() });
+    let inputDraftRevision = 3;
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: "/unused",
+      ipc: electron.ipc,
+      loadInputDraftRevision: vi.fn(async () => inputDraftRevision),
+    });
+
+    expect((await session.open()).threadRevision).toBe(
+      "thread:thread-1:revision:1:server-input-draft:3",
+    );
+    inputDraftRevision = 4;
+    expect((await session.state()).threadRevision).toBe(
+      "thread:thread-1:revision:1:server-input-draft:4",
+    );
+  });
+
   it("captures viewport and full-element tiles with immutable state and content digests", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
     directories.push(directory);
@@ -143,6 +165,7 @@ describe("ReviewSession", () => {
     expect(viewport).toMatchObject({
       executionId: "execution-1",
       threadId: "thread-1",
+      threadRevision: "thread:thread-1:revision:1",
       turnId: "turn-1",
       layerId: "layer-1",
       selectedNodeId: "node-7",

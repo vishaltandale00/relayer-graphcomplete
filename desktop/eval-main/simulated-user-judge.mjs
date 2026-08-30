@@ -22,6 +22,8 @@ export const PERSONAL_PRESENTATION_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_PERSONAL_
 export const PERSONAL_PRESENTATION_AUTORUN_FLAG = "--relayer-eval-autorun-personal-presentation";
 export const PRODUCT_PRESENTATION_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_PRODUCT_PRESENTATION";
 export const PRODUCT_PRESENTATION_AUTORUN_FLAG = "--relayer-eval-autorun-product-presentation";
+export const INPUT_ROUNDTRIP_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_INPUT_ROUNDTRIP";
+export const INPUT_ROUNDTRIP_AUTORUN_FLAG = "--relayer-eval-autorun-input-roundtrip";
 
 export function resolveLocalSimulatedUserAutorun({
   environment = process.env,
@@ -35,11 +37,26 @@ export function resolveLocalSimulatedUserAutorun({
     || commandLineArguments.includes(PRODUCT_PRESENTATION_AUTORUN_FLAG);
   const enabled = environment[LOCAL_SIMULATED_USER_AUTORUN_ENV] === "1"
     || commandLineArguments.includes(LOCAL_SIMULATED_USER_AUTORUN_FLAG);
-  if (!enabled && !personalPresentationEnabled && !productPresentationEnabled) return null;
-  if ([enabled, personalPresentationEnabled, productPresentationEnabled].filter(Boolean).length > 1) {
+  const inputRoundTripEnabled = environment[INPUT_ROUNDTRIP_AUTORUN_ENV] === "1"
+    || commandLineArguments.includes(INPUT_ROUNDTRIP_AUTORUN_FLAG);
+  if (!enabled && !personalPresentationEnabled && !productPresentationEnabled && !inputRoundTripEnabled) return null;
+  if ([enabled, personalPresentationEnabled, productPresentationEnabled, inputRoundTripEnabled].filter(Boolean).length > 1) {
     throw new Error("Select only one local simulated-user autorun.");
   }
   if (packaged) throw new Error("The simulated-user autorun is available only in a local development checkout.");
+  if (inputRoundTripEnabled) {
+    const availableHarnesses = availableHarnessConfigurationNames === undefined
+      ? null
+      : new Set(availableHarnessConfigurationNames);
+    if (availableHarnesses !== null && !availableHarnesses.has("codex-basic")) {
+      throw new Error("The input round-trip autorun requires codex-basic.");
+    }
+    return {
+      testCaseIds: ["empty-project.node-input-roundtrip.single-turn"],
+      harnessConfigurationNames: ["codex-basic"],
+      judgeConfigurationName: "simulated-user-sol-high",
+    };
+  }
   if (productPresentationEnabled) {
     const harnessConfigurationNames = ["codex-basic"];
     const availableHarnesses = availableHarnessConfigurationNames === undefined
@@ -92,15 +109,45 @@ export function resolveLocalSimulatedUserAutorun({
   };
 }
 
-export function createReviewSessionController(reviewSession, screenshotMetadata) {
+export function createReviewSessionController(reviewSession, screenshotMetadata, {
+  inputOperator,
+  inputBindings = new Map(),
+  persistInputRatingReceipt,
+} = {}) {
   if (!reviewSession?.screenshot || !reviewSession?.interact || !reviewSession?.history) {
     throw new Error("Simulated-user review requires a complete ReviewSession controller.");
   }
+  const captureByScreenshot = new Map();
+  const commissionedByAction = new Map();
+  const operatorEvents = [];
+  const inputRatingReceiptRefs = [];
   return Object.freeze({
     screenshot: async (input) => {
-      const output = await reviewSession.screenshot(input);
+      const binding = input.target?.kind === "element" ? inputBindings.get(input.target.elementRef) : undefined;
+      let operatorCapture = null;
+      if (binding && inputOperator) {
+        const state = await reviewSession.state();
+        operatorCapture = inputOperator.beginCapture({
+          occurrence: binding.occurrence,
+          action: binding.action,
+          threadRevision: state.threadRevision,
+        });
+      }
+      let output;
+      try {
+        output = await reviewSession.screenshot(input);
+      } catch (error) {
+        if (operatorCapture) inputOperator.failCapture(operatorCapture.captureId);
+        throw error;
+      }
       if (!output?.ok) return { output, images: [] };
       const screenshot = output.screenshot;
+      if (operatorCapture) {
+        captureByScreenshot.set(screenshot.screenshotId, {
+          captureId: operatorCapture.captureId,
+          occurrence: structuredClone(binding.occurrence),
+        });
+      }
       screenshotMetadata.set(screenshot.screenshotId, structuredClone(screenshot));
       const directory = reviewSession.artifactDirectoryFor(screenshot.screenshotId);
       if (!directory) throw new Error(`Screenshot artifact directory is missing: ${screenshot.screenshotId}`);
@@ -118,12 +165,113 @@ export function createReviewSessionController(reviewSession, screenshotMetadata)
       }
       return { output, images };
     },
-    interact: (input) => reviewSession.interact(input),
+    interact: async (input) => {
+      if (input.value !== undefined) {
+        if (!inputOperator) throw new Error("This review has no separately authorized input operator.");
+        const binding = inputBindings.get(input.elementRef);
+        if (!binding) throw new Error(`Interact value requires a visible input-action target: ${input.elementRef}`);
+        const captureId = commissionedByAction.get(String(binding.occurrence.actionId));
+        if (!captureId) throw new Error("Input-action quality must be rated before the operator is commissioned.");
+        const value = "text" in input.value
+          ? { text: input.value.text }
+          : "selectedKey" in input.value
+            ? { selectedKeys: [input.value.selectedKey] }
+            : { selectedKeys: input.value.selectedKeys };
+        const committedValue = "text" in value
+          ? { text: value.text }
+          : {
+              selected: binding.action.options
+                .filter((option) => value.selectedKeys.includes(option.key))
+                .sort((left, right) => Buffer.from(left.key).compare(Buffer.from(right.key))),
+            };
+        const inputDraftRevision = await inputOperator.commit({ captureId, value });
+        const state = await reviewSession.state();
+        operatorEvents.push({
+          operation: "input_commit",
+          elementRef: input.elementRef,
+          occurrence: structuredClone(binding.occurrence),
+          sourceNodeId: binding.sourceNodeId,
+          action: structuredClone(binding.action),
+          value: structuredClone(committedValue),
+          inputDraftRevision,
+        });
+        return { ok: true, state: reviewUiStateForOperator(state), operator: { operation: "input_commit", inputDraftRevision } };
+      }
+      if (input.elementRef === "send-interaction" && inputOperator) {
+        const response = await inputOperator.send({});
+        operatorEvents.push({ operation: "send", response: structuredClone(response) });
+        const state = await reviewSession.state();
+        return { ok: true, state: reviewUiStateForOperator(state), operator: { operation: "send", response } };
+      }
+      return reviewSession.interact(input);
+    },
     history: (input) => reviewSession.history(input),
+    recordInputRatings: async ({ review, revision }) => {
+      if (!inputOperator) return;
+      if (typeof persistInputRatingReceipt !== "function") {
+        throw new Error("Input operator commission requires durable rating receipt storage.");
+      }
+      const commissions = [];
+      for (const action of review.actions ?? []) {
+        if (action.kind !== "input") continue;
+        const screenshotIds = [...new Set([
+          ...(action.evidence ?? []),
+          ...Object.values(action.inputActionJudgments ?? {}).flatMap((judgment) => judgment.evidence ?? []),
+        ])];
+        const capture = screenshotIds
+          .map((id) => captureByScreenshot.get(id))
+          .find((candidate) => candidate && String(candidate.occurrence.actionId) === String(action.actionId));
+        if (!capture) throw new Error(`Input action ${action.actionId} has no occurrence-matched versioned capture-and-rate lock.`);
+        const { captureId } = capture;
+        const capturedScreenshotId = screenshotIds.find((id) => captureByScreenshot.get(id)?.captureId === captureId);
+        const metadata = capturedScreenshotId === undefined ? undefined : screenshotMetadata.get(capturedScreenshotId);
+        if (!metadata?.threadRevision) {
+          throw new Error(`Input action ${action.actionId} rating is missing its captured thread revision.`);
+        }
+        commissions.push({
+          captureId,
+          threadRevision: metadata.threadRevision,
+          actionId: String(action.actionId),
+        });
+      }
+      if (commissions.length === 0) return;
+      const receiptId = await persistInputRatingReceipt({
+        schemaVersion: 1,
+        reviewRevision: revision,
+        review: structuredClone(review),
+        captures: commissions.map(({ captureId, threadRevision, actionId }) => ({
+          captureId,
+          threadRevision,
+          actionId,
+        })),
+      });
+      inputRatingReceiptRefs.push(receiptId);
+      inputOperator.rateCaptures(commissions.map(({ captureId, threadRevision }) => ({
+        captureId,
+        ratingId: receiptId,
+        threadRevision,
+      })));
+      for (const { actionId, captureId } of commissions) {
+        commissionedByAction.set(actionId, captureId);
+      }
+    },
+    operatorTrace: () => structuredClone(operatorEvents),
+    inputRatingReceiptRefs: () => [...inputRatingReceiptRefs],
   });
 }
 
-export async function buildAcceptedReviewTopology({ turnId, rootLayerId, loadLayer }) {
+function reviewUiStateForOperator(state) {
+  return {
+    threadRevision: state.threadRevision,
+    turnId: state.turnId,
+    layerId: state.layerId,
+    selectedNodeId: state.selectedNodeId,
+    activatedActionId: state.activatedActionId,
+    navigationPath: structuredClone(state.navigationPath),
+  };
+}
+
+export async function buildAcceptedReviewTopology({ turnId, presentingInteractionNodeId, rootLayerId, loadLayer }) {
   if (!turnId || !rootLayerId || typeof loadLayer !== "function") {
     throw new Error("Accepted review topology requires a turn, root layer, and layer loader.");
   }
@@ -204,11 +352,20 @@ export async function buildAcceptedReviewTopology({ turnId, rootLayerId, loadLay
         if (action.control !== "text" && options.length === 0) {
           throw new Error(`Accepted select input action has no options: ${action.id}`);
         }
+        const occurrence = presentingInteractionNodeId === undefined ? undefined : {
+          presentingInteractionNodeId: Number(presentingInteractionNodeId),
+          presentingLayerId: Number(layerId),
+          actionId: Number(action.id),
+        };
+        if (occurrence !== undefined && !Object.values(occurrence).every((id) => Number.isSafeInteger(id) && id > 0)) {
+          throw new Error(`Accepted input action ${action.id} has no valid product occurrence identity.`);
+        }
         return {
           ...base,
           control: action.control,
           prompt: action.prompt,
           options,
+          ...(occurrence === undefined ? {} : { occurrence }),
           ...(action.minimumSelections === null || action.minimumSelections === undefined
             ? {}
             : { minimumSelections: action.minimumSelections }),
@@ -308,6 +465,8 @@ export function createLocalSimulatedUserJudgeRunner({
   resolveCodexRuntime,
   runJudge = runSimulatedUserJudge,
   configuration = LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION,
+  createInputOperator,
+  captureInputRoundTrip,
 }) {
   if (typeof loadLayer !== "function" || typeof openReviewSession !== "function"
     || typeof resolveCodexRuntime !== "function" || typeof runJudge !== "function") {
@@ -319,6 +478,7 @@ export function createLocalSimulatedUserJudgeRunner({
     if (!rootLayerId) throw new Error("Accepted turn has no root layer for simulated-user review.");
     const topology = await buildAcceptedReviewTopology({
       turnId: context.turn.id,
+      presentingInteractionNodeId: context.turn.graphNodeId,
       rootLayerId,
       loadLayer: (layerId) => loadLayer({
         executionId: context.execution.id,
@@ -328,6 +488,25 @@ export function createLocalSimulatedUserJudgeRunner({
       }),
     });
     const inventory = inventoryReviewSubjects(topology);
+    const inputBindings = new Map(inventory.actions.flatMap((subject) => (
+        subject.actionKind !== "input" || subject.occurrence === undefined ? [] : [[
+          `input-action-${subject.actionId}`,
+          {
+            occurrence: subject.occurrence,
+            sourceNodeId: Number(subject.nodeId),
+            action: subject.control === "text"
+              ? { control: "text", prompt: subject.prompt }
+              : {
+                  control: subject.control,
+                  prompt: subject.prompt,
+                  options: subject.options,
+                  ...(subject.control === "multi_select" && subject.minimumSelections !== undefined
+                    ? { minimumSelections: subject.minimumSelections }
+                    : {}),
+                },
+          },
+        ]]
+      )));
     const screenshots = new Map();
     let opened;
     let completed = false;
@@ -345,7 +524,14 @@ export function createLocalSimulatedUserJudgeRunner({
         turnId: context.turn.id,
         rootLayerId,
       });
-      const controller = createReviewSessionController(opened.session, screenshots);
+      const inputOperator = typeof createInputOperator === "function"
+        ? createInputOperator({ context, inputBindings })
+        : undefined;
+      const controller = createReviewSessionController(opened.session, screenshots, {
+        inputOperator,
+        inputBindings,
+        persistInputRatingReceipt: (receipt) => persistInputRatingReceipt(context, receipt),
+      });
       const rubricVersion = context.rubric?.rubricVersion;
       if (["graph-presentation-rubric-v4", "graph-presentation-rubric-v5", "graph-presentation-rubric-v6", "graph-presentation-rubric-v7", "graph-presentation-rubric-v8", "graph-presentation-rubric-v9", "graph-presentation-rubric-v10"].includes(rubricVersion)) {
         throw new Error(`Historical rubric ${rubricVersion} remains readable but cannot start a new v6 judgment.`);
@@ -393,8 +579,17 @@ export function createLocalSimulatedUserJudgeRunner({
           coverage: store.coverage(),
           status: "partial",
           error: error instanceof Error ? error.message : String(error),
+          inputRatingReceiptRefs: controller.inputRatingReceiptRefs(),
         });
       }
+      const inputRoundTrip = typeof captureInputRoundTrip === "function"
+        ? await captureInputRoundTrip({
+            context,
+            topology,
+            operatorTrace: controller.operatorTrace(),
+            artifactDirectory: join(context.artifactDirectory, "input-roundtrip"),
+          })
+        : null;
       const output = await persistJudgeArtifacts({
         context,
         configuration: selectedConfiguration,
@@ -407,6 +602,8 @@ export function createLocalSimulatedUserJudgeRunner({
         judgeRecord: record,
         status: "completed",
         error: null,
+        inputRoundTrip,
+        inputRatingReceiptRefs: controller.inputRatingReceiptRefs(),
       });
       completed = true;
       return output;
@@ -443,6 +640,8 @@ async function persistJudgeArtifacts({
   judgeRecord = null,
   status,
   error,
+  inputRoundTrip = null,
+  inputRatingReceiptRefs = [],
 }) {
   await mkdir(context.artifactDirectory, { recursive: true, mode: 0o700 });
   const artifacts = {
@@ -452,6 +651,7 @@ async function persistJudgeArtifacts({
     reviews: "review.json",
     coverage: "coverage.json",
     judgeRun: "judge-run.json",
+    ...(inputRoundTrip === null ? {} : { inputRoundTrip: "input-roundtrip.json" }),
   };
   await Promise.all([
     writeJson(join(context.artifactDirectory, artifacts.rubric), rubric),
@@ -471,6 +671,10 @@ async function persistJudgeArtifacts({
       status,
       error,
     }),
+    ...(inputRoundTrip === null ? [] : [writeJson(
+      join(context.artifactDirectory, artifacts.inputRoundTrip),
+      inputRoundTrip,
+    )]),
   ]);
   const screenshotRefs = [...screenshots.keys()].map(
     (screenshotId) => ["screenshots", screenshotId, "metadata.json"].join("/"),
@@ -483,6 +687,11 @@ async function persistJudgeArtifacts({
     screenshotRefs,
     reviewRef: artifacts.reviews,
     coverageRef: artifacts.coverage,
+    ...(inputRoundTrip === null ? {} : {
+      inputRoundTripRef: artifacts.inputRoundTrip,
+      inputRoundTrip,
+    }),
+    inputRatingReceiptRefs: [...inputRatingReceiptRefs],
     review,
     coverage,
     summary: status === "completed" ? review.turn.summary : null,
@@ -496,4 +705,21 @@ async function writeJson(path, value) {
     mode: 0o600,
     flag: "wx",
   });
+}
+
+async function persistInputRatingReceipt(context, receipt) {
+  const nodeId = String(receipt.review?.nodeId ?? "");
+  if (!/^\d+$/.test(nodeId) || !Number.isSafeInteger(receipt.reviewRevision) || receipt.reviewRevision < 1) {
+    throw new Error("Input rating receipt requires a positive node and review revision.");
+  }
+  const directoryName = "input-rating-receipts";
+  const filename = `node-${nodeId}-revision-${receipt.reviewRevision}.json`;
+  await mkdir(join(context.artifactDirectory, directoryName), { recursive: true, mode: 0o700 });
+  await writeJson(join(context.artifactDirectory, directoryName, filename), {
+    ...receipt,
+    executionId: String(context.execution.id),
+    threadId: String(context.thread.id),
+    turnId: String(context.turn.id),
+  });
+  return `${directoryName}/${filename}`;
 }

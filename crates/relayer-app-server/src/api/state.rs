@@ -83,6 +83,17 @@ pub(super) async fn product_state(
     authorize_read(&state, &headers)?;
     let thread_id = query.thread_id.map(ThreadId::try_from).transpose()?;
     let mut product_state = state.product.load_state(thread_id).await?;
+    let input_draft_revision = match thread_id {
+        Some(id)
+            if product_state
+                .threads
+                .iter()
+                .any(|view| view.thread.id == id && !view.thread.imported) =>
+        {
+            Some(state.product.action_input_draft(id).await?.revision)
+        }
+        _ => None,
+    };
     let stale = super::threads::refresh_accepted_outputs(
         &state.product,
         state.runtime.as_ref(),
@@ -157,6 +168,7 @@ pub(super) async fn product_state(
     let response = ProductStateResponse::from(product_state)
         .with_interactions(interactions)
         .with_current_projection(current_projection)
+        .with_input_draft_revision(input_draft_revision)
         .with_annotations(annotation_capability(&state, &headers));
     Ok(Json(response))
 }

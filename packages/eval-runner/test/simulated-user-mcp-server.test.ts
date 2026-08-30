@@ -119,6 +119,38 @@ describe("simulated-user MCP server", () => {
     await transport.close();
   });
 
+  it("extends interact with text, one-key, and key-set values without adding a write tool", async () => {
+    const interact = vi.fn(async (input) => ({
+      ok: true as const,
+      state: {
+        turnId: "turn-1",
+        layerId: "layer-1",
+        selectedNodeId: "node-1",
+        activatedActionId: null,
+        navigationPath: [{ layerId: "layer-1", viaActionId: null }],
+      },
+      operator: { operation: "input_commit" },
+    }));
+    const server = await startServer({ interact });
+    const { client, transport } = await connectClient(server);
+
+    for (const value of [
+      { text: "Friday" },
+      { selectedKey: "preview" },
+      { selectedKeys: ["unit", "electron"] },
+    ]) {
+      const result = await client.callTool({ name: "interact", arguments: { elementRef: "input-action-9", value } });
+      expect(result.structuredContent).toMatchObject({ ok: true, operator: { operation: "input_commit" } });
+    }
+    expect(interact.mock.calls.map(([input]) => input.value)).toEqual([
+      { text: "Friday" },
+      { selectedKey: "preview" },
+      { selectedKeys: ["unit", "electron"] },
+    ]);
+    expect((await client.listTools()).tools.map(({ name }) => name)).not.toContain("answer");
+    await transport.close();
+  });
+
   it("rejects unjustified null ratings without mutating the store and accepts a justified retry", async () => {
     const reviewLayer = vi.fn(() => ({ revision: 1 }));
     const server = await startServer(undefined, { reviewLayer });
@@ -296,8 +328,11 @@ describe("simulated-user MCP server", () => {
       }],
     });
     const reviewStore = new RecursivePresentationReviewStore({ inventory });
+    const recordInputRatings = vi.fn()
+      .mockRejectedValueOnce(new Error("durable receipt unavailable"))
+      .mockResolvedValue(undefined);
     const server = await startSimulatedUserReviewMcpServer({
-      controller: unusedController(),
+      controller: { ...unusedController(), recordInputRatings },
       reviewStore,
       bearerToken: "test-token-with-at-least-24-characters",
     });
@@ -380,8 +415,14 @@ describe("simulated-user MCP server", () => {
       findings: [],
     };
 
+    const failedCommission = await client.callTool({ name: "reviewNode", arguments: { review } });
+    expect(failedCommission.isError).toBe(true);
+    expect(recordInputRatings).toHaveBeenNthCalledWith(1, { review, revision: 1 });
+    expect(reviewStore.snapshot().nodes).toEqual([]);
+
     const accepted = await client.callTool({ name: "reviewNode", arguments: { review } });
     expect(accepted.structuredContent).toMatchObject({ ok: true, nodeId: "node-input" });
+    expect(recordInputRatings).toHaveBeenNthCalledWith(2, { review, revision: 1 });
     expect(reviewStore.snapshot()).toMatchObject({
       schemaVersion: 6,
       contractId: "recursive-presentation-judge-v6",

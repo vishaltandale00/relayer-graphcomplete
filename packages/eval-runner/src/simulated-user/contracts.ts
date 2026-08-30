@@ -46,6 +46,8 @@ export interface NavigationPathEntry {
 export interface ScreenshotState {
   readonly executionId: ExecutionId;
   readonly threadId: ThreadId;
+  /** Stable product-thread revision captured with the frame. Absent only on historical screenshots. */
+  readonly threadRevision?: string;
   readonly turnId: TurnId;
   readonly layerId: LayerId;
   readonly selectedNodeId: NodeId | null;
@@ -228,10 +230,12 @@ export interface ScreenshotToolSuccess {
 
 export interface InteractToolInput {
   readonly elementRef: ElementRef;
-  readonly activate: true;
+  readonly activate?: true | undefined;
+  readonly value?: { readonly text: string } | { readonly selectedKey: string } | { readonly selectedKeys: readonly string[] } | undefined;
 }
 
 export interface ReviewUiState {
+  readonly threadRevision?: string;
   readonly turnId: TurnId;
   readonly layerId: LayerId;
   readonly selectedNodeId: NodeId | null;
@@ -242,6 +246,7 @@ export interface ReviewUiState {
 export interface InteractToolSuccess {
   readonly ok: true;
   readonly state: ReviewUiState;
+  readonly operator?: Readonly<Record<string, unknown>>;
 }
 
 export interface HistoryToolInput {

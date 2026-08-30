@@ -13,6 +13,8 @@ import {
   PERSONAL_PRESENTATION_AUTORUN_FLAG,
   PRODUCT_PRESENTATION_AUTORUN_ENV,
   PRODUCT_PRESENTATION_AUTORUN_FLAG,
+  INPUT_ROUNDTRIP_AUTORUN_ENV,
+  INPUT_ROUNDTRIP_AUTORUN_FLAG,
   buildAcceptedReviewTopology,
   createLocalSimulatedUserJudgeRunner,
   createReviewSessionController,
@@ -117,6 +119,20 @@ describe("local Electron simulated-user judge adapter", () => {
       arguments: [],
       availableHarnessConfigurationNames: [],
     })).toThrow("requires codex-basic");
+    const inputRoundTripSelection = {
+      testCaseIds: ["empty-project.node-input-roundtrip.single-turn"],
+      harnessConfigurationNames: ["codex-basic"],
+      judgeConfigurationName: "simulated-user-sol-high",
+    };
+    expect(resolveLocalSimulatedUserAutorun({
+      environment: { [INPUT_ROUNDTRIP_AUTORUN_ENV]: "1" },
+      arguments: [],
+      availableHarnessConfigurationNames: ["codex-basic"],
+    })).toEqual(inputRoundTripSelection);
+    expect(resolveLocalSimulatedUserAutorun({
+      environment: {},
+      arguments: [INPUT_ROUNDTRIP_AUTORUN_FLAG],
+    })).toEqual(inputRoundTripSelection);
     expect(() => resolveLocalSimulatedUserAutorun({
       environment: {
         [PERSONAL_PRESENTATION_AUTORUN_ENV]: "1",
@@ -161,11 +177,238 @@ describe("local Electron simulated-user judge adapter", () => {
     expect(screenshots.get(screenshotId)).toEqual(result.output.screenshot);
   });
 
+  it("rates a versioned input capture before commissioning the separate operator", async () => {
+    const directory = await temporaryDirectory();
+    const screenshotId = "shot-input";
+    const screenshotDirectory = join(directory, screenshotId);
+    await mkdir(screenshotDirectory);
+    await writeFile(join(screenshotDirectory, `${screenshotId}-001.png`), "input");
+    const shot = {
+      ...metadata({ screenshotId, layerId: "10", selectedNodeId: "2", tileCount: 1, target: { kind: "element", elementRef: "input-action-13" }, mode: "full" }),
+      threadRevision: "thread:7:revision:1",
+    };
+    const session = {
+      state: vi.fn(async () => ({
+        threadRevision: shot.threadRevision,
+        turnId: "41",
+        layerId: "10",
+        selectedNodeId: "2",
+        activatedActionId: null,
+        navigationPath: [{ layerId: "10", viaActionId: null }],
+      })),
+      screenshot: vi.fn(async () => ({ ok: true, screenshot: shot })),
+      interact: vi.fn(),
+      history: vi.fn(),
+      artifactDirectoryFor: () => screenshotDirectory,
+    };
+    const operator = {
+      beginCapture: vi.fn(() => ({ captureId: "capture-1", threadRevision: shot.threadRevision })),
+      failCapture: vi.fn(),
+      rateCaptures: vi.fn(),
+      commit: vi.fn(async () => 9),
+      send: vi.fn(async () => ({ interaction: { id: 99 } })),
+    };
+    const binding = {
+      occurrence: { presentingInteractionNodeId: 41, presentingLayerId: 10, actionId: 13 },
+      action: { control: "text", prompt: "What constraint matters most?" },
+    };
+    const persistInputRatingReceipt = vi.fn(async () => "input-rating-receipts/node-2-revision-3.json");
+    const controller = createReviewSessionController(session, new Map(), {
+      inputOperator: operator,
+      inputBindings: new Map([["input-action-13", binding]]),
+      persistInputRatingReceipt,
+    });
+
+    await controller.screenshot({
+      target: { kind: "element", elementRef: "input-action-13" },
+      mode: "full",
+      label: "Input action before answer",
+    });
+    await expect(controller.interact({ elementRef: "input-action-13", value: { text: "Ship Friday" } }))
+      .rejects.toThrow("must be rated before");
+    await controller.recordInputRatings({
+      revision: 3,
+      review: {
+        layerId: "10",
+        nodeId: "2",
+        actions: [{
+          actionId: "13",
+          kind: "input",
+          evidence: [screenshotId],
+          inputActionJudgments: {
+            prompt_answerability: { evidence: [screenshotId] },
+            option_set_quality: { evidence: [screenshotId] },
+            control_fit: { evidence: [screenshotId] },
+          },
+        }],
+      },
+    });
+    expect(operator.rateCaptures).toHaveBeenCalledWith([{
+      captureId: "capture-1",
+      ratingId: "input-rating-receipts/node-2-revision-3.json",
+      threadRevision: shot.threadRevision,
+    }]);
+    expect(persistInputRatingReceipt.mock.invocationCallOrder[0])
+      .toBeLessThan(operator.rateCaptures.mock.invocationCallOrder[0]);
+    await expect(controller.interact({ elementRef: "input-action-13", value: { text: "Ship Friday" } }))
+      .resolves.toMatchObject({ operator: { operation: "input_commit", inputDraftRevision: 9 } });
+    await expect(controller.interact({ elementRef: "send-interaction", activate: true }))
+      .resolves.toMatchObject({ operator: { operation: "send" } });
+    expect(operator.commit).toHaveBeenCalledWith({ captureId: "capture-1", value: { text: "Ship Friday" } });
+    expect(session.interact).not.toHaveBeenCalled();
+  });
+
+  it("captures and atomically commissions two input actions on the same node", async () => {
+    const directory = await temporaryDirectory();
+    const screenshotsByRef = new Map();
+    for (const actionId of ["13", "14"]) {
+      const screenshotId = `shot-input-${actionId}`;
+      const screenshotDirectory = join(directory, screenshotId);
+      await mkdir(screenshotDirectory);
+      await writeFile(join(screenshotDirectory, `${screenshotId}-001.png`), screenshotId);
+      screenshotsByRef.set(`input-action-${actionId}`, {
+        ...metadata({
+          screenshotId,
+          layerId: "10",
+          selectedNodeId: "2",
+          tileCount: 1,
+          target: { kind: "element", elementRef: `input-action-${actionId}` },
+          mode: "full",
+        }),
+        threadRevision: "thread:7:input-draft:0",
+      });
+    }
+    const session = {
+      state: vi.fn(async () => ({
+        threadRevision: "thread:7:input-draft:0",
+        turnId: "41",
+        layerId: "10",
+        selectedNodeId: "2",
+        activatedActionId: null,
+        navigationPath: [{ layerId: "10", viaActionId: null }],
+      })),
+      screenshot: vi.fn(async ({ target }) => ({ ok: true, screenshot: screenshotsByRef.get(target.elementRef) })),
+      interact: vi.fn(),
+      history: vi.fn(),
+      artifactDirectoryFor: (screenshotId) => join(directory, screenshotId),
+    };
+    let captureSequence = 0;
+    const operator = {
+      beginCapture: vi.fn(({ threadRevision }) => ({ captureId: `capture-${++captureSequence}`, threadRevision })),
+      failCapture: vi.fn(),
+      rateCaptures: vi.fn(),
+      commit: vi.fn(),
+      send: vi.fn(),
+    };
+    const controller = createReviewSessionController(session, new Map(), {
+      inputOperator: operator,
+      inputBindings: new Map(["13", "14"].map((actionId) => [`input-action-${actionId}`, {
+        occurrence: { presentingInteractionNodeId: 41, presentingLayerId: 10, actionId: Number(actionId) },
+        action: { control: "text", prompt: `Question ${actionId}` },
+      }])),
+      persistInputRatingReceipt: vi.fn(async () => "input-rating-receipts/node-2-revision-1.json"),
+    });
+
+    for (const actionId of ["13", "14"]) {
+      await controller.screenshot({
+        target: { kind: "element", elementRef: `input-action-${actionId}` },
+        mode: "full",
+        label: `Input ${actionId}`,
+      });
+    }
+    await controller.recordInputRatings({
+      revision: 1,
+      review: {
+        layerId: "10",
+        nodeId: "2",
+        actions: ["13", "14"].map((actionId) => ({
+          actionId,
+          kind: "input",
+          evidence: [`shot-input-${actionId}`],
+          inputActionJudgments: {},
+        })),
+      },
+    });
+
+    expect(operator.rateCaptures).toHaveBeenCalledWith([
+      { captureId: "capture-1", ratingId: "input-rating-receipts/node-2-revision-1.json", threadRevision: "thread:7:input-draft:0" },
+      { captureId: "capture-2", ratingId: "input-rating-receipts/node-2-revision-1.json", threadRevision: "thread:7:input-draft:0" },
+    ]);
+  });
+
+  it("rejects cross-cited capture evidence between two inputs on the same node", async () => {
+    const directory = await temporaryDirectory();
+    const screenshotDirectory = join(directory, "shot-input-14");
+    await mkdir(screenshotDirectory);
+    await writeFile(join(screenshotDirectory, "shot-input-14-001.png"), "input-14");
+    const shot = {
+      ...metadata({
+        screenshotId: "shot-input-14",
+        layerId: "10",
+        selectedNodeId: "2",
+        tileCount: 1,
+        target: { kind: "element", elementRef: "input-action-14" },
+        mode: "full",
+      }),
+      threadRevision: "thread:7:input-draft:0",
+    };
+    const session = {
+      state: vi.fn(async () => ({
+        threadRevision: shot.threadRevision,
+        turnId: "41",
+        layerId: "10",
+        selectedNodeId: "2",
+        activatedActionId: null,
+        navigationPath: [{ layerId: "10", viaActionId: null }],
+      })),
+      screenshot: vi.fn(async () => ({ ok: true, screenshot: shot })),
+      interact: vi.fn(),
+      history: vi.fn(),
+      artifactDirectoryFor: () => screenshotDirectory,
+    };
+    const operator = {
+      beginCapture: vi.fn(() => ({ captureId: "capture-14", threadRevision: shot.threadRevision })),
+      failCapture: vi.fn(),
+      rateCaptures: vi.fn(),
+      commit: vi.fn(),
+      send: vi.fn(),
+    };
+    const controller = createReviewSessionController(session, new Map(), {
+      inputOperator: operator,
+      inputBindings: new Map([["input-action-14", {
+        occurrence: { presentingInteractionNodeId: 41, presentingLayerId: 10, actionId: 14 },
+        action: { control: "text", prompt: "Question 14" },
+      }]]),
+      persistInputRatingReceipt: vi.fn(async () => "unreachable.json"),
+    });
+    await controller.screenshot({
+      target: { kind: "element", elementRef: "input-action-14" },
+      mode: "full",
+      label: "Input 14",
+    });
+
+    await expect(controller.recordInputRatings({
+      revision: 1,
+      review: {
+        layerId: "10",
+        nodeId: "2",
+        actions: [{
+          actionId: "13",
+          kind: "input",
+          evidence: ["shot-input-14"],
+          inputActionJudgments: {},
+        }],
+      },
+    })).rejects.toThrow("occurrence-matched");
+    expect(operator.rateCaptures).not.toHaveBeenCalled();
+  });
+
   it("recursively inventories only authoritative accepted navigate destinations", async () => {
     const layers = acceptedLayers();
     const loadLayer = vi.fn(async (layerId) => layers.get(String(layerId)));
     const topology = await buildAcceptedReviewTopology({
       turnId: 41,
+      presentingInteractionNodeId: 99,
       rootLayerId: 10,
       loadLayer,
     });
@@ -229,6 +472,7 @@ describe("local Electron simulated-user judge adapter", () => {
 
     const topology = await buildAcceptedReviewTopology({
       turnId: 41,
+      presentingInteractionNodeId: 99,
       rootLayerId: 10,
       loadLayer: async (layerId) => layers.get(String(layerId)),
     });
@@ -241,6 +485,7 @@ describe("local Electron simulated-user judge adapter", () => {
         control: "text",
         prompt: "What constraint matters most?",
         options: [],
+        occurrence: { presentingInteractionNodeId: 99, presentingLayerId: 10, actionId: 13 },
       },
       {
         id: "14",
@@ -249,6 +494,7 @@ describe("local Electron simulated-user judge adapter", () => {
         control: "single_select",
         prompt: "Which environment?",
         options: [{ key: "preview", label: "Preview" }, { key: "stable", label: "Stable" }],
+        occurrence: { presentingInteractionNodeId: 99, presentingLayerId: 10, actionId: 14 },
       },
       {
         id: "15",
@@ -258,6 +504,7 @@ describe("local Electron simulated-user judge adapter", () => {
         prompt: "Which checks are required?",
         options: [{ key: "unit", label: "Unit" }, { key: "electron", label: "Electron" }],
         minimumSelections: 2,
+        occurrence: { presentingInteractionNodeId: 99, presentingLayerId: 10, actionId: 15 },
       },
     ]);
   });

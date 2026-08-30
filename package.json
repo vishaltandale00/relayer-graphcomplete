@@ -59,6 +59,7 @@
     "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --judge-configuration codex-structured",
     "eval:graph-repair:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --case graph-authoring.replay-repair --judge-configuration none",
     "live:recursive-complete": "npm run build && node scripts/run-recursive-live-run.mjs",
+    "eval:input-roundtrip:live": "npm run build && RELAYER_EVAL_AUTORUN_INPUT_ROUNDTRIP=1 electron desktop/eval-main/index.mjs",
     "lint:ladybug-receipt": "cargo fmt --manifest-path docs/evidence/issue-261-ladybug-probe/Cargo.toml -- --check && rustfmt --edition 2021 --check docs/evidence/issue-261-ladybug-probe/source-build-probe/src/main.rs && node scripts/lint-ladybug-qualification-receipt.mjs && npm run lint:ladybug-native-receipt && npm run lint:ladybug-contract-probe",
     "lint:ladybug-native-receipt": "node scripts/verify-ladybug-native-receipts.mjs",
     "lint:ladybug-contract-probe": "cargo fmt --manifest-path docs/evidence/issue-261-ladybug-contract-probe/Cargo.toml -- --check && node scripts/lint-ladybug-contract-probe.mjs",

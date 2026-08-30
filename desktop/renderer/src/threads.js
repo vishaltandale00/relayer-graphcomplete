@@ -611,6 +611,9 @@ export async function refreshState(
   appState.interactions = nextInteractions;
   appState.actionInvocations = nextActionInvocations;
   appState.approvals = nextApprovals;
+  appState.inputDraftRevision = Number.isSafeInteger(state.inputDraftRevision)
+    ? state.inputDraftRevision
+    : null;
   appState.capabilities = state.capabilities;
   appState.temporalSafeReason = projectionState?.safeReason ?? null;
   appState.temporalLifecycle = projectionState?.lifecycle ?? null;

@@ -507,6 +507,7 @@ pub(crate) struct ProductStateResponse {
     approvals: Vec<ApprovalReceipt>,
     capabilities: CapabilitiesResponse,
     current_projection: Option<relayer_graph_core::CurrentProjectionPage>,
+    input_draft_revision: Option<i64>,
 }
 
 impl ProductStateResponse {
@@ -527,6 +528,11 @@ impl ProductStateResponse {
         self.current_projection = projection;
         self
     }
+
+    pub(crate) fn with_input_draft_revision(mut self, revision: Option<i64>) -> Self {
+        self.input_draft_revision = revision;
+        self
+    }
 }
 
 impl From<ProductState> for ProductStateResponse {
@@ -543,6 +549,7 @@ impl From<ProductState> for ProductStateResponse {
             approvals: state.approvals,
             capabilities: state.capabilities.into(),
             current_projection: None,
+            input_draft_revision: None,
         }
     }
 }

@@ -4139,7 +4139,8 @@ export function createProductWorkspace({
     const thread = getThread();
     const interaction = currentInteraction(state, thread);
     const layerId = currentLayerId(state, thread);
-    if (!inputDraftController || !loadedInputDraftThreads.has(String(thread?.id))) {
+    const immutableReviewInput = mode === "review";
+    if ((!inputDraftController || !loadedInputDraftThreads.has(String(thread?.id))) && !immutableReviewInput) {
       const status = graphDocument.createElement("p");
       status.className = "node-input-status";
       status.textContent = inputDraftController
@@ -4167,7 +4168,9 @@ export function createProductWorkspace({
     for (const rail of host.querySelectorAll("[data-input-rail-key]")) {
       inputRailScroll.set(rail.dataset.inputRailKey, rail.scrollLeft);
     }
-    const draft = inputDraftController.current(thread.id);
+    const draft = immutableReviewInput
+      ? { revision: 0, attachments: [] }
+      : inputDraftController.current(thread.id);
     const sections = actions.map((action) => {
       // Product state projects the accepted input payload onto the action record. Keep the
       // nested form compatible with direct graph-shaped fixtures and older snapshots.
@@ -4180,6 +4183,9 @@ export function createProductWorkspace({
       const fieldset = graphDocument.createElement("fieldset");
       fieldset.className = "node-input-editor";
       fieldset.dataset.inputOccurrenceKey = stageKey;
+      fieldset.dataset.reviewCapture = `input-action-${action.id}`;
+      fieldset.dataset.reviewActionId = String(action.id);
+      fieldset.setAttribute("aria-label", `Input action: ${semantic.prompt}`);
       const legend = graphDocument.createElement("legend");
       legend.textContent = semantic.prompt;
       fieldset.append(legend);

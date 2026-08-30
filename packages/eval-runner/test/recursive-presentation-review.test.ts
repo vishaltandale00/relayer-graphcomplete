@@ -280,6 +280,12 @@ describe("recursive semantic presentation review", () => {
       findings: [],
     };
 
+    const prepared = store.prepareNodeReview(review);
+    expect(() => store.reviewNode(review)).toThrow("blocked by a prepared node review");
+    expect(() => store.reviewLayer({} as never)).toThrow("blocked by a prepared node review");
+    expect(() => store.submitReview({} as never)).toThrow("blocked by a prepared node review");
+    expect(store.snapshot().nodes).toEqual([]);
+    prepared.cancel();
     store.reviewNode(review);
     expect(store.snapshot()).toMatchObject({
       schemaVersion: 6,

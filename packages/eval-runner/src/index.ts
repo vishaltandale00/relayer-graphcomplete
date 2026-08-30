@@ -15,6 +15,8 @@ export * from "./simulated-user/contracts.js";
 export * from "./simulated-user/coverage.js";
 export * from "./simulated-user/evidence-validator.js";
 export * from "./simulated-user/inventory.js";
+export * from "./simulated-user/input-operator.js";
+export * from "./simulated-user/input-roundtrip.js";
 export * from "./simulated-user/judge-runner.js";
 export * from "./simulated-user/mcp-server.js";
 export * from "./simulated-user/review-store.js";

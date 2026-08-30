@@ -138,6 +138,12 @@ export interface RecursiveReviewRevision<Review> {
   readonly review: Review;
 }
 
+export interface PreparedRecursiveNodeReview {
+  readonly revision: number;
+  commit(): RecursiveReviewRevision<RecursiveNodeReview>;
+  cancel(): void;
+}
+
 export interface RecursiveReviewHistory<Review> {
   readonly currentRevision: number;
   readonly current: Review;
@@ -214,6 +220,7 @@ export class RecursivePresentationReviewStore {
   readonly #nodes = new Map<string, RecursiveReviewHistory<RecursiveNodeReview>>();
   readonly #trace: RecursiveReviewTraceEntry[] = [];
   #finalized: FinalizedRecursiveReview | undefined;
+  #pendingNodePreparation: symbol | undefined;
 
   constructor(options: RecursivePresentationReviewStoreOptions) {
     this.inventory = immutable(options.inventory);
@@ -233,7 +240,12 @@ export class RecursivePresentationReviewStore {
   }
 
   reviewNode(review: RecursiveNodeReview): RecursiveReviewRevision<RecursiveNodeReview> {
+    return this.prepareNodeReview(review).commit();
+  }
+
+  prepareNodeReview(review: RecursiveNodeReview): PreparedRecursiveNodeReview {
     this.#assertMutable();
+    this.#assertNoPendingNodePreparation();
     const normalizedReview: RecursiveNodeReview = {
       ...review,
       missingActionOpportunities: review.missingActionOpportunities ?? [],
@@ -248,19 +260,50 @@ export class RecursivePresentationReviewStore {
     validateNodeReview(normalizedReview, actionSubjects, this.#layers, this.#layerSubjects);
     const saved = immutable(normalizedReview);
     this.#validateEvidence?.({ kind: "node", subject, actionSubjects, review: saved });
-    const revision = appendRevision(this.#nodes, key, saved);
-    this.#trace.push(immutable({
-      sequence: this.#trace.length + 1,
-      tool: "reviewNode" as const,
-      subjectRevision: revision.revision,
-      layerId: normalizedReview.layerId,
-      nodeId: normalizedReview.nodeId,
-    }));
-    return revision;
+    const expectedCurrentRevision = this.#nodes.get(key)?.currentRevision ?? 0;
+    const proposedRevision = expectedCurrentRevision + 1;
+    const reservation = Symbol(key);
+    this.#pendingNodePreparation = reservation;
+    let committed = false;
+    let cancelled = false;
+    return Object.freeze({
+      revision: proposedRevision,
+      commit: () => {
+        if (committed) throw new Error(`Node review ${key} preparation was already committed`);
+        if (cancelled) throw new Error(`Node review ${key} preparation was cancelled`);
+        this.#assertMutable();
+        if (this.#pendingNodePreparation !== reservation) {
+          throw new Error(`Node review ${key} lost its mutation reservation`);
+        }
+        if (this.#layers.has(normalizedReview.layerId)) {
+          throw new Error(`Layer ${normalizedReview.layerId} is already finalized; revise its nodes before finalizing the LayerResult`);
+        }
+        if ((this.#nodes.get(key)?.currentRevision ?? 0) !== expectedCurrentRevision) {
+          throw new Error(`Node review ${key} changed after preparation`);
+        }
+        const revision = appendRevision(this.#nodes, key, saved);
+        this.#trace.push(immutable({
+          sequence: this.#trace.length + 1,
+          tool: "reviewNode" as const,
+          subjectRevision: revision.revision,
+          layerId: normalizedReview.layerId,
+          nodeId: normalizedReview.nodeId,
+        }));
+        this.#pendingNodePreparation = undefined;
+        committed = true;
+        return revision;
+      },
+      cancel: () => {
+        if (committed || cancelled) return;
+        if (this.#pendingNodePreparation === reservation) this.#pendingNodePreparation = undefined;
+        cancelled = true;
+      },
+    });
   }
 
   reviewLayer(review: RecursiveLayerResult): RecursiveReviewRevision<RecursiveLayerResult> {
     this.#assertMutable();
+    this.#assertNoPendingNodePreparation();
     const subject = this.#layerSubjects.get(review.layerId);
     if (subject === undefined) throw new Error(`Unknown layer review subject: ${review.layerId}`);
     if (this.#layers.has(review.layerId) && this.#isLayerConsumed(review.layerId)) {
@@ -329,6 +372,7 @@ export class RecursivePresentationReviewStore {
 
   submitReview(review: RecursiveTurnReview): FinalizedRecursiveReview {
     this.#assertMutable();
+    this.#assertNoPendingNodePreparation();
     if (review.turnId !== this.inventory.turn.turnId) {
       throw new Error(`Turn review subject ${review.turnId} does not match ${this.inventory.turn.turnId}`);
     }
@@ -395,6 +439,12 @@ export class RecursivePresentationReviewStore {
 
   #assertMutable(): void {
     if (this.#finalized !== undefined) throw new Error("Review is already finalized");
+  }
+
+  #assertNoPendingNodePreparation(): void {
+    if (this.#pendingNodePreparation !== undefined) {
+      throw new Error("Review mutation is blocked by a prepared node review");
+    }
   }
 }
 

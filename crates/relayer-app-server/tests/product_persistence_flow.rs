@@ -1717,6 +1717,12 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (10,999,11,'5')")
         .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO conversation_imports(id,source_sha256,export_version,producer_json,header_json,state,created_at,published_at) VALUES ('import-state','sha256:imported',1,'{}','{}','published','6','6')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO threads(id,title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id,conversation_import_id) VALUES (3,'Imported conversation',1,'6','6','codex-basic','auto','import-state')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name,completion_error,permission_profile_id) VALUES (20,3,1,'Imported failed turn','6','failed','codex-basic','Imported failure','auto')")
+        .execute(&pool).await.unwrap();
     pool.close().await;
 
     let workspace_state = response_json(
@@ -1733,6 +1739,14 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             .len(),
         2
     );
+    let imported_state = response_json(
+        app.clone()
+            .oneshot(api_request("GET", "/api/state?threadId=3", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(imported_state["inputDraftRevision"], Value::Null);
 
     let response = app
         .clone()

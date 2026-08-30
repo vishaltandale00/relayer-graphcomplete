@@ -7,17 +7,25 @@ export interface ReviewTopologyInputOption {
   readonly label: string;
 }
 
+export interface ReviewTopologyInputOccurrence {
+  readonly presentingInteractionNodeId: number;
+  readonly presentingLayerId: number;
+  readonly actionId: number;
+}
+
 export type ReviewTopologyInputSnapshot =
   | {
       readonly control: "text";
       readonly prompt: string;
       readonly options: readonly [];
+      readonly occurrence?: ReviewTopologyInputOccurrence;
       readonly minimumSelections?: never;
     }
   | {
       readonly control: "single_select";
       readonly prompt: string;
       readonly options: readonly ReviewTopologyInputOption[];
+      readonly occurrence?: ReviewTopologyInputOccurrence;
       readonly minimumSelections?: never;
     }
   | {
@@ -25,6 +33,7 @@ export type ReviewTopologyInputSnapshot =
       readonly prompt: string;
       readonly options: readonly ReviewTopologyInputOption[];
       readonly minimumSelections?: number;
+      readonly occurrence?: ReviewTopologyInputOccurrence;
     };
 
 interface ReviewTopologyActionBase {
@@ -88,6 +97,7 @@ export interface ActionReviewSubject {
   readonly prompt?: string;
   readonly options?: readonly ReviewTopologyInputOption[];
   readonly minimumSelections?: number;
+  readonly occurrence?: ReviewTopologyInputOccurrence;
 }
 
 export interface TurnReviewSubject {
@@ -230,6 +240,7 @@ export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubject
               control: action.control,
               prompt: action.prompt,
               options: action.options,
+              ...(action.occurrence === undefined ? {} : { occurrence: action.occurrence }),
               ...(action.control === "multi_select" && action.minimumSelections !== undefined
                 ? { minimumSelections: action.minimumSelections }
                 : {}),

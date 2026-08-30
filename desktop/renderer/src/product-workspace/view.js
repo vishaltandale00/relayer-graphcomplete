@@ -97,7 +97,7 @@ export function productWorkspaceMarkup() {
         </section>
         <div class="thread-composer-shell" id="threadComposerShell">
           <section class="composer-context-tray hidden" id="composerContextTray" aria-label="Composer attachments"></section>
-          <div class="thread-composer" id="threadComposer"><p class="composer-retry-message hidden" id="composerRetryMessage" role="alert"></p><p class="read-only-composer-message hidden" id="readOnlyComposerMessage">Read-only evaluation result</p><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
+          <div class="thread-composer" id="threadComposer"><p class="composer-retry-message hidden" id="composerRetryMessage" role="alert"></p><p class="read-only-composer-message hidden" id="readOnlyComposerMessage">Read-only evaluation result</p><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" data-review-ref="send-interaction" data-review-kind="send" title="Send" disabled>↑</button></div></div>
           <dialog class="context-draft-send-warning" id="contextDraftSendWarning" role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="contextDraftSendWarningTitle" aria-describedby="contextDraftSendWarningCopy contextDraftSendWarningCount">
             <div class="context-draft-send-warning-kicker"><span aria-hidden="true">!</span> Drafts will be omitted</div>
             <h2 id="contextDraftSendWarningTitle">Send without these node annotations?</h2>

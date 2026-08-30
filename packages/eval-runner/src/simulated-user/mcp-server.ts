@@ -52,6 +52,7 @@ export interface ReviewSessionController {
   screenshot(input: ScreenshotToolInput): Promise<ScreenshotControllerResult>;
   interact(input: InteractToolInput): Promise<InteractToolOutput>;
   history(input: HistoryToolInput): Promise<HistoryToolOutput>;
+  recordInputRatings?(input: { readonly review: RecursiveNodeReview; readonly revision: number }): Promise<void>;
 }
 
 export interface SimulatedUserReviewStore {
@@ -478,9 +479,17 @@ function createMcpServer(
   }));
 
   server.registerTool("interact", {
-    description: "Activate one visible accessible review control by element reference.",
-    inputSchema: z.object({ elementRef: z.string().min(1), activate: z.literal(true) }).strict(),
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    description: "Activate a visible review control, or supply a text, single-select, or multi-select value to a visible input action after rating it.",
+    inputSchema: z.object({
+      elementRef: z.string().min(1),
+      activate: z.literal(true).optional(),
+      value: z.union([
+        z.object({ text: z.string().min(1) }).strict(),
+        z.object({ selectedKey: z.string().min(1) }).strict(),
+        z.object({ selectedKeys: z.array(z.string().min(1)).min(1) }).strict(),
+      ]).optional(),
+    }).strict().refine((input) => input.activate === true || input.value !== undefined, "Interact requires activate or value"),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input) => traced(trace, now, "interact", input, async () => {
     try {
       return mcpResult(await controller.interact(input));
@@ -502,7 +511,7 @@ function createMcpServer(
   }));
 
   if (contract === "recursive") {
-    registerRecursiveReviewTools(server, reviewStore as RecursivePresentationReviewStore, trace, now);
+    registerRecursiveReviewTools(server, reviewStore as RecursivePresentationReviewStore, controller, trace, now);
     return server;
   }
 
@@ -573,6 +582,7 @@ function createMcpServer(
 function registerRecursiveReviewTools(
   server: McpServer,
   store: RecursivePresentationReviewStore,
+  controller: ReviewSessionController,
   trace: McpToolTraceEntry[],
   now: () => Date,
 ): void {
@@ -581,15 +591,19 @@ function registerRecursiveReviewTools(
     inputSchema: z.object({ review: recursiveNodeReviewSchema }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ review }) => traced(trace, now, "reviewNode", { review }, async () => {
+    let prepared;
     try {
       const typed = review as RecursiveNodeReview;
-      const revision = store.reviewNode(typed);
+      prepared = store.prepareNodeReview(typed);
+      await controller.recordInputRatings?.({ review: typed, revision: prepared.revision });
+      const revision = prepared.commit();
       return mcpResult({
         ok: true,
         disposition: revision.revision === 1 ? "created" : "revised",
         nodeId: typed.nodeId,
       });
     } catch (error) {
+      prepared?.cancel();
       return mcpResult(reviewFailure("reviewNode", error));
     }
   }));

@@ -61,7 +61,7 @@ export function visibleCaptureRegions(root = document, windowObject = window) {
       role: element.getAttribute("role") || "region",
       disabled: false,
       kind: "capture-region",
-      actionId: null,
+      actionId: element.dataset.reviewActionId || null,
     }))
     .filter((region) => Boolean(region.elementRef && region.name));
 }
@@ -172,6 +172,7 @@ export function createReviewPresentationAdapter({
     return {
       executionId,
       threadId: presentation.threadId ?? null,
+      threadRevision: presentation.threadRevision ?? null,
       turnId: presentation.turnId ?? null,
       layerId: presentation.layerId ?? null,
       selectedNodeId: presentation.selectedNodeId ?? null,
