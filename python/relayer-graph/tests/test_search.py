@@ -8,7 +8,8 @@ from pathlib import Path
 
 from relayer_graph import (APIError, GraphQueryError, GraphSearchRequest,
                            RelayerGraphClient)
-from relayer_graph.query_errors_generated import GRAPH_QUERY_ERROR_PHASES
+from relayer_graph.query_errors_generated import (GRAPH_QUERY_CONTRACT_VERSION,
+                                                  GRAPH_QUERY_ERROR_PHASES)
 
 
 GOLDEN = json.loads((Path(__file__).parents[3] / "packages" / "graph-client" /
@@ -134,9 +135,30 @@ class GraphSearchClientTests(unittest.IsolatedAsyncioTestCase):
     def test_generated_error_discriminator_matches_the_shared_v1_artifact(self) -> None:
         self.assertEqual(ERROR_CONTRACT["queryContractVersion"], 1)
         self.assertEqual(
+            GRAPH_QUERY_CONTRACT_VERSION,
+            ERROR_CONTRACT["queryContractVersion"],
+        )
+        self.assertEqual(
             GRAPH_QUERY_ERROR_PHASES,
             {item["code"]: item["phase"] for item in ERROR_CONTRACT["errors"]},
         )
+
+    async def test_success_requires_exact_query_contract_v1(self) -> None:
+        request = GraphSearchRequest(GOLDEN["request"]["query"])
+        for response in (
+            {**GOLDEN["result"], "queryContractVersion": 2},
+            {"columns": [], "rows": [], "truncated": False},
+            {**GOLDEN["result"], "queryContractVersion": "1"},
+            {**GOLDEN["result"], "queryContractVersion": True},
+            {**GOLDEN["result"], "queryContractVersion": 1.0},
+            {**GOLDEN["result"], "queryContractVersion": 1.5},
+        ):
+            SearchHandler.response = response
+            SearchHandler.status = 200
+            with self.assertRaises(APIError) as raised:
+                await self.client.search(request)
+            self.assertNotIsInstance(raised.exception, GraphQueryError)
+            self.assertEqual(raised.exception.status, 200)
 
 
 if __name__ == "__main__":

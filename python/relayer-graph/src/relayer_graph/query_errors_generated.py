@@ -1,6 +1,8 @@
 # Generated from docs/graph-query-v1-errors.json. Do not edit.
 from typing import Final
 
+GRAPH_QUERY_CONTRACT_VERSION: Final = 1
+
 GRAPH_QUERY_ERROR_PHASES: Final = {
     "invalid_request": "envelope",
     "unsupported_query_contract_version": "envelope",

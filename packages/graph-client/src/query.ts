@@ -1,4 +1,5 @@
 import {
+  GRAPH_QUERY_CONTRACT_VERSION,
   GRAPH_QUERY_ERROR_PHASES,
   type GeneratedGraphQueryCode,
   type GeneratedGraphQueryPhase,
@@ -106,14 +107,14 @@ export type GraphQueryValue =
  * project, thread, scope, permit, credential, or other authority selector.
  */
 export interface GraphSearchRequest {
-  readonly queryContractVersion: 1;
+  readonly queryContractVersion: typeof GRAPH_QUERY_CONTRACT_VERSION;
   readonly query: string;
   readonly parameters?: Readonly<Record<string, GraphQueryValue>>;
   readonly budget?: GraphQueryBudget;
 }
 
 export interface GraphSearchResult {
-  readonly queryContractVersion: 1;
+  readonly queryContractVersion: typeof GRAPH_QUERY_CONTRACT_VERSION;
   readonly columns: readonly string[];
   readonly rows: readonly (readonly GraphQueryValue[])[];
   readonly truncated: boolean;

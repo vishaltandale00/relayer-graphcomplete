@@ -50,11 +50,13 @@ if (rustEntries.some(([code, phase]) => code === undefined || phase === undefine
 }
 
 const typescript = `// Generated from docs/graph-query-v1-errors.json. Do not edit.\n` +
+  `export const GRAPH_QUERY_CONTRACT_VERSION = ${contract.queryContractVersion} as const;\n\n` +
   `export const GRAPH_QUERY_ERROR_PHASES = {\n${entries.map(([code, phase]) => `  ${JSON.stringify(code)}: ${JSON.stringify(phase)},`).join("\n")}\n} as const;\n\n` +
   `export type GeneratedGraphQueryCode = keyof typeof GRAPH_QUERY_ERROR_PHASES;\n` +
   `export type GeneratedGraphQueryPhase = typeof GRAPH_QUERY_ERROR_PHASES[GeneratedGraphQueryCode];\n`;
 const python = `# Generated from docs/graph-query-v1-errors.json. Do not edit.\n` +
   `from typing import Final\n\n` +
+  `GRAPH_QUERY_CONTRACT_VERSION: Final = ${contract.queryContractVersion}\n\n` +
   `GRAPH_QUERY_ERROR_PHASES: Final = {\n${entries.map(([code, phase]) => `    ${JSON.stringify(code)}: ${JSON.stringify(phase)},`).join("\n")}\n}\n`;
 
 for (const [target, expected] of [[typescriptPath, typescript], [pythonPath, python]]) {

@@ -1,4 +1,6 @@
 // Generated from docs/graph-query-v1-errors.json. Do not edit.
+export const GRAPH_QUERY_CONTRACT_VERSION = 1 as const;
+
 export const GRAPH_QUERY_ERROR_PHASES = {
   "invalid_request": "envelope",
   "unsupported_query_contract_version": "envelope",

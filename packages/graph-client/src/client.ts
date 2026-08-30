@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EdgeObject, LayerObject, NodeObject, edgeId, layerId, nodeId, type ActionObject, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
+import { GRAPH_QUERY_CONTRACT_VERSION } from "./query-errors.generated.js";
 import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
 import { GraphApiError, type CompletionOutput, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation } from "./types.js";
 
@@ -143,7 +144,7 @@ export class RelayerGraphClient {
   }
 
   async search(request: GraphSearchRequest, options: GraphSearchOptions = {}): Promise<GraphSearchResult> {
-    return this.request<GraphSearchResult>("/api/graph/search", {
+    const result = await this.request<unknown>("/api/graph/search", {
       method: "POST",
       body: JSON.stringify({
         queryContractVersion: request.queryContractVersion,
@@ -153,6 +154,15 @@ export class RelayerGraphClient {
       }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     }, "query");
+    if (!isVersionedGraphSearchResult(result)) {
+      throw new GraphApiError(
+        200,
+        "invalid_search_response",
+        "queryContractVersion",
+        `Graph search response must use query contract version ${GRAPH_QUERY_CONTRACT_VERSION}`,
+      );
+    }
+    return result;
   }
 
   private async request<T>(path: string, init: RequestInit = {}, errorKind: "api" | "query" = "api"): Promise<T> {
@@ -186,6 +196,13 @@ export class RelayerGraphClient {
 function requireReference(value: NodeReference | undefined): NodeReference {
   if (value === undefined) throw new Error("createEdge requires two node references");
   return value;
+}
+
+function isVersionedGraphSearchResult(value: unknown): value is GraphSearchResult {
+  return typeof value === "object"
+    && value !== null
+    && "queryContractVersion" in value
+    && value.queryContractVersion === GRAPH_QUERY_CONTRACT_VERSION;
 }
 
 export { EdgeObject, LayerObject, NodeObject };

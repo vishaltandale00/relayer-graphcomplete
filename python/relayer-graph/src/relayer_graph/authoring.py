@@ -15,7 +15,8 @@ from .exceptions import (APIError, AuthenticationError, ConfigurationError,
                          GraphQueryError, NotFound, TransportError,
                          ValidationError, ValidationIssue)
 from .query import GraphSearchRequest, GraphSearchResult
-from .query_errors_generated import GRAPH_QUERY_ERROR_PHASES
+from .query_errors_generated import (GRAPH_QUERY_CONTRACT_VERSION,
+                                     GRAPH_QUERY_ERROR_PHASES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,9 +308,17 @@ class RelayerGraphClient:
         does not expose a truthful in-flight cancellation primitive. Callers may
         narrow ``wallTimeMs`` in the request budget instead.
         """
-        return await self._request(
+        result = await self._request(
             "POST", "/api/graph/search", request.to_wire(), graph_query=True
         )
+        version = result.get("queryContractVersion") if isinstance(result, Mapping) else None
+        if (type(version) is not int
+                or version != GRAPH_QUERY_CONTRACT_VERSION):
+            raise APIError(
+                f"Graph search response must use query contract version {GRAPH_QUERY_CONTRACT_VERSION}",
+                status=200, details=result,
+            )
+        return result
 
     async def _request(self, method: str, path: str, body: Any = None, *,
                        graph_query: bool = False) -> Any:

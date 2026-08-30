@@ -88,6 +88,26 @@ describe("current-thread graph search client", () => {
       expect(actual).not.toBeInstanceOf(GraphQueryError);
     }
   });
+
+  it("rejects successful responses that are not exactly query contract v1", async () => {
+    for (const response of [
+      { ...golden.result, queryContractVersion: 2 },
+      { columns: [], rows: [], truncated: false },
+      { ...golden.result, queryContractVersion: "1" },
+      { ...golden.result, queryContractVersion: true },
+      { ...golden.result, queryContractVersion: 1.5 },
+    ]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })));
+      const actual = await client().search(golden.request).catch((error: unknown) => error);
+      expect(actual).toBeInstanceOf(GraphApiError);
+      expect(actual).not.toBeInstanceOf(GraphQueryError);
+      expect(actual).toMatchObject({
+        status: 200,
+        code: "invalid_search_response",
+        path: "queryContractVersion",
+      });
+    }
+  });
 });
 
 function client(): RelayerGraphClient {
