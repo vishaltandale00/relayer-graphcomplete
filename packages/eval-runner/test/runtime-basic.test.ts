@@ -458,7 +458,11 @@ describe("first runtime evaluation", () => {
       sourceLayerId: artifact.turns[1]!.output.rootLayer.layer.id,
     });
     const submits = evidence.auditEvents.filter((event) => event.path === "/api/graph/submit" && event.status === 200);
-    const search = evidence.auditEvents.find((event) => event.path === "/api/graph/search" && event.status === 200)!;
+    const search = evidence.auditEvents.find((event) => (
+      event.path === "/api/graph/search"
+      && event.status === 200
+      && event.sequence > evidence.secondTurnStartSequence
+    ))!;
     const reference = evidence.auditEvents.find((event) => event.recordId === evidence.referenceActionId && event.recordKind === "action")!;
     expect(submits).toHaveLength(2);
     expect(submits[0]!.sequence).toBeLessThan(search.sequence);

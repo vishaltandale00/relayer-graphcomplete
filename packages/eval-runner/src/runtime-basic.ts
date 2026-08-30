@@ -136,6 +136,7 @@ export interface ReplayRepairAuditEvent {
 
 export interface GraphMemoryEvidence {
   readonly anchor: string;
+  readonly secondTurnStartSequence: number;
   readonly searchedLayerIds: readonly number[];
   readonly searchSequence?: number;
   readonly draftDecoyLayerId?: number;
@@ -194,12 +195,14 @@ export async function runBasicRuntimeEval(options: {
     const capabilities: GraphCapability[] = [];
     const turns: RuntimeEvalTurn[] = [];
     const sessionStateSnapshots: unknown[] = [];
+    const turnStartSequences: number[] = [];
     const prompts = options.execution.testCaseId === replayRepairEvalCaseId
       ? [replayRepairEvalPrompt]
       : options.execution.testCaseId === graphMemoryEvalCaseId
         ? graphMemoryEvalPrompts(options.execution.testRunId)
         : [basicEvalPrompt, basicEvalFollowUpPrompt];
     for (const prompt of prompts) {
+      turnStartSequences.push(graphAuditProxy?.events().at(-1)?.sequence ?? 0);
       const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, graphControlToken, { projectId, threadId, text: prompt });
       const capability = { url: graphAuditProxy?.url ?? graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
@@ -222,6 +225,7 @@ export async function runBasicRuntimeEval(options: {
             turns[0]!.output,
             complete.output,
             graphAuditProxy?.events() ?? [],
+            turnStartSequences[1] ?? 0,
           )
         : undefined;
       const checks = isReplayRepair
@@ -422,9 +426,18 @@ export function readGraphMemoryEvidence(
   firstOutput: CompletionOutput,
   secondOutput: CompletionOutput,
   auditEvents: readonly ReplayRepairAuditEvent[],
+  secondTurnStartSequence: number,
 ): GraphMemoryEvidence {
+  const firstSubmit = auditEvents.find((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/submit"
+    && event.status >= 200
+    && event.status < 300
+    && event.completionNodeId === firstOutput.nodeId
+  ));
   const search = auditEvents.find((event) => (
     event.method === "POST" && event.path === "/api/graph/search" && event.status >= 200 && event.status < 300
+    && event.sequence > secondTurnStartSequence
   ));
   const searchedLayerIds = search?.searchLayerIds ?? [];
   const reference = auditEvents.find((event) => (
@@ -436,13 +449,6 @@ export function readGraphMemoryEvidence(
     && event.actionRelation === "reference"
     && event.actionTargetLayerId === firstOutput.rootLayer.layer.id
     && event.actionSourceLayerId === secondOutput.rootLayer.layer.id
-  ));
-  const firstSubmit = auditEvents.find((event) => (
-    event.method === "POST"
-    && event.path === "/api/graph/submit"
-    && event.status >= 200
-    && event.status < 300
-    && event.completionNodeId === firstOutput.nodeId
   ));
   const draftDecoy = search === undefined ? undefined : auditEvents.filter((event) => (
     event.method === "POST"
@@ -457,6 +463,7 @@ export function readGraphMemoryEvidence(
   )).at(-1);
   return {
     anchor,
+    secondTurnStartSequence,
     searchedLayerIds,
     ...(search === undefined ? {} : { searchSequence: search.sequence }),
     ...(draftDecoy?.recordId === undefined ? {} : { draftDecoyLayerId: draftDecoy.recordId }),
@@ -495,12 +502,6 @@ export function checkGraphMemorySecondTurn(
     && action.targetLayerId === priorLayerId
     && output.rootLayer.nodes.some((node) => node.id === action.sourceNodeId)
   ));
-  const successfulSearches = evidence.auditEvents.filter((event) => (
-    event.method === "POST"
-    && event.path === "/api/graph/search"
-    && event.status >= 200
-    && event.status < 300
-  ));
   const firstSubmit = evidence.auditEvents.find((event) => (
     event.method === "POST"
     && event.path === "/api/graph/submit"
@@ -508,6 +509,13 @@ export function checkGraphMemorySecondTurn(
     && event.status < 300
     && event.completionNodeId === firstOutput.nodeId
     && event.completionRootLayerId === priorLayerId
+  ));
+  const successfulSearches = evidence.auditEvents.filter((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/search"
+    && event.status >= 200
+    && event.status < 300
+    && event.sequence > evidence.secondTurnStartSequence
   ));
   const secondSubmit = evidence.auditEvents.find((event) => (
     event.method === "POST"
