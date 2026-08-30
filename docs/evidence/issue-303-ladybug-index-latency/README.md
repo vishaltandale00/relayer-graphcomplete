@@ -38,7 +38,7 @@ p95 was 143.3 ms, p99 was 163.0 ms, and the maximum was 207.2 ms. Twenty-one of
 preserved in Git history at commit `b0d3aa56`.
 
 After removing the forced per-save checkpoint and adding rebuild-first recovery,
-the same corpus passed at integrated source commit `3f5b82b8`: p50 was 18.0 ms,
-p90 was 37.1 ms, p95 was 96.7 ms, p99 was 105.2 ms, and the maximum was 107.0 ms.
-Four of 200 acknowledgements were at or above 100 ms; the defined nearest-rank p95
+the same corpus passed at integrated source commit `98977a35`: p50 was 16.7 ms,
+p90 was 34.4 ms, p95 was 96.2 ms, p99 was 98.2 ms, and the maximum was 102.6 ms.
+Two of 200 acknowledgements were at or above 100 ms; the defined nearest-rank p95
 gate remained below 100 ms. The checked-in receipt contains that final capture.
