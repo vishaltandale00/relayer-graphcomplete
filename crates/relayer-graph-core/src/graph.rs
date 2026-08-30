@@ -31,8 +31,9 @@ pub use personal_presentation::{
     ResolvedPersonalPresentation,
 };
 pub use search_index::{
-    NoSearchIndex, SearchIndex, SearchIndexComponent, SearchIndexFuture, SearchIndexRevision,
-    SearchIndexWrite, SearchTarget, publication_targets,
+    NoSearchIndex, SearchIndex, SearchIndexComponent, SearchIndexFuture, SearchIndexRebuildClosure,
+    SearchIndexRebuildSnapshot, SearchIndexRevision, SearchIndexWrite, SearchTarget,
+    publication_targets,
 };
 pub use writer::GraphWriter;
 

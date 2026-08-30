@@ -8,11 +8,16 @@
 //!
 //! This crate is the only one that names `lbug`.
 
+mod lifecycle;
 pub mod schema;
 pub mod store;
 pub mod value;
 
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    path::Path,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use serde_json::Value as JsonValue;
 
@@ -27,6 +32,14 @@ use self::store::{LadybugStore, StoreLayout, exec};
 #[derive(Clone)]
 pub struct LadybugSearchIndex {
     store: Arc<LadybugStore>,
+    #[cfg(feature = "crash-test-support")]
+    post_commit_crash_hook: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
+}
+
+#[cfg(feature = "crash-test-support")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchIndexLifecycleFault {
+    BeforePublish,
 }
 
 impl LadybugSearchIndex {
@@ -40,7 +53,44 @@ impl LadybugSearchIndex {
         let store = LadybugStore::open(layout, query_timeout).map_err(internal)?;
         Ok(Self {
             store: Arc::new(store),
+            #[cfg(feature = "crash-test-support")]
+            post_commit_crash_hook: None,
         })
+    }
+
+    /// Open a validated store whose exact contents were reconciled against the
+    /// canonical SQLite graph before it can answer product work.
+    pub async fn open_reconciled(
+        database: &Path,
+        graph: &relayer_graph_core::GraphDatabase,
+    ) -> Result<Self, GraphError> {
+        lifecycle::open_reconciled(database, graph, DEFAULT_SEARCH_INDEX_BUDGET, None).await
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    pub async fn open_reconciled_with_fault(
+        database: &Path,
+        graph: &relayer_graph_core::GraphDatabase,
+        fault: SearchIndexLifecycleFault,
+    ) -> Result<Self, GraphError> {
+        lifecycle::open_reconciled(database, graph, DEFAULT_SEARCH_INDEX_BUDGET, Some(fault)).await
+    }
+
+    fn from_store(store: LadybugStore) -> Self {
+        Self {
+            store: Arc::new(store),
+            #[cfg(feature = "crash-test-support")]
+            post_commit_crash_hook: None,
+        }
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    pub fn with_post_commit_crash_hook(
+        mut self,
+        hook: Arc<dyn Fn() + Send + Sync + 'static>,
+    ) -> Self {
+        self.post_commit_crash_hook = Some(hook);
+        self
     }
 
     pub fn layout(&self) -> &StoreLayout {
@@ -71,6 +121,13 @@ impl LadybugSearchIndex {
             .await
             .map_err(internal)
     }
+
+    pub(crate) async fn revision_count(&self) -> Result<usize, GraphError> {
+        self.store
+            .run(schema::revision_count)
+            .await
+            .map_err(internal)
+    }
 }
 
 impl SearchIndex for LadybugSearchIndex {
@@ -89,12 +146,28 @@ impl SearchIndex for LadybugSearchIndex {
         target: SearchTarget,
         revision: SearchIndexRevision,
     ) -> SearchIndexFuture<Box<dyn SearchIndexWrite>> {
+        self.begin_until(
+            target,
+            revision,
+            Instant::now() + DEFAULT_SEARCH_INDEX_BUDGET,
+        )
+    }
+
+    fn begin_until(
+        &self,
+        target: SearchTarget,
+        revision: SearchIndexRevision,
+        deadline: Instant,
+    ) -> SearchIndexFuture<Box<dyn SearchIndexWrite>> {
         let store = self.store.clone();
+        #[cfg(feature = "crash-test-support")]
+        let post_commit_crash_hook = self.post_commit_crash_hook.clone();
         Box::pin(async move {
             // The BEGIN runs whether or not this future is still being awaited,
             // so an abandoned one has to release its own transaction.
             store
-                .run_undoable(
+                .run_undoable_until(
+                    deadline,
                     |connection| exec(connection, "BEGIN TRANSACTION"),
                     |connection| {
                         let _ = exec(connection, "ROLLBACK");
@@ -106,6 +179,9 @@ impl SearchIndex for LadybugSearchIndex {
                 store,
                 target,
                 revision,
+                deadline,
+                #[cfg(feature = "crash-test-support")]
+                post_commit_crash_hook,
                 settled: false,
             }) as Box<dyn SearchIndexWrite>)
         })
@@ -120,6 +196,9 @@ struct LadybugWrite {
     store: Arc<LadybugStore>,
     target: SearchTarget,
     revision: SearchIndexRevision,
+    deadline: Instant,
+    #[cfg(feature = "crash-test-support")]
+    post_commit_crash_hook: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
     /// Whether the transaction has been committed or rolled back. An unsettled
     /// write that is dropped was abandoned — a deadline expired, or the request
     /// was cancelled — and has to release its transaction itself.
@@ -147,19 +226,29 @@ impl SearchIndexWrite for LadybugWrite {
         published_to: Vec<SearchTarget>,
     ) -> SearchIndexFuture<()> {
         let store = self.store.clone();
+        let deadline = self.deadline;
         Box::pin(async move {
             store
-                .run(move |connection| schema::apply_closure(connection, &published_to, &closure))
+                .run_until(deadline, move |connection| {
+                    schema::apply_closure(connection, &published_to, &closure)
+                })
                 .await
                 .map_err(internal)
         })
     }
 
     fn commit(mut self: Box<Self>) -> SearchIndexFuture<SearchIndexRevision> {
-        let (store, target, revision) = (self.store.clone(), self.target, self.revision);
+        let (store, target, revision, deadline) = (
+            self.store.clone(),
+            self.target,
+            self.revision,
+            self.deadline,
+        );
+        #[cfg(feature = "crash-test-support")]
+        let post_commit_crash_hook = self.post_commit_crash_hook.clone();
         Box::pin(async move {
             let outcome = store
-                .run(move |connection| {
+                .run_until(deadline, move |connection| {
                     // The revision is written inside the transaction, so it
                     // becomes durable with the closure it describes or not at all.
                     if let Err(error) = schema::write_revision(connection, target, revision) {
@@ -170,13 +259,15 @@ impl SearchIndexWrite for LadybugWrite {
                         let _ = exec(connection, "ROLLBACK");
                         return Err(error);
                     }
-                    // Ladybug 0.18 can acknowledge COMMIT while relationship
-                    // updates still exist only in a WAL state that its own
-                    // replay cannot survive an immediate SIGKILL. The author is
-                    // not acknowledged until the derived revision is crash-
-                    // durable, so force the engine checkpoint inside the same
-                    // bounded worker job.
-                    exec(connection, "CHECKPOINT")
+                    #[cfg(feature = "crash-test-support")]
+                    if let Some(hook) = post_commit_crash_hook {
+                        hook();
+                    }
+                    // COMMIT plus immediate searchability is the acknowledged
+                    // boundary. A forced data-file checkpoint is both outside
+                    // that contract and above the interactive latency budget;
+                    // startup rebuild handles an ahead or unopenable WAL state.
+                    Ok(())
                 })
                 .await
                 .map_err(internal);

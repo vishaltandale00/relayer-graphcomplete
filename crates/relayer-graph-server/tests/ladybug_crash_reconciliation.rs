@@ -17,9 +17,8 @@ use std::{
 };
 
 use relayer_graph_core::{
-    ActionDraft, ActionKind, CompletionCrashPoint, EdgeDraft, GraphDatabase, LayerDraft,
-    LayerLayout, NavigateRelation, NodeDraft, NodeId, NodePlacement, SearchIndex,
-    SearchIndexRevision, SearchTarget, ThreadId,
+    ActionDraft, ActionKind, EdgeDraft, GraphDatabase, LayerDraft, LayerLayout, NavigateRelation,
+    NodeDraft, NodeId, NodePlacement, SearchIndex, SearchIndexRevision, SearchTarget, ThreadId,
 };
 use relayer_graph_server::search_index::LadybugSearchIndex;
 use serde_json::json;
@@ -180,20 +179,21 @@ async fn real_kill_child() {
             .expect("interaction integer"),
     )
     .expect("positive interaction");
-    let index = Arc::new(LadybugSearchIndex::open(&database_path).unwrap());
-    let database = GraphDatabase::open_with_index(&database_path, index)
-        .await
-        .unwrap()
-        .with_completion_crash_hook(Arc::new(move |point| {
-            if point == CompletionCrashPoint::AfterSearchCommit {
+    let index = Arc::new(
+        LadybugSearchIndex::open(&database_path)
+            .unwrap()
+            .with_post_commit_crash_hook(Arc::new(move || {
                 File::create(&marker_path)
                     .and_then(|file| file.sync_all())
                     .expect("publish durable crash marker");
                 loop {
                     std::thread::park();
                 }
-            }
-        }));
+            })),
+    );
+    let database = GraphDatabase::open_with_index(&database_path, index)
+        .await
+        .unwrap();
     database
         .writer_for_subgraph(interaction)
         .await
@@ -283,18 +283,35 @@ async fn sigkill_after_ladybug_commit_leaves_a_detectable_orphan_and_retry_conve
     );
     drop(sqlite_only);
 
-    let orphaned = LadybugSearchIndex::open(&database_path).unwrap();
-    assert_eq!(
-        orphaned.revision(target).await.unwrap(),
-        Some(SearchIndexRevision::FIRST)
-    );
-    assert_complete_topology(&orphaned).await;
-    drop(orphaned);
+    // Depending on exactly which post-COMMIT WAL state the SIGKILL preserved,
+    // the selected generation is either unopenable or observably ahead. Both
+    // are damage signatures; neither is allowed to become a stale success.
+    if let Ok(orphaned) = LadybugSearchIndex::open(&database_path) {
+        assert_eq!(
+            orphaned.revision(target).await.unwrap(),
+            Some(SearchIndexRevision::FIRST)
+        );
+        assert_complete_topology(&orphaned).await;
+    }
 
-    let index = Arc::new(LadybugSearchIndex::open(&database_path).unwrap());
-    let database = GraphDatabase::open_with_index(&database_path, index.clone())
-        .await
-        .unwrap();
+    let sqlite_only = GraphDatabase::open(&database_path).await.unwrap();
+    let index = Arc::new(
+        LadybugSearchIndex::open_reconciled(&database_path, &sqlite_only)
+            .await
+            .unwrap(),
+    );
+    assert_eq!(index.revision(target).await.unwrap(), None);
+    assert!(
+        index
+            .layout()
+            .quarantine()
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some(),
+        "the damaged or ahead generation must be quarantined"
+    );
+    let database = sqlite_only.with_search_index(index.clone());
     database
         .writer_for_subgraph(interaction)
         .await
@@ -311,11 +328,11 @@ async fn sigkill_after_ladybug_commit_leaves_a_detectable_orphan_and_retry_conve
     );
     assert_eq!(
         database.search_index_revision(target).await.unwrap(),
-        Some(SearchIndexRevision::FIRST.next())
+        Some(SearchIndexRevision::FIRST)
     );
     assert_eq!(
         index.revision(target).await.unwrap(),
-        Some(SearchIndexRevision::FIRST.next())
+        Some(SearchIndexRevision::FIRST)
     );
     assert_complete_topology(&index).await;
 }

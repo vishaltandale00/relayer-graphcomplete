@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc::{Sender, channel},
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, anyhow};
@@ -41,9 +41,13 @@ impl StoreLayout {
         &self.root
     }
 
-    /// The store that answers queries and takes writes.
+    /// The atomic pointer naming the generation that answers queries and writes.
     pub fn active(&self) -> PathBuf {
         self.root.join("active")
+    }
+
+    pub fn generations(&self) -> PathBuf {
+        self.root.join("generations")
     }
 
     /// Where a store that will not open, or whose versions are incompatible, is
@@ -51,6 +55,143 @@ impl StoreLayout {
     pub fn quarantine(&self) -> PathBuf {
         self.root.join("quarantine")
     }
+
+    pub fn rollback(&self) -> PathBuf {
+        self.root.join("rollback")
+    }
+
+    pub fn active_generation(&self) -> Result<Option<PathBuf>> {
+        let pointer = self.active();
+        let name = match fs::read_to_string(&pointer) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error).context("read active Ladybug generation"),
+        };
+        let name = name.trim();
+        if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+            return Err(anyhow!("active Ladybug generation pointer is invalid"));
+        }
+        Ok(Some(self.generations().join(name)))
+    }
+
+    /// Copy the pre-generation `active` database and all of its sidecars into a
+    /// generation without disturbing the bytes startup may still need to keep.
+    pub fn snapshot_legacy_active(&self) -> Result<Option<PathBuf>> {
+        if !self.active().exists() {
+            return Ok(None);
+        }
+        let generation = self.create_generation()?;
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let Some(suffix) = name.strip_prefix("active") else {
+                continue;
+            };
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let target = generation.join(format!("store{suffix}"));
+            if fs::hard_link(entry.path(), &target).is_err() {
+                fs::copy(entry.path(), target)?;
+            }
+        }
+        Ok(Some(generation))
+    }
+
+    pub fn remove_legacy_sidecars(&self) -> Result<()> {
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if name.starts_with("active")
+                && entry.path() != self.active()
+                && entry.file_type()?.is_file()
+            {
+                fs::remove_file(entry.path())?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn create_generation(&self) -> Result<PathBuf> {
+        fs::create_dir_all(self.generations())?;
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let generation = self
+            .generations()
+            .join(format!("generation-{}-{nonce}", std::process::id()));
+        if generation.exists() {
+            return Err(anyhow!("new Ladybug generation already exists"));
+        }
+        fs::create_dir(&generation)?;
+        Ok(generation)
+    }
+
+    pub fn publish(&self, generation: &Path) -> Result<()> {
+        let name = generation
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| anyhow!("Ladybug generation has no portable name"))?;
+        if generation.parent() != Some(self.generations().as_path()) {
+            return Err(anyhow!("Ladybug generation is outside its store layout"));
+        }
+        fs::create_dir_all(&self.root)?;
+        let next = self
+            .root
+            .join(format!(".active-next-{}", std::process::id()));
+        fs::write(&next, format!("{name}\n"))?;
+        let file = fs::File::open(&next)?;
+        file.sync_all()?;
+        fs::rename(&next, self.active())?;
+        fs::File::open(&self.root)?.sync_all()?;
+        Ok(())
+    }
+
+    pub fn retain_previous(&self, previous: &Path, quarantine: bool) -> Result<()> {
+        if !previous.exists() {
+            return Ok(());
+        }
+        let destination_root = if quarantine {
+            self.quarantine()
+        } else {
+            self.rollback()
+        };
+        fs::create_dir_all(&destination_root)?;
+        let name = previous
+            .file_name()
+            .ok_or_else(|| anyhow!("previous Ladybug generation has no name"))?;
+        let retained = destination_root.join(name);
+        fs::rename(previous, &retained)?;
+        if quarantine {
+            fs::create_dir_all(self.rollback())?;
+            copy_generation(&retained, &self.rollback().join(name))?;
+        }
+        Ok(())
+    }
+}
+
+fn copy_generation(source: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = destination.join(entry.file_name());
+        if kind.is_dir() {
+            copy_generation(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            if fs::hard_link(entry.path(), &target).is_err() {
+                fs::copy(entry.path(), &target)?;
+            }
+        } else {
+            return Err(anyhow!(
+                "Ladybug generation contains an unsupported file type"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// A unit of work to run against the store's connection, on the worker thread.
@@ -62,6 +203,7 @@ pub struct LadybugStore {
     jobs: Option<Sender<Job>>,
     worker: Option<JoinHandle<()>>,
     layout: StoreLayout,
+    query_timeout: Duration,
 }
 
 impl LadybugStore {
@@ -73,9 +215,25 @@ impl LadybugStore {
     /// caller's deadline, so a stuck statement aborts inside Ladybug rather than
     /// leaving the worker thread blocked with the SQLite write lock held.
     pub fn open(layout: StoreLayout, query_timeout: Duration) -> Result<Self> {
-        let active = layout.active();
         fs::create_dir_all(&layout.root)
             .with_context(|| format!("create Ladybug store at {}", layout.root.display()))?;
+        let active = match layout.active_generation()? {
+            Some(active) => active,
+            None => {
+                let active = layout.create_generation()?;
+                layout.publish(&active)?;
+                active
+            }
+        };
+        Self::open_path(layout, active, query_timeout)
+    }
+
+    pub fn open_path(
+        layout: StoreLayout,
+        generation: PathBuf,
+        query_timeout: Duration,
+    ) -> Result<Self> {
+        let active = generation.join("store");
         let existed = active.exists();
         let (ready, opened) = channel();
         let (jobs, queue) = channel::<Job>();
@@ -122,6 +280,7 @@ impl LadybugStore {
                 jobs: Some(jobs),
                 worker: Some(worker),
                 layout,
+                query_timeout,
             }),
             Ok(Err(error)) => {
                 let _ = worker.join();
@@ -149,6 +308,16 @@ impl LadybugStore {
         self.run_undoable(job, |_| {}).await
     }
 
+    /// Run engine work under the remaining time of one outer operation, then
+    /// restore the store's ordinary query timeout for unrelated work.
+    pub async fn run_until<T, F>(&self, deadline: Instant, job: F) -> Result<T>
+    where
+        F: for<'connection> FnOnce(&Connection<'connection>) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.run_undoable_until(deadline, job, |_| {}).await
+    }
+
     /// Run a job whose effect has to be undone when nobody is waiting for it any
     /// more.
     ///
@@ -167,6 +336,34 @@ impl LadybugStore {
         let (reply, answer) = oneshot::channel();
         self.submit(Box::new(move |connection| {
             let outcome = job(connection);
+            let took_effect = outcome.is_ok();
+            if reply.send(outcome).is_err() && took_effect {
+                undo(connection);
+            }
+        }))?;
+        answer
+            .await
+            .map_err(|_| anyhow!("the Ladybug worker dropped the job"))?
+    }
+
+    pub async fn run_undoable_until<T, F, U>(&self, deadline: Instant, job: F, undo: U) -> Result<T>
+    where
+        F: for<'connection> FnOnce(&Connection<'connection>) -> Result<T> + Send + 'static,
+        U: for<'connection> FnOnce(&Connection<'connection>) + Send + 'static,
+        T: Send + 'static,
+    {
+        if deadline <= Instant::now() {
+            return Err(anyhow!("the Ladybug operation deadline expired"));
+        }
+        let default_timeout = self.query_timeout;
+        let (reply, answer) = oneshot::channel();
+        self.submit(Box::new(move |connection| {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            connection
+                .set_query_timeout(u64::try_from(remaining.as_millis().max(1)).unwrap_or(u64::MAX));
+            let outcome = job(connection);
+            connection
+                .set_query_timeout(u64::try_from(default_timeout.as_millis()).unwrap_or(u64::MAX));
             let took_effect = outcome.is_ok();
             if reply.send(outcome).is_err() && took_effect {
                 undo(connection);

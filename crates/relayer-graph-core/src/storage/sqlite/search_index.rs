@@ -1,6 +1,8 @@
 use sqlx::SqliteConnection;
 
-use crate::{GraphError, SearchIndexComponent, SearchIndexRevision, SearchTarget};
+use crate::{
+    GraphError, ProjectId, SearchIndexComponent, SearchIndexRevision, SearchTarget, ThreadId,
+};
 
 pub(crate) struct SearchIndexTable<'connection> {
     connection: &'connection mut SqliteConnection,
@@ -48,6 +50,34 @@ impl<'connection> SearchIndexTable<'connection> {
         .execute(&mut *self.connection)
         .await?;
         Ok(())
+    }
+
+    pub(crate) async fn revisions(
+        &mut self,
+    ) -> Result<Vec<(SearchTarget, SearchIndexRevision)>, GraphError> {
+        let rows = sqlx::query_as::<_, (String, i64, i64)>(
+            "SELECT target_kind,target_id,revision FROM search_index_targets ORDER BY target_kind,target_id",
+        )
+        .fetch_all(&mut *self.connection)
+        .await?;
+        rows.into_iter()
+            .map(|(kind, id, revision)| {
+                let target = match kind.as_str() {
+                    "project" => SearchTarget::Project(ProjectId::new(id).ok_or_else(|| {
+                        GraphError::Internal("database returned an invalid search project".into())
+                    })?),
+                    "thread" => SearchTarget::Thread(ThreadId::new(id).ok_or_else(|| {
+                        GraphError::Internal("database returned an invalid search thread".into())
+                    })?),
+                    _ => {
+                        return Err(GraphError::Internal(
+                            "database returned an invalid search target kind".into(),
+                        ));
+                    }
+                };
+                Ok((target, valid_revision(revision)?))
+            })
+            .collect()
     }
 
     pub(crate) async fn version(

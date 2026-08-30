@@ -112,15 +112,11 @@ async fn open_graph(path: &str) -> anyhow::Result<GraphDatabase> {
     use relayer_graph_server::search_index::LadybugSearchIndex;
     use std::{path::Path, sync::Arc};
 
-    // Opening the store is blocking work — it waits for the engine to open the
-    // database, which takes a couple of hundred milliseconds on a fresh store —
-    // so it must not run on a runtime thread.
-    let owned = path.to_owned();
-    let index = tokio::task::spawn_blocking(move || LadybugSearchIndex::open(Path::new(&owned)))
+    let graph = GraphDatabase::open(path).await?;
+    let index = LadybugSearchIndex::open_reconciled(Path::new(path), &graph)
         .await
-        .context("open the search index")?
-        .context("open the search index")?;
-    Ok(GraphDatabase::open_with_index(path, Arc::new(index)).await?)
+        .context("reconcile the search index")?;
+    Ok(graph.with_search_index(Arc::new(index)))
 }
 
 /// Without the Ladybug feature there is no search store, so closures are saved

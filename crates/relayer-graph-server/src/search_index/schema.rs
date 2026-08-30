@@ -130,6 +130,14 @@ pub fn read_revision(
     }
 }
 
+pub fn revision_count(connection: &Connection<'_>) -> Result<usize> {
+    let mut result = connection.query("MATCH (r:IndexRevision) RETURN count(r)")?;
+    match result.next().and_then(|row| row.first().cloned()) {
+        Some(Value::Int64(value)) => usize::try_from(value).context("negative revision count"),
+        other => anyhow::bail!("stored revision count was not an integer: {other:?}"),
+    }
+}
+
 /// Every target the closure is searchable from, as the engine list the query
 /// path filters on.
 fn published_targets(published_to: &[SearchTarget]) -> Value {

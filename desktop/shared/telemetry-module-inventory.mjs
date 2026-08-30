@@ -180,6 +180,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "crates/relayer-graph-server/src/lib.rs",
     "crates/relayer-graph-server/src/main.rs",
     "crates/relayer-graph-server/src/search_index.rs",
+    "crates/relayer-graph-server/src/search_index/lifecycle.rs",
     "crates/relayer-graph-server/src/search_index/schema.rs",
     "crates/relayer-graph-server/src/search_index/store.rs",
     "crates/relayer-graph-server/src/search_index/value.rs",

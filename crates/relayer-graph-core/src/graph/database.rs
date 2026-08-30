@@ -5,13 +5,15 @@ use std::{
     time::Duration,
 };
 
+use sqlx::Row;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use crate::{
     AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, InteractionContextAction,
     InteractionContextDraft, InteractionContextTarget, InteractionInputNode, InteractionInvocation,
     NoSearchIndex, NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, SearchIndex,
-    SearchIndexComponent, SearchIndexRevision, SearchTarget, ThreadId,
+    SearchIndexComponent, SearchIndexRebuildClosure, SearchIndexRebuildSnapshot,
+    SearchIndexRevision, SearchTarget, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
     interaction_input_digest,
     storage::{
@@ -94,6 +96,50 @@ impl GraphDatabase {
     /// without going through the write path.
     pub fn search_index(&self) -> &Arc<dyn SearchIndex> {
         &self.search_index
+    }
+
+    /// Attach a reconciled derived store without reopening canonical SQLite.
+    pub fn with_search_index(mut self, search_index: Arc<dyn SearchIndex>) -> Self {
+        self.search_index = search_index;
+        self
+    }
+
+    /// Read the complete canonical rebuild input from one SQLite snapshot.
+    pub async fn search_index_rebuild_snapshot(
+        &self,
+    ) -> Result<SearchIndexRebuildSnapshot, GraphError> {
+        let mut transaction = self.storage.begin_read().await?;
+        let rows = sqlx::query(
+            "SELECT c.interaction_node_id FROM completions c JOIN nodes n ON n.id=c.interaction_node_id ORDER BY CASE WHEN n.project_id IS NULL THEN 1 ELSE 0 END,n.project_id,n.thread_id,c.interaction_node_id",
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
+        let mut closures = Vec::with_capacity(rows.len());
+        for row in rows {
+            let node_id = NodeId::new(row.get::<i64, _>(0)).ok_or_else(|| {
+                GraphError::Internal("database returned an invalid completion interaction".into())
+            })?;
+            let scope = NodeTable::new(&mut transaction)
+                .interaction_scope(node_id)
+                .await?;
+            let closure = crate::graph::completion::read_accepted_closure_on(
+                &mut transaction,
+                &scope,
+                node_id,
+            )
+            .await?
+            .ok_or_else(|| {
+                GraphError::Internal("completed interaction has no accepted closure".into())
+            })?;
+            closures.push(SearchIndexRebuildClosure {
+                target: SearchTarget::new(scope.project_id, scope.thread_id),
+                published_to: crate::publication_targets(scope.project_id, scope.thread_id),
+                closure,
+            });
+        }
+        let targets = SearchIndexTable::new(&mut transaction).revisions().await?;
+        transaction.commit().await?;
+        Ok(SearchIndexRebuildSnapshot { targets, closures })
     }
 
     /// Bound how long a search-index write may take before the save fails.
@@ -191,6 +237,21 @@ impl GraphDatabase {
         SearchIndexTable::new(&mut transaction)
             .record_version(component, version)
             .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Replace the active store's compatibility receipt atomically.
+    pub async fn record_search_index_versions(
+        &self,
+        versions: &[(SearchIndexComponent, String)],
+    ) -> Result<(), GraphError> {
+        let mut transaction = self.storage.begin_write().await?;
+        for (component, version) in versions {
+            SearchIndexTable::new(&mut transaction)
+                .record_version(*component, version)
+                .await?;
+        }
         transaction.commit().await?;
         Ok(())
     }

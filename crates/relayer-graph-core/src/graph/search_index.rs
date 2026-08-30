@@ -1,8 +1,24 @@
-use std::{fmt, future::Future, pin::Pin};
+use std::{fmt, future::Future, pin::Pin, time::Instant};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{AcceptedGraphClosure, GraphError, ProjectId, ThreadId};
+
+/// One canonical accepted closure used to reconstruct the derived search store.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchIndexRebuildClosure {
+    pub target: SearchTarget,
+    pub published_to: Vec<SearchTarget>,
+    pub closure: AcceptedGraphClosure,
+}
+
+/// A transactionally consistent SQLite view of everything the derived store
+/// must contain after startup reconciliation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchIndexRebuildSnapshot {
+    pub targets: Vec<(SearchTarget, SearchIndexRevision)>,
+    pub closures: Vec<SearchIndexRebuildClosure>,
+}
 
 /// A boxed future. The seam is used through `dyn SearchIndex`, and an `async fn`
 /// in a trait is not dyn-compatible, so the futures are boxed here rather than
@@ -137,6 +153,18 @@ pub trait SearchIndex: Send + Sync + 'static {
         target: SearchTarget,
         revision: SearchIndexRevision,
     ) -> SearchIndexFuture<Box<dyn SearchIndexWrite>>;
+
+    /// Open a transaction whose engine work shares the caller's absolute
+    /// operation deadline. Implementations without an inner engine timeout may
+    /// rely on the outer async deadline and keep the ordinary `begin` behavior.
+    fn begin_until(
+        &self,
+        target: SearchTarget,
+        revision: SearchIndexRevision,
+        _deadline: Instant,
+    ) -> SearchIndexFuture<Box<dyn SearchIndexWrite>> {
+        self.begin(target, revision)
+    }
 }
 
 /// One open transaction against the search store. Committing or rolling back

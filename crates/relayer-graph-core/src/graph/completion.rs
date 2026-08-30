@@ -202,7 +202,13 @@ async fn index_closures(
     // One deadline spans the whole sequence rather than each step, because what
     // is being bounded is how long the global SQLite write lock is held. A
     // per-step budget would let a slow store hold it for a multiple of it.
-    let mut write = deadline(expiry, database.search_index.begin(target, revision)).await?;
+    let mut write = deadline(
+        expiry,
+        database
+            .search_index
+            .begin_until(target, revision, expiry.into_std()),
+    )
+    .await?;
     // Past this point a failure has to release the search transaction, or the
     // store keeps its write lock and every later write fails behind it. An
     // abandoned write releases its own transaction when it is dropped.
