@@ -247,8 +247,10 @@ describe("first runtime evaluation", () => {
     temporary.push(outputDirectory);
     let runtimeDirectory: string | undefined;
     let releaseDispose!: () => void;
+    let markDisposeStarted!: () => void;
     let markDisposeFinished!: () => void;
     const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+    const disposeStarted = new Promise<void>((resolveStarted) => { markDisposeStarted = resolveStarted; });
     const disposeFinished = new Promise<void>((resolveFinished) => { markDisposeFinished = resolveFinished; });
     const stalledFactory: HarnessFactory = async (context) => {
       runtimeDirectory = context.workingDirectory;
@@ -257,28 +259,73 @@ describe("first runtime evaluation", () => {
         complete: (runContext, signal) => fixture.complete(runContext, signal),
         state: () => fixture.state(),
         async dispose() {
+          markDisposeStarted();
           await disposeGate;
           markDisposeFinished();
         },
       };
     };
-    const startedAt = Date.now();
 
-    await expect(runBasicRuntimeEval({
+    const evaluation = runBasicRuntimeEval({
       outputDirectory,
       execution: fixtureExecution(),
       implementations: { "fixture.task-system": stalledFactory },
       harnessCloseGraceMs: 25,
-    })).rejects.toThrow("Harness host did not close within 25ms and was forcibly disconnected");
+    });
+    await disposeStarted;
+    const shutdownStartedAt = Date.now();
 
-    // The graph server now opens a Ladybug search store at startup, which costs
-    // roughly a quarter of a second on a fresh store. This budget bounds forced
-    // shutdown, not startup, so it is raised to keep covering the same boundary.
-    expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(runtimeDirectory).toBeDefined();
-    await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
-    releaseDispose();
-    await disposeFinished;
+    try {
+      await expect(evaluation).rejects.toThrow("Harness host did not close within 25ms and was forcibly disconnected");
+
+      expect(Date.now() - shutdownStartedAt).toBeLessThan(1_000);
+      expect(runtimeDirectory).toBeDefined();
+      await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
+    } finally {
+      releaseDispose();
+      await disposeFinished;
+    }
+  });
+
+  it("retains runtime state when forced shutdown cannot establish disconnection", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-failed-force-close-"));
+    temporary.push(outputDirectory);
+    let runtimeDirectory: string | undefined;
+    let releaseDispose!: () => void;
+    let markDisposeFinished!: () => void;
+    const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+    const disposeFinished = new Promise<void>((resolveFinished) => { markDisposeFinished = resolveFinished; });
+    const failedForceFactory: HarnessFactory = async (context) => {
+      runtimeDirectory = context.workingDirectory;
+      const fixture = await taskSystemFixtureFactory(context);
+      return {
+        complete: (runContext, signal) => fixture.complete(runContext, signal),
+        state: () => fixture.state(),
+        forceShutdown() { throw new Error("forced provider interruption failed"); },
+        async dispose() {
+          await disposeGate;
+          markDisposeFinished();
+        },
+      };
+    };
+
+    const evaluation = runBasicRuntimeEval({
+      outputDirectory,
+      execution: fixtureExecution(),
+      implementations: { "fixture.task-system": failedForceFactory },
+      harnessCloseGraceMs: 25,
+    });
+    try {
+      await expect(evaluation).rejects.toThrow("Harness host did not force-close cleanly");
+      expect(runtimeDirectory).toBeDefined();
+      await expect(stat(runtimeDirectory!)).resolves.toBeDefined();
+    } finally {
+      releaseDispose();
+      await disposeFinished;
+      if (runtimeDirectory !== undefined) {
+        await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
+      }
+    }
   });
 
   it("allows a slow successful harness disposal to finish within the configured grace period", async () => {

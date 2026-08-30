@@ -231,28 +231,33 @@ export async function runBasicRuntimeEval(options: {
     throw error;
   } finally {
     const cleanupErrors: unknown[] = [];
-    let workingDirectoryCleanupDeferred = false;
+    let workingDirectoryCanBeRemoved = harnessHost === undefined;
+    let deferredHarnessClose: Promise<void> | undefined;
+    let graphProcessStopped = graphProcess === undefined;
     for (const cleanup of [
       async () => {
         if (harnessHost !== undefined) {
-          try {
-            await closeHarnessHostForEval(
-              harnessHost,
-              options.harnessCloseGraceMs ?? DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS,
-              workingDirectory,
-            );
-          } catch (error) {
-            if ((error as { code?: unknown }).code === "RELAYER_EVAL_HARNESS_CLOSE_TIMEOUT") {
-              workingDirectoryCleanupDeferred = true;
-            }
-            throw error;
-          }
+          await closeHarnessHostForEval(
+            harnessHost,
+            options.harnessCloseGraceMs ?? DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS,
+            () => { workingDirectoryCanBeRemoved = true; },
+            (closing) => { deferredHarnessClose = closing; },
+          );
         }
       },
       async () => graphAuditProxy?.close(),
-      async () => { if (graphProcess !== undefined) await terminate(graphProcess.process); },
       async () => {
-        if (!workingDirectoryCleanupDeferred) await rm(workingDirectory, { recursive: true, force: true });
+        if (graphProcess !== undefined) await terminate(graphProcess.process);
+        graphProcessStopped = true;
+      },
+      async () => {
+        if (workingDirectoryCanBeRemoved && graphProcessStopped) {
+          await rm(workingDirectory, { recursive: true, force: true });
+        } else if (graphProcessStopped && deferredHarnessClose !== undefined) {
+          void deferredHarnessClose
+            .then(() => rm(workingDirectory, { recursive: true, force: true }))
+            .catch(() => undefined);
+        }
       },
     ]) {
       const result = await settle(cleanup);
@@ -268,18 +273,26 @@ export async function runBasicRuntimeEval(options: {
   }
 }
 
-async function closeHarnessHostForEval(host: RunningHarnessHost, closeGraceMs: number, workingDirectory: string): Promise<void> {
+async function closeHarnessHostForEval(
+  host: RunningHarnessHost,
+  closeGraceMs: number,
+  markDisconnected: () => void,
+  deferUntilClosingSettles: (closing: Promise<void>) => void,
+): Promise<void> {
   const closing = settle(() => host.close());
   if (!(await settlesWithin(closing.then(() => {}), closeGraceMs))) {
-    const forcing = settle(() => host.forceClose());
-    void forcing.then(async (result) => {
-      if (result.ok) await rm(workingDirectory, { recursive: true, force: true });
-    }).catch(() => undefined);
+    const forced = await settle(() => host.forceClose());
+    if (!forced.ok) {
+      deferUntilClosingSettles(closing.then(() => {}));
+      throw forced.error;
+    }
+    markDisconnected();
     const error = new Error(`Harness host did not close within ${closeGraceMs}ms and was forcibly disconnected`);
     (error as Error & { code: string }).code = "RELAYER_EVAL_HARNESS_CLOSE_TIMEOUT";
     throw error;
   }
   const result = await closing;
+  markDisconnected();
   if (!result.ok) throw result.error;
 }
 
