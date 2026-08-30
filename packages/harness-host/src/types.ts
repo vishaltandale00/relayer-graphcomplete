@@ -82,6 +82,7 @@ export type CoreTraceEventType =
   | "stream.completed"
   | "span.started"
   | "span.completed"
+  | "execution.scope"
   | "prompt"
   | "message"
   | "reasoning.summary"

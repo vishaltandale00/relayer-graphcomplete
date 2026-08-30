@@ -1258,7 +1258,13 @@ pub(super) async fn complete_prepared_child(
         token: child_broker_lease.token(),
     });
     let started = runtime
-        .start_invoked_completion(thread.id.value(), &prepared, invocation, completion_broker)
+        .start_invoked_completion(
+            thread.id.value(),
+            outcome.interaction.id.value(),
+            &prepared,
+            invocation,
+            completion_broker,
+        )
         .await;
     let started = match started {
         Ok(started) => started,
@@ -2612,6 +2618,10 @@ mod tests {
                     async move {
                         starts.fetch_add(1, Ordering::SeqCst);
                         assert_eq!(body["capability"]["nodeId"], 202);
+                        assert_eq!(
+                            body["traceContext"]["productInteractionId"], 2,
+                            "child trace attribution uses the product interaction, not graph identity"
+                        );
                         (
                             StatusCode::CREATED,
                             axum::Json(serde_json::json!({

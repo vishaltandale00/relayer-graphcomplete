@@ -1711,11 +1711,16 @@ describe("HarnessHost", () => {
       running = await startHarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
+        trace: {
+          directory: join(directory, "traces"),
+          policy: { mode: "required", requiredFeatures: {}, includeNativeArtifacts: false, maxBytesPerTurn: 10_000, maxEventsPerTurn: 100 },
+        },
         implementations: { test: () => ({
           supportsInvokedComplete: true,
           complete(context, signal) {
             starts += 1;
             observedCompletionBroker = context.completionBroker;
+            context.trace.emit({ type: "message", data: { text: "attributed invoked completion" } });
             const execution = new Promise<void>((_resolve, reject) => {
               signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
             });
@@ -1732,6 +1737,7 @@ describe("HarnessHost", () => {
       });
       const invocation = {
         ...invoked(graph(2, "child-token")),
+        traceContext: { productInteractionId: 29 },
         completionBroker: {
           url: "http://127.0.0.1:43125/api/completions",
           token: "12345678901234567890123456789012",
@@ -1760,6 +1766,17 @@ describe("HarnessHost", () => {
       expect(starts).toBe(1);
       expect(observedCompletionBroker).toEqual(invocation.completionBroker);
 
+      const conflictingAttribution = await fetch(`${running.url}/sessions/1/invoked-completions`, {
+        method: "POST",
+        headers: { authorization: "Bearer control", "content-type": "application/json" },
+        body: JSON.stringify({ ...invocation, traceContext: { productInteractionId: 30 } }),
+      });
+      expect(conflictingAttribution.status).toBe(500);
+      await expect(conflictingAttribution.json()).resolves.toMatchObject({
+        error: expect.stringContaining("different graph binding"),
+      });
+      expect(starts).toBe(1);
+
       const malformed = await fetch(`${running.url}/sessions/1/invoked-completions`, {
         method: "POST",
         headers: { authorization: "Bearer control", "content-type": "application/json" },
@@ -1775,7 +1792,26 @@ describe("HarnessHost", () => {
       });
       expect(cancelled.status).toBe(200);
       await expect(cancelled.json()).resolves.toEqual({ cancelled: true });
-      await vi.waitFor(() => expect(running!.host.cancel(1, 2)).toBe(false));
+      await expect(running.host.observeInvokedCompletion(1, 2)).rejects.toThrow("cancelled for thread 1");
+      expect(running.host.cancel(1, 2)).toBe(false);
+      const exported = join(directory, "exported-child-trace");
+      const descriptor = await running.host.exportCandidateTrace(29, exported, {
+        runId: "recursive-live-run",
+        executionId: "child-2",
+        interactionId: "29",
+        harnessConfigurationName: "test-default",
+      });
+      expect(descriptor.status).toBe("partial");
+      expect(descriptor.truncated).not.toBe(true);
+      const manifest = JSON.parse(await readFile(join(exported, "manifest.json"), "utf8"));
+      const events = await readFile(join(exported, "events.jsonl"), "utf8");
+      expect(manifest).toMatchObject({ interactionNodeId: 2, productInteractionId: 29 });
+      expect(events).toContain("attributed invoked completion");
+      expect(events).toContain('\"type\":\"execution.scope\"');
+      expect(events).toContain('\"completionBrokerAvailable\":true');
+      expect(events).not.toContain("child-token");
+      expect(events).not.toContain(invocation.completionBroker.token);
+      expect(events).not.toContain(invocation.completionBroker.url);
     } finally {
       await running?.close();
       vi.unstubAllGlobals();

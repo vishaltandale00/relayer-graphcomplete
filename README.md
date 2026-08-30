@@ -131,7 +131,9 @@ RELAYER_DEV_PROVIDER_RECURSION=1 npm run desktop:dev
 The opt-in live run drives one fixed synthetic task through the same runtime and
 app server the desktop uses, with recursion enabled and disabled on the same
 build. It records whether the agent created a semantic child by its own
-decision, the ordered sequence of current-pointer revisions, and both timings.
+decision, the ordered sequence of root and child current-pointer revisions,
+sanitized durable execution evidence, complete portable candidate traces, and
+diagnostic timings. A single enabled/disabled pair is not performance proof.
 
 Credentials live in one local file. Copy the template and fill it in;
 `live-run.local.json` is gitignored and must never be committed:
@@ -158,15 +160,26 @@ inside that home so it never picks up an unrelated provider login. A
 `prime.agent` profile needs neither; it reaches its provider directly and
 accepts only a key.
 
-It writes `run.json` under `.relayer/live/recursive-complete/<profile>/`, recording what
-ran and never how it authenticated. The run spends real inference and is
-excluded from `npm run check`; its analysis and pass rules run in the default
-deterministic suite. Semantic coherence is graded separately and blocks merge on
-its own.
+Each attempt writes an immutable
+`.relayer/live/recursive-complete/<profile>/<run-id>/run.json`; `latest.json`
+only points to the newest attempt. The artifact binds the source workspace,
+harness configuration, and executable bytes without recording authentication or
+provider-native thread identities. An enabled run passes only after a semantic
+child is durably launched, attached, settled, and observed with a succeeded
+terminal graph revision. The disabled arm must have no broker authority or
+child execution. Both root and child traces must be complete, untruncated, and
+full coverage.
 
-The run itself has never been executed. Its provider wiring is written but
-unproven, so expect the first attempt to surface gaps the way the deterministic
-end-to-end proof did.
+This is a Check 1 execution receipt. It proves that agent-authored
+`complete(inputGraph)` launched and settled a real semantic child. It does not
+claim that the parent read or semantically incorporated `child.result`; that
+requires separate broker-delivery and semantic review evidence.
+
+The run spends real inference and is excluded from `npm run check`; its analysis,
+zero-inference production preflight, and pass rules run in the default
+deterministic suite. The first authorized Codex subscription attempt completed
+normally but created no semantic child, so it failed Check 1. Semantic coherence
+is graded separately and blocks merge on its own.
 
 The opt-in Ask-profile desktop proof intentionally bypasses npm so inherited
 `NODE_OPTIONS` cannot execute before its trust boundary. Invoke the fixed system

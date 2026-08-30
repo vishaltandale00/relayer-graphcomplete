@@ -761,6 +761,31 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.environment.RELAYER_GRAPH_URL).toBe("http://127.0.0.1:43123");
   });
 
+  it("passes broker authority without leaking its URL or token into implementation traces", async () => {
+    const trace = recordingTrace();
+    let submitted: CodexAppServerTurnOptions | undefined;
+    const harness = harnessFixture("auto", async (options) => {
+      submitted = options;
+      options.onThreadId("broker-thread");
+      return { threadId: "broker-thread", turnId: "turn-1", status: "completed" };
+    });
+    const completionBroker = {
+      url: "http://127.0.0.1:43125/api/completions",
+      token: "completion-broker-secret-token-1234567890",
+    };
+
+    await harness.complete({ ...runContext(1, "graph-token", trace.sink), completionBroker });
+
+    expect(submitted?.environment.RELAYER_COMPLETE_URL).toBe(completionBroker.url);
+    expect(submitted?.environment.RELAYER_COMPLETE_TOKEN).toBe(completionBroker.token);
+    expect(JSON.stringify(trace.events)).not.toContain(completionBroker.url);
+    expect(JSON.stringify(trace.events)).not.toContain(completionBroker.token);
+
+    const unavailableTrace = recordingTrace();
+    await harness.complete(runContext(2, "second-graph-token", unavailableTrace.sink));
+    expect(JSON.stringify(unavailableTrace.events)).not.toContain("completionBrokerAvailable");
+  });
+
   it("rejects a provider model that codex.basic cannot execute before starting a thread", async () => {
     const runAppServerTurn = vi.fn<NonNullable<CodexBasicDependencies["runAppServerTurn"]>>();
     const harness = new CodexBasicHarness({

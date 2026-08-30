@@ -92,6 +92,34 @@ function recursiveFixtureFactory(observed, brokerOrigin) {
   });
 }
 
+/** Records only whether the production execution scope carried broker authority. */
+function brokerScopeFixtureFactory(observed) {
+  return () => ({
+    traceSupport: () => ({
+      prompt: "none", messages: "none", reasoningSummaries: "none", modelCalls: "none",
+      toolCalls: "none", usage: "none", childStreams: "none", nativeArtifacts: "none",
+    }),
+    state: () => ({}),
+    async complete(context) {
+      observed.completionBroker = context.completionBroker === undefined
+        ? null
+        : {
+          url: context.completionBroker.url,
+          tokenPresent: context.completionBroker.token.length >= 32,
+        };
+      const graph = new RelayerGraphClient(context.graph.acquireCapability());
+      const result = new NodeObject("check-circle", "Preflight complete", "No inference ran.", "concept", "preflight-result");
+      await graph.submitNode(result);
+      const layer = new LayerObject([result], [], centered(result), "preflight-layer");
+      await graph.submitLayer(layer);
+      await graph.addAction(context.inputGraph.id, {
+        kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "preflight-root",
+      });
+      await graph.submit(context.inputGraph.id);
+    },
+  });
+}
+
 async function run(context, signal, observed, brokerOrigin) {
   {
       const graph = new RelayerGraphClient(context.graph.acquireCapability());
@@ -153,7 +181,10 @@ async function run(context, signal, observed, brokerOrigin) {
   }
 }
 
-async function startRecursiveStack(observed) {
+async function startRecursiveStack(observed, {
+  temporalFeatures = RECURSIVE_TEMPORAL_FEATURES,
+  implementationFactory,
+} = {}) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-recursive-e2e-"));
   directories.push(dataDirectory);
   const configurationPath = join(dataDirectory, "fixture-recursive.yaml");
@@ -178,9 +209,9 @@ async function startRecursiveStack(observed) {
     userDataDirectory: dataDirectory,
     graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
     configurationPaths: [configurationPath],
-    temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
+    temporalFeatures,
     additionalImplementations: {
-      "fixture.recursive": recursiveFixtureFactory(observed, () => proxy.origin),
+      "fixture.recursive": implementationFactory ?? recursiveFixtureFactory(observed, () => proxy.origin),
     },
     acquireProviderExecution: async (providerId) => ({
       definition: { id: providerId, adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
@@ -266,6 +297,51 @@ async function graphMetadata(runtimeSession, nodeId) {
 // real exported `complete(inputGraph)`, with no provider and no inference. Every earlier test
 // of this seam mocked the transport, which is why four separate defects survived in it.
 describe("recursive complete end to end", () => {
+  it("provides broker authority only when temporal provider recursion is enabled", async () => {
+    const enabled = {};
+    const enabledStack = await startRecursiveStack(enabled, {
+      implementationFactory: brokerScopeFixtureFactory(enabled),
+    });
+    const enabledThread = await productRequest(enabledStack.session, "/api/threads", {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Enabled broker preflight",
+        initialMessage: "Observe enabled broker authority",
+        harnessId: "fixture-recursive",
+        permissionProfileId: "auto",
+        modelSelection: enabledStack.selection,
+      }),
+    });
+    await waitForStatus(enabledStack.session, enabledThread.id, 0, "accepted", enabled);
+
+    const disabled = {};
+    const disabledStack = await startRecursiveStack(disabled, {
+      temporalFeatures: {},
+      implementationFactory: brokerScopeFixtureFactory(disabled),
+    });
+    const disabledThread = await productRequest(disabledStack.session, "/api/threads", {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Disabled broker preflight",
+        initialMessage: "Observe disabled broker authority",
+        harnessId: "fixture-recursive",
+        permissionProfileId: "auto",
+        modelSelection: disabledStack.selection,
+      }),
+    });
+    await waitForStatus(disabledStack.session, disabledThread.id, 0, "accepted", disabled);
+
+    expect(enabled.completionBroker).toMatchObject({
+      tokenPresent: true,
+    });
+    expect(new URL(enabled.completionBroker.url)).toMatchObject({
+      protocol: "http:",
+      hostname: "127.0.0.1",
+      pathname: "/api/completions",
+    });
+    expect(disabled.completionBroker).toBeNull();
+  }, 60_000);
+
   it("creates a real semantic child, advances the pointer, and settles the parent from the child's returned layer", async () => {
     const observed = { childDelayMs: 1_500 };
     const { session, runtimeSession, proxy, selection } = await startRecursiveStack(observed);

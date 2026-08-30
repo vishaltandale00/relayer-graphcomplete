@@ -76,8 +76,12 @@ pub(crate) fn router(
     let (control_token, read_only_control_token) = control_tokens;
     let annotations_enabled = read_only_control_token.is_some();
     let approval_decisions = Arc::new(Mutex::new(HashMap::new()));
-    let completion_brokers =
-        CompletionBrokerRegistry::new(runtime.completion_broker_origin.clone());
+    let completion_broker_origin = runtime
+        .runtime
+        .as_ref()
+        .filter(|runtime| runtime.temporal_features().provider_recursion)
+        .and(runtime.completion_broker_origin.clone());
+    let completion_brokers = CompletionBrokerRegistry::new(completion_broker_origin);
     let interaction_execution = runtime.runtime.as_ref().map(|runtime_client| {
         InteractionExecutionService::new(
             product.clone(),

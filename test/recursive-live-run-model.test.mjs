@@ -5,6 +5,7 @@ import {
   RECURSIVE_LIVE_RUN_TASK,
   compareRuns,
   liveRunProfileNames,
+  normalizedTemporalFeatures,
   resolveRunProfile,
   orderedRevisions,
   revisionFindings,
@@ -27,6 +28,14 @@ function revision(sequence, number, overrides = {}) {
 
 const coherentRun = {
   recursionEnabled: true,
+  requestedTemporalFeatures: {
+    schemaRead: true, rootCurrentWrite: true, projectionUi: true, invokeResolution: true, providerRecursion: true,
+  },
+  actualTemporalFeatures: {
+    configVersion: 1,
+    schemaRead: true, rootCurrentWrite: true, projectionUi: true, invokeResolution: true, providerRecursion: true,
+  },
+  expectedAttachmentProvider: "codex",
   rootCompletionId: 101,
   startedAtMs: 1_000,
   settledAtMs: 61_000,
@@ -36,14 +45,28 @@ const coherentRun = {
     revision(2, 1),
     revision(3, 2),
     revision(4, 3, { lifecycle: "succeeded" }),
+    revision(5, 0, { completionId: 202, currentLayerId: null }),
+    revision(6, 1, { completionId: 202, lifecycle: "succeeded", currentLayerId: 702 }),
   ],
   observations: [
-    { observedAtMs: 1_200, currentLayerId: null },
-    { observedAtMs: 4_500, currentLayerId: 501 },
-    { observedAtMs: 9_000, currentLayerId: 502 },
+    { observedAtMs: 1_200, pollSequence: 1, source: "live", rootStatus: "running", sequence: 1, completionId: 101, revision: 0, lifecycle: "active", currentLayerId: null },
+    { observedAtMs: 4_500, pollSequence: 2, source: "live", rootStatus: "running", sequence: 2, completionId: 101, revision: 1, lifecycle: "active", currentLayerId: 501 },
+    { observedAtMs: 9_000, pollSequence: 3, source: "live", rootStatus: "running", sequence: 3, completionId: 101, revision: 2, lifecycle: "active", currentLayerId: 502 },
   ],
   completionMetadata: [
     { nodeId: 202, invocation: { sourceInteractionNodeId: 101, sourceActionId: 41 } },
+  ],
+  completionExecutions: [{
+    completionId: 202,
+    sourceCompletionId: 101,
+    sourceActionId: 41,
+    phase: "settled",
+    attachment: { present: true, provider: "codex", schemaVersion: 1 },
+    settlement: { present: true, valid: true, completionStatus: "accepted" },
+  }],
+  traces: [
+    { productInteractionId: 1, completionId: 101, status: "complete", coverageComplete: true, completionBrokerAvailable: true },
+    { productInteractionId: 2, completionId: 202, status: "complete", coverageComplete: true, completionBrokerAvailable: true },
   ],
 };
 
@@ -60,7 +83,10 @@ describe("recursive live run analysis", () => {
   });
 
   it("accepts a sequence where every revision follows its predecessor", () => {
-    expect(revisionFindings(101, orderedRevisions(coherentRun.events))).toEqual([]);
+    expect(revisionFindings(
+      101,
+      orderedRevisions(coherentRun.events).filter((event) => event.completionId === 101),
+    )).toEqual([]);
   });
 
   it("reports a revision that is not reachable from the one before it", () => {
@@ -117,7 +143,7 @@ describe("recursive live run analysis", () => {
   });
 
   it("fails a recursion run where the agent created no semantic child", () => {
-    const summary = summarizeRun({ ...coherentRun, completionMetadata: [] });
+    const summary = summarizeRun({ ...coherentRun, completionMetadata: [], completionExecutions: [], traces: coherentRun.traces.slice(0, 1) });
 
     expect(summary.passed).toBe(false);
     expect(summary.findings).toContain("no semantic child was created by the agent's own decision");
@@ -126,10 +152,38 @@ describe("recursive live run analysis", () => {
   it("fails a recursion run whose pointer never advanced observably", () => {
     const summary = summarizeRun({
       ...coherentRun,
-      events: [revision(1, 0, { currentLayerId: null }), revision(2, 1, { lifecycle: "succeeded" })],
+      observations: coherentRun.observations.slice(0, 1),
+      events: [
+        revision(1, 0, { currentLayerId: null }),
+        revision(2, 1, { lifecycle: "succeeded" }),
+        revision(3, 0, { completionId: 202, currentLayerId: null }),
+        revision(4, 1, { completionId: 202, lifecycle: "succeeded", currentLayerId: 702 }),
+      ],
     });
 
     expect(summary.findings).toContain(
+      "the root current pointer did not advance observably while work proceeded",
+    );
+  });
+
+  it("does not count post-settlement backfill or two revisions first seen in one poll as live progress", () => {
+    const afterSettlement = summarizeRun({
+      ...coherentRun,
+      observations: coherentRun.observations.map((observation) => ({
+        ...observation,
+        source: "backfill",
+        rootStatus: "accepted",
+      })),
+    });
+    const onePoll = summarizeRun({
+      ...coherentRun,
+      observations: coherentRun.observations.map((observation) => ({ ...observation, pollSequence: 1 })),
+    });
+
+    expect(afterSettlement.findings).toContain(
+      "the root current pointer did not advance observably while work proceeded",
+    );
+    expect(onePoll.findings).toContain(
       "the root current pointer did not advance observably while work proceeded",
     );
   });
@@ -145,6 +199,8 @@ describe("recursive live run analysis", () => {
       ...coherentRun,
       recursionEnabled: false,
       completionMetadata: [],
+      completionExecutions: [],
+      traces: [{ ...coherentRun.traces[0], completionBrokerAvailable: false }],
     });
 
     expect(summary.passed).toBe(true);
@@ -158,12 +214,115 @@ describe("recursive live run analysis", () => {
       settledAtMs: 46_000,
       observations: [{ observedAtMs: 40_000, currentLayerId: 900 }],
       completionMetadata: [],
+      completionExecutions: [],
+      traces: [{ ...coherentRun.traces[0], completionBrokerAvailable: false }],
     });
 
     expect(compareRuns(enabled, disabled)).toEqual({
+      interpretation: "diagnostic-only; an order-balanced repeated portfolio is required for a performance claim",
       timeToFirstObservableGraphMs: { enabled: 3_500, disabled: 39_000 },
       totalTaskMs: { enabled: 60_000, disabled: 45_000, overheadMs: 15_000 },
     });
+  });
+
+  it("fails closed when a prepared child never attached or settled", () => {
+    const summary = summarizeRun({
+      ...coherentRun,
+      completionExecutions: [{
+        completionId: 202,
+        sourceCompletionId: 101,
+        sourceActionId: 41,
+        phase: "prepared",
+        attachment: { present: false },
+        settlement: { present: false, valid: false, completionStatus: "running" },
+      }],
+    });
+
+    expect(summary.passed).toBe(false);
+    expect(summary.findings).toContain("child completion 202 was not durably attached and settled accepted");
+  });
+
+  it("requires the exact attachment provider, schema, and a valid object settlement", () => {
+    for (const execution of [
+      { ...coherentRun.completionExecutions[0], attachment: { present: true, provider: "claude", schemaVersion: 1 } },
+      { ...coherentRun.completionExecutions[0], attachment: { present: true, provider: "codex", schemaVersion: 2 } },
+      { ...coherentRun.completionExecutions[0], settlement: { present: true, valid: false, completionStatus: "accepted" } },
+    ]) {
+      const summary = summarizeRun({ ...coherentRun, completionExecutions: [execution] });
+      expect(summary.findings).toContain("child completion 202 was not durably attached and settled accepted");
+    }
+  });
+
+  it("requires graph invocation action identity to match the durable execution binding", () => {
+    const summary = summarizeRun({
+      ...coherentRun,
+      completionExecutions: [{ ...coherentRun.completionExecutions[0], sourceActionId: 99 }],
+    });
+
+    expect(summary.findings).toContain(
+      "child completion 202 invocation action did not match durable execution",
+    );
+  });
+
+  it("requires the child to advance and publish a terminal layer", () => {
+    const summary = summarizeRun({
+      ...coherentRun,
+      events: coherentRun.events.filter((event) => event.completionId !== 202).concat([
+        revision(5, 0, { completionId: 202, lifecycle: "succeeded", currentLayerId: null }),
+      ]),
+    });
+
+    expect(summary.findings).toContain("child completion 202 did not advance past revision 0");
+    expect(summary.findings).toContain("child completion 202 did not publish a succeeded terminal layer");
+  });
+
+  it("requires complete traces and the exact broker scope for both arms", () => {
+    const missingChildTrace = summarizeRun({ ...coherentRun, traces: coherentRun.traces.slice(0, 1) });
+    const childWithoutBroker = summarizeRun({
+      ...coherentRun,
+      traces: [coherentRun.traces[0], { ...coherentRun.traces[1], completionBrokerAvailable: false }],
+    });
+    const disabledWithBroker = summarizeRun({
+      ...coherentRun,
+      recursionEnabled: false,
+      completionMetadata: [],
+      completionExecutions: [],
+      traces: coherentRun.traces.slice(0, 1),
+    });
+
+    expect(missingChildTrace.findings).toContain("completion 202 has no complete untruncated full-coverage candidate trace");
+    expect(childWithoutBroker.findings).toContain(
+      "completion 202 trace reported completion broker unavailable while recursion was enabled",
+    );
+    expect(disabledWithBroker.findings).toContain(
+      "root trace reported completion broker available while recursion was disabled",
+    );
+  });
+
+  it("normalizes and verifies the graph runtime's effective temporal feature set", () => {
+    expect(normalizedTemporalFeatures({ providerRecursion: true })).toEqual({
+      configVersion: 1,
+      schemaRead: false,
+      rootCurrentWrite: false,
+      projectionUi: false,
+      invokeResolution: false,
+      providerRecursion: true,
+    });
+    const summary = summarizeRun({
+      ...coherentRun,
+      requestedTemporalFeatures: { providerRecursion: true },
+      actualTemporalFeatures: {
+        configVersion: 1,
+        schemaRead: false,
+        rootCurrentWrite: false,
+        projectionUi: false,
+        invokeResolution: false,
+        providerRecursion: false,
+      },
+    });
+    expect(summary.findings).toContain(
+      "the graph runtime temporal features did not match the requested feature set",
+    );
   });
 });
 

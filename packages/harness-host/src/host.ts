@@ -98,6 +98,8 @@ interface HarnessExecutionPolicy {
 export interface HarnessInvokedCompletion {
   readonly capability: GraphCapability;
   readonly origin: Extract<CompletionOrigin, { readonly kind: "invoke" }>;
+  /** Trusted product attribution for the independently exportable child trace. */
+  readonly traceContext?: HarnessCompletionTraceContext;
   readonly model?: InteractionModelSelection;
   /** Required once this session has taken a dynamic policy update, exactly as a root run is. */
   readonly harnessPolicy?: HarnessExecutionPolicy;
@@ -488,7 +490,7 @@ export class HarnessHost {
     invocation: HarnessInvokedCompletion,
     signal?: AbortSignal,
   ): InvokedCompletionRun {
-    const { capability, origin, model, harnessPolicy, completionBroker } = invocation;
+    const { capability, origin, traceContext, model, harnessPolicy, completionBroker } = invocation;
     validateGraphCapability(capability);
     validateCompletionOrigin(origin);
     if (model !== undefined) validateInteractionModelSelection(model);
@@ -496,7 +498,7 @@ export class HarnessHost {
     if (model !== undefined) {
       validateConfiguredModelSelection(executionConfiguration(session, harnessPolicy), model);
     }
-    const invocationDigest = graphInvocationDigest(capability, origin, model);
+    const invocationDigest = graphInvocationDigest(capability, origin, traceContext, model);
     const existing = session.invokedCompletionRuns.get(capability.nodeId);
     if (existing !== undefined) {
       if (existing.invocationDigest !== invocationDigest) {
@@ -520,6 +522,7 @@ export class HarnessHost {
       session,
       capability,
       origin,
+      ...(traceContext === undefined ? {} : { traceContext }),
       ...(model === undefined ? {} : { model }),
       ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
       ...(completionBroker === undefined ? {} : { completionBroker }),
@@ -846,6 +849,10 @@ export class HarnessHost {
       support,
     });
     const traceSink = trace?.sink ?? createNoopHarnessTraceSink();
+    traceSink.emit({
+      type: "execution.scope",
+      data: { completionBrokerAvailable: completionBroker !== undefined },
+    });
     const observedTrace = new EffectObservingTraceSink(traceSink);
     let completionError: HarnessExecutionFailure | undefined;
     let accessLease: HarnessExecutionAccessLease | undefined;
@@ -1792,7 +1799,7 @@ function readCompleteInput(value: unknown): {
 
 function readInvokedCompletionInput(value: unknown): HarnessInvokedCompletion {
   if (!isRecord(value)) throw new Error("Harness invoked completion input must be an object");
-  const unknown = Object.keys(value).filter((key) => !["capability", "origin", "model", "harnessPolicy", "completionBroker"].includes(key));
+  const unknown = Object.keys(value).filter((key) => !["capability", "origin", "traceContext", "model", "harnessPolicy", "completionBroker"].includes(key));
   if (unknown.length > 0) throw new Error(`Harness invoked completion contains unsupported fields: ${unknown.join(", ")}`);
   if (!isRecord(value.capability)
     || Object.keys(value.capability).some((key) => !["url", "token", "nodeId"].includes(key))) {
@@ -1803,12 +1810,14 @@ function readInvokedCompletionInput(value: unknown): HarnessInvokedCompletion {
     throw new Error("Harness invoked completion contains an invalid model selection");
   }
   validateCompletionOrigin(value.origin);
+  const traceContext = readTraceContext(value);
   const model = readInteractionModelSelection(value);
   const harnessPolicy = readHarnessExecutionPolicy(value);
   const completionBroker = readCompletionBroker(value);
   return {
     capability: readGraphCapability({ graph: value.capability }),
     origin: value.origin,
+    ...(traceContext === undefined ? {} : { traceContext }),
     ...(model === undefined ? {} : { model }),
     ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
     ...(completionBroker === undefined ? {} : { completionBroker }),
@@ -2281,6 +2290,7 @@ function validateCompletionOrigin(
 function graphInvocationDigest(
   capability: GraphCapability,
   origin: Extract<CompletionOrigin, { readonly kind: "invoke" }>,
+  traceContext: HarnessCompletionTraceContext | undefined,
   model: InteractionModelSelection | undefined,
 ): string {
   return createHash("sha256")
@@ -2291,6 +2301,7 @@ function graphInvocationDigest(
         sourceCompletionId: origin.sourceCompletionId,
         actionId: origin.actionId,
       },
+      productInteractionId: traceContext?.productInteractionId,
       model: model === undefined ? undefined : {
         providerId: model.providerId,
         adapterId: model.adapterId,

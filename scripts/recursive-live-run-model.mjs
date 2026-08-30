@@ -95,6 +95,36 @@ export const RECURSIVE_LIVE_RUN_TASK = [
 ].join(" ");
 
 const TERMINAL_LIFECYCLES = new Set(["succeeded", "stopped", "failed"]);
+const PRE_TERMINAL_PRODUCT_STATUSES = new Set([
+  "not_started", "running", "submitted", "preparing", "draft", "waiting_for_approval",
+]);
+const TEMPORAL_FEATURE_KEYS = [
+  "schemaRead", "rootCurrentWrite", "projectionUi", "invokeResolution", "providerRecursion",
+];
+
+/** Normalizes requested/effective temporal feature documents for exact comparison. */
+export function normalizedTemporalFeatures(features = {}, { requireExplicit = false } = {}) {
+  if (features === null || typeof features !== "object" || Array.isArray(features)) {
+    throw new Error("Temporal features must be an object");
+  }
+  const unknown = Object.keys(features).filter((key) => !["configVersion", ...TEMPORAL_FEATURE_KEYS].includes(key));
+  if (unknown.length > 0) throw new Error(`Temporal features contain unsupported fields: ${unknown.join(", ")}`);
+  const configVersion = features.configVersion ?? 1;
+  if (!Number.isSafeInteger(configVersion) || configVersion < 1) {
+    throw new Error("Temporal features need a positive configVersion");
+  }
+  const normalized = { configVersion };
+  for (const key of TEMPORAL_FEATURE_KEYS) {
+    if (requireExplicit && features[key] === undefined) {
+      throw new Error(`Effective temporal features omitted ${key}`);
+    }
+    if (features[key] !== undefined && typeof features[key] !== "boolean") {
+      throw new Error(`Temporal feature ${key} must be boolean`);
+    }
+    normalized[key] = features[key] ?? false;
+  }
+  return normalized;
+}
 
 /**
  * Orders raw projection events by their durable outbox sequence, dropping repeats.
@@ -194,6 +224,9 @@ export function timeToFirstObservableGraph(startedAtMs, observations) {
  */
 export function summarizeRun({
   recursionEnabled,
+  requestedTemporalFeatures = {},
+  actualTemporalFeatures = {},
+  expectedAttachmentProvider,
   rootCompletionId,
   startedAtMs,
   settledAtMs,
@@ -201,26 +234,96 @@ export function summarizeRun({
   events,
   observations = [],
   completionMetadata = [],
+  completionExecutions = [],
+  traces = [],
 }) {
+  const normalizedRequestedTemporalFeatures = normalizedTemporalFeatures(requestedTemporalFeatures);
+  const normalizedActualTemporalFeatures = normalizedTemporalFeatures(actualTemporalFeatures, { requireExplicit: true });
   const sequences = revisionsByCompletion(events);
   const findings = [...sequences].flatMap(([completionId, revisions]) =>
     revisionFindings(completionId, revisions));
   const children = semanticChildren(rootCompletionId, completionMetadata);
+  const relevantCompletionIds = [rootCompletionId, ...children];
   if (recursionEnabled && children.length === 0) {
     findings.push("no semantic child was created by the agent's own decision");
   }
-  const rootRevisions = sequences.get(rootCompletionId) ?? [];
-  if (recursionEnabled && rootRevisions.filter((revision) => revision.lifecycle === "active").length < 2) {
+  if (!recursionEnabled && children.length > 0) {
+    findings.push("recursion-disabled execution created a semantic child");
+  }
+  const observedActiveRoot = observations.filter((observation) => observation.source === "live"
+    && observation.completionId === rootCompletionId
+    && observation.lifecycle === "active"
+    && PRE_TERMINAL_PRODUCT_STATUSES.has(observation.rootStatus));
+  const observedActiveRootSequences = new Set(observedActiveRoot.map((observation) => observation.sequence));
+  const observedActiveRootPolls = new Set(observedActiveRoot.map((observation) => observation.pollSequence));
+  if (recursionEnabled && (observedActiveRootSequences.size < 2 || observedActiveRootPolls.size < 2)) {
     findings.push("the root current pointer did not advance observably while work proceeded");
+  }
+  for (const completionId of children) {
+    const metadata = completionMetadata.find((candidate) => candidate.nodeId === completionId);
+    const revisions = sequences.get(completionId) ?? [];
+    if (revisions[0]?.revision !== 0) {
+      findings.push(`child completion ${completionId} did not publish revision 0`);
+    }
+    if (!revisions.some((revision) => revision.revision > 0)) {
+      findings.push(`child completion ${completionId} did not advance past revision 0`);
+    }
+    const terminal = revisions.at(-1);
+    if (terminal?.lifecycle !== "succeeded" || terminal.currentLayerId === null) {
+      findings.push(`child completion ${completionId} did not publish a succeeded terminal layer`);
+    }
+    const execution = completionExecutions.find((candidate) => (
+      candidate.completionId === completionId && candidate.sourceCompletionId === rootCompletionId
+    ));
+    if (execution === undefined) {
+      findings.push(`child completion ${completionId} has no durable execution record`);
+    } else if (execution.phase !== "settled"
+      || execution.attachment?.present !== true
+      || execution.attachment?.schemaVersion !== 1
+      || (expectedAttachmentProvider !== undefined
+        && execution.attachment?.provider !== expectedAttachmentProvider)
+      || execution.settlement?.present !== true
+      || execution.settlement?.valid !== true
+      || execution.settlement?.completionStatus !== "accepted"
+      || execution.settlement?.safeReason !== undefined) {
+      findings.push(`child completion ${completionId} was not durably attached and settled accepted`);
+    } else if (metadata?.invocation?.sourceActionId !== execution.sourceActionId) {
+      findings.push(`child completion ${completionId} invocation action did not match durable execution`);
+    }
+  }
+  if (!recursionEnabled && completionExecutions.length > 0) {
+    findings.push("recursion-disabled execution reached the completion broker");
+  }
+  for (const completionId of relevantCompletionIds) {
+    const trace = traces.find((candidate) => candidate.completionId === completionId);
+    if (trace === undefined || trace.status !== "complete" || trace.truncated === true || trace.coverageComplete !== true) {
+      findings.push(`completion ${completionId} has no complete untruncated full-coverage candidate trace`);
+    } else if (recursionEnabled && trace.completionBrokerAvailable !== true) {
+      findings.push(`completion ${completionId} trace reported completion broker unavailable while recursion was enabled`);
+    }
+  }
+  const rootTrace = traces.find((candidate) => candidate.completionId === rootCompletionId);
+  if (!recursionEnabled && rootTrace !== undefined && rootTrace.completionBrokerAvailable !== false) {
+    findings.push(
+      `root trace reported completion broker ${rootTrace.completionBrokerAvailable ? "available" : "unavailable"} while recursion was disabled`,
+    );
+  }
+  if (JSON.stringify(normalizedRequestedTemporalFeatures) !== JSON.stringify(normalizedActualTemporalFeatures)) {
+    findings.push("the graph runtime temporal features did not match the requested feature set");
   }
   if (completionStatus !== "accepted") {
     findings.push(`the root completion settled ${completionStatus} rather than accepted`);
   }
   return {
     recursionEnabled,
+    requestedTemporalFeatures: normalizedRequestedTemporalFeatures,
+    actualTemporalFeatures: normalizedActualTemporalFeatures,
+    ...(expectedAttachmentProvider === undefined ? {} : { expectedAttachmentProvider }),
     rootCompletionId,
     completionStatus,
     semanticChildren: children,
+    completionExecutions,
+    traces,
     revisions: [...sequences].map(([completionId, revisions]) => ({
       completionId,
       revisions: revisions.map((revision) => ({
@@ -245,11 +348,12 @@ export function summarizeRun({
 /**
  * Compares the enabled and disabled runs of the same build.
  *
- * Time to first observable graph is expected to favour recursion trivially. Total task
- * time is the number that can fail, because publishing intermediate accepted states costs.
+ * A single ordered pair is diagnostic only: provider load, model nondeterminism, warmup,
+ * and unequal delegated work prevent it from establishing a performance effect.
  */
 export function compareRuns(enabled, disabled) {
   return {
+    interpretation: "diagnostic-only; an order-balanced repeated portfolio is required for a performance claim",
     timeToFirstObservableGraphMs: {
       enabled: enabled.timings.timeToFirstObservableGraphMs,
       disabled: disabled.timings.timeToFirstObservableGraphMs,

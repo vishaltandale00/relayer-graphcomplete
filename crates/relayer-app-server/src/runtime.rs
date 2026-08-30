@@ -857,11 +857,13 @@ impl RuntimeClient {
     pub(crate) async fn start_invoked_completion(
         &self,
         thread_id: i64,
+        product_interaction_id: i64,
         prepared: &PreparedInteraction,
         invocation: PreparedInvocation,
         completion_broker: Option<RuntimeCompletionBroker<'_>>,
     ) -> Result<RuntimeInvokedCompletionStart, RuntimeError> {
         if thread_id < 1
+            || product_interaction_id < 1
             || prepared.graph_node_id < 1
             || invocation.source_interaction_node_id < 1
             || invocation.source_action_id < 1
@@ -881,6 +883,7 @@ impl RuntimeClient {
                 "sourceCompletionId": invocation.source_interaction_node_id,
                 "actionId": invocation.source_action_id,
             },
+            "traceContext": { "productInteractionId": product_interaction_id },
         });
         if let Some(model_selection) = prepared.model_selection.as_ref() {
             body["model"] = serde_json::json!({
@@ -2467,7 +2470,8 @@ mod tests {
                                     "kind": "invoke",
                                     "sourceCompletionId": 17,
                                     "actionId": 23
-                                }
+                                },
+                                "traceContext": { "productInteractionId": 29 }
                             })
                         );
                         observed_starts.fetch_add(1, Ordering::SeqCst);
@@ -2553,9 +2557,29 @@ mod tests {
             personal_presentation_version_id: None,
         };
 
+        let invalid_attribution = runtime
+            .start_invoked_completion(
+                7,
+                0,
+                &prepared,
+                PreparedInvocation {
+                    source_interaction_node_id: 17,
+                    source_action_id: 23,
+                },
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            invalid_attribution,
+            RuntimeError::Configuration(_)
+        ));
+        assert_eq!(starts.load(Ordering::SeqCst), 0);
+
         let started = runtime
             .start_invoked_completion(
                 7,
+                29,
                 &prepared,
                 PreparedInvocation {
                     source_interaction_node_id: 17,

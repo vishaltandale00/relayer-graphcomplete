@@ -10,7 +10,8 @@
  * and wall-clock timings with recursion enabled and disabled on the same build.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -19,7 +20,7 @@ import {
   RECURSIVE_TEMPORAL_FEATURES,
 } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
-import { loadHarnessConfigurations } from "@relayer/harness-host";
+import { digestHarnessConfiguration, loadHarnessConfigurations } from "@relayer/harness-host";
 
 import {
   RECURSIVE_LIVE_RUN_TASK,
@@ -31,10 +32,26 @@ import {
 import {
   completionMetadata,
   productRequest,
+  temporalFeatures,
+  waitForSettledCompletionExecutionEvidence,
 } from "./recursive-live-run-transport.mjs";
+import {
+  CHECK1_STATUS,
+  CHECK1_VERIFICATION_LEVEL,
+  assertExecutionIdentity,
+  executionIdentity,
+  liveRunProvenance,
+  liveRunTimeoutMs,
+  publicProfileDigest,
+  writeJsonAtomic,
+} from "./recursive-live-run-provenance.mjs";
+import { exportTraceEvidence } from "./recursive-live-run-trace.mjs";
 
 const OPT_IN = "RELAYER_RECURSIVE_LIVE_RUN";
 const repositoryRoot = resolve(import.meta.dirname, "..");
+const IN_PROGRESS_COMPLETION_STATUSES = new Set([
+  "not_started", "running", "submitted", "preparing", "draft", "waiting_for_approval",
+]);
 
 function singleArgument(name, fallback) {
   const index = process.argv.indexOf(name);
@@ -58,9 +75,14 @@ async function readProfile(path, name) {
   if (!harness) throw new Error(`${path} run ${name} needs harness.`);
   const configurationPath = join(repositoryRoot, "harnesses", `${harness}.yaml`);
   const configurations = await loadHarnessConfigurations([configurationPath]);
-  const implementation = configurations.get(harness)?.implementation;
+  const configuration = configurations.get(harness);
+  const implementation = configuration?.implementation;
   if (implementation === undefined) throw new Error(`${configurationPath} does not define harness ${harness}.`);
-  return { profile: resolveRunProfile(document, name, { implementation, path }), configurationPath };
+  return {
+    profile: resolveRunProfile(document, name, { implementation, path }),
+    configurationPath,
+    harnessConfigurationDigest: digestHarnessConfiguration(configuration),
+  };
 }
 
 /** Reads the provenance of the exact executable this run will spend money through. */
@@ -131,33 +153,67 @@ function providerExecution(profile) {
 async function observeUntilSettled(session, threadId, rootInteractionId, timeoutMs) {
   const startedAtMs = Date.now();
   const deadline = startedAtMs + timeoutMs;
-  const events = [];
+  const eventsBySequence = new Map();
   const observations = [];
   const completionIds = new Set();
+  const interactionsById = new Map();
   let cursor = 0;
+  let pollSequence = 0;
   for (;;) {
+    pollSequence += 1;
     const state = await productRequest(session, `/api/state?currentProjectionAfter=${cursor}`);
     const observedAtMs = Date.now();
-    for (const event of state.currentProjection?.events ?? []) {
-      events.push(event);
-      observations.push({ observedAtMs, currentLayerId: event.currentLayerId ?? null });
-    }
+    const rootAtPoll = (state.interactions ?? []).find((interaction) => interaction.id === rootInteractionId);
+    const rootStatusAtPoll = rootAtPoll?.completionStatus ?? "unknown";
+    const recordEvents = (projectedEvents, source) => {
+      for (const event of projectedEvents) {
+        if (eventsBySequence.has(event.sequence)) continue;
+        eventsBySequence.set(event.sequence, event);
+        observations.push({
+          observedAtMs,
+          pollSequence,
+          source,
+          rootStatus: rootStatusAtPoll,
+          sequence: event.sequence,
+          completionId: event.completionId,
+          revision: event.revision,
+          lifecycle: event.lifecycle,
+          currentLayerId: event.currentLayerId ?? null,
+        });
+      }
+    };
+    recordEvents(state.currentProjection?.events ?? [], "live");
     cursor = state.currentProjection?.cursor ?? cursor;
     for (const interaction of state.interactions ?? []) {
-      if (interaction.threadId === threadId && interaction.graphNodeId) {
+      if (interaction.threadId !== threadId || !interaction.graphNodeId) continue;
+      interactionsById.set(interaction.id, interaction);
+      if (!completionIds.has(interaction.graphNodeId)) {
         completionIds.add(interaction.graphNodeId);
+        const backfill = await productRequest(
+          session,
+          `/api/state?currentProjectionCompletionId=${interaction.graphNodeId}&currentProjectionAfter=0`,
+        );
+        recordEvents(backfill.currentProjection?.events ?? [], "backfill");
       }
     }
-    const root = (state.interactions ?? []).find((interaction) => interaction.id === rootInteractionId);
+    const root = interactionsById.get(rootInteractionId);
     const status = root?.completionStatus ?? "unknown";
-    if (status !== "running" && status !== "preparing" && status !== "draft") {
+    const allSettled = [...interactionsById.values()].every((interaction) => (
+      !IN_PROGRESS_COMPLETION_STATUSES.has(interaction.completionStatus)
+    ));
+    if (allSettled && status !== "unknown" && !IN_PROGRESS_COMPLETION_STATUSES.has(status)) {
       return {
         startedAtMs,
         settledAtMs: Date.now(),
         completionStatus: status,
         rootCompletionId: root?.graphNodeId ?? null,
         completionIds: [...completionIds],
-        events,
+        interactions: [...interactionsById.values()].map((interaction) => ({
+          id: interaction.id,
+          graphNodeId: interaction.graphNodeId,
+          completionStatus: interaction.completionStatus,
+        })),
+        events: [...eventsBySequence.values()],
         observations,
       };
     }
@@ -168,14 +224,26 @@ async function observeUntilSettled(session, threadId, rootInteractionId, timeout
   }
 }
 
-async function runOnce({ recursionEnabled, profile, configurationPath, timeoutMs }) {
+async function runOnce({ recursionEnabled, profile, configurationPath, timeoutMs, outputDirectory, runId }) {
   const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-recursive-live-"));
+  const arm = recursionEnabled ? "enabled" : "disabled";
+  const requestedTemporalFeatures = recursionEnabled ? RECURSIVE_TEMPORAL_FEATURES : {};
   const runtime = new GraphCompleteRuntimeService({
     userDataDirectory: dataDirectory,
     graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
     configurationPaths: [configurationPath],
     ...(profile.codexExecutable === undefined ? {} : { codexPathOverride: profile.codexExecutable }),
-    temporalFeatures: recursionEnabled ? RECURSIVE_TEMPORAL_FEATURES : {},
+    temporalFeatures: requestedTemporalFeatures,
+    candidateTrace: {
+      directory: join(dataDirectory, "candidate-trace-spool"),
+      policy: {
+        mode: "required",
+        requiredFeatures: {},
+        includeNativeArtifacts: false,
+        maxBytesPerTurn: 10 * 1024 * 1024,
+        maxEventsPerTurn: 50_000,
+      },
+    },
     acquireProviderExecution: providerExecution(profile),
   });
   const productServer = new RelayerAppServerService({
@@ -188,6 +256,7 @@ async function runOnce({ recursionEnabled, profile, configurationPath, timeoutMs
     allowHarnessOverride: true,
   });
   try {
+    const actualTemporalFeatures = await temporalFeatures(runtime.session);
     const session = await productServer.start();
     const { providerId, modelId } = profile;
     await productServer.publishProviderCatalog({
@@ -213,6 +282,7 @@ async function runOnce({ recursionEnabled, profile, configurationPath, timeoutMs
         members: [{ providerId, modelId }],
       }),
     });
+    const requestStartedAtMs = Date.now();
     const thread = await productRequest(session, "/api/threads", {
       method: "POST",
       body: JSON.stringify({
@@ -224,10 +294,30 @@ async function runOnce({ recursionEnabled, profile, configurationPath, timeoutMs
       }),
     });
     const observed = await observeUntilSettled(session, thread.id, thread.rootInteractionId, timeoutMs);
+    const metadata = await completionMetadata(runtime.session, observed.completionIds);
+    const invokedCompletionIds = metadata
+      .filter((completion) => completion.invocation !== null && completion.invocation !== undefined)
+      .map((completion) => completion.nodeId);
+    const traces = await exportTraceEvidence({
+      runtime,
+      interactions: observed.interactions,
+      directory: join(outputDirectory, "traces", arm),
+      refPrefix: `traces/${arm}`,
+      correlation: { runId, arm, harnessConfigurationName: profile.harness, model: profile.modelId },
+    });
     return summarizeRun({
       recursionEnabled,
       ...observed,
-      completionMetadata: await completionMetadata(runtime.session, observed.completionIds),
+      startedAtMs: requestStartedAtMs,
+      requestedTemporalFeatures,
+      actualTemporalFeatures,
+      expectedAttachmentProvider: profile.implementation === "codex.basic" ? "codex" : undefined,
+      completionMetadata: metadata,
+      completionExecutions: await waitForSettledCompletionExecutionEvidence(
+        join(dataDirectory, "product-data", "product.sqlite3"),
+        invokedCompletionIds,
+      ),
+      traces,
     });
   } finally {
     await productServer.close().catch(() => {});
@@ -244,37 +334,126 @@ async function main() {
   if (!["on", "off", "both"].includes(requested)) {
     throw new Error("--recursion must be on, off, or both");
   }
-  const { profile, configurationPath } = await readProfile(
+  const { profile, configurationPath, harnessConfigurationDigest } = await readProfile(
     resolve(singleArgument("--credentials", "live-run.local.json")),
     singleArgument("--profile", ""),
   );
-  const outputDirectory = resolve(
+  const outputRoot = resolve(
     singleArgument("--output-dir", join(".relayer", "live", "recursive-complete", profile.name)),
   );
+  const runId = randomUUID();
+  const outputDirectory = join(outputRoot, runId);
   const options = {
     profile,
     configurationPath,
-    timeoutMs: Number(singleArgument("--timeout-ms", "900000")),
+    timeoutMs: liveRunTimeoutMs(singleArgument("--timeout-ms", "900000")),
+    outputDirectory,
+    runId,
   };
   mkdirSync(outputDirectory, { recursive: true });
-
-  const runs = {};
-  if (requested !== "off") runs.enabled = await runOnce({ ...options, recursionEnabled: true });
-  if (requested !== "on") runs.disabled = await runOnce({ ...options, recursionEnabled: false });
-  // The artifact records what ran, never how it authenticated.
-  const artifact = {
+  const graphServerBinary = join(repositoryRoot, "target", "debug", "relayer-graph-server");
+  const appServerBinary = join(repositoryRoot, "target", "debug", "relayer-app-server");
+  const identityInputs = {
+    repositoryRoot,
+    executables: {
+      node: { path: process.execPath, version: process.version },
+      graphServer: { path: graphServerBinary },
+      appServer: { path: appServerBinary },
+      ...(profile.codexExecutable === undefined ? {} : {
+        providerRuntime: { path: profile.codexExecutable, version: codexVersion(profile.codexExecutable) },
+      }),
+    },
+    bundles: {
+      rootDist: join(repositoryRoot, "dist"),
+      graphClientDist: join(repositoryRoot, "packages", "graph-client", "dist"),
+      harnessHostDist: join(repositoryRoot, "packages", "harness-host", "dist"),
+    },
+  };
+  const initialIdentity = executionIdentity(identityInputs);
+  const provenance = liveRunProvenance({
+    harnessConfigurationDigest,
+    temporalFeatureSchemaVersion: 1,
+    runId,
+    identity: initialIdentity,
+  });
+  const baseArtifact = {
+    ...provenance,
     task: RECURSIVE_LIVE_RUN_TASK,
     profile: profile.name,
+    profileDigest: publicProfileDigest(profile),
     harnessConfiguration: profile.harness,
     implementation: profile.implementation,
     adapterId: profile.adapterId,
     modelId: profile.modelId,
-    runs,
-    ...(runs.enabled && runs.disabled ? { comparison: compareRuns(runs.enabled, runs.disabled) } : {}),
+    requestedRecursion: requested,
+    verificationLevel: CHECK1_VERIFICATION_LEVEL,
   };
-  writeFileSync(join(outputDirectory, "run.json"), `${JSON.stringify(artifact, null, 2)}\n`);
-  console.log(JSON.stringify(artifact, null, 2));
-  if (Object.values(runs).some((run) => !run.passed)) process.exitCode = 1;
+  const artifactPath = join(outputDirectory, "run.json");
+  const identityCheckpoints = [];
+  const verifyIdentity = (checkpoint) => {
+    const observed = executionIdentity(identityInputs);
+    try {
+      assertExecutionIdentity(initialIdentity, observed, checkpoint);
+      identityCheckpoints.push({ checkpoint, matched: true });
+    } catch (error) {
+      identityCheckpoints.push({ checkpoint, matched: false });
+      throw error;
+    }
+  };
+  const executeArm = async (arm, recursionEnabled) => {
+    verifyIdentity(`before-${arm}`);
+    try {
+      return await runOnce({ ...options, recursionEnabled });
+    } finally {
+      verifyIdentity(`after-${arm}`);
+    }
+  };
+  writeJsonAtomic(artifactPath, {
+    ...baseArtifact,
+    status: CHECK1_STATUS.running,
+    identityCheckpoints,
+    runs: {},
+  });
+  const runs = {};
+  try {
+    if (requested !== "off") runs.enabled = await executeArm("enabled", true);
+    if (requested !== "on") runs.disabled = await executeArm("disabled", false);
+    const passed = Object.values(runs).every((run) => run.passed);
+    const artifact = {
+      ...baseArtifact,
+      status: passed ? CHECK1_STATUS.passed : CHECK1_STATUS.failed,
+      finishedAt: new Date().toISOString(),
+      identityCheckpoints,
+      runs,
+      ...(runs.enabled && runs.disabled ? { comparison: compareRuns(runs.enabled, runs.disabled) } : {}),
+    };
+    writeJsonAtomic(artifactPath, artifact);
+    writeJsonAtomic(join(outputRoot, "latest.json"), {
+      schemaVersion: 1,
+      verificationLevel: CHECK1_VERIFICATION_LEVEL,
+      runId,
+      ref: `${runId}/run.json`,
+    });
+    console.log(JSON.stringify(artifact, null, 2));
+    if (!passed) process.exitCode = 1;
+  } catch (error) {
+    const artifact = {
+      ...baseArtifact,
+      status: CHECK1_STATUS.failed,
+      finishedAt: new Date().toISOString(),
+      identityCheckpoints,
+      runs,
+      failure: { name: error instanceof Error ? error.name : "Error" },
+    };
+    writeJsonAtomic(artifactPath, artifact);
+    writeJsonAtomic(join(outputRoot, "latest.json"), {
+      schemaVersion: 1,
+      verificationLevel: CHECK1_VERIFICATION_LEVEL,
+      runId,
+      ref: `${runId}/run.json`,
+    });
+    throw error;
+  }
 }
 
 await main();
