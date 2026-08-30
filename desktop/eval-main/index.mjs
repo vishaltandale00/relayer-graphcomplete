@@ -669,14 +669,23 @@ async function captureInputRoundTripEvidence(session, { context, topology, opera
   const groundingRating = structuralPassed
     ? await captureInputGroundingRating({ context, interaction, commits, artifactDirectory })
     : null;
+  const groundingPassed = groundingRating?.status === "completed"
+    && groundingRating.verdict === "grounded";
+  const groundingCheck = {
+    name: "input-roundtrip:visible-follow-up-use",
+    passed: groundingPassed,
+    detail: groundingPassed
+      ? "The rendered follow-up visibly uses every submitted matrix value."
+      : "The rendered follow-up does not visibly use every submitted matrix value.",
+  };
   return {
     schemaVersion: 1,
     status: interaction.completionStatus,
     interactionId,
     candidateTrace: descriptor,
     operatorTrace,
-    passed: structuralPassed,
-    checks: [...controlSet.checks, ...results.flatMap((result) => result.checks)],
+    passed: structuralPassed && groundingPassed,
+    checks: [...controlSet.checks, ...results.flatMap((result) => result.checks), groundingCheck],
     ...(groundingRating === null ? {} : { groundingRating }),
   };
 }

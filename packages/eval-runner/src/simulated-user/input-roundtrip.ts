@@ -24,7 +24,8 @@ export interface InputRoundTripCheck {
     | `input-roundtrip:materialized-provenance:action-${number}`
     | `input-roundtrip:normalized-harness-input:action-${number}`
     | "input-roundtrip:required-control-inventory"
-    | "input-roundtrip:complete-commit-set";
+    | "input-roundtrip:complete-commit-set"
+    | "input-roundtrip:visible-follow-up-use";
   readonly passed: boolean;
   readonly detail: string;
 }
