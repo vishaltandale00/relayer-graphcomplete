@@ -89,7 +89,7 @@ async fn run(
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("the v1 graph server only binds to 127.0.0.1");
     }
-    let graph = open_graph(&arguments.database)
+    let state = open_server_state(&arguments.database, control_token)
         .await
         .context("open graph database")?;
     let listener =
@@ -99,7 +99,7 @@ async fn run(
         "{}",
         serde_json::json!({"ready":true,"url":format!("http://{address}")})
     );
-    axum::serve(listener, router(ServerState::new(graph, control_token)))
+    axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown_signal(parent_disconnected))
         .await?;
     Ok(())
@@ -108,22 +108,27 @@ async fn run(
 /// Open the graph with its search store attached, so an accepted closure is
 /// saved and made searchable as one action.
 #[cfg(feature = "ladybug")]
-async fn open_graph(path: &str) -> anyhow::Result<GraphDatabase> {
+async fn open_server_state(path: &str, control_token: String) -> anyhow::Result<ServerState> {
     use relayer_graph_server::search_index::LadybugSearchIndex;
     use std::{path::Path, sync::Arc};
 
     let graph = GraphDatabase::open(path).await?;
-    let index = LadybugSearchIndex::open_reconciled(Path::new(path), &graph)
-        .await
-        .context("reconcile the search index")?;
-    Ok(graph.with_search_index(Arc::new(index)))
+    let index = Arc::new(
+        LadybugSearchIndex::open_reconciled(Path::new(path), &graph)
+            .await
+            .context("reconcile the search index")?,
+    );
+    Ok(ServerState::new(graph, control_token).with_search_index(index))
 }
 
 /// Without the Ladybug feature there is no search store, so closures are saved
 /// to SQLite and indexed nowhere.
 #[cfg(not(feature = "ladybug"))]
-async fn open_graph(path: &str) -> anyhow::Result<GraphDatabase> {
-    Ok(GraphDatabase::open(path).await?)
+async fn open_server_state(path: &str, control_token: String) -> anyhow::Result<ServerState> {
+    Ok(ServerState::new(
+        GraphDatabase::open(path).await?,
+        control_token,
+    ))
 }
 
 #[cfg(feature = "ladybug")]

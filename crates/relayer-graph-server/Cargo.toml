@@ -35,6 +35,10 @@ name = "graph_query_v1_conformance"
 required-features = ["crash-test-support"]
 
 [[test]]
+name = "graph_search_route"
+required-features = ["crash-test-support"]
+
+[[test]]
 name = "ladybug_crash_reconciliation"
 required-features = ["crash-test-support"]
 

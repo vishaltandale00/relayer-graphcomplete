@@ -44,6 +44,21 @@ pub struct QueryRequest {
     pub budget: QueryBudget,
 }
 
+/// The public graph-search envelope. Its target is deliberately absent: graph
+/// control binds the request to the current interaction's sealed read permit.
+/// Unknown fields are rejected so a caller cannot smuggle authority or a
+/// physical-store selector alongside an otherwise valid query.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicQueryRequest {
+    pub query_contract_version: u32,
+    pub query: String,
+    #[serde(default, deserialize_with = "deserialize_unique_parameters")]
+    pub parameters: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub budget: QueryBudget,
+}
+
 fn deserialize_unique_parameters<'de, D>(
     deserializer: D,
 ) -> Result<serde_json::Map<String, serde_json::Value>, D::Error>
@@ -77,6 +92,13 @@ where
 }
 
 pub fn parse_request_json(bytes: &[u8]) -> Result<QueryRequest, QueryError> {
+    serde_json::from_slice(bytes)
+        .map_err(|error| QueryError::new(QueryCode::InvalidRequest, "request", error.to_string()))
+}
+
+/// Parse the public bytes before authority is consulted. This preserves raw
+/// JSON, duplicate-field, forbidden-field, and malformed-envelope precedence.
+pub fn parse_public_request_json(bytes: &[u8]) -> Result<PublicQueryRequest, QueryError> {
     serde_json::from_slice(bytes)
         .map_err(|error| QueryError::new(QueryCode::InvalidRequest, "request", error.to_string()))
 }
@@ -169,6 +191,29 @@ impl QueryReadPermit {
                 "target",
                 "the requested target is missing or inaccessible",
             )),
+        }
+    }
+
+    /// Bind a target-free public request to this permit's immutable maximum
+    /// entitlement. The resulting internal request still passes through
+    /// [`Self::authorize`] at the hardened execution boundary.
+    pub fn bind_public_request(&self, request: PublicQueryRequest) -> QueryRequest {
+        let target = match self.target {
+            crate::SearchTarget::Thread(thread) => RequestTarget {
+                scope: TargetScope::Thread,
+                id: thread.value(),
+            },
+            crate::SearchTarget::Project(project) => RequestTarget {
+                scope: TargetScope::Project,
+                id: project.value(),
+            },
+        };
+        QueryRequest {
+            query_contract_version: request.query_contract_version,
+            target,
+            query: request.query,
+            parameters: request.parameters,
+            budget: request.budget,
         }
     }
 }
@@ -730,5 +775,60 @@ fn validate_descriptor(name: &str, descriptor: &serde_json::Value) -> Result<(),
             Ok(())
         }
         _ => Err(invalid()),
+    }
+}
+
+#[cfg(test)]
+mod public_request_tests {
+    use super::*;
+
+    fn request(extra: &str) -> Vec<u8> {
+        format!(
+            r#"{{"queryContractVersion":1,"query":"MATCH (n:Content) RETURN n","parameters":{{}},"budget":{{}}{extra}}}"#
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn public_envelope_rejects_every_caller_supplied_authority_field() {
+        for field in [
+            r#","target":{"scope":"thread","id":73}"#,
+            r#","projectId":41"#,
+            r#","threadId":73"#,
+            r#","database":"graph.db""#,
+        ] {
+            let error = parse_public_request_json(&request(field)).unwrap_err();
+            assert_eq!(error.code, QueryCode::InvalidRequest);
+            assert_eq!(error.phase, QueryPhase::Envelope);
+            assert_eq!(error.path, "request");
+        }
+    }
+
+    #[test]
+    fn public_envelope_preserves_duplicate_and_malformed_json_failures() {
+        for bytes in [
+            br#"{"queryContractVersion":1,"query":"MATCH (n:Content) RETURN n","query":"MATCH (n:Layer) RETURN n"}"#.as_slice(),
+            br#"{"queryContractVersion":1,"query":"unterminated""#.as_slice(),
+            br#"{"queryContractVersion":1,"query":"MATCH (n:Content) RETURN n","parameters":{"x":{"type":"integer","value":"1"},"x":{"type":"integer","value":"2"}}}"#.as_slice(),
+        ] {
+            let error = parse_public_request_json(bytes).unwrap_err();
+            assert_eq!(error.code, QueryCode::InvalidRequest);
+            assert_eq!(error.phase, QueryPhase::Envelope);
+            assert_eq!(error.path, "request");
+        }
+    }
+
+    #[test]
+    fn sealed_permit_is_the_only_source_of_the_internal_target() {
+        let public = parse_public_request_json(&request("")).unwrap();
+        let thread = crate::ThreadId::new(73).unwrap();
+        let permit = QueryReadPermit::current_thread(thread);
+        let internal = permit.bind_public_request(public);
+        assert_eq!(internal.target.scope, TargetScope::Thread);
+        assert_eq!(internal.target.id, 73);
+        assert_eq!(
+            permit.authorize(internal.target),
+            Ok(crate::SearchTarget::Thread(thread))
+        );
     }
 }

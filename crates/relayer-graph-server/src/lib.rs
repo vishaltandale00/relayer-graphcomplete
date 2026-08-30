@@ -1,10 +1,12 @@
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use relayer_graph_core::query::{QueryError, parse_public_request_json};
 use relayer_graph_core::{
     ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase,
     GraphError, GraphNode, GraphWriter, ImportedConversationStage, ImportedTurn,
@@ -29,6 +31,10 @@ pub struct ServerState {
     graph: GraphDatabase,
     sessions: Arc<Mutex<HashMap<String, NodeId>>>,
     control_token: Arc<str>,
+    #[cfg(feature = "ladybug")]
+    search_index: Option<Arc<search_index::LadybugSearchIndex>>,
+    #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
+    search_cancellations: Arc<Mutex<VecDeque<search_index::QueryCancellation>>>,
 }
 
 impl ServerState {
@@ -37,7 +43,48 @@ impl ServerState {
             graph,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             control_token: Arc::from(control_token.into()),
+            #[cfg(feature = "ladybug")]
+            search_index: None,
+            #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
+            search_cancellations: Arc::default(),
         }
+    }
+
+    #[cfg(feature = "ladybug")]
+    pub fn with_search_index(
+        mut self,
+        search_index: Arc<search_index::LadybugSearchIndex>,
+    ) -> Self {
+        self.graph = self.graph.with_search_index(search_index.clone());
+        self.search_index = Some(search_index);
+        self
+    }
+
+    #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
+    #[doc(hidden)]
+    pub fn with_contract_test_search_cancellation(
+        self,
+        cancellation: search_index::QueryCancellation,
+    ) -> Self {
+        self.search_cancellations
+            .lock()
+            .expect("search cancellation queue poisoned")
+            .push_back(cancellation);
+        self
+    }
+
+    #[cfg(feature = "ladybug")]
+    fn search_cancellation(&self) -> search_index::QueryCancellation {
+        #[cfg(feature = "crash-test-support")]
+        if let Some(cancellation) = self
+            .search_cancellations
+            .lock()
+            .expect("search cancellation queue poisoned")
+            .pop_front()
+        {
+            return cancellation;
+        }
+        search_index::QueryCancellation::default()
     }
 }
 
@@ -119,8 +166,72 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/actions", post(add_action))
         .route("/api/graph/actions/{id}", get(get_action))
         .route("/api/graph/submit", post(submit_completion))
+        .route("/api/graph/search", post(search))
         .route("/api/graph/nodes/{id}/output", get(completion_output))
         .with_state(state)
+}
+
+#[cfg(feature = "ladybug")]
+async fn search(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    // Envelope failures precede all authority and store observations.
+    let public = parse_public_request_json(&body).map_err(ApiError::query_contract)?;
+    let interaction_node_id = session(&state, &headers)?;
+    let permit = state
+        .graph
+        .current_thread_query_permit(interaction_node_id)
+        .await?;
+    let request = permit.bind_public_request(public);
+    let request = serde_json::to_vec(&request)
+        .map_err(|_| ApiError::internal("graph search request encoding failed"))?;
+    let index = state
+        .search_index
+        .as_ref()
+        .cloned()
+        .ok_or_else(ApiError::search_unavailable)?;
+    let cancellation = state.search_cancellation();
+    let mut cancel_on_drop = CancelSearchOnDrop(Some(cancellation.clone()));
+    // Keep the query future alive after an HTTP request future is dropped. The
+    // drop guard signals cancellation, and the detached query future owns the
+    // select branch that interrupts its exact Ladybug job before it exits.
+    let query = tokio::spawn(async move { index.query(&permit, &request, cancellation).await });
+    let result = query
+        .await
+        .map_err(|_| ApiError::internal("graph search task stopped unexpectedly"))?
+        .map_err(|failure| match failure {
+            search_index::GraphQueryFailure::Contract(error) => ApiError::query_contract(error),
+            search_index::GraphQueryFailure::TargetNotReady { .. } => {
+                ApiError::search_unavailable()
+            }
+        })?;
+    cancel_on_drop.0 = None;
+    Ok(Json(result.outcome.to_json()))
+}
+
+#[cfg(not(feature = "ladybug"))]
+async fn search(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let _ = parse_public_request_json(&body).map_err(ApiError::query_contract)?;
+    let _ = session(&state, &headers)?;
+    Err(ApiError::search_unavailable())
+}
+
+#[cfg(feature = "ladybug")]
+struct CancelSearchOnDrop(Option<search_index::QueryCancellation>);
+
+#[cfg(feature = "ladybug")]
+impl Drop for CancelSearchOnDrop {
+    fn drop(&mut self) {
+        if let Some(cancellation) = &self.0 {
+            cancellation.cancel();
+        }
+    }
 }
 
 async fn begin_imported_conversation(
@@ -969,6 +1080,25 @@ impl ApiError {
         Self(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({"error":{"code":"internal","message":message}}),
+        )
+    }
+
+    fn search_unavailable() -> Self {
+        Self(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error":{"code":"search_unavailable","message":"Graph search is temporarily unavailable."}}),
+        )
+    }
+
+    fn query_contract(error: QueryError) -> Self {
+        Self(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            json!({"error":{
+                "code": error.code,
+                "phase": error.phase,
+                "path": error.path,
+                "message": error.message,
+            }}),
         )
     }
 }
@@ -2645,5 +2775,109 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(standalone.status(), StatusCode::OK);
+    }
+}
+
+#[cfg(all(test, not(feature = "ladybug")))]
+mod no_ladybug_search_tests {
+    use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use tower::ServiceExt;
+
+    async fn body(response: Response) -> Value {
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn target_free_search_fails_closed_without_ladybug_after_envelope_and_authority() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(None, ThreadId::new(73).unwrap(), "Search")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
+        let app = router(state);
+        let valid = r#"{"queryContractVersion":1,"query":"MATCH (n:Content) RETURN n","parameters":{},"budget":{}}"#;
+
+        let unavailable = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/search")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(valid))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            body(unavailable).await["error"]["code"],
+            "search_unavailable"
+        );
+
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/search")
+                    .header("content-type", "application/json")
+                    .body(Body::from(valid))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let malformed_precedes_authority = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/search")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"queryContractVersion":1,"query":"broken""#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            malformed_precedes_authority.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            body(malformed_precedes_authority).await["error"]["phase"],
+            "envelope"
+        );
+
+        let target_is_forbidden = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/search")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(
+                        r#"{"queryContractVersion":1,"target":{"scope":"thread","id":73},"query":"broken"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            target_is_forbidden.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            body(target_is_forbidden).await["error"]["phase"],
+            "envelope"
+        );
     }
 }
