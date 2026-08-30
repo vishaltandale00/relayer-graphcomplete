@@ -76,7 +76,7 @@ export const evalCases = Object.freeze([
     name: "Node input · authored round trip",
     description: "Asks the model to author text, single-select, and multi-select inputs, then lets the simulated user answer all three through the product.",
     prompts: Object.freeze([
-      "Help me prepare a deployment plan. Before planning, I still need to supply the exact deployment window, choose either Canary or Full rollout, and choose at least two validation signals from Health metrics, Logs, and Synthetic checks. Do not make those decisions for me. Ask for the three decisions together and wait for my response. Once I respond, produce a concise deployment plan that visibly applies the exact window, selected strategy, and every selected validation signal.",
+      "Help me prepare a deployment plan. Before planning, I still need to supply the exact deployment window, choose either Canary or Full rollout, and choose at least two validation signals from Health metrics, Logs, and Synthetic checks. Do not make those decisions for me. Ask for the three decisions together and wait for my response. Once I respond, produce a concise deployment plan that names and visibly applies the exact window, selected strategy, and each selected validation signal.",
     ]),
     requiredChecks: Object.freeze(["input-roundtrip"]),
   }),
