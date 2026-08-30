@@ -7,6 +7,8 @@ mod personal_presentation;
 mod search_index;
 mod writer;
 
+#[cfg(feature = "crash-test-support")]
+pub use completion::CompletionCrashPoint;
 pub use completion::{AcceptedGraphClosure, CompletionOutput};
 pub use database::{DEFAULT_IMPORT_INDEX_BUDGET, DEFAULT_SEARCH_INDEX_BUDGET, GraphDatabase};
 pub use import::{

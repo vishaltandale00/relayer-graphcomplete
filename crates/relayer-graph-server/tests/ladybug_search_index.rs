@@ -75,6 +75,20 @@ async fn build_and_complete(database: &GraphDatabase) -> NodeId {
         })
         .await
         .unwrap();
+    let reference_child = writer
+        .submit_layer(&LayerDraft {
+            client_key: "reference-child".into(),
+            nodes: vec![queue.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(vec![NodePlacement {
+                node_id: queue.id,
+                x: 0.5,
+                y: 0.5,
+            }])),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
     let root = writer
         .submit_layer(&LayerDraft {
             client_key: "root".into(),
@@ -104,6 +118,22 @@ async fn build_and_complete(database: &GraphDatabase) -> NodeId {
             kind: ActionKind::Navigate,
             relation: Some(NavigateRelation::Expand),
             label: "Details".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(reference_child.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .add_action(&ActionDraft {
+            client_key: "reference-details".into(),
+            source_node_id: queue.id,
+            source_layer_id: Some(root.id),
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Reference),
+            label: "Reference details".into(),
             variant: Default::default(),
             icon: None,
             description: None,
@@ -194,7 +224,7 @@ async fn a_committed_closure_is_searchable_with_its_identities_intact() {
         .normalized_rows("MATCH (l:Layer) RETURN count(l) AS layers")
         .await
         .unwrap();
-    assert_eq!(counts, vec![vec![json!({"type": "integer", "value": "2"})]]);
+    assert_eq!(counts, vec![vec![json!({"type": "integer", "value": "3"})]]);
     let edges = index
         .normalized_rows("MATCH ()-[r:CONNECTED]->() RETURN count(r) AS edges")
         .await
@@ -207,6 +237,14 @@ async fn a_committed_closure_is_searchable_with_its_identities_intact() {
     assert_eq!(
         actions,
         vec![vec![json!({"type": "integer", "value": "2"})]]
+    );
+    let references = index
+        .normalized_rows("MATCH ()-[a:REFERENCES]->() RETURN count(a) AS actions")
+        .await
+        .unwrap();
+    assert_eq!(
+        references,
+        vec![vec![json!({"type": "integer", "value": "1"})]]
     );
 
     assert_eq!(
@@ -234,9 +272,9 @@ async fn applying_the_same_closure_again_converges_rather_than_duplicating() {
     // reaches the same state rather than a doubled one.
     for (query, expected) in [
         ("MATCH (n:Content) RETURN count(n) AS n", "3"),
-        ("MATCH (l:Layer) RETURN count(l) AS n", "2"),
+        ("MATCH (l:Layer) RETURN count(l) AS n", "3"),
         ("MATCH ()-[r:CONNECTED]->() RETURN count(r) AS n", "1"),
-        ("MATCH ()-[m:CONTAINS]->() RETURN count(m) AS n", "3"),
+        ("MATCH ()-[m:CONTAINS]->() RETURN count(m) AS n", "4"),
         ("MATCH ()-[a:EXPANDS]->() RETURN count(a) AS n", "2"),
     ] {
         assert_eq!(
@@ -269,19 +307,34 @@ async fn replaying_a_stable_identity_unions_its_publication_targets() {
     }
 
     for target in [first, second] {
-        let rows = index
-            .normalized_rows(&format!(
-                "MATCH (n:Content) WHERE list_contains(n.published_targets, '{}') \
-                 RETURN count(n) AS visible",
-                target
-            ))
-            .await
-            .unwrap();
-        assert_eq!(
-            rows,
-            vec![vec![json!({"type": "integer", "value": "3"})]],
-            "replaying the closure erased visibility for {target}"
-        );
+        for (query, expected) in [
+            ("MATCH (n:Content)", "3"),
+            ("MATCH (l:Layer)", "3"),
+            ("MATCH ()-[r:CONNECTED]->()", "1"),
+            ("MATCH ()-[r:CONTAINS]->()", "4"),
+            ("MATCH ()-[r:EXPANDS]->()", "2"),
+            ("MATCH ()-[r:REFERENCES]->()", "1"),
+        ] {
+            let binding = if query.contains("(n:Content)") {
+                "n"
+            } else if query.contains("(l:Layer)") {
+                "l"
+            } else {
+                "r"
+            };
+            let rows = index
+                .normalized_rows(&format!(
+                    "{query} WHERE list_contains({binding}.published_targets, '{target}') \
+                     RETURN count({binding}) AS visible"
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                rows,
+                vec![vec![json!({"type": "integer", "value": expected})]],
+                "replaying the closure erased {query} visibility for {target}"
+            );
+        }
     }
 }
 
@@ -306,6 +359,35 @@ async fn a_rolled_back_write_leaves_the_store_untouched() {
         vec![vec![json!({"type": "integer", "value": "0"})]]
     );
     assert_eq!(index.revision(target()).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn dropping_an_unpolled_commit_releases_the_transaction() {
+    let directory = tempfile::tempdir().unwrap();
+    let index = index(&directory);
+    let closure = accepted_closure().await;
+
+    let mut abandoned = index
+        .begin(target(), SearchIndexRevision::FIRST)
+        .await
+        .unwrap();
+    abandoned
+        .apply(closure.clone(), vec![target()])
+        .await
+        .unwrap();
+    let never_polled = abandoned.commit();
+    drop(never_polled);
+
+    let mut retry = index
+        .begin(target(), SearchIndexRevision::FIRST)
+        .await
+        .expect("the dropped commit future must queue rollback before the next BEGIN");
+    retry.apply(closure, vec![target()]).await.unwrap();
+    retry.commit().await.unwrap();
+    assert_eq!(
+        index.revision(target()).await.unwrap(),
+        Some(SearchIndexRevision::FIRST)
+    );
 }
 
 #[tokio::test]
@@ -513,8 +595,9 @@ async fn a_saved_graph_is_searchable_the_moment_the_author_is_told_it_saved() {
         std::collections::BTreeSet::from([format!("content:{}", closure.interaction.id)]);
     let mut expected_layers = std::collections::BTreeSet::new();
     let mut expected_edges = std::collections::BTreeSet::new();
-    let mut expected_actions =
+    let mut expected_expands =
         std::collections::BTreeSet::from([format!("action:{}", closure.root_action.id)]);
+    let mut expected_references = std::collections::BTreeSet::new();
     for layer in &closure.layers {
         expected_layers.insert(format!("layer:{}", layer.layer.id));
         for node in &layer.nodes {
@@ -525,7 +608,15 @@ async fn a_saved_graph_is_searchable_the_moment_the_author_is_told_it_saved() {
         }
         for action in &layer.actions {
             if action.kind == ActionKind::Navigate {
-                expected_actions.insert(format!("action:{}", action.id));
+                match action.relation {
+                    Some(NavigateRelation::Expand) => {
+                        expected_expands.insert(format!("action:{}", action.id));
+                    }
+                    Some(NavigateRelation::Reference) => {
+                        expected_references.insert(format!("action:{}", action.id));
+                    }
+                    None => {}
+                }
             }
         }
     }
@@ -543,7 +634,11 @@ async fn a_saved_graph_is_searchable_the_moment_the_author_is_told_it_saved() {
     );
     assert_eq!(
         stored("MATCH ()-[a:EXPANDS]->() RETURN a.id AS id").await,
-        expected_actions
+        expected_expands
+    );
+    assert_eq!(
+        stored("MATCH ()-[a:REFERENCES]->() RETURN a.id AS id").await,
+        expected_references
     );
 
     assert_eq!(

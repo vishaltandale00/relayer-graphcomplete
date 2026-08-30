@@ -3,6 +3,8 @@ mod graph;
 mod storage;
 
 pub use error::{GraphError, ValidationIssue};
+#[cfg(feature = "crash-test-support")]
+pub use graph::CompletionCrashPoint;
 pub use graph::{
     AcceptedGraphClosure, ActionDraft, ActionId, ActionKind, ActionVariant, CompletionOutput,
     DEFAULT_IMPORT_INDEX_BUDGET, DEFAULT_SEARCH_INDEX_BUDGET, EdgeDraft, EdgeId, GraphAction,

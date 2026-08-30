@@ -156,21 +156,37 @@ impl SearchIndexWrite for LadybugWrite {
     }
 
     fn commit(mut self: Box<Self>) -> SearchIndexFuture<SearchIndexRevision> {
-        // Settled before the work starts: a COMMIT that fails has already been
-        // rolled back by the engine, and one that outlives its deadline may
-        // already have committed. Neither wants a rollback queued behind it.
-        self.settled = true;
         let (store, target, revision) = (self.store.clone(), self.target, self.revision);
         Box::pin(async move {
-            store
+            let outcome = store
                 .run(move |connection| {
                     // The revision is written inside the transaction, so it
                     // becomes durable with the closure it describes or not at all.
-                    schema::write_revision(connection, target, revision)?;
-                    exec(connection, "COMMIT")
+                    if let Err(error) = schema::write_revision(connection, target, revision) {
+                        let _ = exec(connection, "ROLLBACK");
+                        return Err(error);
+                    }
+                    if let Err(error) = exec(connection, "COMMIT") {
+                        let _ = exec(connection, "ROLLBACK");
+                        return Err(error);
+                    }
+                    // Ladybug 0.18 can acknowledge COMMIT while relationship
+                    // updates still exist only in a WAL state that its own
+                    // replay cannot survive an immediate SIGKILL. The author is
+                    // not acknowledged until the derived revision is crash-
+                    // durable, so force the engine checkpoint inside the same
+                    // bounded worker job.
+                    exec(connection, "CHECKPOINT")
                 })
                 .await
-                .map_err(internal)?;
+                .map_err(internal);
+            // Keep the write unsettled inside the future. If the caller's
+            // deadline expires before this future is ever polled, or while the
+            // worker job is running, dropping the future drops `self` and queues
+            // a rollback behind the job. Once the job answers, its own error
+            // path has rolled back any still-open transaction.
+            self.settled = true;
+            outcome?;
             Ok(revision)
         })
     }

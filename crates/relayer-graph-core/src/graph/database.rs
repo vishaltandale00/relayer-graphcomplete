@@ -43,6 +43,9 @@ pub struct GraphDatabase {
     /// One lock per logical target, so concurrent submissions to one target
     /// index in the order they commit while unrelated targets stay independent.
     write_order: Arc<Mutex<HashMap<SearchTarget, Arc<AsyncMutex<()>>>>>,
+    #[cfg(feature = "crash-test-support")]
+    pub(crate) completion_crash_hook:
+        Option<Arc<dyn Fn(crate::CompletionCrashPoint) + Send + Sync + 'static>>,
 }
 
 impl GraphDatabase {
@@ -64,6 +67,8 @@ impl GraphDatabase {
             search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
             import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
             write_order: Arc::default(),
+            #[cfg(feature = "crash-test-support")]
+            completion_crash_hook: None,
         })
     }
 
@@ -80,6 +85,8 @@ impl GraphDatabase {
             search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
             import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
             write_order: Arc::default(),
+            #[cfg(feature = "crash-test-support")]
+            completion_crash_hook: None,
         })
     }
 
@@ -111,6 +118,26 @@ impl GraphDatabase {
     pub fn with_import_index_budget(mut self, budget: Duration) -> Self {
         self.import_index_budget = budget;
         self
+    }
+
+    /// Install a one-shot-test observer at the six durable completion boundaries.
+    ///
+    /// This API does not exist in ordinary product builds. It is enabled only by
+    /// the explicit crash-proof feature used by #301's deterministic harness.
+    #[cfg(feature = "crash-test-support")]
+    pub fn with_completion_crash_hook(
+        mut self,
+        hook: Arc<dyn Fn(crate::CompletionCrashPoint) + Send + Sync + 'static>,
+    ) -> Self {
+        self.completion_crash_hook = Some(hook);
+        self
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    pub(crate) fn hit_completion_crash_point(&self, point: crate::CompletionCrashPoint) {
+        if let Some(hook) = &self.completion_crash_hook {
+            hook(point);
+        }
     }
 
     /// Take this target's place in line. Submissions to one target are ordered

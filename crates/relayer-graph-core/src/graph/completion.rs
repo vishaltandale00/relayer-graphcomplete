@@ -19,6 +19,24 @@ use crate::{
 
 use self::plan::CompletionPlan;
 
+/// The six durable boundaries in the acknowledgement-level write ordering.
+/// Available only to the explicit #301 crash-proof build.
+#[cfg(feature = "crash-test-support")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionCrashPoint {
+    AfterSqliteClosureWrite,
+    AfterSearchClosureWrite,
+    AfterSearchCommit,
+    AfterSqliteRevisionRecord,
+    AfterSqliteCommit,
+    AfterResponsePrepared,
+}
+
+#[cfg(feature = "crash-test-support")]
+fn crash_checkpoint(database: &GraphDatabase, point: CompletionCrashPoint) {
+    database.hit_completion_crash_point(point);
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionOutput {
@@ -98,6 +116,8 @@ pub(crate) async fn complete(
     let closure = read_accepted_closure_on(&mut transaction, scope, scope.root_node_id)
         .await?
         .ok_or_else(|| GraphError::Internal("accepted closure could not be read".into()))?;
+    #[cfg(feature = "crash-test-support")]
+    crash_checkpoint(database, CompletionCrashPoint::AfterSqliteClosureWrite);
 
     // Steps 2, 3 and 4.
     if let Err(error) = index_and_record(
@@ -115,10 +135,15 @@ pub(crate) async fn complete(
     }
     // Step 5.
     transaction.commit().await?;
+    #[cfg(feature = "crash-test-support")]
+    crash_checkpoint(database, CompletionCrashPoint::AfterSqliteCommit);
     // Step 6.
-    read_output(database, scope)
+    let output = read_output(database, scope)
         .await?
-        .ok_or_else(|| GraphError::Internal("accepted completion could not be read".into()))
+        .ok_or_else(|| GraphError::Internal("accepted completion could not be read".into()))?;
+    #[cfg(feature = "crash-test-support")]
+    crash_checkpoint(database, CompletionCrashPoint::AfterResponsePrepared);
+    Ok(output)
 }
 
 /// Write closures to the search store, commit them, and record the revision in
@@ -155,6 +180,8 @@ pub(crate) async fn index_and_record(
     SearchIndexTable::new(&mut *transaction)
         .record_revision(target, committed)
         .await?;
+    #[cfg(feature = "crash-test-support")]
+    crash_checkpoint(database, CompletionCrashPoint::AfterSqliteRevisionRecord);
     Ok(())
 }
 
@@ -185,11 +212,16 @@ async fn index_closures(
             return Err(error);
         }
     }
+    #[cfg(feature = "crash-test-support")]
+    crash_checkpoint(database, CompletionCrashPoint::AfterSearchClosureWrite);
     // A commit that outlives the deadline is not rolled back, because by then it
     // may already have committed. The caller fails the write and rolls SQLite
     // back, which lands in the same harmless direction as a crash in the step 3
     // to 5 window: an extra copy in the derived store, never a missing one.
-    deadline(expiry, write.commit()).await
+    let committed = deadline(expiry, write.commit()).await?;
+    #[cfg(feature = "crash-test-support")]
+    crash_checkpoint(database, CompletionCrashPoint::AfterSearchCommit);
+    Ok(committed)
 }
 
 async fn deadline<T>(

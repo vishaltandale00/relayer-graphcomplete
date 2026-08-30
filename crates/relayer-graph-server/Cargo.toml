@@ -10,6 +10,7 @@ license.workspace = true
 # separable from the rest of the crate.
 default = ["ladybug"]
 ladybug = ["dep:lbug"]
+crash-test-support = ["relayer-graph-core/crash-test-support"]
 
 [dependencies]
 anyhow.workspace = true

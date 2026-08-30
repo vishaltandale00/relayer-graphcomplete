@@ -13,12 +13,14 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "crash-test-support")]
+use relayer_graph_core::CompletionCrashPoint;
 use relayer_graph_core::{
     AcceptedGraphClosure, ActionDraft, ActionKind, EdgeDraft, GraphDatabase, GraphError,
-    ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedLayer, ImportedLayerLayout,
-    ImportedNode, ImportedNodePlacement, ImportedResolvedLayer, ImportedTurn, LayerDraft,
-    LayerLayout, NavigateRelation, NodeDraft, NodePlacement, ProjectId, SearchIndex,
-    SearchIndexFuture, SearchIndexRevision, SearchIndexWrite, SearchTarget, ThreadId,
+    GraphWriter, ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedLayer,
+    ImportedLayerLayout, ImportedNode, ImportedNodePlacement, ImportedResolvedLayer, ImportedTurn,
+    LayerDraft, LayerLayout, NavigateRelation, NodeDraft, NodeId, NodePlacement, ProjectId,
+    SearchIndex, SearchIndexFuture, SearchIndexRevision, SearchIndexWrite, SearchTarget, ThreadId,
 };
 
 /// What the double should do when a write reaches it.
@@ -145,11 +147,11 @@ impl SearchIndexWrite for DoubleWrite {
 
     fn commit(self: Box<Self>) -> SearchIndexFuture<SearchIndexRevision> {
         Box::pin(async move {
-            self.index.recorded.lock().unwrap().committed.push((
-                self.target,
-                self.revision,
-                self.layers,
-            ));
+            let mut recorded = self.index.recorded.lock().unwrap();
+            recorded
+                .committed
+                .push((self.target, self.revision, self.layers));
+            recorded.stored.insert(self.target, self.revision);
             Ok(self.revision)
         })
     }
@@ -175,6 +177,17 @@ async fn submit(
     thread: i64,
     key: &str,
 ) -> Result<(), GraphError> {
+    let (interaction, writer) = author(database, project, thread, key).await?;
+    writer.complete(interaction).await?;
+    Ok(())
+}
+
+async fn author(
+    database: &GraphDatabase,
+    project: Option<ProjectId>,
+    thread: i64,
+    key: &str,
+) -> Result<(NodeId, GraphWriter), GraphError> {
     let interaction = database
         .create_interaction(project, ThreadId::new(thread).unwrap(), "Explain the queue")
         .await?;
@@ -238,8 +251,7 @@ async fn submit(
             interaction_text: None,
         })
         .await?;
-    writer.complete(interaction.id).await?;
-    Ok(())
+    Ok((interaction.id, writer))
 }
 
 async fn database(index: Double) -> GraphDatabase {
@@ -247,6 +259,72 @@ async fn database(index: Double) -> GraphDatabase {
         .await
         .unwrap()
         .with_search_index_budget(Duration::from_millis(200))
+}
+
+#[cfg(feature = "crash-test-support")]
+#[tokio::test]
+async fn exact_retry_converges_after_every_completion_crash_boundary() {
+    use std::sync::atomic::AtomicBool;
+
+    for point in [
+        CompletionCrashPoint::AfterSqliteClosureWrite,
+        CompletionCrashPoint::AfterSearchClosureWrite,
+        CompletionCrashPoint::AfterSearchCommit,
+        CompletionCrashPoint::AfterSqliteRevisionRecord,
+        CompletionCrashPoint::AfterSqliteCommit,
+        CompletionCrashPoint::AfterResponsePrepared,
+    ] {
+        let index = Double::new(Behaviour::Commit);
+        let fired = Arc::new(AtomicBool::new(false));
+        let hook_fired = fired.clone();
+        let database = database(index.clone())
+            .await
+            .with_completion_crash_hook(Arc::new(move |observed| {
+                if observed == point && !hook_fired.swap(true, Ordering::SeqCst) {
+                    panic!("injected crash after {point:?}");
+                }
+            }));
+        let (interaction, writer) = author(&database, None, 1, "crash").await.unwrap();
+
+        let crashed = tokio::spawn(async move { writer.complete(interaction).await })
+            .await
+            .expect_err("the selected boundary must panic");
+        assert!(crashed.is_panic(), "{point:?} did not model a crash");
+        assert!(fired.load(Ordering::SeqCst), "{point:?} was not reached");
+
+        let target = SearchTarget::Thread(ThreadId::new(1).unwrap());
+        let commits_after_crash = index.committed().len();
+        let expected_after_crash = match point {
+            CompletionCrashPoint::AfterSqliteClosureWrite
+            | CompletionCrashPoint::AfterSearchClosureWrite => 0,
+            _ => 1,
+        };
+        assert_eq!(commits_after_crash, expected_after_crash, "{point:?}");
+
+        let first_retry = database.writer_for_subgraph(interaction).await.unwrap();
+        let second_retry = database.writer_for_subgraph(interaction).await.unwrap();
+        let (first, second) = tokio::join!(
+            first_retry.complete(interaction),
+            second_retry.complete(interaction)
+        );
+        assert_eq!(first.unwrap(), second.unwrap(), "{point:?}");
+
+        let expected_revision = match point {
+            CompletionCrashPoint::AfterSearchCommit
+            | CompletionCrashPoint::AfterSqliteRevisionRecord => SearchIndexRevision::FIRST.next(),
+            _ => SearchIndexRevision::FIRST,
+        };
+        assert_eq!(
+            database.search_index_revision(target).await.unwrap(),
+            Some(expected_revision),
+            "{point:?} did not converge to the correct receipt"
+        );
+        assert_eq!(
+            index.committed().len(),
+            usize::from(expected_revision == SearchIndexRevision::FIRST.next()) + 1,
+            "{point:?} indexed more than the one required retry"
+        );
+    }
 }
 
 #[tokio::test]
