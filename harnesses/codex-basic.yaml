@@ -2,7 +2,7 @@ schemaVersion: 1
 name: codex-basic
 implementation: codex.basic
 implementationVersion: 1
-revision: 3
+revision: 4
 permissionBindings:
   ask:
     sandboxMode: workspace-write

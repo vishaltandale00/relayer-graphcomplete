@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
 import { access, chmod, lstat, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import * as tar from "tar";
 
@@ -56,6 +57,7 @@ export async function verifyBundledAppServer(
   const graphClientPath = join(resourcesPath, "graph-client", "index.js");
   const markedPath = join(resourcesPath, "renderer", "vendor", "marked.umd.js");
   await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath), access(markedPath)]);
+  await verifyPackagedGraphClient(graphClientPath);
   const packagedEntries = new Set(listPackageEntries(join(resourcesPath, "app.asar")).map(normalizeAsarEntry));
   for (const entry of [
     "main/single-instance.mjs",
@@ -86,6 +88,20 @@ export async function verifyBundledAppServer(
     }
   }
   return { binaryPath, architecture: architectures };
+}
+
+export async function verifyPackagedGraphClient(graphClientPath) {
+  const digest = sha256(await readFile(graphClientPath));
+  let graphClient;
+  try {
+    graphClient = await import(`${pathToFileURL(graphClientPath).href}?sha256=${digest}`);
+  } catch (error) {
+    throw new Error("Bundled Relayer graph client cannot be imported.", { cause: error });
+  }
+  if (typeof graphClient.RelayerGraphClient !== "function"
+    || typeof graphClient.RelayerGraphClient.prototype?.search !== "function") {
+    throw new Error("Bundled Relayer graph client is missing RelayerGraphClient.prototype.search.");
+  }
 }
 
 export async function verifyPackagedCodexBrowserMcp(resourcesPath) {

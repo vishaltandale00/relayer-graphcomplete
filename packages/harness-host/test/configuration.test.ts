@@ -27,7 +27,7 @@ describe("harness configuration", () => {
   });
 
   it.each([
-    ["codex-basic", "medium", 3, "layered-navigation-multi-agent-v1"],
+    ["codex-basic", "medium", 4, "layered-navigation-multi-agent-v1"],
     ["codex-basic-high", "high", 2, undefined],
   ])("loads the checked-in %s configuration", async (name, modelReasoningEffort, revision, promptProfile) => {
     await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({

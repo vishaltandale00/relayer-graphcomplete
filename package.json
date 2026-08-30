@@ -58,6 +58,8 @@
     "eval:basic": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js",
     "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --judge-configuration codex-structured",
     "eval:graph-repair:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --case graph-authoring.replay-repair --judge-configuration none",
+    "eval:graph-memory": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --case graph-memory.prior-accepted-reference --judge-configuration none",
+    "eval:graph-memory:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --case graph-memory.prior-accepted-reference --judge-configuration none",
     "lint:ladybug-receipt": "cargo fmt --manifest-path docs/evidence/issue-261-ladybug-probe/Cargo.toml -- --check && rustfmt --edition 2021 --check docs/evidence/issue-261-ladybug-probe/source-build-probe/src/main.rs && node scripts/lint-ladybug-qualification-receipt.mjs && npm run lint:ladybug-native-receipt && npm run lint:ladybug-contract-probe",
     "lint:ladybug-native-receipt": "node scripts/verify-ladybug-native-receipts.mjs",
     "lint:ladybug-contract-probe": "node scripts/lint-ladybug-contract-probe.mjs",

@@ -2252,7 +2252,7 @@ describe("desktop skeleton", () => {
       await Promise.all([
         writeFile(bundledBinary, "binary-fixture"),
         writeFile(bundledGraphBinary, "binary-fixture"),
-        writeFile(bundledGraphClient, "client-fixture"),
+        writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} }\n"),
         writeFile(bundledMarked, "marked-fixture"),
         writeFile(join(bundledCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
         writeFile(bundledCodexBrowserScript, "helper-fixture"),
@@ -2291,6 +2291,14 @@ describe("desktop skeleton", () => {
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/graph-client/dist/index.js"),
         verifyPrimeAgent,
       })).rejects.toThrow("missing node_modules/@relayer/graph-client/dist/index.js");
+      await writeFile(bundledGraphClient, "export class RelayerGraphClient {}\n");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: packagedRuntimeEntries,
+        verifyPrimeAgent,
+      })).rejects.toThrow("missing RelayerGraphClient.prototype.search");
+      await writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} }\n");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
@@ -2337,7 +2345,7 @@ describe("desktop skeleton", () => {
       await Promise.all([
         writeFile(join(windowsPath, "resources", "bin", "relayer-app-server.exe"), "binary-fixture"),
         writeFile(join(windowsPath, "resources", "bin", "relayer-graph-server.exe"), "binary-fixture"),
-        writeFile(join(windowsPath, "resources", "graph-client", "index.js"), "client-fixture"),
+        writeFile(join(windowsPath, "resources", "graph-client", "index.js"), "export class RelayerGraphClient { search() {} }\n"),
         writeFile(join(windowsPath, "resources", "renderer", "vendor", "marked.umd.js"), "marked-fixture"),
         writeFile(join(windowsCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
         writeFile(join(windowsCodexBrowserRoot, "build", "src", "bin", "chrome-devtools-mcp.js"), "helper-fixture"),

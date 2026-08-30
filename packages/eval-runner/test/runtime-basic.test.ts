@@ -5,13 +5,17 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { productHarnessImplementations, type HarnessFactory } from "@relayer/harness-host";
 import type { CompletionOutput } from "@relayer/graph-client";
+import { graphMemoryFixtureConfiguration, graphMemoryFixtureFactory } from "../src/fixtures/graph-memory.js";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, graphMemoryAnchor, graphMemoryEvalCaseId, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
-const implementations = productHarnessImplementations({ "fixture.task-system": taskSystemFixtureFactory });
+const implementations = productHarnessImplementations({
+  "fixture.task-system": taskSystemFixtureFactory,
+  "fixture.graph-memory": graphMemoryFixtureFactory,
+});
 
 function fixtureExecution() {
   return expandTestRun({
@@ -20,6 +24,15 @@ function fixtureExecution() {
     harnessConfigurationNames: [taskSystemFixtureConfiguration.name],
     judgeConfiguration: { name: "none" as const },
   }, new Map([[taskSystemFixtureConfiguration.name, taskSystemFixtureConfiguration]]))[0]!;
+}
+
+function graphMemoryExecution() {
+  return expandTestRun({
+    testRunId: "fixture-memory-run",
+    testCaseIds: [graphMemoryEvalCaseId],
+    harnessConfigurationNames: [graphMemoryFixtureConfiguration.name],
+    judgeConfiguration: { name: "none" as const },
+  }, new Map([[graphMemoryFixtureConfiguration.name, graphMemoryFixtureConfiguration]]))[0]!;
 }
 
 function navigationOutput(actions: CompletionOutput["rootLayer"]["actions"] = []): CompletionOutput {
@@ -407,6 +420,51 @@ describe("first runtime evaluation", () => {
     expect(html).toContain("title.textContent=node.title");
     expect(html).toContain("110+placement.x*740");
   }, 15_000);
+
+  it("proves prior accepted graph search and typed reference reuse across two capabilities in one session", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-graph-memory-"));
+    temporary.push(outputDirectory);
+    const execution = graphMemoryExecution();
+    const artifact = await runBasicRuntimeEval({ outputDirectory, execution, implementations });
+
+    expect(artifact.passed).toBe(true);
+    expect(artifact.turns).toHaveLength(2);
+    expect(artifact.turns[0]!.output.rootLayer.nodes.filter((node) => (
+      node.title === graphMemoryAnchor(execution.testRunId)
+    ))).toHaveLength(1);
+    expect(artifact.turns[1]!.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "draft-decoy-hidden", passed: true }),
+      expect.objectContaining({ name: "typed-reference-target", passed: true }),
+      expect.objectContaining({ name: "ack-search-submit-order", passed: true }),
+    ]));
+    expect(artifact.sessionChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "single-harness-object", passed: true }),
+      expect.objectContaining({ name: "distinct-interaction-capabilities", passed: true }),
+      expect.objectContaining({ name: "revoked-interaction-capabilities", passed: true }),
+      expect.objectContaining({ name: "same-provider-session", passed: true }),
+    ]));
+    const evidence = artifact.turns[1]!.graphMemoryEvidence!;
+    const firstLayerId = artifact.turns[0]!.output.rootLayer.layer.id;
+    expect(evidence.searchedLayerIds).toEqual([firstLayerId]);
+    const acceptedReference = artifact.turns[1]!.output.rootLayer.actions.find((action) => (
+      action.id === evidence.referenceActionId
+    ));
+    expect(acceptedReference).toMatchObject({
+      kind: "navigate",
+      relation: "reference",
+      state: "accepted",
+      targetLayerId: firstLayerId,
+      sourceLayerId: artifact.turns[1]!.output.rootLayer.layer.id,
+    });
+    const submits = evidence.auditEvents.filter((event) => event.path === "/api/graph/submit" && event.status === 200);
+    const search = evidence.auditEvents.find((event) => event.path === "/api/graph/search" && event.status === 200)!;
+    const reference = evidence.auditEvents.find((event) => event.recordId === evidence.referenceActionId && event.recordKind === "action")!;
+    expect(submits).toHaveLength(2);
+    expect(submits[0]!.sequence).toBeLessThan(search.sequence);
+    expect(search.sequence).toBeLessThan(reference.sequence);
+    expect(reference.sequence).toBeLessThan(submits[1]!.sequence);
+  }, 30_000);
 
   it("uses the explicit managed Codex executable for every structured judge turn", async () => {
     const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-managed-judge-")); temporary.push(outputDirectory);

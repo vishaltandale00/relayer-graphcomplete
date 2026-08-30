@@ -1,6 +1,7 @@
 export * from "./cases/catalog.js";
 export * from "./cases/contracts.js";
 export * from "./fixtures/approval.js";
+export * from "./fixtures/graph-memory.js";
 export * from "./fixtures/task-system.js";
 export * from "./outcome/contracts.js";
 export * from "./outcome/grading.js";
