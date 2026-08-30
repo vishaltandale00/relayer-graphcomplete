@@ -1791,9 +1791,16 @@ impl ProductService {
         source_turn_id: &str,
         graph_node_id: Option<i64>,
         output: Option<&serde_json::Value>,
+        portable_turn: &crate::conversation_export::ConversationExportTurn,
     ) -> Result<(), ProductError> {
         self.storage
-            .prepare_conversation_import_turn(import_id, source_turn_id, graph_node_id, output)
+            .prepare_conversation_import_turn(
+                import_id,
+                source_turn_id,
+                graph_node_id,
+                output,
+                portable_turn,
+            )
             .await
             .map_err(Into::into)
     }

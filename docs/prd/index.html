@@ -2145,7 +2145,7 @@ settings:
 <li>No input action is required. An empty message is valid when at least one attachment is submitted.</li>
 <li>Text values preserve authored text. Select values persist stable option keys plus their accepted labels, with multi-select keys canonically ordered. The harness receives unordered prompt/control/value snapshots without product-assigned priority.</li>
 <li>Failure or stop restores the attempt's attachments to the draft unless a newer commit already owns the same occurrence. The immutable attempt cannot be retried in place; the next Send creates a new root.</li>
-<li>Accepted and terminal submitted input remains readable in compact history, safe diagnostics, and V1 conversation export. Import assigns fresh local identities, strips execution authority and digests, and keeps imported input read-only and inert.</li>
+<li>Accepted input actions retain their authored payload in V1 conversation export even when unanswered. Accepted and terminal submitted input remains readable in compact history, safe diagnostics, and export. Import assigns fresh local identities, strips execution authority and digests, and keeps imported input read-only and inert.</li>
 </ul>
 <h3>7.3 Current proof boundary</h3>
 <ul>

@@ -157,6 +157,7 @@ pub struct ImportedAction {
     pub description: Option<String>,
     pub target_layer_id: Option<String>,
     pub interaction_text: Option<String>,
+    pub input: Option<InputAction>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -186,7 +187,9 @@ pub struct ImportedConversationReceipt {
 pub struct SkippedSubmittedInput {
     pub source_turn_id: String,
     pub submitted_input_id: String,
-    pub reason: String,
+    pub code: String,
+    pub path: String,
+    pub message: String,
 }
 
 impl crate::GraphDatabase {
@@ -461,14 +464,9 @@ impl crate::GraphDatabase {
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
             for submitted in turn.submitted_inputs {
-                if let Some(existing) = input_action_snapshots.get(&submitted.source.action_id)
-                    && existing != &submitted.action
-                {
-                    return Err(GraphError::Internal(
-                        "imported input action snapshot changed across consuming turns".into(),
-                    ));
-                }
-                input_action_snapshots.insert(submitted.source.action_id, submitted.action);
+                input_action_snapshots
+                    .entry(submitted.source.action_id)
+                    .or_insert(submitted.action);
             }
         }
         let mut action_ids = HashMap::<String, i64>::new();
@@ -687,11 +685,13 @@ impl crate::GraphDatabase {
                 .await?;
                 let resolution = match resolved {
                     ImportedInputResolution::Resolved(resolution) => resolution,
-                    ImportedInputResolution::Rejected(reason) => {
+                    ImportedInputResolution::Rejected(rejection) => {
                         skipped_submitted_inputs.push(SkippedSubmittedInput {
                             source_turn_id: turn.source_turn_id.clone(),
                             submitted_input_id: submitted.id.clone(),
-                            reason: reason.to_owned(),
+                            code: rejection.code.to_owned(),
+                            path: rejection.path,
+                            message: rejection.message,
                         });
                         continue;
                     }
@@ -981,7 +981,12 @@ async fn insert_action(
     response: bool,
     ids: &mut HashMap<String, i64>,
 ) -> Result<(), GraphError> {
-    let input = context.input_actions.get(&action.id);
+    let consumed_snapshot = context.input_actions.get(&action.id);
+    // Older draft exports carried the action snapshot only on a consuming child.
+    // Keep that additive shape readable when an answer exists, while current
+    // exports carry the authored payload on the action so unanswered questions
+    // round-trip too.
+    let input = action.input.as_ref().or(consumed_snapshot);
     if (action.kind == "input") != input.is_some() {
         return Err(GraphError::Internal(
             "imported input action is missing or conflicts with its frozen child snapshot".into(),
@@ -1032,7 +1037,23 @@ struct MaterializedImportIds<'a> {
 
 enum ImportedInputResolution {
     Resolved(ResolvedImportedInput),
-    Rejected(&'static str),
+    Rejected(ImportedInputRejection),
+}
+
+struct ImportedInputRejection {
+    code: &'static str,
+    path: String,
+    message: String,
+}
+
+impl ImportedInputRejection {
+    fn new(code: &'static str, path: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            path: path.into(),
+            message: message.into(),
+        }
+    }
 }
 
 /// Proves one imported submitted input against the materialized graph.
@@ -1052,9 +1073,14 @@ async fn resolve_imported_input_occurrence(
     submitted: &ImportedSubmittedInput,
     ids: &MaterializedImportIds<'_>,
 ) -> Result<ImportedInputResolution, GraphError> {
+    let source_path = format!("submittedInputs[{index}].source");
     if submitted.root_turn_id != source_turn_id {
         return Ok(ImportedInputResolution::Rejected(
-            "submitted input names a different root turn",
+            ImportedInputRejection::new(
+                "input_occurrence_not_visible",
+                format!("submittedInputs[{index}].rootTurnId"),
+                "The submitted input names a different root turn.",
+            ),
         ));
     }
     let (
@@ -1070,7 +1096,11 @@ async fn resolve_imported_input_occurrence(
     )
     else {
         return Ok(ImportedInputResolution::Rejected(
-            "submitted input provenance names a record that was not materialized",
+            ImportedInputRejection::new(
+                "input_occurrence_not_visible",
+                source_path.clone(),
+                "The submitted input provenance names a record that was not materialized.",
+            ),
         ));
     };
     let occurrence = PresentingInputOccurrence {
@@ -1083,33 +1113,58 @@ async fn resolve_imported_input_occurrence(
         .await
     {
         Ok(accepted) => accepted,
-        Err(GraphError::Validation { .. }) => {
+        Err(GraphError::Validation {
+            code,
+            path,
+            message,
+        }) => {
             return Ok(ImportedInputResolution::Rejected(
-                "submitted input provenance is not one accepted input occurrence",
+                ImportedInputRejection::new(code, imported_occurrence_path(index, &path), message),
             ));
         }
         Err(error) => return Err(error),
     };
     if accepted.kind != ActionKind::Input || accepted.input.as_ref() != Some(&submitted.action) {
         return Ok(ImportedInputResolution::Rejected(
-            "submitted input action snapshot does not match the accepted action",
+            ImportedInputRejection::new(
+                "input_action_snapshot_mismatch",
+                format!("submittedInputs[{index}].action"),
+                "The submitted input action snapshot does not match the accepted action.",
+            ),
         ));
     }
     if accepted.source_node_id.value() != claimed_source_node_id {
         return Ok(ImportedInputResolution::Rejected(
-            "submitted input names a source node that did not author the action",
+            ImportedInputRejection::new(
+                "input_action_not_in_occurrence",
+                format!("submittedInputs[{index}].source.nodeId"),
+                "The submitted input names a source node that did not author the action.",
+            ),
         ));
     }
     let Some(accepted_action) = accepted.input.as_ref() else {
         return Ok(ImportedInputResolution::Rejected(
-            "submitted input provenance is not one accepted input occurrence",
+            ImportedInputRejection::new(
+                "input_action_not_in_occurrence",
+                source_path,
+                "The submitted input provenance is not one accepted input occurrence.",
+            ),
         ));
     };
     let value = match validate_value(index, accepted_action, &submitted.value) {
         Ok(value) => value,
-        Err(GraphError::Validation { .. }) => {
+        Err(GraphError::Validation {
+            code,
+            path,
+            message,
+        }) => {
+            let path = path.replacen(
+                &format!("attachments[{index}]"),
+                &format!("submittedInputs[{index}]"),
+                1,
+            );
             return Ok(ImportedInputResolution::Rejected(
-                "submitted input value does not satisfy the accepted action",
+                ImportedInputRejection::new(code, path, message),
             ));
         }
         Err(error) => return Err(error),
@@ -1121,6 +1176,17 @@ async fn resolve_imported_input_occurrence(
         source_node_id: accepted.source_node_id.value(),
         value,
     }))
+}
+
+fn imported_occurrence_path(index: usize, canonical_path: &str) -> String {
+    let source = format!("submittedInputs[{index}].source");
+    match canonical_path {
+        "occurrence.actionId" => format!("{source}.actionId"),
+        "occurrence.presentingInteractionNodeId" => format!("{source}.interactionNodeId"),
+        "occurrence.presentingLayerId" => format!("{source}.layerId"),
+        "occurrence" => source,
+        _ => source,
+    }
 }
 
 fn imported_node_id(value: i64) -> Result<NodeId, GraphError> {

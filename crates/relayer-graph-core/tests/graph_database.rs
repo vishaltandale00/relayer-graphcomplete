@@ -128,6 +128,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                     description: None,
                     target_layer_id: Some("layer-1".into()),
                     interaction_text: None,
+                    input: None,
                 },
                 root_layer_id: "layer-1".into(),
                 layers: vec![ImportedResolvedLayer {
@@ -181,6 +182,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                 description: None,
                 target_layer_id: Some("layer-1".into()),
                 interaction_text: None,
+                input: None,
             },
             root_layer_id: "layer-1".into(),
             layers: vec![ImportedResolvedLayer {
@@ -210,6 +212,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     description: None,
                     target_layer_id: None,
                     interaction_text: Some("Continue this path".into()),
+                    input: None,
                 }],
             }],
         }),
@@ -238,6 +241,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                 description: None,
                 target_layer_id: Some("layer-2".into()),
                 interaction_text: None,
+                input: None,
             },
             root_layer_id: "layer-2".into(),
             layers: vec![ImportedResolvedLayer {
@@ -389,6 +393,53 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
 }
 
 #[tokio::test]
+async fn imported_unanswered_input_action_keeps_its_authored_payload() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut conversation = imported_conversation("interaction-1");
+    let expected = InputAction {
+        control: InputControl::SingleSelect,
+        prompt: "Choose a destination".into(),
+        options: vec![InputOption {
+            key: "home".into(),
+            label: "Home".into(),
+            unsupported_fields: Default::default(),
+        }],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    conversation.turns[0].accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .push(ImportedAction {
+            id: "unanswered-input".into(),
+            source_node_id: "node-1".into(),
+            source_layer_id: Some("layer-1".into()),
+            kind: "input".into(),
+            relation: None,
+            label: "Choose".into(),
+            variant: "pill".into(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(expected.clone()),
+        });
+
+    let receipt = database
+        .import_accepted_conversation(&conversation)
+        .await
+        .unwrap();
+    let output = receipt.turns[0].output.as_ref().unwrap();
+    let imported = output
+        .root_layer
+        .actions
+        .iter()
+        .find(|action| action.kind == ActionKind::Input)
+        .unwrap();
+    assert_eq!(imported.input.as_ref(), Some(&expected));
+    assert!(receipt.skipped_submitted_inputs.is_empty());
+}
+
+#[tokio::test]
 async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable() {
     let database = GraphDatabase::in_memory().await.unwrap();
     let mut input = imported_conversation("interaction-1");
@@ -406,6 +457,7 @@ async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable()
             description: None,
             target_layer_id: None,
             interaction_text: None,
+            input: None,
         });
     input.turns.push(ImportedTurn {
         source_turn_id: "turn-2".into(),
@@ -516,6 +568,7 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
             description: None,
             target_layer_id: None,
             interaction_text: None,
+            input: None,
         });
     }
 
@@ -580,7 +633,8 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
     let skipped = &receipt.skipped_submitted_inputs[0];
     assert_eq!(skipped.submitted_input_id, "input-child-spliced");
     assert_eq!(skipped.source_turn_id, "turn-2");
-    assert!(skipped.reason.contains("source node"));
+    assert_eq!(skipped.code, "input_action_not_in_occurrence");
+    assert_eq!(skipped.path, "submittedInputs[1].source.nodeId");
 
     // The honest answer on the same turn still imports.
     let root = NodeId::new(receipt.turns[1].graph_node_id.unwrap()).unwrap();
@@ -612,6 +666,7 @@ async fn imported_submitted_input_value_must_satisfy_the_accepted_action() {
             description: None,
             target_layer_id: None,
             interaction_text: None,
+            input: None,
         });
     }
 
@@ -681,7 +736,8 @@ async fn imported_submitted_input_value_must_satisfy_the_accepted_action() {
     let skipped = &receipt.skipped_submitted_inputs[0];
     assert_eq!(skipped.submitted_input_id, "input-child-forged");
     assert_eq!(skipped.source_turn_id, "turn-2");
-    assert!(skipped.reason.contains("value"));
+    assert_eq!(skipped.code, "input_option_unknown");
+    assert_eq!(skipped.path, "submittedInputs[1].value");
 
     // The honest answer on the same turn still imports, and nothing the file claimed
     // about the fabricated option reached the projection.

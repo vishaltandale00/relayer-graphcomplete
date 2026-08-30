@@ -13,6 +13,7 @@ pub use import::{
     ImportedConversationStage, ImportedEdge, ImportedInputSource, ImportedInteractionContext,
     ImportedInvokeOrigin, ImportedLayer, ImportedLayerLayout, ImportedNode, ImportedNodePlacement,
     ImportedResolvedLayer, ImportedSubmittedInput, ImportedTurn, ImportedTurnReceipt,
+    SkippedSubmittedInput,
 };
 pub use model::{
     ActionDraft, ActionId, ActionKind, ActionVariant, CompletionLifecycle, CompletionState,

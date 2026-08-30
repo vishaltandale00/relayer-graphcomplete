@@ -19,6 +19,7 @@ fn action(
         description: None,
         target_layer_id: target_layer_id.map(Into::into),
         interaction_text: None,
+        input: None,
         state: ExportRecordState::Accepted,
     }
 }
@@ -36,6 +37,7 @@ fn invoke(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction
         description: None,
         target_layer_id: None,
         interaction_text: Some("Continue".into()),
+        input: None,
         state: ExportRecordState::Accepted,
     }
 }
@@ -47,12 +49,19 @@ fn input(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction 
         source_layer_id: Some(source_layer_id.into()),
         kind: ExportActionKind::Input,
         relation: None,
-        label: "".into(),
+        label: "Respond".into(),
         variant: ExportActionVariant::Pill,
         icon: None,
         description: None,
         target_layer_id: None,
         interaction_text: None,
+        input: Some(ExportInputActionSnapshot {
+            control: ExportInputControl::Text,
+            prompt: "Explain".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        }),
         state: ExportRecordState::Accepted,
     }
 }
@@ -906,6 +915,13 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
         jsonl.push(b'\n');
     }
     assert_eq!(decode_export_jsonl(&jsonl).unwrap(), fixture);
+
+    let mut blank_activation_label = fixture.clone();
+    let ConversationExportRecord::Turn(turn) = &mut blank_activation_label[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0].actions[0].label = "  ".into();
+    assert_rejected_with_parity(&blank_activation_label, "string_empty");
 
     let encoded = String::from_utf8(jsonl.clone()).unwrap();
     let unsupported_control_jsonl =

@@ -389,6 +389,7 @@ mod tests {
             target_layer_id: target_layer_id.map(Into::into),
             interaction_text: (kind == ExportActionKind::Invoke)
                 .then_some("Continue this path".into()),
+            input: None,
             state: ExportRecordState::Accepted,
         }
     }
@@ -584,6 +585,7 @@ mod tests {
         tempfile::TempDir,
         Router,
         SqliteProductStore,
+        relayer_graph_core::GraphDatabase,
         tokio::task::JoinHandle<()>,
     ) {
         let directory = tempfile::tempdir().unwrap();
@@ -591,13 +593,10 @@ mod tests {
             .await
             .unwrap();
         let product = ProductService::new(store.clone(), true);
-        let (runtime, graph_task) = runtime(
-            relayer_graph_core::GraphDatabase::in_memory()
-                .await
-                .unwrap(),
-            directory.path(),
-        )
-        .await;
+        let graph = relayer_graph_core::GraphDatabase::in_memory()
+            .await
+            .unwrap();
+        let (runtime, graph_task) = runtime(graph.clone(), directory.path()).await;
         let permission_catalog = crate::permissions::PermissionCatalog::load(
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../permissions/desktop.json"),
         )
@@ -624,7 +623,7 @@ mod tests {
                 },
             },
         );
-        (directory, router, store, graph_task)
+        (directory, router, store, graph, graph_task)
     }
 
     fn request(method: &str, cookie: &str, body: impl Into<Body>) -> Request<Body> {
@@ -697,7 +696,7 @@ mod tests {
 
     #[tokio::test]
     async fn import_router_enforces_write_cookie_and_feature_gate_for_every_verb() {
-        let (_directory, enabled, _store, enabled_graph) = app(true).await;
+        let (_directory, enabled, _store, _graph, enabled_graph) = app(true).await;
         let body = jsonl(&records("router fixture".into()));
 
         for method in ["GET", "POST", "PUT", "DELETE"] {
@@ -761,7 +760,7 @@ mod tests {
         assert_eq!(canceled.status(), StatusCode::OK);
         enabled_graph.abort();
 
-        let (_directory, disabled, _store, disabled_graph) = app(false).await;
+        let (_directory, disabled, _store, _graph, disabled_graph) = app(false).await;
         for method in ["GET", "POST", "PUT", "DELETE"] {
             let response = disabled
                 .clone()
@@ -792,7 +791,7 @@ mod tests {
         assert_eq!(authored_invoke.kind, ExportActionKind::Invoke);
         assert!(authored_invoke.target_layer_id.is_none());
 
-        let (_directory, app, _store, graph_task) = app(true).await;
+        let (_directory, app, _store, _graph, graph_task) = app(true).await;
         let staged = app
             .clone()
             .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
@@ -1158,7 +1157,7 @@ mod tests {
             )));
         }
 
-        let (_directory, app, _store, graph_task) = app(true).await;
+        let (_directory, app, _store, _graph, graph_task) = app(true).await;
         let staged = app
             .clone()
             .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
@@ -1297,8 +1296,319 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unanswered_input_action_round_trips_through_app_import() {
+        let mut records = resolved_invoke_records();
+        let expected = ExportInputActionSnapshot {
+            control: ExportInputControl::MultiSelect,
+            prompt: "Choose the evidence to inspect".into(),
+            options: vec![
+                ExportInputOption {
+                    key: "logs".into(),
+                    label: "Logs".into(),
+                    unsupported_fields: Default::default(),
+                },
+                ExportInputOption {
+                    key: "traces".into(),
+                    label: "Traces".into(),
+                    unsupported_fields: Default::default(),
+                },
+            ],
+            minimum_selections: Some(2),
+            unsupported_fields: Default::default(),
+        };
+        let mut input_action = export_action(
+            "action:input-unanswered",
+            "node:source",
+            Some("layer:source"),
+            ExportActionKind::Input,
+            None,
+        );
+        input_action.label = "Choose evidence".into();
+        input_action.input = Some(expected.clone());
+        let ConversationExportRecord::Turn(source) = &mut records[1] else {
+            unreachable!()
+        };
+        source.accepted_view.as_mut().unwrap().layers[0]
+            .actions
+            .push(input_action);
+
+        let (_directory, app, _store, _graph, graph_task) = app(true).await;
+        let staged = app
+            .clone()
+            .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
+            .await
+            .unwrap();
+        assert_eq!(staged.status(), StatusCode::OK);
+        let staged = response_json(staged).await;
+        let published = app
+            .clone()
+            .oneshot(request(
+                "PUT",
+                "write-token",
+                Body::from(serde_json::json!({"importId": staged["importId"]}).to_string()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(published.status(), StatusCode::OK);
+        let published = response_json(published).await;
+        let reexported = app
+            .oneshot(request_uri(
+                "GET",
+                &format!(
+                    "/api/threads/{}/export",
+                    published["threadId"].as_i64().unwrap()
+                ),
+                "write-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reexported.status(), StatusCode::OK);
+        let bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
+            .await
+            .unwrap();
+        let reexported = decode_export_jsonl(&bytes).unwrap();
+        let ConversationExportRecord::Turn(source) = &reexported[1] else {
+            unreachable!()
+        };
+        let action = source
+            .accepted_view
+            .as_ref()
+            .unwrap()
+            .layers
+            .iter()
+            .flat_map(|layer| &layer.actions)
+            .find(|action| action.id == "action:input-unanswered")
+            .unwrap();
+        assert_eq!(action.label, "Choose evidence");
+        assert_eq!(action.input.as_ref(), Some(&expected));
+        graph_task.abort();
+    }
+
+    fn forged_input_records(status: ExportCompletionStatus) -> Vec<ConversationExportRecord> {
+        let mut records = resolved_invoke_records();
+        let action_snapshot = ExportInputActionSnapshot {
+            control: ExportInputControl::Text,
+            prompt: "Explain the destination".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        };
+        let mut input_action = export_action(
+            "action:input",
+            "node:source",
+            Some("layer:source"),
+            ExportActionKind::Input,
+            None,
+        );
+        input_action.input = Some(action_snapshot.clone());
+        let ConversationExportRecord::Turn(source) = &mut records[1] else {
+            unreachable!()
+        };
+        source.accepted_view.as_mut().unwrap().layers[0]
+            .actions
+            .push(input_action);
+        let ConversationExportRecord::Header(header) = &mut records[0] else {
+            unreachable!()
+        };
+        header.turns.push(ExportTurnManifestEntry {
+            id: "turn:3".into(),
+            sequence: 3,
+        });
+        let accepted_view =
+            (status == ExportCompletionStatus::Accepted).then(|| ExportAcceptedView {
+                interaction_node_id: "node:interaction-3".into(),
+                root_action: export_action(
+                    "action:root-3",
+                    "node:interaction-3",
+                    None,
+                    ExportActionKind::Navigate,
+                    Some("layer:third"),
+                ),
+                root_layer_id: "layer:third".into(),
+                layers: vec![export_layer("layer:third", "node:third", "Third", vec![])],
+            });
+        records.push(ConversationExportRecord::Turn(Box::new(
+            ConversationExportTurn {
+                id: "turn:3".into(),
+                sequence: 3,
+                created_at: "1769000003000".into(),
+                text: "".into(),
+                interaction_node_id: Some("node:interaction-3".into()),
+                origin: ExportTurnOrigin::User,
+                completion: if status == ExportCompletionStatus::Accepted {
+                    accepted_receipt()
+                } else {
+                    ExportCompletionReceipt {
+                        status,
+                        attempt_outcome: None,
+                        harness_configuration_name: Some("codex-basic".into()),
+                        harness_configuration_digest: None,
+                        model_selection: None,
+                        permission_profile_id: "auto".into(),
+                        effective_execution_digest: None,
+                        effective_permission_receipt: None,
+                        error: Some("fixture failure".into()),
+                        attempt_admission_id: None,
+                        admitted_model_plan: None,
+                    }
+                },
+                contexts: vec![],
+                submitted_inputs: vec![ExportSubmittedInput {
+                    id: "input-child:rejected".into(),
+                    root_turn_id: "turn:3".into(),
+                    // Every ID is real, but this action was never presented in the
+                    // destination occurrence. Graph authority must reject the splice.
+                    source: ExportInputSource {
+                        interaction_node_id: "node:interaction-2".into(),
+                        layer_id: "layer:destination".into(),
+                        action_id: "action:input".into(),
+                        node_id: "node:source".into(),
+                    },
+                    action: action_snapshot,
+                    value: ExportSubmittedInputValue::Text {
+                        text: "Forged occurrence".into(),
+                    },
+                }],
+                accepted_view,
+            },
+        )));
+        records
+    }
+
+    #[tokio::test]
+    async fn rejected_imported_input_is_reported_and_absent_from_reexport() {
+        let records = forged_input_records(ExportCompletionStatus::Failed);
+
+        let (_directory, app, _store, _graph, graph_task) = app(true).await;
+        let staged = app
+            .clone()
+            .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
+            .await
+            .unwrap();
+        assert_eq!(staged.status(), StatusCode::OK);
+        let staged = response_json(staged).await;
+        let published = app
+            .clone()
+            .oneshot(request(
+                "PUT",
+                "write-token",
+                Body::from(serde_json::json!({"importId": staged["importId"]}).to_string()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(published.status(), StatusCode::OK);
+        let published = response_json(published).await;
+        assert_eq!(
+            published["skippedSubmittedInputs"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            published["skippedSubmittedInputs"][0]["submittedInputId"],
+            "input-child:rejected"
+        );
+        assert_eq!(
+            published["skippedSubmittedInputs"][0]["code"],
+            "input_action_not_in_occurrence"
+        );
+        assert_eq!(
+            published["skippedSubmittedInputs"][0]["path"],
+            "submittedInputs[0].source.actionId"
+        );
+
+        let reexported = app
+            .oneshot(request_uri(
+                "GET",
+                &format!(
+                    "/api/threads/{}/export",
+                    published["threadId"].as_i64().unwrap()
+                ),
+                "write-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        if reexported.status() != StatusCode::OK {
+            panic!("re-export failed: {}", response_json(reexported).await);
+        }
+        let bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
+            .await
+            .unwrap();
+        let reexported = decode_export_jsonl(&bytes).unwrap();
+        let ConversationExportRecord::Turn(rejected_turn) = &reexported[3] else {
+            unreachable!()
+        };
+        assert!(rejected_turn.submitted_inputs.is_empty());
+        graph_task.abort();
+    }
+
+    #[tokio::test]
+    async fn accepted_turn_with_only_rejected_input_is_cleaned_up_before_publish() {
+        let records = forged_input_records(ExportCompletionStatus::Accepted);
+        let (_directory, app, store, graph, graph_task) = app(true).await;
+        let staged = app
+            .clone()
+            .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
+            .await
+            .unwrap();
+        assert_eq!(staged.status(), StatusCode::OK);
+        let staged = response_json(staged).await;
+        let import_id = staged["importId"].as_str().unwrap().to_owned();
+        let thread_id = staged["threadId"].as_i64().unwrap();
+        let published = app
+            .oneshot(request(
+                "PUT",
+                "write-token",
+                Body::from(serde_json::json!({"importId": staged["importId"]}).to_string()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(published.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let failure = response_json(published).await;
+        assert_eq!(failure["code"], "invalid_input");
+        assert!(
+            failure["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("interaction_input_empty at turns[2].text:")
+        );
+        assert!(
+            store
+                .list_published_conversation_imports()
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .staged_conversation_import_ids()
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        graph
+            .begin_imported_conversation(&relayer_graph_core::ImportedConversationStage {
+                import_id: import_id.clone(),
+                source_sha256: "sha256:cleanup-probe".into(),
+                project_id: None,
+                thread_id: relayer_graph_core::ThreadId::new(thread_id).unwrap(),
+                created_at: "1770000000000".into(),
+            })
+            .await
+            .expect("graph import identity must be reusable after cleanup");
+        graph
+            .remove_imported_conversation(&import_id)
+            .await
+            .unwrap();
+        graph_task.abort();
+    }
+
+    #[tokio::test]
     async fn hostile_jsonl_corpus_never_panics_or_publishes_partial_state() {
-        let (_directory, app, store, graph_task) = app(true).await;
+        let (_directory, app, store, _graph, graph_task) = app(true).await;
         let valid = jsonl(&records("hostile corpus baseline".into()));
         let mut cases = vec![
             Vec::new(),
@@ -1396,7 +1706,7 @@ mod tests {
 
     #[tokio::test]
     async fn seeded_generated_jsonl_mutations_never_publish_or_retain_staging() {
-        let (_directory, app, store, graph_task) = app(true).await;
+        let (_directory, app, store, _graph, graph_task) = app(true).await;
         let valid = jsonl(&records("seeded mutation baseline".into()));
         let newline = valid.iter().position(|byte| *byte == b'\n').unwrap();
         let header = valid[..=newline].to_vec();
