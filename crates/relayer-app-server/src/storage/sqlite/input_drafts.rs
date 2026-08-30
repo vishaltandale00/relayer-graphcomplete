@@ -125,6 +125,20 @@ impl SqliteProductStore {
                 .fetch_optional(&mut *tx)
                 .await?
                 .unwrap_or(0);
+        let replay_result_revision: Option<i64> = sqlx::query_scalar(
+            "SELECT result_revision FROM action_input_detach_receipts WHERE thread_id=?1 AND presenting_interaction_node_id=?2 AND presenting_layer_id=?3 AND action_id=?4 AND expected_revision=?5",
+        )
+        .bind(thread_id.value())
+        .bind(occurrence.presenting_interaction_node_id.value())
+        .bind(occurrence.presenting_layer_id.value())
+        .bind(occurrence.action_id.value())
+        .bind(expected_revision)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if replay_result_revision == Some(current_revision) {
+            tx.commit().await?;
+            return load_draft(&self.pool, thread_id).await;
+        }
         if expected_revision != current_revision {
             return Err(input_draft_conflict(
                 "input_draft_revision_conflict",
@@ -151,6 +165,17 @@ impl SqliteProductStore {
             .bind(current_revision)
             .execute(&mut *tx)
             .await?;
+        sqlx::query(
+            "INSERT INTO action_input_detach_receipts(thread_id,presenting_interaction_node_id,presenting_layer_id,action_id,expected_revision,result_revision) VALUES (?1,?2,?3,?4,?5,?6)",
+        )
+        .bind(thread_id.value())
+        .bind(occurrence.presenting_interaction_node_id.value())
+        .bind(occurrence.presenting_layer_id.value())
+        .bind(occurrence.action_id.value())
+        .bind(current_revision)
+        .bind(current_revision + 1)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         load_draft(&self.pool, thread_id).await
     }
@@ -356,6 +381,121 @@ mod tests {
             .unwrap();
         assert_eq!(detached.revision, 3);
         assert_eq!(detached.attachments[0].occurrence.action_id.value(), 301);
+    }
+
+    #[tokio::test]
+    async fn restoring_an_identical_committed_value_ignores_its_newer_timestamp() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteProductStore::open(directory.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Restore identical input",
+                project_id: None,
+                initial_message: "Initial",
+                harness_configuration_name: "fixture-task-system",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "2026-08-28T00:00:00Z",
+            })
+            .await
+            .unwrap();
+        let action = InputAction {
+            control: InputControl::Text,
+            prompt: "Constraint?".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        };
+        let value = ActionInputValue::Text {
+            text: "Keep support load flat".into(),
+        };
+        let committed = store
+            .commit_action_input_attachment(
+                thread.id,
+                NewActionInputAttachment {
+                    occurrence: &occurrence(300),
+                    source_node_id: 400,
+                    action: &action,
+                    value: &value,
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        let submitted = relayer_graph_core::SubmittedInputDraft {
+            occurrence: occurrence(300),
+            action: action.clone(),
+            value: relayer_graph_core::SubmittedInputValue::Text {
+                text: "Keep support load flat".into(),
+            },
+        };
+        let digest = relayer_graph_core::interaction_input_authority_digest(
+            "",
+            std::slice::from_ref(&submitted),
+        )
+        .unwrap();
+        let created = store
+            .insert_interaction_input(
+                thread.id,
+                NewInteractionInput {
+                    text: "",
+                    input_identity: "send:identical",
+                    input_digest: &digest,
+                    contexts: &[],
+                    context_confirmation_ids: &[],
+                    submitted_input_draft_revision: Some(committed.revision),
+                },
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+        let interaction = match created {
+            InteractionInputInsertOutcome::Created(interaction) => interaction,
+            _ => panic!("expected a new immutable attempt"),
+        };
+        let fresh = store.action_input_draft(thread.id).await.unwrap();
+        let recommitted = store
+            .commit_action_input_attachment(
+                thread.id,
+                NewActionInputAttachment {
+                    occurrence: &occurrence(300),
+                    source_node_id: 400,
+                    action: &action,
+                    value: &value,
+                },
+                fresh.revision,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            store
+                .fail_interaction_completion(
+                    interaction.id,
+                    "fixture-task-system",
+                    "provider stopped before graph acceptance",
+                )
+                .await
+                .unwrap()
+        );
+        let restored = store.action_input_draft(thread.id).await.unwrap();
+        assert_eq!(restored.revision, recommitted.revision + 1);
+        assert_eq!(restored.attachments.len(), 1);
+        assert_eq!(restored.attachments[0].action, action);
+        assert_eq!(restored.attachments[0].value, value);
+        let failed = store
+            .get_interaction(interaction.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            failed.completion_error.as_deref(),
+            Some("provider stopped before graph acceptance")
+        );
     }
 
     #[tokio::test]

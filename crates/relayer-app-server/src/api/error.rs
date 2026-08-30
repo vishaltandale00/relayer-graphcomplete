@@ -186,6 +186,14 @@ impl From<ProductError> for ApiError {
                 json!({ "error": format!("Not found: {message}") }),
             ),
             ProductError::Invalid(message) => Self::invalid(message),
+            ProductError::InputValidation {
+                code,
+                path,
+                message,
+            } => Self(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "code": code, "path": path, "error": message }),
+            ),
             ProductError::ProjectExists(project) => Self(
                 StatusCode::CONFLICT,
                 json!({

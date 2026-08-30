@@ -115,6 +115,12 @@ pub(crate) enum ProductError {
     NotFound(String),
     #[error("invalid input: {0}")]
     Invalid(String),
+    #[error("input validation failed at {path}: {message}")]
+    InputValidation {
+        code: &'static str,
+        path: &'static str,
+        message: String,
+    },
     #[error("project already exists")]
     ProjectExists(Project),
     #[error("folder unavailable at {path}: {reason}")]
@@ -2249,24 +2255,27 @@ fn validate_action_input_value(
     match (action.control, value) {
         (InputControl::Text, super::ActionInputValue::Text { text }) => {
             if text.trim().is_empty() {
-                return Err(ProductError::Invalid(
-                    "input_text_blank: enter non-whitespace text".into(),
+                return Err(input_validation(
+                    "input_text_blank",
+                    "Enter non-whitespace text or detach the input.",
                 ));
             }
         }
         (InputControl::SingleSelect, super::ActionInputValue::Selected { selected_keys }) => {
             if selected_keys.len() != 1 {
-                return Err(ProductError::Invalid(
-                    "input_selection_count: select exactly one option".into(),
+                return Err(input_validation(
+                    "input_selection_count",
+                    "Select exactly one option.",
                 ));
             }
             validate_selected_keys(action, selected_keys)?;
         }
         (InputControl::MultiSelect, super::ActionInputValue::Selected { selected_keys }) => {
             validate_selected_keys(action, selected_keys)?;
-            if selected_keys.len() < action.minimum_selections.unwrap_or(1) {
-                return Err(ProductError::Invalid(
-                    "input_selection_count: meet this action's minimum selections".into(),
+            if selected_keys.len() < action.minimum_selections.unwrap_or(0) {
+                return Err(input_validation(
+                    "input_selection_count",
+                    "Meet this action's minimum selections.",
                 ));
             }
         }
@@ -2291,17 +2300,27 @@ fn validate_selected_keys(
     let mut selected = std::collections::HashSet::new();
     for key in selected_keys {
         if !known.contains(key.as_str()) {
-            return Err(ProductError::Invalid(format!(
-                "input_option_unknown: option key {key:?} is not in the accepted action"
-            )));
+            return Err(input_validation(
+                "input_option_unknown",
+                &format!("Option key {key:?} is not in the accepted action."),
+            ));
         }
         if !selected.insert(key.as_str()) {
-            return Err(ProductError::Invalid(
-                "input_option_duplicate: remove repeated option keys".into(),
+            return Err(input_validation(
+                "input_option_duplicate",
+                "Remove repeated option keys.",
             ));
         }
     }
     Ok(())
+}
+
+fn input_validation(code: &'static str, message: &str) -> ProductError {
+    ProductError::InputValidation {
+        code,
+        path: "attachments[0].value",
+        message: message.into(),
+    }
 }
 
 fn stored_project_path(canonical_path: &std::path::Path) -> Result<String, ProductError> {

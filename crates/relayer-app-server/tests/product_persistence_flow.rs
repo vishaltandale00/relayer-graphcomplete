@@ -1084,9 +1084,10 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
         axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
             let observed_request = observed_request.clone();
             async move {
-                *observed_request.lock().unwrap() = Some(body);
-                axum::Json(json!({
-                    "id": 301,
+                *observed_request.lock().unwrap() = Some(body.clone());
+                let action_id = body["occurrence"]["actionId"].as_i64().unwrap();
+                let mut action = json!({
+                    "id": action_id,
                     "sourceNodeId": 401,
                     "sourceLayerId": 201,
                     "kind": "input",
@@ -1095,7 +1096,23 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
                     "control": "text",
                     "prompt": "What constraint applies?",
                     "state": "accepted"
-                }))
+                });
+                if action_id == 302 {
+                    action["control"] = json!("multi_select");
+                    action["prompt"] = json!("Which optional signals apply?");
+                    action["options"] = json!([
+                        {"key": "logs", "label": "Logs"},
+                        {"key": "metrics", "label": "Metrics"}
+                    ]);
+                } else if action_id == 303 {
+                    action["control"] = json!("single_select");
+                    action["prompt"] = json!("Which rollout applies?");
+                    action["options"] = json!([
+                        {"key": "canary", "label": "Canary"},
+                        {"key": "full", "label": "Full rollout"}
+                    ]);
+                }
+                axum::Json(action)
             }
         }),
     );
@@ -1163,6 +1180,7 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
         .unwrap();
     assert_eq!(replaced.status(), StatusCode::OK);
     let stale_send = app
+        .clone()
         .oneshot(api_request(
             "POST",
             &format!("/api/threads/{thread_id}/interactions"),
@@ -1180,6 +1198,101 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
         response_json(stale_send).await["code"],
         "input_draft_revision_conflict"
     );
+    let detach_uri =
+        format!("/api/threads/{thread_id}/input-draft/attachments/101/201/301?expectedRevision=2");
+    let detached = app
+        .clone()
+        .oneshot(api_request("DELETE", &detach_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(detached.status(), StatusCode::OK);
+    assert_eq!(response_json(detached).await["revision"], 3);
+    let replayed_detach = app
+        .clone()
+        .oneshot(api_request("DELETE", &detach_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(replayed_detach.status(), StatusCode::OK);
+    assert_eq!(response_json(replayed_detach).await["revision"], 3);
+    let empty_multi = app
+        .clone()
+        .oneshot(api_request(
+            "PUT",
+            &format!("/api/threads/{thread_id}/input-draft/attachments"),
+            Some(json!({
+                "occurrence": {
+                    "presentingInteractionNodeId": 101,
+                    "presentingLayerId": 201,
+                    "actionId": 302
+                },
+                "value": {"selectedKeys": []},
+                "expectedRevision": 3
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(empty_multi.status(), StatusCode::OK);
+    let empty_multi = response_json(empty_multi).await;
+    assert_eq!(empty_multi["revision"], 4);
+    assert_eq!(
+        empty_multi["attachments"][0]["value"],
+        json!({"selectedKeys": []})
+    );
+    let unrelated_stale_detach = app
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            &format!(
+                "/api/threads/{thread_id}/input-draft/attachments/101/201/301?expectedRevision=3"
+            ),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unrelated_stale_detach.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(unrelated_stale_detach).await["code"],
+        "input_draft_revision_conflict"
+    );
+    for (action_id, value, expected_code) in [
+        (301, json!({"text": "  "}), "input_text_blank"),
+        (
+            302,
+            json!({"selectedKeys": ["logs", "logs"]}),
+            "input_option_duplicate",
+        ),
+        (
+            302,
+            json!({"selectedKeys": ["missing"]}),
+            "input_option_unknown",
+        ),
+        (303, json!({"selectedKeys": []}), "input_selection_count"),
+    ] {
+        let rejected = app
+            .clone()
+            .oneshot(api_request(
+                "PUT",
+                &format!("/api/threads/{thread_id}/input-draft/attachments"),
+                Some(json!({
+                    "occurrence": {
+                        "presentingInteractionNodeId": 101,
+                        "presentingLayerId": 201,
+                        "actionId": action_id
+                    },
+                    "value": value,
+                    "expectedRevision": 4
+                })),
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let rejected = response_json(rejected).await;
+        assert_eq!(rejected["code"], expected_code);
+        assert_eq!(rejected["path"], "attachments[0].value");
+    }
 
     graph_task.abort();
     harness_task.abort();
@@ -5664,7 +5777,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 25);
+    assert_eq!(applied_migrations, 26);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");

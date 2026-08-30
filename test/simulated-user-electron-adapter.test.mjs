@@ -22,6 +22,7 @@ import {
   gradeAcceptedReviewTopology,
   groundingRootNodeIds,
   operatorInteractionIsTerminal,
+  persistInputRatingReceipt,
   resolveLocalSimulatedUserAutorun,
 } from "../desktop/eval-main/simulated-user-judge.mjs";
 
@@ -38,6 +39,35 @@ afterEach(async () => {
 });
 
 describe("local Electron simulated-user judge adapter", () => {
+  it("persists revision-one input ratings independently for reused nodes across presenting layers", async () => {
+    const artifactDirectory = await temporaryDirectory();
+    const context = {
+      artifactDirectory,
+      execution: { id: "execution-1" },
+      thread: { id: "7" },
+      turn: { id: "41" },
+    };
+    const receipt = (presentingLayerId) => ({
+      schemaVersion: 1,
+      reviewRevision: 1,
+      review: { layerId: String(presentingLayerId), nodeId: "2", actions: [] },
+      captures: [{
+        captureId: `capture-${presentingLayerId}`,
+        threadRevision: "thread:7:input-draft:0",
+        actionId: "13",
+        occurrence: { presentingInteractionNodeId: 41, presentingLayerId, actionId: 13 },
+      }],
+    });
+
+    const first = await persistInputRatingReceipt(context, receipt(10));
+    const second = await persistInputRatingReceipt(context, receipt(20));
+
+    expect(first.ref).toBe("input-rating-receipts/layer-10-node-2-revision-1.json");
+    expect(second.ref).toBe("input-rating-receipts/layer-20-node-2-revision-1.json");
+    await expect(readFile(join(artifactDirectory, first.ref), "utf8")).resolves.toContain('"presentingLayerId": 10');
+    await expect(readFile(join(artifactDirectory, second.ref), "utf8")).resolves.toContain('"presentingLayerId": 20');
+  });
+
   it("retries scoped operator release after a transient revocation failure", async () => {
     const operator = { state: vi.fn() };
     const revoke = vi.fn()

@@ -17,6 +17,10 @@ import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcompl
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createWindowFactory } from "../desktop/main/window.mjs";
 import { createElectronWorkspaceDriver } from "./electron-workspace-driver.mjs";
+import {
+  closeNodeInputProofResources,
+  completeNodeInputProof,
+} from "./node-input-actions-proof-result.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-node-input-actions-"));
@@ -487,22 +491,50 @@ async function run() {
 }
 
 async function stop() {
-  if (window && !window.isDestroyed()) window.destroy();
-  if (keepaliveWindow && !keepaliveWindow.isDestroyed()) keepaliveWindow.destroy();
-  if (product) await product.close().catch(() => undefined);
-  if (catalogRefreshServer) await catalogRefreshServer.close().catch(() => undefined);
-  if (runtime) await runtime.close().catch(() => undefined);
-  for (const channel of ["relayer:account-read", "relayer:appearance-read", "relayer:update-status", "relayer:folder-choose", "relayer:tutorial-read", "relayer:provider-status"]) ipcMain.removeHandler(channel);
-  await rm(dataDirectory, { recursive: true, force: true });
+  const failures = [];
+  try {
+    if (window && !window.isDestroyed()) window.destroy();
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    await closeNodeInputProofResources([
+      { name: "product", close: async () => { if (product) await product.close(); } },
+      { name: "catalog", close: async () => { if (catalogRefreshServer) await catalogRefreshServer.close(); } },
+      { name: "runtime", close: async () => { if (runtime) await runtime.close(); } },
+    ]);
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    for (const channel of ["relayer:account-read", "relayer:appearance-read", "relayer:update-status", "relayer:folder-choose", "relayer:tutorial-read", "relayer:provider-status"]) ipcMain.removeHandler(channel);
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    await rm(dataDirectory, { recursive: true, force: true });
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length > 0) throw new AggregateError(failures, "Node-input Electron proof reset failed.");
 }
 
-app.whenReady().then(run).then(async () => {
-  if (resultFile) await writeFile(resultFile, `${JSON.stringify({ passed: true })}\n`);
-  await stop();
-  app.exit(0);
+app.whenReady().then(() => completeNodeInputProof({
+  runScenario: run,
+  cleanup: stop,
+  recordResult: async (result) => {
+    if (resultFile) await writeFile(resultFile, `${JSON.stringify(result)}\n`);
+  },
+})).then(({ result, exitCode }) => {
+  if (!result.passed) console.error(result.error);
+  if (keepaliveWindow && !keepaliveWindow.isDestroyed()) keepaliveWindow.destroy();
+  app.exit(exitCode);
 }).catch(async (error) => {
   console.error(error);
-  if (resultFile) await writeFile(resultFile, `${JSON.stringify({ passed: false, error: error?.stack || String(error) })}\n`).catch(() => undefined);
-  await stop();
-  app.exit(0);
+  if (resultFile) {
+    await writeFile(resultFile, `${JSON.stringify({ passed: false, error: error?.stack || String(error) })}\n`)
+      .catch(() => undefined);
+  }
+  if (keepaliveWindow && !keepaliveWindow.isDestroyed()) keepaliveWindow.destroy();
+  app.exit(1);
 });

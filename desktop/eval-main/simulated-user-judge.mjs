@@ -797,13 +797,15 @@ async function writeJson(path, value) {
   });
 }
 
-async function persistInputRatingReceipt(context, receipt) {
+export async function persistInputRatingReceipt(context, receipt) {
   const nodeId = String(receipt.review?.nodeId ?? "");
-  if (!/^\d+$/.test(nodeId) || !Number.isSafeInteger(receipt.reviewRevision) || receipt.reviewRevision < 1) {
-    throw new Error("Input rating receipt requires a positive node and review revision.");
+  const presentingLayerId = String(receipt.review?.layerId ?? "");
+  if (!/^\d+$/.test(nodeId) || !/^\d+$/.test(presentingLayerId)
+    || !Number.isSafeInteger(receipt.reviewRevision) || receipt.reviewRevision < 1) {
+    throw new Error("Input rating receipt requires a positive presenting layer, node, and review revision.");
   }
   const directoryName = "input-rating-receipts";
-  const filename = `node-${nodeId}-revision-${receipt.reviewRevision}.json`;
+  const filename = `layer-${presentingLayerId}-node-${nodeId}-revision-${receipt.reviewRevision}.json`;
   await mkdir(join(context.artifactDirectory, directoryName), { recursive: true, mode: 0o700 });
   const path = join(context.artifactDirectory, directoryName, filename);
   await writeJson(path, {
