@@ -14,12 +14,17 @@ pub mod store;
 pub mod value;
 
 use std::{
+    collections::{HashMap, HashSet},
     path::Path,
-    sync::Arc,
+    sync::{
+        Arc, RwLock as StdRwLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use serde_json::Value as JsonValue;
+use tokio::sync::{Notify, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as AsyncRwLock};
 
 use relayer_graph_core::{
     AcceptedGraphClosure, DEFAULT_SEARCH_INDEX_BUDGET, GraphError, SearchIndex, SearchIndexFuture,
@@ -31,15 +36,36 @@ use self::store::{LadybugStore, StoreLayout, exec};
 /// A search index backed by a Ladybug store beside the SQLite file.
 #[derive(Clone)]
 pub struct LadybugSearchIndex {
-    store: Arc<LadybugStore>,
+    runtime: Arc<LadybugRuntime>,
     #[cfg(feature = "crash-test-support")]
     post_commit_crash_hook: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
+}
+
+struct LadybugRuntime {
+    store: StdRwLock<Arc<LadybugStore>>,
+    layout: StoreLayout,
+    operations: Arc<AsyncRwLock<()>>,
+    readiness: StdRwLock<HashMap<SearchTarget, SearchTargetReadiness>>,
+    reconciling: AtomicBool,
+    epoch: AtomicU64,
+    notify: Notify,
+    background_hold: AtomicBool,
+    background_gate: Notify,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchTargetReadiness {
+    Ready,
+    Rebuilding,
+    Failed,
 }
 
 #[cfg(feature = "crash-test-support")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchIndexLifecycleFault {
     BeforePublish,
+    ReplacePointerAfterOpen,
+    HoldLogicalRebuild,
 }
 
 impl LadybugSearchIndex {
@@ -51,11 +77,7 @@ impl LadybugSearchIndex {
     pub fn open_with_timeout(database: &Path, query_timeout: Duration) -> Result<Self, GraphError> {
         let layout = StoreLayout::beside(database);
         let store = LadybugStore::open(layout, query_timeout).map_err(internal)?;
-        Ok(Self {
-            store: Arc::new(store),
-            #[cfg(feature = "crash-test-support")]
-            post_commit_crash_hook: None,
-        })
+        Ok(Self::from_store(store))
     }
 
     /// Open a validated store whose exact contents were reconciled against the
@@ -77,8 +99,19 @@ impl LadybugSearchIndex {
     }
 
     fn from_store(store: LadybugStore) -> Self {
+        let layout = store.layout().clone();
         Self {
-            store: Arc::new(store),
+            runtime: Arc::new(LadybugRuntime {
+                store: StdRwLock::new(Arc::new(store)),
+                layout,
+                operations: Arc::new(AsyncRwLock::new(())),
+                readiness: StdRwLock::new(HashMap::new()),
+                reconciling: AtomicBool::new(false),
+                epoch: AtomicU64::new(0),
+                notify: Notify::new(),
+                background_hold: AtomicBool::new(false),
+                background_gate: Notify::new(),
+            }),
             #[cfg(feature = "crash-test-support")]
             post_commit_crash_hook: None,
         }
@@ -94,7 +127,123 @@ impl LadybugSearchIndex {
     }
 
     pub fn layout(&self) -> &StoreLayout {
-        self.store.layout()
+        &self.runtime.layout
+    }
+
+    fn current_store(&self) -> Arc<LadybugStore> {
+        self.runtime
+            .store
+            .read()
+            .expect("Ladybug store lock poisoned")
+            .clone()
+    }
+
+    fn require_ready(&self, target: SearchTarget) -> Result<(), GraphError> {
+        match self.target_readiness(target) {
+            SearchTargetReadiness::Ready => Ok(()),
+            SearchTargetReadiness::Rebuilding => Err(GraphError::Internal(format!(
+                "search target {target} is rebuilding"
+            ))),
+            SearchTargetReadiness::Failed => Err(GraphError::Internal(format!(
+                "search target {target} rebuild failed"
+            ))),
+        }
+    }
+
+    pub fn target_readiness(&self, target: SearchTarget) -> SearchTargetReadiness {
+        self.runtime
+            .readiness
+            .read()
+            .expect("search readiness lock poisoned")
+            .get(&target)
+            .copied()
+            .unwrap_or(SearchTargetReadiness::Ready)
+    }
+
+    pub async fn wait_until_reconciled(&self) -> Result<(), GraphError> {
+        loop {
+            let notified = self.runtime.notify.notified();
+            if !self.runtime.reconciling.load(Ordering::Acquire) {
+                break;
+            }
+            notified.await;
+        }
+        if self
+            .runtime
+            .readiness
+            .read()
+            .expect("search readiness lock poisoned")
+            .values()
+            .any(|state| *state == SearchTargetReadiness::Failed)
+        {
+            return Err(GraphError::Internal(
+                "one or more search targets failed to rebuild".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn mark_rebuilding(&self, targets: HashSet<SearchTarget>) {
+        let mut readiness = self
+            .runtime
+            .readiness
+            .write()
+            .expect("search readiness lock poisoned");
+        for target in targets {
+            readiness.insert(target, SearchTargetReadiness::Rebuilding);
+        }
+        self.runtime.reconciling.store(true, Ordering::Release);
+    }
+
+    fn finish_rebuild(&self, success: bool) {
+        let mut readiness = self
+            .runtime
+            .readiness
+            .write()
+            .expect("search readiness lock poisoned");
+        for state in readiness.values_mut() {
+            if *state == SearchTargetReadiness::Rebuilding {
+                *state = if success {
+                    SearchTargetReadiness::Ready
+                } else {
+                    SearchTargetReadiness::Failed
+                };
+            }
+        }
+        self.runtime.reconciling.store(false, Ordering::Release);
+        self.runtime.notify.notify_waiters();
+    }
+
+    async fn lock_operations(&self) -> OwnedRwLockWriteGuard<()> {
+        self.runtime.operations.clone().write_owned().await
+    }
+
+    fn install_store(&self, store: LadybugStore) {
+        *self
+            .runtime
+            .store
+            .write()
+            .expect("Ladybug store lock poisoned") = Arc::new(store);
+    }
+
+    fn epoch(&self) -> u64 {
+        self.runtime.epoch.load(Ordering::Acquire)
+    }
+
+    async fn wait_for_background_gate(&self) {
+        loop {
+            let notified = self.runtime.background_gate.notified();
+            if !self.runtime.background_hold.load(Ordering::Acquire) {
+                break;
+            }
+            notified.await;
+        }
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    pub fn resume_logical_rebuild(&self) {
+        self.runtime.background_hold.store(false, Ordering::Release);
+        self.runtime.background_gate.notify_waiters();
     }
 
     /// Run one read-only query and normalize its rows into the frozen
@@ -105,8 +254,27 @@ impl LadybugSearchIndex {
     /// reconciliation, and the contract tests that keep the promoted value
     /// lowerings honest against a real engine.
     pub async fn normalized_rows(&self, query: &str) -> Result<Vec<Vec<JsonValue>>, GraphError> {
+        self.normalized_rows_on(self.current_store(), query).await
+    }
+
+    pub async fn normalized_rows_for(
+        &self,
+        target: SearchTarget,
+        query: &str,
+    ) -> Result<Vec<Vec<JsonValue>>, GraphError> {
+        self.require_ready(target)?;
+        let _operation = self.runtime.operations.clone().read_owned().await;
+        self.require_ready(target)?;
+        self.normalized_rows_on(self.current_store(), query).await
+    }
+
+    async fn normalized_rows_on(
+        &self,
+        store: Arc<LadybugStore>,
+        query: &str,
+    ) -> Result<Vec<Vec<JsonValue>>, GraphError> {
         let query = query.to_owned();
-        self.store
+        store
             .run(move |connection| {
                 let endpoints = store::endpoint_index(connection)?;
                 store::rows(connection, &query)?
@@ -123,8 +291,31 @@ impl LadybugSearchIndex {
     }
 
     pub(crate) async fn revision_count(&self) -> Result<usize, GraphError> {
-        self.store
+        self.current_store()
             .run(schema::revision_count)
+            .await
+            .map_err(internal)
+    }
+
+    pub(crate) async fn revision_targets(&self) -> Result<Vec<String>, GraphError> {
+        self.current_store()
+            .run(schema::revision_targets)
+            .await
+            .map_err(internal)
+    }
+
+    pub(crate) async fn inventory(&self) -> Result<schema::SearchInventory, GraphError> {
+        self.current_store()
+            .run(schema::physical_inventory)
+            .await
+            .map_err(internal)
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    pub async fn inject_lifecycle_corruption(&self, query: &str) -> Result<(), GraphError> {
+        let query = query.to_owned();
+        self.current_store()
+            .run(move |connection| exec(connection, &query))
             .await
             .map_err(internal)
     }
@@ -132,9 +323,13 @@ impl LadybugSearchIndex {
 
 impl SearchIndex for LadybugSearchIndex {
     fn revision(&self, target: SearchTarget) -> SearchIndexFuture<Option<SearchIndexRevision>> {
-        let store = self.store.clone();
+        let index = self.clone();
         Box::pin(async move {
-            store
+            index.require_ready(target)?;
+            let _operation = index.runtime.operations.clone().read_owned().await;
+            index.require_ready(target)?;
+            index
+                .current_store()
                 .run(move |connection| schema::read_revision(connection, target))
                 .await
                 .map_err(internal)
@@ -159,10 +354,14 @@ impl SearchIndex for LadybugSearchIndex {
         revision: SearchIndexRevision,
         deadline: Instant,
     ) -> SearchIndexFuture<Box<dyn SearchIndexWrite>> {
-        let store = self.store.clone();
+        let index = self.clone();
         #[cfg(feature = "crash-test-support")]
         let post_commit_crash_hook = self.post_commit_crash_hook.clone();
         Box::pin(async move {
+            index.require_ready(target)?;
+            let operation = index.runtime.operations.clone().read_owned().await;
+            index.require_ready(target)?;
+            let store = index.current_store();
             // The BEGIN runs whether or not this future is still being awaited,
             // so an abandoned one has to release its own transaction.
             store
@@ -180,6 +379,8 @@ impl SearchIndex for LadybugSearchIndex {
                 target,
                 revision,
                 deadline,
+                _operation: operation,
+                runtime: index.runtime.clone(),
                 #[cfg(feature = "crash-test-support")]
                 post_commit_crash_hook,
                 settled: false,
@@ -197,6 +398,8 @@ struct LadybugWrite {
     target: SearchTarget,
     revision: SearchIndexRevision,
     deadline: Instant,
+    _operation: OwnedRwLockReadGuard<()>,
+    runtime: Arc<LadybugRuntime>,
     #[cfg(feature = "crash-test-support")]
     post_commit_crash_hook: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
     /// Whether the transaction has been committed or rolled back. An unsettled
@@ -244,6 +447,7 @@ impl SearchIndexWrite for LadybugWrite {
             self.revision,
             self.deadline,
         );
+        let runtime = self.runtime.clone();
         #[cfg(feature = "crash-test-support")]
         let post_commit_crash_hook = self.post_commit_crash_hook.clone();
         Box::pin(async move {
@@ -278,6 +482,7 @@ impl SearchIndexWrite for LadybugWrite {
             // path has rolled back any still-open transaction.
             self.settled = true;
             outcome?;
+            runtime.epoch.fetch_add(1, Ordering::AcqRel);
             Ok(revision)
         })
     }

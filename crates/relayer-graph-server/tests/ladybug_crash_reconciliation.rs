@@ -300,6 +300,7 @@ async fn sigkill_after_ladybug_commit_leaves_a_detectable_orphan_and_retry_conve
             .await
             .unwrap(),
     );
+    index.wait_until_reconciled().await.unwrap();
     assert_eq!(index.revision(target).await.unwrap(), None);
     assert!(
         index

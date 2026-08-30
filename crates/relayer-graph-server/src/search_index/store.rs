@@ -8,7 +8,8 @@
 
 use std::{
     ffi::OsString,
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
     sync::mpsc::{Sender, channel},
     thread::{self, JoinHandle},
@@ -62,6 +63,7 @@ impl StoreLayout {
 
     pub fn active_generation(&self) -> Result<Option<PathBuf>> {
         let pointer = self.active();
+        reject_symlink_if_present(&pointer)?;
         let name = match fs::read_to_string(&pointer) {
             Ok(value) => value,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -71,7 +73,9 @@ impl StoreLayout {
         if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
             return Err(anyhow!("active Ladybug generation pointer is invalid"));
         }
-        Ok(Some(self.generations().join(name)))
+        let generation = self.generations().join(name);
+        self.validate_generation_reference(&generation)?;
+        Ok(Some(generation))
     }
 
     /// Copy the pre-generation `active` database and all of its sidecars into a
@@ -79,6 +83,14 @@ impl StoreLayout {
     pub fn snapshot_legacy_active(&self) -> Result<Option<PathBuf>> {
         if !self.active().exists() {
             return Ok(None);
+        }
+        // A syntactically readable pointer is a damaged generation layout, not
+        // the pre-generation Ladybug database. Never reinterpret attacker-
+        // controlled text as legacy database bytes.
+        match fs::read_to_string(self.active()) {
+            Ok(_) => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {}
+            Err(error) => return Err(error.into()),
         }
         let generation = self.create_generation()?;
         for entry in fs::read_dir(&self.root)? {
@@ -88,14 +100,18 @@ impl StoreLayout {
             let Some(suffix) = name.strip_prefix("active") else {
                 continue;
             };
-            if !entry.file_type()?.is_file() {
+            let kind = entry.file_type()?;
+            if kind.is_symlink() {
+                return Err(anyhow!("legacy Ladybug store contains a symlink"));
+            }
+            if !kind.is_file() {
                 continue;
             }
             let target = generation.join(format!("store{suffix}"));
-            if fs::hard_link(entry.path(), &target).is_err() {
-                fs::copy(entry.path(), target)?;
-            }
+            fs::copy(entry.path(), &target)?;
+            fs::File::open(target)?.sync_all()?;
         }
+        sync_directory(&generation)?;
         Ok(Some(generation))
     }
 
@@ -115,7 +131,10 @@ impl StoreLayout {
     }
 
     pub fn create_generation(&self) -> Result<PathBuf> {
+        reject_symlink_if_present(&self.root)?;
         fs::create_dir_all(self.generations())?;
+        ensure_plain_directory(&self.root)?;
+        ensure_plain_directory(&self.generations())?;
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -127,10 +146,14 @@ impl StoreLayout {
             return Err(anyhow!("new Ladybug generation already exists"));
         }
         fs::create_dir(&generation)?;
+        sync_directory(&self.generations())?;
         Ok(generation)
     }
 
     pub fn publish(&self, generation: &Path) -> Result<()> {
+        self.validate_generation_path(generation)?;
+        sync_tree(generation)?;
+        sync_directory(&self.generations())?;
         let name = generation
             .file_name()
             .and_then(|name| name.to_str())
@@ -139,14 +162,23 @@ impl StoreLayout {
             return Err(anyhow!("Ladybug generation is outside its store layout"));
         }
         fs::create_dir_all(&self.root)?;
+        ensure_plain_directory(&self.root)?;
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
         let next = self
             .root
-            .join(format!(".active-next-{}", std::process::id()));
-        fs::write(&next, format!("{name}\n"))?;
-        let file = fs::File::open(&next)?;
+            .join(format!(".active-next-{}-{nonce}", std::process::id()));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&next)?;
+        file.write_all(format!("{name}\n").as_bytes())?;
         file.sync_all()?;
+        drop(file);
         fs::rename(&next, self.active())?;
-        fs::File::open(&self.root)?.sync_all()?;
+        sync_directory(&self.root)?;
         Ok(())
     }
 
@@ -154,43 +186,131 @@ impl StoreLayout {
         if !previous.exists() {
             return Ok(());
         }
+        self.validate_generation_path(previous)?;
         let destination_root = if quarantine {
             self.quarantine()
         } else {
             self.rollback()
         };
         fs::create_dir_all(&destination_root)?;
+        ensure_plain_directory(&destination_root)?;
         let name = previous
             .file_name()
             .ok_or_else(|| anyhow!("previous Ladybug generation has no name"))?;
         let retained = destination_root.join(name);
         fs::rename(previous, &retained)?;
+        sync_directory(&self.generations())?;
+        sync_directory(&destination_root)?;
         if quarantine {
             fs::create_dir_all(self.rollback())?;
+            ensure_plain_directory(&self.rollback())?;
             copy_generation(&retained, &self.rollback().join(name))?;
+            sync_directory(&self.rollback())?;
         }
+        Ok(())
+    }
+
+    pub fn validate_generation_path(&self, generation: &Path) -> Result<()> {
+        self.validate_generation_reference(generation)?;
+        ensure_plain_directory(generation)?;
+        Ok(())
+    }
+
+    fn validate_generation_reference(&self, generation: &Path) -> Result<()> {
+        ensure_plain_directory(&self.generations())?;
+        if generation.parent() != Some(self.generations().as_path()) {
+            return Err(anyhow!("Ladybug generation is outside its store layout"));
+        }
+        match fs::symlink_metadata(generation) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(anyhow!(
+                    "Ladybug directory is not a confined plain directory: {}",
+                    generation.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        }
+        reject_symlink_if_present(&generation.join("store"))?;
         Ok(())
     }
 }
 
 fn copy_generation(source: &Path, destination: &Path) -> Result<()> {
+    ensure_plain_directory(source)?;
     fs::create_dir(destination)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let kind = entry.file_type()?;
         let target = destination.join(entry.file_name());
-        if kind.is_dir() {
+        if kind.is_symlink() {
+            return Err(anyhow!(
+                "Ladybug generation contains an unsupported symlink"
+            ));
+        } else if kind.is_dir() {
             copy_generation(&entry.path(), &target)?;
         } else if kind.is_file() {
-            if fs::hard_link(entry.path(), &target).is_err() {
-                fs::copy(entry.path(), &target)?;
-            }
+            fs::copy(entry.path(), &target)?;
+            fs::File::open(target)?.sync_all()?;
         } else {
             return Err(anyhow!(
                 "Ladybug generation contains an unsupported file type"
             ));
         }
     }
+    sync_directory(destination)?;
+    Ok(())
+}
+
+fn sync_tree(path: &Path) -> Result<()> {
+    ensure_plain_directory(path)?;
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            return Err(anyhow!("Ladybug generation contains a symlink"));
+        }
+        if kind.is_dir() {
+            sync_tree(&entry.path())?;
+        } else if kind.is_file() {
+            fs::File::open(entry.path())?.sync_all()?;
+        } else {
+            return Err(anyhow!(
+                "Ladybug generation contains an unsupported file type"
+            ));
+        }
+    }
+    sync_directory(path)
+}
+
+fn reject_symlink_if_present(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
+            "Ladybug path must not be a symlink: {}",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn ensure_plain_directory(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("inspect Ladybug directory {}", path.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(anyhow!(
+            "Ladybug directory is not a confined plain directory: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn sync_directory(path: &Path) -> Result<()> {
+    ensure_plain_directory(path)?;
+    fs::File::open(path)?.sync_all()?;
     Ok(())
 }
 
@@ -215,8 +335,10 @@ impl LadybugStore {
     /// caller's deadline, so a stuck statement aborts inside Ladybug rather than
     /// leaving the worker thread blocked with the SQLite write lock held.
     pub fn open(layout: StoreLayout, query_timeout: Duration) -> Result<Self> {
+        reject_symlink_if_present(&layout.root)?;
         fs::create_dir_all(&layout.root)
             .with_context(|| format!("create Ladybug store at {}", layout.root.display()))?;
+        ensure_plain_directory(&layout.root)?;
         let active = match layout.active_generation()? {
             Some(active) => active,
             None => {
@@ -233,6 +355,7 @@ impl LadybugStore {
         generation: PathBuf,
         query_timeout: Duration,
     ) -> Result<Self> {
+        layout.validate_generation_path(&generation)?;
         let active = generation.join("store");
         let existed = active.exists();
         let (ready, opened) = channel();

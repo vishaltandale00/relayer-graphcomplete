@@ -8,11 +8,13 @@
 //! `published_targets` list here instead. That is a private lowering either way —
 //! no frozen query names those columns; scoping is applied by the engine.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use anyhow::{Context, Result, bail};
 use lbug::{Connection, LogicalType, Value};
 use relayer_graph_core::{
     AcceptedGraphClosure, ActionKind, GraphAction, GraphEdge, GraphLayer, GraphNode,
-    NavigateRelation, ResolvedLayer, SearchIndexRevision, SearchTarget,
+    NavigateRelation, ResolvedLayer, SearchIndexRebuildSnapshot, SearchIndexRevision, SearchTarget,
 };
 
 use super::store::exec;
@@ -135,6 +137,224 @@ pub fn revision_count(connection: &Connection<'_>) -> Result<usize> {
     match result.next().and_then(|row| row.first().cloned()) {
         Some(Value::Int64(value)) => usize::try_from(value).context("negative revision count"),
         other => anyhow::bail!("stored revision count was not an integer: {other:?}"),
+    }
+}
+
+pub fn revision_targets(connection: &Connection<'_>) -> Result<Vec<String>> {
+    let mut result = connection.query("MATCH (r:IndexRevision) RETURN r.target")?;
+    (&mut result).map(|row| value_string(&row[0])).collect()
+}
+
+/// Exact searchable topology, stable identities, and target publication sets.
+/// Property values are protected by the frozen lowering tests; this inventory
+/// is the startup boundary that prevents a same-revision partial MATCH from
+/// being mistaken for a complete derived store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchInventory(pub Vec<String>);
+
+impl SearchInventory {
+    pub fn projection(&self, target: SearchTarget) -> Result<BTreeSet<Vec<String>>> {
+        let target = target.to_string();
+        self.0
+            .iter()
+            .filter_map(|entry| {
+                let parsed = serde_json::from_str::<(Vec<String>, Vec<String>)>(entry)
+                    .context("decode search inventory entry");
+                match parsed {
+                    Ok((key, targets)) if targets.contains(&target) => Some(Ok(key)),
+                    Ok(_) => None,
+                    Err(error) => Some(Err(error)),
+                }
+            })
+            .collect()
+    }
+
+    pub fn target_names(&self) -> Result<BTreeSet<String>> {
+        let mut names = BTreeSet::new();
+        for entry in &self.0 {
+            let (_, targets) = serde_json::from_str::<(Vec<String>, Vec<String>)>(entry)
+                .context("decode search inventory entry")?;
+            names.extend(targets);
+        }
+        Ok(names)
+    }
+}
+
+type InventoryMap = BTreeMap<Vec<String>, BTreeSet<String>>;
+
+pub fn canonical_inventory(snapshot: &SearchIndexRebuildSnapshot) -> SearchInventory {
+    let mut inventory = InventoryMap::new();
+    for item in &snapshot.closures {
+        let targets = item
+            .published_to
+            .iter()
+            .map(ToString::to_string)
+            .collect::<BTreeSet<_>>();
+        add_inventory(
+            &mut inventory,
+            vec![
+                "node".into(),
+                "Content".into(),
+                content_id(&item.closure.interaction),
+            ],
+            &targets,
+        );
+        for layer in &item.closure.layers {
+            let layer_identity = layer_id(&layer.layer);
+            add_inventory(
+                &mut inventory,
+                vec!["node".into(), "Layer".into(), layer_identity.clone()],
+                &targets,
+            );
+            for node in &layer.nodes {
+                add_inventory(
+                    &mut inventory,
+                    vec!["node".into(), "Content".into(), content_id(node)],
+                    &targets,
+                );
+            }
+            for node_id in &layer.layer.nodes {
+                add_inventory(
+                    &mut inventory,
+                    vec![
+                        "relationship".into(),
+                        "CONTAINS".into(),
+                        format!("membership:{}:{node_id}", layer.layer.id),
+                        layer_identity.clone(),
+                        format!("content:{node_id}"),
+                    ],
+                    &targets,
+                );
+            }
+            for edge in &layer.edges {
+                let mut endpoints = [
+                    format!("content:{}", edge.endpoints[0]),
+                    format!("content:{}", edge.endpoints[1]),
+                ];
+                endpoints.sort();
+                add_inventory(
+                    &mut inventory,
+                    vec![
+                        "relationship".into(),
+                        "CONNECTED".into(),
+                        format!("edge:{}", edge.id),
+                        endpoints[0].clone(),
+                        endpoints[1].clone(),
+                    ],
+                    &targets,
+                );
+            }
+            for action in &layer.actions {
+                add_action_inventory(&mut inventory, action, &targets);
+            }
+        }
+        add_action_inventory(&mut inventory, &item.closure.root_action, &targets);
+    }
+    finish_inventory(inventory)
+}
+
+pub fn physical_inventory(connection: &Connection<'_>) -> Result<SearchInventory> {
+    let mut inventory = InventoryMap::new();
+    for (label, query) in [
+        (
+            "Content",
+            "MATCH (n:Content) RETURN n.id, n.published_targets",
+        ),
+        ("Layer", "MATCH (n:Layer) RETURN n.id, n.published_targets"),
+    ] {
+        let mut result = connection.query(query)?;
+        for row in &mut result {
+            add_inventory(
+                &mut inventory,
+                vec!["node".into(), label.into(), value_string(&row[0])?],
+                &value_string_set(&row[1])?,
+            );
+        }
+    }
+    for kind in ["CONNECTED", "CONTAINS", "EXPANDS", "REFERENCES"] {
+        let query =
+            format!("MATCH (a)-[r:{kind}]->(b) RETURN r.id, a.id, b.id, r.published_targets");
+        let mut result = connection.query(&query)?;
+        for row in &mut result {
+            let mut start = value_string(&row[1])?;
+            let mut end = value_string(&row[2])?;
+            if kind == "CONNECTED" && start > end {
+                std::mem::swap(&mut start, &mut end);
+            }
+            add_inventory(
+                &mut inventory,
+                vec![
+                    "relationship".into(),
+                    kind.into(),
+                    value_string(&row[0])?,
+                    start,
+                    end,
+                ],
+                &value_string_set(&row[3])?,
+            );
+        }
+    }
+    Ok(finish_inventory(inventory))
+}
+
+fn add_action_inventory(
+    inventory: &mut InventoryMap,
+    action: &GraphAction,
+    targets: &BTreeSet<String>,
+) {
+    if action.kind != ActionKind::Navigate {
+        return;
+    }
+    let (Some(relation), Some(target_layer)) = (action.relation, action.target_layer_id) else {
+        return;
+    };
+    let kind = match relation {
+        NavigateRelation::Expand => "EXPANDS",
+        NavigateRelation::Reference => "REFERENCES",
+    };
+    add_inventory(
+        inventory,
+        vec![
+            "relationship".into(),
+            kind.into(),
+            format!("action:{}", action.id),
+            format!("content:{}", action.source_node_id),
+            format!("layer:{target_layer}"),
+        ],
+        targets,
+    );
+}
+
+fn add_inventory(inventory: &mut InventoryMap, key: Vec<String>, targets: &BTreeSet<String>) {
+    inventory
+        .entry(key)
+        .or_default()
+        .extend(targets.iter().cloned());
+}
+
+fn finish_inventory(inventory: InventoryMap) -> SearchInventory {
+    SearchInventory(
+        inventory
+            .into_iter()
+            .map(|(key, targets)| {
+                serde_json::to_string(&(key, targets.into_iter().collect::<Vec<_>>()))
+                    .expect("search inventory strings are serializable")
+            })
+            .collect(),
+    )
+}
+
+fn value_string(value: &Value) -> Result<String> {
+    match value {
+        Value::String(value) => Ok(value.clone()),
+        other => bail!("search inventory identity was not a string: {other:?}"),
+    }
+}
+
+fn value_string_set(value: &Value) -> Result<BTreeSet<String>> {
+    match value {
+        Value::List(LogicalType::String, values) => values.iter().map(value_string).collect(),
+        other => bail!("search inventory publication set was not a string list: {other:?}"),
     }
 }
 

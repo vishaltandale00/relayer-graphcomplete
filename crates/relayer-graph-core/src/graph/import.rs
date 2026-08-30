@@ -233,6 +233,7 @@ impl crate::GraphDatabase {
             crate::SearchTarget::new(project_id.and_then(ProjectId::new), thread_id)
         };
         let _order = self.order_writes_to(target).await;
+        let _publication = self.enter_search_publication().await;
         let mut tx = self.storage.begin_write().await?;
         let metadata = load_metadata(&mut tx, import_id).await?;
         let turn_count: i64 =

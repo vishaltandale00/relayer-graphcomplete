@@ -95,6 +95,7 @@ pub(crate) async fn complete(
     // held across the search write, so what keeps one target from stalling the
     // rest is the deadline below, not this lock.
     let _order = database.order_writes_to(target).await;
+    let _publication = database.enter_search_publication().await;
 
     // Step 1.
     let mut transaction = database.storage.begin_write().await?;

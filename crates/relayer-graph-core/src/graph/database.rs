@@ -1,12 +1,15 @@
 use std::{
     collections::HashMap,
+    collections::HashSet,
     path::Path,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use sqlx::Row;
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
+use tokio::sync::{
+    Mutex as AsyncMutex, OwnedMutexGuard, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock,
+};
 
 use crate::{
     AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, InteractionContextAction,
@@ -45,6 +48,9 @@ pub struct GraphDatabase {
     /// One lock per logical target, so concurrent submissions to one target
     /// index in the order they commit while unrelated targets stay independent.
     write_order: Arc<Mutex<HashMap<SearchTarget, Arc<AsyncMutex<()>>>>>,
+    /// Short publication barrier used only when a reconciled generation swaps.
+    /// Ordinary rebuilding does not hold it, so unrelated targets stay usable.
+    search_rebuild: Arc<RwLock<()>>,
     #[cfg(feature = "crash-test-support")]
     pub(crate) completion_crash_hook:
         Option<Arc<dyn Fn(crate::CompletionCrashPoint) + Send + Sync + 'static>>,
@@ -69,6 +75,7 @@ impl GraphDatabase {
             search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
             import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
             write_order: Arc::default(),
+            search_rebuild: Arc::default(),
             #[cfg(feature = "crash-test-support")]
             completion_crash_hook: None,
         })
@@ -87,6 +94,7 @@ impl GraphDatabase {
             search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
             import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
             write_order: Arc::default(),
+            search_rebuild: Arc::default(),
             #[cfg(feature = "crash-test-support")]
             completion_crash_hook: None,
         })
@@ -102,6 +110,16 @@ impl GraphDatabase {
     pub fn with_search_index(mut self, search_index: Arc<dyn SearchIndex>) -> Self {
         self.search_index = search_index;
         self
+    }
+
+    pub(crate) async fn enter_search_publication(&self) -> OwnedRwLockReadGuard<()> {
+        self.search_rebuild.clone().read_owned().await
+    }
+
+    /// Freeze accepted-search publication briefly while startup verifies that a
+    /// side-by-side candidate still represents the latest canonical snapshot.
+    pub async fn lock_search_rebuild(&self) -> OwnedRwLockWriteGuard<()> {
+        self.search_rebuild.clone().write_owned().await
     }
 
     /// Read the complete canonical rebuild input from one SQLite snapshot.
@@ -137,7 +155,21 @@ impl GraphDatabase {
                 closure,
             });
         }
-        let targets = SearchIndexTable::new(&mut transaction).revisions().await?;
+        let mut targets = SearchIndexTable::new(&mut transaction).revisions().await?;
+        let mut known = targets
+            .iter()
+            .map(|(target, _)| *target)
+            .collect::<HashSet<_>>();
+        // Search receipts were introduced after accepted graphs already existed.
+        // Every canonical closure still establishes an ordering target even when
+        // its historical database has no receipt row yet. One deterministic
+        // rebuild transaction carries every historical closure for that target.
+        for item in &closures {
+            if known.insert(item.target) {
+                targets.push((item.target, SearchIndexRevision::FIRST));
+            }
+        }
+        targets.sort_by_key(|(target, _)| (target.kind(), target.id()));
         transaction.commit().await?;
         Ok(SearchIndexRebuildSnapshot { targets, closures })
     }
@@ -247,6 +279,29 @@ impl GraphDatabase {
         versions: &[(SearchIndexComponent, String)],
     ) -> Result<(), GraphError> {
         let mut transaction = self.storage.begin_write().await?;
+        for (component, version) in versions {
+            SearchIndexTable::new(&mut transaction)
+                .record_version(*component, version)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Publish the complete rebuild receipt only after the generation pointer
+    /// names a reopen-validated store. This also upgrades accepted history from
+    /// before target receipts existed.
+    pub async fn record_search_index_rebuild_receipt(
+        &self,
+        targets: &[(SearchTarget, SearchIndexRevision)],
+        versions: &[(SearchIndexComponent, String)],
+    ) -> Result<(), GraphError> {
+        let mut transaction = self.storage.begin_write().await?;
+        for (target, revision) in targets {
+            SearchIndexTable::new(&mut transaction)
+                .record_revision(*target, *revision)
+                .await?;
+        }
         for (component, version) in versions {
             SearchIndexTable::new(&mut transaction)
                 .record_version(*component, version)
