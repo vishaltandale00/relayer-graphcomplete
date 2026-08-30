@@ -44,7 +44,7 @@ describe("current-thread graph search client", () => {
       ...golden.request,
       target: { scope: "project", id: 99 }, scope: "project", projectId: 99,
       threadId: 88, permit: "forged", token: "leak",
-    } as GraphSearchRequest;
+    } satisfies GraphSearchRequest & Record<string, unknown>;
 
     await client().search(hostile, { signal: controller.signal });
 
@@ -52,10 +52,11 @@ describe("current-thread graph search client", () => {
     expect(Object.keys(serialized ?? {})).toEqual(["queryContractVersion", "query", "parameters", "budget"]);
     expect(actualSignal).toBe(controller.signal);
 
-    await client().search({
+    const minimal: GraphSearchRequest = {
       queryContractVersion: 1,
       query: golden.request.query,
-    } as GraphSearchRequest);
+    };
+    await client().search(minimal);
     expect(serialized).toEqual({
       queryContractVersion: 1,
       query: golden.request.query,

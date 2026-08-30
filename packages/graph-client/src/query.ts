@@ -1,43 +1,11 @@
-export type GraphQueryPhase =
-  | "envelope"
-  | "parse"
-  | "plan"
-  | "authorize"
-  | "execute"
-  | "normalize"
-  | "encode";
+import {
+  GRAPH_QUERY_ERROR_PHASES,
+  type GeneratedGraphQueryCode,
+  type GeneratedGraphQueryPhase,
+} from "./query-errors.generated.js";
 
-export type GraphQueryCode =
-  | "invalid_request"
-  | "unsupported_query_contract_version"
-  | "query_bytes_exceeded"
-  | "query_syntax_invalid"
-  | "query_construct_forbidden"
-  | "query_construct_unsupported"
-  | "unknown_label"
-  | "unknown_relationship_type"
-  | "unknown_property"
-  | "dynamic_schema_forbidden"
-  | "query_type_mismatch"
-  | "duplicate_output_column"
-  | "invalid_aggregate"
-  | "ast_depth_exceeded"
-  | "variable_limit_exceeded"
-  | "pattern_part_limit_exceeded"
-  | "traversal_limit_exceeded"
-  | "row_limit_exceeded"
-  | "inaccessible_or_missing"
-  | "scope_not_granted"
-  | "foreign_draft"
-  | "query_cancelled"
-  | "wall_time_exceeded"
-  | "examined_expansions_exceeded"
-  | "intermediate_rows_exceeded"
-  | "invalid_engine_value"
-  | "heterogeneous_list"
-  | "integer_overflow"
-  | "duplicate_record_field"
-  | "result_row_too_large";
+export type GraphQueryCode = GeneratedGraphQueryCode;
+export type GraphQueryPhase = GeneratedGraphQueryPhase;
 
 export interface GraphQueryBudget {
   readonly queryBytes?: number;
@@ -140,8 +108,8 @@ export type GraphQueryValue =
 export interface GraphSearchRequest {
   readonly queryContractVersion: 1;
   readonly query: string;
-  readonly parameters: Readonly<Record<string, GraphQueryValue>>;
-  readonly budget: GraphQueryBudget;
+  readonly parameters?: Readonly<Record<string, GraphQueryValue>>;
+  readonly budget?: GraphQueryBudget;
 }
 
 export interface GraphSearchResult {
@@ -177,39 +145,6 @@ export class GraphQueryError extends Error {
   }
 }
 
-const QUERY_CODE_PHASES: Readonly<Record<GraphQueryCode, GraphQueryPhase>> = {
-  invalid_request: "envelope",
-  unsupported_query_contract_version: "envelope",
-  query_bytes_exceeded: "envelope",
-  query_syntax_invalid: "parse",
-  query_construct_forbidden: "parse",
-  query_construct_unsupported: "parse",
-  unknown_label: "plan",
-  unknown_relationship_type: "plan",
-  unknown_property: "plan",
-  dynamic_schema_forbidden: "plan",
-  query_type_mismatch: "plan",
-  duplicate_output_column: "plan",
-  invalid_aggregate: "plan",
-  ast_depth_exceeded: "plan",
-  variable_limit_exceeded: "plan",
-  pattern_part_limit_exceeded: "plan",
-  traversal_limit_exceeded: "plan",
-  row_limit_exceeded: "plan",
-  inaccessible_or_missing: "authorize",
-  scope_not_granted: "authorize",
-  foreign_draft: "authorize",
-  query_cancelled: "execute",
-  wall_time_exceeded: "execute",
-  examined_expansions_exceeded: "execute",
-  intermediate_rows_exceeded: "execute",
-  invalid_engine_value: "normalize",
-  heterogeneous_list: "normalize",
-  integer_overflow: "normalize",
-  duplicate_record_field: "normalize",
-  result_row_too_large: "encode",
-};
-
 export function isGraphQueryErrorBody(body: GraphQueryErrorBody): body is {
   readonly error: {
     readonly code: GraphQueryCode;
@@ -219,8 +154,8 @@ export function isGraphQueryErrorBody(body: GraphQueryErrorBody): body is {
   };
 } {
   const code = body.error?.code;
-  if (typeof code !== "string" || !(code in QUERY_CODE_PHASES)) return false;
+  if (typeof code !== "string" || !(code in GRAPH_QUERY_ERROR_PHASES)) return false;
   const queryCode = code as GraphQueryCode;
-  return body.error?.phase === QUERY_CODE_PHASES[queryCode]
+  return body.error?.phase === GRAPH_QUERY_ERROR_PHASES[queryCode]
     && typeof body.error.path === "string";
 }

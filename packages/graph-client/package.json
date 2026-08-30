@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "check": "tsc --noEmit"
+    "build": "node scripts/generate-query-errors.mjs --check && tsc -p tsconfig.build.json",
+    "check": "node scripts/generate-query-errors.mjs --check && tsc --noEmit"
   }
 }

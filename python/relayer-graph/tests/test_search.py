@@ -8,10 +8,13 @@ from pathlib import Path
 
 from relayer_graph import (APIError, GraphQueryError, GraphSearchRequest,
                            RelayerGraphClient)
+from relayer_graph.query_errors_generated import GRAPH_QUERY_ERROR_PHASES
 
 
 GOLDEN = json.loads((Path(__file__).parents[3] / "packages" / "graph-client" /
                      "test" / "graph-search-wire-golden.json").read_text())
+ERROR_CONTRACT = json.loads((Path(__file__).parents[3] / "docs" /
+                             "graph-query-v1-errors.json").read_text())
 
 
 class SearchHandler(BaseHTTPRequestHandler):
@@ -127,6 +130,13 @@ class GraphSearchClientTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(APIError) as generic:
                 await self.client.search(request)
             self.assertNotIsInstance(generic.exception, GraphQueryError)
+
+    def test_generated_error_discriminator_matches_the_shared_v1_artifact(self) -> None:
+        self.assertEqual(ERROR_CONTRACT["queryContractVersion"], 1)
+        self.assertEqual(
+            GRAPH_QUERY_ERROR_PHASES,
+            {item["code"]: item["phase"] for item in ERROR_CONTRACT["errors"]},
+        )
 
 
 if __name__ == "__main__":
