@@ -11,8 +11,44 @@ from typing import Any, Literal, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .exceptions import (APIError, AuthenticationError, ConfigurationError, NotFound,
-                         TransportError, ValidationError, ValidationIssue)
+from .exceptions import (APIError, AuthenticationError, ConfigurationError,
+                         GraphQueryError, NotFound, TransportError,
+                         ValidationError, ValidationIssue)
+from .query import GraphSearchRequest, GraphSearchResult
+
+
+_GRAPH_QUERY_CODE_PHASES = {
+    "invalid_request": "envelope",
+    "unsupported_query_contract_version": "envelope",
+    "query_bytes_exceeded": "envelope",
+    "query_syntax_invalid": "parse",
+    "query_construct_forbidden": "parse",
+    "query_construct_unsupported": "parse",
+    "unknown_label": "plan",
+    "unknown_relationship_type": "plan",
+    "unknown_property": "plan",
+    "dynamic_schema_forbidden": "plan",
+    "query_type_mismatch": "plan",
+    "duplicate_output_column": "plan",
+    "invalid_aggregate": "plan",
+    "ast_depth_exceeded": "plan",
+    "variable_limit_exceeded": "plan",
+    "pattern_part_limit_exceeded": "plan",
+    "traversal_limit_exceeded": "plan",
+    "row_limit_exceeded": "plan",
+    "inaccessible_or_missing": "authorize",
+    "scope_not_granted": "authorize",
+    "foreign_draft": "authorize",
+    "query_cancelled": "execute",
+    "wall_time_exceeded": "execute",
+    "examined_expansions_exceeded": "execute",
+    "intermediate_rows_exceeded": "execute",
+    "invalid_engine_value": "normalize",
+    "heterogeneous_list": "normalize",
+    "integer_overflow": "normalize",
+    "duplicate_record_field": "normalize",
+    "result_row_too_large": "encode",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,7 +333,19 @@ class RelayerGraphClient:
         interaction_id = self.node_id if interaction_node is None else _node_id(interaction_node)
         return await self._request("GET", f"/api/graph/nodes/{interaction_id}/output")
 
-    async def _request(self, method: str, path: str, body: Any = None) -> Any:
+    async def search(self, request: GraphSearchRequest) -> GraphSearchResult:
+        """Search the current thread authorized by this active capability.
+
+        Python's blocking standard-library transport runs on a worker thread and
+        does not expose a truthful in-flight cancellation primitive. Callers may
+        narrow ``wallTimeMs`` in the request budget instead.
+        """
+        return await self._request(
+            "POST", "/api/graph/search", request.to_wire(), graph_query=True
+        )
+
+    async def _request(self, method: str, path: str, body: Any = None, *,
+                       graph_query: bool = False) -> Any:
         encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode()
         headers = {"accept": "application/json", "authorization": f"Bearer {self.token}"}
         if encoded is not None:
@@ -315,6 +363,14 @@ class RelayerGraphClient:
                 details = json.loads(raw or b"{}")
                 item = details.get("error", {}) if isinstance(details, Mapping) else {}
                 message = item.get("message", f"Graph request failed with HTTP {error.code}")
+                if (graph_query and isinstance(item, Mapping)
+                        and isinstance(item.get("code"), str)
+                        and _GRAPH_QUERY_CODE_PHASES.get(item["code"]) == item.get("phase")
+                        and isinstance(item.get("path"), str)):
+                    raise GraphQueryError(
+                        str(message), status=error.code, code=item["code"],
+                        phase=item["phase"], path=item["path"]
+                    ) from error
                 error_type = (
                     AuthenticationError if error.code in (401, 403)
                     else NotFound if error.code == 404

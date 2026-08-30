@@ -1,0 +1,75 @@
+{
+  "request": {
+    "queryContractVersion": 1,
+    "query": "MATCH (n:Content) RETURN n.title AS title ORDER BY title ASC LIMIT 2",
+    "parameters": {
+      "minimum": { "type": "integer", "value": "-9223372036854775808" },
+      "title": { "type": "string", "value": "Queue" }
+    },
+    "budget": { "resultRows": 2, "wallTimeMs": 100, "encodedResultBytes": 4096 }
+  },
+  "result": {
+    "queryContractVersion": 1,
+    "columns": ["null", "boolean", "integer", "float", "string", "node", "layer", "relationship", "path", "list", "record"],
+    "rows": [[
+      { "type": "null" },
+      { "type": "boolean", "value": true },
+      { "type": "integer", "value": "9223372036854775807" },
+      { "type": "float", "value": 1.25 },
+      { "type": "string", "value": "Queue" },
+      {
+        "type": "node", "id": "content:10", "kind": "Content",
+        "properties": [{ "name": "title", "value": { "type": "string", "value": "Queue" } }]
+      },
+      {
+        "type": "layer", "id": "layer:20", "kind": "Layer",
+        "properties": [{ "name": "layout_version", "value": { "type": "integer", "value": "1" } }]
+      },
+      {
+        "type": "relationship", "id": "connected:30", "kind": "CONNECTED",
+        "start": "content:10", "end": "content:11", "directed": false,
+        "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }]
+      },
+      {
+        "type": "path",
+        "vertices": [
+          { "type": "node", "id": "content:10", "kind": "Content", "properties": [] },
+          { "type": "layer", "id": "layer:20", "kind": "Layer", "properties": [] }
+        ],
+        "relationships": [{
+          "type": "relationship", "id": "contains:31", "kind": "CONTAINS",
+          "start": "layer:20", "end": "content:10", "directed": true, "properties": []
+        }]
+      },
+      {
+        "type": "list", "elementType": { "kind": "integer" },
+        "values": [{ "type": "integer", "value": "2" }, { "type": "integer", "value": "10" }]
+      },
+      {
+        "type": "record",
+        "fields": [
+          { "name": "title", "value": { "type": "string", "value": "Queue" } },
+          { "name": "counts", "value": {
+            "type": "list", "elementType": { "kind": "integer" },
+            "values": [{ "type": "integer", "value": "2" }]
+          } }
+        ]
+      }
+    ]],
+    "truncated": true
+  },
+  "contractError": {
+    "error": {
+      "code": "query_syntax_invalid",
+      "phase": "parse",
+      "path": "query",
+      "message": "the query is not in the admitted v1 grammar"
+    }
+  },
+  "unavailableError": {
+    "error": {
+      "code": "search_unavailable",
+      "message": "graph search is unavailable"
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EdgeObject, LayerObject, NodeObject, edgeId, layerId, nodeId, type ActionObject, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
+import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
 import { GraphApiError, type CompletionOutput, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation } from "./types.js";
 
 export class RelayerGraphClient {
@@ -141,13 +142,35 @@ export class RelayerGraphClient {
     return this.request<CompletionOutput>(`/api/graph/nodes/${nodeId(interactionNode)}/output`);
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async search(request: GraphSearchRequest, options: GraphSearchOptions = {}): Promise<GraphSearchResult> {
+    return this.request<GraphSearchResult>("/api/graph/search", {
+      method: "POST",
+      body: JSON.stringify({
+        queryContractVersion: request.queryContractVersion,
+        query: request.query,
+        parameters: request.parameters ?? {},
+        budget: request.budget ?? {},
+      }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    }, "query");
+  }
+
+  private async request<T>(path: string, init: RequestInit = {}, errorKind: "api" | "query" = "api"): Promise<T> {
     const response = await fetch(`${this.capability.url}${path}`, {
       ...init,
       headers: { "content-type": "application/json", authorization: `Bearer ${this.capability.token}`, ...init.headers },
     });
-    const body = await response.json().catch(() => ({})) as T & GraphApiErrorBody;
+    const body = await response.json().catch(() => ({})) as T & GraphApiErrorBody & GraphQueryErrorBody;
     if (!response.ok) {
+      if (errorKind === "query" && isGraphQueryErrorBody(body)) {
+        throw new GraphQueryError(
+          response.status,
+          body.error.code,
+          body.error.phase,
+          body.error.path,
+          body.error.message ?? `Graph search failed with ${response.status}`,
+        );
+      }
       throw new GraphApiError(
         response.status,
         body.error?.code ?? "request_failed",

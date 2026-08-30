@@ -40,6 +40,18 @@ class APIError(RelayerGraphError):
         self.details = details
 
 
+class GraphQueryError(RelayerGraphError):
+    """A stable failure from the versioned graph-query contract."""
+
+    def __init__(self, message: str, *, status: int, code: str, phase: str,
+                 path: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.phase = phase
+        self.path = path
+
+
 class AuthenticationError(APIError):
     pass
 
