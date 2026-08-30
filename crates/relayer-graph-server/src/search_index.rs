@@ -37,9 +37,7 @@ use tokio::sync::{Notify, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as
 use relayer_graph_core::{
     AcceptedGraphClosure, DEFAULT_SEARCH_INDEX_BUDGET, GraphError, SearchIndex, SearchIndexFuture,
     SearchIndexRevision, SearchIndexWrite, SearchTarget,
-    query::{
-        QueryCode, QueryError, QueryLimits, QueryReadPermit, parse_request_json, plan_request,
-    },
+    query::{PreparedQuery, QueryCode, QueryError, QueryReadPermit, prepare_request_json},
 };
 
 pub use self::query::QueryOutcome;
@@ -366,18 +364,30 @@ impl LadybugSearchIndex {
         request_json: &[u8],
         cancellation: QueryCancellation,
     ) -> Result<GraphQueryResult, GraphQueryFailure> {
-        let request = parse_request_json(request_json)?;
-        let limits = QueryLimits::default().narrowed(&request.budget);
-        let plan = plan_request(&request, &limits)?;
-        let target = permit.authorize(request.target)?;
+        let prepared = prepare_request_json(request_json)?;
+        self.execute_prepared(permit, prepared, cancellation).await
+    }
+
+    /// Execute the exact preflight value produced by graph core. The transport
+    /// can therefore preserve contract precedence without making this engine
+    /// reparse or replan a semantically divergent request.
+    pub(crate) async fn execute_prepared(
+        &self,
+        permit: &QueryReadPermit,
+        prepared: PreparedQuery,
+        cancellation: QueryCancellation,
+    ) -> Result<GraphQueryResult, GraphQueryFailure> {
+        let target = permit.authorize(prepared.target())?;
         self.query_readiness(target)?;
         let operation = self.runtime.operations.clone().read_owned().await;
         self.query_readiness(target)?;
         let store = self.current_store();
         let started = Instant::now();
-        let deadline = started + limits.wall_time;
+        let deadline = started + prepared.limits().wall_time;
         let cold = self.runtime.query_count.fetch_add(1, Ordering::AcqRel) == 0;
-        let parameters = request.parameters;
+        let parameters = prepared.parameters().clone();
+        let plan = prepared.plan().clone();
+        let limits = prepared.limits().clone();
         let worker_plan = plan.clone();
         let worker_limits = limits.clone();
         let worker_cancellation = cancellation.clone();

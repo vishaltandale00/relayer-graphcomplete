@@ -103,6 +103,77 @@ fn query_body(budget: Value) -> Body {
     )
 }
 
+fn preflight_failures() -> Vec<(String, &'static str, &'static str)> {
+    vec![
+        (
+            json!({
+                "queryContractVersion": 2,
+                "query": "MATCH (n:Content) RETURN n",
+                "parameters": {},
+                "budget": {},
+            })
+            .to_string(),
+            "unsupported_query_contract_version",
+            "envelope",
+        ),
+        (
+            json!({
+                "queryContractVersion": 1,
+                "query": "",
+                "parameters": {},
+                "budget": {},
+            })
+            .to_string(),
+            "invalid_request",
+            "envelope",
+        ),
+        (
+            json!({
+                "queryContractVersion": 1,
+                "query": "MATCH (n:Content) RETURN n",
+                "parameters": {"not-an-identifier": {"type": "string", "value": "x"}},
+                "budget": {},
+            })
+            .to_string(),
+            "invalid_request",
+            "envelope",
+        ),
+        (
+            json!({
+                "queryContractVersion": 1,
+                "query": "MATCH (n:Content) RETURN n",
+                "parameters": {},
+                "budget": {"queryBytes": 1},
+            })
+            .to_string(),
+            "query_bytes_exceeded",
+            "envelope",
+        ),
+        (
+            json!({
+                "queryContractVersion": 1,
+                "query": "CREATE (n:Content)",
+                "parameters": {},
+                "budget": {},
+            })
+            .to_string(),
+            "query_construct_forbidden",
+            "parse",
+        ),
+        (
+            json!({
+                "queryContractVersion": 1,
+                "query": "MATCH (n:Unknown) RETURN n",
+                "parameters": {},
+                "budget": {},
+            })
+            .to_string(),
+            "unknown_label",
+            "plan",
+        ),
+    ]
+}
+
 async fn author_answer(graph: &GraphDatabase, interaction: &CreateInteractionResponse) {
     let writer = graph
         .writer_for_subgraph(interaction.node.id)
@@ -258,6 +329,27 @@ async fn envelope_precedence_and_capability_revocation_are_non_oracular() {
         .await
         .unwrap();
     assert_eq!(revoked.status(), StatusCode::OK);
+
+    for token in [
+        Some(interaction.graph_token.as_str()),
+        Some("invented-token"),
+        None,
+    ] {
+        for (request, code, phase) in preflight_failures() {
+            let response = post(
+                &fixture.app,
+                "/api/graph/search",
+                token,
+                Body::from(request),
+            )
+            .await;
+            let (status, body) = json_response(response).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+            assert_eq!(body["error"]["code"], code, "{body}");
+            assert_eq!(body["error"]["phase"], phase, "{body}");
+        }
+    }
+
     let denied = post(
         &fixture.app,
         "/api/graph/search",
@@ -342,6 +434,20 @@ async fn missing_index_uses_the_same_generic_unavailable_boundary() {
     let (status, body) = json_response(response).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["error"]["code"], "search_unavailable");
+
+    for (request, code, phase) in preflight_failures() {
+        let response = post(
+            &app,
+            "/api/graph/search",
+            Some(&interaction.graph_token),
+            Body::from(request),
+        )
+        .await;
+        let (status, body) = json_response(response).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error"]["code"], code, "{body}");
+        assert_eq!(body["error"]["phase"], phase, "{body}");
+    }
 }
 
 #[tokio::test]

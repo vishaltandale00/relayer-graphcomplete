@@ -59,6 +59,43 @@ pub struct PublicQueryRequest {
     pub budget: QueryBudget,
 }
 
+/// A target-free request whose complete envelope, parser, and planner boundary
+/// has passed. Its fields are private so the exact request, narrowed limits,
+/// and typed plan cannot drift between transport preflight and execution.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedPublicQuery {
+    request: PublicQueryRequest,
+    limits: QueryLimits,
+    plan: QueryPlan,
+}
+
+/// A completely prepared query with its authority selector attached. Only a
+/// sealed read permit can turn a public preflight into this execution value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedQuery {
+    request: QueryRequest,
+    limits: QueryLimits,
+    plan: QueryPlan,
+}
+
+impl PreparedQuery {
+    pub fn target(&self) -> RequestTarget {
+        self.request.target
+    }
+
+    pub fn parameters(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.request.parameters
+    }
+
+    pub fn limits(&self) -> &QueryLimits {
+        &self.limits
+    }
+
+    pub fn plan(&self) -> &QueryPlan {
+        &self.plan
+    }
+}
+
 fn deserialize_unique_parameters<'de, D>(
     deserializer: D,
 ) -> Result<serde_json::Map<String, serde_json::Value>, D::Error>
@@ -101,6 +138,33 @@ pub fn parse_request_json(bytes: &[u8]) -> Result<QueryRequest, QueryError> {
 pub fn parse_public_request_json(bytes: &[u8]) -> Result<PublicQueryRequest, QueryError> {
     serde_json::from_slice(bytes)
         .map_err(|error| QueryError::new(QueryCode::InvalidRequest, "request", error.to_string()))
+}
+
+/// Run the complete target-free contract boundary before transport authority,
+/// index presence, or target readiness is observed.
+pub fn preflight_public_request_json(bytes: &[u8]) -> Result<PreparedPublicQuery, QueryError> {
+    let request = parse_public_request_json(bytes)?;
+    let limits = QueryLimits::default().narrowed(&request.budget);
+    let plan = plan_public_request(&request, &limits)?;
+    Ok(PreparedPublicQuery {
+        request,
+        limits,
+        plan,
+    })
+}
+
+/// Prepare the internal request used by direct callers of the hardened query
+/// seam. Public transports should use [`preflight_public_request_json`] so the
+/// target remains absent until a sealed permit binds it.
+pub fn prepare_request_json(bytes: &[u8]) -> Result<PreparedQuery, QueryError> {
+    let request = parse_request_json(bytes)?;
+    let limits = QueryLimits::default().narrowed(&request.budget);
+    let plan = plan_request(&request, &limits)?;
+    Ok(PreparedQuery {
+        request,
+        limits,
+        plan,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -194,11 +258,25 @@ impl QueryReadPermit {
         }
     }
 
-    /// Bind a target-free public request to this permit's immutable maximum
-    /// entitlement. The resulting internal request still passes through
-    /// [`Self::authorize`] at the hardened execution boundary.
-    pub fn bind_public_request(&self, request: PublicQueryRequest) -> QueryRequest {
-        let target = match self.target {
+    /// Attach this permit's immutable maximum entitlement to an exact public
+    /// preflight without repeating or weakening its validation.
+    pub fn bind_prepared_public_query(&self, prepared: PreparedPublicQuery) -> PreparedQuery {
+        let request = prepared.request;
+        PreparedQuery {
+            request: QueryRequest {
+                query_contract_version: request.query_contract_version,
+                target: self.request_target(),
+                query: request.query,
+                parameters: request.parameters,
+                budget: request.budget,
+            },
+            limits: prepared.limits,
+            plan: prepared.plan,
+        }
+    }
+
+    fn request_target(&self) -> RequestTarget {
+        match self.target {
             crate::SearchTarget::Thread(thread) => RequestTarget {
                 scope: TargetScope::Thread,
                 id: thread.value(),
@@ -207,13 +285,6 @@ impl QueryReadPermit {
                 scope: TargetScope::Project,
                 id: project.value(),
             },
-        };
-        QueryRequest {
-            query_contract_version: request.query_contract_version,
-            target,
-            query: request.query,
-            parameters: request.parameters,
-            budget: request.budget,
         }
     }
 }
@@ -224,13 +295,7 @@ impl QueryReadPermit {
 /// planned before any target is touched, so a syntax error cannot reveal whether
 /// a target exists.
 pub fn plan_request(request: &QueryRequest, limits: &QueryLimits) -> Result<QueryPlan, QueryError> {
-    if request.query_contract_version != 1 {
-        return Err(QueryError::new(
-            QueryCode::UnsupportedQueryContractVersion,
-            "queryContractVersion",
-            "this store serves query contract version 1",
-        ));
-    }
+    validate_query_contract_version(request.query_contract_version)?;
     if request.target.id <= 0 {
         return Err(QueryError::new(
             QueryCode::InvalidRequest,
@@ -238,14 +303,42 @@ pub fn plan_request(request: &QueryRequest, limits: &QueryLimits) -> Result<Quer
             "a target identity is a positive integer",
         ));
     }
-    if request.query.trim().is_empty() {
+    plan_query_fields_after_version(&request.query, &request.parameters, limits)
+}
+
+fn plan_public_request(
+    request: &PublicQueryRequest,
+    limits: &QueryLimits,
+) -> Result<QueryPlan, QueryError> {
+    validate_query_contract_version(request.query_contract_version)?;
+    plan_query_fields_after_version(&request.query, &request.parameters, limits)
+}
+
+fn validate_query_contract_version(query_contract_version: u32) -> Result<(), QueryError> {
+    if query_contract_version == 1 {
+        Ok(())
+    } else {
+        Err(QueryError::new(
+            QueryCode::UnsupportedQueryContractVersion,
+            "queryContractVersion",
+            "this store serves query contract version 1",
+        ))
+    }
+}
+
+fn plan_query_fields_after_version(
+    query: &str,
+    parameters: &serde_json::Map<String, serde_json::Value>,
+    limits: &QueryLimits,
+) -> Result<QueryPlan, QueryError> {
+    if query.trim().is_empty() {
         return Err(QueryError::new(
             QueryCode::InvalidRequest,
             "query",
             "a request needs a query",
         ));
     }
-    for name in request.parameters.keys() {
+    for name in parameters.keys() {
         if !ascii_identifier(name) {
             return Err(QueryError::new(
                 QueryCode::InvalidRequest,
@@ -254,8 +347,8 @@ pub fn plan_request(request: &QueryRequest, limits: &QueryLimits) -> Result<Quer
             ));
         }
     }
-    let mut plan = parser::parse(&request.query, limits)?;
-    check_parameter_types(&mut plan, &request.parameters, limits)?;
+    let mut plan = parser::parse(query, limits)?;
+    check_parameter_types(&mut plan, parameters, limits)?;
     Ok(plan)
 }
 
@@ -820,15 +913,33 @@ mod public_request_tests {
 
     #[test]
     fn sealed_permit_is_the_only_source_of_the_internal_target() {
-        let public = parse_public_request_json(&request("")).unwrap();
+        let public = preflight_public_request_json(&request("")).unwrap();
         let thread = crate::ThreadId::new(73).unwrap();
         let permit = QueryReadPermit::current_thread(thread);
-        let internal = permit.bind_public_request(public);
-        assert_eq!(internal.target.scope, TargetScope::Thread);
-        assert_eq!(internal.target.id, 73);
+        let internal = permit.bind_prepared_public_query(public);
+        assert_eq!(internal.target().scope, TargetScope::Thread);
+        assert_eq!(internal.target().id, 73);
         assert_eq!(
-            permit.authorize(internal.target),
+            permit.authorize(internal.target()),
             Ok(crate::SearchTarget::Thread(thread))
         );
+    }
+
+    #[test]
+    fn unsupported_version_still_precedes_an_invalid_internal_target() {
+        let request = QueryRequest {
+            query_contract_version: 2,
+            target: RequestTarget {
+                scope: TargetScope::Thread,
+                id: 0,
+            },
+            query: String::new(),
+            parameters: serde_json::Map::new(),
+            budget: QueryBudget::default(),
+        };
+        let error = plan_request(&request, &QueryLimits::default()).unwrap_err();
+        assert_eq!(error.code, QueryCode::UnsupportedQueryContractVersion);
+        assert_eq!(error.phase, QueryPhase::Envelope);
+        assert_eq!(error.path, "queryContractVersion");
     }
 }

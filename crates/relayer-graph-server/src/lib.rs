@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use relayer_graph_core::query::{QueryError, parse_public_request_json};
+use relayer_graph_core::query::{QueryError, preflight_public_request_json};
 use relayer_graph_core::{
     ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase,
     GraphError, GraphNode, GraphWriter, ImportedConversationStage, ImportedTurn,
@@ -177,16 +177,15 @@ async fn search(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    // Envelope failures precede all authority and store observations.
-    let public = parse_public_request_json(&body).map_err(ApiError::query_contract)?;
+    // The complete target-free contract boundary precedes all transport
+    // authority and store observations.
+    let preflight = preflight_public_request_json(&body).map_err(ApiError::query_contract)?;
     let interaction_node_id = session(&state, &headers)?;
     let permit = state
         .graph
         .current_thread_query_permit(interaction_node_id)
         .await?;
-    let request = permit.bind_public_request(public);
-    let request = serde_json::to_vec(&request)
-        .map_err(|_| ApiError::internal("graph search request encoding failed"))?;
+    let prepared = permit.bind_prepared_public_query(preflight);
     let index = state
         .search_index
         .as_ref()
@@ -197,7 +196,11 @@ async fn search(
     // Keep the query future alive after an HTTP request future is dropped. The
     // drop guard signals cancellation, and the detached query future owns the
     // select branch that interrupts its exact Ladybug job before it exits.
-    let query = tokio::spawn(async move { index.query(&permit, &request, cancellation).await });
+    let query = tokio::spawn(async move {
+        index
+            .execute_prepared(&permit, prepared, cancellation)
+            .await
+    });
     let result = query
         .await
         .map_err(|_| ApiError::internal("graph search task stopped unexpectedly"))?
@@ -217,7 +220,7 @@ async fn search(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    let _ = parse_public_request_json(&body).map_err(ApiError::query_contract)?;
+    let _ = preflight_public_request_json(&body).map_err(ApiError::query_contract)?;
     let _ = session(&state, &headers)?;
     Err(ApiError::search_unavailable())
 }
@@ -2856,6 +2859,44 @@ mod no_ladybug_search_tests {
             body(malformed_precedes_authority).await["error"]["phase"],
             "envelope"
         );
+
+        for (request, code, phase) in [
+            (
+                r#"{"queryContractVersion":2,"query":"MATCH (n:Content) RETURN n","parameters":{},"budget":{}}"#,
+                "unsupported_query_contract_version",
+                "envelope",
+            ),
+            (
+                r#"{"queryContractVersion":1,"query":"CREATE (n:Content)","parameters":{},"budget":{}}"#,
+                "query_construct_forbidden",
+                "parse",
+            ),
+            (
+                r#"{"queryContractVersion":1,"query":"MATCH (n:Unknown) RETURN n","parameters":{},"budget":{}}"#,
+                "unknown_label",
+                "plan",
+            ),
+        ] {
+            let preflight_precedes_missing_authority_and_index = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/graph/search")
+                        .header("content-type", "application/json")
+                        .body(Body::from(request))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                preflight_precedes_missing_authority_and_index.status(),
+                StatusCode::UNPROCESSABLE_ENTITY
+            );
+            let error = body(preflight_precedes_missing_authority_and_index).await;
+            assert_eq!(error["error"]["code"], code);
+            assert_eq!(error["error"]["phase"], phase);
+        }
 
         let target_is_forbidden = app
             .oneshot(
