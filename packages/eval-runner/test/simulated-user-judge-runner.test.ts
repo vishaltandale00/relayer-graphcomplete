@@ -57,6 +57,7 @@ describe("simulated-user Codex judge runner", () => {
     expect(prompt).toContain("Two or more material missing opportunities cap all three at 4");
     expect(prompt).toContain("expand, reference, invoke, input, and stop");
     expect(prompt).toContain("before any answer is committed");
+    expect(prompt).toContain("never end the turn immediately after reviewNode");
     expect(prompt).toContain("asking for what the artifact already states");
     expect(prompt).toContain("asking to dodge a judgment the node should have made");
     expect(prompt).toContain("fragmenting one decision into a separate question per node");
