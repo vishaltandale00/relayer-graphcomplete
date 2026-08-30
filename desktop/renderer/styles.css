@@ -123,6 +123,7 @@ html[data-theme="light"] .tutorial-target{outline-color:#527baa!important;box-sh
 .node-input-editor textarea:focus{border-color:#6f92ca;box-shadow:0 0 0 2px rgba(128,174,248,.08)}
 .node-input-option-rail{display:flex;gap:8px;margin-top:9px;padding:1px 1px 7px;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent;scroll-snap-type:x proximity}
 .node-input-option{width:132px;min-width:132px;min-height:82px;display:flex;flex-direction:column;align-items:stretch;padding:0;overflow:hidden;border:1px solid var(--line-strong);border-radius:10px;background:var(--raised);color:var(--text);text-align:left;scroll-snap-align:start}
+.node-input-option-rail-compact{display:grid;overflow-x:hidden;scroll-snap-type:none}.node-input-option-rail-compact[data-option-count="1"]{grid-template-columns:minmax(0,1fr)}.node-input-option-rail-compact[data-option-count="2"]{grid-template-columns:repeat(2,minmax(0,1fr))}.node-input-option-rail-compact[data-option-count="3"]{grid-template-columns:repeat(3,minmax(0,1fr))}.node-input-option-rail-compact .node-input-option{width:auto;min-width:0;scroll-snap-align:none}
 .node-input-option:hover{border-color:#66707a;background:var(--hover)}
 .node-input-option[aria-checked="true"]{border-color:#7198d0;box-shadow:0 0 0 2px rgba(128,174,248,.12)}
 .node-input-option-visual{height:42px;display:grid;place-items:center;background:linear-gradient(135deg,#29313a,#171b20);color:#8fa6c2;font-size:18px;font-weight:760;text-transform:uppercase}

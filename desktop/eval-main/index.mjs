@@ -696,10 +696,16 @@ async function captureInputGroundingRating({ context, interaction, commits, arti
       rootLayerId,
       artifactDirectory: screenshotDirectory,
     });
+    const rootNodeId = interaction.completionOutput?.rootLayer?.nodes?.[0]?.id;
+    if (rootNodeId) {
+      await opened.session.interact({ elementRef: `node-${rootNodeId}`, activate: true });
+    }
     const captured = await opened.session.screenshot({
-      target: { kind: "viewport" },
-      mode: "visible",
-      label: "Input round-trip response",
+      target: rootNodeId
+        ? { kind: "element", elementRef: "node-detail" }
+        : { kind: "viewport" },
+      mode: rootNodeId ? "full" : "visible",
+      label: "Input round-trip response detail",
     });
     if (!captured?.ok || !captured.screenshot?.screenshotId) {
       throw new Error("Production review workspace did not capture the input response.");

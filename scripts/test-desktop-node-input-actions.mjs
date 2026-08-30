@@ -113,12 +113,11 @@ function nodeInputFixtureFactory() {
         control: "multi_select",
         prompt: "Choose supporting evidence",
         options: [
+          { key: "health-metrics", label: "Health metrics" },
           { key: "logs", label: "Logs" },
-          { key: "traces", label: "Traces" },
-          { key: "screens", label: "Screenshots" },
-          { key: "reports", label: "Reports" },
+          { key: "synthetic-checks", label: "Synthetic checks" },
         ],
-        minimumSelections: 1,
+        minimumSelections: 2,
         clientKey: `evidence-${completionCount}`,
       });
       await graph.addAction(interaction.id, {
@@ -252,18 +251,36 @@ async function run() {
   if (stacked.count !== 2 || stacked.firstScroll < 100 || stacked.secondSelected !== 1) {
     throw new Error(`Stacked horizontal rails lost independent state: ${JSON.stringify(stacked)}`);
   }
+  const compactFits = await evaluate(`(() => {
+    const rail = document.querySelectorAll('.node-input-option-rail')[1];
+    rail.scrollLeft = 0;
+    const bounds = rail.getBoundingClientRect();
+    return rail.scrollWidth <= rail.clientWidth + 1
+      && [...rail.querySelectorAll('.node-input-option')].every((option) => {
+        const optionBounds = option.getBoundingClientRect();
+        return optionBounds.left >= bounds.left - 1 && optionBounds.right <= bounds.right + 1;
+      });
+  })()`);
+  if (!compactFits) throw new Error("Three ordinary input choices require horizontal discovery.");
   await evaluate(`document.querySelectorAll('.node-input-option-rail')[0].querySelectorAll('.node-input-option')[5].click()`);
-  for (const prompt of [
-    "Name the governing constraint",
-    "Choose the primary route",
-    "Choose supporting evidence",
-  ]) {
+  for (const prompt of ["Name the governing constraint", "Choose the primary route"]) {
     await click(`[aria-label='Commit ${prompt}']`);
     await waitFor(`${prompt} committed`, async () => {
       const draft = await productRequest(`/api/threads/${thread.id}/input-draft`);
       return draft.attachments?.some((attachment) => attachment.action.prompt === prompt);
     });
   }
+  await waitFor("multi-select minimum error", () => evaluate(`(() => (
+    document.querySelector("[aria-label='Input action: Choose supporting evidence'] .node-input-error")?.textContent.includes('minimum')
+      && document.querySelector("[aria-label='Commit Choose supporting evidence']")?.disabled
+      && document.querySelectorAll('.composer-input-pill').length === 2
+  ))()`));
+  await evaluate(`document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option')[1].click()`);
+  await click("[aria-label='Commit Choose supporting evidence']");
+  await waitFor("Choose supporting evidence committed", async () => {
+    const draft = await productRequest(`/api/threads/${thread.id}/input-draft`);
+    return draft.attachments?.some((attachment) => attachment.action.prompt === "Choose supporting evidence");
+  });
   await waitFor("three exact committed attachments", async () => {
     const draft = await productRequest(`/api/threads/${thread.id}/input-draft`);
     return draft.attachments?.length === 3 && new Set(draft.attachments.map((item) => JSON.stringify(item.occurrence))).size === 3;
@@ -282,7 +299,7 @@ async function run() {
   await clickNode("Input grammar");
   await waitFor("Node Details restores committed values", () => evaluate(`(() => (
     document.querySelector('.node-input-text')?.value === 'Preserve occurrence identity'
-      && document.querySelectorAll('.node-input-option[aria-checked="true"]').length === 2
+      && document.querySelectorAll('.node-input-option[aria-checked="true"]').length === 3
   ))()`));
   await click(".composer-input-pill");
   await waitFor("explicit composer input inspection", () => evaluate(`Boolean(document.querySelector('.composer-input-preview'))`));
@@ -323,7 +340,11 @@ async function run() {
       && !draft.attachments.some((item) => item.action.prompt === "Choose supporting evidence")
       && await evaluate(`document.querySelectorAll('.composer-input-pill').length === 2`);
   });
-  await evaluate(`document.querySelectorAll('.node-input-option-rail')[1].querySelector('.node-input-option').click()`);
+  await evaluate(`(() => {
+    const options = document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option');
+    options[0].click();
+    document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option')[1].click();
+  })()`);
   await click("[aria-label='Commit Choose supporting evidence']");
   await waitFor("detached input recommitted", async () => (
     (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments?.length === 3
@@ -334,7 +355,16 @@ async function run() {
   const largeTextFits = await evaluate(`(() => [...document.querySelectorAll('.node-input-editor')].every((editor) => {
     const bounds = editor.getBoundingClientRect();
     return bounds.width > 0 && [...editor.querySelectorAll('button,textarea')].every((control) => control.getBoundingClientRect().width > 0);
-  }))()`);
+  }) && (() => {
+    const rail = document.querySelectorAll('.node-input-option-rail')[1];
+    rail.scrollLeft = 0;
+    const bounds = rail.getBoundingClientRect();
+    return rail.scrollWidth <= rail.clientWidth + 1
+      && [...rail.querySelectorAll('.node-input-option')].every((option) => {
+        const optionBounds = option.getBoundingClientRect();
+        return optionBounds.left >= bounds.left - 1 && optionBounds.right <= bounds.right + 1;
+      });
+  })())()`);
   if (!largeTextFits) throw new Error("Large-text scaling clipped a node input control.");
   window.webContents.setZoomFactor(1);
   await waitForPaint();

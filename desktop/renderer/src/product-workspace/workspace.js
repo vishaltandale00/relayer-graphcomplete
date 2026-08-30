@@ -4202,6 +4202,8 @@ export function createProductWorkspace({
       } else {
         control = graphDocument.createElement("div");
         control.className = "node-input-option-rail";
+        control.classList.toggle("node-input-option-rail-compact", (semantic.options || []).length <= 3);
+        control.dataset.optionCount = String((semantic.options || []).length);
         control.dataset.inputRailKey = stageKey;
         control.dataset.inputControlRole = "rail";
         control.setAttribute("aria-label", semantic.prompt);

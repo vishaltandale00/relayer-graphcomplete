@@ -198,4 +198,29 @@ describe("input round-trip grounding rating", () => {
         .toThrow(`Input grounding judge used forbidden capability: ${type}`);
     },
   );
+
+  it("requires one visible evidence item for every submitted value before rating a composite response grounded", async () => {
+    await expect(runInputGroundingJudge({
+      submittedInput: { values: [{ text: "Tuesday" }, { selected: [{ key: "canary", label: "Canary" }] }] },
+      screenshot: { screenshotId: "shot-2", threadRevision: "revision-3", imagePaths: ["/tmp/shot-2.png"] },
+      codexPathOverride: "/managed/codex",
+      workingDirectory: "/tmp/work",
+      model: "gpt-test",
+      modelReasoningEffort: "high",
+      threadFactory: () => ({
+        id: "grounding-thread",
+        async run() {
+          return {
+            items: [{ id: "message-1", type: "agent_message", text: "structured" }],
+            finalResponse: JSON.stringify({
+              verdict: "grounded",
+              reason: "Only one value is visibly grounded.",
+              visibleEvidence: ["The visible node says Canary."],
+            }),
+            usage: null,
+          };
+        },
+      }),
+    })).rejects.toThrow("invalid structured rating");
+  });
 });

@@ -149,6 +149,7 @@ export async function runInputGroundingJudge(options: {
       "Rate only whether the visible answer materially uses the submitted interaction input.",
       "The screenshot is the sole authority for the visible answer. Do not inspect files, use tools, or infer hidden behavior.",
       "Choose grounded only when visible answer content depends materially on the submitted value, not merely when the answer is generically compatible with it.",
+      "When Submitted input contains a values array, choose grounded only when the visible answer materially uses every value. Return one visibleEvidence entry per submitted value, in the same order.",
       "Choose not_grounded when the answer is visible but would say materially the same thing without the submitted value.",
       "Choose indeterminate when the screenshot does not expose enough of the answer to decide.",
       `Submitted input: ${JSON.stringify(options.submittedInput)}`,
@@ -157,11 +158,13 @@ export async function runInputGroundingJudge(options: {
   const turn = await thread.run(input, { outputSchema: groundingRatingSchema });
   assertInputGroundingTrace(turn.items);
   const parsed: unknown = JSON.parse(turn.finalResponse);
+  const expectedEvidenceCount = submittedValueCount(options.submittedInput);
   if (!isRecord(parsed)
     || !["grounded", "not_grounded", "indeterminate"].includes(String(parsed.verdict))
     || typeof parsed.reason !== "string" || !parsed.reason.trim()
     || !Array.isArray(parsed.visibleEvidence)
-    || parsed.visibleEvidence.some((entry) => typeof entry !== "string" || !entry.trim())) {
+    || parsed.visibleEvidence.some((entry) => typeof entry !== "string" || !entry.trim())
+    || (parsed.verdict === "grounded" && parsed.visibleEvidence.length !== expectedEvidenceCount)) {
     throw new Error("Input grounding judge returned an invalid structured rating.");
   }
   return {
@@ -184,6 +187,10 @@ export async function runInputGroundingJudge(options: {
       trace: structuredClone(turn.items),
     },
   };
+}
+
+function submittedValueCount(input: unknown): number {
+  return isRecord(input) && Array.isArray(input.values) ? input.values.length : 1;
 }
 
 export function assertInputGroundingTrace(items: readonly ThreadItem[]): void {
