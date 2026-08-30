@@ -96,4 +96,9 @@ export interface GraphPresentationGrade {
   readonly hasMateriallyMisleadingLayer: boolean;
   readonly aggregationMethod?: "legacy_depth_weighted" | "recursive_semantic_root";
   readonly rootLayerResultIds?: readonly string[];
+  readonly comparability?: {
+    readonly status: "incompatible";
+    readonly contractIds: readonly string[];
+    readonly reason: string;
+  };
 }

@@ -5,7 +5,7 @@ import type {
   ScreenshotEvidenceRef,
   TurnEvidence,
 } from "./contracts.js";
-import type { LayerCriterionKey, TurnCriterionKey } from "./rubric.js";
+import type { InputActionCriterionKey, LayerCriterionKey, TurnCriterionKey } from "./rubric.js";
 import type {
   ActionReviewSubject,
   LayerReviewSubject,
@@ -13,8 +13,8 @@ import type {
   ReviewSubjectInventory,
 } from "./inventory.js";
 
-export const RECURSIVE_PRESENTATION_CONTRACT_VERSION = 5 as const;
-export const RECURSIVE_PRESENTATION_CONTRACT_ID = "recursive-presentation-judge-v5" as const;
+export const RECURSIVE_PRESENTATION_CONTRACT_VERSION = 6 as const;
+export const RECURSIVE_PRESENTATION_CONTRACT_ID = "recursive-presentation-judge-v6" as const;
 
 export type RecursivePresentationRating = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 export interface RecursiveCriterionJudgment {
@@ -23,7 +23,7 @@ export interface RecursiveCriterionJudgment {
   readonly evidence: readonly ScreenshotEvidenceRef[];
 }
 export type RecursiveCriterionJudgments<Key extends string> = Readonly<Record<Key, RecursiveCriterionJudgment>>;
-export type AllocationChoice = "expand" | "reference" | "invoke" | "stop";
+export type AllocationChoice = "expand" | "reference" | "invoke" | "input" | "stop";
 export type AllocationMargin = "close" | "clearly_better" | "necessary";
 
 export interface RecursiveNodeScore {
@@ -47,7 +47,7 @@ export interface RecursiveNodeSemanticSummary {
 
 export interface AllocationRank {
   readonly choice: AllocationChoice;
-  readonly rank: 1 | 2 | 3 | 4;
+  readonly rank: 1 | 2 | 3 | 4 | 5;
 }
 
 export interface AllocationStepReview {
@@ -73,7 +73,7 @@ export interface MissingActionOpportunity {
 
 export interface RecursiveActionReview {
   readonly actionId: string;
-  readonly kind: "expand" | "reference" | "invoke";
+  readonly kind: "expand" | "reference" | "invoke" | "input";
   readonly allocationStep: number;
   readonly labelAndPlacement: string;
   readonly delivery: string | null;
@@ -81,6 +81,8 @@ export interface RecursiveActionReview {
   readonly targetLayerId: string | null;
   readonly reusedLayerId: string | null;
   readonly evidence: readonly ScreenshotEvidenceRef[];
+  /** Present and complete only for an immutable, unanswered input action review. */
+  readonly inputActionJudgments?: RecursiveCriterionJudgments<InputActionCriterionKey>;
 }
 
 export interface RecursiveNodeReview {
@@ -162,7 +164,7 @@ export type RecursiveReviewTraceEntry = {
 };
 
 export interface RecursiveReviewSnapshot {
-  readonly schemaVersion: 5;
+  readonly schemaVersion: 6;
   readonly contractId: typeof RECURSIVE_PRESENTATION_CONTRACT_ID;
   readonly inventory: ReviewSubjectInventory;
   readonly layers: readonly RecursiveLayerReviewState[];
@@ -286,7 +288,9 @@ export class RecursivePresentationReviewStore {
         nodeId: current.nodeId,
         actions: current.actions.map((action) => ({
           actionId: action.actionId,
-          kind: action.kind === "invoke" ? "invoke" as const : "navigate" as const,
+          kind: action.kind === "invoke"
+            ? "invoke" as const
+            : action.kind === "input" ? "input" as const : "navigate" as const,
         })),
       })),
       allocationDecisions: {
@@ -306,7 +310,7 @@ export class RecursivePresentationReviewStore {
 
   snapshot(): RecursiveReviewSnapshot {
     return immutable({
-      schemaVersion: 5 as const,
+      schemaVersion: 6 as const,
       contractId: RECURSIVE_PRESENTATION_CONTRACT_ID,
       inventory: this.inventory,
       layers: this.inventory.layers.flatMap((subject) => {
@@ -412,7 +416,9 @@ function validateNodeReview(
 
   const expectedActions = subjects.map((subject) => ({
     subject,
-    kind: subject.actionKind === "invoke" ? "invoke" as const : subject.relation!,
+    kind: subject.actionKind === "invoke"
+      ? "invoke" as const
+      : subject.actionKind === "input" ? "input" as const : subject.relation!,
   }));
   const seen = new Set<string>();
   for (const action of review.actions) {
@@ -428,12 +434,20 @@ function validateNodeReview(
     }
     requireText(action.labelAndPlacement, `Action ${action.actionId} label and placement`);
     requireEvidence(action.evidence, `Action ${action.actionId} evidence`);
-    if (action.kind === "invoke") {
+    if (action.kind === "invoke" || action.kind === "input") {
       if (
         action.delivery !== null || action.recursiveContribution !== null
         || action.targetLayerId !== null || action.reusedLayerId !== null
-      ) throw new Error(`Invoke action ${action.actionId} must keep delivery and recursion null`);
+      ) throw new Error(`${action.kind === "input" ? "Input" : "Invoke"} action ${action.actionId} must keep delivery and recursion null`);
+      if (action.kind === "input") {
+        validateInputActionJudgments(action.inputActionJudgments, action.actionId);
+      } else if (action.inputActionJudgments !== undefined) {
+        throw new Error(`Invoke action ${action.actionId} cannot carry input-action judgments`);
+      }
     } else {
+      if (action.inputActionJudgments !== undefined) {
+        throw new Error(`Navigate action ${action.actionId} cannot carry input-action judgments`);
+      }
       if (action.targetLayerId !== expected.subject.targetLayerId) {
         throw new Error(`Action ${action.actionId} must target layer ${expected.subject.targetLayerId}`);
       }
@@ -605,10 +619,30 @@ function validateRanking(step: AllocationStepReview, nodeId: string): void {
   const choices = new Set(step.ranking.map(({ choice }) => choice));
   const ranks = new Set(step.ranking.map(({ rank }) => rank));
   if (
-    step.ranking.length !== 4 || choices.size !== 4 || ranks.size !== 4
-    || !["expand", "reference", "invoke", "stop"].every((choice) => choices.has(choice as AllocationChoice))
-    || ![1, 2, 3, 4].every((rank) => ranks.has(rank as 1 | 2 | 3 | 4))
+    step.ranking.length !== 5 || choices.size !== 5 || ranks.size !== 5
+    || !["expand", "reference", "invoke", "input", "stop"].every((choice) => choices.has(choice as AllocationChoice))
+    || ![1, 2, 3, 4, 5].every((rank) => ranks.has(rank as 1 | 2 | 3 | 4 | 5))
   ) throw new Error(`Node ${nodeId} allocation step ${step.step} must rank each choice exactly once`);
+}
+
+const inputActionCriterionKeys = [
+  "prompt_answerability",
+  "option_set_quality",
+  "control_fit",
+] as const satisfies readonly InputActionCriterionKey[];
+
+function validateInputActionJudgments(
+  judgments: RecursiveCriterionJudgments<InputActionCriterionKey> | undefined,
+  actionId: string,
+): void {
+  if (judgments === undefined) throw new Error(`Input action ${actionId} requires input-action judgments`);
+  const actual = Object.keys(judgments);
+  if (
+    actual.length !== inputActionCriterionKeys.length
+    || inputActionCriterionKeys.some((key) => !(key in judgments))
+    || actual.some((key) => !inputActionCriterionKeys.includes(key as InputActionCriterionKey))
+  ) throw new Error(`Input action ${actionId} requires exactly the v11 input-action criteria`);
+  validateCriterionJudgments(judgments, `Input action ${actionId}`);
 }
 
 function validateScore(score: RecursiveNodeScore): void {

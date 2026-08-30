@@ -2344,7 +2344,7 @@ npm run eval:web
 <p>There is no scroll tool and no graph-specific <code>openLayer</code> or <code>selectNode</code> shortcut. A visible viewport capture preserves the actual first impression. A full-element capture exposes an entire node-detail panel without shrinking long content into one unreadable image; tall captures return ordered tiles under one screenshot ID. Element references permit interaction but are not rubric evidence.</p>
 <p>The runner, not the judge, binds each screenshot to immutable state. This state includes execution, thread, turn, layer, selected node, activated action, navigation path, viewport, capture target, tile count, and content digest. A review cannot cite a screenshot whose recorded state does not match its claimed subject.</p>
 <h4>13.4.2 Literal recursive rubric</h4>
-<p>The rubric is a versioned manifest. Active recursive contract v5 uses human-experience rubric v10. Every layer uses the same criteria; the contract does not distinguish root and child layers. Node count is observable context, not a threshold. The judge decides from the rendered screenshot whether a layer is sparse, crowded, fragmented, balanced, or otherwise well organized.</p>
+<p>The rubric is a versioned manifest. Active recursive contract v6 uses human-experience rubric v11. Every layer uses the same criteria; the contract does not distinguish root and child layers. Node count is observable context, not a threshold. The judge decides from the rendered screenshot whether a layer is sparse, crowded, fragmented, balanced, or otherwise well organized. Historical v5/v10 records retain their original contracts and remain readable; the version bump deliberately breaks direct score comparability.</p>
 <table>
 <thead><tr><th>Subject</th><th>Required criteria</th><th>Required screenshot context</th></tr></thead>
 <tbody>
@@ -2352,13 +2352,15 @@ npm run eval:web
 <tr><td>Node</td><td>Layer fit, title-detail alignment, substance, detail presentation</td><td>Layer context plus selected-node detail; full-detail tiles when needed</td></tr>
 <tr><td>Navigate action inside its source node review</td><td>Placement, label expectation, destination delivery, added value</td><td>Visible source and destination reached through that action</td></tr>
 <tr><td>Invoke action inside its source node review</td><td>Placement, label expectation, apparent value</td><td>Visible source; invocation remains disabled in immutable review</td></tr>
+<tr><td>Input action inside its source node review</td><td>Answerability, option-set quality, control fit</td><td>Visible source with the rendered prompt, control, and authored options; quality is rated before any answer is supplied</td></tr>
 <tr><td>Turn</td><td>Answer quality, recursive coherence, navigation value, presentation quality, and follow-up progress when applicable</td><td>Representative evidence from completed layer, node, and action reviews</td></tr>
 </tbody></table>
 <p>Each criterion uses an ordered integer from 1 through 8, where higher is better. The integers intentionally have no canned meanings. The judge chooses a score from the criterion definition and observed graph, then records a criterion-specific reason and screenshot evidence explaining that exact judgment. Node <code>actionDelivery</code> may be <code>null</code> only when no destination is assessable. Node <code>recursiveQuality</code> may be <code>null</code> only when no expansion child exists. Turn <code>follow_up_progress</code> may be <code>null</code> when the request is not a follow-up. Every other occupied node, layer, and turn criterion requires a score.</p>
 <p><code>polish</code> is a separate node vector dimension for basic rendered integrity: clipping, readability, density, alignment, and control rendering. Polish provides no credit to content, action allocation, destination delivery, recursive quality, layer quality, turn quality, or task outcome.</p>
 <h4>13.4.3 Incremental screenshot-grounded review records</h4>
 <p>The judge writes reviews as it explores. <code>reviewLayer</code> persists one finalized layer result after its nodes and expansion children have been reviewed.</p>
-<p><code>reviewNode</code> persists one node record and its sequential expand/reference/invoke/stop allocation decisions. The record also contains missing-action opportunities and visible actions.</p>
+<p><code>reviewNode</code> persists one node record and its sequential expand/reference/invoke/input/stop allocation decisions. The record also contains missing-action opportunities and visible actions. A missing input opportunity is recorded when the response needs user information or a user choice but authored no suitable input action.</p>
+<p>Input-action quality is judged from the presented action before any operator may answer it. A text input has an intentionally empty option set; single- and multi-select inputs expose their complete authored choices. The v11 necessity counterweight penalizes questions whose answers already exist in the immutable task artifact. It also penalizes evading node-owned judgment and fragmenting one coherent decision into one question per node.</p>
 <p>Calling either tool again revises that subject's current record while preserving prior calls in the interaction trace. Applicable criterion keys come from the rubric manifest.</p>
 <pre><code class="language-typescript">reviewNode({ layerId, nodeId, evidence, score, semantic, allocationSteps, missingActionOpportunities, actions, findings });
 reviewLayer({ layerId, depth, nodeScores, nodeSemantics, criterionJudgments, materiallyMisleading, layerSummary, evidence });
@@ -2381,7 +2383,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
   },
   "allocationSteps": [{
     "step": 0,
-    "ranking": [{ "choice": "expand", "rank": 1 }, { "choice": "reference", "rank": 2 }, { "choice": "invoke", "rank": 3 }, { "choice": "stop", "rank": 4 }],
+    "ranking": [{ "choice": "expand", "rank": 1 }, { "choice": "reference", "rank": 2 }, { "choice": "invoke", "rank": 3 }, { "choice": "input", "rank": 4 }, { "choice": "stop", "rank": 5 }],
     "preferredChoice": "expand",
     "authoredChoice": "stop",
     "authoredActionId": null,

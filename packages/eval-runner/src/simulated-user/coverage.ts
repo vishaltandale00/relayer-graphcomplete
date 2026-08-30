@@ -10,7 +10,7 @@ import type { MissingReviewSubject } from "./contracts.js";
 
 export interface ReviewActionReference {
   readonly actionId: ReviewSubjectId;
-  readonly kind: "navigate" | "invoke";
+  readonly kind: "navigate" | "invoke" | "input";
 }
 
 export interface ReviewNodeReference {
@@ -83,7 +83,9 @@ export function computeReviewCoverage(
     nodeId: subject.nodeId,
   }));
   const missingActions: MissingCoverageSubject[] = missingActionSubjects.map((subject) => ({
-    kind: subject.actionKind === "navigate" ? "navigate_action" : "invoke_action",
+    kind: subject.actionKind === "navigate"
+      ? "navigate_action"
+      : subject.actionKind === "invoke" ? "invoke_action" : "input_action",
     subjectId: subject.actionId,
     layerId: subject.layerId,
     nodeId: subject.nodeId,
@@ -139,6 +141,8 @@ export function formatMissingSubject(subject: MissingCoverageSubject): string {
       return `navigate-action(${formatId(subject.layerId!)}/${formatId(subject.nodeId!)}/${formatId(subject.subjectId)})`;
     case "invoke_action":
       return `invoke-action(${formatId(subject.layerId!)}/${formatId(subject.nodeId!)}/${formatId(subject.subjectId)})`;
+    case "input_action":
+      return `input-action(${formatId(subject.layerId!)}/${formatId(subject.nodeId!)}/${formatId(subject.subjectId)})`;
     case "turn":
       return `turn(${formatId(subject.subjectId)})`;
   }

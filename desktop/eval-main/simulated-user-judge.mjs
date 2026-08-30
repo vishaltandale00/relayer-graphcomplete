@@ -187,8 +187,34 @@ export async function buildAcceptedReviewTopology({ turnId, rootLayerId, loadLay
         }
         return { ...base, relation: action.relation, targetLayerId };
       }
-      if (action.kind !== "invoke") throw new Error(`Unknown accepted action kind: ${action.kind}`);
-      return base;
+      if (action.kind === "invoke") return base;
+      if (action.kind === "input") {
+        if (!["text", "single_select", "multi_select"].includes(action.control)) {
+          throw new Error(`Accepted input action has no valid control: ${action.id}`);
+        }
+        if (typeof action.prompt !== "string" || action.prompt.trim() === "") {
+          throw new Error(`Accepted input action has no prompt: ${action.id}`);
+        }
+        const options = Array.isArray(action.options)
+          ? action.options.map((option) => ({ key: String(option.key), label: String(option.label) }))
+          : [];
+        if (action.control === "text" && options.length !== 0) {
+          throw new Error(`Accepted text input action unexpectedly has options: ${action.id}`);
+        }
+        if (action.control !== "text" && options.length === 0) {
+          throw new Error(`Accepted select input action has no options: ${action.id}`);
+        }
+        return {
+          ...base,
+          control: action.control,
+          prompt: action.prompt,
+          options,
+          ...(action.minimumSelections === null || action.minimumSelections === undefined
+            ? {}
+            : { minimumSelections: action.minimumSelections }),
+        };
+      }
+      throw new Error(`Unknown accepted action kind: ${action.kind}`);
     });
     const nodes = resolved.nodes.map((node) => ({ id: String(node.id), title: node.title, detail: node.detail }));
     layers.push({
@@ -320,8 +346,11 @@ export function createLocalSimulatedUserJudgeRunner({
         rootLayerId,
       });
       const controller = createReviewSessionController(opened.session, screenshots);
-      const recursiveContract = ["graph-presentation-rubric-v4", "graph-presentation-rubric-v5", "graph-presentation-rubric-v6", "graph-presentation-rubric-v7", "graph-presentation-rubric-v8", "graph-presentation-rubric-v9", "graph-presentation-rubric-v10"]
-        .includes(context.rubric?.rubricVersion);
+      const rubricVersion = context.rubric?.rubricVersion;
+      if (["graph-presentation-rubric-v4", "graph-presentation-rubric-v5", "graph-presentation-rubric-v6", "graph-presentation-rubric-v7", "graph-presentation-rubric-v8", "graph-presentation-rubric-v9", "graph-presentation-rubric-v10"].includes(rubricVersion)) {
+        throw new Error(`Historical rubric ${rubricVersion} remains readable but cannot start a new v6 judgment.`);
+      }
+      const recursiveContract = rubricVersion === "graph-presentation-rubric-v11";
       const evidenceOptions = {
         executionId: String(context.execution.id),
         threadId: String(context.thread.id),

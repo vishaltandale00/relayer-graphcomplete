@@ -91,6 +91,34 @@ describe("EvalService simulated-user result persistence", () => {
     });
   });
 
+  it("surfaces v10 and v11 recursive results as non-comparable instead of aggregating them", () => {
+    const result = presentationGradeFromTurns([
+      {
+        status: "accepted",
+        judgeResults: [{
+          status: "completed",
+          review: { schemaVersion: 5, contractId: "recursive-presentation-judge-v5", turn: { criterionJudgments: {} } },
+        }],
+      },
+      {
+        status: "accepted",
+        judgeResults: [{
+          status: "completed",
+          review: { schemaVersion: 6, contractId: "recursive-presentation-judge-v6", turn: { criterionJudgments: {} } },
+        }],
+      },
+    ], true);
+
+    expect(result).toMatchObject({
+      status: "partial",
+      score: null,
+      comparability: {
+        status: "incompatible",
+        contractIds: ["recursive-presentation-judge-v5", "recursive-presentation-judge-v6"],
+      },
+    });
+  });
+
   it("omits product model selection for every turn of a configuration-owned harness", async () => {
     const { directory, stateFile } = await testPaths();
     const configurationPath = join(directory, "configuration-owned-fixture.yaml");
@@ -279,7 +307,7 @@ describe("EvalService simulated-user result persistence", () => {
         status: "accepted",
       },
       request: { followUp: false },
-      rubric: { rubricVersion: "graph-presentation-rubric-v10" },
+      rubric: { rubricVersion: "graph-presentation-rubric-v11" },
       judgeConfiguration: { name: "simulated-user" },
     });
     expect(calls[0].request.text).toContain("incoming queue");
@@ -293,7 +321,7 @@ describe("EvalService simulated-user result persistence", () => {
         judge: "simulated-user",
         status: "completed",
         passed: null,
-        rubricVersion: "graph-presentation-rubric-v10",
+        rubricVersion: "graph-presentation-rubric-v11",
         judgeConfiguration: { name: "simulated-user" },
         artifactAuthority: "references",
         references: {

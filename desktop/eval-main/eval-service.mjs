@@ -17,7 +17,7 @@ import {
   canonicalJson,
   checkNodeNavigation,
   checkBasicOutput,
-  GRAPH_PRESENTATION_RUBRIC_V10,
+  GRAPH_PRESENTATION_RUBRIC_V11,
   expandTestRun,
   gradeH3Workspace,
   gradeFrontierProjectWorkspace,
@@ -396,14 +396,25 @@ export function presentationGradeFromTurns(turns, requested) {
     : completed.length === results.length && terminalWithoutReview.length === 0 ? "completed"
       : failed.length === results.length ? "failed" : "partial";
   const recursive = completed.length > 0 && completed.every((result) => (
-    [2, 3, 4, 5].includes(result.review?.schemaVersion)
-    && ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5"].includes(result.review?.contractId)
+    [2, 3, 4, 5, 6].includes(result.review?.schemaVersion)
+    && ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5", "recursive-presentation-judge-v6"].includes(result.review?.contractId)
   ));
   if (recursive) {
-    const scales = completed.map((result) => result.review?.schemaVersion === 5 ? 8 : 4);
+    const contractIds = [...new Set(completed.map((result) => result.review.contractId))].sort();
+    if (contractIds.includes("recursive-presentation-judge-v6") && contractIds.length > 1) {
+      return {
+        ...buildRecursiveGraphPresentationGrade({ status: "partial", scoreScaleMaximum: 8 }),
+        comparability: {
+          status: "incompatible",
+          contractIds,
+          reason: "Rubric v11 changes input-action judgment and cannot be aggregated with earlier recursive contracts.",
+        },
+      };
+    }
+    const scales = completed.map((result) => [5, 6].includes(result.review?.schemaVersion) ? 8 : 4);
     const scoreScaleMaximum = scales.includes(8) ? 8 : 4;
     const turnScore = (result, criterion) => {
-      const scale = result.review?.schemaVersion === 5 ? 8 : 4;
+      const scale = [5, 6].includes(result.review?.schemaVersion) ? 8 : 4;
       const score = scale === 8
         ? result.review?.turn?.criterionJudgments?.[criterion]?.score ?? null
         : result.review?.turn?.ratings?.[criterion] ?? null;
@@ -413,7 +424,7 @@ export function presentationGradeFromTurns(turns, requested) {
     };
     const scoreCeiling = (result) => {
       const maximum = result.review?.turn?.scoreCeiling?.maximum;
-      const scale = result.review?.schemaVersion === 5 ? 8 : 4;
+      const scale = [5, 6].includes(result.review?.schemaVersion) ? 8 : 4;
       return [1, 2, 3, 4, 5, 6, 7, 8].includes(maximum)
         ? maximum * (scoreScaleMaximum / scale)
         : null;
@@ -1919,7 +1930,7 @@ export class EvalService {
       completedAt: null,
       artifactDirectory,
       artifactAuthority: "references",
-      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V10.rubricVersion,
+      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V11.rubricVersion,
       judgeConfiguration: copy(execution.judgeConfiguration),
       references: emptyJudgeReferences(),
       review: null,
@@ -1960,7 +1971,7 @@ export class EvalService {
         },
         artifact: judgeArtifactForExecution(execution, turn),
         artifactEvidence: judgeArtifactEvidenceForExecution(execution, turn),
-        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V10),
+        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V11),
         judgeConfiguration: copy(execution.judgeConfiguration),
         ...(provenance === null ? {} : { provenance: copy(provenance) }),
       };

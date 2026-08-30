@@ -221,7 +221,7 @@ function validateActionEvidence(
       review.findings,
       [...path, "findings"],
       isSource,
-      `Invoke action ${subject.actionId} findings must cite its visible source`,
+      `${review.kind === "input" ? "Input" : "Invoke"} action ${subject.actionId} findings must cite its visible source`,
     );
   }
 }

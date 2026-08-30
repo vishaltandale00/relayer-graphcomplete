@@ -165,6 +165,7 @@ export function projectExecutionCell(run, execution) {
     ? judgmentStatus(execution.presentationGrade, lifecycleStatus, hasLegacyPresentation)
     : "not_applicable";
   const presentationScore = applicable ? finiteScore(execution.presentationGrade?.score) : null;
+  const presentationIncompatible = execution.presentationGrade?.comparability?.status === "incompatible";
   return {
     id: execution.id ?? null,
     lifecycle: {
@@ -182,7 +183,9 @@ export function projectExecutionCell(run, execution) {
     },
     presentation: {
       status: presentationStatus,
-      label: presentationScore === null ? judgmentLabel(presentationStatus) : scoreLabel(presentationScore),
+      label: presentationIncompatible
+        ? "Non-comparable rubric versions"
+        : presentationScore === null ? judgmentLabel(presentationStatus) : scoreLabel(presentationScore),
       score: presentationScore,
       applicable,
     },
@@ -228,13 +231,17 @@ export function projectExecutionDossier(run, execution) {
       comprehensionScore: finiteScore(presentation.comprehensionScore),
       renderedScore: finiteScore(presentation.renderedScore),
       rawScore: finiteScore(presentation.rawScore),
-      scoreCeiling: [1, 2, 3, 4].includes(presentation.scoreCeiling) ? presentation.scoreCeiling : null,
+      scoreCeiling: [1, 2, 3, 4, 5, 6, 7, 8].includes(presentation.scoreCeiling)
+        && (presentation.scoreScaleMaximum !== 4 || presentation.scoreCeiling <= 4)
+        ? presentation.scoreCeiling
+        : null,
       decay: Number.isFinite(presentation.depthDecay)
         ? presentation.depthDecay
         : Number.isFinite(presentation.decay) ? presentation.decay : null,
       layers: asArray(presentation.layers),
       aggregation: presentation.aggregation ?? null,
       aggregationMethod: presentation.aggregationMethod ?? null,
+      comparability: presentation.comparability ?? null,
       worstLayer: presentation.worstLayer ?? null,
       hasMateriallyMisleadingLayer: typeof presentation.hasMateriallyMisleadingLayer === "boolean"
         ? presentation.hasMateriallyMisleadingLayer

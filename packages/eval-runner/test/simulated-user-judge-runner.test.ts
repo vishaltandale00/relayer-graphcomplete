@@ -15,8 +15,9 @@ import {
   type JudgeThreadStartRequest,
 } from "../src/simulated-user/judge-runner.js";
 import { inventoryReviewSubjects } from "../src/simulated-user/inventory.js";
-import { GRAPH_PRESENTATION_RUBRIC_V10 } from "../src/simulated-user/rubric.js";
+import { GRAPH_PRESENTATION_RUBRIC_V11 } from "../src/simulated-user/rubric.js";
 import { IncrementalReviewStore } from "../src/simulated-user/review-store.js";
+import { RecursivePresentationReviewStore } from "../src/simulated-user/recursive-review.js";
 import type { LayerReview, NodeReview, TurnReview } from "../src/simulated-user/contracts.js";
 
 describe("simulated-user Codex judge runner", () => {
@@ -28,7 +29,7 @@ describe("simulated-user Codex judge runner", () => {
     });
     const prompt = buildRecursivePresentationJudgePrompt(
       "Explain the completed repair.",
-      GRAPH_PRESENTATION_RUBRIC_V10,
+      GRAPH_PRESENTATION_RUBRIC_V11,
       inventory,
     );
 
@@ -54,6 +55,12 @@ describe("simulated-user Codex judge runner", () => {
     expect(prompt).toContain("A clean textual handoff split across static cards earns no semantic or interactive credit merely for polish");
     expect(prompt).toContain("Do not treat adjacency or reading order as relational evidence");
     expect(prompt).toContain("Two or more material missing opportunities cap all three at 4");
+    expect(prompt).toContain("expand, reference, invoke, input, and stop");
+    expect(prompt).toContain("before any answer is committed");
+    expect(prompt).toContain("asking for what the artifact already states");
+    expect(prompt).toContain("asking to dodge a judgment the node should have made");
+    expect(prompt).toContain("fragmenting one decision into a separate question per node");
+    expect(prompt).toContain("Necessity is an allocation counterweight, not an input-action quality score");
     expect(prompt).not.toContain("Shell, filesystem, web, network, graph mutation, and invoke execution are unavailable");
   });
 
@@ -150,7 +157,7 @@ describe("simulated-user Codex judge runner", () => {
       schemaVersion: 1,
       executionId: "execution-1",
       judge: { model: "gpt-test", modelReasoningEffort: "high" },
-      prompt: { version: "simulated-user-judge-prompt-v10" },
+      prompt: { version: "simulated-user-judge-prompt-v11" },
       rubric: { rubricVersion: "simulated-user-rubric-v1" },
       codexThreadId: "codex-thread-1",
       finalResponse: "Review submitted.",
@@ -216,6 +223,41 @@ describe("simulated-user Codex judge runner", () => {
       AWS_SECRET_ACCESS_KEY: "cloud-secret",
     })).toEqual({ HOME: "/home/test", PATH: "/bin" });
     expect(() => sanitizeJudgeEnvironment({}, { OPENAI_API_KEY: "secret" })).toThrow("not allowlisted");
+  });
+
+  it("defaults recursive stores to the v11 rubric while legacy stores remain on v1", async () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-recursive",
+      rootLayerId: "layer-recursive",
+      layers: [{ id: "layer-recursive", nodeIds: ["node-recursive"], actions: [] }],
+    });
+    const recursiveStore = new RecursivePresentationReviewStore({ inventory });
+    let capturedPrompt = "";
+    const factory: JudgeThreadFactory = {
+      start() {
+        return {
+          id: "recursive-default",
+          run: async (prompt) => {
+            capturedPrompt = prompt;
+            throw new Error("stop after prompt capture");
+          },
+        };
+      },
+    };
+
+    await expect(runSimulatedUserJudge({
+      executionId: "execution-recursive",
+      originalRequest: "Ask only if blocked.",
+      configuration: { model: "gpt-test", modelReasoningEffort: "high" },
+      controller: unusedController(),
+      reviewStore: recursiveStore,
+      workingDirectory: process.cwd(),
+      threadFactory: factory,
+      mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
+    })).rejects.toThrow("stop after prompt capture");
+
+    expect(capturedPrompt).toContain("Graph-presentation rubric (graph-presentation-rubric-v11)");
+    expect(capturedPrompt).toContain('"contractId": "recursive-presentation-judge-v6"');
   });
 });
 

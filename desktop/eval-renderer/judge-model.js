@@ -238,8 +238,8 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
     ]),
   ];
 
-  const recursive = [2, 3, 4, 5].includes(review?.schemaVersion)
-    || ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5"].includes(review?.contractId);
+  const recursive = [2, 3, 4, 5, 6].includes(review?.schemaVersion)
+    || ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5", "recursive-presentation-judge-v6"].includes(review?.contractId);
   if (recursive) layers.sort((left, right) => right.depth - left.depth || left.position - right.position);
   return {
     kind: "turn",

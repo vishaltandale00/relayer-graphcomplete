@@ -15,6 +15,7 @@ import {
   GRAPH_PRESENTATION_RUBRIC_V8,
   GRAPH_PRESENTATION_RUBRIC_V9,
   GRAPH_PRESENTATION_RUBRIC_V10,
+  GRAPH_PRESENTATION_RUBRIC_V11,
   SIMULATED_USER_RUBRIC_V1,
   getRubricCriterionKeys,
   validateRubricRatings,
@@ -251,6 +252,31 @@ describe("recursive simulated-user rubric", () => {
     });
     expect(GRAPH_PRESENTATION_RUBRIC_V10.subjects.turn.criteria.presentation_quality.description)
       .not.toMatch(/a 3|4 is|at most 2/);
+  });
+
+  it("adds immutable input-action quality and five-choice allocation together in v11", () => {
+    expect(GRAPH_PRESENTATION_RUBRIC_V11).toMatchObject({
+      rubricVersion: "graph-presentation-rubric-v11",
+      recursiveJudgment: {
+        contractId: "recursive-presentation-judge-v6",
+        allocationChoices: ["expand", "reference", "invoke", "input", "stop"],
+      },
+      subjects: {
+        input_action: {
+          requiredScreenshotContext: ["visible_source", "presented_input_control_before_answer"],
+        },
+      },
+    });
+    expect(getRubricCriterionKeys("input_action")).toEqual([
+      "prompt_answerability",
+      "option_set_quality",
+      "control_fit",
+    ]);
+    expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria.option_set_quality.description)
+      .toContain("text action, having no authored options is the correct assessable state");
+    expect(JSON.stringify(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria)).not.toContain("necessity");
+    expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.turn.criteria.recursive_coherence.description)
+      .toContain("penalizing authored questions that were unnecessary");
   });
 
   it("reports missing, unknown, and invalid rating keys without inference", () => {

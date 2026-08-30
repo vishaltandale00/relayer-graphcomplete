@@ -178,8 +178,8 @@ screenshots remain the sole evidence for what the graph communicates.
 
 The presentation judge builds a recursive semantic result tree bottom-up. Expansion
 actions consume finalized child `LayerResult`s; references reuse results without
-starting another recursive pass; invoke actions are never executed. At every node,
-the judge compares expansion, reference, invoke, and stop sequentially, while keeping
+starting another recursive pass; invoke and input actions are never executed. At every node,
+the judge compares expansion, reference, invoke, input, and stop sequentially, while keeping
 allocation quality separate from destination delivery. Each layer preserves aligned
 node score and semantic-summary vectors. A parent semantically compresses child
 findings and applies qualitative depth decay without a numeric propagation formula.
@@ -195,16 +195,20 @@ paths, semantically empty geometry, and action spam. Artifact inspection may rev
 useful presentation opportunities, but implementation correctness, verifier results,
 and task-outcome contradictions can neither raise nor lower this independent grade.
 The rubric does not require media capabilities that the graph contract and renderer
-do not yet support. Recursive review contract v5 records basic rendered integrity
+do not yet support. Recursive review contract v6 records basic rendered integrity
 as a separate node-level `polish` score. Polish covers clipping, readability,
 density, alignment, and control rendering only; it is inspectable in the score
 vector and cannot raise or offset semantic, interaction, navigation, layer, turn,
-or task-outcome grades. The v10 human-experience rubric requires an independent
+or task-outcome grades. The v11 human-experience rubric requires an independent
 reason and screenshot evidence for every scored criterion on its ordered 1-8 scale;
 the integers intentionally have no canned meanings. Only action delivery, recursive
 quality, and inapplicable follow-up progress may be null; the node criteria require
 no assessable destination or expansion child respectively. A material missing action caps affected turn-level
 criteria at 6; repeated material omissions or one critical omission cap them at 4.
+Input actions are rated from their visible prompt, control, and authored options before
+any answer is supplied. The same rubric penalizes asking for facts already present in
+the artifact, delegating judgment the response should make, and splitting one decision
+into needless per-node questions.
 Historical recursive reviews retain their original scale when projected alone and
 are proportionally normalized only when a multi-turn grade contains mixed scales.
 

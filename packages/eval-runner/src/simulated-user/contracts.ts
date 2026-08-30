@@ -1,4 +1,5 @@
 import type {
+  InputActionRatings,
   InvokeActionRatings,
   LayerRatings,
   NavigateActionRatings,
@@ -82,6 +83,10 @@ export interface InvokeActionEvidence {
   readonly source: readonly ScreenshotEvidenceRef[];
 }
 
+export interface InputActionEvidence {
+  readonly source: readonly ScreenshotEvidenceRef[];
+}
+
 export interface TurnEvidence {
   readonly representative: readonly ScreenshotEvidenceRef[];
 }
@@ -130,7 +135,17 @@ export interface InvokeActionReview {
   readonly findings: readonly Finding[];
 }
 
-export type ActionReview = NavigateActionReview | InvokeActionReview;
+export interface InputActionReview {
+  readonly actionId: ActionId;
+  readonly kind: "input";
+  readonly evidence: InputActionEvidence;
+  readonly ratings: InputActionRatings;
+  readonly nullRatingJustifications?: Readonly<Partial<Record<keyof InputActionRatings, string>>>;
+  readonly summary: string;
+  readonly findings: readonly Finding[];
+}
+
+export type ActionReview = NavigateActionReview | InvokeActionReview | InputActionReview;
 
 export interface NodeReview {
   readonly nodeId: NodeId;
@@ -150,6 +165,8 @@ export interface NodeStructureReview {
   readonly expansion: StructureDimensionReview;
   readonly references: StructureDimensionReview;
   readonly invoke: StructureDimensionReview;
+  /** Required by v11; optional only while reading historical v1-v10 records. */
+  readonly input?: StructureDimensionReview;
   readonly reason: string;
   readonly evidence: readonly ScreenshotEvidenceRef[];
 }
@@ -184,6 +201,8 @@ export interface StructureReview {
   readonly overall: "helps" | "neutral" | "mixed" | "hurts";
   readonly expansion: StructureDimensionReview;
   readonly references: StructureDimensionReview;
+  /** Required by v11; optional only while reading historical v1-v10 records. */
+  readonly input?: StructureDimensionReview;
   readonly reason: string;
   readonly evidence: readonly ScreenshotEvidenceRef[];
 }
@@ -288,7 +307,7 @@ export interface ReviewValidationIssue {
 }
 
 export interface MissingReviewSubject {
-  readonly kind: "layer" | "node" | "navigate_action" | "invoke_action" | "turn";
+  readonly kind: "layer" | "node" | "navigate_action" | "invoke_action" | "input_action" | "turn";
   readonly subjectId: string;
   readonly layerId?: LayerId;
   readonly nodeId?: NodeId;

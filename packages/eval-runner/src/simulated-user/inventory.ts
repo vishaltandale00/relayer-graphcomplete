@@ -2,13 +2,53 @@ import type { ActionId, LayerId, NodeId, TurnId } from "./contracts.js";
 
 export type ReviewSubjectId = string | number;
 
-export interface ReviewTopologyAction {
+export interface ReviewTopologyInputOption {
+  readonly key: string;
+  readonly label: string;
+}
+
+export type ReviewTopologyInputSnapshot =
+  | {
+      readonly control: "text";
+      readonly prompt: string;
+      readonly options: readonly [];
+      readonly minimumSelections?: never;
+    }
+  | {
+      readonly control: "single_select";
+      readonly prompt: string;
+      readonly options: readonly ReviewTopologyInputOption[];
+      readonly minimumSelections?: never;
+    }
+  | {
+      readonly control: "multi_select";
+      readonly prompt: string;
+      readonly options: readonly ReviewTopologyInputOption[];
+      readonly minimumSelections?: number;
+    };
+
+interface ReviewTopologyActionBase {
   readonly id: ActionId;
   readonly sourceNodeId: NodeId;
-  readonly kind: "navigate" | "invoke";
-  readonly relation?: "expand" | "reference" | null;
-  readonly targetLayerId?: LayerId | null;
 }
+
+export type ReviewTopologyAction = ReviewTopologyActionBase & (
+  | {
+      readonly kind: "navigate";
+      readonly relation: "expand" | "reference";
+      readonly targetLayerId: LayerId;
+    }
+  | {
+      readonly kind: "invoke";
+      readonly relation?: null;
+      readonly targetLayerId?: null;
+    }
+  | ({
+      readonly kind: "input";
+      readonly relation?: null;
+      readonly targetLayerId?: null;
+    } & ReviewTopologyInputSnapshot)
+);
 
 export interface ReviewTopologyLayer {
   readonly id: LayerId;
@@ -41,9 +81,13 @@ export interface ActionReviewSubject {
   readonly layerId: LayerId;
   readonly nodeId: NodeId;
   readonly actionId: ActionId;
-  readonly actionKind: "navigate" | "invoke";
+  readonly actionKind: "navigate" | "invoke" | "input";
   readonly relation?: "expand" | "reference";
   readonly targetLayerId?: LayerId;
+  readonly control?: "text" | "single_select" | "multi_select";
+  readonly prompt?: string;
+  readonly options?: readonly ReviewTopologyInputOption[];
+  readonly minimumSelections?: number;
 }
 
 export interface TurnReviewSubject {
@@ -90,24 +134,26 @@ export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubject
         );
       }
       if (action.kind === "navigate") {
-        if (action.targetLayerId === undefined || action.targetLayerId === null) {
+        const targetLayerId = action.targetLayerId as LayerId | null | undefined;
+        const relation = action.relation as "expand" | "reference" | null | undefined;
+        if (targetLayerId === undefined || targetLayerId === null) {
           throw new Error(`Navigate action ${formatId(action.id)} has no target layer`);
         }
-        if (!layersById.has(action.targetLayerId)) {
+        if (!layersById.has(targetLayerId)) {
           throw new Error(
-            `Navigate action ${formatId(action.id)} targets unknown layer ${formatId(action.targetLayerId)}`,
+            `Navigate action ${formatId(action.id)} targets unknown layer ${formatId(targetLayerId)}`,
           );
         }
-        if (action.relation !== "expand" && action.relation !== "reference") {
+        if (relation !== "expand" && relation !== "reference") {
           throw new Error(`Navigate action ${formatId(action.id)} has no valid relation`);
         }
-        if (action.relation === "expand") destinations.push(action.targetLayerId);
+        if (relation === "expand") destinations.push(targetLayerId);
       } else if (
         action.targetLayerId !== undefined
         && action.targetLayerId !== null
         || action.relation !== undefined && action.relation !== null
       ) {
-        throw new Error(`Invoke action ${formatId(action.id)} cannot target a layer`);
+        throw new Error(`${action.kind === "input" ? "Input" : "Invoke"} action ${formatId(action.id)} cannot target a layer`);
       }
     }
     expansionAdjacency.set(layer.id, destinations);
@@ -169,12 +215,24 @@ export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubject
               relation: action.relation!,
               targetLayerId: action.targetLayerId!,
             }
-          : {
+          : action.kind === "invoke" ? {
               kind: "action",
               layerId,
               nodeId,
               actionId: action.id,
               actionKind: "invoke",
+            } : {
+              kind: "action",
+              layerId,
+              nodeId,
+              actionId: action.id,
+              actionKind: "input",
+              control: action.control,
+              prompt: action.prompt,
+              options: action.options,
+              ...(action.control === "multi_select" && action.minimumSelections !== undefined
+                ? { minimumSelections: action.minimumSelections }
+                : {}),
             });
       }
     }

@@ -70,7 +70,7 @@ export function createRecursiveScreenshotEvidenceValidator(
       request.review.actions.forEach((action, index) => {
         const subject = request.actionSubjects.find((candidate) => candidate.actionId === action.actionId);
         const actionScreenshots = action.evidence.map((screenshotId) => options.screenshots.get(screenshotId));
-        if (action.kind !== "invoke") {
+        if (action.kind === "expand" || action.kind === "reference") {
           const hasSource = actionScreenshots.some((shot) => shot !== undefined && isNode(shot));
           const hasDestination = actionScreenshots.some((shot) => (
             shot !== undefined
@@ -96,6 +96,24 @@ export function createRecursiveScreenshotEvidenceValidator(
           ),
           `Action evidence must show source node ${request.subject.nodeId} or its traversed destination`,
         );
+        if (action.kind === "input") {
+          validate(
+            action.evidence,
+            ["actions", index, "evidence"],
+            (shot) => shot.layerId === request.subject.layerId
+              && shot.selectedNodeId === request.subject.nodeId,
+            `Input action ${action.actionId} evidence must show the selected source node and its rendered controls`,
+          );
+          for (const [criterion, judgment] of Object.entries(action.inputActionJudgments ?? {})) {
+            validate(
+              judgment.evidence,
+              ["actions", index, "inputActionJudgments", criterion, "evidence"],
+              (shot) => shot.layerId === request.subject.layerId
+                && shot.selectedNodeId === request.subject.nodeId,
+              `Input action ${action.actionId} ${criterion} evidence must show the selected source node and its rendered controls`,
+            );
+          }
+        }
       });
       request.review.findings.forEach((finding, index) => validate(
         finding.evidence,
