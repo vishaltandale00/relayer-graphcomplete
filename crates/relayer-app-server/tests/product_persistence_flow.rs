@@ -1051,6 +1051,174 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
 }
 
 #[tokio::test]
+async fn submitted_input_projection_ignores_order_but_rejects_missing_values() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-input-projection-multiset-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let seed_app = open_app(&database, &root).await;
+    let thread = response_json(
+        seed_app
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Project two inputs" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let pool = sqlite_pool(&database).await;
+    let interaction_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM interactions WHERE thread_id=?1 ORDER BY sequence LIMIT 1",
+    )
+    .bind(thread_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE interactions SET graph_node_id=501,completion_status='accepted',input_identity='projection-multiset',input_digest='sha256:projection-multiset' WHERE id=?1")
+        .bind(interaction_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO interaction_context_intents(interaction_id,position,target_node_id,source_interaction_node_id,source_layer_id) VALUES (?1,0,7,3,5)")
+        .bind(interaction_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO interaction_context_annotations(interaction_id,context_position,position,text) VALUES (?1,0,0,'raw note')")
+        .bind(interaction_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO interaction_submitted_input_attempts(interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,graph_root_node_id,child_receipt_json,created_at,bound_at,finished_at) VALUES (?1,?2,1,'sha256:authority','sha256:semantic','accepted',501,'[]','1','2','3')")
+        .bind(interaction_id)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (action_id, prompt, text) in [
+        (10_i64, "Zulu prompt", "first value"),
+        (20_i64, "Alpha prompt", "second value"),
+    ] {
+        sqlx::query("INSERT INTO interaction_submitted_input_attachments(interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) VALUES (?1,101,201,?2,401,?3,?4,'1')")
+            .bind(interaction_id)
+            .bind(action_id)
+            .bind(json!({"control":"text","prompt":prompt}).to_string())
+            .bind(json!({"text":text}).to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool.close().await;
+
+    let input_reads = Arc::new(AtomicUsize::new(0));
+    let observed_input_reads = input_reads.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions/501/input",
+            axum::routing::get(move || {
+                let observed_input_reads = observed_input_reads.clone();
+                async move {
+                    let alpha = json!({
+                        "action":{"control":"text","prompt":"Alpha prompt"},
+                        "value":{"text":"second value"}
+                    });
+                    let zulu = json!({
+                        "action":{"control":"text","prompt":"Zulu prompt"},
+                        "value":{"text":"first value"}
+                    });
+                    let submitted_inputs = if observed_input_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        vec![alpha, zulu]
+                    } else {
+                        vec![alpha]
+                    };
+                    axum::Json(json!({
+                        "interaction":{"id":501,"kind":"user-interaction","icon":"user","title":"Project two inputs","detail":"Project two inputs","state":"accepted"},
+                        "contexts":[{"type":"interaction.context","targetNode":{"id":7,"kind":"concept","icon":"box","title":"Target","detail":"Immutable target","state":"accepted"},"annotations":["raw note"]}],
+                        "submittedInputs":submitted_inputs
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/501/context-actions",
+            axum::routing::get(|| async {
+                axum::Json(json!({"actions":[{
+                    "id":88,"type":"interaction.context","sourceNodeId":501,
+                    "target":{"nodeId":7,"sourceInteractionNodeId":3,"sourceLayerId":5},
+                    "annotations":["raw note"],"state":"accepted"
+                }]}))
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,
+            "configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"ask":{},"auto":{}},
+                "settings":{}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
+
+    let fresh = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/threads/{thread_id}/interactions"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(fresh["interactions"][0]["projectionFresh"], true);
+    assert_eq!(
+        fresh["interactions"][0]["submittedInputs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let missing = response_json(
+        app.oneshot(api_request(
+            "GET",
+            &format!("/api/threads/{thread_id}/interactions"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(missing["interactions"][0]["projectionFresh"], false);
+    assert_eq!(input_reads.load(Ordering::SeqCst), 2);
+    graph_task.abort();
+    harness_task.abort();
+    let _ = fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn input_draft_commit_sends_the_destination_product_graph_scope() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
