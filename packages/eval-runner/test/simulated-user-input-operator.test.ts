@@ -155,6 +155,7 @@ describe("InputOperatorController", () => {
     expect(sendBodies).toHaveLength(2);
     expect(sendBodies[0]!.inputId).toBe("capture-2");
     expect(sendBodies[1]!.inputId).toBe(sendBodies[0]!.inputId);
+    expect(sendBodies[1]!.inputDraftRevision).toBe(sendBodies[0]!.inputDraftRevision);
   });
 
   it("reserves the Send write fence while an active capture is still settling", async () => {

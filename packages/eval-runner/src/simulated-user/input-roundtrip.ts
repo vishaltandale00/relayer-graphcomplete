@@ -152,7 +152,7 @@ export async function runInputGroundingJudge(options: {
       "Rate only whether the visible answer materially uses the submitted interaction input.",
       "The screenshot is the sole authority for the visible answer. Do not inspect files, use tools, or infer hidden behavior.",
       "Choose grounded only when visible answer content depends materially on the submitted value, not merely when the answer is generically compatible with it.",
-      "When Submitted input contains a values array, choose grounded only when the visible answer materially uses every value. Return one visibleEvidence entry per submitted value, in the same order.",
+      "Choose grounded only when the visible answer materially uses every submitted semantic signal. Recursively expand values arrays, and treat every entry of a multi-select selected array as its own signal. Return one visibleEvidence entry per signal, in the same order.",
       "Choose not_grounded when the answer is visible but would say materially the same thing without the submitted value.",
       "Choose indeterminate when the screenshot does not expose enough of the answer to decide.",
       `Submitted input: ${JSON.stringify(options.submittedInput)}`,
@@ -193,7 +193,11 @@ export async function runInputGroundingJudge(options: {
 }
 
 function submittedValueCount(input: unknown): number {
-  return isRecord(input) && Array.isArray(input.values) ? input.values.length : 1;
+  if (isRecord(input) && Array.isArray(input.values)) {
+    return input.values.reduce((count, value) => count + submittedValueCount(value), 0);
+  }
+  if (isRecord(input) && Array.isArray(input.selected)) return input.selected.length;
+  return 1;
 }
 
 export function assertInputGroundingTrace(items: readonly ThreadItem[]): void {

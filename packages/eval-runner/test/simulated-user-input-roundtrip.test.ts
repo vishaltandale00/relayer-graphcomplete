@@ -256,9 +256,14 @@ describe("input round-trip grounding rating", () => {
     },
   );
 
-  it("requires one visible evidence item for every submitted value before rating a composite response grounded", async () => {
+  it("requires one visible evidence item for every nested selected signal before rating a composite response grounded", async () => {
     await expect(runInputGroundingJudge({
-      submittedInput: { values: [{ text: "Tuesday" }, { selected: [{ key: "canary", label: "Canary" }] }] },
+      submittedInput: {
+        values: [
+          { text: "Tuesday" },
+          { selected: [{ key: "logs", label: "Logs" }, { key: "synthetic", label: "Synthetic checks" }] },
+        ],
+      },
       screenshot: { screenshotId: "shot-2", threadRevision: "revision-3", imagePaths: ["/tmp/shot-2.png"] },
       codexPathOverride: "/managed/codex",
       workingDirectory: "/tmp/work",
@@ -271,8 +276,8 @@ describe("input round-trip grounding rating", () => {
             items: [{ id: "message-1", type: "agent_message", text: "structured" }],
             finalResponse: JSON.stringify({
               verdict: "grounded",
-              reason: "Only one value is visibly grounded.",
-              visibleEvidence: ["The visible node says Canary."],
+              reason: "The aggregate controls are visible, but one selected signal is not grounded.",
+              visibleEvidence: ["The visible node says Tuesday.", "The visible node says Logs."],
             }),
             usage: null,
           };

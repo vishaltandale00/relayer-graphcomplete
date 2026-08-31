@@ -517,6 +517,60 @@ fn preserves_actual_completion_status_without_inventing_acceptance() {
         Some(ExportAttemptOutcome::Cancelled)
     );
 
+    for (status, outcome) in [
+        (
+            ExportCompletionStatus::Accepted,
+            ExportAttemptOutcome::ModelFailed,
+        ),
+        (
+            ExportCompletionStatus::Accepted,
+            ExportAttemptOutcome::Running,
+        ),
+        (
+            ExportCompletionStatus::Running,
+            ExportAttemptOutcome::Accepted,
+        ),
+    ] {
+        let mut impossible = records();
+        let ConversationExportRecord::Turn(turn) = &mut impossible[1] else {
+            unreachable!()
+        };
+        turn.completion.status = status;
+        turn.completion.attempt_outcome = Some(outcome);
+        if status != ExportCompletionStatus::Accepted {
+            turn.accepted_view = None;
+        }
+        assert_rejected_with_parity(&impossible, "attempt_outcome_status_mismatch");
+    }
+
+    for (status, outcome) in [
+        (
+            ExportCompletionStatus::Accepted,
+            Some(ExportAttemptOutcome::Accepted),
+        ),
+        (ExportCompletionStatus::Accepted, None),
+        (
+            ExportCompletionStatus::Running,
+            Some(ExportAttemptOutcome::Running),
+        ),
+        (
+            ExportCompletionStatus::Failed,
+            Some(ExportAttemptOutcome::ModelFailed),
+        ),
+    ] {
+        let mut valid = records();
+        let ConversationExportRecord::Turn(turn) = &mut valid[1] else {
+            unreachable!()
+        };
+        turn.completion.status = status;
+        turn.completion.attempt_outcome = outcome;
+        if status != ExportCompletionStatus::Accepted {
+            turn.accepted_view = None;
+        }
+        validate_export_records(&valid).unwrap();
+        validate_incrementally(&valid).unwrap();
+    }
+
     let mut accepted_without_view = records();
     let ConversationExportRecord::Turn(turn) = &mut accepted_without_view[1] else {
         unreachable!()

@@ -889,6 +889,28 @@ async function writeJson(path, value) {
   });
 }
 
+export async function parseProductWriteResponse(
+  response,
+  { requireJson = false, requirePositiveInteractionId = false } = {},
+) {
+  let value;
+  try {
+    value = await response.json();
+  } catch (error) {
+    if (response.ok && requireJson) {
+      throw new Error("Input operator product response did not contain valid JSON.", { cause: error });
+    }
+  }
+  if (!response.ok) {
+    throw new Error(value?.error || `Input operator product request failed (${response.status}).`);
+  }
+  if (requirePositiveInteractionId
+    && (!Number.isSafeInteger(value?.id) || value.id < 1)) {
+    throw new Error("Input operator product response requires a positive interaction id.");
+  }
+  return value;
+}
+
 export async function persistInputRatingReceipt(context, receipt) {
   const nodeId = String(receipt.review?.nodeId ?? "");
   const presentingLayerId = String(receipt.review?.layerId ?? "");

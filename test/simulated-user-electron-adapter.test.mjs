@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { DEFAULT_SIMULATED_USER_RUBRIC } from "@relayer/eval-runner";
+import { DEFAULT_SIMULATED_USER_RUBRIC, InputOperatorController } from "@relayer/eval-runner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -25,6 +25,7 @@ import {
   groundingCaptureTargets,
   groundingRootNodeIds,
   operatorInteractionIsTerminal,
+  parseProductWriteResponse,
   persistInputRatingReceipt,
   resolveLocalSimulatedUserAutorun,
 } from "../desktop/eval-main/simulated-user-judge.mjs";
@@ -42,6 +43,59 @@ afterEach(async () => {
 });
 
 describe("local Electron simulated-user judge adapter", () => {
+  it("keeps Send retry identity for malformed or invalid successful JSON while accepting bodyless control revocation", async () => {
+    const occurrence = { presentingInteractionNodeId: 11, presentingLayerId: 12, actionId: 13 };
+    const action = { control: "text", prompt: "Name the constraint" };
+    const sendBodies = [];
+    let sendAttempts = 0;
+    const operator = new InputOperatorController({
+      authority: { kind: "scoped_product_write", threadId: "thread one", authorityId: "operator-test" },
+      createId: () => "stable-input-id",
+      transport: {
+        async request(path, request) {
+          if (path.endsWith("attachments")) {
+            return {
+              revision: 8,
+              attachments: [{ occurrence, action, value: request.body.value, draftRevision: 8 }],
+            };
+          }
+          sendBodies.push(request.body);
+          sendAttempts += 1;
+          return parseProductWriteResponse(new Response(
+            ['{"id":', '{}', 'null', '{"id":0}', '{"id":1.5}', '{"id":9007199254740992}', '{"id":99}'][sendAttempts - 1],
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          ), { requireJson: true, requirePositiveInteractionId: true });
+        },
+      },
+    });
+    const capture = operator.beginCapture({ occurrence, action, threadRevision: "thread-r1" });
+    operator.rateCapture({ ...capture, ratingId: "rating-1" });
+    await operator.commit({ captureId: capture.captureId, value: { text: "Exact" }, expectedRevision: 7 });
+
+    for (const expectedError of [
+      "valid JSON",
+      "positive interaction id",
+      "positive interaction id",
+      "positive interaction id",
+      "positive interaction id",
+      "positive interaction id",
+    ]) {
+      await expect(operator.send({})).rejects.toThrow(expectedError);
+      expect(operator.state()).toMatchObject({
+        committedDraftRevision: 8,
+        pendingSendInputId: "stable-input-id",
+      });
+    }
+    await expect(operator.send({})).resolves.toEqual({ id: 99 });
+    expect(sendBodies).toHaveLength(7);
+    expect(sendBodies).toEqual(sendBodies.map(() => (
+      { text: "", inputId: "stable-input-id", inputDraftRevision: 8 }
+    )));
+
+    await expect(parseProductWriteResponse(new Response(null, { status: 204 })))
+      .resolves.toBeUndefined();
+  });
+
   it("persists revision-one input ratings independently for reused nodes across presenting layers", async () => {
     const artifactDirectory = await temporaryDirectory();
     const context = {

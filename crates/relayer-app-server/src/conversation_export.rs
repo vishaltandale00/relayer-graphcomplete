@@ -939,6 +939,7 @@ fn validate_turn(
         ));
     }
     validate_materialized_turn_content(turn, path)?;
+    validate_completion_attempt_outcome(&turn.completion, path)?;
     require_string(
         &turn.completion.permission_profile_id,
         format!("{path}.completion.permissionProfileId"),
@@ -1151,6 +1152,26 @@ fn validate_turn(
         )),
         (_, None) => Ok(()),
     }
+}
+
+fn validate_completion_attempt_outcome(
+    completion: &ExportCompletionReceipt,
+    path: &str,
+) -> Result<(), ExportValidationError> {
+    let accepted_status = completion.status == ExportCompletionStatus::Accepted;
+    let accepted_outcome = completion.attempt_outcome == Some(ExportAttemptOutcome::Accepted);
+    let incompatible = match completion.attempt_outcome {
+        None => false,
+        Some(_) => accepted_status != accepted_outcome,
+    };
+    if incompatible {
+        return Err(ExportValidationError::new(
+            "attempt_outcome_status_mismatch",
+            format!("{path}.completion.attemptOutcome"),
+            "An accepted attempt outcome belongs only to an accepted completion, and an accepted completion cannot report a different terminal or running attempt outcome.",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_materialized_turn_content(

@@ -29,6 +29,7 @@ import {
   createLocalSimulatedUserJudgeRunner,
   groundingCaptureTargets,
   operatorInteractionIsTerminal,
+  parseProductWriteResponse,
   releaseInputOperatorLease,
   resolveLocalSimulatedUserAutorun,
 } from "./simulated-user-judge.mjs";
@@ -622,7 +623,7 @@ async function createScopedInputOperator(session, { context, inputBindings }) {
 async function controlProductRequest(session, path, request) {
   const cookie = session.cookie;
   if (!cookie) throw new Error("Relayer Eval product control authority is unavailable.");
-  return productWriteRequest(session, path, request, `${cookie.name}=${cookie.value}`);
+  return productWriteRequest(session, path, request, `${cookie.name}=${cookie.value}`, { requireJson: false });
 }
 
 async function operatorProductRequest(session, token, path, request) {
@@ -633,10 +634,14 @@ async function operatorProductRequest(session, token, path, request) {
     path,
     request,
     `${cookie.name}=${cookie.value}; relayer_input_operator=${token}`,
+    {
+      requireJson: true,
+      requirePositiveInteractionId: request.method === "POST" && path.endsWith("/interactions"),
+    },
   );
 }
 
-async function productWriteRequest(session, path, request, cookieHeader) {
+async function productWriteRequest(session, path, request, cookieHeader, responseOptions) {
   const response = await fetch(new URL(path, session.origin), {
     method: request.method,
     headers: {
@@ -646,9 +651,7 @@ async function productWriteRequest(session, path, request, cookieHeader) {
     },
     ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
   });
-  const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(value?.error || `Input operator product request failed (${response.status}).`);
-  return value;
+  return parseProductWriteResponse(response, responseOptions);
 }
 
 async function captureInputRoundTripEvidence(session, { context, topology, operatorTrace, artifactDirectory }) {
