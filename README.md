@@ -339,6 +339,21 @@ npm run check
 npm run build
 ```
 
+### Running the desktop apps on Linux (development only)
+
+The unsigned `Relayer Dev` and `Relayer Eval` builds also run on `linux-x64` for
+development. `npm run desktop:dev` and `npm run eval-app:dev` resolve the managed
+Codex/Claude runtimes for the Linux host (Codex ships an `x86_64-unknown-linux-musl`
+build; Claude installs `@anthropic-ai/claude-agent-sdk-linux-x64`). Prime Agent stays
+unavailable on Linux, exactly as on Windows, because its bounded Ask/Auto modes
+require the macOS boundary. Linux is a development host only; signed release targets
+remain macOS (Apple Silicon/Intel) and Windows x64 per [ADR 0002](docs/decisions/0002-desktop-release-contract.md).
+
+Electron needs a display and a usable Chromium sandbox. In a headless container,
+run under an X server (for example `DISPLAY=:1`) and make the bundled
+`chrome-sandbox` setuid-root (`sudo chown root:root` and `chmod 4755` on
+`node_modules/electron/dist/chrome-sandbox`).
+
 ## License
 
 Apache-2.0
