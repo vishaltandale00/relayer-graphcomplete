@@ -354,12 +354,15 @@ impl SqliteProductStore {
         &self,
         interaction_id: crate::product::InteractionId,
     ) -> Result<Option<DurableInteractionInput>, StorageError> {
-        let header: Option<(Option<String>, Option<String>, Option<String>)> =
-            sqlx::query_as("SELECT interaction.input_identity,interaction.input_digest,attempt.semantic_digest FROM interactions interaction LEFT JOIN interaction_submitted_input_attempts attempt ON attempt.interaction_id=interaction.id WHERE interaction.id=?1")
+        type InteractionInputHeader = (Option<String>, Option<String>, Option<i64>, Option<String>);
+        let header: Option<InteractionInputHeader> =
+            sqlx::query_as("SELECT interaction.input_identity,interaction.input_digest,attempt.draft_revision,attempt.semantic_digest FROM interactions interaction LEFT JOIN interaction_submitted_input_attempts attempt ON attempt.interaction_id=interaction.id WHERE interaction.id=?1")
                 .bind(interaction_id.value())
                 .fetch_optional(&self.pool)
                 .await?;
-        let Some((input_identity, input_digest, semantic_digest)) = header else {
+        let Some((input_identity, input_digest, submitted_input_draft_revision, semantic_digest)) =
+            header
+        else {
             return Ok(None);
         };
         let (input_identity, input_digest) = match (input_identity, input_digest) {
@@ -402,6 +405,7 @@ impl SqliteProductStore {
             input_digest,
             contexts,
             submitted_inputs,
+            submitted_input_draft_revision,
             semantic_digest,
         }))
     }

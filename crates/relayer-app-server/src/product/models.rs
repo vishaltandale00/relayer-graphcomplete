@@ -120,6 +120,7 @@ pub(crate) struct DurableInteractionInput {
     pub(crate) input_digest: String,
     pub(crate) contexts: Vec<InteractionContextIntent>,
     pub(crate) submitted_inputs: Vec<relayer_graph_core::SubmittedInputDraft>,
+    pub(crate) submitted_input_draft_revision: Option<i64>,
     pub(crate) semantic_digest: Option<String>,
 }
 
@@ -157,7 +158,7 @@ pub(crate) struct NodeContextDraftConfirmation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", untagged)]
+#[serde(rename_all = "camelCase", untagged, deny_unknown_fields)]
 pub(crate) enum ActionInputValue {
     Text {
         text: String,

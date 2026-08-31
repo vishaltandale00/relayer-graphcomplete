@@ -1267,6 +1267,7 @@ mod tests {
                 input_digest: "sha256:retry-input".into(),
                 contexts,
                 submitted_inputs: vec![],
+                submitted_input_draft_revision: None,
                 semantic_digest: None,
             })
         );

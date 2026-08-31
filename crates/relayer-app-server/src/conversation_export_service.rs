@@ -1756,6 +1756,7 @@ mod tests {
                 annotations: vec!["Compare /workspace/project/private.txt".into()],
             }],
             submitted_inputs: vec![],
+            submitted_input_draft_revision: None,
             semantic_digest: None,
         });
 

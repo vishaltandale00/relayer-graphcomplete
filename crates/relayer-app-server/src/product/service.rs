@@ -1143,10 +1143,16 @@ impl ProductService {
                         "existing identified interaction lost its durable input".into(),
                     )
                 })?;
+            let submitted_input_draft_matches = if durable.submitted_inputs.is_empty() {
+                durable.submitted_input_draft_revision.is_none()
+            } else {
+                durable.submitted_input_draft_revision == command.input_draft_revision
+            };
             if existing.text != command.text
                 || durable.contexts != command.contexts
                 || command.model_selection.is_some()
                     && existing.model_selection.as_ref() != command.model_selection
+                || !submitted_input_draft_matches
             {
                 return Err(ProductError::Invalid(
                     "interaction input identity was reused with different content".into(),
@@ -2621,6 +2627,130 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static MANAGED_POLICY_TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[tokio::test]
+    async fn identified_send_replay_rejects_a_different_committed_input_draft() {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = SqliteProductStore::open(directory.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        let thread = storage
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Replay input authority",
+                project_id: None,
+                initial_message: "Initial",
+                harness_configuration_name: "fixture-task-system",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "2026-08-31T00:00:00Z",
+            })
+            .await
+            .unwrap();
+        let service = ProductService::new(storage.clone(), false);
+        let occurrence = relayer_graph_core::PresentingInputOccurrence {
+            presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+            presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+            action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+        };
+        let action = relayer_graph_core::InputAction {
+            control: relayer_graph_core::InputControl::Text,
+            prompt: "Deployment window".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        };
+        let first_value = crate::product::ActionInputValue::Text {
+            text: "Saturday 02:00 UTC".into(),
+        };
+        let first_draft = storage
+            .commit_action_input_attachment(
+                thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &first_value,
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        let send = || CreateIdentifiedInteractionCommand {
+            text: "Prepare the deployment plan",
+            input_identity: "send:stable-replay",
+            contexts: &[],
+            context_snapshots: &[],
+            context_confirmation_ids: &[],
+            input_draft_revision: Some(first_draft.revision),
+            model_selection: None,
+            allow_unselected_model: true,
+        };
+        let created = service
+            .create_identified_interaction(thread.id, send())
+            .await
+            .unwrap();
+        let created_id = match created {
+            crate::storage::InteractionInputInsertOutcome::Created(interaction) => interaction.id,
+            crate::storage::InteractionInputInsertOutcome::Existing(_) => {
+                panic!("first Send must create the identified interaction")
+            }
+        };
+        let exact_replay = service
+            .create_identified_interaction(thread.id, send())
+            .await
+            .unwrap();
+        assert!(matches!(
+            exact_replay,
+            crate::storage::InteractionInputInsertOutcome::Existing(interaction)
+                if interaction.id == created_id
+        ));
+
+        let empty_draft = service.action_input_draft(thread.id).await.unwrap();
+        let second_value = crate::product::ActionInputValue::Text {
+            text: "Sunday 03:00 UTC".into(),
+        };
+        let second_draft = storage
+            .commit_action_input_attachment(
+                thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &second_value,
+                },
+                empty_draft.revision,
+            )
+            .await
+            .unwrap();
+        let error = service
+            .create_identified_interaction(
+                thread.id,
+                CreateIdentifiedInteractionCommand {
+                    input_draft_revision: Some(second_draft.revision),
+                    ..send()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ProductError::Invalid(message)
+                if message == "interaction input identity was reused with different content"
+        ));
+        let original_replay = service
+            .create_identified_interaction(thread.id, send())
+            .await
+            .unwrap();
+        assert!(matches!(
+            original_replay,
+            crate::storage::InteractionInputInsertOutcome::Existing(interaction)
+                if interaction.id == created_id
+        ));
+        assert_eq!(
+            service.action_input_draft(thread.id).await.unwrap(),
+            second_draft
+        );
+    }
 
     #[test]
     fn input_send_reserves_only_the_exact_inspected_draft_revision() {

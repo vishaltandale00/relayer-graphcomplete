@@ -191,3 +191,69 @@ pub(super) async fn detach(
             .into(),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CommitActionInputRequest;
+    use crate::product::ActionInputValue;
+    use serde_json::json;
+
+    fn commit_request(value: serde_json::Value) -> serde_json::Value {
+        json!({
+            "occurrence": {
+                "presentingInteractionNodeId": 11,
+                "presentingLayerId": 12,
+                "actionId": 13
+            },
+            "value": value,
+            "expectedRevision": 0
+        })
+    }
+
+    #[test]
+    fn committed_input_value_rejects_mixed_text_and_selection_fields() {
+        assert!(
+            serde_json::from_value::<CommitActionInputRequest>(commit_request(json!({
+                "text": "Tonight",
+                "selectedKeys": ["canary"]
+            })))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn committed_input_value_rejects_unknown_nested_fields() {
+        for value in [
+            json!({ "text": "Tonight", "texxt": "misspelled" }),
+            json!({ "selectedKeys": ["canary"], "selectedKey": "misspelled" }),
+        ] {
+            assert!(
+                serde_json::from_value::<CommitActionInputRequest>(commit_request(value)).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn committed_input_value_accepts_exact_text_and_selection_shapes() {
+        let text: CommitActionInputRequest =
+            serde_json::from_value(commit_request(json!({ "text": "Tonight" })))
+                .expect("exact text input should parse");
+        assert_eq!(
+            text.value,
+            ActionInputValue::Text {
+                text: "Tonight".into()
+            }
+        );
+
+        let selected: CommitActionInputRequest = serde_json::from_value(commit_request(json!({
+            "selectedKeys": ["canary", "logs"]
+        })))
+        .expect("exact selected input should parse");
+        assert_eq!(
+            selected.value,
+            ActionInputValue::Selected {
+                selected_keys: vec!["canary".into(), "logs".into()]
+            }
+        );
+    }
+}
