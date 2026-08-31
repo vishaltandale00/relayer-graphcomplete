@@ -1144,7 +1144,11 @@ impl ProductService {
                     )
                 })?;
             let submitted_input_draft_matches = if durable.submitted_inputs.is_empty() {
-                durable.submitted_input_draft_revision.is_none()
+                let current_draft = self.storage.action_input_draft(thread_id).await?;
+                current_draft.attachments.is_empty()
+                    || command
+                        .input_draft_revision
+                        .is_some_and(|revision| revision != current_draft.revision)
             } else {
                 durable.submitted_input_draft_revision == command.input_draft_revision
             };
@@ -2749,6 +2753,80 @@ mod tests {
         assert_eq!(
             service.action_input_draft(thread.id).await.unwrap(),
             second_draft
+        );
+
+        let empty_thread = storage
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Empty replay input authority",
+                project_id: None,
+                initial_message: "Initial",
+                harness_configuration_name: "fixture-task-system",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "2026-08-31T00:00:00Z",
+            })
+            .await
+            .unwrap();
+        let empty_send = || CreateIdentifiedInteractionCommand {
+            text: "Prepare without committed inputs",
+            input_identity: "send:empty-replay",
+            contexts: &[],
+            context_snapshots: &[],
+            context_confirmation_ids: &[],
+            input_draft_revision: Some(0),
+            model_selection: None,
+            allow_unselected_model: true,
+        };
+        let empty_created = service
+            .create_identified_interaction(empty_thread.id, empty_send())
+            .await
+            .unwrap();
+        let empty_created_id = match empty_created {
+            crate::storage::InteractionInputInsertOutcome::Created(interaction) => interaction.id,
+            crate::storage::InteractionInputInsertOutcome::Existing(_) => {
+                panic!("first empty Send must create the identified interaction")
+            }
+        };
+        let new_draft = storage
+            .commit_action_input_attachment(
+                empty_thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &first_value,
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        let error = service
+            .create_identified_interaction(
+                empty_thread.id,
+                CreateIdentifiedInteractionCommand {
+                    input_draft_revision: Some(new_draft.revision),
+                    ..empty_send()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ProductError::Invalid(message)
+                if message == "interaction input identity was reused with different content"
+        ));
+        let empty_original_replay = service
+            .create_identified_interaction(empty_thread.id, empty_send())
+            .await
+            .unwrap();
+        assert!(matches!(
+            empty_original_replay,
+            crate::storage::InteractionInputInsertOutcome::Existing(interaction)
+                if interaction.id == empty_created_id
+        ));
+        assert_eq!(
+            service.action_input_draft(empty_thread.id).await.unwrap(),
+            new_draft
         );
     }
 
