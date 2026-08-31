@@ -6,8 +6,11 @@ import {
 import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
 import {
   providerOnboardingCompletionIntent,
+  providerOnboardingRecoveryAction,
+  createProviderOnboardingProjectionGate,
   createProviderConnectionCancellationState,
   reconcileProviderOnboardingState,
+  resolveProviderOnboardingStep,
   resumableProviderDefinitions,
   setProviderOnboardingControlsBusy,
 } from "./provider-onboarding-model.js";
@@ -28,6 +31,7 @@ let connectedDefinition;
 let onboardingHarness;
 let onboardingFamilyIntent;
 let onboardingProjection;
+const onboardingProjectionGate = createProviderOnboardingProjectionGate();
 let bound = false;
 const connectionCancellation = createProviderConnectionCancellationState();
 let refreshProductAfterOnboarding = async () => {};
@@ -206,17 +210,30 @@ function renderOnboardingChoices({ focus } = {}) {
     ? onboardingFamilyOptionsMarkup(harness, onboardingFamilyIntent ?? {})
     : `<p class="field-error" role="alert">${onboardingProjection.blockingReason?.message ?? "Choose a compatible harness to continue."}</p>`;
   $("#finishProviderSetup").disabled = !finishIntentValid();
+  const recovery = providerOnboardingRecoveryAction(onboardingProjection);
+  const recoveryButton = $("#refreshOnboardingProviderModels");
+  recoveryButton.classList.toggle("hidden", recovery === null);
+  recoveryButton.textContent = recovery?.label ?? "Refresh models and set up defaults";
   bindOnboardingChoices({ focus });
 }
 
 async function prepareFamilyStep(definition, { preserveIntent = false } = {}) {
   if (!productApiAvailable) return completeOnboarding();
-  if (!preserveIntent) {
-    const declaredDefault = await completeDefaultProviderOnboarding(definition.id);
-    if (declaredDefault) return completeOnboarding();
-  }
+  const providerId = definition.id;
+  const request = onboardingProjectionGate.begin(providerId);
+  const step = await resolveProviderOnboardingStep({
+    gate: onboardingProjectionGate,
+    request,
+    providerId,
+    activeProviderId: () => connectedDefinition?.id,
+    preserveIntent,
+    completeDefault: completeDefaultProviderOnboarding,
+    loadProjection: loadProviderOnboardingProjection,
+  });
+  if (step.kind === "stale") return;
+  if (step.kind === "complete") return completeOnboarding();
   const previous = preserveIntent ? { harnessId: onboardingHarness, family: onboardingFamilyIntent } : null;
-  onboardingProjection = await loadProviderOnboardingProjection(definition.id);
+  onboardingProjection = step.projection;
   const reconciled = reconcileProviderOnboardingState(onboardingProjection, previous);
   onboardingHarness = reconciled.harnessId;
   onboardingFamilyIntent = reconciled.family;
@@ -324,6 +341,23 @@ function bindProviderSetup() {
       setBusy(false);
     }
     if (blockingError) focusRequiredOnboardingChoice();
+  };
+  $("#refreshOnboardingProviderModels").onclick = async () => {
+    const providerId = onboardingProjection?.provider?.id;
+    if (!providerId) return;
+    setBusy(true);
+    try {
+      await desktop.models.refresh(providerId);
+      providerStatus = await desktop.providers.status();
+      const refreshedDefinition = providerStatus.definitions.find(({ id }) => String(id) === String(providerId));
+      if (!refreshedDefinition) throw new Error("The refreshed provider is no longer available.");
+      connectedDefinition = refreshedDefinition;
+      await prepareFamilyStep(refreshedDefinition);
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setBusy(false);
+    }
   };
 }
 

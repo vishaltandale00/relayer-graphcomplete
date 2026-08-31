@@ -650,9 +650,64 @@ describe("CodexBasicHarness", () => {
       expect(submitted?.environment.OPENAI_BASE_URL).toBe("https://api.openai.test/v1");
       expect(submitted?.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
       expect(submitted?.environment).not.toHaveProperty("CODEX_HOME");
+      expect(submitted?.threadParams).toMatchObject({
+        modelProvider: "relayer_execution_provider",
+        config: {
+          model_providers: {
+            relayer_execution_provider: {
+              name: "Relayer execution provider",
+              base_url: "https://api.openai.test/v1",
+              env_key: "OPENAI_API_KEY",
+              wire_api: "responses",
+              requires_openai_auth: false,
+              supports_websockets: false,
+            },
+          },
+        },
+      });
+      expect(JSON.stringify(submitted?.threadParams)).not.toContain("selected-secret");
+      expect(submitted?.codexConfigOverrides).toEqual([
+        'model_provider="relayer_execution_provider"',
+        'model_providers.relayer_execution_provider.name="Relayer execution provider"',
+        'model_providers.relayer_execution_provider.base_url="https://api.openai.test/v1"',
+        'model_providers.relayer_execution_provider.env_key="OPENAI_API_KEY"',
+        'model_providers.relayer_execution_provider.wire_api="responses"',
+        "model_providers.relayer_execution_provider.requires_openai_auth=false",
+        "model_providers.relayer_execution_provider.supports_websockets=false",
+        'shell_environment_policy.inherit="all"',
+        "shell_environment_policy.ignore_default_excludes=true",
+        'shell_environment_policy.filters.OPENAI_API_KEY="exclude"',
+        'shell_environment_policy.filters.OPENAI_BASE_URL="exclude"',
+      ]);
+      expect(JSON.stringify(submitted?.codexConfigOverrides)).not.toContain("selected-secret");
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it.each(["openrouter", "vercel-ai-router"])("rejects %s before starting Codex", async (adapterId) => {
+    const runAppServerTurn = vi.fn();
+    const harness = harnessFixture("auto", runAppServerTurn);
+
+    await expect(harness.complete({
+      ...runContext(1, "token"),
+      model: {
+        providerId: `${adapterId}-provider`,
+        adapterId,
+        modelId: "provider/model",
+      },
+      access: {
+        kind: "secret",
+        contract: "secret@1",
+        providerId: `${adapterId}-provider`,
+        adapterId,
+        adapterImplementationVersion: "1",
+        endpoint: "https://provider.test/v1",
+        fields: { "api-key": "selected-secret" },
+      },
+    })).rejects.toThrow(`codex.basic cannot run provider adapter ${adapterId}`);
+
+    expect(runAppServerTurn).not.toHaveBeenCalled();
   });
 
   it("uses the managed Codex runtime attached to secret provider access", async () => {
