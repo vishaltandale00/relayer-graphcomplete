@@ -88,6 +88,11 @@ describe("first-message composer integration", () => {
       "fixture-task-system",
     ]);
     expect(modelSettings.families).toEqual([
+      expect.objectContaining({
+        kind: "system",
+        name: "Codex defaults",
+        managedPolicy: expect.objectContaining({ providerId: "codex", policyId: "codex-default-family" }),
+      }),
       expect.objectContaining({ id: fixtureFamily.id, kind: "custom", name: "Fixture models" }),
     ]);
     expect(modelSettings.harnesses.find(({ id }) => id === "codex-basic").available).toBe(false);

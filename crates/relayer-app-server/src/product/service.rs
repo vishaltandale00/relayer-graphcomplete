@@ -204,13 +204,6 @@ impl ProductService {
             )
             .into());
         }
-        if !snapshot.models.iter().any(|model| model.visible) {
-            return Err(super::CatalogError::invalid(
-                "provider_catalog_empty",
-                "A provider must expose at least one visible model before it can be created.",
-            )
-            .into());
-        }
         let managed_policy = self
             .apply_default_harness_family_policy(&definition, &mut snapshot)
             .await?;
@@ -659,8 +652,9 @@ impl ProductService {
         let policy = settings
             .harnesses
             .iter()
-            .find(|harness| harness.id == settings.defaults.harness_id)
-            .and_then(|harness| harness.family_policy.clone());
+            .filter_map(|harness| harness.family_policy.clone())
+            .find(|policy| super::model_policy::applies_to_adapter(policy, &definition.adapter_id))
+            .or_else(|| super::model_policy::fallback_for_adapter(&definition.adapter_id));
         let Some(policy) = policy.filter(|policy| {
             super::model_policy::applies_to_adapter(policy, &definition.adapter_id)
         }) else {
@@ -679,20 +673,14 @@ impl ProductService {
             }
         };
         if members.is_empty() {
-            let error = super::CatalogError::invalid(
-                "family_policy_empty",
-                format!(
-                    "Model-family policy {}@{} did not resolve any visible default models.",
-                    policy.id, policy.version
-                ),
-            );
-            eprintln!(
-                "managed family policy {}@{} for provider {} produced no members; the prior family/default remains and the next refresh will retry",
-                policy.id,
-                policy.version,
-                snapshot.provider_id.as_str()
-            );
-            return Err(error.into());
+            // A valid connection can expose only non-agent models. Persist its diagnostic
+            // catalog without creating or replacing a managed family; a later eligible
+            // refresh materializes the family under this same policy identity.
+            snapshot.unavailable_reason = Some(super::UnavailableReason {
+                code: "provider_no_eligible_execution_models".into(),
+                message: "This provider is connected but has no models eligible for agent execution. Refresh its catalog or update the provider connection.".into(),
+            });
+            return Ok(Some(policy));
         }
         snapshot.system_family = Some(SystemFamilySnapshot {
             key: format!("{}@{}", policy.id, policy.version),
@@ -2228,7 +2216,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn staged_provider_requires_connected_catalog_with_a_visible_model() {
+    async fn staged_provider_requires_a_connected_catalog_and_preserves_hidden_only_recovery() {
         let (path, storage, service) = managed_policy_service(1).await;
         let (definition, snapshot) = staged_codex_catalog();
 
@@ -2251,21 +2239,24 @@ mod tests {
         for model in &mut hidden.models {
             model.visible = false;
         }
-        assert!(
-            service
-                .create_provider_with_catalog(definition, hidden)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("at least one visible model")
-        );
-        assert!(
-            service
-                .provider_definitions()
-                .await
-                .unwrap()
-                .iter()
-                .all(|provider| provider.id.as_str() != "onboarding-codex")
+        service
+            .create_provider_with_catalog(definition, hidden)
+            .await
+            .unwrap();
+        let created = service
+            .model_settings()
+            .await
+            .unwrap()
+            .providers
+            .into_iter()
+            .find(|provider| provider.id.as_str() == "onboarding-codex")
+            .unwrap();
+        assert_eq!(
+            created
+                .unavailable_reason
+                .as_ref()
+                .map(|reason| reason.code.as_str()),
+            Some("provider_no_eligible_execution_models")
         );
 
         drop(service);
@@ -2326,15 +2317,35 @@ mod tests {
         for model in &mut empty_policy_output.models {
             model.provider_default = false;
         }
-        assert!(
-            service
-                .publish_provider_catalog(empty_policy_output)
-                .await
-                .is_err()
-        );
+        service
+            .publish_provider_catalog(empty_policy_output)
+            .await
+            .unwrap();
         assert_eq!(
             service.model_settings().await.unwrap().defaults.family_id,
             Some(first_default)
+        );
+        assert!(
+            service
+                .model_settings()
+                .await
+                .unwrap()
+                .families
+                .iter()
+                .all(|family| family.id != first_default)
+        );
+        service
+            .publish_provider_catalog(snapshot.clone())
+            .await
+            .unwrap();
+        assert!(
+            service
+                .model_settings()
+                .await
+                .unwrap()
+                .families
+                .iter()
+                .any(|family| family.id == first_default && family.enabled)
         );
 
         storage
@@ -2493,6 +2504,15 @@ mod tests {
             .create_provider_with_catalog(custom_definition, custom_snapshot)
             .await
             .unwrap();
+        let openai_settings = service.model_settings().await.unwrap();
+        assert!(openai_settings.families.iter().any(|family| {
+            family.members.iter().any(|member| {
+                member.provider_id.as_str() == "custom-openai" && member.model_id == "default"
+            }) && family.managed_policy.as_ref().is_some_and(|policy| {
+                policy.policy_id == super::super::model_policy::PROVIDER_DEFAULT_FAMILY_POLICY_ID
+                    && policy.policy_version == 1
+            })
+        }));
         service
             .update_model_settings_defaults(UpdateModelSettingsDefaultsCommand {
                 harness_id: None,
@@ -2524,6 +2544,415 @@ mod tests {
                 .as_ref()
                 .is_some_and(|policy| policy.policy_version == 2)
         }));
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn settings_added_claude_gets_a_managed_family_without_changing_codex_defaults() {
+        let (path, storage, service) = managed_policy_service(1).await;
+        let (codex_definition, codex_snapshot) = staged_codex_catalog();
+        service
+            .create_provider_with_catalog(codex_definition, codex_snapshot)
+            .await
+            .unwrap();
+        let codex_settings = service.model_settings().await.unwrap();
+        let codex_family = codex_settings
+            .families
+            .iter()
+            .find(|family| {
+                family
+                    .members
+                    .iter()
+                    .any(|member| member.provider_id.as_str() == "onboarding-codex")
+            })
+            .unwrap()
+            .id;
+        service
+            .update_model_settings_defaults(UpdateModelSettingsDefaultsCommand {
+                harness_id: Some("codex-basic".into()),
+                provider_id: Some(ProviderId::parse("onboarding-codex").unwrap()),
+                family_id: Some(codex_family),
+            })
+            .await
+            .unwrap();
+
+        let claude_id = ProviderId::parse("settings-claude").unwrap();
+        let claude_snapshot = ProviderCatalogSnapshot {
+            provider_id: claude_id.clone(),
+            label: "Settings Claude".into(),
+            connected: true,
+            unavailable_reason: None,
+            models: ["sonnet", "opus", "fable"]
+                .into_iter()
+                .enumerate()
+                .map(|(order, id)| CatalogModelSnapshot {
+                    id: id.into(),
+                    label: id.into(),
+                    order,
+                    visible: true,
+                    available: true,
+                    unavailable_reason: None,
+                    provider_default: id == "sonnet",
+                    replacement_model_id: None,
+                    metadata: serde_json::json!({}),
+                })
+                .collect(),
+            system_family: None,
+        };
+        service
+            .create_provider_with_catalog(
+                ProviderDefinition {
+                    id: claude_id.clone(),
+                    adapter_id: "claude-subscription".into(),
+                    label: "Settings Claude".into(),
+                    endpoint: None,
+                    access_contract: "managed-runtime@1".into(),
+                    credential_reference: None,
+                    lifecycle_state: "active".into(),
+                    removed_at: None,
+                },
+                claude_snapshot.clone(),
+            )
+            .await
+            .unwrap();
+        service
+            .publish_provider_catalog(claude_snapshot)
+            .await
+            .unwrap();
+
+        let settings = service.model_settings().await.unwrap();
+        assert_eq!(settings.defaults.harness_id, "codex-basic");
+        assert_eq!(settings.defaults.provider_id.as_str(), "onboarding-codex");
+        assert_eq!(settings.defaults.family_id, Some(codex_family));
+        assert!(settings.families.iter().any(|family| {
+            family
+                .members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>()
+                == vec!["sonnet", "opus", "fable"]
+                && family
+                    .members
+                    .iter()
+                    .all(|member| member.provider_id == claude_id)
+        }));
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn openai_api_default_onboarding_selects_its_managed_family_without_custom_setup() {
+        let (path, storage, service) = managed_policy_service(1).await;
+        let (mut definition, mut snapshot) = staged_codex_catalog();
+        definition.id = ProviderId::parse("onboarding-openai").unwrap();
+        definition.adapter_id = "openai-api".into();
+        definition.label = "Onboarding OpenAI".into();
+        definition.endpoint = Some("https://api.openai.com/v1".into());
+        definition.access_contract = "secret@1".into();
+        definition.credential_reference = Some("provider:onboarding-openai".into());
+        snapshot.provider_id = definition.id.clone();
+        snapshot.label = definition.label.clone();
+        snapshot.system_family = None;
+        service
+            .create_provider_with_catalog(definition, snapshot)
+            .await
+            .unwrap();
+
+        let completion = service
+            .complete_default_provider_onboarding(
+                &ProviderId::parse("onboarding-openai").unwrap(),
+                "codex-basic",
+                &HashSet::from(["codex-basic".to_owned()]),
+            )
+            .await
+            .unwrap()
+            .expect("OpenAI API has one automatic Codex route");
+
+        assert_eq!(completion.defaults.harness_id, "codex-basic");
+        assert_eq!(
+            completion.defaults.provider_id.as_str(),
+            "onboarding-openai"
+        );
+        assert_eq!(
+            completion.defaults.family_id,
+            Some(completion.resolution.family_id)
+        );
+        assert_eq!(
+            completion
+                .resolution
+                .resolvable_members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["default", "second"]
+        );
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn connected_policy_ineligible_api_provider_recovers_a_managed_family_after_refresh() {
+        let (path, storage, service) = managed_policy_service(1).await;
+        let (codex_definition, codex_snapshot) = staged_codex_catalog();
+        service
+            .create_provider_with_catalog(codex_definition, codex_snapshot)
+            .await
+            .unwrap();
+        let codex_settings = service.model_settings().await.unwrap();
+        let codex_family = codex_settings
+            .families
+            .iter()
+            .find(|family| {
+                family
+                    .members
+                    .iter()
+                    .any(|member| member.provider_id.as_str() == "onboarding-codex")
+            })
+            .unwrap()
+            .id;
+        service
+            .update_model_settings_defaults(UpdateModelSettingsDefaultsCommand {
+                harness_id: Some("codex-basic".into()),
+                provider_id: Some(ProviderId::parse("onboarding-codex").unwrap()),
+                family_id: Some(codex_family),
+            })
+            .await
+            .unwrap();
+        let provider_id = ProviderId::parse("recovering-openrouter").unwrap();
+        let definition = ProviderDefinition {
+            id: provider_id.clone(),
+            adapter_id: "openrouter".into(),
+            label: "Recovering OpenRouter".into(),
+            endpoint: Some("https://openrouter.ai/api/v1".into()),
+            access_contract: "secret@1".into(),
+            credential_reference: Some("provider:recovering-openrouter".into()),
+            lifecycle_state: "active".into(),
+            removed_at: None,
+        };
+        let unmatched_model = CatalogModelSnapshot {
+            id: "other/custom-text-model".into(),
+            label: "Custom text model".into(),
+            order: 0,
+            visible: true,
+            available: true,
+            unavailable_reason: None,
+            provider_default: false,
+            replacement_model_id: None,
+            metadata: serde_json::json!({}),
+        };
+        let reviewed_model = CatalogModelSnapshot {
+            id: "deepseek/deepseek-v4-pro-0813".into(),
+            label: "DeepSeek V4 Pro".into(),
+            order: 0,
+            visible: true,
+            available: true,
+            unavailable_reason: None,
+            provider_default: true,
+            replacement_model_id: None,
+            metadata: serde_json::json!({}),
+        };
+        service
+            .create_provider_with_catalog(
+                definition,
+                ProviderCatalogSnapshot {
+                    provider_id: provider_id.clone(),
+                    label: "Recovering OpenRouter".into(),
+                    connected: true,
+                    unavailable_reason: None,
+                    models: vec![reviewed_model.clone()],
+                    system_family: None,
+                },
+            )
+            .await
+            .unwrap();
+        let original_family_id = service
+            .model_settings()
+            .await
+            .unwrap()
+            .families
+            .into_iter()
+            .find(|family| {
+                family
+                    .members
+                    .iter()
+                    .any(|member| member.provider_id == provider_id)
+            })
+            .unwrap()
+            .id;
+        service
+            .publish_provider_catalog(ProviderCatalogSnapshot {
+                provider_id: provider_id.clone(),
+                label: "Recovering OpenRouter".into(),
+                connected: true,
+                unavailable_reason: None,
+                models: vec![unmatched_model.clone()],
+                system_family: None,
+            })
+            .await
+            .unwrap();
+
+        drop(service);
+        drop(storage);
+        let storage = SqliteProductStore::open(&path).await.unwrap();
+        let service = ProductService::new(storage.clone(), true);
+
+        let before = service.model_settings().await.unwrap();
+        assert!(before.providers.iter().any(|provider| {
+            provider.id == provider_id
+                && provider.connected
+                && provider
+                    .unavailable_reason
+                    .as_ref()
+                    .is_some_and(|reason| reason.code == "provider_no_eligible_execution_models")
+        }));
+        assert!(
+            before
+                .families
+                .iter()
+                .all(|family| family.id != original_family_id)
+        );
+        let blocked = service
+            .provider_onboarding_projection(
+                &provider_id,
+                "codex-basic",
+                &HashSet::from(["codex-basic".to_owned(), "prime-agent-basic".to_owned()]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            blocked
+                .blocking_reason
+                .as_ref()
+                .map(|reason| reason.code.as_str()),
+            Some("provider_no_eligible_execution_models")
+        );
+
+        service
+            .publish_provider_catalog(ProviderCatalogSnapshot {
+                provider_id: provider_id.clone(),
+                label: "Recovering OpenAI".into(),
+                connected: true,
+                unavailable_reason: None,
+                models: vec![
+                    unmatched_model,
+                    CatalogModelSnapshot {
+                        order: 1,
+                        ..reviewed_model
+                    },
+                ],
+                system_family: None,
+            })
+            .await
+            .unwrap();
+
+        let recovered = service.model_settings().await.unwrap();
+        assert_eq!(recovered.defaults, before.defaults);
+        assert!(recovered.providers.iter().any(|provider| {
+            provider.id == provider_id
+                && provider.connected
+                && provider.unavailable_reason.is_none()
+        }));
+        assert!(recovered.families.iter().any(|family| {
+            family.id == original_family_id
+                && family.enabled
+                && family.members.iter().any(|member| {
+                    member.provider_id == provider_id
+                        && member.model_id == "deepseek/deepseek-v4-pro-0813"
+                })
+        }));
+        let projection = service
+            .provider_onboarding_projection(
+                &provider_id,
+                "codex-basic",
+                &HashSet::from(["codex-basic".to_owned(), "prime-agent-basic".to_owned()]),
+            )
+            .await
+            .unwrap();
+        assert!(projection.blocking_reason.is_none());
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn every_api_adapter_materializes_a_provider_scoped_managed_family() {
+        let (path, storage, service) = managed_policy_service(1).await;
+        for (adapter_id, model_id, access_contract) in [
+            ("openai-api", "gpt-5.4", "secret@1"),
+            ("anthropic-api", "claude-sonnet-4-20250514", "secret@1"),
+            ("openrouter", "deepseek/deepseek-v4-pro-0813", "secret@1"),
+            (
+                "vercel-ai-router",
+                "deepseek/deepseek-v4-pro-0813",
+                "secret@1",
+            ),
+        ] {
+            let provider_id = ProviderId::parse(format!("family-{adapter_id}")).unwrap();
+            service
+                .create_provider_with_catalog(
+                    ProviderDefinition {
+                        id: provider_id.clone(),
+                        adapter_id: adapter_id.into(),
+                        label: format!("Family {adapter_id}"),
+                        endpoint: Some(format!("https://{adapter_id}.example.test/v1")),
+                        access_contract: access_contract.into(),
+                        credential_reference: Some(format!("provider:{}", provider_id.as_str())),
+                        lifecycle_state: "active".into(),
+                        removed_at: None,
+                    },
+                    ProviderCatalogSnapshot {
+                        provider_id: provider_id.clone(),
+                        label: format!("Family {adapter_id}"),
+                        connected: true,
+                        unavailable_reason: None,
+                        models: vec![CatalogModelSnapshot {
+                            id: model_id.into(),
+                            label: model_id.into(),
+                            order: 0,
+                            visible: true,
+                            available: true,
+                            unavailable_reason: None,
+                            provider_default: true,
+                            replacement_model_id: None,
+                            metadata: serde_json::json!({}),
+                        }],
+                        system_family: None,
+                    },
+                )
+                .await
+                .unwrap();
+            let settings = service.model_settings().await.unwrap();
+            let family = settings
+                .families
+                .iter()
+                .find(|family| {
+                    family.members.iter().any(|member| {
+                        member.provider_id == provider_id && member.model_id == model_id
+                    })
+                })
+                .expect("provider-scoped managed family");
+            assert!(family.managed_policy.as_ref().is_some_and(|policy| {
+                policy.provider_id == provider_id
+                    && policy.policy_id == match adapter_id {
+                        "openrouter" => {
+                            super::super::model_policy::OPENROUTER_DEFAULT_FAMILY_POLICY_ID
+                        }
+                        "vercel-ai-router" => {
+                            super::super::model_policy::VERCEL_AI_ROUTER_DEFAULT_FAMILY_POLICY_ID
+                        }
+                        _ => super::super::model_policy::PROVIDER_DEFAULT_FAMILY_POLICY_ID,
+                    }
+                    && policy.policy_version == 1
+            }));
+        }
 
         drop(service);
         drop(storage);
@@ -2603,34 +3032,78 @@ mod tests {
     }
 
     fn managed_runtime_harnesses(version: u32) -> Vec<RuntimeProductHarness> {
-        vec![RuntimeProductHarness {
-            id: "codex-basic".into(),
-            configuration_digest: format!("sha256:codex-basic-{version}"),
-            model_compatibility: vec![],
-            configuration_revision: version,
-            model_rules: Some(HarnessModelRules {
-                allow: vec![
-                    HarnessModelRule {
-                        adapter_id: "codex-subscription".into(),
+        vec![
+            RuntimeProductHarness {
+                id: "codex-basic".into(),
+                configuration_digest: format!("sha256:codex-basic-{version}"),
+                model_compatibility: vec![],
+                configuration_revision: version,
+                model_rules: Some(HarnessModelRules {
+                    allow: vec![
+                        HarnessModelRule {
+                            adapter_id: "codex-subscription".into(),
+                            model_id_exact: None,
+                            model_id_regex: Some(".*".into()),
+                        },
+                        HarnessModelRule {
+                            adapter_id: "openai-api".into(),
+                            model_id_exact: None,
+                            model_id_regex: Some(".*".into()),
+                        },
+                    ],
+                    deny: vec![],
+                }),
+                execution_access_contracts: vec!["managed-runtime@1".into(), "secret@1".into()],
+                family_policy: Some(FamilyPolicyReference {
+                    id: super::super::model_policy::CODEX_DEFAULT_FAMILY_POLICY_ID.into(),
+                    version,
+                }),
+                runtime_available: true,
+                unavailable_reason: None,
+            },
+            RuntimeProductHarness {
+                id: "claude-basic".into(),
+                configuration_digest: "sha256:claude-basic-1".into(),
+                model_compatibility: vec![],
+                configuration_revision: 1,
+                model_rules: Some(HarnessModelRules {
+                    allow: vec![HarnessModelRule {
+                        adapter_id: "claude-subscription".into(),
                         model_id_exact: None,
                         model_id_regex: Some(".*".into()),
-                    },
-                    HarnessModelRule {
-                        adapter_id: "openai-api".into(),
+                    }],
+                    deny: vec![],
+                }),
+                execution_access_contracts: vec!["managed-runtime@1".into()],
+                family_policy: Some(FamilyPolicyReference {
+                    id: super::super::model_policy::CLAUDE_DEFAULT_FAMILY_POLICY_ID.into(),
+                    version: 1,
+                }),
+                runtime_available: true,
+                unavailable_reason: None,
+            },
+            RuntimeProductHarness {
+                id: "prime-agent-basic".into(),
+                configuration_digest: "sha256:prime-agent-basic-1".into(),
+                model_compatibility: vec![],
+                configuration_revision: 1,
+                model_rules: Some(HarnessModelRules {
+                    allow: vec![HarnessModelRule {
+                        adapter_id: "openrouter".into(),
                         model_id_exact: None,
                         model_id_regex: Some(".*".into()),
-                    },
-                ],
-                deny: vec![],
-            }),
-            execution_access_contracts: vec!["managed-runtime@1".into()],
-            family_policy: Some(FamilyPolicyReference {
-                id: super::super::model_policy::CODEX_DEFAULT_FAMILY_POLICY_ID.into(),
-                version,
-            }),
-            runtime_available: true,
-            unavailable_reason: None,
-        }]
+                    }],
+                    deny: vec![],
+                }),
+                execution_access_contracts: vec!["secret@1".into()],
+                family_policy: Some(FamilyPolicyReference {
+                    id: super::super::model_policy::OPENROUTER_DEFAULT_FAMILY_POLICY_ID.into(),
+                    version: 1,
+                }),
+                runtime_available: true,
+                unavailable_reason: None,
+            },
+        ]
     }
 
     fn runtime_harnesses() -> Vec<RuntimeProductHarness> {

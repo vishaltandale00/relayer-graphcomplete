@@ -6,13 +6,14 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark" }) {
   const handlers = new Map();
   const writes = [];
+  const modelCatalog = { settingsOpened: vi.fn(), explicitRefresh: vi.fn() };
   registerDesktopIpc({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     dialog: { showOpenDialog: vi.fn() },
     shell: { openExternal: vi.fn() },
     nativeTheme: {},
     credentials: { account: vi.fn(), login: vi.fn(), logout: vi.fn() },
-    modelCatalog: { settingsOpened: vi.fn(), explicitRefresh: vi.fn() },
+    modelCatalog,
     providerDefinitions: {
       adapters: () => [], list: async () => [],
       logout: vi.fn(async () => ({ status: "disconnected" })),
@@ -36,6 +37,8 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     status: handlers.get("relayer:provider-status"),
     logout: handlers.get("relayer:provider-logout"),
     reconnect: handlers.get("relayer:provider-reconnect"),
+    refreshModels: handlers.get("relayer:model-catalog-refresh"),
+    modelCatalog,
     writes,
   };
 }
@@ -65,6 +68,14 @@ describe("provider onboarding IPC hard gate", () => {
     await expect(reconnect(null, { id: "claude-work" })).resolves.toMatchObject({
       status: "pending", connectionId: "claude-work", providerDefinition: { id: "claude-work" },
     });
+  });
+
+  it("routes model-family recovery refresh to the exact connected provider", async () => {
+    const { refreshModels, modelCatalog } = fixture(async () => false);
+
+    await refreshModels(null, "openai-work");
+
+    expect(modelCatalog.explicitRefresh).toHaveBeenCalledWith("openai-work");
   });
 
   it("migrates an existing already-valid Codex user without showing first-run setup", async () => {

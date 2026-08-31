@@ -210,6 +210,23 @@ describe("provider and harness renderer markup", () => {
     expect(markup).not.toContain('data-provider-logout="claude-work"');
   });
 
+  it("offers provider-scoped model refresh when a connected provider has no eligible default family", () => {
+    const markup = providerDefinitionsMarkup([{
+      id: "openai-work", adapterId: "openai-api", label: "OpenAI Work",
+      lifecycleState: "active", connected: true,
+      unavailableReason: {
+        code: "provider_no_eligible_execution_models",
+        message: "No supported text models are available. Refresh models or update this provider.",
+      },
+    }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
+
+    expect(markup).toContain("Needs model setup");
+    expect(markup).toContain("No supported text models are available.");
+    expect(markup).toContain('data-provider-family-recovery="openai-work"');
+    expect(markup).toContain("Refresh models");
+    expect(markup).not.toContain('data-provider-reconnect="openai-work"');
+  });
+
   it("shows only harnesses usable through a currently connected provider and eligible model", () => {
     const markup = harnessConfigurationsMarkup({
       defaults: { harnessId: "codex-basic" },
