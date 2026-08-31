@@ -63,12 +63,20 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/control/interactions/{id}", get(interaction_metadata))
         .route("/api/control/interactions/{id}/input", get(control_input))
         .route(
+            "/api/control/interactions/{id}/input-children",
+            get(control_input_children),
+        )
+        .route(
             "/api/control/interactions/{id}/context-actions",
             get(control_context_actions),
         )
         .route(
             "/api/control/context-occurrences/canonical",
             post(canonical_context_occurrence),
+        )
+        .route(
+            "/api/control/input-action-occurrences/canonical",
+            post(canonical_input_action_occurrence),
         )
         .route("/api/control/interactions/{id}/output", get(control_output))
         .route(
@@ -335,6 +343,8 @@ struct CreateInteractionRequest {
     #[serde(default)]
     contexts: Vec<InteractionContextDraft>,
     #[serde(default)]
+    submitted_inputs: Vec<relayer_graph_core::SubmittedInputDraft>,
+    #[serde(default)]
     input_identity: Option<String>,
     #[serde(default)]
     input_digest: Option<String>,
@@ -355,6 +365,8 @@ pub struct CreateInteractionResponse {
     pub graph_token: String,
     #[serde(default)]
     pub context_actions: Vec<InteractionContextAction>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_children: Vec<relayer_graph_core::InteractionInputChild>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_identity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -367,16 +379,19 @@ async fn create_interaction(
     Json(input): Json<CreateInteractionRequest>,
 ) -> Result<Json<CreateInteractionResponse>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
-    if input.invocation.is_some() && !input.contexts.is_empty() {
+    if input.invocation.is_some()
+        && (!input.contexts.is_empty() || !input.submitted_inputs.is_empty())
+    {
         return Err(ApiError::invalid(
-            "invocation and contexts cannot be prepared together yet",
+            "invocation and submitted interaction input cannot be prepared together",
         ));
     }
-    let (interaction, context_actions) = if input.personal_presentation_profile {
+    let (interaction, context_actions, input_children) = if input.personal_presentation_profile {
         if input.project_id.is_some()
             || input.thread_id.value() != PERSONAL_PRESENTATION_PROFILE_THREAD_ID
             || input.invocation.is_some()
             || !input.contexts.is_empty()
+            || !input.submitted_inputs.is_empty()
         {
             return Err(ApiError::invalid(
                 "personal-presentation profile creation requires its reserved standalone thread and no invocation or contexts",
@@ -396,6 +411,7 @@ async fn create_interaction(
                 .create_personal_presentation_interaction(&input.text, identity, digest)
                 .await?,
             Vec::new(),
+            Vec::new(),
         )
     } else if let (Some(identity), Some(digest)) = (
         input.input_identity.as_deref(),
@@ -406,20 +422,44 @@ async fn create_interaction(
                 "identified context input cannot also be an invocation",
             ));
         }
-        state
-            .graph
-            .create_identified_interaction_with_context(
-                input.project_id,
-                input.thread_id,
-                &input.text,
-                identity,
-                digest,
-                &input.contexts,
-            )
-            .await?
+        if input.submitted_inputs.is_empty() {
+            let (node, actions) = state
+                .graph
+                .create_identified_interaction_with_context(
+                    input.project_id,
+                    input.thread_id,
+                    &input.text,
+                    identity,
+                    digest,
+                    &input.contexts,
+                )
+                .await?;
+            (node, actions, Vec::new())
+        } else {
+            let (node, children) = state
+                .graph
+                .create_identified_interaction_with_inputs(
+                    input.project_id,
+                    input.thread_id,
+                    &input.text,
+                    relayer_graph_core::InteractionInputPreparation {
+                        attempt_key: identity,
+                        authority_digest: digest,
+                        contexts: &input.contexts,
+                        submitted_inputs: &input.submitted_inputs,
+                    },
+                )
+                .await?;
+            let actions = state.graph.interaction_context_actions(node.id).await?;
+            (node, actions, children)
+        }
     } else if input.input_identity.is_some() || input.input_digest.is_some() {
         return Err(ApiError::invalid(
             "inputIdentity and inputDigest must be supplied together",
+        ));
+    } else if !input.submitted_inputs.is_empty() {
+        return Err(ApiError::invalid(
+            "submittedInputs require inputIdentity and inputDigest",
         ));
     } else if input.contexts.is_empty() {
         (
@@ -433,9 +473,10 @@ async fn create_interaction(
                 )
                 .await?,
             Vec::new(),
+            Vec::new(),
         )
     } else {
-        state
+        let (node, actions) = state
             .graph
             .create_interaction_with_context(
                 input.project_id,
@@ -443,7 +484,8 @@ async fn create_interaction(
                 &input.text,
                 &input.contexts,
             )
-            .await?
+            .await?;
+        (node, actions, Vec::new())
     };
     let graph_token = if input.mint_capability {
         Some(mint_capability(&state, interaction.id, None).await?)
@@ -454,6 +496,7 @@ async fn create_interaction(
         node: interaction,
         graph_token: graph_token.unwrap_or_default(),
         context_actions,
+        input_children,
         input_identity: input.input_identity,
         input_digest: input.input_digest,
     }))
@@ -541,6 +584,32 @@ async fn control_input(
     ))
 }
 
+async fn control_input_children(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let children = state
+        .graph
+        .writer_for_subgraph(id)
+        .await?
+        .interaction_input_children()
+        .await?;
+    Ok(Json(json!({
+        "children": children.into_iter().map(|child| json!({
+            "id": child.id,
+            "parentInteractionNodeId": child.parent_interaction_node_id,
+            "presentingInteractionNodeId": child.occurrence.presenting_interaction_node_id,
+            "presentingLayerId": child.occurrence.presenting_layer_id,
+            "actionId": child.occurrence.action_id,
+            "sourceNodeId": child.source_node_id,
+            "action": child.action,
+            "value": child.value,
+        })).collect::<Vec<_>>()
+    })))
+}
+
 async fn control_context_actions(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -575,6 +644,32 @@ async fn canonical_context_occurrence(
         state
             .graph
             .canonical_interaction_context_occurrence(&target)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalInputActionOccurrenceRequest {
+    destination_project_id: Option<ProjectId>,
+    destination_thread_id: ThreadId,
+    occurrence: relayer_graph_core::PresentingInputOccurrence,
+}
+
+async fn canonical_input_action_occurrence(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<CanonicalInputActionOccurrenceRequest>,
+) -> Result<Json<GraphAction>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .canonical_input_action_occurrence(
+                input.destination_project_id,
+                input.destination_thread_id,
+                &input.occurrence,
+            )
             .await?,
     ))
 }
@@ -1475,6 +1570,7 @@ mod tests {
             interaction_node_id: None,
             invoke_origin: None,
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: None,
         })
         .unwrap();
@@ -1568,6 +1664,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -1687,6 +1784,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -2156,6 +2254,7 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Canonical child input".into()),
+                input: None,
             })
             .await
             .unwrap();
@@ -2476,6 +2575,7 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Continue".into()),
+                input: None,
             })
             .await
             .unwrap();
@@ -2492,6 +2592,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -2607,6 +2708,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(result_layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -3001,6 +3103,7 @@ mod tests {
                 description: None,
                 target_layer_id: LayerId::new(layer_id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -3123,6 +3226,7 @@ mod tests {
         assert!(older["action"]["description"].is_null());
 
         let unsupported = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -3143,6 +3247,163 @@ mod tests {
                 .unwrap();
         assert_eq!(unsupported["error"]["code"], "unsupported_action_variant");
         assert_eq!(unsupported["error"]["path"], "variant");
+
+        let missing_prompt = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"missing-prompt","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Choose","control":"text"}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_prompt.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let missing_prompt: Value = serde_json::from_slice(
+            &to_bytes(missing_prompt.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            missing_prompt["error"]["code"],
+            "input_action_prompt_required"
+        );
+        assert_eq!(missing_prompt["error"]["path"], "prompt");
+
+        let missing_control = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"missing-control","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Choose","prompt":"Choose a value"}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_control.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let missing_control: Value = serde_json::from_slice(
+            &to_bytes(missing_control.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            missing_control["error"]["code"],
+            "input_action_control_unsupported"
+        );
+        assert_eq!(missing_control["error"]["path"], "control");
+
+        let explicit_empty_options = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"empty-options","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Explain","control":"text","prompt":"Explain","options":[]}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            explicit_empty_options.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        let explicit_empty_options: Value = serde_json::from_slice(
+            &to_bytes(explicit_empty_options.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            explicit_empty_options["error"]["code"],
+            "input_action_options_unexpected"
+        );
+        assert_eq!(explicit_empty_options["error"]["path"], "options");
+
+        let omitted_options = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"omitted-options","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Explain","control":"text","prompt":"Explain"}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(omitted_options.status(), StatusCode::OK);
+
+        let negative_minimum = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"negative-minimum","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Choose","control":"multi_select","prompt":"Choose","options":[{{"key":"one","label":"One"}},{{"key":"two","label":"Two"}}],"minimumSelections":-1}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(negative_minimum.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let negative_minimum: Value = serde_json::from_slice(
+            &to_bytes(negative_minimum.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            negative_minimum["error"]["code"],
+            "input_action_minimum_invalid"
+        );
+        assert_eq!(negative_minimum["error"]["path"], "minimumSelections");
+
+        for minimum in 1..=2 {
+            let valid_minimum = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/graph/actions")
+                        .header("content-type", "application/json")
+                        .header("authorization", format!("Bearer {graph_token}"))
+                        .body(Body::from(format!(
+                            r#"{{"clientKey":"valid-minimum-{minimum}","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Choose","control":"multi_select","prompt":"Choose","options":[{{"key":"one","label":"One"}},{{"key":"two","label":"Two"}}],"minimumSelections":{minimum}}}"#,
+                            source.id.value(), source_layer.id.value()
+                        )))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(valid_minimum.status(), StatusCode::OK);
+        }
     }
 
     #[tokio::test]
@@ -3296,6 +3557,7 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Continue from here".into()),
+                input: None,
             })
             .await
             .unwrap();
@@ -3312,6 +3574,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -3395,5 +3658,209 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(standalone.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn control_materializes_submitted_input_and_capability_reads_only_semantics() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let presenting = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Source")
+            .await
+            .unwrap();
+        let writer = graph.writer_for_subgraph(presenting.id).await.unwrap();
+        let source = writer
+            .submit_node(&NodeDraft {
+                client_key: "choice".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Choice".into(),
+                detail: "Choose evidence".into(),
+            })
+            .await
+            .unwrap();
+        let layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: "root".into(),
+                nodes: vec![source.id],
+                edges: vec![],
+                layout: authored_layout(source.id),
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        let input_action = relayer_graph_core::InputAction {
+            control: relayer_graph_core::InputControl::SingleSelect,
+            prompt: "Choose evidence".into(),
+            options: vec![relayer_graph_core::InputOption {
+                key: "logs".into(),
+                label: "Logs".into(),
+                unsupported_fields: Default::default(),
+            }],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        };
+        let action = writer
+            .add_action(&ActionDraft {
+                client_key: "evidence".into(),
+                source_node_id: source.id,
+                source_layer_id: Some(layer.id),
+                kind: ActionKind::Input,
+                relation: None,
+                label: "Choose".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: None,
+                input: Some(input_action.clone()),
+            })
+            .await
+            .unwrap();
+        writer
+            .add_action(&ActionDraft {
+                client_key: "response".into(),
+                source_node_id: presenting.id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(relayer_graph_core::NavigateRelation::Expand),
+                label: "Response".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(layer.id),
+                interaction_text: None,
+                input: None,
+            })
+            .await
+            .unwrap();
+        writer.complete(presenting.id).await.unwrap();
+        let submitted = relayer_graph_core::SubmittedInputDraft {
+            occurrence: relayer_graph_core::PresentingInputOccurrence {
+                presenting_interaction_node_id: presenting.id,
+                presenting_layer_id: layer.id,
+                action_id: action.id,
+            },
+            action: input_action,
+            value: relayer_graph_core::SubmittedInputValue::Selected {
+                selected: vec![relayer_graph_core::InputOption {
+                    key: "logs".into(),
+                    label: "Logs".into(),
+                    unsupported_fields: Default::default(),
+                }],
+            },
+        };
+        let digest = relayer_graph_core::interaction_input_authority_digest(
+            "",
+            std::slice::from_ref(&submitted),
+        )
+        .unwrap();
+        let body = json!({
+            "projectId": 41, "threadId": 74, "text": "", "inputIdentity": "attempt:1",
+            "inputDigest": digest, "submittedInputs": [submitted],
+        })
+        .to_string();
+        let app = router(ServerState::new(graph, "control"));
+        let canonical_body = |destination_project_id, destination_thread_id| {
+            json!({
+                "destinationProjectId": destination_project_id,
+                "destinationThreadId": destination_thread_id,
+                "occurrence": {
+                    "presentingInteractionNodeId": presenting.id,
+                    "presentingLayerId": layer.id,
+                    "actionId": action.id
+                }
+            })
+            .to_string()
+        };
+        let canonical = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/input-action-occurrences/canonical")
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(canonical_body(41, 74)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(canonical.status(), StatusCode::OK);
+        let wrong_project = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/input-action-occurrences/canonical")
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(canonical_body(42, 73)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(wrong_project.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let wrong_project_body: Value = serde_json::from_slice(
+            &to_bytes(wrong_project.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            wrong_project_body["error"]["code"],
+            "input_occurrence_not_visible"
+        );
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/interactions")
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let response_body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&response_body)
+        );
+        let created: CreateInteractionResponse = serde_json::from_slice(&response_body).unwrap();
+        assert_eq!(created.input_children.len(), 1);
+
+        let child = serde_json::to_value(&created.input_children[0]).unwrap();
+        assert_eq!(child["sourceNodeId"], source.id.value());
+        assert_eq!(child["attemptKey"], "attempt:1");
+        let normalized = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/graph/input")
+                    .header("authorization", format!("Bearer {}", created.graph_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(normalized.status(), StatusCode::OK);
+        let normalized: Value =
+            serde_json::from_slice(&to_bytes(normalized.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(normalized["interaction"]["detail"], "");
+        assert_eq!(
+            normalized["submittedInputs"][0]["action"]["prompt"],
+            "Choose evidence"
+        );
+        assert_eq!(
+            normalized["submittedInputs"][0]["value"]["selected"][0]["label"],
+            "Logs"
+        );
+        assert!(normalized["submittedInputs"][0].get("attemptKey").is_none());
+        assert!(normalized["submittedInputs"][0].get("occurrence").is_none());
     }
 }

@@ -24,6 +24,7 @@ pub(crate) struct PreExecutionModelFailure<'a> {
     pub(crate) policy: Option<&'a super::ExecutionHarnessPolicy>,
     pub(crate) adapter_version: Option<u32>,
     pub(crate) failure_category: &'a str,
+    pub(crate) error: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,6 +120,18 @@ pub(crate) struct DurableInteractionInput {
     pub(crate) input_identity: String,
     pub(crate) input_digest: String,
     pub(crate) contexts: Vec<InteractionContextIntent>,
+    pub(crate) submitted_inputs: Vec<relayer_graph_core::SubmittedInputDraft>,
+    pub(crate) submitted_input_draft_revision: Option<i64>,
+    pub(crate) semantic_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SubmittedInputEvidence {
+    pub(crate) occurrence: relayer_graph_core::PresentingInputOccurrence,
+    pub(crate) source_node_id: i64,
+    pub(crate) action: relayer_graph_core::InputAction,
+    pub(crate) value: relayer_graph_core::SubmittedInputValue,
+    pub(crate) attempt_state: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +156,60 @@ pub(crate) struct NodeContextDraftConfirmation {
     pub(crate) draft_revision: i64,
     pub(crate) confirmation_revision: i64,
     pub(crate) confirmed_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", untagged, deny_unknown_fields)]
+pub(crate) enum ActionInputValue {
+    Text {
+        text: String,
+    },
+    Selected {
+        #[serde(rename = "selectedKeys")]
+        selected_keys: Vec<String>,
+    },
+}
+
+#[cfg(test)]
+mod action_input_value_tests {
+    use super::ActionInputValue;
+
+    #[test]
+    fn selected_input_value_uses_the_camel_case_api_contract() {
+        let value: ActionInputValue = serde_json::from_value(serde_json::json!({
+            "selectedKeys": ["logs", "traces"]
+        }))
+        .expect("camelCase selection payload should deserialize");
+        assert_eq!(
+            value,
+            ActionInputValue::Selected {
+                selected_keys: vec!["logs".into(), "traces".into()]
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(value).expect("selection payload should serialize"),
+            serde_json::json!({ "selectedKeys": ["logs", "traces"] })
+        );
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActionInputAttachment {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) occurrence: relayer_graph_core::PresentingInputOccurrence,
+    pub(crate) source_node_id: i64,
+    pub(crate) action: relayer_graph_core::InputAction,
+    pub(crate) value: ActionInputValue,
+    pub(crate) draft_revision: i64,
+    pub(crate) committed_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActionInputDraft {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) revision: i64,
+    pub(crate) attachments: Vec<ActionInputAttachment>,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

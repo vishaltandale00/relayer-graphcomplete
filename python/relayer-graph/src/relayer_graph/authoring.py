@@ -75,15 +75,27 @@ class InteractionContext:
 
 
 @dataclass(frozen=True, slots=True)
+class SubmittedInput:
+    action: Mapping[str, Any]
+    value: Mapping[str, Any]
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "SubmittedInput":
+        return cls(dict(value["action"]), dict(value["value"]))
+
+
+@dataclass(frozen=True, slots=True)
 class InteractionInput:
     interaction: InteractionInputNode
     contexts: tuple[InteractionContext, ...]
+    submitted_inputs: tuple[SubmittedInput, ...] = ()
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "InteractionInput":
         return cls(
             InteractionInputNode.from_dict(value["interaction"]),
             tuple(InteractionContext.from_dict(item) for item in value.get("contexts", ())),
+            tuple(SubmittedInput.from_dict(item) for item in value.get("submittedInputs", ())),
         )
 
 
@@ -173,6 +185,8 @@ EdgeReference = int | GraphEdge | EdgeObject
 LayerReference = int | GraphLayer | LayerObject
 ActionVariant = Literal["chip", "pill", "wide", "card"]
 NavigateRelation = Literal["expand", "reference"]
+InputControl = Literal["text", "single_select", "multi_select"]
+InputOption = tuple[str, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +301,39 @@ class RelayerGraphClient:
             "kind": "invoke", "label": label, "interactionText": interaction_text,
             **_action_presentation(variant, icon, description),
         })
+
+    async def add_input_action(
+        self,
+        source: NodeReference,
+        label: str,
+        prompt: str,
+        *,
+        control: InputControl,
+        source_layer: LayerReference,
+        client_key: str,
+        options: Sequence[InputOption] = (),
+        minimum_selections: int | None = None,
+        variant: ActionVariant = "pill",
+        icon: str | None = None,
+        description: str | None = None,
+    ) -> Mapping[str, Any]:
+        payload: dict[str, Any] = {
+            "clientKey": client_key,
+            "sourceNodeId": _node_id(source),
+            "sourceLayerId": _layer_id(source_layer),
+            "kind": "input",
+            "label": label,
+            "control": control,
+            "prompt": prompt,
+            **_action_presentation(variant, icon, description),
+        }
+        if control != "text":
+            payload["options"] = [
+                {"key": key, "label": option_label} for key, option_label in options
+            ]
+        if minimum_selections is not None:
+            payload["minimumSelections"] = minimum_selections
+        return await self._request("POST", "/api/graph/actions", payload)
 
     async def get_layer(self, layer: LayerReference) -> Mapping[str, Any]:
         return await self._request("GET", f"/api/graph/layers/{_layer_id(layer)}")

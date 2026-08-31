@@ -62,6 +62,48 @@ async fn personal_presentation_thread_is_reserved_from_ordinary_creation() {
         }
     ));
 
+    let submitted = SubmittedInputDraft {
+        occurrence: PresentingInputOccurrence {
+            presenting_interaction_node_id: NodeId::new(1).unwrap(),
+            presenting_layer_id: LayerId::new(1).unwrap(),
+            action_id: ActionId::new(1).unwrap(),
+        },
+        action: InputAction {
+            control: InputControl::Text,
+            prompt: "Profile input".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        },
+        value: SubmittedInputValue::Text {
+            text: "ordinary".into(),
+        },
+    };
+    let submitted_digest =
+        interaction_input_authority_digest("", std::slice::from_ref(&submitted)).unwrap();
+    let submitted_error = database
+        .create_identified_interaction_with_inputs(
+            None,
+            reserved,
+            "",
+            InteractionInputPreparation {
+                attempt_key: "relayer.personal-presentation:personal-presentation-v0",
+                authority_digest: &submitted_digest,
+                contexts: &[],
+                submitted_inputs: &[submitted],
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        submitted_error,
+        GraphError::Validation {
+            code: "reserved_personal_presentation_thread",
+            path,
+            ..
+        } if path == "threadId"
+    ));
+
     let digest = interaction_input_digest("profile", &[]).unwrap();
     let profile = database
         .create_personal_presentation_interaction(
@@ -113,6 +155,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
             interaction_node_id: None,
             invoke_origin: None,
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: Some(ImportedAcceptedView {
                 interaction_node_id: interaction_node_id.into(),
                 root_action: ImportedAction {
@@ -127,6 +170,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                     description: None,
                     target_layer_id: Some("layer-1".into()),
                     interaction_text: None,
+                    input: None,
                 },
                 root_layer_id: "layer-1".into(),
                 layers: vec![ImportedResolvedLayer {
@@ -165,6 +209,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
         interaction_node_id: None,
         invoke_origin: None,
         contexts: vec![],
+        submitted_inputs: vec![],
         accepted_view: Some(ImportedAcceptedView {
             interaction_node_id: "interaction-1".into(),
             root_action: ImportedAction {
@@ -179,6 +224,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                 description: None,
                 target_layer_id: Some("layer-1".into()),
                 interaction_text: None,
+                input: None,
             },
             root_layer_id: "layer-1".into(),
             layers: vec![ImportedResolvedLayer {
@@ -208,6 +254,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     description: None,
                     target_layer_id: None,
                     interaction_text: Some("Continue this path".into()),
+                    input: None,
                 }],
             }],
         }),
@@ -221,6 +268,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
             source_action_id: "invoke-action-1".into(),
         }),
         contexts: vec![],
+        submitted_inputs: vec![],
         accepted_view: Some(ImportedAcceptedView {
             interaction_node_id: "interaction-2".into(),
             root_action: ImportedAction {
@@ -235,6 +283,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                 description: None,
                 target_layer_id: Some("layer-2".into()),
                 interaction_text: None,
+                input: None,
             },
             root_layer_id: "layer-2".into(),
             layers: vec![ImportedResolvedLayer {
@@ -345,6 +394,7 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
             source_layer_id: "another-foreign-layer".into(),
             annotations: vec!["Failure still keeps this".into()],
         }],
+        submitted_inputs: vec![],
         accepted_view: None,
     });
 
@@ -382,6 +432,385 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
             .await,
         Err(GraphError::Forbidden(_))
     ));
+}
+
+#[tokio::test]
+async fn imported_unanswered_input_action_keeps_its_authored_payload() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut conversation = imported_conversation("interaction-1");
+    let expected = InputAction {
+        control: InputControl::SingleSelect,
+        prompt: "Choose a destination".into(),
+        options: vec![InputOption {
+            key: "home".into(),
+            label: "Home".into(),
+            unsupported_fields: Default::default(),
+        }],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    conversation.turns[0].accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .push(ImportedAction {
+            id: "unanswered-input".into(),
+            source_node_id: "node-1".into(),
+            source_layer_id: Some("layer-1".into()),
+            kind: "input".into(),
+            relation: None,
+            label: "Choose".into(),
+            variant: "pill".into(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(expected.clone()),
+        });
+
+    let receipt = database
+        .import_accepted_conversation(&conversation)
+        .await
+        .unwrap();
+    let output = receipt.turns[0].output.as_ref().unwrap();
+    let imported = output
+        .root_layer
+        .actions
+        .iter()
+        .find(|action| action.kind == ActionKind::Input)
+        .unwrap();
+    assert_eq!(imported.input.as_ref(), Some(&expected));
+    assert!(receipt.skipped_submitted_inputs.is_empty());
+
+    let error = database
+        .canonical_input_action_occurrence(
+            None,
+            thread(9001),
+            &PresentingInputOccurrence {
+                presenting_interaction_node_id: NodeId::new(
+                    receipt.turns[0].graph_node_id.unwrap(),
+                )
+                .unwrap(),
+                presenting_layer_id: output.root_layer.layer.id,
+                action_id: imported.id,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation { code, path, .. }
+            if code == "input_action_not_in_occurrence" && path == "attachments[0].actionId"
+    ));
+}
+
+#[tokio::test]
+async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    input.turns[0].accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .push(ImportedAction {
+            id: "input-action-1".into(),
+            source_node_id: "node-1".into(),
+            source_layer_id: Some("layer-1".into()),
+            kind: "input".into(),
+            relation: None,
+            label: "".into(),
+            variant: "pill".into(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: None,
+        });
+    input.turns.push(ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "".into(),
+        interaction_node_id: Some("input-root-2".into()),
+        invoke_origin: None,
+        contexts: vec![],
+        submitted_inputs: vec![ImportedSubmittedInput {
+            id: "input-child-1".into(),
+            root_turn_id: "turn-2".into(),
+            source: ImportedInputSource {
+                interaction_node_id: "interaction-1".into(),
+                layer_id: "layer-1".into(),
+                action_id: "input-action-1".into(),
+                node_id: "node-1".into(),
+            },
+            action: InputAction {
+                control: InputControl::SingleSelect,
+                prompt: "Choose".into(),
+                options: vec![InputOption {
+                    key: "one".into(),
+                    label: "One".into(),
+                    unsupported_fields: Default::default(),
+                }],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: SubmittedInputValue::Selected {
+                selected: vec![InputOption {
+                    key: "one".into(),
+                    label: "One".into(),
+                    unsupported_fields: Default::default(),
+                }],
+            },
+        }],
+        accepted_view: None,
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+    let root = NodeId::new(receipt.turns[1].graph_node_id.unwrap()).unwrap();
+    let writer = database.writer_for_subgraph(root).await.unwrap();
+    let projected = writer.interaction_input().await.unwrap();
+    assert_eq!(
+        projected.submitted_inputs,
+        vec![SubmittedInput {
+            action: input.turns[1].submitted_inputs[0].action.clone(),
+            value: input.turns[1].submitted_inputs[0].value.clone(),
+        }]
+    );
+    assert!(matches!(
+        writer
+            .submit_node(&NodeDraft {
+                client_key: "forbidden".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Forbidden".into(),
+                detail: "Imported input is inert".into(),
+            })
+            .await,
+        Err(GraphError::Forbidden(_))
+    ));
+    drop(writer);
+    database
+        .remove_imported_conversation(&input.import_id)
+        .await
+        .unwrap();
+    assert!(database.writer_for_subgraph(root).await.is_err());
+}
+
+#[tokio::test]
+async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurrence() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    let view = input.turns[0].accepted_view.as_mut().unwrap();
+    // A second accepted node in the same layer. It is a perfectly valid node that
+    // simply never authored the input action.
+    let resolved = &mut view.layers[0];
+    resolved.layer.nodes.push("node-2".into());
+    resolved
+        .layer
+        .layout
+        .as_mut()
+        .unwrap()
+        .placements
+        .push(ImportedNodePlacement {
+            node_id: "node-2".into(),
+            x: 0.75,
+            y: 0.25,
+        });
+    resolved.nodes.push(ImportedNode {
+        id: "node-2".into(),
+        kind: "concept".into(),
+        icon: "box".into(),
+        title: "Worker".into(),
+        detail: "A worker".into(),
+    });
+    // Two input actions, both genuinely authored by node-1.
+    for id in ["input-action-1", "input-action-2"] {
+        resolved.actions.push(ImportedAction {
+            id: id.into(),
+            source_node_id: "node-1".into(),
+            source_layer_id: Some("layer-1".into()),
+            kind: "input".into(),
+            relation: None,
+            label: "".into(),
+            variant: "pill".into(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: None,
+        });
+    }
+
+    let action = InputAction {
+        control: InputControl::SingleSelect,
+        prompt: "Choose".into(),
+        options: vec![InputOption {
+            key: "one".into(),
+            label: "One".into(),
+            unsupported_fields: Default::default(),
+        }],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    let value = SubmittedInputValue::Selected {
+        selected: vec![InputOption {
+            key: "one".into(),
+            label: "One".into(),
+            unsupported_fields: Default::default(),
+        }],
+    };
+    let honest = ImportedSubmittedInput {
+        id: "input-child-honest".into(),
+        root_turn_id: "turn-2".into(),
+        source: ImportedInputSource {
+            interaction_node_id: "interaction-1".into(),
+            layer_id: "layer-1".into(),
+            action_id: "input-action-1".into(),
+            node_id: "node-1".into(),
+        },
+        action: action.clone(),
+        value: value.clone(),
+    };
+    // A distinct occurrence, so the unique index over
+    // (parent, interaction, layer, action) cannot catch this incidentally -- the
+    // provenance check is the only thing standing between this and the database.
+    // Every identifier resolves on its own; only the tuple is a lie, claiming a node
+    // that never asked the question.
+    let spliced = ImportedSubmittedInput {
+        id: "input-child-spliced".into(),
+        source: ImportedInputSource {
+            action_id: "input-action-2".into(),
+            node_id: "node-2".into(),
+            ..honest.source.clone()
+        },
+        ..honest.clone()
+    };
+    input.turns.push(ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "".into(),
+        interaction_node_id: Some("input-root-2".into()),
+        invoke_origin: None,
+        contexts: vec![],
+        submitted_inputs: vec![honest, spliced],
+        accepted_view: None,
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+
+    // The spliced answer is dropped, and dropping it is visible rather than silent.
+    assert_eq!(receipt.skipped_submitted_inputs.len(), 1);
+    let skipped = &receipt.skipped_submitted_inputs[0];
+    assert_eq!(skipped.submitted_input_id, "input-child-spliced");
+    assert_eq!(skipped.source_turn_id, "turn-2");
+    assert_eq!(skipped.code, "input_action_not_in_occurrence");
+    assert_eq!(skipped.path, "submittedInputs[1].source.nodeId");
+
+    // The honest answer on the same turn still imports.
+    let root = NodeId::new(receipt.turns[1].graph_node_id.unwrap()).unwrap();
+    let writer = database.writer_for_subgraph(root).await.unwrap();
+    let projected = writer.interaction_input().await.unwrap();
+    assert_eq!(
+        projected.submitted_inputs,
+        vec![SubmittedInput { action, value }]
+    );
+}
+
+#[tokio::test]
+async fn imported_submitted_input_value_must_satisfy_the_accepted_action() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    let resolved = &mut input.turns[0].accepted_view.as_mut().unwrap().layers[0];
+    // Two input actions, both genuinely authored by node-1, so each answer below
+    // carries provenance that actually happened.
+    for id in ["input-action-1", "input-action-2"] {
+        resolved.actions.push(ImportedAction {
+            id: id.into(),
+            source_node_id: "node-1".into(),
+            source_layer_id: Some("layer-1".into()),
+            kind: "input".into(),
+            relation: None,
+            label: "".into(),
+            variant: "pill".into(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: None,
+        });
+    }
+
+    let action = InputAction {
+        control: InputControl::SingleSelect,
+        prompt: "Choose".into(),
+        options: vec![InputOption {
+            key: "one".into(),
+            label: "One".into(),
+            unsupported_fields: Default::default(),
+        }],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    let value = SubmittedInputValue::Selected {
+        selected: vec![InputOption {
+            key: "one".into(),
+            label: "One".into(),
+            unsupported_fields: Default::default(),
+        }],
+    };
+    let honest = ImportedSubmittedInput {
+        id: "input-child-honest".into(),
+        root_turn_id: "turn-2".into(),
+        source: ImportedInputSource {
+            interaction_node_id: "interaction-1".into(),
+            layer_id: "layer-1".into(),
+            action_id: "input-action-1".into(),
+            node_id: "node-1".into(),
+        },
+        action: action.clone(),
+        value: value.clone(),
+    };
+    // Provenance here is entirely honest: node-1 really did author input-action-2 in
+    // this layer. Only the answer is fabricated -- an option key and label the accepted
+    // action never offered. The live send path rejects exactly this as
+    // `input_option_unknown`, so import must not accept it either.
+    let forged = ImportedSubmittedInput {
+        id: "input-child-forged".into(),
+        source: ImportedInputSource {
+            action_id: "input-action-2".into(),
+            ..honest.source.clone()
+        },
+        value: SubmittedInputValue::Selected {
+            selected: vec![InputOption {
+                key: "two".into(),
+                label: "Wire the money".into(),
+                unsupported_fields: Default::default(),
+            }],
+        },
+        ..honest.clone()
+    };
+    input.turns.push(ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "".into(),
+        interaction_node_id: Some("input-root-2".into()),
+        invoke_origin: None,
+        contexts: vec![],
+        submitted_inputs: vec![honest, forged],
+        accepted_view: None,
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+
+    // The fabricated answer is dropped, and dropping it is visible rather than silent.
+    assert_eq!(receipt.skipped_submitted_inputs.len(), 1);
+    let skipped = &receipt.skipped_submitted_inputs[0];
+    assert_eq!(skipped.submitted_input_id, "input-child-forged");
+    assert_eq!(skipped.source_turn_id, "turn-2");
+    assert_eq!(skipped.code, "input_option_unknown");
+    assert_eq!(skipped.path, "submittedInputs[1].value");
+
+    // The honest answer on the same turn still imports, and nothing the file claimed
+    // about the fabricated option reached the projection.
+    let root = NodeId::new(receipt.turns[1].graph_node_id.unwrap()).unwrap();
+    let writer = database.writer_for_subgraph(root).await.unwrap();
+    let projected = writer.interaction_input().await.unwrap();
+    assert_eq!(
+        projected.submitted_inputs,
+        vec![SubmittedInput { action, value }]
+    );
 }
 
 #[tokio::test]
@@ -482,6 +911,7 @@ async fn root_expand(
             description: None,
             target_layer_id: Some(target.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap()
@@ -507,6 +937,7 @@ async fn accepted_invoke(
             description: None,
             target_layer_id: None,
             interaction_text: Some("Continue this answer".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -536,6 +967,7 @@ async fn navigate(
             description: None,
             target_layer_id: Some(target.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap()
@@ -569,6 +1001,7 @@ async fn accept_single_node(
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -774,6 +1207,27 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
         .unwrap();
     assert_eq!(replayed.id, interaction.id);
     assert_eq!(replayed_actions, actions);
+    for replay_project in [Some(project(2)), None] {
+        let scope_conflict = database
+            .create_identified_interaction_with_context(
+                replay_project,
+                thread(2),
+                "Compare this",
+                "product:41",
+                &input_digest,
+                &drafts,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            scope_conflict,
+            GraphError::Validation {
+                code: "interaction_input_conflict",
+                path,
+                ..
+            } if path == "projectId"
+        ));
+    }
     let changed_digest = relayer_graph_core::interaction_input_digest("Changed", &drafts).unwrap();
     let conflict = database
         .create_identified_interaction_with_context(
@@ -839,6 +1293,7 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
             description: None,
             target_layer_id: Some(answer_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap_err();
@@ -862,6 +1317,7 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
             description: None,
             target_layer_id: Some(answer_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .expect("context control identity must not consume an LM client key");
@@ -1117,6 +1573,7 @@ async fn root_action_replay_updates_same_key_and_rejects_a_different_key_without
             description: None,
             target_layer_id: Some(first_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap_err();
@@ -1147,6 +1604,7 @@ async fn root_action_replay_updates_same_key_and_rejects_a_different_key_without
             description: None,
             target_layer_id: Some(first_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -1177,6 +1635,7 @@ async fn concurrent_root_action_writes_allow_exactly_one_client_key() {
         description: None,
         target_layer_id: Some(layer.id),
         interaction_text: None,
+        input: None,
     };
     let first_draft = draft("first-root");
     let second_draft = draft("second-root");
@@ -1537,6 +1996,7 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
             description: None,
             target_layer_id: None,
             interaction_text: Some("Investigate the published branch".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -1578,6 +2038,7 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
             description: None,
             target_layer_id: Some(current.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -1639,6 +2100,7 @@ async fn active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off(
             description: None,
             target_layer_id: None,
             interaction_text: Some("Investigate the gated branch".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -1842,6 +2304,7 @@ async fn accepts_connected_layer_and_returns_exact_view() {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -2127,6 +2590,7 @@ async fn accepts_recursive_navigate_subgraph() {
             description: None,
             target_layer_id: Some(nested.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -2143,6 +2607,7 @@ async fn accepts_recursive_navigate_subgraph() {
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -2451,6 +2916,7 @@ async fn reference_layers_cannot_author_expand_or_invoke_actions() {
             description: None,
             target_layer_id: Some(child_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap_err();
@@ -2781,6 +3247,7 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the first node".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -2797,6 +3264,7 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the second node".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -2824,6 +3292,7 @@ async fn invoke_actions_reject_whitespace_only_interaction_text() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("  \n\t".into()),
+            input: None,
         })
         .await
         .unwrap_err();
@@ -2854,6 +3323,7 @@ async fn invoke_actions_cannot_author_resolution_targets() {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: Some("Continue".into()),
+            input: None,
         })
         .await
         .unwrap_err();
@@ -2912,6 +3382,7 @@ async fn action_presentation_grammar_round_trips_in_authored_order() {
                 description: description.map(str::to_owned),
                 target_layer_id: None,
                 interaction_text: Some(format!("Run {key}")),
+                input: None,
             })
             .await
             .unwrap();
@@ -2949,6 +3420,604 @@ async fn action_presentation_grammar_round_trips_in_authored_order() {
 }
 
 #[tokio::test]
+async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
+    let (database, interaction) = setup(Some(project(88)), thread(88)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "input-source").await;
+    let layer = single_node_layer(&writer, "input-layer", &source).await;
+
+    let cases = [
+        InputAction {
+            control: InputControl::Text,
+            prompt: "Describe the evidence".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        },
+        InputAction {
+            control: InputControl::SingleSelect,
+            prompt: "Choose a direction".into(),
+            options: vec![
+                InputOption {
+                    key: "left".into(),
+                    label: "Left".into(),
+                    unsupported_fields: Default::default(),
+                },
+                InputOption {
+                    key: "right".into(),
+                    label: "Right".into(),
+                    unsupported_fields: Default::default(),
+                },
+            ],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        },
+        InputAction {
+            control: InputControl::MultiSelect,
+            prompt: "Choose signals".into(),
+            options: vec![
+                InputOption {
+                    key: "logs".into(),
+                    label: "Logs".into(),
+                    unsupported_fields: Default::default(),
+                },
+                InputOption {
+                    key: "traces".into(),
+                    label: "Traces".into(),
+                    unsupported_fields: Default::default(),
+                },
+            ],
+            minimum_selections: Some(2),
+            unsupported_fields: Default::default(),
+        },
+    ];
+    for (index, input) in cases.into_iter().enumerate() {
+        writer
+            .add_action(&ActionDraft {
+                client_key: format!("input-{index}"),
+                source_node_id: source.id,
+                source_layer_id: Some(layer.id),
+                kind: ActionKind::Input,
+                relation: None,
+                label: format!("Input {index}"),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: None,
+                input: Some(input),
+            })
+            .await
+            .unwrap();
+    }
+    root_expand(&writer, &interaction, &layer).await;
+    writer.complete(interaction.id).await.unwrap();
+    let accepted = writer.get_layer(layer.id).await.unwrap();
+    assert_eq!(
+        accepted
+            .actions
+            .iter()
+            .filter_map(|action| action.input.as_ref().map(|input| input.control))
+            .collect::<Vec<_>>(),
+        vec![
+            InputControl::Text,
+            InputControl::SingleSelect,
+            InputControl::MultiSelect,
+        ]
+    );
+    let canonical = database
+        .canonical_input_action_occurrence(
+            Some(project(88)),
+            thread(88),
+            &PresentingInputOccurrence {
+                presenting_interaction_node_id: interaction.id,
+                presenting_layer_id: layer.id,
+                action_id: accepted.actions[0].id,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(canonical.input.unwrap().prompt, "Describe the evidence");
+
+    let (database, interaction) = setup(None, thread(89)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "bad-input-source").await;
+    let layer = single_node_layer(&writer, "bad-input-layer", &source).await;
+    let error = writer
+        .add_action(&ActionDraft {
+            client_key: "bad-input".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(layer.id),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Bad input".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::MultiSelect,
+                prompt: "Choose".into(),
+                options: vec![
+                    InputOption {
+                        key: "same".into(),
+                        label: "One".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: "same".into(),
+                        label: "Two".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
+                minimum_selections: Some(3),
+                unsupported_fields: Default::default(),
+            }),
+        })
+        .await
+        .unwrap_err();
+    let GraphError::ValidationIssues { issues, .. } = error else {
+        panic!("expected ordered validation issues");
+    };
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.code == "input_action_option_key_duplicate")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.code == "input_action_minimum_invalid")
+    );
+
+    let unsupported: ActionDraft = serde_json::from_value(serde_json::json!({
+        "clientKey": "unsupported-input",
+        "sourceNodeId": source.id,
+        "sourceLayerId": layer.id,
+        "kind": "input",
+        "label": "Unsupported input",
+        "variant": "pill",
+        "targetLayerId": null,
+        "interactionText": null,
+        "control": "slider",
+        "prompt": "Choose a value",
+        "sliderMin": 1
+    }))
+    .unwrap();
+    let error = writer.add_action(&unsupported).await.unwrap_err();
+    let GraphError::ValidationIssues { issues, .. } = error else {
+        panic!("expected a stable unsupported-control validation issue");
+    };
+    assert!(issues.iter().any(|issue| {
+        issue.code == "input_action_control_unsupported" && issue.path == "control"
+    }));
+    assert!(issues.iter().any(|issue| {
+        issue.code == "input_action_payload_unexpected" && issue.path == "sliderMin"
+    }));
+
+    let option_extension: ActionDraft = serde_json::from_value(serde_json::json!({
+        "clientKey": "extended-option-input",
+        "sourceNodeId": source.id,
+        "sourceLayerId": layer.id,
+        "kind": "input",
+        "label": "Extended option input",
+        "variant": "pill",
+        "targetLayerId": null,
+        "interactionText": null,
+        "control": "single_select",
+        "prompt": "Choose a value",
+        "options": [{"key":"one","label":"One","imageUrl":"https://example.invalid/one.png"}]
+    }))
+    .unwrap();
+    let error = writer.add_action(&option_extension).await.unwrap_err();
+    let GraphError::ValidationIssues { issues, .. } = error else {
+        panic!("expected a stable option-payload validation issue");
+    };
+    assert!(issues.iter().any(|issue| {
+        issue.code == "input_action_payload_unexpected" && issue.path == "options[0].imageUrl"
+    }));
+}
+
+#[tokio::test]
+async fn canonical_input_occurrence_uses_project_scope_with_standalone_thread_fallback() {
+    let (database, interaction) = setup(Some(project(89)), thread(89)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "thread-bound-input-source").await;
+    let layer = single_node_layer(&writer, "thread-bound-input-layer", &source).await;
+    let action = writer
+        .add_action(&ActionDraft {
+            client_key: "thread-bound-input".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(layer.id),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Bound input".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            }),
+        })
+        .await
+        .unwrap();
+    root_expand(&writer, &interaction, &layer).await;
+    writer.complete(interaction.id).await.unwrap();
+    let occurrence = PresentingInputOccurrence {
+        presenting_interaction_node_id: interaction.id,
+        presenting_layer_id: layer.id,
+        action_id: action.id,
+    };
+
+    database
+        .canonical_input_action_occurrence(Some(project(89)), thread(90), &occurrence)
+        .await
+        .unwrap();
+    let wrong_action = PresentingInputOccurrence {
+        action_id: relayer_graph_core::ActionId::new(action.id.value() + 1).unwrap(),
+        ..occurrence.clone()
+    };
+    let error = database
+        .canonical_input_action_occurrence(Some(project(89)), thread(90), &wrong_action)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation { code, path, .. }
+            if code == "input_action_not_in_occurrence" && path == "attachments[0].actionId"
+    ));
+    let error = database
+        .canonical_input_action_occurrence(Some(project(90)), thread(89), &occurrence)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation { code, path, .. }
+            if code == "input_occurrence_not_visible" && path == "attachments[0]"
+    ));
+
+    let (standalone_database, standalone_interaction) = setup(None, thread(91)).await;
+    let standalone_writer = standalone_database
+        .writer_for_subgraph(standalone_interaction.id)
+        .await
+        .unwrap();
+    let standalone_source = node(&standalone_writer, "standalone-input-source").await;
+    let standalone_layer = single_node_layer(
+        &standalone_writer,
+        "standalone-input-layer",
+        &standalone_source,
+    )
+    .await;
+    let standalone_action = standalone_writer
+        .add_action(&ActionDraft {
+            client_key: "standalone-input".into(),
+            source_node_id: standalone_source.id,
+            source_layer_id: Some(standalone_layer.id),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Standalone input".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            }),
+        })
+        .await
+        .unwrap();
+    root_expand(
+        &standalone_writer,
+        &standalone_interaction,
+        &standalone_layer,
+    )
+    .await;
+    standalone_writer
+        .complete(standalone_interaction.id)
+        .await
+        .unwrap();
+    let standalone_occurrence = PresentingInputOccurrence {
+        presenting_interaction_node_id: standalone_interaction.id,
+        presenting_layer_id: standalone_layer.id,
+        action_id: standalone_action.id,
+    };
+    standalone_database
+        .canonical_input_action_occurrence(None, thread(91), &standalone_occurrence)
+        .await
+        .unwrap();
+    let error = standalone_database
+        .canonical_input_action_occurrence(None, thread(92), &standalone_occurrence)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation { code, path, .. }
+            if code == "input_occurrence_not_visible" && path == "attachments[0]"
+    ));
+}
+
+#[tokio::test]
+async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
+    let (database, presenting) = setup(Some(project(90)), thread(90)).await;
+    let writer = database.writer_for_subgraph(presenting.id).await.unwrap();
+    let source = node(&writer, "input-source").await;
+    let layer = single_node_layer(&writer, "input-layer", &source).await;
+    for (key, input) in [
+        (
+            "text",
+            InputAction {
+                control: InputControl::Text,
+                prompt: "Explain the tradeoff".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+        ),
+        (
+            "select",
+            InputAction {
+                control: InputControl::MultiSelect,
+                prompt: "Choose evidence".into(),
+                options: vec![
+                    InputOption {
+                        key: "logs".into(),
+                        label: "Logs".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: "traces".into(),
+                        label: "Traces".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
+                minimum_selections: Some(1),
+                unsupported_fields: Default::default(),
+            },
+        ),
+    ] {
+        writer
+            .add_action(&ActionDraft {
+                client_key: key.into(),
+                source_node_id: source.id,
+                source_layer_id: Some(layer.id),
+                kind: ActionKind::Input,
+                relation: None,
+                label: key.into(),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: None,
+                input: Some(input),
+            })
+            .await
+            .unwrap();
+    }
+    root_expand(&writer, &presenting, &layer).await;
+    writer.complete(presenting.id).await.unwrap();
+    let accepted = writer.get_layer(layer.id).await.unwrap();
+    let text_action = accepted
+        .actions
+        .iter()
+        .find(|action| action.label == "text")
+        .unwrap();
+    let select_action = accepted
+        .actions
+        .iter()
+        .find(|action| action.label == "select")
+        .unwrap();
+    let text = SubmittedInputDraft {
+        occurrence: PresentingInputOccurrence {
+            presenting_interaction_node_id: presenting.id,
+            presenting_layer_id: layer.id,
+            action_id: text_action.id,
+        },
+        action: text_action.input.clone().unwrap(),
+        value: SubmittedInputValue::Text {
+            text: "  Preserve this exactly.  ".into(),
+        },
+    };
+    let select = SubmittedInputDraft {
+        occurrence: PresentingInputOccurrence {
+            presenting_interaction_node_id: presenting.id,
+            presenting_layer_id: layer.id,
+            action_id: select_action.id,
+        },
+        action: select_action.input.clone().unwrap(),
+        value: SubmittedInputValue::Selected {
+            selected: vec![
+                InputOption {
+                    key: "traces".into(),
+                    label: "Traces".into(),
+                    unsupported_fields: Default::default(),
+                },
+                InputOption {
+                    key: "logs".into(),
+                    label: "Logs".into(),
+                    unsupported_fields: Default::default(),
+                },
+            ],
+        },
+    };
+    let first_order = vec![select.clone(), text.clone()];
+    let second_order = vec![text, select];
+    let digest = interaction_input_authority_digest("", &first_order).unwrap();
+    assert_eq!(
+        digest,
+        interaction_input_authority_digest("", &second_order).unwrap()
+    );
+
+    let (root, children) = database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(91),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:90",
+                authority_digest: &digest,
+                contexts: &[],
+                submitted_inputs: &first_order,
+            },
+        )
+        .await
+        .unwrap();
+    let (replayed, replayed_children) = database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(91),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:90",
+                authority_digest: &digest,
+                contexts: &[],
+                submitted_inputs: &second_order,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(replayed.id, root.id);
+    assert_eq!(replayed_children, children);
+    for replay_project in [Some(project(91)), None] {
+        let scope_conflict = database
+            .create_identified_interaction_with_inputs(
+                replay_project,
+                thread(91),
+                "",
+                InteractionInputPreparation {
+                    attempt_key: "attempt:90",
+                    authority_digest: &digest,
+                    contexts: &[],
+                    submitted_inputs: &second_order,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            scope_conflict,
+            GraphError::Validation {
+                code: "interaction_input_attempt_conflict",
+                path,
+                ..
+            } if path == "attemptKey"
+        ));
+    }
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0].parent_interaction_node_id, root.id);
+    assert_eq!(children[0].source_node_id, source.id);
+    let child_id = serde_json::to_value(children[0].id).unwrap();
+    assert!(
+        child_id
+            .as_str()
+            .unwrap()
+            .starts_with("interaction-input-child:")
+    );
+    assert!(serde_json::from_value::<NodeId>(child_id).is_err());
+
+    let normalized = database
+        .writer_for_subgraph(root.id)
+        .await
+        .unwrap()
+        .interaction_input()
+        .await
+        .unwrap();
+    assert_eq!(normalized.interaction.detail, "");
+    assert_eq!(normalized.submitted_inputs.len(), 2);
+    let visible = serde_json::to_value(&normalized.submitted_inputs).unwrap();
+    assert!(!visible.to_string().contains("actionId"));
+    assert!(!visible.to_string().contains("presentingLayerId"));
+    assert!(!visible.to_string().contains("attempt"));
+    assert!(visible.to_string().contains("Preserve this exactly"));
+
+    let changed_inputs = [second_order[0].clone()];
+    let changed_digest = interaction_input_authority_digest("", &changed_inputs).unwrap();
+    let conflict = database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(91),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:90",
+                authority_digest: &changed_digest,
+                contexts: &[],
+                submitted_inputs: &changed_inputs,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        conflict,
+        GraphError::Validation {
+            code: "interaction_input_attempt_conflict",
+            ..
+        }
+    ));
+
+    let malformed = SubmittedInputDraft {
+        occurrence: second_order[1].occurrence.clone(),
+        action: second_order[1].action.clone(),
+        value: SubmittedInputValue::Selected {
+            selected: vec![InputOption {
+                key: "unknown".into(),
+                label: "Forged".into(),
+                unsupported_fields: Default::default(),
+            }],
+        },
+    };
+    let malformed_digest =
+        interaction_input_authority_digest("", std::slice::from_ref(&malformed)).unwrap();
+    let malformed_inputs = [malformed];
+    let error = database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(92),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:bad",
+                authority_digest: &malformed_digest,
+                contexts: &[],
+                submitted_inputs: &malformed_inputs,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "input_option_unknown",
+            ..
+        }
+    ));
+    let repaired_inputs = [second_order[1].clone()];
+    let repaired_digest = interaction_input_authority_digest("", &repaired_inputs).unwrap();
+    database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(92),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:bad",
+                authority_digest: &repaired_digest,
+                contexts: &[],
+                submitted_inputs: &repaired_inputs,
+            },
+        )
+        .await
+        .expect("invalid child preparation must roll back the root and exact child set atomically");
+}
+
+#[tokio::test]
 async fn action_presentation_errors_are_repairable() {
     let (database, interaction) = setup(Some(project(1)), thread(1)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
@@ -2967,6 +4036,7 @@ async fn action_presentation_errors_are_repairable() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Try it".into()),
+            input: None,
         })
         .await
         .unwrap_err();
@@ -2992,6 +4062,7 @@ async fn action_presentation_errors_are_repairable() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Try it".into()),
+            input: None,
         })
         .await
         .unwrap_err();
@@ -3114,6 +4185,7 @@ async fn completion_rejects_an_edge_accepted_by_a_concurrent_interaction() {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -3164,6 +4236,7 @@ async fn accepted_layers_keep_their_original_action_snapshot() {
             description: None,
             target_layer_id: Some(viewer_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -3355,6 +4428,7 @@ async fn lease_issuance_rejects_invalid_authority_kind_and_scope() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Continue".into()),
+            input: None,
         })
         .await
         .unwrap();

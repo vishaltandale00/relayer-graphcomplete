@@ -42,7 +42,9 @@ pub(crate) struct RetryInteractionCommand<'a> {
     pub(crate) text: &'a str,
     pub(crate) input_identity: &'a str,
     pub(crate) contexts: &'a [super::InteractionContextIntent],
+    pub(crate) context_snapshots: &'a [relayer_graph_core::InteractionInputNode],
     pub(crate) context_confirmation_ids: &'a [String],
+    pub(crate) input_draft_revision: Option<i64>,
     pub(crate) model_selection: &'a InteractionModelSelection,
     pub(crate) harness_configuration_name: &'a str,
 }
@@ -51,7 +53,9 @@ pub(crate) struct CreateIdentifiedInteractionCommand<'a> {
     pub(crate) text: &'a str,
     pub(crate) input_identity: &'a str,
     pub(crate) contexts: &'a [super::InteractionContextIntent],
+    pub(crate) context_snapshots: &'a [relayer_graph_core::InteractionInputNode],
     pub(crate) context_confirmation_ids: &'a [String],
+    pub(crate) input_draft_revision: Option<i64>,
     pub(crate) model_selection: Option<&'a InteractionModelSelection>,
     pub(crate) allow_unselected_model: bool,
 }
@@ -85,6 +89,7 @@ pub(crate) struct PreparedInteractionBinding<'a> {
     pub(crate) harness_configuration_digest: &'a str,
     pub(crate) effective_execution_digest: &'a str,
     pub(crate) effective_permission_receipt: &'a serde_json::Value,
+    pub(crate) input_children: &'a [relayer_graph_core::InteractionInputChild],
 }
 
 pub(crate) struct ProjectWriteOutcome {
@@ -112,6 +117,12 @@ pub(crate) enum ProductError {
     NotFound(String),
     #[error("invalid input: {0}")]
     Invalid(String),
+    #[error("input validation failed at {path}: {message}")]
+    InputValidation {
+        code: &'static str,
+        path: &'static str,
+        message: String,
+    },
     #[error("project already exists")]
     ProjectExists(Project),
     #[error("folder unavailable at {path}: {reason}")]
@@ -1113,12 +1124,82 @@ impl ProductService {
         command: CreateIdentifiedInteractionCommand<'_>,
     ) -> Result<crate::storage::InteractionInputInsertOutcome, ProductError> {
         let input_identity = required(command.input_identity, "inputId")?;
-        let input_digest = validated_interaction_input_digest(command.text, command.contexts)?;
         if self.storage.thread_is_imported(thread_id).await? {
             return Err(ProductError::Invalid(
                 "imported conversations are immutable".into(),
             ));
         }
+        if let Some(existing) = self
+            .storage
+            .get_interaction_by_input_identity(thread_id, input_identity)
+            .await?
+        {
+            let durable = self
+                .storage
+                .interaction_input(existing.id)
+                .await?
+                .ok_or_else(|| {
+                    ProductError::Invalid(
+                        "existing identified interaction lost its durable input".into(),
+                    )
+                })?;
+            let submitted_input_draft_matches = if command.input_draft_revision.is_some() {
+                durable.submitted_input_draft_revision == command.input_draft_revision
+            } else {
+                self.storage
+                    .action_input_draft(thread_id)
+                    .await?
+                    .attachments
+                    .is_empty()
+            };
+            if existing.text != command.text
+                || durable.contexts != command.contexts
+                || command.model_selection.is_some()
+                    && existing.model_selection.as_ref() != command.model_selection
+                || !submitted_input_draft_matches
+            {
+                return Err(ProductError::Invalid(
+                    "interaction input identity was reused with different content".into(),
+                ));
+            }
+            return self
+                .storage
+                .insert_interaction_input(
+                    thread_id,
+                    crate::storage::NewInteractionInput {
+                        text: command.text,
+                        input_identity,
+                        input_digest: &durable.input_digest,
+                        contexts: command.contexts,
+                        context_confirmation_ids: command.context_confirmation_ids,
+                        submitted_input_draft_revision: None,
+                    },
+                    command.model_selection,
+                    self.runtime_available && !command.allow_unselected_model,
+                    self.runtime_available,
+                )
+                .await
+                .map_err(Into::into);
+        }
+        let action_input_draft = self.storage.action_input_draft(thread_id).await?;
+        let submitted_inputs = action_input_draft
+            .attachments
+            .iter()
+            .map(submitted_input_from_attachment)
+            .collect::<Result<Vec<_>, _>>()?;
+        let submitted_input_draft_revision = input_draft_reservation_revision(
+            command.input_draft_revision,
+            action_input_draft.revision,
+            !submitted_inputs.is_empty(),
+        )?;
+        let project_path = self.thread_project_path(thread_id).await?;
+        let input_digest = validated_interaction_input_digest(
+            command.text,
+            command.contexts,
+            &submitted_inputs,
+            command.context_snapshots,
+            project_path.as_deref(),
+        )?;
         self.storage
             .insert_interaction_input(
                 thread_id,
@@ -1128,6 +1209,7 @@ impl ProductService {
                     input_digest: &input_digest,
                     contexts: command.contexts,
                     context_confirmation_ids: command.context_confirmation_ids,
+                    submitted_input_draft_revision,
                 },
                 command.model_selection,
                 self.runtime_available && !command.allow_unselected_model,
@@ -1143,6 +1225,16 @@ impl ProductService {
     ) -> Result<Option<super::DurableInteractionInput>, ProductError> {
         self.storage
             .interaction_input(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn submitted_input_evidence(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<Vec<super::SubmittedInputEvidence>, ProductError> {
+        self.storage
+            .submitted_input_evidence(interaction_id)
             .await
             .map_err(Into::into)
     }
@@ -1332,6 +1424,83 @@ impl ProductService {
         }
         self.storage
             .discard_node_context_draft(thread_id, draft_id, expected_revision)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn action_input_draft(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<super::ActionInputDraft, ProductError> {
+        self.storage
+            .action_input_draft(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn commit_action_input_attachment(
+        &self,
+        thread_id: ThreadId,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+        action: &relayer_graph_core::GraphAction,
+        value: &super::ActionInputValue,
+        expected_revision: i64,
+    ) -> Result<super::ActionInputDraft, ProductError> {
+        if expected_revision < 0 {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be zero or a positive integer".into(),
+            ));
+        }
+        if action.id != occurrence.action_id
+            || action.kind != relayer_graph_core::ActionKind::Input
+            || action.state != relayer_graph_core::RecordState::Accepted
+        {
+            return Err(ProductError::Invalid(
+                "the canonical action does not match this accepted input occurrence".into(),
+            ));
+        }
+        let input = action.input.as_ref().ok_or_else(|| {
+            ProductError::Invalid("the accepted input action has no control payload".into())
+        })?;
+        validate_action_input_value(input, value)?;
+        let normalized_value = match value {
+            super::ActionInputValue::Text { text } => {
+                super::ActionInputValue::Text { text: text.clone() }
+            }
+            super::ActionInputValue::Selected { selected_keys } => {
+                let mut selected_keys = selected_keys.clone();
+                selected_keys.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+                super::ActionInputValue::Selected { selected_keys }
+            }
+        };
+        self.storage
+            .commit_action_input_attachment(
+                thread_id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence,
+                    source_node_id: action.source_node_id.value(),
+                    action: input,
+                    value: &normalized_value,
+                },
+                expected_revision,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn detach_action_input_attachment(
+        &self,
+        thread_id: ThreadId,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+        expected_revision: i64,
+    ) -> Result<super::ActionInputDraft, ProductError> {
+        if expected_revision < 0 {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be zero or a positive integer".into(),
+            ));
+        }
+        self.storage
+            .detach_action_input_attachment(thread_id, occurrence, expected_revision)
             .await
             .map_err(Into::into)
     }
@@ -1646,9 +1815,16 @@ impl ProductService {
         source_turn_id: &str,
         graph_node_id: Option<i64>,
         output: Option<&serde_json::Value>,
+        portable_turn: &crate::conversation_export::ConversationExportTurn,
     ) -> Result<(), ProductError> {
         self.storage
-            .prepare_conversation_import_turn(import_id, source_turn_id, graph_node_id, output)
+            .prepare_conversation_import_turn(
+                import_id,
+                source_turn_id,
+                graph_node_id,
+                output,
+                portable_turn,
+            )
             .await
             .map_err(Into::into)
     }
@@ -1757,7 +1933,36 @@ impl ProductService {
         command: RetryInteractionCommand<'_>,
     ) -> Result<bool, ProductError> {
         let input_identity = required(command.input_identity, "inputId")?;
-        let input_digest = validated_interaction_input_digest(command.text, command.contexts)?;
+        let interaction = self.get_interaction(interaction_id).await?;
+        let action_input_draft = self
+            .storage
+            .action_input_draft(interaction.thread_id)
+            .await?;
+        if !action_input_draft.attachments.is_empty() {
+            return Err(CatalogError::invalid(
+                "submitted_input_retry_requires_new_send",
+                "Send the committed inputs again to create a new immutable root and attempt.",
+            )
+            .into());
+        }
+        let submitted_inputs = action_input_draft
+            .attachments
+            .iter()
+            .map(submitted_input_from_attachment)
+            .collect::<Result<Vec<_>, _>>()?;
+        let submitted_input_draft_revision = input_draft_reservation_revision(
+            command.input_draft_revision,
+            action_input_draft.revision,
+            !submitted_inputs.is_empty(),
+        )?;
+        let project_path = self.thread_project_path(interaction.thread_id).await?;
+        let input_digest = validated_interaction_input_digest(
+            command.text,
+            command.contexts,
+            &submitted_inputs,
+            command.context_snapshots,
+            project_path.as_deref(),
+        )?;
         self.storage
             .claim_interaction_retry(
                 interaction_id,
@@ -1768,6 +1973,7 @@ impl ProductService {
                     input_digest: &input_digest,
                     contexts: command.contexts,
                     context_confirmation_ids: command.context_confirmation_ids,
+                    submitted_input_draft_revision,
                 },
                 command.model_selection,
                 command.harness_configuration_name,
@@ -1845,6 +2051,17 @@ impl ProductService {
     ) -> Result<bool, ProductError> {
         self.storage
             .recover_interaction_accepted(interaction_id, output)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn finalize_quarantined_submitted_input_failure(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .finalize_quarantined_submitted_input_failure(interaction_id, error)
             .await
             .map_err(Into::into)
     }
@@ -2042,6 +2259,114 @@ impl ProductService {
             .await?
             .ok_or_else(|| ProductError::NotFound(format!("project {project_id}")))
     }
+
+    async fn thread_project_path(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Option<String>, ProductError> {
+        let thread = self
+            .storage
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("thread {thread_id}")))?;
+        match thread.project_id {
+            Some(project_id) => self.project_path(project_id).await.map(Some),
+            None => Ok(None),
+        }
+    }
+}
+
+fn input_draft_reservation_revision(
+    requested_revision: Option<i64>,
+    current_revision: i64,
+    has_inputs: bool,
+) -> Result<Option<i64>, ProductError> {
+    if requested_revision.is_some_and(|revision| revision != current_revision) {
+        return Err(ProductError::Storage(
+            crate::storage::StorageError::ActionInputDraftConflict {
+                code: "input_draft_revision_conflict",
+                message: "The committed interaction inputs changed before Send. Review them and send again."
+                    .into(),
+            },
+        ));
+    }
+    Ok(requested_revision.or_else(|| has_inputs.then_some(current_revision)))
+}
+
+fn validate_action_input_value(
+    action: &relayer_graph_core::InputAction,
+    value: &super::ActionInputValue,
+) -> Result<(), ProductError> {
+    use relayer_graph_core::InputControl;
+    match (action.control, value) {
+        (InputControl::Text, super::ActionInputValue::Text { text }) => {
+            if text.trim().is_empty() {
+                return Err(input_validation(
+                    "input_text_blank",
+                    "Enter non-whitespace text or detach the input.",
+                ));
+            }
+        }
+        (InputControl::SingleSelect, super::ActionInputValue::Selected { selected_keys }) => {
+            if selected_keys.len() != 1 {
+                return Err(input_validation(
+                    "input_selection_count",
+                    "Select exactly one option.",
+                ));
+            }
+            validate_selected_keys(action, selected_keys)?;
+        }
+        (InputControl::MultiSelect, super::ActionInputValue::Selected { selected_keys }) => {
+            validate_selected_keys(action, selected_keys)?;
+            if selected_keys.len() < action.minimum_selections.unwrap_or(0) {
+                return Err(input_validation(
+                    "input_selection_count",
+                    "Meet this action's minimum selections.",
+                ));
+            }
+        }
+        _ => {
+            return Err(ProductError::Invalid(
+                "the submitted value does not match the input control".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_selected_keys(
+    action: &relayer_graph_core::InputAction,
+    selected_keys: &[String],
+) -> Result<(), ProductError> {
+    let known = action
+        .options
+        .iter()
+        .map(|option| option.key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut selected = std::collections::HashSet::new();
+    for key in selected_keys {
+        if !known.contains(key.as_str()) {
+            return Err(input_validation(
+                "input_option_unknown",
+                &format!("Option key {key:?} is not in the accepted action."),
+            ));
+        }
+        if !selected.insert(key.as_str()) {
+            return Err(input_validation(
+                "input_option_duplicate",
+                "Remove repeated option keys.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn input_validation(code: &'static str, message: &str) -> ProductError {
+    ProductError::InputValidation {
+        code,
+        path: "attachments[0].value",
+        message: message.into(),
+    }
 }
 
 fn stored_project_path(canonical_path: &std::path::Path) -> Result<String, ProductError> {
@@ -2053,8 +2378,46 @@ fn stored_project_path(canonical_path: &std::path::Path) -> Result<String, Produ
 fn validated_interaction_input_digest(
     text: &str,
     contexts: &[super::InteractionContextIntent],
+    submitted_inputs: &[relayer_graph_core::SubmittedInputDraft],
+    context_snapshots: &[relayer_graph_core::InteractionInputNode],
+    project_path: Option<&str>,
 ) -> Result<String, ProductError> {
+    if contexts.len() != context_snapshots.len() {
+        return Err(ProductError::Invalid(
+            "context snapshots must match the exact ordered context intents".into(),
+        ));
+    }
+    if submitted_inputs.len() > crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN {
+        return Err(ProductError::InputValidation {
+            code: "submitted_input_limit_exceeded",
+            path: "submittedInputs",
+            message: format!(
+                "A Send may contain at most {} submitted inputs.",
+                crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN
+            ),
+        });
+    }
+    let portable_input_bytes =
+        crate::conversation_export_service::portable_interaction_input_bytes(
+            project_path,
+            text,
+            contexts,
+            submitted_inputs,
+            context_snapshots,
+        )
+        .map_err(|error| ProductError::Invalid(error.to_string()))?;
+    if portable_input_bytes > crate::conversation_export::MAX_JSONL_LINE_BYTES {
+        return Err(ProductError::InputValidation {
+            code: "submitted_input_limit_exceeded",
+            path: "submittedInputs",
+            message: format!(
+                "The submitted input set is too large for the portable {}-byte turn record limit.",
+                crate::conversation_export::MAX_JSONL_LINE_BYTES
+            ),
+        });
+    }
     if text.trim().is_empty()
+        && submitted_inputs.is_empty()
         && !contexts
             .iter()
             .flat_map(|context| &context.annotations)
@@ -2103,8 +2466,47 @@ fn validated_interaction_input_digest(
             annotations: context.annotations.clone(),
         });
     }
-    relayer_graph_core::interaction_input_digest(text, &graph_contexts)
-        .map_err(|error| ProductError::Invalid(error.to_string()))
+    if submitted_inputs.is_empty() {
+        relayer_graph_core::interaction_input_digest(text, &graph_contexts)
+            .map_err(|error| ProductError::Invalid(error.to_string()))
+    } else {
+        relayer_graph_core::interaction_input_authority_digest(text, submitted_inputs)
+            .map_err(|error| ProductError::Invalid(error.to_string()))
+    }
+}
+
+fn submitted_input_from_attachment(
+    attachment: &super::ActionInputAttachment,
+) -> Result<relayer_graph_core::SubmittedInputDraft, ProductError> {
+    let value = match &attachment.value {
+        super::ActionInputValue::Text { text } => {
+            relayer_graph_core::SubmittedInputValue::Text { text: text.clone() }
+        }
+        super::ActionInputValue::Selected { selected_keys } => {
+            let selected = selected_keys
+                .iter()
+                .map(|key| {
+                    attachment
+                        .action
+                        .options
+                        .iter()
+                        .find(|option| &option.key == key)
+                        .cloned()
+                        .ok_or_else(|| {
+                            ProductError::Invalid(format!(
+                                "input_option_unknown: option key {key:?} is not in the accepted action snapshot"
+                            ))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            relayer_graph_core::SubmittedInputValue::Selected { selected }
+        }
+    };
+    Ok(relayer_graph_core::SubmittedInputDraft {
+        occurrence: attachment.occurrence.clone(),
+        action: attachment.action.clone(),
+        value,
+    })
 }
 
 fn required<'a>(value: &'a str, name: &str) -> Result<&'a str, ProductError> {
@@ -2229,6 +2631,487 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static MANAGED_POLICY_TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[tokio::test]
+    async fn identified_send_replay_rejects_a_different_committed_input_draft() {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = SqliteProductStore::open(directory.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        let thread = storage
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Replay input authority",
+                project_id: None,
+                initial_message: "Initial",
+                harness_configuration_name: "fixture-task-system",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "2026-08-31T00:00:00Z",
+            })
+            .await
+            .unwrap();
+        let service = ProductService::new(storage.clone(), false);
+        let occurrence = relayer_graph_core::PresentingInputOccurrence {
+            presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+            presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+            action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+        };
+        let action = relayer_graph_core::InputAction {
+            control: relayer_graph_core::InputControl::Text,
+            prompt: "Deployment window".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        };
+        let first_value = crate::product::ActionInputValue::Text {
+            text: "Saturday 02:00 UTC".into(),
+        };
+        let first_draft = storage
+            .commit_action_input_attachment(
+                thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &first_value,
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        let send = || CreateIdentifiedInteractionCommand {
+            text: "Prepare the deployment plan",
+            input_identity: "send:stable-replay",
+            contexts: &[],
+            context_snapshots: &[],
+            context_confirmation_ids: &[],
+            input_draft_revision: Some(first_draft.revision),
+            model_selection: None,
+            allow_unselected_model: true,
+        };
+        let created = service
+            .create_identified_interaction(thread.id, send())
+            .await
+            .unwrap();
+        let created_id = match created {
+            crate::storage::InteractionInputInsertOutcome::Created(interaction) => interaction.id,
+            crate::storage::InteractionInputInsertOutcome::Existing(_) => {
+                panic!("first Send must create the identified interaction")
+            }
+        };
+        let exact_replay = service
+            .create_identified_interaction(thread.id, send())
+            .await
+            .unwrap();
+        assert!(matches!(
+            exact_replay,
+            crate::storage::InteractionInputInsertOutcome::Existing(interaction)
+                if interaction.id == created_id
+        ));
+
+        let empty_draft = service.action_input_draft(thread.id).await.unwrap();
+        let second_value = crate::product::ActionInputValue::Text {
+            text: "Sunday 03:00 UTC".into(),
+        };
+        let second_draft = storage
+            .commit_action_input_attachment(
+                thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &second_value,
+                },
+                empty_draft.revision,
+            )
+            .await
+            .unwrap();
+        let error = service
+            .create_identified_interaction(
+                thread.id,
+                CreateIdentifiedInteractionCommand {
+                    input_draft_revision: Some(second_draft.revision),
+                    ..send()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ProductError::Invalid(message)
+                if message == "interaction input identity was reused with different content"
+        ));
+        let original_replay = service
+            .create_identified_interaction(thread.id, send())
+            .await
+            .unwrap();
+        assert!(matches!(
+            original_replay,
+            crate::storage::InteractionInputInsertOutcome::Existing(interaction)
+                if interaction.id == created_id
+        ));
+        assert_eq!(
+            service.action_input_draft(thread.id).await.unwrap(),
+            second_draft
+        );
+
+        let empty_thread = storage
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Empty replay input authority",
+                project_id: None,
+                initial_message: "Initial",
+                harness_configuration_name: "fixture-task-system",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "2026-08-31T00:00:00Z",
+            })
+            .await
+            .unwrap();
+        let empty_send = || CreateIdentifiedInteractionCommand {
+            text: "Prepare without committed inputs",
+            input_identity: "send:empty-replay",
+            contexts: &[],
+            context_snapshots: &[],
+            context_confirmation_ids: &[],
+            input_draft_revision: Some(0),
+            model_selection: None,
+            allow_unselected_model: true,
+        };
+        let empty_created = service
+            .create_identified_interaction(empty_thread.id, empty_send())
+            .await
+            .unwrap();
+        let empty_created_id = match empty_created {
+            crate::storage::InteractionInputInsertOutcome::Created(interaction) => interaction.id,
+            crate::storage::InteractionInputInsertOutcome::Existing(_) => {
+                panic!("first empty Send must create the identified interaction")
+            }
+        };
+        let new_draft = storage
+            .commit_action_input_attachment(
+                empty_thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &first_value,
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        let error = service
+            .create_identified_interaction(
+                empty_thread.id,
+                CreateIdentifiedInteractionCommand {
+                    input_draft_revision: Some(new_draft.revision),
+                    ..empty_send()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ProductError::Invalid(message)
+                if message == "interaction input identity was reused with different content"
+        ));
+        let replaced_draft = storage
+            .commit_action_input_attachment(
+                empty_thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &second_value,
+                },
+                new_draft.revision,
+            )
+            .await
+            .unwrap();
+        let stale_error = service
+            .create_identified_interaction(
+                empty_thread.id,
+                CreateIdentifiedInteractionCommand {
+                    input_draft_revision: Some(new_draft.revision),
+                    ..empty_send()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            stale_error,
+            ProductError::Invalid(message)
+                if message == "interaction input identity was reused with different content"
+        ));
+        let empty_original_replay = service
+            .create_identified_interaction(empty_thread.id, empty_send())
+            .await
+            .unwrap();
+        assert!(matches!(
+            empty_original_replay,
+            crate::storage::InteractionInputInsertOutcome::Existing(interaction)
+                if interaction.id == empty_created_id
+        ));
+        assert_eq!(
+            service.action_input_draft(empty_thread.id).await.unwrap(),
+            replaced_draft
+        );
+
+        let omitted_thread = storage
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Omitted replay input authority",
+                project_id: None,
+                initial_message: "Initial",
+                harness_configuration_name: "fixture-task-system",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "2026-08-31T00:00:00Z",
+            })
+            .await
+            .unwrap();
+        let omitted_send = || CreateIdentifiedInteractionCommand {
+            text: "Prepare without inspecting the input draft",
+            input_identity: "send:omitted-replay",
+            contexts: &[],
+            context_snapshots: &[],
+            context_confirmation_ids: &[],
+            input_draft_revision: None,
+            model_selection: None,
+            allow_unselected_model: true,
+        };
+        service
+            .create_identified_interaction(omitted_thread.id, omitted_send())
+            .await
+            .unwrap();
+        assert!(matches!(
+            service
+                .create_identified_interaction(omitted_thread.id, omitted_send())
+                .await
+                .unwrap(),
+            crate::storage::InteractionInputInsertOutcome::Existing(_)
+        ));
+        let omitted_new_draft = storage
+            .commit_action_input_attachment(
+                omitted_thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &first_value,
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        let omitted_error = service
+            .create_identified_interaction(omitted_thread.id, omitted_send())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            omitted_error,
+            ProductError::Invalid(message)
+                if message == "interaction input identity was reused with different content"
+        ));
+        assert_eq!(
+            service.action_input_draft(omitted_thread.id).await.unwrap(),
+            omitted_new_draft
+        );
+    }
+
+    #[test]
+    fn input_send_reserves_only_the_exact_inspected_draft_revision() {
+        assert_eq!(
+            input_draft_reservation_revision(Some(4), 4, true).unwrap(),
+            Some(4)
+        );
+        assert_eq!(
+            input_draft_reservation_revision(None, 4, true).unwrap(),
+            Some(4)
+        );
+        assert_eq!(
+            input_draft_reservation_revision(Some(4), 4, false).unwrap(),
+            Some(4)
+        );
+        assert!(matches!(
+            input_draft_reservation_revision(Some(3), 4, true),
+            Err(ProductError::Storage(
+                crate::storage::StorageError::ActionInputDraftConflict {
+                    code: "input_draft_revision_conflict",
+                    ..
+                }
+            ))
+        ));
+        assert!(matches!(
+            input_draft_reservation_revision(Some(3), 4, false),
+            Err(ProductError::Storage(
+                crate::storage::StorageError::ActionInputDraftConflict {
+                    code: "input_draft_revision_conflict",
+                    ..
+                }
+            ))
+        ));
+    }
+
+    #[test]
+    fn input_send_rejects_more_children_than_the_portable_turn_limit() {
+        let submitted = relayer_graph_core::SubmittedInputDraft {
+            occurrence: relayer_graph_core::PresentingInputOccurrence {
+                presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+                presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+                action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+            },
+            action: relayer_graph_core::InputAction {
+                control: relayer_graph_core::InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: relayer_graph_core::SubmittedInputValue::Text {
+                text: "exact".into(),
+            },
+        };
+        let submitted_inputs =
+            vec![submitted; crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN + 1];
+
+        assert!(
+            validated_interaction_input_digest(
+                "",
+                &[],
+                &submitted_inputs[..crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN],
+                &[],
+                None,
+            )
+            .is_ok()
+        );
+
+        assert!(matches!(
+            validated_interaction_input_digest("", &[], &submitted_inputs, &[], None),
+            Err(ProductError::InputValidation {
+                code: "submitted_input_limit_exceeded",
+                path: "submittedInputs",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn input_send_rejects_submitted_values_above_the_portable_record_byte_limit() {
+        let value_bytes = crate::conversation_export::MAX_JSONL_LINE_BYTES / 8;
+        let submitted_inputs = (1..=9)
+            .map(|id| relayer_graph_core::SubmittedInputDraft {
+                occurrence: relayer_graph_core::PresentingInputOccurrence {
+                    presenting_interaction_node_id: relayer_graph_core::NodeId::new(id).unwrap(),
+                    presenting_layer_id: relayer_graph_core::LayerId::new(id).unwrap(),
+                    action_id: relayer_graph_core::ActionId::new(id).unwrap(),
+                },
+                action: relayer_graph_core::InputAction {
+                    control: relayer_graph_core::InputControl::Text,
+                    prompt: "Explain".into(),
+                    options: vec![],
+                    minimum_selections: None,
+                    unsupported_fields: Default::default(),
+                },
+                value: relayer_graph_core::SubmittedInputValue::Text {
+                    text: "x".repeat(value_bytes),
+                },
+            })
+            .collect::<Vec<_>>();
+
+        assert!(matches!(
+            validated_interaction_input_digest("", &[], &submitted_inputs, &[], None),
+            Err(ProductError::InputValidation {
+                code: "submitted_input_limit_exceeded",
+                path: "submittedInputs",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn input_send_measures_submitted_values_after_portable_project_path_redaction() {
+        let submitted_inputs = vec![relayer_graph_core::SubmittedInputDraft {
+            occurrence: relayer_graph_core::PresentingInputOccurrence {
+                presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+                presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+                action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+            },
+            action: relayer_graph_core::InputAction {
+                control: relayer_graph_core::InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: relayer_graph_core::SubmittedInputValue::Text {
+                text: "/a".repeat(1_200_000),
+            },
+        }];
+
+        assert!(matches!(
+            validated_interaction_input_digest("", &[], &submitted_inputs, &[], Some("/a")),
+            Err(ProductError::InputValidation {
+                code: "submitted_input_limit_exceeded",
+                path: "submittedInputs",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn input_send_measures_the_complete_known_portable_turn_envelope() {
+        let value_bytes = crate::conversation_export::MAX_STRING_BYTES;
+        let submitted_inputs = (1..=2)
+            .map(|id| relayer_graph_core::SubmittedInputDraft {
+                occurrence: relayer_graph_core::PresentingInputOccurrence {
+                    presenting_interaction_node_id: relayer_graph_core::NodeId::new(id).unwrap(),
+                    presenting_layer_id: relayer_graph_core::LayerId::new(id).unwrap(),
+                    action_id: relayer_graph_core::ActionId::new(id).unwrap(),
+                },
+                action: relayer_graph_core::InputAction {
+                    control: relayer_graph_core::InputControl::Text,
+                    prompt: "Explain".into(),
+                    options: vec![],
+                    minimum_selections: None,
+                    unsupported_fields: Default::default(),
+                },
+                value: relayer_graph_core::SubmittedInputValue::Text {
+                    text: "i".repeat(value_bytes),
+                },
+            })
+            .collect::<Vec<_>>();
+        let contexts = vec![crate::product::InteractionContextIntent {
+            target: crate::product::InteractionContextTarget {
+                node_id: 1,
+                source_interaction_node_id: 2,
+                source_layer_id: 3,
+            },
+            annotations: vec!["c".repeat(value_bytes)],
+        }];
+        let context_snapshots = vec![relayer_graph_core::InteractionInputNode {
+            id: relayer_graph_core::NodeId::new(1).unwrap(),
+            kind: "answer".into(),
+            icon: "document".into(),
+            title: "Context".into(),
+            detail: "d".repeat(value_bytes),
+            state: relayer_graph_core::RecordState::Accepted,
+        }];
+
+        assert!(matches!(
+            validated_interaction_input_digest(
+                &"t".repeat(value_bytes),
+                &contexts,
+                &submitted_inputs,
+                &context_snapshots,
+                None,
+            ),
+            Err(ProductError::InputValidation {
+                code: "submitted_input_limit_exceeded",
+                path: "submittedInputs",
+                ..
+            })
+        ));
+    }
 
     #[test]
     #[cfg(unix)]

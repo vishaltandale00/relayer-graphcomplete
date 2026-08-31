@@ -127,6 +127,7 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) input_digest: Option<&'a str>,
     pub(crate) contexts: &'a [crate::product::InteractionContextIntent],
     pub(crate) personal_presentation: Option<&'a PersonalPresentationExecution>,
+    pub(crate) submitted_inputs: &'a [relayer_graph_core::SubmittedInputDraft],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +170,7 @@ pub(crate) struct PreparedInteraction {
     pub(crate) permission_profile_id: String,
     pub(crate) effective_execution_digest: String,
     pub(crate) effective_permission_receipt: Value,
+    pub(crate) input_children: Vec<relayer_graph_core::InteractionInputChild>,
     configuration: HarnessConfiguration,
     model_selection: Option<ExecutionModelSelection>,
     personal_presentation_version_id: Option<i64>,
@@ -607,6 +609,7 @@ impl RuntimeClient {
             "inputIdentity": command.input_identity,
             "inputDigest": command.input_digest,
             "contexts": command.contexts,
+            "submittedInputs": command.submitted_inputs,
             "mintCapability": false,
         });
         let interaction: CreateInteractionResponse =
@@ -696,6 +699,7 @@ impl RuntimeClient {
                 "unconfinedHostAccess": unrestricted,
                 "disclosure": unrestricted.then_some("Filesystem and network access were not hard-confined."),
             }),
+            input_children: interaction.input_children,
             configuration: selected.configuration.clone(),
             model_selection: command.model_selection.cloned(),
             personal_presentation_version_id: command
@@ -1636,6 +1640,16 @@ impl RuntimeClient {
         )?)
     }
 
+    pub(crate) async fn interaction_input_children(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<Value, RuntimeError> {
+        self.control_get(&format!(
+            "api/control/interactions/{interaction_node_id}/input-children"
+        ))
+        .await
+    }
+
     pub(crate) async fn interaction_context_actions(
         &self,
         interaction_node_id: i64,
@@ -1661,6 +1675,40 @@ impl RuntimeClient {
             .bearer_auth(&self.graph_control_token)
             .timeout(CONTROL_REQUEST_TIMEOUT)
             .json(target)
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        let snapshot: relayer_graph_core::InteractionInputNode = serde_json::from_value(value)?;
+        if snapshot.id != target.node_id
+            || snapshot.state != relayer_graph_core::RecordState::Accepted
+        {
+            return Err(RuntimeError::Protocol(
+                "canonical context occurrence returned a different or non-accepted target snapshot"
+                    .into(),
+            ));
+        }
+        Ok(snapshot)
+    }
+
+    pub(crate) async fn canonical_input_action_occurrence(
+        &self,
+        destination_project_id: Option<i64>,
+        destination_thread_id: i64,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+    ) -> Result<relayer_graph_core::GraphAction, RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join("api/control/input-action-occurrences/canonical")?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({
+                "destinationProjectId": destination_project_id,
+                "destinationThreadId": destination_thread_id,
+                "occurrence": occurrence,
+            }))
             .send()
             .await?;
         let value = response_json(response, StatusCode::OK).await?;
@@ -1907,6 +1955,8 @@ struct CreateInteractionResponse {
     input_identity: Option<String>,
     #[serde(default)]
     input_digest: Option<String>,
+    #[serde(default)]
+    input_children: Vec<relayer_graph_core::InteractionInputChild>,
 }
 
 #[derive(Deserialize)]
@@ -2639,6 +2689,7 @@ mod tests {
             permission_profile_id: "auto".into(),
             effective_execution_digest: "sha256:execution".into(),
             effective_permission_receipt: json!({}),
+            input_children: vec![],
             configuration: HarnessConfiguration {
                 schema_version: 1,
                 name: "test".into(),
@@ -2985,12 +3036,29 @@ mod tests {
                     async move {
                         if body["inputIdentity"] == "product:99" {
                             assert_eq!(body["inputDigest"], "sha256:v1:stable");
+                            assert_eq!(body["submittedInputs"][0]["actionId"], 23);
+                            assert_eq!(body["submittedInputs"][0]["value"]["text"], "exact");
                             if observed_identified.fetch_add(1, Ordering::SeqCst) < 2 {
                                 return (StatusCode::OK, "response was truncated").into_response();
                             }
                             return Json(json!({
                                 "node": { "id": 42 }, "graphToken": "",
-                                "inputIdentity": "product:99", "inputDigest": "sha256:v1:stable"
+                                "inputIdentity": "product:99", "inputDigest": "sha256:v1:stable",
+                                "inputChildren": [{
+                                    "id": "interaction-input-child:1",
+                                    "parentInteractionNodeId": 42,
+                                    "occurrence": {
+                                        "presentingInteractionNodeId": 17,
+                                        "presentingLayerId": 19,
+                                        "actionId": 23
+                                    },
+                                    "sourceNodeId": 21,
+                                    "action": { "control": "text", "prompt": "Explain" },
+                                    "value": { "text": "exact" },
+                                    "attemptKey": "product:99",
+                                    "authorityDigest": "sha256:v1:stable",
+                                    "semanticDigest": "sha256:semantic"
+                                }]
                             }))
                             .into_response();
                         }
@@ -3068,12 +3136,30 @@ mod tests {
             input_digest: None,
             contexts: &[],
             personal_presentation: None,
+            submitted_inputs: &[],
         };
 
         let prepared = runtime.prepare(&command).await.unwrap();
         assert_eq!(prepared.graph_node_id, 41);
         assert_eq!(creates.load(Ordering::SeqCst), 3);
         runtime.discard_prepared(prepared).await.unwrap();
+        let submitted_inputs = [relayer_graph_core::SubmittedInputDraft {
+            occurrence: relayer_graph_core::PresentingInputOccurrence {
+                presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+                presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+                action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+            },
+            action: relayer_graph_core::InputAction {
+                control: relayer_graph_core::InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: relayer_graph_core::SubmittedInputValue::Text {
+                text: "exact".into(),
+            },
+        }];
         let identified = CompleteInteraction {
             project_id: None,
             product_interaction_id: 99,
@@ -3093,10 +3179,175 @@ mod tests {
             input_digest: Some("sha256:v1:stable"),
             contexts: &[],
             personal_presentation: None,
+            submitted_inputs: &submitted_inputs,
         };
         let prepared = runtime.prepare(&identified).await.unwrap();
         assert_eq!(prepared.graph_node_id, 42);
+        assert_eq!(prepared.input_children.len(), 1);
         assert_eq!(identified_creates.load(Ordering::SeqCst), 3);
+        runtime.discard_prepared(prepared).await.unwrap();
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn prepare_carries_submitted_input_children_and_a_personal_presentation_together() {
+        // Submitted inputs and a personal-presentation attachment are prepared on the
+        // same interaction, in the same call. Each has its own coverage; this proves
+        // they still both land when they arrive together.
+        let attachments = Arc::new(AtomicUsize::new(0));
+        let observed_attachments = attachments.clone();
+        let graph = Router::new()
+            .route(
+                "/api/control/interactions",
+                routing::post(move |Json(body): Json<serde_json::Value>| async move {
+                    assert_eq!(body["inputIdentity"], "product:77");
+                    assert_eq!(body["submittedInputs"][0]["actionId"], 23);
+                    assert_eq!(body["submittedInputs"][0]["value"]["text"], "exact");
+                    Json(json!({
+                        "node": { "id": 42 }, "graphToken": "",
+                        "inputIdentity": "product:77", "inputDigest": "sha256:v1:stable",
+                        "inputChildren": [{
+                            "id": "interaction-input-child:1",
+                            "parentInteractionNodeId": 42,
+                            "occurrence": {
+                                "presentingInteractionNodeId": 17,
+                                "presentingLayerId": 19,
+                                "actionId": 23
+                            },
+                            "sourceNodeId": 21,
+                            "action": { "control": "text", "prompt": "Explain" },
+                            "value": { "text": "exact" },
+                            "attemptKey": "product:77",
+                            "authorityDigest": "sha256:v1:stable",
+                            "semanticDigest": "sha256:semantic"
+                        }]
+                    }))
+                }),
+            )
+            .route(
+                "/api/control/interactions/42/personal-presentation",
+                routing::post(move |Json(body): Json<serde_json::Value>| {
+                    let observed_attachments = observed_attachments.clone();
+                    async move {
+                        assert_eq!(body["versionInteractionNodeId"], 31);
+                        observed_attachments.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({
+                            "interactionNodeId": 42,
+                            "versionInteractionNodeId": 31,
+                            "rootLayerId": 37
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/api/control/capabilities",
+                routing::delete(|| async { Json(json!({ "revoked": true })) }),
+            );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(Router::new()).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-runtime-input-with-presentation-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({
+                "schemaVersion":1,
+                "configurations":[{"configuration":{
+                    "schemaVersion":1,"name":"test","implementation":"test",
+                    "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+                },"digest":"sha256:test"}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+        let permission_profile = PermissionProfile {
+            id: "auto".into(),
+            label: "Approve for me".into(),
+            authority: "bounded".into(),
+            reviewer: "automatic".into(),
+        };
+        let submitted_inputs = [relayer_graph_core::SubmittedInputDraft {
+            occurrence: relayer_graph_core::PresentingInputOccurrence {
+                presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+                presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+                action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+            },
+            action: relayer_graph_core::InputAction {
+                control: relayer_graph_core::InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: relayer_graph_core::SubmittedInputValue::Text {
+                text: "exact".into(),
+            },
+        }];
+        let personal_presentation = super::PersonalPresentationExecution {
+            version_key: "personal-presentation-v1".into(),
+            version_interaction_node_id: 31,
+            root_layer_id: 37,
+        };
+        let command = CompleteInteraction {
+            project_id: None,
+            product_interaction_id: 77,
+            thread_id: 1,
+            interaction_id: 77,
+            text: "question",
+            working_directory: root.to_str().unwrap(),
+            harness_configuration_name: "test",
+            permission_profile: &permission_profile,
+            model_selection: None,
+            model_plan: None,
+            attempt_admission_id: None,
+            execution_lease_id: None,
+            harness_policy: None,
+            invocation: None,
+            input_identity: Some("product:77"),
+            input_digest: Some("sha256:v1:stable"),
+            contexts: &[],
+            personal_presentation: Some(&personal_presentation),
+            submitted_inputs: &submitted_inputs,
+        };
+
+        let prepared = runtime.prepare(&command).await.unwrap();
+        assert_eq!(prepared.graph_node_id, 42);
+        assert_eq!(prepared.input_children.len(), 1);
+        assert_eq!(prepared.personal_presentation_version_id, Some(31));
+        assert_eq!(attachments.load(Ordering::SeqCst), 1);
+        // The pinned presentation still reaches the execution digest when submitted
+        // inputs share the same prepare.
+        assert_ne!(
+            prepared.effective_execution_digest,
+            super::effective_execution_digest("sha256:test", "auto", None, None)
+        );
+        assert_eq!(
+            prepared.effective_execution_digest,
+            super::effective_execution_digest(
+                "sha256:test",
+                "auto",
+                None,
+                Some(&personal_presentation),
+            )
+        );
         runtime.discard_prepared(prepared).await.unwrap();
         graph_task.abort();
         harness_task.abort();
@@ -3381,6 +3632,7 @@ mod tests {
             input_digest: None,
             contexts: &[],
             personal_presentation: None,
+            submitted_inputs: &[],
         };
         let error = runtime.prepare(&command).await.unwrap_err();
         assert!(matches!(&error, super::RuntimeError::ResponseDecode(_)));
@@ -3518,6 +3770,7 @@ mod tests {
                 input_digest: None,
                 contexts: &[],
                 personal_presentation: None,
+                submitted_inputs: &[],
             })
             .await;
 
@@ -3675,6 +3928,7 @@ mod tests {
                 input_digest: None,
                 contexts: &[],
                 personal_presentation: Some(&personal_presentation),
+                submitted_inputs: &[],
             })
             .await
             .unwrap();

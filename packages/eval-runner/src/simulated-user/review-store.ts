@@ -35,6 +35,7 @@ export interface NodeReviewRecord {
     readonly expansion: { readonly need: string; readonly result: string };
     readonly references: { readonly need: string; readonly result: string };
     readonly invoke: { readonly need: string; readonly result: string };
+    readonly input?: { readonly need: string; readonly result: string };
   };
 }
 
@@ -299,13 +300,16 @@ function validateRecursiveDisclosure(
     expansion: subjects.some((subject) => subject.actionKind === "navigate" && subject.relation === "expand"),
     references: subjects.some((subject) => subject.actionKind === "navigate" && subject.relation === "reference"),
     invoke: subjects.some((subject) => subject.actionKind === "invoke"),
+    input: subjects.some((subject) => subject.actionKind === "input"),
   };
   for (const [dimension, present] of Object.entries(availability)) {
-    const result = review.structure[dimension as keyof typeof availability].result;
+    const result = review.structure[dimension as keyof typeof availability]?.result;
+    if (result === undefined) continue;
     if (present && result === "absent") throw new Error(`${dimension} disclosure exists in inventory and cannot be rated absent`);
     if (!present && result !== "absent") throw new Error(`${dimension} disclosure is absent from inventory and cannot be rated ${result}`);
   }
-  const dimensions = [review.structure.expansion, review.structure.references, review.structure.invoke];
+  const dimensions = [review.structure.expansion, review.structure.references, review.structure.invoke, review.structure.input]
+    .filter((dimension) => dimension !== undefined);
   if (dimensions.some((dimension) => dimension.need === "required" && ["absent", "fails"].includes(dimension.result))) {
     if (review.structure.rating > 2) {
       throw new Error("A node with required missing disclosure cannot receive a recursive-disclosure rating above 2");
@@ -324,7 +328,8 @@ function validateRequiredDisclosureCeiling<TurnReview extends TurnReviewRecord, 
   if (review.scoreCeiling === undefined) return;
   const dimensions = nodes.flatMap((node) => node.structure === undefined
     ? []
-    : [node.structure.expansion, node.structure.references, node.structure.invoke]);
+    : [node.structure.expansion, node.structure.references, node.structure.invoke, node.structure.input]
+      .filter((dimension) => dimension !== undefined));
   if (
     dimensions.some((dimension) => dimension.need === "required" && ["absent", "fails"].includes(dimension.result))
     && review.scoreCeiling.maximum > 2

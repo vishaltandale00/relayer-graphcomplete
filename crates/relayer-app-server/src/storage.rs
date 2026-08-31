@@ -46,6 +46,7 @@ pub(crate) struct NewInteractionInput<'a> {
     pub(crate) input_digest: &'a str,
     pub(crate) contexts: &'a [crate::product::InteractionContextIntent],
     pub(crate) context_confirmation_ids: &'a [String],
+    pub(crate) submitted_input_draft_revision: Option<i64>,
 }
 
 pub(crate) struct NewNodeContextDraft<'a> {
@@ -53,6 +54,13 @@ pub(crate) struct NewNodeContextDraft<'a> {
     pub(crate) target: &'a crate::product::InteractionContextTarget,
     pub(crate) target_node: &'a relayer_graph_core::InteractionInputNode,
     pub(crate) text: &'a str,
+}
+
+pub(crate) struct NewActionInputAttachment<'a> {
+    pub(crate) occurrence: &'a relayer_graph_core::PresentingInputOccurrence,
+    pub(crate) source_node_id: i64,
+    pub(crate) action: &'a relayer_graph_core::InputAction,
+    pub(crate) value: &'a crate::product::ActionInputValue,
 }
 
 #[derive(Debug)]
@@ -179,4 +187,6 @@ pub(crate) enum StorageError {
     CompletionExecutionConflict(String),
     #[error("personal presentation conflict: {0}")]
     PersonalPresentationConflict(String),
+    #[error("action-input draft conflict: {message}")]
+    ActionInputDraftConflict { code: &'static str, message: String },
 }

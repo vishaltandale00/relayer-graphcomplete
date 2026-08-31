@@ -15,7 +15,8 @@ export function renderInteractionInput(input: InteractionInput): string {
       },
       annotations,
     })),
+    ...(input.submittedInputs?.length ? { submittedInputs: input.submittedInputs } : {}),
   }, null, 2);
 }
 
-export const INTERACTION_INPUT_GUIDANCE = `The message and every attached node annotation are one interaction input. Preserve target and annotation order, and use your own judgment to infer their meaning; the product assigns no semantic precedence. The graph capability can re-read this exact normalized input from the interaction pointer, including in native child agents. Do not try to create, modify, or delete interaction context.`;
+export const INTERACTION_INPUT_GUIDANCE = `The message, every attached node annotation, and every submitted input snapshot are one interaction input. Preserve context target and annotation order. Submitted inputs are an unordered collection of prompt/control/value snapshots; the product assigns no semantic precedence or independent work. Use your own judgment to infer their meaning. The graph capability can re-read this exact normalized input from the interaction pointer, including in native child agents. Do not try to create, modify, or delete interaction context or submitted input.`;

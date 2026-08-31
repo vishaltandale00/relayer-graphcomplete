@@ -9,17 +9,19 @@ use crate::{
     conversation_export::{
         ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
         EXPORT_VERSION_V1, ExportAcceptedView, ExportAction, ExportActionKind, ExportActionVariant,
-        ExportAdmittedExecutionModelPlan, ExportAdmittedExecutionModelRoute,
+        ExportAdmittedExecutionModelPlan, ExportAdmittedExecutionModelRoute, ExportAttemptOutcome,
         ExportCompletionReceipt, ExportCompletionStatus, ExportContextSource,
-        ExportContextTargetSnapshot, ExportConversation, ExportEdge, ExportInteractionContext,
+        ExportContextTargetSnapshot, ExportConversation, ExportEdge, ExportInputActionSnapshot,
+        ExportInputControl, ExportInputOption, ExportInputSource, ExportInteractionContext,
         ExportLayer, ExportLayerLayout, ExportModelSelection, ExportNavigateRelation, ExportNode,
         ExportNodePlacement, ExportPermissionReceipt, ExportProducer, ExportRecordState,
-        ExportResolvedLayer, ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES,
-        MAX_JSONL_LINE_BYTES, validate_export_records,
+        ExportResolvedLayer, ExportSubmittedInput, ExportSubmittedInputValue,
+        ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES,
+        validate_export_records,
     },
     product::{
         ActionInvocation, DurableInteractionInput, Interaction, InteractionId, ProductError,
-        ProductService, ThreadId,
+        ProductService, SubmittedInputEvidence, ThreadId,
     },
     runtime::{RuntimeClient, RuntimeError},
 };
@@ -108,6 +110,7 @@ pub(crate) async fn build_conversation_export(
     let mut ids = PortableIds::default();
     let mut closures = Vec::with_capacity(detail.interactions.len());
     let mut context_inputs = Vec::with_capacity(detail.interactions.len());
+    let mut submitted_evidence = Vec::with_capacity(detail.interactions.len());
     for interaction in &detail.interactions {
         let closure = if interaction.completion_status == "accepted" {
             let node_id = interaction.graph_node_id.ok_or_else(|| {
@@ -139,6 +142,7 @@ pub(crate) async fn build_conversation_export(
                 .map(ContextInput::Durable),
         };
         context_inputs.push(context_input);
+        submitted_evidence.push(product.submitted_input_evidence(interaction.id).await?);
     }
     for invocation in conversation_invocations {
         let source_index = *interaction_indexes
@@ -213,17 +217,19 @@ pub(crate) async fn build_conversation_export(
         turns,
     }));
     let mut records = vec![header];
-    for ((interaction, closure), context_input) in detail
+    for (((interaction, closure), context_input), submitted_evidence) in detail
         .interactions
         .iter()
         .zip(closures.iter())
         .zip(context_inputs.iter())
+        .zip(submitted_evidence.iter())
     {
         records.push(ConversationExportRecord::Turn(Box::new(export_turn(
             interaction,
             TurnExportContext {
                 closure: closure.as_ref(),
                 context_input: context_input.as_ref(),
+                submitted_evidence,
                 invocation: invocations.get(&interaction.id).copied(),
                 imported: ImportedExportContext {
                     turn: imported_turns.get(&interaction.id).copied(),
@@ -273,6 +279,7 @@ enum ContextInput {
 struct TurnExportContext<'a> {
     closure: Option<&'a AcceptedGraphClosure>,
     context_input: Option<&'a ContextInput>,
+    submitted_evidence: &'a [SubmittedInputEvidence],
     invocation: Option<&'a ActionInvocation>,
     imported: ImportedExportContext<'a>,
     turn_sequences: &'a HashMap<InteractionId, i64>,
@@ -287,6 +294,7 @@ fn export_turn(
     let TurnExportContext {
         closure,
         context_input,
+        submitted_evidence,
         invocation,
         imported,
         turn_sequences,
@@ -321,7 +329,20 @@ fn export_turn(
         ids,
         redactor,
     )?;
-    let interaction_node_id = interaction.graph_node_id.map(|node_id| ids.node(node_id));
+    let submitted_inputs = export_submitted_inputs(
+        interaction,
+        submitted_evidence,
+        imported.turn.map(|record| &record.turn.submitted_inputs),
+        ids,
+        redactor,
+    )?;
+    let interaction_node_id = interaction
+        .graph_node_id
+        .map(|node_id| ids.node(node_id))
+        .or_else(|| {
+            (!submitted_inputs.is_empty())
+                .then(|| format!("node:input-root-{}", interaction.sequence))
+        });
     let origin = match invocation {
         Some(invocation) => {
             let source_action_id = ids.action.get(&invocation.action_id).cloned().ok_or_else(|| {
@@ -390,6 +411,12 @@ fn export_turn(
         origin,
         completion: ExportCompletionReceipt {
             status,
+            attempt_outcome: interaction
+                .latest_attempt
+                .as_ref()
+                .map(|attempt| attempt_outcome(&attempt.outcome))
+                .transpose()?
+                .or_else(|| imported_completion.and_then(|completion| completion.attempt_outcome)),
             harness_configuration_name: interaction.harness_configuration_name.clone(),
             harness_configuration_digest: interaction.harness_configuration_digest.clone(),
             model_selection: interaction
@@ -461,6 +488,7 @@ fn export_turn(
                 }),
         },
         contexts,
+        submitted_inputs,
         accepted_view,
     })
 }
@@ -589,6 +617,282 @@ fn export_contexts(
         .collect()
 }
 
+fn export_submitted_inputs(
+    interaction: &Interaction,
+    evidence: &[SubmittedInputEvidence],
+    imported: Option<&Vec<ExportSubmittedInput>>,
+    ids: &mut PortableIds,
+    redactor: &ProjectPathRedactor,
+) -> Result<Vec<ExportSubmittedInput>, ConversationExportBuildError> {
+    if evidence.is_empty() {
+        let mut imported = imported.cloned().unwrap_or_default();
+        for submitted in &mut imported {
+            submitted.root_turn_id = turn_id(interaction.sequence);
+            redact_submitted_input(submitted, redactor);
+        }
+        imported.sort_by_key(submitted_input_sort_key);
+        return Ok(imported);
+    }
+    if imported.is_some_and(|inputs| !inputs.is_empty()) {
+        return Err(ConversationExportBuildError::Invalid(format!(
+            "interaction {} has both native and imported submitted input evidence",
+            interaction.id
+        )));
+    }
+    let root_turn_id = turn_id(interaction.sequence);
+    let mut evidence = evidence.to_vec();
+    evidence.sort_by_key(|input| input.occurrence.clone());
+    let mut exported = evidence
+        .into_iter()
+        .enumerate()
+        .map(|(index, input)| {
+            if !matches!(
+                input.attempt_state.as_str(),
+                "reserved" | "preparing" | "bound" | "running" | "accepted" | "failed" | "stopped"
+            ) {
+                return Err(ConversationExportBuildError::Invalid(format!(
+                    "interaction {} has unknown submitted input attempt state {}",
+                    interaction.id, input.attempt_state
+                )));
+            }
+            let minimum_selections = input
+                .action
+                .minimum_selections
+                .map(|minimum| {
+                    u32::try_from(minimum).map_err(|_| {
+                        ConversationExportBuildError::Invalid(format!(
+                            "interaction {} input minimum exceeds portable range",
+                            interaction.id
+                        ))
+                    })
+                })
+                .transpose()?;
+            let option_keys = injective_portable_option_keys(
+                input
+                    .action
+                    .options
+                    .iter()
+                    .map(|option| option.key.as_str()),
+                redactor,
+            );
+            let action = ExportInputActionSnapshot {
+                control: match input.action.control {
+                    relayer_graph_core::InputControl::Text => ExportInputControl::Text,
+                    relayer_graph_core::InputControl::SingleSelect => {
+                        ExportInputControl::SingleSelect
+                    }
+                    relayer_graph_core::InputControl::MultiSelect => {
+                        ExportInputControl::MultiSelect
+                    }
+                    relayer_graph_core::InputControl::Unsupported => {
+                        return Err(ConversationExportBuildError::Invalid(format!(
+                            "interaction {} has an unsupported accepted input control",
+                            interaction.id
+                        )));
+                    }
+                },
+                prompt: redactor.text(&input.action.prompt),
+                options: input
+                    .action
+                    .options
+                    .into_iter()
+                    .map(|option| ExportInputOption {
+                        key: option_keys
+                            .get(&option.key)
+                            .expect("accepted option key was indexed")
+                            .clone(),
+                        label: redactor.text(&option.label),
+                        unsupported_fields: Default::default(),
+                    })
+                    .collect(),
+                minimum_selections,
+                unsupported_fields: Default::default(),
+            };
+            let value = match input.value {
+                relayer_graph_core::SubmittedInputValue::Text { text } => {
+                    ExportSubmittedInputValue::Text {
+                        text: redactor.text(&text),
+                    }
+                }
+                relayer_graph_core::SubmittedInputValue::Selected { selected } => {
+                    let mut selected = selected
+                        .into_iter()
+                        .map(|option| ExportInputOption {
+                            key: option_keys
+                                .get(&option.key)
+                                .cloned()
+                                .unwrap_or_else(|| redactor.text(&option.key)),
+                            label: redactor.text(&option.label),
+                            unsupported_fields: Default::default(),
+                        })
+                        .collect::<Vec<_>>();
+                    selected.sort_by(|left, right| left.key.as_bytes().cmp(right.key.as_bytes()));
+                    ExportSubmittedInputValue::Selected { selected }
+                }
+            };
+            Ok(ExportSubmittedInput {
+                id: format!("input-child:{}-{}", interaction.sequence, index + 1),
+                root_turn_id: root_turn_id.clone(),
+                source: ExportInputSource {
+                    interaction_node_id: ids
+                        .node(input.occurrence.presenting_interaction_node_id.value()),
+                    layer_id: ids.layer(input.occurrence.presenting_layer_id.value()),
+                    action_id: ids.action(input.occurrence.action_id.value()),
+                    node_id: ids.node(input.source_node_id),
+                },
+                action,
+                value,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    exported.sort_by_key(submitted_input_sort_key);
+    Ok(exported)
+}
+
+fn redact_submitted_input(input: &mut ExportSubmittedInput, redactor: &ProjectPathRedactor) {
+    input.action.prompt = redactor.text(&input.action.prompt);
+    let option_keys = injective_portable_option_keys(
+        input
+            .action
+            .options
+            .iter()
+            .map(|option| option.key.as_str()),
+        redactor,
+    );
+    for option in &mut input.action.options {
+        option.key = option_keys
+            .get(&option.key)
+            .expect("portable option key was indexed")
+            .clone();
+        option.label = redactor.text(&option.label);
+    }
+    match &mut input.value {
+        ExportSubmittedInputValue::Text { text } => *text = redactor.text(text),
+        ExportSubmittedInputValue::Selected { selected } => {
+            for option in &mut *selected {
+                option.key = option_keys
+                    .get(&option.key)
+                    .cloned()
+                    .unwrap_or_else(|| redactor.text(&option.key));
+                option.label = redactor.text(&option.label);
+            }
+            selected.sort_by(|left, right| left.key.as_bytes().cmp(right.key.as_bytes()));
+        }
+    }
+}
+
+pub(crate) fn portable_interaction_input_bytes(
+    project_path: Option<&str>,
+    text: &str,
+    contexts: &[crate::product::InteractionContextIntent],
+    submitted_inputs: &[relayer_graph_core::SubmittedInputDraft],
+    context_snapshots: &[relayer_graph_core::InteractionInputNode],
+) -> Result<usize, serde_json::Error> {
+    const PORTABLE_TURN_ENVELOPE_BYTES: usize = 1_024;
+    const PORTABLE_INPUT_IDENTITY_BYTES: usize = 512;
+    // Imported history may bind every context identity to the V1 128-byte maximum. The
+    // estimator's numeric stand-ins are shorter, so reserve the full four-field identity budget.
+    const PORTABLE_CONTEXT_IDENTITY_BYTES: usize = 4 * 128;
+
+    let redactor = ProjectPathRedactor::new(project_path);
+    let text = redactor.text(text);
+    let contexts = contexts
+        .iter()
+        .zip(context_snapshots)
+        .enumerate()
+        .map(|(index, (context, snapshot))| ExportInteractionContext {
+            id: format!(
+                "action:{}-{}-{}-{}",
+                context.target.source_interaction_node_id,
+                context.target.source_layer_id,
+                context.target.node_id,
+                index + 1
+            ),
+            target: ExportContextTargetSnapshot {
+                id: format!("node:{}", context.target.node_id),
+                kind: redactor.text(&snapshot.kind),
+                icon: redactor.text(&snapshot.icon),
+                title: redactor.text(&snapshot.title),
+                detail: redactor.text(&snapshot.detail),
+                state: ExportRecordState::Accepted,
+            },
+            source: ExportContextSource {
+                interaction_node_id: format!("node:{}", context.target.source_interaction_node_id),
+                layer_id: format!("layer:{}", context.target.source_layer_id),
+            },
+            annotations: context
+                .annotations
+                .iter()
+                .map(|annotation| redactor.text(annotation))
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let submitted_inputs = submitted_inputs
+        .iter()
+        .cloned()
+        .map(|mut input| {
+            input.action.prompt = redactor.text(&input.action.prompt);
+            let option_keys = injective_portable_option_keys(
+                input
+                    .action
+                    .options
+                    .iter()
+                    .map(|option| option.key.as_str()),
+                &redactor,
+            );
+            for option in &mut input.action.options {
+                option.key = option_keys
+                    .get(&option.key)
+                    .expect("submitted option key was indexed")
+                    .clone();
+                option.label = redactor.text(&option.label);
+            }
+            match &mut input.value {
+                relayer_graph_core::SubmittedInputValue::Text { text } => {
+                    *text = redactor.text(text)
+                }
+                relayer_graph_core::SubmittedInputValue::Selected { selected } => {
+                    for option in &mut *selected {
+                        option.key = option_keys
+                            .get(&option.key)
+                            .cloned()
+                            .unwrap_or_else(|| redactor.text(&option.key));
+                        option.label = redactor.text(&option.label);
+                    }
+                    selected.sort_by(|left, right| left.key.as_bytes().cmp(right.key.as_bytes()));
+                }
+            }
+            input
+        })
+        .collect::<Vec<_>>();
+
+    Ok(serde_json::to_vec(&(&text, &contexts, &submitted_inputs))?
+        .len()
+        .saturating_add(PORTABLE_TURN_ENVELOPE_BYTES)
+        .saturating_add(
+            submitted_inputs
+                .len()
+                .saturating_mul(PORTABLE_INPUT_IDENTITY_BYTES),
+        )
+        .saturating_add(
+            contexts
+                .len()
+                .saturating_mul(PORTABLE_CONTEXT_IDENTITY_BYTES),
+        ))
+}
+
+fn submitted_input_sort_key(input: &ExportSubmittedInput) -> Vec<u8> {
+    serde_json::to_vec(&(
+        &input.source.interaction_node_id,
+        &input.source.layer_id,
+        &input.source.action_id,
+        &input.source.node_id,
+        &input.action,
+        &input.value,
+    ))
+    .expect("portable submitted input sort key serializes")
+}
+
 fn seed_imported_action_ids(
     interaction_id: InteractionId,
     closure: &AcceptedGraphClosure,
@@ -605,6 +909,23 @@ fn seed_imported_action_ids(
         )));
     }
     for (resolved, imported_resolved) in closure.layers.iter().zip(&imported.layers) {
+        ids.bind_layer(
+            resolved.layer.id.value(),
+            imported_resolved.layer.id.clone(),
+        )?;
+        if resolved.nodes.len() != imported_resolved.nodes.len()
+            || resolved.edges.len() != imported_resolved.edges.len()
+        {
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "imported interaction {interaction_id} graph record inventory no longer matches its portable accepted view"
+            )));
+        }
+        for (node, imported_node) in resolved.nodes.iter().zip(&imported_resolved.nodes) {
+            ids.bind_node(node.id.value(), imported_node.id.clone())?;
+        }
+        for (edge, imported_edge) in resolved.edges.iter().zip(&imported_resolved.edges) {
+            ids.bind_edge(edge.id.value(), imported_edge.id.clone())?;
+        }
         if resolved.actions.len() != imported_resolved.actions.len() {
             return Err(ConversationExportBuildError::Invalid(format!(
                 "imported interaction {interaction_id} action inventory no longer matches its portable accepted view"
@@ -614,6 +935,7 @@ fn seed_imported_action_ids(
             let expected_kind = match action.kind {
                 ActionKind::Navigate => ExportActionKind::Navigate,
                 ActionKind::Invoke => ExportActionKind::Invoke,
+                ActionKind::Input => ExportActionKind::Input,
                 ActionKind::InteractionContext => continue,
             };
             if imported_action.kind != expected_kind {
@@ -748,6 +1070,7 @@ fn export_action(
     let kind = match action.kind {
         ActionKind::Navigate => ExportActionKind::Navigate,
         ActionKind::Invoke => ExportActionKind::Invoke,
+        ActionKind::Input => ExportActionKind::Input,
         ActionKind::InteractionContext => {
             return Err(ConversationExportBuildError::Invalid(
                 "interaction context actions are not exported as graph actions".into(),
@@ -788,7 +1111,58 @@ fn export_action(
             None
         },
         interaction_text: redactor.optional(action.interaction_text.as_deref()),
+        input: action
+            .input
+            .as_ref()
+            .map(|input| export_input_action(input, redactor))
+            .transpose()?,
         state: ExportRecordState::Accepted,
+    })
+}
+
+fn export_input_action(
+    input: &relayer_graph_core::InputAction,
+    redactor: &ProjectPathRedactor,
+) -> Result<ExportInputActionSnapshot, ConversationExportBuildError> {
+    let control = match input.control {
+        relayer_graph_core::InputControl::Text => ExportInputControl::Text,
+        relayer_graph_core::InputControl::SingleSelect => ExportInputControl::SingleSelect,
+        relayer_graph_core::InputControl::MultiSelect => ExportInputControl::MultiSelect,
+        relayer_graph_core::InputControl::Unsupported => {
+            return Err(ConversationExportBuildError::Invalid(
+                "accepted input action has an unsupported control".into(),
+            ));
+        }
+    };
+    let option_keys = injective_portable_option_keys(
+        input.options.iter().map(|option| option.key.as_str()),
+        redactor,
+    );
+    Ok(ExportInputActionSnapshot {
+        control,
+        prompt: redactor.text(&input.prompt),
+        options: input
+            .options
+            .iter()
+            .map(|option| ExportInputOption {
+                key: option_keys
+                    .get(&option.key)
+                    .expect("accepted option key was indexed")
+                    .clone(),
+                label: redactor.text(&option.label),
+                unsupported_fields: Default::default(),
+            })
+            .collect(),
+        minimum_selections: input
+            .minimum_selections
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| {
+                ConversationExportBuildError::Invalid(
+                    "accepted input action minimum exceeds portable range".into(),
+                )
+            })?,
+        unsupported_fields: Default::default(),
     })
 }
 
@@ -817,6 +1191,19 @@ fn completion_status(value: &str) -> Result<ExportCompletionStatus, Conversation
         "stopped" => Ok(ExportCompletionStatus::Stopped),
         other => Err(ConversationExportBuildError::Invalid(format!(
             "unknown completion status {other}"
+        ))),
+    }
+}
+
+fn attempt_outcome(value: &str) -> Result<ExportAttemptOutcome, ConversationExportBuildError> {
+    match value {
+        "running" => Ok(ExportAttemptOutcome::Running),
+        "accepted" => Ok(ExportAttemptOutcome::Accepted),
+        "model_failed" => Ok(ExportAttemptOutcome::ModelFailed),
+        "execution_failed" => Ok(ExportAttemptOutcome::ExecutionFailed),
+        "cancelled" => Ok(ExportAttemptOutcome::Cancelled),
+        other => Err(ConversationExportBuildError::Invalid(format!(
+            "unknown attempt outcome {other}"
         ))),
     }
 }
@@ -869,6 +1256,43 @@ impl ProjectPathRedactor {
     }
 }
 
+fn injective_portable_option_keys<'a>(
+    keys: impl IntoIterator<Item = &'a str>,
+    redactor: &ProjectPathRedactor,
+) -> HashMap<String, String> {
+    let mut portable = HashMap::new();
+    let mut used = std::collections::HashSet::new();
+    for key in keys {
+        let base = bounded_portable_option_key(&redactor.text(key), 128);
+        let mut candidate = base.clone();
+        let mut ordinal = 2;
+        while !used.insert(candidate.clone()) {
+            candidate = suffixed_portable_option_key(&base, ordinal);
+            ordinal += 1;
+        }
+        portable.insert(key.to_owned(), candidate);
+    }
+    portable
+}
+
+fn suffixed_portable_option_key(base: &str, ordinal: usize) -> String {
+    let suffix = format!("~{ordinal}");
+    let maximum_base_bytes = 128_usize.saturating_sub(suffix.len());
+    format!(
+        "{}{}",
+        bounded_portable_option_key(base, maximum_base_bytes),
+        suffix
+    )
+}
+
+fn bounded_portable_option_key(base: &str, maximum_bytes: usize) -> String {
+    let mut end = base.len().min(maximum_bytes);
+    while !base.is_char_boundary(end) {
+        end -= 1;
+    }
+    base[..end].trim_end().to_owned()
+}
+
 #[derive(Default)]
 struct PortableIds {
     node: HashMap<i64, String>,
@@ -905,6 +1329,22 @@ impl PortableIds {
         portable: String,
     ) -> Result<(), ConversationExportBuildError> {
         bind_id(&mut self.action, raw, portable, "action")
+    }
+
+    fn bind_layer(
+        &mut self,
+        raw: i64,
+        portable: String,
+    ) -> Result<(), ConversationExportBuildError> {
+        bind_id(&mut self.layer, raw, portable, "layer")
+    }
+
+    fn bind_edge(
+        &mut self,
+        raw: i64,
+        portable: String,
+    ) -> Result<(), ConversationExportBuildError> {
+        bind_id(&mut self.edge, raw, portable, "edge")
     }
 }
 
@@ -951,19 +1391,22 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
 mod tests {
     use super::{
         ContextInput, ImportedExportContext, PortableIds, ProjectPathRedactor, RuntimeContextInput,
-        TurnExportContext, completion_status, export_action, export_contexts, export_turn,
+        TurnExportContext, completion_status, export_action, export_contexts,
+        export_submitted_inputs, export_turn, portable_interaction_input_bytes,
     };
     use crate::{
         conversation_export::{ExportCompletionStatus, ExportTurnOrigin},
         product::{
             ActionInvocation, DurableInteractionInput, Interaction, InteractionContextIntent,
-            InteractionContextTarget as ProductInteractionContextTarget, InteractionId, ThreadId,
+            InteractionContextTarget as ProductInteractionContextTarget, InteractionId,
+            SubmittedInputEvidence, ThreadId,
         },
     };
     use relayer_graph_core::{
-        ActionId, ActionKind, ActionVariant, GraphAction, GraphNode, InteractionContext,
-        InteractionContextAction, InteractionContextTarget, InteractionInput, InteractionInputNode,
-        LayerId, NodeId, RecordState,
+        ActionId, ActionKind, ActionVariant, GraphAction, GraphNode, InputAction, InputControl,
+        InputOption, InteractionContext, InteractionContextAction, InteractionContextTarget,
+        InteractionInput, InteractionInputNode, LayerId, NodeId, PresentingInputOccurrence,
+        RecordState, SubmittedInputValue,
     };
 
     #[test]
@@ -975,6 +1418,193 @@ mod tests {
         assert_eq!(
             completion_status("stopped").unwrap(),
             ExportCompletionStatus::Stopped
+        );
+    }
+
+    #[test]
+    fn exports_native_submitted_input_with_redacted_snapshot_and_portable_provenance() {
+        let interaction = Interaction {
+            id: InteractionId::from_database(7),
+            thread_id: ThreadId::from_database(1),
+            sequence: 2,
+            text: "".into(),
+            created_at: "2".into(),
+            graph_node_id: None,
+            completion_status: "failed".into(),
+            harness_configuration_name: None,
+            harness_configuration_digest: None,
+            permission_profile_id: "auto".into(),
+            model_selection: None,
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
+            completion_output: None,
+            completion_error: Some("failed".into()),
+            latest_attempt: None,
+        };
+        let evidence = vec![SubmittedInputEvidence {
+            occurrence: PresentingInputOccurrence {
+                presenting_interaction_node_id: NodeId::new(10).unwrap(),
+                presenting_layer_id: LayerId::new(30).unwrap(),
+                action_id: ActionId::new(40).unwrap(),
+            },
+            source_node_id: 20,
+            action: InputAction {
+                control: InputControl::SingleSelect,
+                prompt: "Choose /private/tmp/project/file".into(),
+                options: vec![
+                    InputOption {
+                        key: "/tmp/project/target".into(),
+                        label: "From /tmp/project".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: "/private/tmp/project/target".into(),
+                        label: "From /private/tmp/project".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: SubmittedInputValue::Selected {
+                selected: vec![
+                    InputOption {
+                        key: "/private/tmp/project/target".into(),
+                        label: "From /private/tmp/project".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: "/tmp/project/target".into(),
+                        label: "From /tmp/project".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
+            },
+            attempt_state: "failed".into(),
+        }];
+        let mut ids = PortableIds::default();
+        let exported = export_submitted_inputs(
+            &interaction,
+            &evidence,
+            None,
+            &mut ids,
+            &ProjectPathRedactor::new(Some("/private/tmp/project")),
+        )
+        .unwrap();
+        assert_eq!(exported[0].root_turn_id, "turn:2");
+        assert_eq!(exported[0].source.interaction_node_id, "node:1");
+        assert_eq!(exported[0].source.node_id, "node:2");
+        assert_eq!(exported[0].source.layer_id, "layer:1");
+        assert_eq!(exported[0].source.action_id, "action:1");
+        assert_eq!(exported[0].action.prompt, "Choose [project-path]/file");
+        assert_eq!(exported[0].action.options[0].key, "[project-path]/target");
+        assert_eq!(exported[0].action.options[1].key, "[project-path]/target~2");
+        assert_eq!(
+            serde_json::to_value(&exported).unwrap()[0]["value"]["selected"],
+            serde_json::json!([
+                {"key":"[project-path]/target","label":"From [project-path]"},
+                {"key":"[project-path]/target~2","label":"From [project-path]"}
+            ])
+        );
+        let json = serde_json::to_string(&exported).unwrap();
+        assert!(!json.contains("private/tmp/project"));
+        assert!(!json.contains("/tmp/project"));
+        assert!(!json.contains("authority"));
+        assert!(!json.contains("digest"));
+
+        let mut raw_ids = PortableIds::default();
+        let raw_imported = export_submitted_inputs(
+            &interaction,
+            &evidence,
+            None,
+            &mut raw_ids,
+            &ProjectPathRedactor::new(None),
+        )
+        .unwrap();
+        let reexported = export_submitted_inputs(
+            &interaction,
+            &[],
+            Some(&raw_imported),
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some("/private/tmp/project")),
+        )
+        .unwrap();
+        assert_eq!(reexported[0].action.options[0].key, "[project-path]/target");
+        assert_eq!(
+            reexported[0].action.options[1].key,
+            "[project-path]/target~2"
+        );
+        assert_eq!(
+            serde_json::to_value(&reexported).unwrap()[0]["value"]["selected"],
+            serde_json::json!([
+                {"key":"[project-path]/target","label":"From [project-path]"},
+                {"key":"[project-path]/target~2","label":"From [project-path]"}
+            ])
+        );
+    }
+
+    #[test]
+    fn native_submitted_inputs_sort_by_materialized_portable_identity() {
+        let interaction = Interaction {
+            id: InteractionId::from_database(7),
+            thread_id: ThreadId::from_database(1),
+            sequence: 2,
+            text: "".into(),
+            created_at: "2".into(),
+            graph_node_id: None,
+            completion_status: "failed".into(),
+            harness_configuration_name: None,
+            harness_configuration_digest: None,
+            permission_profile_id: "auto".into(),
+            model_selection: None,
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
+            completion_output: None,
+            completion_error: Some("failed".into()),
+            latest_attempt: None,
+        };
+        let evidence = [
+            (40, "second portable action"),
+            (41, "tenth portable action"),
+        ]
+        .into_iter()
+        .map(|(action_id, text)| SubmittedInputEvidence {
+            occurrence: PresentingInputOccurrence {
+                presenting_interaction_node_id: NodeId::new(10).unwrap(),
+                presenting_layer_id: LayerId::new(30).unwrap(),
+                action_id: ActionId::new(action_id).unwrap(),
+            },
+            source_node_id: 20,
+            action: InputAction {
+                control: InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: SubmittedInputValue::Text { text: text.into() },
+            attempt_state: "failed".into(),
+        })
+        .collect::<Vec<_>>();
+        let mut ids = PortableIds::default();
+        ids.bind_action(40, "action:2".into()).unwrap();
+        ids.bind_action(41, "action:10".into()).unwrap();
+
+        let exported = export_submitted_inputs(
+            &interaction,
+            &evidence,
+            None,
+            &mut ids,
+            &ProjectPathRedactor::new(None),
+        )
+        .unwrap();
+
+        assert_eq!(
+            exported
+                .iter()
+                .map(|input| input.source.action_id.as_str())
+                .collect::<Vec<_>>(),
+            ["action:10", "action:2"]
         );
     }
 
@@ -1023,6 +1653,7 @@ mod tests {
                     target_node: target.clone(),
                     annotations: vec!["Inspect /workspace/project/src".into(), "Second".into()],
                 }],
+                submitted_inputs: vec![],
             },
             actions: vec![InteractionContextAction {
                 id: ActionId::new(30).unwrap(),
@@ -1038,22 +1669,56 @@ mod tests {
             }],
         };
 
+        let long_action_id = format!("action:{}", "a".repeat(121));
+        let long_target_id = format!("node:{}", "t".repeat(123));
+        let long_source_id = format!("node:{}", "s".repeat(123));
+        let long_layer_id = format!("layer:{}", "l".repeat(122));
+        let mut ids = PortableIds::default();
+        ids.bind_action(30, long_action_id.clone()).unwrap();
+        ids.bind_node(20, long_target_id.clone()).unwrap();
+        ids.bind_node(40, long_source_id.clone()).unwrap();
+        ids.bind_layer(50, long_layer_id.clone()).unwrap();
         let exported = export_contexts(
             &interaction,
             Some(&ContextInput::Runtime(runtime)),
             None,
-            &mut PortableIds::default(),
+            &mut ids,
             &ProjectPathRedactor::new(Some("/workspace/project")),
         )
         .unwrap();
-        assert_eq!(exported[0].id, "action:1");
-        assert_eq!(exported[0].target.id, "node:1");
-        assert_eq!(exported[0].source.interaction_node_id, "node:2");
-        assert_eq!(exported[0].source.layer_id, "layer:1");
+        assert_eq!(exported[0].id, long_action_id);
+        assert_eq!(exported[0].target.id, long_target_id);
+        assert_eq!(exported[0].source.interaction_node_id, long_source_id);
+        assert_eq!(exported[0].source.layer_id, long_layer_id);
         assert_eq!(
             exported[0].annotations,
             ["Inspect [project-path]/src", "Second"]
         );
+        let intent = InteractionContextIntent {
+            target: ProductInteractionContextTarget {
+                node_id: 20,
+                source_interaction_node_id: 40,
+                source_layer_id: 50,
+            },
+            annotations: vec!["Inspect /workspace/project/src".into(), "Second".into()],
+        };
+        let estimated = portable_interaction_input_bytes(
+            Some("/workspace/project"),
+            "",
+            &[intent],
+            &[],
+            &[target],
+        )
+        .unwrap();
+        let actual = serde_json::to_vec(&(
+            &"",
+            &exported,
+            &Vec::<relayer_graph_core::SubmittedInputDraft>::new(),
+        ))
+        .unwrap()
+        .len()
+        .saturating_add(1_024);
+        assert!(estimated >= actual, "{estimated} < {actual}");
     }
 
     #[test]
@@ -1090,6 +1755,9 @@ mod tests {
                 },
                 annotations: vec!["Compare /workspace/project/private.txt".into()],
             }],
+            submitted_inputs: vec![],
+            submitted_input_draft_revision: None,
+            semantic_digest: None,
         });
 
         let error = export_contexts(
@@ -1127,6 +1795,7 @@ mod tests {
             description: None,
             target_layer_id: Some(LayerId::new(4).unwrap()),
             interaction_text: Some("Continue from here".into()),
+            input: None,
             state: RecordState::Accepted,
         };
 
@@ -1141,6 +1810,118 @@ mod tests {
         assert_eq!(
             exported.interaction_text.as_deref(),
             Some("Continue from here")
+        );
+    }
+
+    #[test]
+    fn unanswered_input_action_exports_its_authored_payload() {
+        let action = GraphAction {
+            id: ActionId::new(1).unwrap(),
+            source_node_id: NodeId::new(2).unwrap(),
+            source_layer_id: Some(LayerId::new(3).unwrap()),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Choose".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::SingleSelect,
+                prompt: "Choose /private/tmp/project/target".into(),
+                options: vec![
+                    InputOption {
+                        key: "/private/tmp/project/target".into(),
+                        label: "Use /private/tmp/project target".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: "/tmp/project/target".into(),
+                        label: "Use /tmp/project target".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            }),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_action(
+            &action,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some("/private/tmp/project")),
+        )
+        .unwrap();
+
+        let input = exported.input.unwrap();
+        assert_eq!(
+            input.control,
+            crate::conversation_export::ExportInputControl::SingleSelect
+        );
+        assert_eq!(input.prompt, "Choose [project-path]/target");
+        assert_eq!(input.options[0].key, "[project-path]/target");
+        assert_eq!(input.options[1].key, "[project-path]/target~2");
+        assert_eq!(input.options[0].label, "Use [project-path] target");
+        assert_eq!(input.options[1].label, "Use [project-path] target");
+    }
+
+    #[test]
+    fn expanding_path_redaction_keeps_option_keys_within_the_portable_limit() {
+        let authored_key = format!("/a{}", "x".repeat(126));
+        let authored_key_with_internal_space = format!("/a{} {}", "x".repeat(113), "y".repeat(12));
+        assert_eq!(authored_key.len(), 128);
+        assert_eq!(authored_key_with_internal_space.len(), 128);
+        let action = GraphAction {
+            id: ActionId::new(1).unwrap(),
+            source_node_id: NodeId::new(2).unwrap(),
+            source_layer_id: Some(LayerId::new(3).unwrap()),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Choose".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::SingleSelect,
+                prompt: "Choose".into(),
+                options: vec![
+                    InputOption {
+                        key: authored_key,
+                        label: "Expanded path".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: authored_key_with_internal_space,
+                        label: "Expanded path with internal space".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            }),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_action(
+            &action,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some("/a")),
+        )
+        .unwrap();
+        let input = exported.input.unwrap();
+        let option_key = &input.options[0].key;
+        let option_key_with_exposed_space = &input.options[1].key;
+
+        assert_eq!(option_key.len(), 128);
+        assert!(option_key.starts_with("[project-path]"));
+        assert_eq!(option_key_with_exposed_space.len(), 127);
+        assert_eq!(
+            option_key_with_exposed_space.trim(),
+            option_key_with_exposed_space
         );
     }
 
@@ -1182,6 +1963,7 @@ mod tests {
             TurnExportContext {
                 closure: None,
                 context_input: None,
+                submitted_evidence: &[],
                 invocation: Some(&invocation),
                 imported: ImportedExportContext {
                     turn: None,

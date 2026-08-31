@@ -21,9 +21,17 @@ export function followupRequestBody(
   inputId,
   contexts = [],
   contextConfirmationIds = [],
+  inputDraftRevision = null,
 ) {
   if (!inputId) throw new Error("A stable inputId is required for a follow-up send.");
-  return { text, inputId, contexts, contextConfirmationIds, modelSelection };
+  return {
+    text,
+    inputId,
+    contexts,
+    contextConfirmationIds,
+    modelSelection,
+    ...(inputDraftRevision == null ? {} : { inputDraftRevision }),
+  };
 }
 
 const pendingFollowupSends = new Map();
@@ -34,6 +42,7 @@ export function stableFollowupInputId(
   modelSelection,
   contexts = [],
   contextConfirmationIds = [],
+  inputDraftRevision = null,
 ) {
   const content = JSON.stringify({
     threadId: String(threadId),
@@ -41,6 +50,7 @@ export function stableFollowupInputId(
     modelSelection,
     contexts,
     contextConfirmationIds,
+    inputDraftRevision,
   });
   const pending = pendingFollowupSends.get(content);
   if (pending) return pending;

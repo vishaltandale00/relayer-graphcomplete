@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -10,6 +10,7 @@ import {
   inventoryReviewSubjects,
   runSimulatedUserJudge,
 } from "@relayer/eval-runner";
+import { inputActionReviewRef, inputOccurrenceKey } from "../renderer/src/node-input-controls.js";
 
 export const LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION = Object.freeze({
   model: "gpt-5.6-sol",
@@ -22,6 +23,144 @@ export const PERSONAL_PRESENTATION_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_PERSONAL_
 export const PERSONAL_PRESENTATION_AUTORUN_FLAG = "--relayer-eval-autorun-personal-presentation";
 export const PRODUCT_PRESENTATION_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_PRODUCT_PRESENTATION";
 export const PRODUCT_PRESENTATION_AUTORUN_FLAG = "--relayer-eval-autorun-product-presentation";
+export const INPUT_ROUNDTRIP_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_INPUT_ROUNDTRIP";
+export const INPUT_ROUNDTRIP_AUTORUN_FLAG = "--relayer-eval-autorun-input-roundtrip";
+
+export function operatorInteractionIsTerminal(status) {
+  return ["accepted", "failed", "cancelled", "stopped"].includes(status);
+}
+
+export function incompleteInputRoundTripEvidence(operatorTrace) {
+  const commits = operatorTrace.filter((event) => event.operation === "input_commit");
+  if (commits.length === 0) {
+    return {
+      schemaVersion: 1,
+      status: "not_exercised",
+      passed: false,
+      checks: [],
+      detail: "The simulated user did not commit an input and activate Send.",
+    };
+  }
+  if (!operatorTrace.some((event) => event.operation === "send")) {
+    return {
+      schemaVersion: 1,
+      status: "indeterminate",
+      passed: false,
+      checks: [],
+      detail: "The simulated user committed input, but the judge ended before activating Send.",
+    };
+  }
+  return null;
+}
+
+export function groundingRootNodeIds(interaction) {
+  return (interaction?.completionOutput?.rootLayer?.nodes ?? [])
+    .map((node) => String(node?.id ?? ""))
+    .filter(Boolean);
+}
+
+export function groundingCaptureTargets(topology) {
+  const layers = new Map((topology?.layers || []).map((layer) => [String(layer.id), layer]));
+  const rootLayerId = String(topology?.rootLayerId ?? "");
+  if (!rootLayerId || !layers.has(rootLayerId)) return [];
+  const pending = [{ layerId: rootLayerId, path: [] }];
+  const visited = new Set();
+  const targets = [];
+  for (let index = 0; index < pending.length; index += 1) {
+    const entry = pending[index];
+    if (visited.has(entry.layerId)) continue;
+    visited.add(entry.layerId);
+    const layer = layers.get(entry.layerId);
+    targets.push({
+      layerId: entry.layerId,
+      nodeIds: (layer?.nodeIds || []).map(String),
+      path: entry.path,
+    });
+    for (const action of layer?.actions || []) {
+      if (action.kind !== "navigate") continue;
+      const targetLayerId = String(action.targetLayerId ?? "");
+      if (!layers.has(targetLayerId) || visited.has(targetLayerId)) continue;
+      pending.push({
+        layerId: targetLayerId,
+        path: [...entry.path, {
+          sourceNodeId: String(action.sourceNodeId),
+          actionId: String(action.id),
+        }],
+      });
+    }
+  }
+  return targets;
+}
+
+export async function buildInputGroundingTopology({ threadId, interaction, loadLayer }) {
+  const rootLayerId = interaction?.completionOutput?.rootLayer?.layer?.id;
+  if (!rootLayerId) {
+    throw new Error("Accepted input response has no visible root layer.");
+  }
+  return buildAcceptedReviewTopology({
+    turnId: interaction.id,
+    presentingInteractionNodeId: interaction.graphNodeId,
+    rootLayerId,
+    loadLayer: (layerId) => loadLayer({
+      threadId,
+      turnId: interaction.id,
+      layerId,
+    }),
+  });
+}
+
+export async function captureGroundingTargets(session, targets) {
+  const captures = [];
+  const activateNode = async (nodeId) => {
+    const state = await session.state();
+    if (String(state.selectedNodeId ?? "") === String(nodeId)) return;
+    await session.interact({ elementRef: `node-${nodeId}`, activate: true });
+  };
+  for (const target of targets) {
+    for (const step of target.path) {
+      await activateNode(step.sourceNodeId);
+      await session.interact({ elementRef: `action-${step.actionId}`, activate: true });
+    }
+    for (const [index, nodeId] of target.nodeIds.entries()) {
+      await activateNode(nodeId);
+      captures.push(await session.screenshot({
+        target: { kind: "element", elementRef: "node-detail" },
+        mode: "full",
+        label: `Input round-trip response layer ${target.layerId} node ${index + 1}`,
+      }));
+    }
+    if (target.path.length > 0) await session.history({ delta: -target.path.length });
+  }
+  return captures;
+}
+
+export function createInputOperatorLease({ operator, revoke }) {
+  if (!operator || typeof revoke !== "function") {
+    throw new Error("Input operator lease requires an operator and revocation callback.");
+  }
+  let released = false;
+  let releaseAttempt = null;
+  return Object.freeze({
+    operator,
+    release: async () => {
+      if (released) return;
+      releaseAttempt ??= Promise.resolve()
+        .then(revoke)
+        .then(() => { released = true; })
+        .finally(() => { releaseAttempt = null; });
+      await releaseAttempt;
+    },
+  });
+}
+
+export async function releaseInputOperatorLease(lease) {
+  if (!lease?.release) return;
+  try {
+    await lease.release();
+  } catch {
+    await lease.release();
+  }
+}
 
 export function resolveLocalSimulatedUserAutorun({
   environment = process.env,
@@ -35,11 +174,26 @@ export function resolveLocalSimulatedUserAutorun({
     || commandLineArguments.includes(PRODUCT_PRESENTATION_AUTORUN_FLAG);
   const enabled = environment[LOCAL_SIMULATED_USER_AUTORUN_ENV] === "1"
     || commandLineArguments.includes(LOCAL_SIMULATED_USER_AUTORUN_FLAG);
-  if (!enabled && !personalPresentationEnabled && !productPresentationEnabled) return null;
-  if ([enabled, personalPresentationEnabled, productPresentationEnabled].filter(Boolean).length > 1) {
+  const inputRoundTripEnabled = environment[INPUT_ROUNDTRIP_AUTORUN_ENV] === "1"
+    || commandLineArguments.includes(INPUT_ROUNDTRIP_AUTORUN_FLAG);
+  if (!enabled && !personalPresentationEnabled && !productPresentationEnabled && !inputRoundTripEnabled) return null;
+  if ([enabled, personalPresentationEnabled, productPresentationEnabled, inputRoundTripEnabled].filter(Boolean).length > 1) {
     throw new Error("Select only one local simulated-user autorun.");
   }
   if (packaged) throw new Error("The simulated-user autorun is available only in a local development checkout.");
+  if (inputRoundTripEnabled) {
+    const availableHarnesses = availableHarnessConfigurationNames === undefined
+      ? null
+      : new Set(availableHarnessConfigurationNames);
+    if (availableHarnesses !== null && !availableHarnesses.has("codex-basic")) {
+      throw new Error("The input round-trip autorun requires codex-basic.");
+    }
+    return {
+      testCaseIds: ["empty-project.node-input-roundtrip.single-turn"],
+      harnessConfigurationNames: ["codex-basic"],
+      judgeConfigurationName: "simulated-user-sol-high",
+    };
+  }
   if (productPresentationEnabled) {
     const harnessConfigurationNames = ["codex-basic"];
     const availableHarnesses = availableHarnessConfigurationNames === undefined
@@ -92,38 +246,277 @@ export function resolveLocalSimulatedUserAutorun({
   };
 }
 
-export function createReviewSessionController(reviewSession, screenshotMetadata) {
+export function createReviewSessionController(reviewSession, screenshotMetadata, {
+  inputOperator,
+  inputBindings = new Map(),
+  persistInputRatingReceipt,
+} = {}) {
   if (!reviewSession?.screenshot || !reviewSession?.interact || !reviewSession?.history) {
     throw new Error("Simulated-user review requires a complete ReviewSession controller.");
   }
+  const captureByScreenshot = new Map();
+  const commissionedByOccurrence = new Map();
+  const committedOccurrences = new Set();
+  const operatorEvents = [];
+  const inputRatingReceiptRefs = [];
+  let pendingRendererAcknowledgement = null;
+  const acknowledgeOperatorWrite = async (pending) => {
+    pending.event.rendererAcknowledgement = {
+      status: "pending",
+      attempts: pending.attempts + 1,
+    };
+    try {
+      await reviewSession.setInputOperatorCommitted?.(pending.committed);
+      const state = await reviewSession.state();
+      pending.attempts += 1;
+      pending.event.rendererAcknowledgement = {
+        status: "completed",
+        attempts: pending.attempts,
+      };
+      pendingRendererAcknowledgement = null;
+      return { ...pending.result, state: reviewUiStateForOperator(state) };
+    } catch (error) {
+      pending.attempts += 1;
+      pending.event.rendererAcknowledgement = {
+        status: "failed",
+        attempts: pending.attempts,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      pendingRendererAcknowledgement = pending;
+      throw new Error(
+        `The product ${pending.event.operation} succeeded, but renderer acknowledgement failed; retry this exact interaction to acknowledge it without repeating the write: ${pending.event.rendererAcknowledgement.error}`,
+        { cause: error },
+      );
+    }
+  };
   return Object.freeze({
     screenshot: async (input) => {
-      const output = await reviewSession.screenshot(input);
-      if (!output?.ok) return { output, images: [] };
-      const screenshot = output.screenshot;
-      screenshotMetadata.set(screenshot.screenshotId, structuredClone(screenshot));
-      const directory = reviewSession.artifactDirectoryFor(screenshot.screenshotId);
-      if (!directory) throw new Error(`Screenshot artifact directory is missing: ${screenshot.screenshotId}`);
-      const images = await Promise.all([...screenshot.tiles]
-        .sort((left, right) => left.index - right.index)
-        .map(async (tile) => ({
-          data: (await readFile(join(
-            directory,
-            `${screenshot.screenshotId}-${String(tile.index + 1).padStart(3, "0")}.png`,
-          ))).toString("base64"),
-          mimeType: "image/png",
-        })));
-      if (images.length !== screenshot.tileCount) {
-        throw new Error(`Screenshot tile count does not match metadata: ${screenshot.screenshotId}`);
+      const binding = input.target?.kind === "element" ? inputBindings.get(input.target.elementRef) : undefined;
+      let operatorCapture = null;
+      if (binding && inputOperator) {
+        const state = await reviewSession.state();
+        operatorCapture = inputOperator.beginCapture({
+          occurrence: binding.occurrence,
+          action: binding.action,
+          threadRevision: state.threadRevision,
+        });
       }
-      return { output, images };
+      let capturedScreenshotId;
+      try {
+        const output = await reviewSession.screenshot(input);
+        if (!output?.ok) {
+          const failedCapture = operatorCapture;
+          operatorCapture = null;
+          if (failedCapture) inputOperator.failCapture(failedCapture.captureId);
+          return { output, images: [] };
+        }
+        const screenshot = output.screenshot;
+        capturedScreenshotId = screenshot.screenshotId;
+        if (operatorCapture) {
+          captureByScreenshot.set(screenshot.screenshotId, {
+            captureId: operatorCapture.captureId,
+            occurrence: structuredClone(binding.occurrence),
+          });
+        }
+        screenshotMetadata.set(screenshot.screenshotId, structuredClone(screenshot));
+        const directory = reviewSession.artifactDirectoryFor(screenshot.screenshotId);
+        if (!directory) throw new Error(`Screenshot artifact directory is missing: ${screenshot.screenshotId}`);
+        const images = await Promise.all([...screenshot.tiles]
+          .sort((left, right) => left.index - right.index)
+          .map(async (tile) => ({
+            data: (await readFile(join(
+              directory,
+              `${screenshot.screenshotId}-${String(tile.index + 1).padStart(3, "0")}.png`,
+            ))).toString("base64"),
+            mimeType: "image/png",
+          })));
+        if (images.length !== screenshot.tileCount) {
+          throw new Error(`Screenshot tile count does not match metadata: ${screenshot.screenshotId}`);
+        }
+        return { output, images };
+      } catch (error) {
+        if (operatorCapture) {
+          inputOperator.failCapture(operatorCapture.captureId);
+          if (capturedScreenshotId !== undefined) {
+            captureByScreenshot.delete(capturedScreenshotId);
+            screenshotMetadata.delete(capturedScreenshotId);
+          }
+        }
+        throw error;
+      }
     },
-    interact: (input) => reviewSession.interact(input),
+    interact: async (input) => {
+      const interactionKey = canonicalOperatorInteractionKey(input);
+      if (pendingRendererAcknowledgement) {
+        if (pendingRendererAcknowledgement.interactionKey !== interactionKey) {
+          throw new Error("Retry the operator interaction whose renderer acknowledgement is pending.");
+        }
+        return acknowledgeOperatorWrite(pendingRendererAcknowledgement);
+      }
+      if (input.value !== undefined) {
+        if (!inputOperator) throw new Error("This review has no separately authorized input operator.");
+        const binding = inputBindings.get(input.elementRef);
+        if (!binding) throw new Error(`Interact value requires a visible input-action target: ${input.elementRef}`);
+        const captureId = commissionedByOccurrence.get(inputOccurrenceKey(binding.occurrence));
+        if (!captureId) throw new Error("Input-action quality must be rated before the operator is commissioned.");
+        const value = "text" in input.value
+          ? { text: input.value.text }
+          : "selectedKey" in input.value
+            ? { selectedKeys: [input.value.selectedKey] }
+            : { selectedKeys: input.value.selectedKeys };
+        const committedValue = "text" in value
+          ? { text: value.text }
+          : {
+              selected: binding.action.options
+                .filter((option) => value.selectedKeys.includes(option.key))
+                .sort((left, right) => Buffer.from(left.key).compare(Buffer.from(right.key))),
+            };
+        const inputDraftRevision = await inputOperator.commit({ captureId, value });
+        committedOccurrences.add(inputOccurrenceKey(binding.occurrence));
+        const event = {
+          operation: "input_commit",
+          elementRef: input.elementRef,
+          occurrence: structuredClone(binding.occurrence),
+          sourceNodeId: binding.sourceNodeId,
+          action: structuredClone(binding.action),
+          value: structuredClone(committedValue),
+          inputDraftRevision,
+        };
+        operatorEvents.push(event);
+        return acknowledgeOperatorWrite({
+          interactionKey,
+          committed: true,
+          event,
+          attempts: 0,
+          result: { ok: true, operator: { operation: "input_commit", inputDraftRevision } },
+        });
+      }
+      if (input.elementRef === "send-interaction" && inputOperator) {
+        const before = await reviewSession.state();
+        const control = before.controls?.find((candidate) => candidate.elementRef === input.elementRef);
+        if (!control || control.kind !== "input-operator-send") {
+          throw new Error("The production review has no visible operator Send control.");
+        }
+        if (committedOccurrences.size === 0) {
+          throw new Error("The input operator requires at least one committed input before Send.");
+        }
+        if (control.disabled) throw new Error("The production review operator Send control is disabled.");
+        const response = await inputOperator.send({});
+        committedOccurrences.clear();
+        const event = { operation: "send", response: structuredClone(response) };
+        operatorEvents.push(event);
+        return acknowledgeOperatorWrite({
+          interactionKey,
+          committed: false,
+          event,
+          attempts: 0,
+          result: { ok: true, operator: { operation: "send", response } },
+        });
+      }
+      return reviewSession.interact(input);
+    },
     history: (input) => reviewSession.history(input),
+    recordInputRatings: async ({ review, revision }) => {
+      if (!inputOperator) return;
+      if (typeof persistInputRatingReceipt !== "function") {
+        throw new Error("Input operator commission requires durable rating receipt storage.");
+      }
+      const commissions = [];
+      for (const action of review.actions ?? []) {
+        if (action.kind !== "input") continue;
+        const screenshotIds = [...new Set([
+          ...(action.evidence ?? []),
+          ...Object.values(action.inputActionJudgments ?? {}).flatMap((judgment) => judgment.evidence ?? []),
+        ])];
+        const citedScreenshotIds = new Set(screenshotIds);
+        const operatorCaptureState = inputOperator.state?.();
+        const activeCaptureIds = new Set((operatorCaptureState?.captures ?? [])
+          .filter(({ status }) => status === "capturing")
+          .map(({ captureId }) => captureId));
+        const capture = [...captureByScreenshot.entries()]
+          .filter(([screenshotId, candidate]) => citedScreenshotIds.has(screenshotId)
+            && String(candidate.occurrence.actionId) === String(action.actionId)
+            && String(candidate.occurrence.presentingLayerId) === String(review.layerId)
+            && (operatorCaptureState === undefined || activeCaptureIds.has(candidate.captureId)))
+          .map(([, candidate]) => candidate)
+          .findLast(() => true);
+        if (!capture) throw new Error(`Input action ${action.actionId} has no occurrence-matched versioned capture-and-rate lock.`);
+        const { captureId } = capture;
+        const capturedScreenshotId = screenshotIds.find((id) => captureByScreenshot.get(id)?.captureId === captureId);
+        const metadata = capturedScreenshotId === undefined ? undefined : screenshotMetadata.get(capturedScreenshotId);
+        if (!metadata?.threadRevision) {
+          throw new Error(`Input action ${action.actionId} rating is missing its captured thread revision.`);
+        }
+        commissions.push({
+          captureId,
+          threadRevision: metadata.threadRevision,
+          actionId: String(action.actionId),
+          occurrence: structuredClone(capture.occurrence),
+        });
+      }
+      if (commissions.length === 0) return;
+      const persistedReceipt = await persistInputRatingReceipt({
+        schemaVersion: 1,
+        reviewRevision: revision,
+        review: structuredClone(review),
+        captures: commissions.map(({ captureId, threadRevision, actionId, occurrence }) => ({
+          captureId,
+          threadRevision,
+          actionId,
+          occurrence,
+        })),
+      });
+      const receiptId = typeof persistedReceipt === "string"
+        ? persistedReceipt
+        : persistedReceipt?.ref;
+      if (typeof receiptId !== "string" || !receiptId) {
+        throw new Error("Input rating receipt storage returned no durable reference.");
+      }
+      try {
+        inputOperator.rateCaptures(commissions.map(({ captureId, threadRevision }) => ({
+          captureId,
+          ratingId: receiptId,
+          threadRevision,
+        })));
+      } catch (error) {
+        await persistedReceipt?.discard?.();
+        throw error;
+      }
+      inputRatingReceiptRefs.push(receiptId);
+      for (const { occurrence, captureId } of commissions) {
+        commissionedByOccurrence.set(inputOccurrenceKey(occurrence), captureId);
+      }
+    },
+    operatorTrace: () => structuredClone(operatorEvents),
+    inputRatingReceiptRefs: () => [...inputRatingReceiptRefs],
   });
 }
 
-export async function buildAcceptedReviewTopology({ turnId, rootLayerId, loadLayer }) {
+function canonicalOperatorInteractionKey(input) {
+  const canonicalize = (value) => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value === null || typeof value !== "object") return value;
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalize(value[key])]),
+    );
+  };
+  return JSON.stringify(canonicalize(input));
+}
+
+function reviewUiStateForOperator(state) {
+  return {
+    threadRevision: state.threadRevision,
+    turnId: state.turnId,
+    layerId: state.layerId,
+    selectedNodeId: state.selectedNodeId,
+    activatedActionId: state.activatedActionId,
+    navigationPath: structuredClone(state.navigationPath),
+  };
+}
+
+export async function buildAcceptedReviewTopology({ turnId, presentingInteractionNodeId, rootLayerId, loadLayer }) {
   if (!turnId || !rootLayerId || typeof loadLayer !== "function") {
     throw new Error("Accepted review topology requires a turn, root layer, and layer loader.");
   }
@@ -187,8 +580,43 @@ export async function buildAcceptedReviewTopology({ turnId, rootLayerId, loadLay
         }
         return { ...base, relation: action.relation, targetLayerId };
       }
-      if (action.kind !== "invoke") throw new Error(`Unknown accepted action kind: ${action.kind}`);
-      return base;
+      if (action.kind === "invoke") return base;
+      if (action.kind === "input") {
+        if (!["text", "single_select", "multi_select"].includes(action.control)) {
+          throw new Error(`Accepted input action has no valid control: ${action.id}`);
+        }
+        if (typeof action.prompt !== "string" || action.prompt.trim() === "") {
+          throw new Error(`Accepted input action has no prompt: ${action.id}`);
+        }
+        const options = Array.isArray(action.options)
+          ? action.options.map((option) => ({ key: String(option.key), label: String(option.label) }))
+          : [];
+        if (action.control === "text" && options.length !== 0) {
+          throw new Error(`Accepted text input action unexpectedly has options: ${action.id}`);
+        }
+        if (action.control !== "text" && options.length === 0) {
+          throw new Error(`Accepted select input action has no options: ${action.id}`);
+        }
+        const occurrence = presentingInteractionNodeId === undefined ? undefined : {
+          presentingInteractionNodeId: Number(presentingInteractionNodeId),
+          presentingLayerId: Number(layerId),
+          actionId: Number(action.id),
+        };
+        if (occurrence !== undefined && !Object.values(occurrence).every((id) => Number.isSafeInteger(id) && id > 0)) {
+          throw new Error(`Accepted input action ${action.id} has no valid product occurrence identity.`);
+        }
+        return {
+          ...base,
+          control: action.control,
+          prompt: action.prompt,
+          options,
+          ...(occurrence === undefined ? {} : { occurrence }),
+          ...(action.minimumSelections === null || action.minimumSelections === undefined
+            ? {}
+            : { minimumSelections: action.minimumSelections }),
+        };
+      }
+      throw new Error(`Unknown accepted action kind: ${action.kind}`);
     });
     const nodes = resolved.nodes.map((node) => ({ id: String(node.id), title: node.title, detail: node.detail }));
     layers.push({
@@ -282,6 +710,8 @@ export function createLocalSimulatedUserJudgeRunner({
   resolveCodexRuntime,
   runJudge = runSimulatedUserJudge,
   configuration = LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION,
+  createInputOperator,
+  captureInputRoundTrip,
 }) {
   if (typeof loadLayer !== "function" || typeof openReviewSession !== "function"
     || typeof resolveCodexRuntime !== "function" || typeof runJudge !== "function") {
@@ -293,6 +723,7 @@ export function createLocalSimulatedUserJudgeRunner({
     if (!rootLayerId) throw new Error("Accepted turn has no root layer for simulated-user review.");
     const topology = await buildAcceptedReviewTopology({
       turnId: context.turn.id,
+      presentingInteractionNodeId: context.turn.graphNodeId,
       rootLayerId,
       loadLayer: (layerId) => loadLayer({
         executionId: context.execution.id,
@@ -302,16 +733,41 @@ export function createLocalSimulatedUserJudgeRunner({
       }),
     });
     const inventory = inventoryReviewSubjects(topology);
+    const inputBindings = new Map(inventory.actions.flatMap((subject) => (
+        subject.actionKind !== "input" || subject.occurrence === undefined ? [] : [[
+          inputActionReviewRef(subject.occurrence),
+          {
+            occurrence: subject.occurrence,
+            sourceNodeId: Number(subject.nodeId),
+            action: subject.control === "text"
+              ? { control: "text", prompt: subject.prompt }
+              : {
+                  control: subject.control,
+                  prompt: subject.prompt,
+                  options: subject.options,
+                  ...(subject.control === "multi_select" && subject.minimumSelections !== undefined
+                    ? { minimumSelections: subject.minimumSelections }
+                    : {}),
+                },
+          },
+        ]]
+      )));
     const screenshots = new Map();
     let opened;
+    let inputOperatorLease;
     let completed = false;
     try {
+      inputOperatorLease = typeof createInputOperator === "function" && context.allowInputOperator === true
+        ? await createInputOperator({ context, inputBindings })
+        : undefined;
+      const inputOperator = inputOperatorLease?.operator ?? inputOperatorLease;
       opened = await openReviewSession({
         executionId: context.execution.id,
         threadId: context.thread.id,
         turnId: context.turn.id,
         rootLayerId,
         artifactDirectory: join(context.artifactDirectory, "screenshots"),
+        inputOperatorAvailable: Boolean(inputOperator),
       });
       assertExactOpenedTurn(opened.state, {
         executionId: context.execution.id,
@@ -319,9 +775,16 @@ export function createLocalSimulatedUserJudgeRunner({
         turnId: context.turn.id,
         rootLayerId,
       });
-      const controller = createReviewSessionController(opened.session, screenshots);
-      const recursiveContract = ["graph-presentation-rubric-v4", "graph-presentation-rubric-v5", "graph-presentation-rubric-v6", "graph-presentation-rubric-v7", "graph-presentation-rubric-v8", "graph-presentation-rubric-v9", "graph-presentation-rubric-v10"]
-        .includes(context.rubric?.rubricVersion);
+      const controller = createReviewSessionController(opened.session, screenshots, {
+        inputOperator,
+        inputBindings,
+        persistInputRatingReceipt: (receipt) => persistInputRatingReceipt(context, receipt),
+      });
+      const rubricVersion = context.rubric?.rubricVersion;
+      if (["graph-presentation-rubric-v4", "graph-presentation-rubric-v5", "graph-presentation-rubric-v6", "graph-presentation-rubric-v7", "graph-presentation-rubric-v8", "graph-presentation-rubric-v9", "graph-presentation-rubric-v10"].includes(rubricVersion)) {
+        throw new Error(`Historical rubric ${rubricVersion} remains readable but cannot start a new v6 judgment.`);
+      }
+      const recursiveContract = rubricVersion === "graph-presentation-rubric-v11";
       const evidenceOptions = {
         executionId: String(context.execution.id),
         threadId: String(context.thread.id),
@@ -351,8 +814,16 @@ export function createLocalSimulatedUserJudgeRunner({
           additionalDirectories: [],
           codexPathOverride: codexRuntime.executable,
           environment: codexRuntime.environment,
+          inputOperatorAvailable: Boolean(inputOperator),
         });
       } catch (error) {
+        const inputRoundTrip = await captureInputRoundTripArtifacts({
+          context,
+          topology,
+          controller,
+          captureInputRoundTrip,
+          failureDetail: "The partial presentation review was retained, but input round-trip evidence capture failed.",
+        });
         return persistJudgeArtifacts({
           context,
           configuration: selectedConfiguration,
@@ -364,8 +835,17 @@ export function createLocalSimulatedUserJudgeRunner({
           coverage: store.coverage(),
           status: "partial",
           error: error instanceof Error ? error.message : String(error),
+          inputRoundTrip,
+          inputRatingReceiptRefs: controller.inputRatingReceiptRefs(),
         });
       }
+      const inputRoundTrip = await captureInputRoundTripArtifacts({
+        context,
+        topology,
+        controller,
+        captureInputRoundTrip,
+        failureDetail: "The completed presentation review was retained, but input round-trip evidence capture failed.",
+      });
       const output = await persistJudgeArtifacts({
         context,
         configuration: selectedConfiguration,
@@ -378,17 +858,55 @@ export function createLocalSimulatedUserJudgeRunner({
         judgeRecord: record,
         status: "completed",
         error: null,
+        inputRoundTrip,
+        inputRatingReceiptRefs: controller.inputRatingReceiptRefs(),
       });
       completed = true;
       return output;
     } finally {
-      if (opened) {
-        const lastReview = context.reviewSequence === undefined
-          || context.reviewSequence.index === context.reviewSequence.count - 1;
-        await opened.release({ close: !completed || lastReview });
+      try {
+        await releaseInputOperatorLease(inputOperatorLease);
+      } finally {
+        if (opened) {
+          const lastReview = context.reviewSequence === undefined
+            || context.reviewSequence.index === context.reviewSequence.count - 1;
+          await opened.release({ close: !completed || lastReview });
+        }
       }
     }
   };
+}
+
+async function captureInputRoundTripArtifacts({
+  context,
+  topology,
+  controller,
+  captureInputRoundTrip,
+  failureDetail,
+}) {
+  if (context.allowInputOperator !== true || typeof captureInputRoundTrip !== "function") return null;
+  const operatorTrace = controller.operatorTrace();
+  try {
+    return {
+      ...await captureInputRoundTrip({
+        context,
+        topology,
+        operatorTrace,
+        artifactDirectory: join(context.artifactDirectory, "input-roundtrip"),
+      }),
+      operatorTrace,
+    };
+  } catch (error) {
+    return {
+      schemaVersion: 1,
+      status: "failed",
+      passed: false,
+      checks: [],
+      detail: failureDetail,
+      error: error instanceof Error ? error.message : String(error),
+      operatorTrace,
+    };
+  }
 }
 
 function assertExactOpenedTurn(state, expected) {
@@ -414,6 +932,8 @@ async function persistJudgeArtifacts({
   judgeRecord = null,
   status,
   error,
+  inputRoundTrip = null,
+  inputRatingReceiptRefs = [],
 }) {
   await mkdir(context.artifactDirectory, { recursive: true, mode: 0o700 });
   const artifacts = {
@@ -423,6 +943,7 @@ async function persistJudgeArtifacts({
     reviews: "review.json",
     coverage: "coverage.json",
     judgeRun: "judge-run.json",
+    ...(inputRoundTrip === null ? {} : { inputRoundTrip: "input-roundtrip.json" }),
   };
   await Promise.all([
     writeJson(join(context.artifactDirectory, artifacts.rubric), rubric),
@@ -442,6 +963,10 @@ async function persistJudgeArtifacts({
       status,
       error,
     }),
+    ...(inputRoundTrip === null ? [] : [writeJson(
+      join(context.artifactDirectory, artifacts.inputRoundTrip),
+      inputRoundTrip,
+    )]),
   ]);
   const screenshotRefs = [...screenshots.keys()].map(
     (screenshotId) => ["screenshots", screenshotId, "metadata.json"].join("/"),
@@ -454,6 +979,11 @@ async function persistJudgeArtifacts({
     screenshotRefs,
     reviewRef: artifacts.reviews,
     coverageRef: artifacts.coverage,
+    ...(inputRoundTrip === null ? {} : {
+      inputRoundTripRef: artifacts.inputRoundTrip,
+      inputRoundTrip,
+    }),
+    inputRatingReceiptRefs: [...inputRatingReceiptRefs],
     review,
     coverage,
     summary: status === "completed" ? review.turn.summary : null,
@@ -467,4 +997,49 @@ async function writeJson(path, value) {
     mode: 0o600,
     flag: "wx",
   });
+}
+
+export async function parseProductWriteResponse(
+  response,
+  { requireJson = false, requirePositiveInteractionId = false } = {},
+) {
+  let value;
+  try {
+    value = await response.json();
+  } catch (error) {
+    if (response.ok && requireJson) {
+      throw new Error("Input operator product response did not contain valid JSON.", { cause: error });
+    }
+  }
+  if (!response.ok) {
+    throw new Error(value?.error || `Input operator product request failed (${response.status}).`);
+  }
+  if (requirePositiveInteractionId
+    && (!Number.isSafeInteger(value?.id) || value.id < 1)) {
+    throw new Error("Input operator product response requires a positive interaction id.");
+  }
+  return value;
+}
+
+export async function persistInputRatingReceipt(context, receipt) {
+  const nodeId = String(receipt.review?.nodeId ?? "");
+  const presentingLayerId = String(receipt.review?.layerId ?? "");
+  if (!/^\d+$/.test(nodeId) || !/^\d+$/.test(presentingLayerId)
+    || !Number.isSafeInteger(receipt.reviewRevision) || receipt.reviewRevision < 1) {
+    throw new Error("Input rating receipt requires a positive presenting layer, node, and review revision.");
+  }
+  const directoryName = "input-rating-receipts";
+  const filename = `layer-${presentingLayerId}-node-${nodeId}-revision-${receipt.reviewRevision}.json`;
+  await mkdir(join(context.artifactDirectory, directoryName), { recursive: true, mode: 0o700 });
+  const path = join(context.artifactDirectory, directoryName, filename);
+  await writeJson(path, {
+    ...receipt,
+    executionId: String(context.execution.id),
+    threadId: String(context.thread.id),
+    turnId: String(context.turn.id),
+  });
+  return {
+    ref: `${directoryName}/${filename}`,
+    discard: () => rm(path, { force: true }),
+  };
 }

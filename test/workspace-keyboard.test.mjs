@@ -7,11 +7,13 @@ import {
   applyComposerCapabilities,
   applyContextEditor,
   applyMountedContextEditorInput,
+  beginNodeInputMutation,
   bindComposerKeydown,
   clearSubmittedComposerDraft,
   composerDisabledForState,
   confirmationSendFailureMayHaveCommitted,
   confirmationSendReplayIntent,
+  confirmationSendReplayIntentWithoutInputAuthority,
   continueDraftOverrideAfterPersistence,
   composerConfirmationAuthorityChanged,
   composerDraftScopeKey,
@@ -48,17 +50,308 @@ import {
   interactionContextTargetForEditor,
   removeContextAnnotation,
   refreshComposerContextsAfterFailedConfirmationSend,
+  rebuildInteractionSendIntentAfterInputReconciliation,
   resolveInteractionContextNode,
   sendIntentIsCurrentThread,
   sendAttemptBlocksThread,
   releaseInFlightSend,
+  settleNodeInputCommit,
+  selectInteractionSendIntentAfterInputReconciliation,
   settleConfirmationSendReplay,
+  compactSubmittedText,
+  submittedInputHistoryPresentation,
   threadHasInFlightSend,
   settledComposerContextsWithConfirmations,
   transitionComposerDraftScope,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
+import {
+  createNodeInputDraftController,
+  createNodeInputDraftLoadQueue,
+  createInputMutationTracker,
+  threadHasPendingInputMutation,
+} from "../desktop/renderer/src/node-input-controls.js";
 
 describe("product workspace keyboard behavior", () => {
+  it("retries the initial input-draft load with a bounded thread-scoped timer", async () => {
+    const source = await readFile(new URL(
+      "../desktop/renderer/src/product-workspace/workspace.js",
+      import.meta.url,
+    ), "utf8");
+
+    expect(source).toContain("createInputDraftLoadRetryScheduler({");
+    expect(source).toContain("inputDraftLoadRetries?.schedule(thread.id);");
+    expect(source).toContain("!inputDraftLoadRetries?.suppressesLoad(threadId)");
+    expect(source.indexOf("inputDraftLoadRetries?.beginEligibilityCycle(thread.id);"))
+      .toBeLessThan(source.indexOf("!inputDraftLoadRetries?.suppressesLoad(threadId)"));
+    expect(source).toContain("inputDraftLoadRetries?.dispose();");
+  });
+
+  it("waits for forced input reconciliation before rejecting stale replay authority", async () => {
+    let releaseReconciliation;
+    const reconciliation = new Promise((resolve) => { releaseReconciliation = resolve; });
+    const api = {
+      get: vi.fn()
+        .mockResolvedValueOnce({
+          threadId: 7,
+          revision: 7,
+          attachments: [],
+          updatedAt: "revision-7",
+        })
+        .mockImplementationOnce(() => reconciliation),
+      commit: vi.fn(),
+      detach: vi.fn(),
+    };
+    const controller = createNodeInputDraftController({ api });
+    const loads = createNodeInputDraftLoadQueue({
+      load: (threadId) => controller.load(threadId),
+    });
+    await loads.load(7);
+    const forcedReload = loads.load(7, { reload: true });
+    const staleIntent = interactionSendIntent({
+      threadId: 7,
+      draftScopeKey: "7:turn-a",
+      promptValue: "",
+      contexts: [],
+      modelSelection: { providerId: "fixture", modelId: "deterministic" },
+      inputDraftRevision: 7,
+    });
+    const readReplay = vi.fn(() => confirmationSendReplayIntent({
+      intent: staleIntent,
+      threadId: 7,
+      draftScopeKey: "7:turn-a",
+      promptRevision: 0,
+      contextRevision: 0,
+      replayContextRevision: 0,
+      modelSelection: staleIntent.modelSelection,
+      inputDraftRevision: controller.current(7).revision,
+    }));
+    const rebuild = vi.fn(() => ({
+      rebuilt: true,
+      inputDraftRevision: controller.current(7).revision,
+    }));
+
+    const selecting = selectInteractionSendIntentAfterInputReconciliation({
+      awaitInputDraft: () => loads.load(7),
+      selectionIsCurrent: () => true,
+      replayIntent: readReplay,
+      rebuildIntent: rebuild,
+    });
+    await Promise.resolve();
+    expect(readReplay).not.toHaveBeenCalled();
+    expect(rebuild).not.toHaveBeenCalled();
+
+    releaseReconciliation({
+      threadId: 7,
+      revision: 8,
+      attachments: [],
+      updatedAt: "revision-8",
+    });
+    await forcedReload;
+    await expect(selecting).resolves.toEqual({ rebuilt: true, inputDraftRevision: 8 });
+    expect(readReplay).toHaveBeenCalledOnce();
+    expect(rebuild).toHaveBeenCalledOnce();
+  });
+
+  it("rebuilds a post-commit response-loss retry from the click-time snapshot and current authority", () => {
+    const confirmation = {
+      draftId: "confirmation-a",
+      target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
+      annotation: "Original context",
+    };
+    const clicked = interactionSendIntent({
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptValue: "Original prompt",
+      promptRevision: 4,
+      contexts: [{
+        target: confirmation.target,
+        annotations: [confirmation.annotation],
+        annotationConfirmations: [confirmation],
+      }],
+      contextRevision: 8,
+      modelSelection: { providerId: "fixture", modelId: "deterministic" },
+      inputDraftRevision: 7,
+      inputCompositionRevision: 3,
+    });
+    const current = interactionSendIntent({
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptValue: "Original prompt",
+      promptRevision: 4,
+      contexts: [],
+      contextRevision: 9,
+      modelSelection: clicked.modelSelection,
+      inputDraftRevision: 10,
+      inputCompositionRevision: 4,
+    });
+
+    expect(confirmationSendReplayIntentWithoutInputAuthority({
+      intent: clicked,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 4,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: clicked.modelSelection,
+    })).toBe(clicked);
+    expect(confirmationSendReplayIntentWithoutInputAuthority({
+      intent: clicked,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 5,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: clicked.modelSelection,
+    })).toBeNull();
+
+    expect(rebuildInteractionSendIntentAfterInputReconciliation({
+      clickedIntent: clicked,
+      currentIntent: current,
+      inputDraftRevision: 10,
+    })).toMatchObject({
+      text: "Original prompt",
+      contextPayload: [{
+        target: confirmation.target,
+        annotations: ["Original context"],
+      }],
+      contextConfirmationIds: [],
+      modelSelection: clicked.modelSelection,
+      inputDraftRevision: 10,
+    });
+  });
+
+  it("settles an async input commit without repainting a stale selection occurrence", async () => {
+    const original = {
+      threadId: "thread-a",
+      nodeId: 7,
+      presentingInteractionNodeId: 41,
+      presentingLayerId: 52,
+    };
+    const changes = [
+      { threadId: "thread-b" },
+      { nodeId: 8 },
+      { presentingInteractionNodeId: 42 },
+      { presentingLayerId: 53 },
+    ];
+
+    for (const change of changes) {
+      let releaseCommit;
+      const pendingCommit = new Promise((resolve) => { releaseCommit = resolve; });
+      const inputPending = createInputMutationTracker();
+      inputPending.begin("input-stage");
+      const repaintNodeInputs = vi.fn();
+      const renderComposer = vi.fn();
+      let currentSelection = { ...original };
+      const committing = pendingCommit.finally(() => settleNodeInputCommit({
+        inputPending,
+        stageKey: "input-stage",
+        originalSelection: original,
+        currentSelection: () => currentSelection,
+        repaintNodeInputs,
+        renderComposer,
+      }));
+
+      currentSelection = { ...currentSelection, ...change };
+      releaseCommit();
+      await committing;
+
+      expect(repaintNodeInputs, JSON.stringify(change)).not.toHaveBeenCalled();
+      expect(renderComposer, JSON.stringify(change)).toHaveBeenCalledOnce();
+      expect(inputPending.has("input-stage"), JSON.stringify(change)).toBe(false);
+    }
+
+    const repaintNodeInputs = vi.fn();
+    settleNodeInputCommit({
+      inputPending: (() => {
+        const pending = createInputMutationTracker();
+        pending.begin("input-stage");
+        return pending;
+      })(),
+      stageKey: "input-stage",
+      originalSelection: original,
+      currentSelection: () => ({ ...original }),
+      repaintNodeInputs,
+      renderComposer: vi.fn(),
+    });
+    expect(repaintNodeInputs).toHaveBeenCalledOnce();
+  });
+
+  it("repaints node controls at detach start and keeps Send locked through overlapping commit settlement", () => {
+    const inputPending = createInputMutationTracker();
+    const stageKey = JSON.stringify(["thread-a", "41", "52", "63"]);
+    const renderComposer = vi.fn();
+    const repaintNodeInputs = vi.fn();
+
+    beginNodeInputMutation({ inputPending, stageKey, renderComposer, repaintNodeInputs });
+    expect(repaintNodeInputs).toHaveBeenCalledOnce();
+    expect(renderComposer).toHaveBeenCalledOnce();
+
+    beginNodeInputMutation({ inputPending, stageKey, renderComposer, repaintNodeInputs });
+    settleNodeInputCommit({
+      inputPending,
+      stageKey,
+      originalSelection: { threadId: "thread-a", nodeId: 7, presentingInteractionNodeId: 41, presentingLayerId: 52 },
+      currentSelection: () => ({ threadId: "thread-a", nodeId: 7, presentingInteractionNodeId: 41, presentingLayerId: 52 }),
+      repaintNodeInputs: vi.fn(),
+      renderComposer: vi.fn(),
+    });
+
+    expect(inputPending.has(stageKey)).toBe(true);
+    expect(threadHasPendingInputMutation(inputPending, "thread-a")).toBe(true);
+    expect(inputPending.end(stageKey)).toBe(false);
+    expect(threadHasPendingInputMutation(inputPending, "thread-a")).toBe(false);
+  });
+
+  it("keeps submitted text history compact while disclosing the exact full value accessibly", async () => {
+    const exact = `First line\n${"x".repeat(160)}`;
+    const presentation = submittedInputHistoryPresentation({
+      action: { prompt: "Deployment rationale" },
+      value: { text: exact },
+    });
+
+    expect(presentation).toMatchObject({
+      kind: "disclosure",
+      fullValue: exact,
+      ariaLabel: "Show full submitted value for Deployment rationale",
+    });
+    expect([...presentation.compactValue]).toHaveLength(80);
+    expect(presentation.compactValue.endsWith("…")).toBe(true);
+
+    let iteratedCodePoints = 0;
+    const boundedSource = {
+      *[Symbol.iterator]() {
+        while (true) {
+          iteratedCodePoints += 1;
+          if (iteratedCodePoints > 81) {
+            throw new Error("compact history consumed beyond its bounded prefix");
+          }
+          yield iteratedCodePoints <= 79 ? "😀" : iteratedCodePoints === 80 ? "Z" : "x";
+        }
+      },
+    };
+    expect(compactSubmittedText(boundedSource)).toBe(`${"😀".repeat(79)}…`);
+    expect(iteratedCodePoints).toBe(81);
+
+    const huge = `${"😀".repeat(79)}Z${"x".repeat(4 * 1024 * 1024)}`;
+    expect(submittedInputHistoryPresentation({
+      action: { prompt: "Large rationale" },
+      value: { text: huge },
+    })).toMatchObject({
+      kind: "disclosure",
+      compactValue: `${"😀".repeat(79)}…`,
+      fullValue: huge,
+    });
+
+    expect(submittedInputHistoryPresentation({
+      action: { prompt: "Release channel" },
+      value: { selected: [{ key: "preview", label: "Preview" }] },
+    })).toEqual({ kind: "plain", compactValue: "Preview" });
+
+    const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
+    expect(styles).toContain(".interaction-input-history-disclosure>summary{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
+    expect(styles).toContain(".interaction-input-history-disclosure>p{max-width:240px;max-height:160px;overflow:auto;white-space:pre-wrap");
+  });
+
   it("projects durable confirmations into grouped composer contexts with exact identities", () => {
     const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
     const targetNode = { id: 7, title: "Queue" };
@@ -280,7 +573,7 @@ describe("product workspace keyboard behavior", () => {
       .toBe("Not saved: disk full");
   });
 
-  it("mounts the annotation editor only in the bottom of Node Details", async () => {
+  it("reserves a stable annotation region at the bottom of Node Details", async () => {
     const markup = productWorkspaceMarkup();
     const detailContent = markup.indexOf('id="inspectorContent"');
     const dock = markup.indexOf('id="nodeContextDock"');
@@ -291,6 +584,8 @@ describe("product workspace keyboard behavior", () => {
     );
 
     expect(detailContent).toBeGreaterThan(-1);
+    expect(markup).toContain('id="inspectorContent" data-review-capture="node-detail"');
+    expect(markup).not.toContain('id="inspector" data-review-capture="node-detail"');
     expect(detailContent).toBeLessThan(dock);
     expect(dock).toBeLessThan(evaluationPanel);
     expect(markup).toContain('aria-label="Node context annotation editor"');
@@ -298,7 +593,7 @@ describe("product workspace keyboard behavior", () => {
 
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain(".node-context-dock{height:33.333%;min-height:0");
-    expect(styles).toContain(".inspector:has(.node-context-dock:not(.hidden)) .inspector-content{min-height:0}");
+    expect(styles).toContain(".inspector-content{min-height:0}.inspector>.node-context-dock.hidden{display:flex!important;visibility:hidden;pointer-events:none;border-top-color:transparent}");
     expect(styles).toContain(".app-shell:has(.desktop-account-corner-control:not(.hidden)) .node-context-dock-actions{padding-right:112px}");
     expect(styles).toContain(".node-context-dock textarea{min-height:0;flex:1;resize:none;overflow:auto");
     expect(styles).toContain("@media(forced-colors:active){.node-context-dock");
@@ -430,10 +725,33 @@ describe("product workspace keyboard behavior", () => {
     });
   });
 
-  it("scopes an asynchronous send lock to the thread that owns it", () => {
+  it("scopes context and input staging to the thread that owns an asynchronous send", async () => {
     expect(sendAttemptBlocksThread("thread-a", "thread-a")).toBe(true);
     expect(sendAttemptBlocksThread("thread-a", "thread-b")).toBe(false);
     expect(sendAttemptBlocksThread(null, "thread-a")).toBe(false);
+
+    const workspaceSource = await readFile(new URL(
+      "../desktop/renderer/src/product-workspace/workspace.js",
+      import.meta.url,
+    ), "utf8");
+    const stagingStart = workspaceSource.indexOf("const contextStagingDisabled = () => {");
+    const stagingEnd = workspaceSource.indexOf("const closeDurableEditor", stagingStart);
+    const stagingSeam = workspaceSource.slice(stagingStart, stagingEnd);
+    expect(stagingSeam).toContain(
+      "sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)",
+    );
+    expect(stagingSeam).toContain(
+      "threadHasInFlightSend(inFlightSendThreads, getThread()?.id)",
+    );
+    expect(stagingSeam).not.toContain("Boolean(sendAttempt)");
+
+    const composerStart = workspaceSource.indexOf("const syncComposer = () => {");
+    const composerEnd = workspaceSource.indexOf("const releaseSendAttempt", composerStart);
+    const composerSeam = workspaceSource.slice(composerStart, composerEnd);
+    expect(composerSeam).toContain(
+      "threadHasPendingInputMutation(inputPending, getThread()?.id)",
+    );
+    expect(composerSeam).not.toContain("inputPending.size > 0");
   });
 
   it("retains the owning thread's in-flight lock across navigation", () => {
@@ -506,6 +824,7 @@ describe("product workspace keyboard behavior", () => {
       }],
       contextRevision: 8,
       modelSelection: { providerId: "fixture", modelId: "deterministic" },
+      inputDraftRevision: 3,
     });
 
     expect(confirmationSendReplayIntent({
@@ -516,6 +835,7 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 9,
       replayContextRevision: 9,
       modelSelection: intent.modelSelection,
+      inputDraftRevision: 3,
     })).toBe(intent);
     expect(confirmationSendReplayIntent({
       intent,
@@ -525,6 +845,7 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 9,
       replayContextRevision: 9,
       modelSelection: intent.modelSelection,
+      inputDraftRevision: 3,
     })).toBeNull();
     expect(confirmationSendReplayIntent({
       intent,
@@ -534,6 +855,7 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 9,
       replayContextRevision: 9,
       modelSelection: intent.modelSelection,
+      inputDraftRevision: 3,
     })).toBeNull();
     expect(confirmationSendReplayIntent({
       intent,
@@ -543,6 +865,7 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 10,
       replayContextRevision: 9,
       modelSelection: intent.modelSelection,
+      inputDraftRevision: 3,
     })).toBeNull();
     expect(confirmationSendReplayIntent({
       intent,
@@ -552,10 +875,62 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 9,
       replayContextRevision: 9,
       modelSelection: { providerId: "fixture", modelId: "other" },
+      inputDraftRevision: 3,
+    })).toBeNull();
+    expect(confirmationSendReplayIntent({
+      intent,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 4,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: intent.modelSelection,
+      inputDraftRevision: 4,
+      inputCompositionRevision: 1,
     })).toBeNull();
     expect(confirmationSendFailureMayHaveCommitted(new Error("network lost"))).toBe(true);
     expect(confirmationSendFailureMayHaveCommitted({ status: 503 })).toBe(true);
     expect(confirmationSendFailureMayHaveCommitted({ status: 409 })).toBe(false);
+  });
+
+  it("replays an ambiguous input send only while durable draft authority is unchanged", () => {
+    const intent = interactionSendIntent({
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptValue: "",
+      promptRevision: 2,
+      contexts: [],
+      contextRevision: 0,
+      modelSelection: { providerId: "fixture", modelId: "deterministic" },
+      inputDraftRevision: 7,
+      inputCompositionRevision: 3,
+    });
+    const current = {
+      intent,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 2,
+      contextRevision: 0,
+      replayContextRevision: 0,
+      modelSelection: intent.modelSelection,
+      inputDraftRevision: 7,
+      inputCompositionRevision: 3,
+    };
+    expect(confirmationSendReplayIntent(current)).toBe(intent);
+    const afterCommit = confirmationSendReplayIntent({
+      ...current,
+      inputDraftRevision: 8,
+    });
+    const afterDetach = confirmationSendReplayIntent({
+      ...current,
+      inputDraftRevision: 9,
+    });
+    expect(afterCommit).toBeNull();
+    expect(afterDetach).toBeNull();
+    expect(confirmationSendReplayIntent({
+      ...current,
+      inputCompositionRevision: 4,
+    })).toBeNull();
   });
 
   it("settles overlapping confirmation replays without cross-thread clobbering", () => {
@@ -946,13 +1321,19 @@ describe("product workspace keyboard behavior", () => {
 
   it("keeps context controls symbol-first and accessible", () => {
     const markup = productWorkspaceMarkup();
-    expect(markup).toContain('id="composerContextTray" aria-label="Connected node draft"');
+    expect(markup).toContain('id="composerContextTray" aria-label="Composer attachments"');
     expect(markup).toContain('id="attachNodeContext"');
     expect(markup).toContain('aria-label="Connect node to next message">+</button>');
     expect(markup).toContain('id="interactionContextPill"');
     expect(markup.indexOf('id="interactionContextPill"')).toBeLessThan(
       markup.indexOf('id="turnPickerButton"'),
     );
+  });
+
+  it("allows a committed node input to submit without prompt text", () => {
+    expect(composerSubmissionReady("", false, true, [], false, [{ id: "input" }])).toBe(true);
+    expect(composerSubmissionReady("", false, true, [], false, [])).toBe(false);
+    expect(composerSubmissionReady("", true, true, [], false, [{ id: "input" }])).toBe(false);
   });
 
   it("keeps context editing enabled only for an available composer", () => {

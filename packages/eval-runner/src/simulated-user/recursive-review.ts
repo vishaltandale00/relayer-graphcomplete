@@ -5,7 +5,7 @@ import type {
   ScreenshotEvidenceRef,
   TurnEvidence,
 } from "./contracts.js";
-import type { LayerCriterionKey, TurnCriterionKey } from "./rubric.js";
+import type { InputActionCriterionKey, LayerCriterionKey, TurnCriterionKey } from "./rubric.js";
 import type {
   ActionReviewSubject,
   LayerReviewSubject,
@@ -13,8 +13,8 @@ import type {
   ReviewSubjectInventory,
 } from "./inventory.js";
 
-export const RECURSIVE_PRESENTATION_CONTRACT_VERSION = 5 as const;
-export const RECURSIVE_PRESENTATION_CONTRACT_ID = "recursive-presentation-judge-v5" as const;
+export const RECURSIVE_PRESENTATION_CONTRACT_VERSION = 6 as const;
+export const RECURSIVE_PRESENTATION_CONTRACT_ID = "recursive-presentation-judge-v6" as const;
 
 export type RecursivePresentationRating = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 export interface RecursiveCriterionJudgment {
@@ -23,7 +23,7 @@ export interface RecursiveCriterionJudgment {
   readonly evidence: readonly ScreenshotEvidenceRef[];
 }
 export type RecursiveCriterionJudgments<Key extends string> = Readonly<Record<Key, RecursiveCriterionJudgment>>;
-export type AllocationChoice = "expand" | "reference" | "invoke" | "stop";
+export type AllocationChoice = "expand" | "reference" | "invoke" | "input" | "stop";
 export type AllocationMargin = "close" | "clearly_better" | "necessary";
 
 export interface RecursiveNodeScore {
@@ -47,7 +47,7 @@ export interface RecursiveNodeSemanticSummary {
 
 export interface AllocationRank {
   readonly choice: AllocationChoice;
-  readonly rank: 1 | 2 | 3 | 4;
+  readonly rank: 1 | 2 | 3 | 4 | 5;
 }
 
 export interface AllocationStepReview {
@@ -73,7 +73,7 @@ export interface MissingActionOpportunity {
 
 export interface RecursiveActionReview {
   readonly actionId: string;
-  readonly kind: "expand" | "reference" | "invoke";
+  readonly kind: "expand" | "reference" | "invoke" | "input";
   readonly allocationStep: number;
   readonly labelAndPlacement: string;
   readonly delivery: string | null;
@@ -81,6 +81,8 @@ export interface RecursiveActionReview {
   readonly targetLayerId: string | null;
   readonly reusedLayerId: string | null;
   readonly evidence: readonly ScreenshotEvidenceRef[];
+  /** Present and complete only for an immutable, unanswered input action review. */
+  readonly inputActionJudgments?: RecursiveCriterionJudgments<InputActionCriterionKey>;
 }
 
 export interface RecursiveNodeReview {
@@ -136,6 +138,12 @@ export interface RecursiveReviewRevision<Review> {
   readonly review: Review;
 }
 
+export interface PreparedRecursiveNodeReview {
+  readonly revision: number;
+  commit(): RecursiveReviewRevision<RecursiveNodeReview>;
+  cancel(): void;
+}
+
 export interface RecursiveReviewHistory<Review> {
   readonly currentRevision: number;
   readonly current: Review;
@@ -162,7 +170,7 @@ export type RecursiveReviewTraceEntry = {
 };
 
 export interface RecursiveReviewSnapshot {
-  readonly schemaVersion: 5;
+  readonly schemaVersion: 6;
   readonly contractId: typeof RECURSIVE_PRESENTATION_CONTRACT_ID;
   readonly inventory: ReviewSubjectInventory;
   readonly layers: readonly RecursiveLayerReviewState[];
@@ -212,6 +220,7 @@ export class RecursivePresentationReviewStore {
   readonly #nodes = new Map<string, RecursiveReviewHistory<RecursiveNodeReview>>();
   readonly #trace: RecursiveReviewTraceEntry[] = [];
   #finalized: FinalizedRecursiveReview | undefined;
+  #pendingNodePreparation: symbol | undefined;
 
   constructor(options: RecursivePresentationReviewStoreOptions) {
     this.inventory = immutable(options.inventory);
@@ -231,7 +240,12 @@ export class RecursivePresentationReviewStore {
   }
 
   reviewNode(review: RecursiveNodeReview): RecursiveReviewRevision<RecursiveNodeReview> {
+    return this.prepareNodeReview(review).commit();
+  }
+
+  prepareNodeReview(review: RecursiveNodeReview): PreparedRecursiveNodeReview {
     this.#assertMutable();
+    this.#assertNoPendingNodePreparation();
     const normalizedReview: RecursiveNodeReview = {
       ...review,
       missingActionOpportunities: review.missingActionOpportunities ?? [],
@@ -246,19 +260,50 @@ export class RecursivePresentationReviewStore {
     validateNodeReview(normalizedReview, actionSubjects, this.#layers, this.#layerSubjects);
     const saved = immutable(normalizedReview);
     this.#validateEvidence?.({ kind: "node", subject, actionSubjects, review: saved });
-    const revision = appendRevision(this.#nodes, key, saved);
-    this.#trace.push(immutable({
-      sequence: this.#trace.length + 1,
-      tool: "reviewNode" as const,
-      subjectRevision: revision.revision,
-      layerId: normalizedReview.layerId,
-      nodeId: normalizedReview.nodeId,
-    }));
-    return revision;
+    const expectedCurrentRevision = this.#nodes.get(key)?.currentRevision ?? 0;
+    const proposedRevision = expectedCurrentRevision + 1;
+    const reservation = Symbol(key);
+    this.#pendingNodePreparation = reservation;
+    let committed = false;
+    let cancelled = false;
+    return Object.freeze({
+      revision: proposedRevision,
+      commit: () => {
+        if (committed) throw new Error(`Node review ${key} preparation was already committed`);
+        if (cancelled) throw new Error(`Node review ${key} preparation was cancelled`);
+        this.#assertMutable();
+        if (this.#pendingNodePreparation !== reservation) {
+          throw new Error(`Node review ${key} lost its mutation reservation`);
+        }
+        if (this.#layers.has(normalizedReview.layerId)) {
+          throw new Error(`Layer ${normalizedReview.layerId} is already finalized; revise its nodes before finalizing the LayerResult`);
+        }
+        if ((this.#nodes.get(key)?.currentRevision ?? 0) !== expectedCurrentRevision) {
+          throw new Error(`Node review ${key} changed after preparation`);
+        }
+        const revision = appendRevision(this.#nodes, key, saved);
+        this.#trace.push(immutable({
+          sequence: this.#trace.length + 1,
+          tool: "reviewNode" as const,
+          subjectRevision: revision.revision,
+          layerId: normalizedReview.layerId,
+          nodeId: normalizedReview.nodeId,
+        }));
+        this.#pendingNodePreparation = undefined;
+        committed = true;
+        return revision;
+      },
+      cancel: () => {
+        if (committed || cancelled) return;
+        if (this.#pendingNodePreparation === reservation) this.#pendingNodePreparation = undefined;
+        cancelled = true;
+      },
+    });
   }
 
   reviewLayer(review: RecursiveLayerResult): RecursiveReviewRevision<RecursiveLayerResult> {
     this.#assertMutable();
+    this.#assertNoPendingNodePreparation();
     const subject = this.#layerSubjects.get(review.layerId);
     if (subject === undefined) throw new Error(`Unknown layer review subject: ${review.layerId}`);
     if (this.#layers.has(review.layerId) && this.#isLayerConsumed(review.layerId)) {
@@ -286,7 +331,9 @@ export class RecursivePresentationReviewStore {
         nodeId: current.nodeId,
         actions: current.actions.map((action) => ({
           actionId: action.actionId,
-          kind: action.kind === "invoke" ? "invoke" as const : "navigate" as const,
+          kind: action.kind === "invoke"
+            ? "invoke" as const
+            : action.kind === "input" ? "input" as const : "navigate" as const,
         })),
       })),
       allocationDecisions: {
@@ -306,7 +353,7 @@ export class RecursivePresentationReviewStore {
 
   snapshot(): RecursiveReviewSnapshot {
     return immutable({
-      schemaVersion: 5 as const,
+      schemaVersion: 6 as const,
       contractId: RECURSIVE_PRESENTATION_CONTRACT_ID,
       inventory: this.inventory,
       layers: this.inventory.layers.flatMap((subject) => {
@@ -325,6 +372,7 @@ export class RecursivePresentationReviewStore {
 
   submitReview(review: RecursiveTurnReview): FinalizedRecursiveReview {
     this.#assertMutable();
+    this.#assertNoPendingNodePreparation();
     if (review.turnId !== this.inventory.turn.turnId) {
       throw new Error(`Turn review subject ${review.turnId} does not match ${this.inventory.turn.turnId}`);
     }
@@ -392,6 +440,12 @@ export class RecursivePresentationReviewStore {
   #assertMutable(): void {
     if (this.#finalized !== undefined) throw new Error("Review is already finalized");
   }
+
+  #assertNoPendingNodePreparation(): void {
+    if (this.#pendingNodePreparation !== undefined) {
+      throw new Error("Review mutation is blocked by a prepared node review");
+    }
+  }
 }
 
 function validateNodeReview(
@@ -412,7 +466,9 @@ function validateNodeReview(
 
   const expectedActions = subjects.map((subject) => ({
     subject,
-    kind: subject.actionKind === "invoke" ? "invoke" as const : subject.relation!,
+    kind: subject.actionKind === "invoke"
+      ? "invoke" as const
+      : subject.actionKind === "input" ? "input" as const : subject.relation!,
   }));
   const seen = new Set<string>();
   for (const action of review.actions) {
@@ -428,12 +484,20 @@ function validateNodeReview(
     }
     requireText(action.labelAndPlacement, `Action ${action.actionId} label and placement`);
     requireEvidence(action.evidence, `Action ${action.actionId} evidence`);
-    if (action.kind === "invoke") {
+    if (action.kind === "invoke" || action.kind === "input") {
       if (
         action.delivery !== null || action.recursiveContribution !== null
         || action.targetLayerId !== null || action.reusedLayerId !== null
-      ) throw new Error(`Invoke action ${action.actionId} must keep delivery and recursion null`);
+      ) throw new Error(`${action.kind === "input" ? "Input" : "Invoke"} action ${action.actionId} must keep delivery and recursion null`);
+      if (action.kind === "input") {
+        validateInputActionJudgments(action.inputActionJudgments, action.actionId);
+      } else if (action.inputActionJudgments !== undefined) {
+        throw new Error(`Invoke action ${action.actionId} cannot carry input-action judgments`);
+      }
     } else {
+      if (action.inputActionJudgments !== undefined) {
+        throw new Error(`Navigate action ${action.actionId} cannot carry input-action judgments`);
+      }
       if (action.targetLayerId !== expected.subject.targetLayerId) {
         throw new Error(`Action ${action.actionId} must target layer ${expected.subject.targetLayerId}`);
       }
@@ -605,10 +669,30 @@ function validateRanking(step: AllocationStepReview, nodeId: string): void {
   const choices = new Set(step.ranking.map(({ choice }) => choice));
   const ranks = new Set(step.ranking.map(({ rank }) => rank));
   if (
-    step.ranking.length !== 4 || choices.size !== 4 || ranks.size !== 4
-    || !["expand", "reference", "invoke", "stop"].every((choice) => choices.has(choice as AllocationChoice))
-    || ![1, 2, 3, 4].every((rank) => ranks.has(rank as 1 | 2 | 3 | 4))
+    step.ranking.length !== 5 || choices.size !== 5 || ranks.size !== 5
+    || !["expand", "reference", "invoke", "input", "stop"].every((choice) => choices.has(choice as AllocationChoice))
+    || ![1, 2, 3, 4, 5].every((rank) => ranks.has(rank as 1 | 2 | 3 | 4 | 5))
   ) throw new Error(`Node ${nodeId} allocation step ${step.step} must rank each choice exactly once`);
+}
+
+const inputActionCriterionKeys = [
+  "prompt_answerability",
+  "option_set_quality",
+  "control_fit",
+] as const satisfies readonly InputActionCriterionKey[];
+
+function validateInputActionJudgments(
+  judgments: RecursiveCriterionJudgments<InputActionCriterionKey> | undefined,
+  actionId: string,
+): void {
+  if (judgments === undefined) throw new Error(`Input action ${actionId} requires input-action judgments`);
+  const actual = Object.keys(judgments);
+  if (
+    actual.length !== inputActionCriterionKeys.length
+    || inputActionCriterionKeys.some((key) => !(key in judgments))
+    || actual.some((key) => !inputActionCriterionKeys.includes(key as InputActionCriterionKey))
+  ) throw new Error(`Input action ${actionId} requires exactly the v11 input-action criteria`);
+  validateCriterionJudgments(judgments, `Input action ${actionId}`);
 }
 
 function validateScore(score: RecursiveNodeScore): void {

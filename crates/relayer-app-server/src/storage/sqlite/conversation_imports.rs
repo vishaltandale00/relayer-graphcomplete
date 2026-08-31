@@ -166,15 +166,34 @@ impl SqliteProductStore {
         source_turn_id: &str,
         graph_node_id: Option<i64>,
         output: Option<&serde_json::Value>,
+        portable_turn: &ConversationExportTurn,
     ) -> Result<(), StorageError> {
+        if portable_turn.id != source_turn_id {
+            return Err(StorageError::IncompatibleSchema(
+                "prepared portable turn does not match its source turn".into(),
+            ));
+        }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let result = sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_output_json=?2 WHERE id=(SELECT it.product_interaction_id FROM imported_turns it JOIN conversation_imports ci ON ci.id=it.conversation_import_id WHERE ci.id=?3 AND ci.state='staging' AND it.source_turn_id=?4)")
             .bind(graph_node_id)
             .bind(output.map(serde_json::to_string).transpose().map_err(serialization)?)
-            .bind(import_id).bind(source_turn_id).execute(&self.pool).await?;
+            .bind(import_id).bind(source_turn_id).execute(&mut *tx).await?;
         require_one(
             result.rows_affected(),
             "conversation import turn is missing or not staged",
-        )
+        )?;
+        let result = sqlx::query("UPDATE imported_turns SET source_completion_json=?1 WHERE conversation_import_id=?2 AND source_turn_id=?3 AND EXISTS(SELECT 1 FROM conversation_imports WHERE id=?2 AND state='staging')")
+            .bind(serde_json::to_string(portable_turn).map_err(serialization)?)
+            .bind(import_id)
+            .bind(source_turn_id)
+            .execute(&mut *tx)
+            .await?;
+        require_one(
+            result.rows_affected(),
+            "conversation import turn is missing or not staged",
+        )?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub(crate) async fn publish_conversation_import(
@@ -288,7 +307,14 @@ fn parse_completion_status(value: &str) -> Result<ExportCompletionStatus, Storag
 #[cfg(test)]
 mod tests {
     use super::{completion_status, parse_completion_status};
-    use crate::conversation_export::ExportCompletionStatus;
+    use crate::{
+        conversation_export::{
+            ConversationExportHeader, ConversationExportTurn, EXPORT_VERSION_V1,
+            ExportCompletionReceipt, ExportCompletionStatus, ExportConversation, ExportProducer,
+            ExportTurnManifestEntry, ExportTurnOrigin,
+        },
+        storage::{NewConversationImport, SqliteProductStore},
+    };
 
     #[test]
     fn imported_approval_lifecycle_statuses_round_trip() {
@@ -299,5 +325,109 @@ mod tests {
             let stored = completion_status(status);
             assert_eq!(parse_completion_status(stored).unwrap(), status);
         }
+    }
+
+    #[tokio::test]
+    async fn preparing_import_turn_rolls_back_interaction_when_portable_update_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteProductStore::open(directory.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        let header = ConversationExportHeader {
+            export_version: EXPORT_VERSION_V1,
+            exported_at: "1770000000000".into(),
+            producer: ExportProducer {
+                desktop_version: "test".into(),
+                build_commit: "test".into(),
+                platform: "test".into(),
+                architecture: "test".into(),
+            },
+            conversation: ExportConversation {
+                id: "conversation:rollback".into(),
+                title: "Rollback".into(),
+                created_at: "1770000000000".into(),
+                project_name: None,
+                harness_configuration_name: "codex-basic".into(),
+                permission_profile_id: "auto".into(),
+            },
+            turns: vec![ExportTurnManifestEntry {
+                id: "turn:1".into(),
+                sequence: 1,
+            }],
+        };
+        let turn = ConversationExportTurn {
+            id: "turn:1".into(),
+            sequence: 1,
+            created_at: "1770000000001".into(),
+            text: "Portable source".into(),
+            interaction_node_id: None,
+            origin: ExportTurnOrigin::User,
+            completion: ExportCompletionReceipt {
+                status: ExportCompletionStatus::Failed,
+                attempt_outcome: None,
+                harness_configuration_name: None,
+                harness_configuration_digest: None,
+                model_selection: None,
+                permission_profile_id: "auto".into(),
+                effective_execution_digest: None,
+                effective_permission_receipt: None,
+                error: Some("fixture".into()),
+                attempt_admission_id: None,
+                admitted_model_plan: None,
+            },
+            contexts: vec![],
+            submitted_inputs: vec![],
+            accepted_view: None,
+        };
+        store
+            .stage_conversation_import(NewConversationImport {
+                id: "import:rollback",
+                source_sha256: "pending",
+                header: &header,
+            })
+            .await
+            .unwrap();
+        let staged_turn = store
+            .append_conversation_import_turn("import:rollback", &turn)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_portable_turn_update BEFORE UPDATE OF source_completion_json ON imported_turns BEGIN SELECT RAISE(ABORT, 'forced portable update failure'); END",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        assert!(
+            store
+                .prepare_conversation_import_turn(
+                    "import:rollback",
+                    "turn:1",
+                    Some(99),
+                    Some(&serde_json::json!({"result":"should roll back"})),
+                    &turn,
+                )
+                .await
+                .is_err()
+        );
+        let (graph_node_id, output): (Option<i64>, Option<String>) = sqlx::query_as(
+            "SELECT graph_node_id,completion_output_json FROM interactions WHERE id=?1",
+        )
+        .bind(staged_turn.interaction_id.value())
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(graph_node_id, None);
+        assert_eq!(output, None);
+        let stored: String = sqlx::query_scalar(
+            "SELECT source_completion_json FROM imported_turns WHERE conversation_import_id='import:rollback' AND source_turn_id='turn:1'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<ConversationExportTurn>(&stored).unwrap(),
+            turn
+        );
     }
 }

@@ -37,6 +37,9 @@ describe("simulated-user MCP server", () => {
     const tools = await client.listTools();
     expect(tools.tools.map(({ name }) => name)).toEqual(SIMULATED_USER_MCP_TOOL_NAMES);
     expect(tools.tools.every((tool) => !["shell", "openLayer", "scroll"].includes(tool.name))).toBe(true);
+    expect(tools.tools.find(({ name }) => name === "reviewNode")?.description).toContain(
+      "input-action criteria and structure.input",
+    );
     await transport.close();
   });
 
@@ -116,6 +119,40 @@ describe("simulated-user MCP server", () => {
       "interact:failed",
       "history:failed",
     ]);
+    await transport.close();
+  });
+
+  it("extends interact with text, one-key, and possibly-empty key-set values without adding a write tool", async () => {
+    const interact = vi.fn(async (input) => ({
+      ok: true as const,
+      state: {
+        turnId: "turn-1",
+        layerId: "layer-1",
+        selectedNodeId: "node-1",
+        activatedActionId: null,
+        navigationPath: [{ layerId: "layer-1", viaActionId: null }],
+      },
+      operator: { operation: "input_commit" },
+    }));
+    const server = await startServer({ interact });
+    const { client, transport } = await connectClient(server);
+
+    for (const value of [
+      { text: "Friday" },
+      { selectedKey: "preview" },
+      { selectedKeys: ["unit", "electron"] },
+      { selectedKeys: [] },
+    ]) {
+      const result = await client.callTool({ name: "interact", arguments: { elementRef: "input-action-41-52-9", value } });
+      expect(result.structuredContent).toMatchObject({ ok: true, operator: { operation: "input_commit" } });
+    }
+    expect(interact.mock.calls.map(([input]) => input.value)).toEqual([
+      { text: "Friday" },
+      { selectedKey: "preview" },
+      { selectedKeys: ["unit", "electron"] },
+      { selectedKeys: [] },
+    ]);
+    expect((await client.listTools()).tools.map(({ name }) => name)).not.toContain("answer");
     await transport.close();
   });
 
@@ -227,7 +264,7 @@ describe("simulated-user MCP server", () => {
         score: {
           nodeId: "node-1",
           content: { score: 6, reason: "Useful concise result.", evidence: ["shot-node"] },
-          actionAllocation: { score: 4, reason: "A material expansion is absent.", evidence: ["shot-node"] },
+          actionAllocation: { score: 4, reason: "A material input action is absent.", evidence: ["shot-node"] },
           actionDelivery: { score: null, reason: "There is no authored destination.", evidence: ["shot-node"] },
           recursiveQuality: { score: null, reason: "There is no authored expansion.", evidence: ["shot-node"] },
           polish: { score: 8, reason: "The node renders cleanly.", evidence: ["shot-node"] },
@@ -243,24 +280,25 @@ describe("simulated-user MCP server", () => {
         allocationSteps: [{
           step: 0,
           ranking: [
-            { choice: "expand", rank: 1 },
+            { choice: "input", rank: 1 },
             { choice: "stop", rank: 2 },
             { choice: "reference", rank: 3 },
             { choice: "invoke", rank: 4 },
+            { choice: "expand", rank: 5 },
           ],
-          preferredChoice: "expand",
+          preferredChoice: "input",
           authoredChoice: "stop",
           authoredActionId: null,
           margin: "clearly_better",
-          selectionFinding: "A causal explanation is materially missing.",
+          selectionFinding: "A necessary user-owned deployment choice is materially missing.",
           evidence: ["shot-node"],
         }],
         missingActionOpportunities: [{
           allocationStep: 0,
-          preferredChoice: "expand",
+          preferredChoice: "input",
           importance: "material",
-          unansweredQuestion: "How does the invalid value reach the response boundary?",
-          expectedContribution: "Trace the causal path and repaired boundary.",
+          unansweredQuestion: "Which deployment window should the repair use?",
+          expectedContribution: "Collect the user-owned scheduling choice before proceeding.",
           artifactEvidence: ["src/utils/sanitize.ts", "src/response.ts"],
           evidence: ["shot-node"],
         }],
@@ -271,9 +309,136 @@ describe("simulated-user MCP server", () => {
 
     expect(result.structuredContent).toMatchObject({ ok: true, nodeId: "node-1" });
     expect(reviewStore.snapshot().nodes[0]?.history.current.missingActionOpportunities).toEqual([expect.objectContaining({
-      preferredChoice: "expand",
+      preferredChoice: "input",
       importance: "material",
     })]);
+    await transport.close();
+  });
+
+  it("accepts and requires three immutable input-action judgments in recursive contract v6", async () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-input",
+      rootLayerId: "layer-input",
+      layers: [{
+        id: "layer-input",
+        nodeIds: ["node-input"],
+        actions: [{
+          id: "action-input",
+          sourceNodeId: "node-input",
+          kind: "input",
+          control: "text",
+          prompt: "What deployment window should we use?",
+          options: [],
+        }],
+      }],
+    });
+    const reviewStore = new RecursivePresentationReviewStore({ inventory });
+    const recordInputRatings = vi.fn()
+      .mockRejectedValueOnce(new Error("durable receipt unavailable"))
+      .mockResolvedValue(undefined);
+    const server = await startSimulatedUserReviewMcpServer({
+      controller: { ...unusedController(), recordInputRatings },
+      reviewStore,
+      bearerToken: "test-token-with-at-least-24-characters",
+    });
+    openServers.push(server);
+    const { client, transport } = await connectClient(server);
+    const judgment = (reason: string) => ({ score: 7, reason, evidence: ["shot-input"] });
+    const action = {
+      actionId: "action-input",
+      kind: "input",
+      allocationStep: 0,
+      labelAndPlacement: "The question appears at the decision node.",
+      delivery: null,
+      recursiveContribution: null,
+      targetLayerId: null,
+      reusedLayerId: null,
+      evidence: ["shot-input"],
+      inputActionJudgments: {
+        prompt_answerability: judgment("The prompt asks for one concrete window."),
+        option_set_quality: judgment("A text control correctly presents no authored options."),
+        control_fit: judgment("Free text fits an unconstrained deployment window."),
+      },
+    };
+    const ranking = [
+      { choice: "input", rank: 1 },
+      { choice: "stop", rank: 2 },
+      { choice: "invoke", rank: 3 },
+      { choice: "expand", rank: 4 },
+      { choice: "reference", rank: 5 },
+    ];
+    const review = {
+      layerId: "layer-input",
+      nodeId: "node-input",
+      evidence: { context: ["shot-input"], detail: ["shot-input"] },
+      score: {
+        nodeId: "node-input",
+        content: judgment("The decision context is visible."),
+        actionAllocation: judgment("Asking is appropriate at this blocked decision."),
+        actionDelivery: { score: null, reason: "Input has no destination.", evidence: ["shot-input"] },
+        recursiveQuality: { score: null, reason: "Input has no expansion child.", evidence: ["shot-input"] },
+        polish: judgment("The control is readable."),
+      },
+      semantic: {
+        nodeId: "node-input",
+        meaning: "A deployment decision is blocked.",
+        delivered: "The required question is visible.",
+        limitations: "No answer has been committed.",
+        effectOnLayer: "The user can supply the missing decision.",
+        evidence: ["shot-input"],
+      },
+      allocationSteps: [
+        {
+          step: 0,
+          ranking,
+          preferredChoice: "input",
+          authoredChoice: "input",
+          authoredActionId: "action-input",
+          margin: "necessary",
+          selectionFinding: "The node needs this user-owned decision.",
+          evidence: ["shot-input"],
+        },
+        {
+          step: 1,
+          ranking: [
+            { choice: "stop", rank: 1 },
+            { choice: "expand", rank: 2 },
+            { choice: "reference", rank: 3 },
+            { choice: "invoke", rank: 4 },
+            { choice: "input", rank: 5 },
+          ],
+          preferredChoice: "stop",
+          authoredChoice: "stop",
+          authoredActionId: null,
+          margin: "close",
+          selectionFinding: "No additional action is needed.",
+          evidence: ["shot-input"],
+        },
+      ],
+      missingActionOpportunities: [],
+      actions: [action],
+      findings: [],
+    };
+
+    const failedCommission = await client.callTool({ name: "reviewNode", arguments: { review } });
+    expect(failedCommission.isError).toBe(true);
+    expect(recordInputRatings).toHaveBeenNthCalledWith(1, { review, revision: 1 });
+    expect(reviewStore.snapshot().nodes).toEqual([]);
+
+    const accepted = await client.callTool({ name: "reviewNode", arguments: { review } });
+    expect(accepted.structuredContent).toMatchObject({ ok: true, nodeId: "node-input" });
+    expect(recordInputRatings).toHaveBeenNthCalledWith(2, { review, revision: 1 });
+    expect(reviewStore.snapshot()).toMatchObject({
+      schemaVersion: 6,
+      contractId: "recursive-presentation-judge-v6",
+      nodes: [{ history: { current: { actions: [{ inputActionJudgments: action.inputActionJudgments }] } } }],
+    });
+
+    const rejected = await client.callTool({
+      name: "reviewNode",
+      arguments: { review: { ...review, actions: [{ ...action, inputActionJudgments: undefined }] } },
+    });
+    expect(rejected.isError).toBe(true);
     await transport.close();
   });
 });

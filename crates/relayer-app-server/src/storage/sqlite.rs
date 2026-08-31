@@ -6,6 +6,7 @@ mod catalog;
 mod completion_executions;
 mod context_drafts;
 mod conversation_imports;
+mod input_drafts;
 mod interaction_contexts;
 mod interactions;
 mod migrations;

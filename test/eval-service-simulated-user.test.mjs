@@ -91,6 +91,34 @@ describe("EvalService simulated-user result persistence", () => {
     });
   });
 
+  it("surfaces v10 and v11 recursive results as non-comparable instead of aggregating them", () => {
+    const result = presentationGradeFromTurns([
+      {
+        status: "accepted",
+        judgeResults: [{
+          status: "completed",
+          review: { schemaVersion: 5, contractId: "recursive-presentation-judge-v5", turn: { criterionJudgments: {} } },
+        }],
+      },
+      {
+        status: "accepted",
+        judgeResults: [{
+          status: "completed",
+          review: { schemaVersion: 6, contractId: "recursive-presentation-judge-v6", turn: { criterionJudgments: {} } },
+        }],
+      },
+    ], true);
+
+    expect(result).toMatchObject({
+      status: "partial",
+      score: null,
+      comparability: {
+        status: "incompatible",
+        contractIds: ["recursive-presentation-judge-v5", "recursive-presentation-judge-v6"],
+      },
+    });
+  });
+
   it("omits product model selection for every turn of a configuration-owned harness", async () => {
     const { directory, stateFile } = await testPaths();
     const configurationPath = join(directory, "configuration-owned-fixture.yaml");
@@ -279,7 +307,7 @@ describe("EvalService simulated-user result persistence", () => {
         status: "accepted",
       },
       request: { followUp: false },
-      rubric: { rubricVersion: "graph-presentation-rubric-v10" },
+      rubric: { rubricVersion: "graph-presentation-rubric-v11" },
       judgeConfiguration: { name: "simulated-user" },
     });
     expect(calls[0].request.text).toContain("incoming queue");
@@ -293,7 +321,7 @@ describe("EvalService simulated-user result persistence", () => {
         judge: "simulated-user",
         status: "completed",
         passed: null,
-        rubricVersion: "graph-presentation-rubric-v10",
+        rubricVersion: "graph-presentation-rubric-v11",
         judgeConfiguration: { name: "simulated-user" },
         artifactAuthority: "references",
         references: {
@@ -341,6 +369,79 @@ describe("EvalService simulated-user result persistence", () => {
     expect(reloaded.catalog().judges.map(({ id }) => id)).toEqual(["deterministic-graph-contract"]);
     expect(await readFile(bundleFile, "utf8")).toBe(bundleBeforeReload);
 
+  });
+
+  it("fails the opt-in input round-trip execution when its structural gate was not exercised", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    globalThis.fetch = fakeAcceptedProduct();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      simulatedUserJudgeRunner: async () => ({
+        status: "completed",
+        rubricRef: "rubric.json",
+        configurationRef: "judge-configuration.json",
+        interactionTraceRef: "trace.json",
+        screenshotRefs: ["screenshots/shot-root.json"],
+        reviewRef: "reviews.json",
+        coverageRef: "coverage.json",
+        inputRoundTripRef: "input-roundtrip.json",
+        review: { turn: { ratings: { answer_quality: 4 } } },
+        coverage: { complete: true, missingSubjects: [] },
+        summary: "The visible turn was reviewed.",
+        inputRoundTrip: {
+          schemaVersion: 1,
+          status: "not_exercised",
+          passed: false,
+          checks: [],
+          detail: "The judge did not commit and Send.",
+        },
+      }),
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: ["empty-project.node-input-roundtrip.single-turn"],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "simulated-user",
+    });
+    const completed = await waitForCompletedRun(service, created.id);
+
+    expect(completed.status).toBe("failed");
+    expect(completed.executions[0]).toMatchObject({ status: "failed", passed: false });
+    expect(completed.executions[0].checks).toContainEqual(expect.objectContaining({
+      name: "turn-1:input-roundtrip:exercised",
+      passed: false,
+    }));
+    expect(completed.executions[0].turns[0].judgeResults[0].inputRoundTrip)
+      .toMatchObject({ status: "not_exercised", passed: false });
+    expect(completed.executions[0].turns[0].deterministicPassed).toBe(false);
+    expect(completed.executions[0].outcomeGrade).toMatchObject({ qualified: false });
+  });
+
+  it("rejects an input round-trip run with the deterministic judge before execution", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      simulatedUserJudgeRunner: vi.fn(),
+    }).open();
+
+    const inputCase = service.catalog().cases.find(
+      ({ id }) => id === "empty-project.node-input-roundtrip.single-turn",
+    );
+    expect(inputCase.requiredJudgeConfigurationIds).toEqual([
+      "simulated-user",
+      "simulated-user-sol-high",
+    ]);
+    await expect(service.createRun({
+      testCaseIds: [inputCase.id],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow(
+      "Input round-trip cases require a compatible simulated-user judge configuration.",
+    );
   });
 
   it("persists explicit partial and thrown-failure artifacts without losing deterministic evidence", async () => {

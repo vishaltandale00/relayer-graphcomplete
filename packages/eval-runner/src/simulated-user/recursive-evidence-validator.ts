@@ -70,7 +70,7 @@ export function createRecursiveScreenshotEvidenceValidator(
       request.review.actions.forEach((action, index) => {
         const subject = request.actionSubjects.find((candidate) => candidate.actionId === action.actionId);
         const actionScreenshots = action.evidence.map((screenshotId) => options.screenshots.get(screenshotId));
-        if (action.kind !== "invoke") {
+        if (action.kind === "expand" || action.kind === "reference") {
           const hasSource = actionScreenshots.some((shot) => shot !== undefined && isNode(shot));
           const hasDestination = actionScreenshots.some((shot) => (
             shot !== undefined
@@ -96,6 +96,33 @@ export function createRecursiveScreenshotEvidenceValidator(
           ),
           `Action evidence must show source node ${request.subject.nodeId} or its traversed destination`,
         );
+        if (action.kind === "input") {
+          const occurrence = subject?.occurrence;
+          const expectedElementRef = occurrence === undefined ? undefined : [
+            "input-action",
+            occurrence.presentingInteractionNodeId,
+            occurrence.presentingLayerId,
+            occurrence.actionId,
+          ].join("-");
+          const showsRenderedInputControl = (shot: ScreenshotMetadata): boolean => shot.layerId === request.subject.layerId
+            && shot.selectedNodeId === request.subject.nodeId
+            && shot.captureTarget.kind === "element"
+            && shot.captureTarget.elementRef === expectedElementRef;
+          validate(
+            action.evidence,
+            ["actions", index, "evidence"],
+            showsRenderedInputControl,
+            `Input action ${action.actionId} evidence must show the selected source node and its rendered controls`,
+          );
+          for (const [criterion, judgment] of Object.entries(action.inputActionJudgments ?? {})) {
+            validate(
+              judgment.evidence,
+              ["actions", index, "inputActionJudgments", criterion, "evidence"],
+              showsRenderedInputControl,
+              `Input action ${action.actionId} ${criterion} evidence must show the selected source node and its rendered controls`,
+            );
+          }
+        }
       });
       request.review.findings.forEach((finding, index) => validate(
         finding.evidence,
@@ -112,7 +139,10 @@ export function createRecursiveScreenshotEvidenceValidator(
           ...node.semantic.evidence,
           ...node.allocationSteps.flatMap((step) => step.evidence),
           ...(node.missingActionOpportunities ?? []).flatMap((opportunity) => opportunity.evidence),
-          ...node.actions.flatMap((action) => action.evidence),
+          ...node.actions.flatMap((action) => [
+            ...action.evidence,
+            ...Object.values(action.inputActionJudgments ?? {}).flatMap((judgment) => judgment.evidence),
+          ]),
           ...node.findings.flatMap((finding) => finding.evidence),
         ]),
       ]);

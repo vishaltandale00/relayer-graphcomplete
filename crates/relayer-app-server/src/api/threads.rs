@@ -57,6 +57,7 @@ pub(super) struct CreateInteractionRequest {
     contexts: Vec<InteractionContextIntent>,
     #[serde(default)]
     context_confirmation_ids: Vec<String>,
+    input_draft_revision: Option<i64>,
     model_selection: Option<ModelSelectionRequest>,
 }
 
@@ -70,6 +71,7 @@ pub(super) struct RetryInteractionRequest {
     contexts: Vec<InteractionContextIntent>,
     #[serde(default)]
     context_confirmation_ids: Vec<String>,
+    input_draft_revision: Option<i64>,
     model_selection: ModelSelectionRequest,
 }
 
@@ -393,21 +395,47 @@ pub(super) async fn project_interaction(
         .product
         .interaction_input(InteractionId::try_from(id)?)
         .await?;
+    let submitted_evidence = state
+        .product
+        .submitted_input_evidence(InteractionId::try_from(id)?)
+        .await?;
+    let durable_submitted_inputs = submitted_evidence
+        .iter()
+        .map(|input| relayer_graph_core::SubmittedInput {
+            action: input.action.clone(),
+            value: input.value.clone(),
+        })
+        .collect::<Vec<_>>();
+    response.set_submitted_inputs(durable_submitted_inputs.clone());
     let has_durable_context = durable_input
         .as_ref()
         .is_some_and(|input| !input.contexts.is_empty());
-    if has_durable_context || imported_thread {
+    let has_durable_submitted_inputs = !durable_submitted_inputs.is_empty();
+    if has_durable_context || has_durable_submitted_inputs || imported_thread {
         let Some((runtime, graph_node_id)) = state.runtime.as_ref().zip(graph_node_id) else {
-            if has_durable_context {
+            if has_durable_context || has_durable_submitted_inputs {
                 response.mark_projection_stale();
                 eprintln!(
-                    "could not project context for interaction {id}: graph input is unavailable"
+                    "could not project interaction input for interaction {id}: graph input is unavailable"
                 );
             }
             return Ok(response);
         };
         match runtime.interaction_input(graph_node_id).await {
             Ok(input) => {
+                if imported_thread {
+                    response.set_submitted_inputs(input.submitted_inputs.clone());
+                } else if !durable_submitted_inputs.is_empty()
+                    && !submitted_input_semantic_multisets_match(
+                        &input.submitted_inputs,
+                        &durable_submitted_inputs,
+                    )
+                {
+                    response.mark_projection_stale();
+                    eprintln!(
+                        "could not project submitted input for interaction {id}: product and graph semantic values diverged"
+                    );
+                }
                 let projected = if input.contexts.is_empty() {
                     if has_durable_context {
                         Err("durable product contexts are missing from graph input")
@@ -449,6 +477,27 @@ pub(super) async fn project_interaction(
     Ok(response)
 }
 
+fn submitted_input_semantic_multisets_match(
+    left: &[relayer_graph_core::SubmittedInput],
+    right: &[relayer_graph_core::SubmittedInput],
+) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let canonicalize = |inputs: &[relayer_graph_core::SubmittedInput]| {
+        inputs
+            .iter()
+            .map(|input| serde_json::to_value(input).and_then(|value| serde_json::to_vec(&value)))
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let (Ok(mut left), Ok(mut right)) = (canonicalize(left), canonicalize(right)) else {
+        return false;
+    };
+    left.sort_unstable();
+    right.sort_unstable();
+    left == right
+}
+
 async fn project_interactions(
     state: &ApiState,
     interactions: Vec<Interaction>,
@@ -469,8 +518,48 @@ pub(super) async fn create_interaction(
     Path(id): Path<i64>,
     Json(request): Json<CreateInteractionRequest>,
 ) -> Result<(StatusCode, Json<InteractionResponse>), ApiError> {
-    authorize_write(&state, &headers)?;
+    let operator = if state.authenticator.is_control(&headers) {
+        authorize_write(&state, &headers)?;
+        None
+    } else if state.authenticator.input_operator_token(&headers).is_some() {
+        Some(super::input_operator_sessions::authorize_thread(
+            &state, &headers, id,
+        )?)
+    } else {
+        authorize_write(&state, &headers)?;
+        None
+    };
     let thread_id = ThreadId::try_from(id)?;
+    if let Some(operator) = operator.as_ref() {
+        if !request.text.trim().is_empty()
+            || request.model_selection.is_some()
+            || !request.contexts.is_empty()
+            || !request.context_confirmation_ids.is_empty()
+            || request.input_id.is_none()
+            || request.input_draft_revision.is_none()
+        {
+            return Err(ApiError::invalid(
+                "input operator Send may submit only its scoped committed input draft",
+            ));
+        }
+        let draft = state.product.action_input_draft(thread_id).await?;
+        if draft.attachments.is_empty()
+            || draft.attachments.iter().any(|attachment| {
+                !operator
+                    .occurrences
+                    .contains(&super::input_operator_sessions::occurrence_key(
+                        &attachment.occurrence,
+                    ))
+            })
+        {
+            return Err(ApiError::not_found(
+                "input draft contains values outside this operator session",
+            ));
+        }
+    }
+    if request.input_draft_revision.is_some() && request.input_id.is_none() {
+        return Err(ApiError::invalid("inputDraftRevision requires inputId"));
+    }
     let thread_detail = state.product.get_thread(thread_id).await?;
     let privileged_model_less_thread = state.allow_harness_override
         && thread_detail
@@ -505,6 +594,9 @@ pub(super) async fn create_interaction(
             "Relayer could not send this message. Your draft was preserved.",
         ));
     }
+    let context_snapshots = canonical_context_snapshots(&state, &request.contexts)
+        .await
+        .map_err(context_snapshot_api_error)?;
     let identified = request.input_id.is_some() || !request.contexts.is_empty();
     let interaction = if identified {
         let input_id = request
@@ -519,7 +611,9 @@ pub(super) async fn create_interaction(
                     text: &request.text,
                     input_identity: &input_id,
                     contexts: &request.contexts,
+                    context_snapshots: &context_snapshots,
                     context_confirmation_ids: &request.context_confirmation_ids,
+                    input_draft_revision: request.input_draft_revision,
                     model_selection: model_selection.as_ref(),
                     allow_unselected_model,
                 },
@@ -533,6 +627,14 @@ pub(super) async fn create_interaction(
             Err(
                 error @ crate::product::ProductError::Storage(
                     crate::storage::StorageError::ContextDraftConflict { .. },
+                ),
+            ) => return Err(error.into()),
+            Err(error @ crate::product::ProductError::InputValidation { .. }) => {
+                return Err(error.into());
+            }
+            Err(
+                error @ crate::product::ProductError::Storage(
+                    crate::storage::StorageError::ActionInputDraftConflict { .. },
                 ),
             ) => return Err(error.into()),
             Err(error) if !request.contexts.is_empty() => {
@@ -614,6 +716,9 @@ pub(super) async fn retry_interaction(
         ));
     }
     let model_selection = InteractionModelSelection::try_from(request.model_selection)?;
+    let context_snapshots = canonical_context_snapshots(&state, &request.contexts)
+        .await
+        .map_err(context_snapshot_api_error)?;
     let claimed = state
         .product
         .claim_interaction_retry(
@@ -623,7 +728,9 @@ pub(super) async fn retry_interaction(
                 text: &request.text,
                 input_identity: &request.input_id,
                 contexts: &request.contexts,
+                context_snapshots: &context_snapshots,
                 context_confirmation_ids: &request.context_confirmation_ids,
+                input_draft_revision: request.input_draft_revision,
                 model_selection: &model_selection,
                 harness_configuration_name: &thread.harness_configuration_name,
             },
@@ -662,6 +769,7 @@ pub(super) async fn retry_interaction(
                                 policy: None,
                                 adapter_version: None,
                                 failure_category: "configuration",
+                                error: error.message(),
                             })
                             .await
                         {
@@ -684,6 +792,49 @@ pub(super) async fn retry_interaction(
         });
     }
     Ok(Json(interaction.into()))
+}
+
+async fn canonical_context_snapshots(
+    state: &ApiState,
+    contexts: &[InteractionContextIntent],
+) -> Result<Vec<relayer_graph_core::InteractionInputNode>, ApiError> {
+    if contexts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let mut snapshots = Vec::with_capacity(contexts.len());
+    for context in contexts {
+        let target = relayer_graph_core::InteractionContextTarget {
+            node_id: relayer_graph_core::NodeId::new(context.target.node_id)
+                .ok_or_else(|| ApiError::invalid("context target nodeId must be positive"))?,
+            source_interaction_node_id: relayer_graph_core::NodeId::new(
+                context.target.source_interaction_node_id,
+            )
+            .ok_or_else(|| ApiError::invalid("context sourceInteractionNodeId must be positive"))?,
+            source_layer_id: relayer_graph_core::LayerId::new(context.target.source_layer_id)
+                .ok_or_else(|| ApiError::invalid("context sourceLayerId must be positive"))?,
+        };
+        snapshots.push(
+            runtime
+                .canonical_interaction_context_occurrence(&target)
+                .await?,
+        );
+    }
+    Ok(snapshots)
+}
+
+fn context_snapshot_api_error(error: ApiError) -> ApiError {
+    if error.is_deterministic_input_failure() {
+        return error;
+    }
+    eprintln!(
+        "context-bearing interaction snapshot resolution failed: {}",
+        error.internal_diagnostic()
+    );
+    ApiError::internal("Relayer could not send this message. Your draft was preserved.")
 }
 
 pub(crate) async fn resume_recovered_identified_interactions(state: ApiState) {
@@ -779,6 +930,42 @@ pub(super) async fn get_layer(
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
     Ok(Json(runtime.get_layer(graph_node_id, layer_id).await?))
+}
+
+pub(super) async fn get_input_children(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id)): Path<(i64, i64)>,
+) -> Result<Json<Value>, ApiError> {
+    authorize_read(&state, &headers)?;
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let interaction = state.product.get_interaction(interaction_id).await?;
+    if interaction.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    if let Some((runtime, graph_node_id)) = state.runtime.as_ref().zip(interaction.graph_node_id) {
+        return Ok(Json(
+            runtime.interaction_input_children(graph_node_id).await?,
+        ));
+    }
+    let evidence = state
+        .product
+        .submitted_input_evidence(interaction_id)
+        .await?;
+    Ok(Json(serde_json::json!({
+        "children": evidence.into_iter().map(|input| serde_json::json!({
+            "presentingInteractionNodeId": input.occurrence.presenting_interaction_node_id,
+            "presentingLayerId": input.occurrence.presenting_layer_id,
+            "actionId": input.occurrence.action_id,
+            "sourceNodeId": input.source_node_id,
+            "action": input.action,
+            "value": input.value,
+            "attemptState": input.attempt_state,
+        })).collect::<Vec<_>>()
+    })))
 }
 
 pub(super) async fn get_action_destination(
@@ -946,6 +1133,10 @@ async fn reconcile_quarantined_interaction(
     })?;
     runtime.invalidate_node_capabilities(graph_node_id).await?;
     let metadata = runtime.interaction_metadata(graph_node_id).await?;
+    let durable_input = product
+        .interaction_input(interaction.id)
+        .await
+        .map_err(|error| RuntimeError::Protocol(error.to_string()))?;
     let expected = product
         .invocation_graph_source(interaction.id)
         .await
@@ -967,11 +1158,19 @@ async fn reconcile_quarantined_interaction(
         .map_err(|error| RuntimeError::Protocol(error.to_string()))?;
     let legacy_unleased_invocation =
         !graph_lease_required && expected.is_some() && metadata.invocation.is_none();
+    let expected_identity = durable_input
+        .as_ref()
+        .map(|input| input.input_identity.as_str());
+    let expected_digest = durable_input
+        .as_ref()
+        .map(|input| input.input_digest.as_str());
     if metadata.node_id != graph_node_id
         || (metadata.invocation != expected && !legacy_unleased_invocation)
+        || metadata.input_identity.as_deref() != expected_identity
+        || metadata.input_digest.as_deref() != expected_digest
     {
         return Err(RuntimeError::Protocol(
-            "graph interaction lease provenance does not match product history".into(),
+            "graph interaction lease or input provenance does not match product history".into(),
         ));
     }
     let Some(output) = runtime.completion_output(graph_node_id).await? else {
@@ -983,6 +1182,23 @@ async fn reconcile_quarantined_interaction(
                 .map_err(|error| RuntimeError::Protocol(error.to_string()))?
             {
                 interaction.completion_error = Some(LEGACY_INTERRUPTED.into());
+                return Ok(());
+            }
+        }
+        if durable_input
+            .as_ref()
+            .is_some_and(|input| !input.submitted_inputs.is_empty())
+        {
+            const INTERRUPTED: &str = "Submitted interaction input was interrupted before graph acceptance. The input draft was restored; send it again to create a new attempt.";
+            if product
+                .finalize_quarantined_submitted_input_failure(interaction.id, INTERRUPTED)
+                .await
+                .map_err(|error| RuntimeError::Protocol(error.to_string()))?
+            {
+                *interaction = product
+                    .get_interaction(interaction.id)
+                    .await
+                    .map_err(|error| RuntimeError::Protocol(error.to_string()))?;
                 return Ok(());
             }
         }
@@ -2261,6 +2477,10 @@ async fn prepare_and_claim_interaction(
             .map(|input| input.contexts.as_slice())
             .unwrap_or(&[]),
         personal_presentation: personal_presentation.as_ref(),
+        submitted_inputs: durable_input
+            .as_ref()
+            .map(|input| input.submitted_inputs.as_slice())
+            .unwrap_or(&[]),
     };
     let mut binding_attempt = 0;
     let prepared = loop {
@@ -2298,6 +2518,7 @@ async fn prepare_and_claim_interaction(
                 harness_configuration_digest: &prepared.harness_configuration_digest,
                 effective_execution_digest: &prepared.effective_execution_digest,
                 effective_permission_receipt: &prepared.effective_permission_receipt,
+                input_children: &prepared.input_children,
             })
             .await
         {
@@ -2473,6 +2694,7 @@ mod tests {
         storage::SqliteProductStore,
     };
     use axum::{Router, routing};
+    use relayer_graph_core::{InputAction, InputControl, SubmittedInput, SubmittedInputValue};
     use std::{
         collections::HashMap,
         fs,
@@ -2825,6 +3047,7 @@ mod tests {
                 input_digest: None,
                 personal_presentation: None,
                 contexts: &[],
+                submitted_inputs: &[],
             })
             .await
             .unwrap();
@@ -2837,6 +3060,7 @@ mod tests {
                     harness_configuration_digest: &seeded.harness_configuration_digest,
                     effective_execution_digest: &seeded.effective_execution_digest,
                     effective_permission_receipt: &seeded.effective_permission_receipt,
+                    input_children: &seeded.input_children,
                 })
                 .await
                 .unwrap()
@@ -2897,6 +3121,7 @@ mod tests {
             },
             approval_decisions: Arc::new(Mutex::new(HashMap::new())),
             annotation_sessions: Arc::new(Mutex::new(HashMap::new())),
+            input_operator_sessions: Arc::new(Mutex::new(HashMap::new())),
             annotations_enabled: false,
             environment_inspector: crate::environment::EnvironmentInspector::new(),
             completion_brokers,
@@ -3254,6 +3479,31 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let task = tokio::spawn(axum::serve(listener, app).into_future());
         (format!("http://{address}/"), task)
+    }
+
+    #[test]
+    fn submitted_input_projection_compares_semantic_multisets_not_occurrence_order() {
+        let submitted = |prompt: &str, text: &str| SubmittedInput {
+            action: InputAction {
+                control: InputControl::Text,
+                prompt: prompt.into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: SubmittedInputValue::Text { text: text.into() },
+        };
+        let first = submitted("Zulu prompt", "first value");
+        let second = submitted("Alpha prompt", "second value");
+
+        assert!(submitted_input_semantic_multisets_match(
+            &[first.clone(), second.clone()],
+            &[second.clone(), first.clone()],
+        ));
+        assert!(!submitted_input_semantic_multisets_match(
+            &[first.clone(), second],
+            &[first.clone(), first],
+        ));
     }
 
     #[test]

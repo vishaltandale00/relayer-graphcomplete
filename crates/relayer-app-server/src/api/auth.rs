@@ -3,6 +3,7 @@ use axum::http::HeaderMap;
 use std::sync::Arc;
 
 pub const ANNOTATION_COOKIE: &str = "relayer_annotation";
+pub const INPUT_OPERATOR_COOKIE: &str = "relayer_input_operator";
 
 #[derive(Clone)]
 pub(crate) struct DesktopSessionAuthenticator {
@@ -27,6 +28,10 @@ impl DesktopSessionAuthenticator {
 
     pub(crate) fn annotation_token<'a>(&self, headers: &'a HeaderMap) -> Option<&'a str> {
         cookie(headers, ANNOTATION_COOKIE)
+    }
+
+    pub(crate) fn input_operator_token<'a>(&self, headers: &'a HeaderMap) -> Option<&'a str> {
+        cookie(headers, INPUT_OPERATOR_COOKIE)
     }
 
     pub(crate) fn is_control(&self, headers: &HeaderMap) -> bool {

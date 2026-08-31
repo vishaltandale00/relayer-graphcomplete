@@ -1,8 +1,9 @@
 use sqlx::{FromRow, SqliteConnection};
 
 use crate::{
-    ActionDraft, ActionId, ActionKind, ActionVariant, GraphAction, GraphError, LayerId,
-    NavigateRelation, NodeId, ProjectId, RecordState, graph::InteractionScope,
+    ActionDraft, ActionId, ActionKind, ActionVariant, GraphAction, GraphError, InputAction,
+    InputControl, InputOption, LayerId, NavigateRelation, NodeId, PresentingInputOccurrence,
+    ProjectId, RecordState, graph::InteractionScope,
 };
 
 pub(crate) struct ActionTable<'connection> {
@@ -31,7 +32,17 @@ struct ActionRow {
     description: Option<String>,
     target_layer_id: Option<i64>,
     interaction_text: Option<String>,
+    input_control: Option<String>,
+    input_prompt: Option<String>,
+    input_options_json: Option<String>,
+    input_minimum_selections: Option<i64>,
     state: String,
+}
+
+macro_rules! action_projection {
+    () => {
+        "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records"
+    };
 }
 
 impl<'connection> ActionTable<'connection> {
@@ -45,7 +56,7 @@ impl<'connection> ActionTable<'connection> {
         id: ActionId,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            concat!(action_projection!(), " WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))"),
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -62,7 +73,7 @@ impl<'connection> ActionTable<'connection> {
         id: ActionId,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE id=?1 AND owner_interaction_id=?2 AND state='accepted' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4))",
+            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE id=?1 AND owner_interaction_id=?2 AND state='accepted' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4))",
         )
         .bind(id.value())
         .bind(scope.root_node_id.value())
@@ -74,6 +85,99 @@ impl<'connection> ActionTable<'connection> {
         .transpose()
     }
 
+    pub(crate) async fn canonical_input_occurrence(
+        &mut self,
+        scope: &InteractionScope,
+        occurrence: &PresentingInputOccurrence,
+        allow_imported: bool,
+    ) -> Result<GraphAction, GraphError> {
+        let valid: i64 = sqlx::query_scalar(
+            r#"
+            WITH RECURSIVE reachable_layers(id) AS (
+                SELECT root.target_layer_id
+                FROM completions completion
+                JOIN actions root ON root.id=completion.root_action_id
+                WHERE completion.interaction_node_id=?1
+                  AND root.kind='navigate'
+                  AND root.state='accepted'
+                  AND root.target_layer_id IS NOT NULL
+                UNION
+                SELECT child.target_layer_id
+                FROM reachable_layers reachable
+                JOIN layer_actions membership ON membership.layer_id=reachable.id
+                JOIN actions child ON child.id=membership.action_id
+                WHERE child.kind='navigate'
+                  AND child.state='accepted'
+                  AND child.target_layer_id IS NOT NULL
+            )
+            SELECT EXISTS(
+                SELECT 1
+                FROM nodes presenting_interaction
+                JOIN reachable_layers reachable ON reachable.id=?2
+                JOIN layers presenting_layer ON presenting_layer.id=reachable.id
+                JOIN layer_actions membership
+                  ON membership.layer_id=presenting_layer.id AND membership.action_id=?3
+                JOIN actions input_action ON input_action.id=membership.action_id
+                JOIN layer_nodes source_membership
+                  ON source_membership.layer_id=presenting_layer.id
+                 AND source_membership.node_id=input_action.source_node_id
+                WHERE presenting_interaction.id=?1
+                  AND presenting_interaction.kind='user-interaction'
+                  AND presenting_interaction.state='accepted'
+                  AND presenting_interaction.owner_interaction_id IS NULL
+                  AND (?6 OR NOT EXISTS(
+                      SELECT 1
+                      FROM graph_imports imported
+                      WHERE imported.thread_id=presenting_interaction.thread_id
+                  ))
+                  AND presenting_layer.state='accepted'
+                  AND input_action.state='accepted'
+                  AND input_action.kind='input'
+                  AND ((?4 IS NOT NULL AND presenting_interaction.project_id=?4 AND input_action.project_id=?4)
+                       OR (?4 IS NULL
+                           AND presenting_interaction.project_id IS NULL
+                           AND input_action.project_id IS NULL
+                           AND presenting_interaction.thread_id=?5
+                           AND input_action.thread_id=?5))
+            )
+            "#,
+        )
+        .bind(occurrence.presenting_interaction_node_id.value())
+        .bind(occurrence.presenting_layer_id.value())
+        .bind(occurrence.action_id.value())
+        .bind(scope.project_id.map(ProjectId::value))
+        .bind(scope.thread_id.value())
+        .bind(allow_imported)
+        .fetch_one(&mut *self.connection)
+        .await?;
+        if valid == 0 {
+            return Err(GraphError::validation(
+                "input_action_not_in_occurrence",
+                "occurrence.actionId",
+                "Reopen and commit the input action from the exact accepted presenting layer.",
+            ));
+        }
+        let action = self
+            .record(scope, occurrence.action_id)
+            .await?
+            .ok_or_else(|| {
+                GraphError::validation(
+                    "input_occurrence_not_visible",
+                    "occurrence",
+                    "Remove an occurrence unavailable to this thread scope.",
+                )
+            })?
+            .action;
+        if action.kind != ActionKind::Input || action.input.is_none() {
+            return Err(GraphError::validation(
+                "input_action_snapshot_mismatch",
+                "occurrence",
+                "Refresh the accepted action and recommit its value.",
+            ));
+        }
+        Ok(action)
+    }
+
     pub(crate) async fn for_source(
         &mut self,
         scope: &InteractionScope,
@@ -83,7 +187,7 @@ impl<'connection> ActionTable<'connection> {
     ) -> Result<Vec<ActionRecord>, GraphError> {
         let rows = match (owner, accepted_only) {
             (Some(owner), _) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND owner_interaction_id=?2 AND type_id!='interaction.context' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                concat!(action_projection!(), " WHERE source_node_id=?1 AND owner_interaction_id=?2 AND type_id!='interaction.context' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id"),
             )
             .bind(source.value())
             .bind(owner.value())
@@ -92,7 +196,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, true) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND type_id!='interaction.context' AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id",
+                concat!(action_projection!(), " WHERE source_node_id=?1 AND type_id!='interaction.context' AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id"),
             )
             .bind(source.value())
             .bind(scope.project_id.map(ProjectId::value))
@@ -100,7 +204,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, false) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND type_id!='interaction.context' AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                concat!(action_projection!(), " WHERE source_node_id=?1 AND type_id!='interaction.context' AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id"),
             )
             .bind(source.value())
             .bind(scope.root_node_id.value())
@@ -119,7 +223,7 @@ impl<'connection> ActionTable<'connection> {
         client_key: &str,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3 AND type_id!='interaction.context'",
+            concat!(action_projection!(), " WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3 AND type_id!='interaction.context'"),
         )
         .bind(owner.value())
         .bind(source.value())
@@ -155,7 +259,7 @@ impl<'connection> ActionTable<'connection> {
         layer: LayerId,
     ) -> Result<Vec<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE owner_interaction_id=?1 AND type_id!='interaction.context' AND source_layer_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+            concat!(action_projection!(), " WHERE owner_interaction_id=?1 AND type_id!='interaction.context' AND source_layer_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id"),
         )
         .bind(scope.root_node_id.value())
         .bind(layer.value())
@@ -336,10 +440,9 @@ impl<'connection> ActionTable<'connection> {
         .bind(&draft.client_key)
         .execute(&mut *self.connection)
         .await?;
-        Ok(draft_action(
-            valid_action_id(result.last_insert_rowid())?,
-            draft,
-        ))
+        let id = valid_action_id(result.last_insert_rowid())?;
+        self.replace_input_payload(id, draft.input.as_ref()).await?;
+        Ok(draft_action(id, draft))
     }
 
     pub(crate) async fn update_draft(
@@ -361,7 +464,30 @@ impl<'connection> ActionTable<'connection> {
             .bind(id.value())
             .execute(&mut *self.connection)
             .await?;
+        self.replace_input_payload(id, draft.input.as_ref()).await?;
         Ok(draft_action(id, draft))
+    }
+
+    async fn replace_input_payload(
+        &mut self,
+        id: ActionId,
+        input: Option<&InputAction>,
+    ) -> Result<(), GraphError> {
+        sqlx::query("DELETE FROM input_action_payloads WHERE action_id=?1")
+            .bind(id.value())
+            .execute(&mut *self.connection)
+            .await?;
+        if let Some(input) = input {
+            sqlx::query("INSERT INTO input_action_payloads(action_id,control,prompt,options_json,minimum_selections) VALUES (?1,?2,?3,?4,?5)")
+                .bind(id.value())
+                .bind(input.control.as_str())
+                .bind(&input.prompt)
+                .bind(serde_json::to_string(&input.options).map_err(|error| GraphError::Internal(error.to_string()))?)
+                .bind(input.minimum_selections.map(|value| value as i64))
+                .execute(&mut *self.connection)
+                .await?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn publish_owned(
@@ -391,6 +517,32 @@ impl TryFrom<ActionRow> for ActionRecord {
     type Error = GraphError;
 
     fn try_from(row: ActionRow) -> Result<Self, Self::Error> {
+        let input = match (
+            row.input_control,
+            row.input_prompt,
+            row.input_options_json,
+            row.input_minimum_selections,
+        ) {
+            (None, None, None, None) => None,
+            (Some(control), Some(prompt), Some(options), minimum) => Some(InputAction {
+                control: InputControl::parse(&control)?,
+                prompt,
+                options: serde_json::from_str::<Vec<InputOption>>(&options)
+                    .map_err(|error: serde_json::Error| GraphError::Internal(error.to_string()))?,
+                minimum_selections: minimum
+                    .map(|value| {
+                        usize::try_from(value)
+                            .map_err(|error| GraphError::Internal(error.to_string()))
+                    })
+                    .transpose()?,
+                unsupported_fields: Default::default(),
+            }),
+            _ => {
+                return Err(GraphError::Internal(
+                    "database returned a partial input action payload".into(),
+                ));
+            }
+        };
         Ok(Self {
             action: GraphAction {
                 id: valid_action_id(row.id)?,
@@ -408,6 +560,7 @@ impl TryFrom<ActionRow> for ActionRecord {
                 description: row.description,
                 target_layer_id: row.target_layer_id.map(valid_layer_id).transpose()?,
                 interaction_text: row.interaction_text,
+                input,
                 state: RecordState::parse(&row.state)?,
             },
         })
@@ -427,6 +580,7 @@ fn draft_action(id: ActionId, draft: &ActionDraft) -> GraphAction {
         description: draft.description.clone(),
         target_layer_id: draft.target_layer_id,
         interaction_text: draft.interaction_text.clone(),
+        input: draft.input.clone(),
         state: RecordState::Draft,
     }
 }

@@ -175,6 +175,53 @@ impl SqliteProductStore {
                 ));
             }
         }
+        let submitted_input = if let Some(expected_revision) = input.submitted_input_draft_revision
+        {
+            let current_revision: Option<i64> =
+                sqlx::query_scalar("SELECT revision FROM action_input_drafts WHERE thread_id=?1")
+                    .bind(thread_id.value())
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if current_revision.unwrap_or(0) != expected_revision {
+                return Err(StorageError::ActionInputDraftConflict {
+                    code: "input_draft_revision_conflict",
+                    message: "The committed interaction inputs changed while Send was reserving them. Reload the draft and send again.".into(),
+                });
+            }
+            let rows = sqlx::query(
+                "SELECT presenting_interaction_node_id,presenting_layer_id,action_id,action_json,value_json FROM action_input_attachments WHERE thread_id=?1 ORDER BY presenting_interaction_node_id,presenting_layer_id,action_id",
+            )
+            .bind(thread_id.value())
+            .fetch_all(&mut *tx)
+            .await?;
+            if rows.is_empty() {
+                None
+            } else {
+                let submitted_inputs =
+                    rows.iter()
+                        .map(submitted_input_from_row)
+                        .collect::<Result<Vec<_>, _>>()?;
+                let authority_digest = relayer_graph_core::interaction_input_authority_digest(
+                    input.text,
+                    &submitted_inputs,
+                )
+                .map_err(|error| StorageError::Serialization(error.to_string()))?;
+                if authority_digest != input.input_digest {
+                    return Err(StorageError::ActionInputDraftConflict {
+                        code: "input_draft_revision_conflict",
+                        message: "The committed interaction inputs no longer match the Send snapshot. Reload the draft and send again.".into(),
+                    });
+                }
+                let semantic_digest = relayer_graph_core::interaction_input_semantic_digest(
+                    input.text,
+                    &submitted_inputs,
+                )
+                .map_err(|error| StorageError::Serialization(error.to_string()))?;
+                Some((expected_revision, semantic_digest))
+            }
+        } else {
+            None
+        };
         let model_selection = match model_selection {
             Some(value) => Some(value.clone()),
             None => sqlx::query("SELECT model_provider_id,provider_model_id,model_family_id FROM interactions WHERE thread_id=?1 ORDER BY sequence DESC LIMIT 1")
@@ -204,10 +251,10 @@ impl SqliteProductStore {
         .bind(thread_id.value())
         .fetch_one(&mut *tx)
         .await?;
-        let result = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id,model_provider_id,provider_model_id,model_family_id,input_identity,input_digest) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)")
+        let result = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id,model_provider_id,provider_model_id,model_family_id,input_identity,input_digest,input_draft_revision) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)")
             .bind(thread_id.value()).bind(sequence).bind(input.text).bind(&timestamp).bind(&permission_profile_id)
             .bind(model_selection.as_ref().map(|s| s.provider_id.as_str())).bind(model_selection.as_ref().map(|s| s.model_id.as_str()))
-            .bind(model_selection.as_ref().map(|s| s.family_id.value())).bind(input.input_identity).bind(input.input_digest)
+            .bind(model_selection.as_ref().map(|s| s.family_id.value())).bind(input.input_identity).bind(input.input_digest).bind(input.submitted_input_draft_revision)
             .execute(&mut *tx).await?;
         let id = result.last_insert_rowid();
         for (context_position, context) in input.contexts.iter().enumerate() {
@@ -239,6 +286,43 @@ impl SqliteProductStore {
             &confirmation_ids,
         )
         .await?;
+        if let Some((draft_revision, semantic_digest)) = submitted_input {
+            sqlx::query(
+                "INSERT INTO interaction_submitted_input_attempts(interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,created_at) VALUES (?1,?2,?3,?4,?5,'reserved',?6)",
+            )
+            .bind(id)
+            .bind(thread_id.value())
+            .bind(draft_revision)
+            .bind(input.input_digest)
+            .bind(semantic_digest)
+            .bind(&timestamp)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO interaction_submitted_input_attachments(interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) SELECT ?1,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at FROM action_input_attachments WHERE thread_id=?2",
+            )
+            .bind(id)
+            .bind(thread_id.value())
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query("DELETE FROM action_input_attachments WHERE thread_id=?1")
+                .bind(thread_id.value())
+                .execute(&mut *tx)
+                .await?;
+            let advanced = sqlx::query(
+                "UPDATE action_input_drafts SET revision=revision+1,updated_at=?1 WHERE thread_id=?2 AND revision=?3",
+            )
+            .bind(&timestamp)
+            .bind(thread_id.value())
+            .bind(draft_revision)
+            .execute(&mut *tx)
+            .await?;
+            if advanced.rows_affected() != 1 {
+                return Err(StorageError::IncompatibleSchema(
+                    "submitted input reservation lost its draft revision".into(),
+                ));
+            }
+        }
         sqlx::query("UPDATE threads SET updated_at=?1 WHERE id=?2")
             .bind(&timestamp)
             .bind(thread_id.value())
@@ -270,12 +354,15 @@ impl SqliteProductStore {
         &self,
         interaction_id: crate::product::InteractionId,
     ) -> Result<Option<DurableInteractionInput>, StorageError> {
-        let header: Option<(Option<String>, Option<String>)> =
-            sqlx::query_as("SELECT input_identity,input_digest FROM interactions WHERE id=?1")
+        type InteractionInputHeader = (Option<String>, Option<String>, Option<i64>, Option<String>);
+        let header: Option<InteractionInputHeader> =
+            sqlx::query_as("SELECT interaction.input_identity,interaction.input_digest,COALESCE(interaction.input_draft_revision,attempt.draft_revision),attempt.semantic_digest FROM interactions interaction LEFT JOIN interaction_submitted_input_attempts attempt ON attempt.interaction_id=interaction.id WHERE interaction.id=?1")
                 .bind(interaction_id.value())
                 .fetch_optional(&self.pool)
                 .await?;
-        let Some((input_identity, input_digest)) = header else {
+        let Some((input_identity, input_digest, submitted_input_draft_revision, semantic_digest)) =
+            header
+        else {
             return Ok(None);
         };
         let (input_identity, input_digest) = match (input_identity, input_digest) {
@@ -303,11 +390,48 @@ impl SqliteProductStore {
                 annotations,
             });
         }
+        let submitted_rows = sqlx::query(
+            "SELECT presenting_interaction_node_id,presenting_layer_id,action_id,action_json,value_json FROM interaction_submitted_input_attachments WHERE interaction_id=?1 ORDER BY presenting_interaction_node_id,presenting_layer_id,action_id",
+        )
+        .bind(interaction_id.value())
+        .fetch_all(&self.pool)
+        .await?;
+        let submitted_inputs = submitted_rows
+            .iter()
+            .map(submitted_input_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Some(DurableInteractionInput {
             input_identity,
             input_digest,
             contexts,
+            submitted_inputs,
+            submitted_input_draft_revision,
+            semantic_digest,
         }))
+    }
+
+    pub(crate) async fn submitted_input_evidence(
+        &self,
+        interaction_id: crate::product::InteractionId,
+    ) -> Result<Vec<crate::product::SubmittedInputEvidence>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT snapshot.presenting_interaction_node_id,snapshot.presenting_layer_id,snapshot.action_id,snapshot.source_node_id,snapshot.action_json,snapshot.value_json,attempt.state FROM interaction_submitted_input_attachments snapshot JOIN interaction_submitted_input_attempts attempt ON attempt.interaction_id=snapshot.interaction_id WHERE snapshot.interaction_id=?1 ORDER BY snapshot.presenting_interaction_node_id,snapshot.presenting_layer_id,snapshot.action_id",
+        )
+        .bind(interaction_id.value())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let submitted = submitted_input_from_row(row)?;
+                Ok(crate::product::SubmittedInputEvidence {
+                    occurrence: submitted.occurrence,
+                    source_node_id: row.try_get("source_node_id")?,
+                    action: submitted.action,
+                    value: submitted.value,
+                    attempt_state: row.try_get("state")?,
+                })
+            })
+            .collect()
     }
 
     pub(crate) async fn discard_unbound_interaction_input(
@@ -316,7 +440,7 @@ impl SqliteProductStore {
     ) -> Result<bool, StorageError> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let thread_id: Option<i64> = sqlx::query_scalar(
-            "SELECT thread_id FROM interactions WHERE id=?1 AND graph_node_id IS NULL AND input_identity IS NOT NULL AND completion_status IN ('not_started','submitted','failed')",
+            "SELECT thread_id FROM interactions WHERE id=?1 AND graph_node_id IS NULL AND input_identity IS NOT NULL AND completion_status IN ('not_started','submitted','failed') AND NOT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=interactions.id)",
         ).bind(interaction_id.value()).fetch_optional(&mut *tx).await?;
         let Some(thread_id) = thread_id else {
             tx.commit().await?;
@@ -351,10 +475,143 @@ impl SqliteProductStore {
     }
 }
 
+pub(super) fn submitted_input_from_row(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<relayer_graph_core::SubmittedInputDraft, StorageError> {
+    let action: relayer_graph_core::InputAction =
+        serde_json::from_str(&row.try_get::<String, _>("action_json")?)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+    let value: crate::product::ActionInputValue =
+        serde_json::from_str(&row.try_get::<String, _>("value_json")?)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+    let value = match value {
+        crate::product::ActionInputValue::Text { text } => {
+            relayer_graph_core::SubmittedInputValue::Text { text }
+        }
+        crate::product::ActionInputValue::Selected { selected_keys } => {
+            let selected = selected_keys
+                .into_iter()
+                .map(|key| {
+                    action
+                        .options
+                        .iter()
+                        .find(|option| option.key == key)
+                        .cloned()
+                        .ok_or_else(|| {
+                            StorageError::IncompatibleSchema(format!(
+                                "submitted input snapshot contains unknown option key {key:?}"
+                            ))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            relayer_graph_core::SubmittedInputValue::Selected { selected }
+        }
+    };
+    Ok(relayer_graph_core::SubmittedInputDraft {
+        occurrence: relayer_graph_core::PresentingInputOccurrence {
+            presenting_interaction_node_id: relayer_graph_core::NodeId::new(
+                row.try_get("presenting_interaction_node_id")?,
+            )
+            .ok_or_else(|| {
+                StorageError::IncompatibleSchema("invalid presenting interaction ID".into())
+            })?,
+            presenting_layer_id: relayer_graph_core::LayerId::new(
+                row.try_get("presenting_layer_id")?,
+            )
+            .ok_or_else(|| {
+                StorageError::IncompatibleSchema("invalid presenting layer ID".into())
+            })?,
+            action_id: relayer_graph_core::ActionId::new(row.try_get("action_id")?).ok_or_else(
+                || StorageError::IncompatibleSchema("invalid input action ID".into()),
+            )?,
+        },
+        action,
+        value,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::NewInteractionInput;
+
+    #[tokio::test]
+    async fn empty_input_snapshot_is_revision_checked_inside_send_transaction() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-empty-input-revision-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let input_digest = relayer_graph_core::interaction_input_digest("Prompt", &[]).unwrap();
+        let clean_thread = sqlx::query(
+            "INSERT INTO threads(title,created_at,updated_at) VALUES ('Clean','1','1')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let created = store
+            .insert_interaction_input(
+                ThreadId::from_database(clean_thread),
+                NewInteractionInput {
+                    text: "Prompt",
+                    input_identity: "empty-revision-zero",
+                    input_digest: &input_digest,
+                    contexts: &[],
+                    context_confirmation_ids: &[],
+                    submitted_input_draft_revision: Some(0),
+                },
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(created, InteractionInputInsertOutcome::Created(_)));
+
+        let changed_thread = sqlx::query(
+            "INSERT INTO threads(title,created_at,updated_at) VALUES ('Changed','1','1')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO action_input_drafts(thread_id,revision,updated_at) VALUES (?1,1,'2')",
+        )
+        .bind(changed_thread)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let conflict = store
+            .insert_interaction_input(
+                ThreadId::from_database(changed_thread),
+                NewInteractionInput {
+                    text: "Prompt",
+                    input_identity: "stale-empty-revision",
+                    input_digest: &input_digest,
+                    contexts: &[],
+                    context_confirmation_ids: &[],
+                    submitted_input_draft_revision: Some(0),
+                },
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            conflict,
+            StorageError::ActionInputDraftConflict {
+                code: "input_draft_revision_conflict",
+                ..
+            }
+        ));
+    }
 
     #[tokio::test]
     async fn interaction_atomically_consumes_and_unbound_delete_restores_confirmation() {
@@ -398,6 +655,7 @@ mod tests {
                     input_digest: "sha256:confirmed",
                     contexts: &contexts,
                     context_confirmation_ids: &confirmation_ids,
+                    submitted_input_draft_revision: None,
                 },
                 None,
                 false,
@@ -538,6 +796,7 @@ mod tests {
             input_digest: "sha256:replay",
             contexts: &contexts,
             context_confirmation_ids: &confirmation_ids,
+            submitted_input_draft_revision: None,
         };
         let created = store
             .insert_interaction_input(
@@ -657,6 +916,7 @@ mod tests {
                     input_digest: "sha256:duplicate-confirmations",
                     contexts: &contexts,
                     context_confirmation_ids: &confirmation_ids,
+                    submitted_input_draft_revision: None,
                 },
                 None,
                 false,
@@ -725,6 +985,7 @@ mod tests {
             input_digest: "sha256:v1:one",
             contexts: &contexts,
             context_confirmation_ids: &[],
+            submitted_input_draft_revision: None,
         };
         let created = store
             .insert_interaction_input(
@@ -755,6 +1016,7 @@ mod tests {
                     input_digest: "sha256:v1:one",
                     contexts: &contexts,
                     context_confirmation_ids: &[],
+                    submitted_input_draft_revision: None,
                 },
                 None,
                 false,
@@ -774,6 +1036,7 @@ mod tests {
                     input_digest: "sha256:v1:two",
                     contexts: &contexts,
                     context_confirmation_ids: &[],
+                    submitted_input_draft_revision: None,
                 },
                 None,
                 false,

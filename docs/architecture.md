@@ -61,7 +61,7 @@ Ladybug stores only accepted, published graph material. Its searchable supergrap
 
 Engine, storage-format, Relayer-schema, query-contract, and derived-index versions are independent. Incompatible Ladybug bytes are quarantined and rebuilt from SQLite before an atomic active-store swap. The initial release uses official pinned Ladybug bytes plus narrow extensions or upstream hooks, without a permanent core fork. Vector retrieval and a Ladybug canonical-write cutover remain deferred. The exact v1 language, values, limits, and compatibility rules live in [the graph-query contract](graph-query-v1.md).
 
-For every product interaction, the app server durably creates the product interaction and atomically reserves its `submitted` preparation state before graph control. It then creates the canonical user-interaction graph node with product project/thread provenance, stores that node plus the frozen execution identity, claims `running`, and only then supplies the transient graph capability to the matching `complete()` call. Explicit graph submission runs in background work owned by the app-server process, which persists accepted output or explicit failure on the product interaction. This lets every product host display the thread and waiting state while polling the same product record to terminal state. Product and graph writes remain separate SQLite transactions; the stored graph node ID is the durable join between them.
+For every ordinary message product interaction, the app server durably creates the product interaction and atomically reserves its `submitted` preparation state before graph control. Input-assisted Send instead snapshots the thread's committed input attachments into one immutable submitted-input attempt while creating a `not_started` root interaction; a conditional claim on that exact attempt later reserves `submitted`. It then creates the canonical user-interaction graph node with product project/thread provenance, stores that node plus the frozen execution identity, claims `running`, and only then supplies the transient graph capability to the matching `complete()` call. Explicit graph submission runs in background work owned by the app-server process, which persists accepted output or explicit failure on the product interaction. This lets every product host display the thread and waiting state while polling the same product record to terminal state. Product and graph writes remain separate SQLite transactions; the stored graph node ID is the durable join between them.
 
 ## Product permission profiles
 
@@ -85,7 +85,7 @@ Threads pin a harness-configuration identity, not an immutable copy of catalog o
 
 Provider removal uses atomic admission and draining. Marking a definition `removal_pending` immediately blocks new attempts through it while already admitted work finishes. Credential deletion and the non-secret historical tombstone occur only after the last execution reference is released. Family deletion needs no drain because a sent attempt no longer consults family membership.
 
-Every execution attempt has an immutable receipt and a durable effect boundary: `none`, `partial_output`, `graph_write`, `tool_effect`, or fail-closed `unknown`. In this initial release, every model-related failure returns the same interaction to an editable unsent state, including failures after partial output, graph writes, tool effects, or an unknown boundary. This deliberately accepts duplicate-effect risk: the user must explicitly send the restored draft, durable graph writes remain authoritative, and only the product binding and transient execution capability state are cleared. Pre-execution model failures also persist the exact provider, model, family, and harness-policy snapshot available at failure time; adapter implementation version `0` records that provider admission did not complete. Non-model failures remain failed and inspectable. Trace events conservatively raise the boundary for streamed output and tool starts, observable graph neighbors raise it for graph writes, and an accepted graph discovered while recovering a harness failure is adopted without rerunning the harness. Attempt finalization and the matching interaction transition commit in one SQLite transaction, while startup converts any genuinely interrupted running attempt to terminal `unknown` and reconciles graph-authoritative acceptance first. Issue #158 may later replace this accepted duplicate-risk behavior with effect-aware replay protection; no restore mechanism is implied here.
+Every execution attempt has an immutable receipt and a durable effect boundary: `none`, `partial_output`, `graph_write`, `tool_effect`, or fail-closed `unknown`. For an ordinary message, a model-related failure returns the same interaction to an editable unsent state, including failures after partial output, graph writes, tool effects, or an unknown boundary. For an input-assisted Send, failure or stop instead restores its snapshotted attachments to the thread draft without reopening or retrying that immutable attempt; retry requires a new explicit Send and a new root interaction. A draft edit committed after the failed attempt was reserved wins over restoration for the same occurrence. Both paths deliberately accept duplicate-effect risk: durable graph writes remain authoritative, and only the product binding and transient execution capability state are cleared. Pre-execution model failures also persist the exact provider, model, family, and harness-policy snapshot available at failure time; adapter implementation version `0` records that provider admission did not complete. Non-model failures remain failed and inspectable. Trace events conservatively raise the boundary for streamed output and tool starts, observable graph neighbors raise it for graph writes, and an accepted graph discovered while recovering a harness failure is adopted without rerunning the harness. Attempt finalization and the matching interaction transition commit in one SQLite transaction, while startup converts any genuinely interrupted running attempt to terminal `unknown` and reconciles graph-authoritative acceptance first. Issue #158 may later replace this accepted duplicate-risk behavior with effect-aware replay protection.
 
 This contract applies equally to `codex.basic`, `prime.agent`, and future harness implementations. It adds no scheduler and does not change `complete(inputGraph)` or graph acceptance authority.
 
@@ -100,6 +100,8 @@ Activation changes only future human-authored pins. Existing interactions, retri
 Relayer and Relayer Eval are separate Electron build targets. Relayer exposes the ordinary product window and lets each new thread pin an available catalog configuration. Relayer Eval exposes a test-run dashboard and selects named configurations for its matrix, but executes each case through the same product app server. A case may create one or more ordinary product threads and interactions.
 
 Opening one case × harness execution creates a separate review window using the exact production renderer and `ProductWorkspace` component. The review preload supplies only Eval navigation context: the run's cases and product thread IDs for the selected harness. Product graph reads, accepted-layer navigation, turn navigation, layout, and node inspection remain owned by the ordinary product API and workspace. The same app server issues the review window a read-only session capability and rejects writes at the API boundary; workspace review mode also removes composition and mutating controls. See [ADR 0003](decisions/0003-shared-product-eval-workspace.md).
+
+Node-input round-trip evaluation does not relax that read boundary. A separately credentialed, occurrence-scoped operator uses the ordinary input-draft and interaction HTTP routes only after versioned input-action captures have been durably persisted with their node rating. Independent per-action locks exclude writes while pixels and ratings are bound, one receipt atomically commissions the complete capture set, and the read-only presentation revision includes the opaque selected-thread input-draft revision. The operator verifies the route's returned occurrence, action, value, and draft revision before it may Send. The opt-in live gate then joins the accepted authored action, consuming product interaction, provenance-exact graph input children, and the next harness prompt trace containing the same normalized semantic input. Model grounding ratings are recorded separately and never replace this structural gate.
 
 Every newly authored layer carries a versioned layout with exactly one normalized
 placement per member node. Graph core validates and persists those placements as
@@ -178,8 +180,8 @@ screenshots remain the sole evidence for what the graph communicates.
 
 The presentation judge builds a recursive semantic result tree bottom-up. Expansion
 actions consume finalized child `LayerResult`s; references reuse results without
-starting another recursive pass; invoke actions are never executed. At every node,
-the judge compares expansion, reference, invoke, and stop sequentially, while keeping
+starting another recursive pass; invoke and input actions are never executed. At every node,
+the judge compares expansion, reference, invoke, input, and stop sequentially, while keeping
 allocation quality separate from destination delivery. Each layer preserves aligned
 node score and semantic-summary vectors. A parent semantically compresses child
 findings and applies qualitative depth decay without a numeric propagation formula.
@@ -195,16 +197,20 @@ paths, semantically empty geometry, and action spam. Artifact inspection may rev
 useful presentation opportunities, but implementation correctness, verifier results,
 and task-outcome contradictions can neither raise nor lower this independent grade.
 The rubric does not require media capabilities that the graph contract and renderer
-do not yet support. Recursive review contract v5 records basic rendered integrity
+do not yet support. Recursive review contract v6 records basic rendered integrity
 as a separate node-level `polish` score. Polish covers clipping, readability,
 density, alignment, and control rendering only; it is inspectable in the score
 vector and cannot raise or offset semantic, interaction, navigation, layer, turn,
-or task-outcome grades. The v10 human-experience rubric requires an independent
+or task-outcome grades. The v11 human-experience rubric requires an independent
 reason and screenshot evidence for every scored criterion on its ordered 1-8 scale;
 the integers intentionally have no canned meanings. Only action delivery, recursive
 quality, and inapplicable follow-up progress may be null; the node criteria require
 no assessable destination or expansion child respectively. A material missing action caps affected turn-level
 criteria at 6; repeated material omissions or one critical omission cap them at 4.
+Input actions are rated from their visible prompt, control, and authored options before
+any answer is supplied. The same rubric penalizes asking for facts already present in
+the artifact, delegating judgment the response should make, and splitting one decision
+into needless per-node questions.
 Historical recursive reviews retain their original scale when projected alone and
 are proportionally normalized only when a multi-turn grade contains mixed scales.
 
@@ -245,7 +251,7 @@ For `prime.agent`, a prompt settling is not the run boundary. The adapter waits 
 
 Harness factories may initialize asynchronously so provider runtimes such as Prime Agent can open durable sessions before registration completes. The host serializes first construction and Complete calls per thread, forwards cancellation through an `AbortSignal`, aborts active work during shutdown, and disposes every live harness object exactly once.
 
-Product and graph metadata remain in separate SQLite databases, so the app server uses an explicit recoverable handoff rather than pretending they share a transaction. It first creates the durable product interaction, conditionally reserves `submitted`, prepares the canonical graph interaction, and stores the graph `NodeId`, frozen configuration/model identity, effective-execution digest, and permission receipt. Only a conditional transition on that exact prepared identity may claim `running` and enter the harness. The graph capability token remains transient runtime memory and is never product data. Product graph reads use control-authenticated read endpoints rather than minting harness writer capabilities.
+Product and graph metadata remain in separate SQLite databases, so the app server uses an explicit recoverable handoff rather than pretending they share a transaction. It first creates the durable product interaction and conditionally reserves `submitted`; an input-assisted Send creates the root plus immutable submitted-input attempt before that reservation. It then prepares the canonical graph interaction and stores the graph `NodeId`, frozen configuration/model identity, effective-execution digest, and permission receipt. Only a conditional transition on that exact prepared identity may claim `running` and enter the harness. The graph capability token remains transient runtime memory and is never product data. Product graph reads use control-authenticated read endpoints rather than minting harness writer capabilities.
 
 Terminal provider-execution lease debt is handled by one app-owned reconciliation worker. Startup and later release failures only wake that worker; they never spawn competing retry loops. The worker serially scans durable debt, retries with capped backoff, and returns to an idle notification wait after the debt is clear.
 

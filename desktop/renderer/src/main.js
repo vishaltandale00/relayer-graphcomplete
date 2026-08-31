@@ -351,17 +351,29 @@ async function boot() {
   if (evalReview) {
     evalReview.registerPresentationAdapter(createReviewPresentationAdapter({
       executionId: viewState.evalContext.selectedExecutionId,
-      getPresentationState: () => ({
-        threadId: viewState.currentThreadId,
-        turnId: viewState.currentInteractionId,
-        layerId: appState.visibleLayer?.layer?.id ?? null,
-        selectedNodeId: viewState.selectedNodeId,
-        navigationPath: viewState.layerPath.map((entry) => ({
-          layerId: entry.layerId,
-          viaActionId: entry.actionId ?? entry.viaActionId ?? null,
-        })),
-      }),
+      getPresentationState: () => {
+        const threadId = viewState.currentThreadId;
+        const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
+        const interactionRevision = appState.interactions
+          .filter((interaction) => String(interaction.threadId) === String(threadId))
+          .sort((left, right) => left.sequence - right.sequence)
+          .map((interaction) => `${interaction.id}:${interaction.sequence}:${interaction.completionStatus}`)
+          .join(",");
+        return {
+          threadId,
+          threadRevision: `thread:${threadId}:updated:${thread?.updatedAt ?? "unknown"}`
+            + `:input-draft:${appState.inputDraftRevision ?? "none"}:interactions:${interactionRevision}`,
+          turnId: viewState.currentInteractionId,
+          layerId: appState.visibleLayer?.layer?.id ?? null,
+          selectedNodeId: viewState.selectedNodeId,
+          navigationPath: viewState.layerPath.map((entry) => ({
+            layerId: entry.layerId,
+            viaActionId: entry.actionId ?? entry.viaActionId ?? null,
+          })),
+        };
+      },
       navigateHistory,
+      setInputOperatorCommitted: (committed) => workspace().setInputOperatorCommitted(committed),
     }));
   }
   connectEvents();

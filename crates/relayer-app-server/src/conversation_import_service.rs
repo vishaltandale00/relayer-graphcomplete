@@ -1,7 +1,7 @@
 use relayer_graph_core::{
     ImportedAcceptedView, ImportedAction, ImportedConversationReceipt, ImportedConversationStage,
-    ImportedEdge, ImportedInteractionContext, ImportedInvokeOrigin, ImportedLayer, ImportedNode,
-    ImportedResolvedLayer, ImportedTurn,
+    ImportedEdge, ImportedInputSource, ImportedInteractionContext, ImportedInvokeOrigin,
+    ImportedLayer, ImportedNode, ImportedResolvedLayer, ImportedSubmittedInput, ImportedTurn,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -40,6 +40,8 @@ pub(crate) struct ConversationImportReceipt {
     pub title: String,
     pub producer: crate::conversation_export::ExportProducer,
     pub turns: Vec<ConversationImportTurnReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_submitted_inputs: Vec<relayer_graph_core::SkippedSubmittedInput>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -207,6 +209,34 @@ pub(crate) async fn materialize_conversation(
         return Err(operation);
     }
     for turn in &graph.turns {
+        let mut portable_turn = match product
+            .staged_conversation_turn(import_id, &turn.source_turn_id)
+            .await
+        {
+            Ok(turn) => turn,
+            Err(operation) => {
+                return cleanup_failed_materialization(
+                    import_id,
+                    operation.to_string(),
+                    product,
+                    runtime,
+                )
+                .await;
+            }
+        };
+        retain_materialized_submitted_inputs(&mut portable_turn, &graph.skipped_submitted_inputs);
+        if let Err(operation) = crate::conversation_export::validate_materialized_turn_content(
+            &portable_turn,
+            &format!("turns[{}]", portable_turn.sequence.saturating_sub(1)),
+        ) {
+            return cleanup_failed_materialization(
+                import_id,
+                operation.to_string(),
+                product,
+                runtime,
+            )
+            .await;
+        }
         let output = turn
             .output
             .as_ref()
@@ -217,6 +247,7 @@ pub(crate) async fn materialize_conversation(
                 &turn.source_turn_id,
                 turn.graph_node_id,
                 output.as_ref(),
+                &portable_turn,
             )
             .await
         {
@@ -325,6 +356,7 @@ fn staged_receipt(
         thread_id: staged.thread_id.value(),
         title: staged.header.conversation.title.clone(),
         producer: staged.header.producer.clone(),
+        skipped_submitted_inputs: Vec::new(),
         turns: staged
             .turns
             .iter()
@@ -349,7 +381,19 @@ fn materialized_receipt(
         turn.graph_node_id = graph_turn.graph_node_id;
         turn.root_layer_id = graph_turn.root_layer_id;
     }
+    receipt.skipped_submitted_inputs = graph.skipped_submitted_inputs.clone();
     receipt
+}
+
+fn retain_materialized_submitted_inputs(
+    turn: &mut ConversationExportTurn,
+    skipped: &[relayer_graph_core::SkippedSubmittedInput],
+) {
+    turn.submitted_inputs.retain(|submitted| {
+        !skipped.iter().any(|skipped| {
+            skipped.source_turn_id == turn.id && skipped.submitted_input_id == submitted.id
+        })
+    });
 }
 
 fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
@@ -383,6 +427,38 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                 source_interaction_node_id: context.source.interaction_node_id,
                 source_layer_id: context.source.layer_id,
                 annotations: context.annotations,
+            })
+            .collect(),
+        submitted_inputs: turn
+            .submitted_inputs
+            .into_iter()
+            .map(|submitted| ImportedSubmittedInput {
+                id: submitted.id,
+                root_turn_id: submitted.root_turn_id,
+                source: ImportedInputSource {
+                    interaction_node_id: submitted.source.interaction_node_id,
+                    layer_id: submitted.source.layer_id,
+                    action_id: submitted.source.action_id,
+                    node_id: submitted.source.node_id,
+                },
+                action: import_input_action(submitted.action),
+                value: match submitted.value {
+                    crate::conversation_export::ExportSubmittedInputValue::Text { text } => {
+                        relayer_graph_core::SubmittedInputValue::Text { text }
+                    }
+                    crate::conversation_export::ExportSubmittedInputValue::Selected {
+                        selected,
+                    } => relayer_graph_core::SubmittedInputValue::Selected {
+                        selected: selected
+                            .into_iter()
+                            .map(|option| relayer_graph_core::InputOption {
+                                key: option.key,
+                                label: option.label,
+                                unsupported_fields: Default::default(),
+                            })
+                            .collect(),
+                    },
+                },
             })
             .collect(),
         accepted_view: turn.accepted_view.map(|view| ImportedAcceptedView {
@@ -439,6 +515,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
 }
 
 fn import_action(action: ExportAction) -> ImportedAction {
+    let input = action.input.map(import_input_action);
     ImportedAction {
         id: action.id,
         source_node_id: action.source_node_id,
@@ -446,6 +523,7 @@ fn import_action(action: ExportAction) -> ImportedAction {
         kind: match action.kind {
             ExportActionKind::Navigate => "navigate",
             ExportActionKind::Invoke => "invoke",
+            ExportActionKind::Input => "input",
         }
         .into(),
         relation: action.relation.map(|relation| {
@@ -467,6 +545,40 @@ fn import_action(action: ExportAction) -> ImportedAction {
         description: action.description,
         target_layer_id: action.target_layer_id,
         interaction_text: action.interaction_text,
+        input,
+    }
+}
+
+fn import_input_action(
+    action: crate::conversation_export::ExportInputActionSnapshot,
+) -> relayer_graph_core::InputAction {
+    relayer_graph_core::InputAction {
+        control: match action.control {
+            crate::conversation_export::ExportInputControl::Text => {
+                relayer_graph_core::InputControl::Text
+            }
+            crate::conversation_export::ExportInputControl::SingleSelect => {
+                relayer_graph_core::InputControl::SingleSelect
+            }
+            crate::conversation_export::ExportInputControl::MultiSelect => {
+                relayer_graph_core::InputControl::MultiSelect
+            }
+            crate::conversation_export::ExportInputControl::Unsupported => {
+                unreachable!("conversation input controls are validated before import")
+            }
+        },
+        prompt: action.prompt,
+        options: action
+            .options
+            .into_iter()
+            .map(|option| relayer_graph_core::InputOption {
+                key: option.key,
+                label: option.label,
+                unsupported_fields: Default::default(),
+            })
+            .collect(),
+        minimum_selections: action.minimum_selections.map(|minimum| minimum as usize),
+        unsupported_fields: Default::default(),
     }
 }
 
@@ -474,19 +586,26 @@ fn import_action(action: ExportAction) -> ImportedAction {
 mod tests {
     use std::{fs, path::Path};
 
-    use relayer_graph_core::GraphDatabase;
+    use relayer_graph_core::{
+        GraphDatabase, ImportedConversationReceipt, ImportedTurnReceipt, SkippedSubmittedInput,
+    };
 
-    use super::{ConversationImportStager, materialize_conversation, remove_conversation};
+    use super::{
+        ConversationImportStager, materialize_conversation, materialized_receipt,
+        remove_conversation, retain_materialized_submitted_inputs,
+    };
     use crate::{
         conversation_export::{
             ConversationExportHeader, ConversationExportTurn, EXPORT_VERSION_V1,
             ExportCompletionReceipt, ExportCompletionStatus, ExportContextSource,
-            ExportContextTargetSnapshot, ExportConversation, ExportInteractionContext,
-            ExportProducer, ExportRecordState, ExportTurnManifestEntry, ExportTurnOrigin,
+            ExportContextTargetSnapshot, ExportConversation, ExportInputActionSnapshot,
+            ExportInputControl, ExportInputSource, ExportInteractionContext, ExportProducer,
+            ExportRecordState, ExportSubmittedInput, ExportSubmittedInputValue,
+            ExportTurnManifestEntry, ExportTurnOrigin,
         },
-        product::ProductService,
+        product::{InteractionId, ProductService, ThreadId},
         runtime::RuntimeClient,
-        storage::SqliteProductStore,
+        storage::{SqliteProductStore, StagedConversationImport, StagedConversationTurnSummary},
     };
 
     fn header() -> ConversationExportHeader {
@@ -524,6 +643,7 @@ mod tests {
             origin: ExportTurnOrigin::User,
             completion: ExportCompletionReceipt {
                 status: ExportCompletionStatus::Failed,
+                attempt_outcome: None,
                 harness_configuration_name: Some("codex-basic".into()),
                 harness_configuration_digest: None,
                 model_selection: None,
@@ -535,12 +655,103 @@ mod tests {
                 admitted_model_plan: None,
             },
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: None,
         }
     }
 
     async fn product(path: &Path) -> ProductService {
         ProductService::new(SqliteProductStore::open(path).await.unwrap(), true)
+    }
+
+    #[test]
+    fn materialized_turn_drops_only_inputs_rejected_by_graph_authority() {
+        let submitted = |id: &str| ExportSubmittedInput {
+            id: id.into(),
+            root_turn_id: "turn:1".into(),
+            source: ExportInputSource {
+                interaction_node_id: "node:source".into(),
+                layer_id: "layer:source".into(),
+                action_id: format!("action:{id}"),
+                node_id: "node:answer".into(),
+            },
+            action: ExportInputActionSnapshot {
+                control: ExportInputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: ExportSubmittedInputValue::Text {
+                text: "Answer".into(),
+            },
+        };
+        let mut portable_turn = turn();
+        portable_turn.submitted_inputs = vec![submitted("keep"), submitted("drop")];
+
+        retain_materialized_submitted_inputs(
+            &mut portable_turn,
+            &[
+                SkippedSubmittedInput {
+                    source_turn_id: "turn:other".into(),
+                    submitted_input_id: "keep".into(),
+                    code: "input_occurrence_not_visible".into(),
+                    path: "submittedInputs[0].source".into(),
+                    message: "Other turn".into(),
+                },
+                SkippedSubmittedInput {
+                    source_turn_id: "turn:1".into(),
+                    submitted_input_id: "drop".into(),
+                    code: "input_action_not_in_occurrence".into(),
+                    path: "submittedInputs[1].source".into(),
+                    message: "Not in occurrence".into(),
+                },
+            ],
+        );
+
+        assert_eq!(portable_turn.submitted_inputs.len(), 1);
+        assert_eq!(portable_turn.submitted_inputs[0].id, "keep");
+    }
+
+    #[test]
+    fn materialized_receipt_reports_every_rejected_input() {
+        let staged = StagedConversationImport {
+            id: "import:1".into(),
+            source_sha256: "sha256:fixture".into(),
+            header: header(),
+            thread_id: ThreadId::from_database(1),
+            turns: vec![StagedConversationTurnSummary {
+                source_turn_id: "turn:1".into(),
+                sequence: 1,
+                interaction_id: InteractionId::from_database(1),
+                completion_status: ExportCompletionStatus::Failed,
+            }],
+        };
+        let skipped = SkippedSubmittedInput {
+            source_turn_id: "turn:1".into(),
+            submitted_input_id: "input:rejected".into(),
+            code: "input_action_not_in_occurrence".into(),
+            path: "submittedInputs[0].source".into(),
+            message: "Not in occurrence".into(),
+        };
+        let graph = ImportedConversationReceipt {
+            import_id: "import:1".into(),
+            turns: vec![ImportedTurnReceipt {
+                source_turn_id: "turn:1".into(),
+                graph_node_id: Some(11),
+                root_layer_id: None,
+                root_action_id: None,
+                output: None,
+            }],
+            skipped_submitted_inputs: vec![skipped.clone()],
+        };
+
+        let receipt = materialized_receipt(&staged, &graph);
+        assert_eq!(receipt.skipped_submitted_inputs.len(), 1);
+        assert_eq!(
+            receipt.skipped_submitted_inputs[0].submitted_input_id,
+            skipped.submitted_input_id
+        );
     }
 
     async fn stage(product: &ProductService) -> String {

@@ -81,6 +81,21 @@ const invokeActionCriteria = {
   },
 } as const satisfies Readonly<Record<string, RubricCriterion>>;
 
+const inputActionCriteria = {
+  prompt_answerability: {
+    label: "Prompt answerability",
+    description: "The presented prompt asks one clear question that a user can answer from the visible decision context.",
+  },
+  option_set_quality: {
+    label: "Option-set quality",
+    description: "A select action offers authored options that are collectively exhaustive enough for the decision. Single-select options should be mutually exclusive; multi-select options should be distinct and non-overlapping while allowing several to apply together. For a text action, having no authored options is the correct assessable state.",
+  },
+  control_fit: {
+    label: "Control fit",
+    description: "The text, single-select, or multi-select control fits the shape of the answer being requested.",
+  },
+} as const satisfies Readonly<Record<string, RubricCriterion>>;
+
 const turnCriteria = {
   answer_quality: {
     label: "Answer quality",
@@ -108,6 +123,7 @@ export type LayerCriterionKey = keyof typeof layerCriteria;
 export type NodeCriterionKey = keyof typeof nodeCriteria;
 export type NavigateActionCriterionKey = keyof typeof navigateActionCriteria;
 export type InvokeActionCriterionKey = keyof typeof invokeActionCriteria;
+export type InputActionCriterionKey = keyof typeof inputActionCriteria;
 export type TurnCriterionKey = keyof typeof turnCriteria;
 
 export type Ratings<CriterionKey extends string> = Readonly<Record<CriterionKey, Rating>>;
@@ -115,9 +131,10 @@ export type LayerRatings = Ratings<LayerCriterionKey>;
 export type NodeRatings = Ratings<NodeCriterionKey>;
 export type NavigateActionRatings = Ratings<NavigateActionCriterionKey>;
 export type InvokeActionRatings = Ratings<InvokeActionCriterionKey>;
+export type InputActionRatings = Ratings<InputActionCriterionKey>;
 export type TurnRatings = Ratings<TurnCriterionKey>;
 
-export type RubricSubject = "layer" | "node" | "navigate_action" | "invoke_action" | "turn";
+export type RubricSubject = "layer" | "node" | "navigate_action" | "invoke_action" | "input_action" | "turn";
 
 export interface RubricSubjectDefinition<CriterionKey extends string> {
   readonly criteria: Readonly<Record<CriterionKey, RubricCriterion>>;
@@ -136,7 +153,8 @@ export interface SimulatedUserRubricManifest {
     | "graph-presentation-rubric-v7"
     | "graph-presentation-rubric-v8"
     | "graph-presentation-rubric-v9"
-    | "graph-presentation-rubric-v10";
+    | "graph-presentation-rubric-v10"
+    | "graph-presentation-rubric-v11";
   readonly ratingScale: Readonly<Record<1 | 2 | 3 | 4, string>> | {
     readonly minimum: 1;
     readonly maximum: 8;
@@ -161,12 +179,13 @@ export interface SimulatedUserRubricManifest {
     readonly node: RubricSubjectDefinition<NodeCriterionKey>;
     readonly navigate_action: RubricSubjectDefinition<NavigateActionCriterionKey>;
     readonly invoke_action: RubricSubjectDefinition<InvokeActionCriterionKey>;
+    readonly input_action?: RubricSubjectDefinition<InputActionCriterionKey>;
     readonly turn: RubricSubjectDefinition<TurnCriterionKey>;
   };
   readonly recursiveJudgment?: {
     readonly contractId: string;
     readonly fixedNodeCapacity: 8;
-    readonly allocationChoices: readonly ["expand", "reference", "invoke", "stop"];
+    readonly allocationChoices: readonly ("expand" | "reference" | "invoke" | "input" | "stop")[];
     readonly allocationMargins: readonly ["close", "clearly_better", "necessary"];
     readonly bottomUpExpansion: true;
     readonly referenceRegrade: false;
@@ -663,6 +682,34 @@ export const GRAPH_PRESENTATION_RUBRIC_V10 = {
   },
 } as const satisfies SimulatedUserRubricManifest;
 
+/** Makes node-authored questions visible, judgeable, and costly when unnecessary. */
+export const GRAPH_PRESENTATION_RUBRIC_V11 = {
+  ...GRAPH_PRESENTATION_RUBRIC_V10,
+  rubricVersion: "graph-presentation-rubric-v11",
+  recursiveJudgment: {
+    ...GRAPH_PRESENTATION_RUBRIC_V10.recursiveJudgment,
+    contractId: "recursive-presentation-judge-v6",
+    allocationChoices: ["expand", "reference", "invoke", "input", "stop"],
+  },
+  subjects: {
+    ...GRAPH_PRESENTATION_RUBRIC_V10.subjects,
+    input_action: {
+      criteria: inputActionCriteria,
+      requiredScreenshotContext: ["visible_source", "presented_input_control_before_answer"],
+    },
+    turn: {
+      ...GRAPH_PRESENTATION_RUBRIC_V10.subjects.turn,
+      criteria: {
+        ...GRAPH_PRESENTATION_RUBRIC_V10.subjects.turn.criteria,
+        recursive_coherence: {
+          label: "Recursive semantic allocation",
+          description: "Judge bottom-up whether each node chose well among expand, reference, invoke, input, and stop. Treat an absent-but-needed question as a first-class missing action, while penalizing authored questions that were unnecessary for progress.",
+        },
+      },
+    },
+  },
+} as const satisfies SimulatedUserRubricManifest;
+
 export interface RubricRatingValidationIssue {
   readonly code: "missing_rubric_key" | "unknown_rubric_key" | "invalid_rating";
   readonly key: string;
@@ -670,7 +717,9 @@ export interface RubricRatingValidationIssue {
 }
 
 export function getRubricCriterionKeys(subject: RubricSubject): readonly string[] {
-  return Object.keys(SIMULATED_USER_RUBRIC_V1.subjects[subject].criteria);
+  return Object.keys(subject === "input_action"
+    ? inputActionCriteria
+    : SIMULATED_USER_RUBRIC_V1.subjects[subject].criteria);
 }
 
 export function validateRubricRatings(

@@ -1,6 +1,7 @@
 import {
   authorizeRecursiveCompleteSelection,
   isolateRecursiveCompleteSelection,
+  judgeConfigurationCompatibleWithCases,
   projectExecutionCell,
   projectExecutionDossier,
   recursiveCompleteCaseId,
@@ -43,6 +44,25 @@ function configure() {
   $("#caseOptions").innerHTML = catalog.cases.map((item) => optionMarkup(item, "cases", item.defaultSelected !== false)).join("");
   $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({ id: item.name, name: item.name, detail: item.implementation }, "harnesses", item.name === "fixture-task-system")).join("");
   $("#judgeOptions").innerHTML = catalog.judges.map((item, index) => optionMarkup(item, "judge", index === 0)).join("");
+  const syncJudgeCompatibility = () => {
+    const selectedCaseIds = [...document.querySelectorAll('input[name="cases"]:checked')]
+      .map((input) => input.value);
+    const judgeInputs = [...document.querySelectorAll('input[name="judge"]')];
+    for (const input of judgeInputs) {
+      input.disabled = !judgeConfigurationCompatibleWithCases(
+        catalog.cases,
+        selectedCaseIds,
+        input.value,
+      );
+    }
+    if (!judgeInputs.some((input) => input.checked && !input.disabled)) {
+      const compatible = judgeInputs.find((input) => !input.disabled);
+      if (compatible) compatible.checked = true;
+    }
+  };
+  document.querySelectorAll('input[name="cases"]').forEach((input) => {
+    input.addEventListener("change", syncJudgeCompatibility);
+  });
   const recursiveOption = document.querySelector(`input[name="cases"][value="${recursiveCompleteCaseId}"]`);
   if (recursiveOption) recursiveOption.onchange = () => {
     if (!recursiveOption.checked) return;
@@ -53,7 +73,9 @@ function configure() {
     document.querySelectorAll('input[name="harnesses"]').forEach((input) => {
       input.checked = isolated.harnessConfigurationNames.includes(input.value);
     });
+    syncJudgeCompatibility();
   };
+  syncJudgeCompatibility();
   show("configureView");
 }
 
@@ -276,7 +298,7 @@ function renderExecutionDossier(run, execution) {
     <section class="dossier-columns">
       <article class="dossier-block"><div class="block-heading"><span class="eyebrow">Verifiable substance</span><h3>Mandatory gates</h3></div><dl class="metadata-grid"><div><dt>Verifier</dt><dd>${escapeHtml(dossier.substance.verifierId || "—")}</dd></div><div><dt>Verifier digest</dt><dd><code>${escapeHtml(dossier.substance.verifierDigest || "—")}</code></dd></div><div><dt>Outcome rubric</dt><dd>${escapeHtml(dossier.substance.rubricVersion || "—")}</dd></div></dl>${findingsMarkup(dossier.substance.gates, "gates")}<div class="block-heading subheading"><h3>Outcome criteria</h3></div>${findingsMarkup(dossier.substance.criteria, "criteria")}<div class="block-heading subheading"><h3>Outcome evidence</h3></div>${evidenceMarkup(dossier.substance.evidenceRefs)}</article>
       <article class="dossier-block"><div class="block-heading"><span class="eyebrow">Graph presentation</span><h3>Presentation summary</h3></div>
-        ${dossier.presentation.applicable ? `<dl class="metadata-grid presentation-metadata"><div><dt>Final score</dt><dd>${escapeHtml(dossier.presentation.label)}</dd></div><div><dt>Comprehension</dt><dd>${escapeHtml(dossier.presentation.comprehensionScore ?? "—")}</dd></div><div><dt>Rendered experience</dt><dd>${escapeHtml(dossier.presentation.renderedScore ?? "—")}</dd></div><div><dt>Raw score</dt><dd>${escapeHtml(dossier.presentation.rawScore ?? "—")}</dd></div><div><dt>Omission ceiling</dt><dd>${escapeHtml(dossier.presentation.scoreCeiling ?? "None")}</dd></div><div><dt>Depth decay</dt><dd>${escapeHtml(dossier.presentation.decay ?? "—")}</dd></div><div><dt>Worst layer</dt><dd>${worstLayerMarkup(dossier.presentation.worstLayer)}</dd></div><div><dt>Materially misleading layer</dt><dd>${escapeHtml(dossier.presentation.hasMateriallyMisleadingLayer === null ? "—" : dossier.presentation.hasMateriallyMisleadingLayer ? "Yes" : "No")}</dd></div><div><dt>Graded layers</dt><dd>${escapeHtml(dossier.presentation.layers.length || "—")}</dd></div><div><dt>Aggregation</dt><dd>${escapeHtml(dossier.presentation.aggregationMethod === "recursive_semantic_root" ? "Recursive semantic root" : aggregationLabel(dossier.presentation.aggregation))}</dd></div></dl>${evidenceMarkup(dossier.presentation.evidenceRefs)}` : '<p class="empty-note">Graph presentation does not apply to this harness.</p>'}
+        ${dossier.presentation.applicable ? `<dl class="metadata-grid presentation-metadata"><div><dt>Final score</dt><dd>${escapeHtml(dossier.presentation.label)}</dd></div><div><dt>Comprehension</dt><dd>${escapeHtml(dossier.presentation.comprehensionScore ?? "—")}</dd></div><div><dt>Rendered experience</dt><dd>${escapeHtml(dossier.presentation.renderedScore ?? "—")}</dd></div><div><dt>Raw score</dt><dd>${escapeHtml(dossier.presentation.rawScore ?? "—")}</dd></div><div><dt>Omission ceiling</dt><dd>${escapeHtml(dossier.presentation.scoreCeiling ?? "None")}</dd></div><div><dt>Depth decay</dt><dd>${escapeHtml(dossier.presentation.decay ?? "—")}</dd></div><div><dt>Worst layer</dt><dd>${worstLayerMarkup(dossier.presentation.worstLayer)}</dd></div><div><dt>Materially misleading layer</dt><dd>${escapeHtml(dossier.presentation.hasMateriallyMisleadingLayer === null ? "—" : dossier.presentation.hasMateriallyMisleadingLayer ? "Yes" : "No")}</dd></div><div><dt>Graded layers</dt><dd>${escapeHtml(dossier.presentation.layers.length || "—")}</dd></div><div><dt>Aggregation</dt><dd>${escapeHtml(dossier.presentation.comparability?.status === "incompatible" ? dossier.presentation.comparability.reason : dossier.presentation.aggregationMethod === "recursive_semantic_root" ? "Recursive semantic root" : aggregationLabel(dossier.presentation.aggregation))}</dd></div></dl>${evidenceMarkup(dossier.presentation.evidenceRefs)}` : '<p class="empty-note">Graph presentation does not apply to this harness.</p>'}
       </article>
     </section>
     ${dossier.recursiveComplete.declared ? `<section class="dossier-block"><div class="block-heading"><span class="eyebrow">Agent-authored Complete</span><h3>${dossier.recursiveComplete.configured ? "Available" : "Unavailable"}</h3></div><dl class="metadata-grid"><div><dt>Broker authority observed</dt><dd>${escapeHtml(dossier.recursiveComplete.brokerAvailable === null ? "Not recorded" : dossier.recursiveComplete.brokerAvailable ? "Yes" : "No")}</dd></div><div><dt>Semantic children</dt><dd>${escapeHtml(dossier.recursiveComplete.children.length)}</dd></div></dl>${dossier.recursiveComplete.children.length ? `<div class="finding-list">${dossier.recursiveComplete.children.map((child) => `<article class="finding-row ${escapeHtml(child.status)}"><div><span class="finding-status">${escapeHtml(child.status)}</span><b>Completion ${escapeHtml(child.graphNodeId)}</b><strong>${escapeHtml(child.projectionCount)} revisions</strong></div><p>Source interaction ${escapeHtml(child.sourceInteractionId)} · action ${escapeHtml(child.sourceActionId)} · trace ${escapeHtml(child.traceStatus)}</p><button class="secondary" data-trace-execution="${escapeHtml(dossier.id)}" data-trace-interaction="${escapeHtml(child.interactionId)}" ${child.traceStatus === "complete" ? "" : "disabled"}>Child trace ↗</button></article>`).join("")}</div>` : '<p class="empty-note">No semantic child was recorded for this execution.</p>'}</section>` : ""}

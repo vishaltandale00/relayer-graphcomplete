@@ -65,6 +65,7 @@ const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("model_family_id", "INTEGER", false, 0),
     ("input_identity", "TEXT", false, 0),
     ("input_digest", "TEXT", false, 0),
+    ("input_draft_revision", "INTEGER", false, 0),
 ];
 const PERSONAL_PRESENTATION_VERSION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("version_key", "TEXT", true, 1),
@@ -128,6 +129,52 @@ const NODE_CONTEXT_DRAFT_RESOLUTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("composer_revision", "INTEGER", true, 0),
     ("dismissed_at", "TEXT", false, 0),
     ("consumed_interaction_id", "INTEGER", false, 0),
+];
+const ACTION_INPUT_DRAFT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("thread_id", "INTEGER", false, 1),
+    ("revision", "INTEGER", true, 0),
+    ("updated_at", "TEXT", true, 0),
+];
+const ACTION_INPUT_ATTACHMENT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("thread_id", "INTEGER", true, 1),
+    ("presenting_interaction_node_id", "INTEGER", true, 2),
+    ("presenting_layer_id", "INTEGER", true, 3),
+    ("action_id", "INTEGER", true, 4),
+    ("source_node_id", "INTEGER", true, 0),
+    ("action_json", "TEXT", true, 0),
+    ("value_json", "TEXT", true, 0),
+    ("committed_at", "TEXT", true, 0),
+];
+const ACTION_INPUT_DETACH_RECEIPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("thread_id", "INTEGER", true, 1),
+    ("presenting_interaction_node_id", "INTEGER", true, 2),
+    ("presenting_layer_id", "INTEGER", true, 3),
+    ("action_id", "INTEGER", true, 4),
+    ("expected_revision", "INTEGER", true, 5),
+    ("result_revision", "INTEGER", true, 0),
+];
+const SUBMITTED_INPUT_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("interaction_id", "INTEGER", false, 1),
+    ("thread_id", "INTEGER", true, 0),
+    ("draft_revision", "INTEGER", true, 0),
+    ("authority_digest", "TEXT", true, 0),
+    ("semantic_digest", "TEXT", true, 0),
+    ("state", "TEXT", true, 0),
+    ("graph_root_node_id", "INTEGER", false, 0),
+    ("child_receipt_json", "TEXT", false, 0),
+    ("created_at", "TEXT", true, 0),
+    ("bound_at", "TEXT", false, 0),
+    ("finished_at", "TEXT", false, 0),
+];
+const SUBMITTED_INPUT_ATTEMPT_ATTACHMENT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("interaction_id", "INTEGER", true, 1),
+    ("presenting_interaction_node_id", "INTEGER", true, 2),
+    ("presenting_layer_id", "INTEGER", true, 3),
+    ("action_id", "INTEGER", true, 4),
+    ("source_node_id", "INTEGER", true, 0),
+    ("action_json", "TEXT", true, 0),
+    ("value_json", "TEXT", true, 0),
+    ("committed_at", "TEXT", true, 0),
 ];
 const INTERACTION_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "INTEGER", false, 1),
@@ -377,6 +424,31 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         NODE_CONTEXT_DRAFT_RESOLUTION_COLUMNS,
     )
     .await?;
+    validate_columns(pool, "action_input_drafts", ACTION_INPUT_DRAFT_COLUMNS).await?;
+    validate_columns(
+        pool,
+        "action_input_attachments",
+        ACTION_INPUT_ATTACHMENT_COLUMNS,
+    )
+    .await?;
+    validate_columns(
+        pool,
+        "action_input_detach_receipts",
+        ACTION_INPUT_DETACH_RECEIPT_COLUMNS,
+    )
+    .await?;
+    validate_columns(
+        pool,
+        "interaction_submitted_input_attempts",
+        SUBMITTED_INPUT_ATTEMPT_COLUMNS,
+    )
+    .await?;
+    validate_columns(
+        pool,
+        "interaction_submitted_input_attachments",
+        SUBMITTED_INPUT_ATTEMPT_ATTACHMENT_COLUMNS,
+    )
+    .await?;
     validate_columns(pool, "conversation_imports", CONVERSATION_IMPORT_COLUMNS).await?;
     validate_columns(pool, "imported_turns", IMPORTED_TURN_COLUMNS).await?;
     validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
@@ -411,6 +483,36 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "node_context_drafts",
         &["thread_id", "target_node_id"],
         true,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "action_input_attachments",
+        &[
+            "thread_id",
+            "presenting_interaction_node_id",
+            "presenting_layer_id",
+            "action_id",
+        ],
+        false,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "interaction_submitted_input_attempts",
+        &["thread_id", "interaction_id"],
+        true,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "interaction_submitted_input_attachments",
+        &[
+            "presenting_interaction_node_id",
+            "presenting_layer_id",
+            "action_id",
+        ],
+        false,
     )
     .await?;
     validate_index(
@@ -693,6 +795,60 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "interactions",
         "id",
         "SET NULL",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "action_input_drafts",
+        "thread_id",
+        "threads",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "action_input_attachments",
+        "thread_id",
+        "action_input_drafts",
+        "thread_id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "action_input_detach_receipts",
+        "thread_id",
+        "action_input_drafts",
+        "thread_id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "interaction_submitted_input_attempts",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "interaction_submitted_input_attempts",
+        "thread_id",
+        "threads",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "interaction_submitted_input_attachments",
+        "interaction_id",
+        "interaction_submitted_input_attempts",
+        "interaction_id",
+        "CASCADE",
     )
     .await?;
     validate_foreign_key(
@@ -1099,6 +1255,49 @@ fn incompatible(message: &str) -> StorageError {
 #[cfg(test)]
 mod tests {
     use super::super::SqliteProductStore;
+
+    #[tokio::test]
+    async fn missing_action_input_detach_receipt_foreign_key_fails_current_schema_open() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-malformed-input-detach-receipt-schema-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query("DROP TABLE action_input_detach_receipts")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE action_input_detach_receipts(
+                thread_id INTEGER NOT NULL,
+                presenting_interaction_node_id INTEGER NOT NULL,
+                presenting_layer_id INTEGER NOT NULL,
+                action_id INTEGER NOT NULL,
+                expected_revision INTEGER NOT NULL,
+                result_revision INTEGER NOT NULL,
+                PRIMARY KEY(
+                    thread_id,presenting_interaction_node_id,presenting_layer_id,action_id,expected_revision
+                )
+            )",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        store.pool.close().await;
+
+        let error = SqliteProductStore::open(&path).await.err().unwrap();
+        assert!(
+            error.to_string().contains(
+                "table action_input_detach_receipts is missing the required thread_id foreign key"
+            ),
+            "{error}"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[tokio::test]
     async fn missing_node_context_draft_order_index_fails_current_schema_open() {

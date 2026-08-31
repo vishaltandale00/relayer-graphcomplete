@@ -99,6 +99,10 @@ class Handler(BaseHTTPRequestHandler):
                     "targetNode": {"id": 4, "kind": "concept", "icon": "box", "title": "Boundary", "detail": "Evidence", "state": "accepted"},
                     "annotations": ["First", "Second"],
                 }],
+                "submittedInputs": [{
+                    "action": {"control": "text", "prompt": "Explain the tradeoff"},
+                    "value": {"text": "Preserve this exactly"},
+                }],
             })
         elif self.path.endswith("/output"):
             self._reply({"nodeId": 7, "rootAction": {}, "rootLayer": {}})
@@ -182,6 +186,8 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(input.contexts[0].type, "interaction.context")
         self.assertEqual(input.contexts[0].target_node.title, "Boundary")
         self.assertEqual(input.contexts[0].annotations, ("First", "Second"))
+        self.assertEqual(input.submitted_inputs[0].action["control"], "text")
+        self.assertEqual(input.submitted_inputs[0].value["text"], "Preserve this exactly")
         self.assertEqual(Handler.requests[-1][0], "/api/graph/input")
 
     async def test_discard_layer_posts_to_recovery_endpoint_and_refreshes_reference(self):
@@ -205,10 +211,52 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
             [request[2]["clientKey"] for request in Handler.requests[-2:]],
             ["ask-again", "ask-again"],
         )
+
+    async def test_input_action_is_sent_as_structured_authoring_data(self):
+        await self.client.add_input_action(
+            7,
+            "Choose evidence",
+            "Which evidence should be emphasized?",
+            control="multi_select",
+            source_layer=8,
+            client_key="evidence-input",
+            options=(("logs", "Logs"), ("traces", "Traces")),
+            minimum_selections=1,
+        )
+        self.assertEqual(
+            Handler.requests[-1][2],
+            {
+                "clientKey": "evidence-input",
+                "sourceNodeId": 7,
+                "sourceLayerId": 8,
+                "kind": "input",
+                "label": "Choose evidence",
+                "control": "multi_select",
+                "prompt": "Which evidence should be emphasized?",
+                "options": [
+                    {"key": "logs", "label": "Logs"},
+                    {"key": "traces", "label": "Traces"},
+                ],
+                "minimumSelections": 1,
+                "variant": "pill",
+                "icon": None,
+                "description": None,
+            },
+        )
         self.assertEqual(
             {key: Handler.requests[-1][2][key] for key in ("variant", "icon", "description")},
             {"variant": "pill", "icon": None, "description": None},
         )
+
+        await self.client.add_input_action(
+            7,
+            "Explain",
+            "Explain the tradeoff",
+            control="text",
+            source_layer=8,
+            client_key="text-input",
+        )
+        self.assertNotIn("options", Handler.requests[-1][2])
 
     async def test_card_action_presentation_is_canonical_request_data(self):
         await self.client.add_navigate_action(

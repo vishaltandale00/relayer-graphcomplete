@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReviewSession } from "../desktop/eval-main/review-session.mjs";
+import { captureGroundingTargets } from "../desktop/eval-main/simulated-user-judge.mjs";
 import { setControlActivationCompletion } from "../desktop/renderer/src/control-activation.js";
 import {
   accessibleControlName,
@@ -25,6 +26,7 @@ function reviewState(overrides = {}) {
   return {
     executionId: "execution-1",
     threadId: "thread-1",
+    threadRevision: "thread:thread-1:revision:1",
     turnId: "turn-1",
     layerId: "layer-1",
     selectedNodeId: null,
@@ -85,6 +87,83 @@ describe("ReviewSession", () => {
     await expect(session.open()).rejects.toThrow("local production review workspace");
   });
 
+  it("folds the live read-only input-draft revision into every presentation revision", async () => {
+    const electron = fakeElectron({ snapshot: async () => reviewState() });
+    let inputDraftRevision = 3;
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: "/unused",
+      ipc: electron.ipc,
+      loadInputDraftRevision: vi.fn(async () => inputDraftRevision),
+    });
+
+    expect((await session.open()).threadRevision).toBe(
+      "thread:thread-1:revision:1:server-input-draft:3",
+    );
+    inputDraftRevision = 4;
+    expect((await session.state()).threadRevision).toBe(
+      "thread:thread-1:revision:1:server-input-draft:4",
+    );
+  });
+
+  it("uses a stable no-draft revision for imported read-only threads", async () => {
+    const electron = fakeElectron({ snapshot: async () => reviewState() });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: "/unused",
+      ipc: electron.ipc,
+      loadInputDraftRevision: vi.fn(async () => null),
+    });
+
+    expect((await session.open()).threadRevision).toBe(
+      "thread:thread-1:revision:1:server-input-draft:none",
+    );
+    expect((await session.state()).threadRevision).toBe(
+      "thread:thread-1:revision:1:server-input-draft:none",
+    );
+  });
+
+  it("enables operator Send only when the production renderer confirms committed input state", async () => {
+    const updateInputOperatorState = vi.fn(async ({ committed }) => reviewState({
+      controls: [{
+        elementRef: "send-interaction",
+        kind: "input-operator-send",
+        disabled: !committed,
+      }],
+    }));
+    const electron = fakeElectron({
+      snapshot: async () => reviewState(),
+      updateInputOperatorState,
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: "/unused",
+      ipc: electron.ipc,
+    });
+    await session.open();
+
+    await expect(session.setInputOperatorCommitted(true)).resolves.toMatchObject({
+      controls: [{ elementRef: "send-interaction", disabled: false }],
+    });
+    await expect(session.setInputOperatorCommitted(false)).resolves.toMatchObject({
+      controls: [{ elementRef: "send-interaction", disabled: true }],
+    });
+    expect(updateInputOperatorState).toHaveBeenNthCalledWith(1, { committed: true });
+    expect(updateInputOperatorState).toHaveBeenNthCalledWith(2, { committed: false });
+
+    updateInputOperatorState.mockResolvedValueOnce(reviewState({
+      controls: [{ elementRef: "send-interaction", kind: "input-operator-send", disabled: true }],
+    }));
+    await expect(session.setInputOperatorCommitted(true))
+      .rejects.toThrow("did not reflect the commissioned input state");
+  });
+
   it("captures viewport and full-element tiles with immutable state and content digests", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
     directories.push(directory);
@@ -143,6 +222,7 @@ describe("ReviewSession", () => {
     expect(viewport).toMatchObject({
       executionId: "execution-1",
       threadId: "thread-1",
+      threadRevision: "thread:thread-1:revision:1",
       turnId: "turn-1",
       layerId: "layer-1",
       selectedNodeId: "node-7",
@@ -382,6 +462,107 @@ describe("ReviewSession", () => {
     ]);
   });
 
+  it("captures the root-child-grandchild fixture without reactivating selection or over-rewinding history", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-grounding-review-"));
+    directories.push(directory);
+    const stack = [];
+    const historyDeltas = [];
+    const nodeControl = (nodeId) => ({
+      elementRef: `node-${nodeId}`,
+      name: `Node ${nodeId}`,
+      role: "button",
+      disabled: false,
+      kind: "node",
+      actionId: null,
+    });
+    const actionControl = (actionId) => ({
+      elementRef: `action-${actionId}`,
+      name: `Action ${actionId}`,
+      role: "button",
+      disabled: false,
+      kind: "navigate-action",
+      actionId,
+    });
+    let state = reviewState({ controls: [nodeControl("2")] });
+    const select = (nodeId) => {
+      const actionId = state.layerId === "layer-1" && nodeId === "2" ? "11"
+        : state.layerId === "layer-2" && nodeId === "3" ? "21"
+          : null;
+      state = { ...state, selectedNodeId: nodeId, controls: actionId ? [actionControl(actionId)] : [] };
+    };
+    const navigate = (actionId) => {
+      stack.push(structuredClone(state));
+      const child = actionId === "11"
+        ? { layerId: "layer-2", nodeId: "3" }
+        : { layerId: "layer-3", nodeId: "4" };
+      state = reviewState({
+        layerId: child.layerId,
+        selectedNodeId: null,
+        activatedActionId: actionId,
+        navigationPath: [
+          ...state.navigationPath,
+          { layerId: child.layerId, viaActionId: actionId },
+        ],
+        controls: [nodeControl(child.nodeId)],
+      });
+    };
+    const electron = fakeElectron({
+      snapshot: async () => state,
+      activate: async ({ elementRef }) => {
+        if (elementRef.startsWith("node-")) select(elementRef.slice(5));
+        else navigate(elementRef.slice(7));
+        return state;
+      },
+      history: async ({ delta }) => {
+        historyDeltas.push(delta);
+        for (let count = 0; count < -delta; count += 1) state = stack.pop();
+        return state;
+      },
+      capturePlan: async () => ({
+        clip: { x: 0, y: 0, width: 320, height: 200 },
+        tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
+      }),
+      prepareCaptureTile: async ({ index }) => ({
+        index,
+        clip: { x: 0, y: 0, width: 320, height: 200 },
+      }),
+      restoreCapture: async () => state,
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: directory,
+      ipc: electron.ipc,
+      commandTimeoutMs: 100,
+    });
+    await session.open();
+
+    const captures = await captureGroundingTargets(session, [
+      { layerId: "layer-1", nodeIds: ["2"], path: [] },
+      {
+        layerId: "layer-2",
+        nodeIds: ["3"],
+        path: [{ sourceNodeId: "2", actionId: "11" }],
+      },
+      {
+        layerId: "layer-3",
+        nodeIds: ["4"],
+        path: [
+          { sourceNodeId: "2", actionId: "11" },
+          { sourceNodeId: "3", actionId: "21" },
+        ],
+      },
+    ]);
+
+    expect(captures).toHaveLength(3);
+    expect(historyDeltas).toEqual([-1, -2]);
+    expect(session.trace().filter((entry) => entry.elementRef === "node-2")).toHaveLength(1);
+    expect((await session.state()).navigationPath).toEqual([
+      { layerId: "layer-1", viaActionId: null },
+    ]);
+  });
+
   it("treats a resolved invoke as Eval navigation when it changes interaction at the same layer id", async () => {
     let state = reviewState({
       controls: [{
@@ -524,6 +705,105 @@ describe("review presentation capture synchronization", () => {
       mode: "visible",
     })).resolves.toMatchObject({ clip: { width: 1200, height: 800 } });
     expect(frames).toBe(2);
+  });
+
+  it("reveals an off-screen input action before planning its full capture", async () => {
+    let revealed = false;
+    const scrollIntoView = vi.fn(() => { revealed = true; });
+    const inputAction = {
+      dataset: { reviewCapture: "input-action-41-10-13", reviewActionId: "13" },
+      isConnected: true,
+      hidden: false,
+      clientWidth: 320,
+      clientHeight: 120,
+      scrollWidth: 320,
+      scrollHeight: 120,
+      scrollLeft: 0,
+      scrollTop: 0,
+      matches: () => false,
+      getAttribute: (key) => key === "aria-label" ? "Input action: Deployment region" : null,
+      getBoundingClientRect: () => revealed
+        ? { x: 20, y: 420, left: 20, top: 420, right: 340, bottom: 540, width: 320, height: 120 }
+        : { x: 20, y: 720, left: 20, top: 720, right: 340, bottom: 840, width: 320, height: 120 },
+      scrollIntoView,
+    };
+    const root = {
+      querySelectorAll: (selector) => selector === "[data-review-capture]" ? [inputAction] : [],
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation("node-2"),
+      navigateHistory: async () => {},
+      root,
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 600,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => callback(),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    await expect(adapter.capturePlan({
+      target: { kind: "element", elementRef: "input-action-41-10-13" },
+      mode: "full",
+    })).resolves.toMatchObject({
+      clip: { x: 20, y: 420, width: 320, height: 120 },
+      tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
+    });
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    await adapter.restoreCapture();
+  });
+
+  it("tiles the scrolling inspector content so a full node-detail capture reaches lower content", async () => {
+    const outerInspector = {
+      dataset: {},
+      scrollTop: 0,
+      clientWidth: 360,
+      clientHeight: 500,
+      scrollWidth: 360,
+      scrollHeight: 500,
+    };
+    const inspectorContent = {
+      dataset: { reviewCapture: "node-detail" },
+      isConnected: true,
+      hidden: false,
+      scrollLeft: 0,
+      scrollTop: 0,
+      clientWidth: 320,
+      clientHeight: 200,
+      scrollWidth: 320,
+      scrollHeight: 600,
+      matches: () => false,
+      getAttribute: (key) => key === "aria-label" ? "Selected node detail content" : null,
+      getBoundingClientRect: () => ({ x: 860, y: 100, left: 860, top: 100, right: 1180, bottom: 300, width: 320, height: 200 }),
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation("node-2"),
+      navigateHistory: async () => {},
+      root: {
+        querySelectorAll: (selector) => selector === "[data-review-capture]" ? [inspectorContent] : [],
+      },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => callback(),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    const plan = await adapter.capturePlan({
+      target: { kind: "element", elementRef: "node-detail" },
+      mode: "full",
+    });
+    expect(plan.tiles.map(({ scrollY }) => scrollY)).toEqual([0, 200, 400]);
+    await adapter.prepareCaptureTile(plan.tiles[2]);
+    expect(inspectorContent.scrollTop).toBe(400);
+    expect(outerInspector.scrollTop).toBe(0);
+    await adapter.restoreCapture();
+    expect(inspectorContent.scrollTop).toBe(0);
   });
 
   it("does not complete node activation before the selected presentation changes", async () => {

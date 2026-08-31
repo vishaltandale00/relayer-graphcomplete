@@ -22,6 +22,7 @@ export function productWorkspaceMarkup() {
           <span class="interaction-icon">›_</span>
           <div class="interaction-copy">
             <p id="interactionText"></p>
+            <div class="interaction-input-history hidden" id="interactionInputHistory" aria-label="Submitted node inputs"></div>
           </div>
           <div class="turn-picker" id="turnPicker">
             <button class="interaction-context-pill hidden" id="interactionContextPill" type="button" title="Show connected nodes" aria-label="Show connected nodes" aria-expanded="false" aria-controls="interactionContextPopover"><span aria-hidden="true">⌘</span><b id="interactionContextCount">0</b></button>
@@ -95,8 +96,8 @@ export function productWorkspaceMarkup() {
           </div>
         </section>
         <div class="thread-composer-shell" id="threadComposerShell">
-          <section class="composer-context-tray hidden" id="composerContextTray" aria-label="Connected node draft"></section>
-          <div class="thread-composer" id="threadComposer"><p class="composer-retry-message hidden" id="composerRetryMessage" role="alert"></p><p class="read-only-composer-message hidden" id="readOnlyComposerMessage">Read-only evaluation result</p><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
+          <section class="composer-context-tray hidden" id="composerContextTray" aria-label="Composer attachments"></section>
+          <div class="thread-composer" id="threadComposer"><p class="composer-retry-message hidden" id="composerRetryMessage" role="alert"></p><p class="read-only-composer-message hidden" id="readOnlyComposerMessage">Read-only evaluation result</p><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" data-review-ref="send-interaction" data-review-kind="send" title="Send" disabled>↑</button></div></div>
           <dialog class="context-draft-send-warning" id="contextDraftSendWarning" role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="contextDraftSendWarningTitle" aria-describedby="contextDraftSendWarningCopy contextDraftSendWarningCount">
             <div class="context-draft-send-warning-kicker"><span aria-hidden="true">!</span> Drafts will be omitted</div>
             <h2 id="contextDraftSendWarningTitle">Send without these node annotations?</h2>
@@ -110,11 +111,12 @@ export function productWorkspaceMarkup() {
           </dialog>
         </div>
       </div>
-      <aside class="inspector hidden" id="inspector" data-review-capture="node-detail" aria-label="Selected node detail">
+      <aside class="inspector hidden" id="inspector" aria-label="Selected node detail">
         <div class="inspector-header"><span>Node details</span><div class="inspector-header-actions"><button class="icon-button hidden" id="attachNodeContext" type="button" title="Connect node to next message" aria-label="Connect node to next message">+</button><button class="icon-button" id="closeInspector" data-review-ref="close-node-detail" aria-label="Close node details">×</button></div></div>
-        <div class="inspector-content" id="inspectorContent">
+        <div class="inspector-content" id="inspectorContent" data-review-capture="node-detail" role="region" aria-label="Selected node detail content">
           <div class="node-heading"><div class="node-icon" id="detailIcon">N</div><div><small id="detailKind">CONCEPT</small><h2 id="detailTitle"></h2></div></div>
           <div class="node-content" id="detailContent"></div>
+          <div class="node-input-actions hidden" id="nodeInputActions"></div>
           <div class="inline-actions hidden" id="detailActions"></div>
         </div>
         <section class="node-context-dock hidden" id="nodeContextDock" aria-label="Node context annotation editor"></section>

@@ -24,6 +24,11 @@ recursive children should use this same capability read instead of relying on
 prompt text inherited from the root. Interaction context is graph-control-owned;
 do not create, modify, or delete it.
 
+Accepted response nodes may offer optional input actions for the user's next ordinary interaction.
+Use `add_input_action` with `control="text"`, `"single_select"`, or `"multi_select"`.
+Select controls use stable unique `(key, label)` options; multi-select may set
+`minimum_selections`. Input actions do not invoke work and are not required on every node.
+
 Create and submit reusable objects before referencing them:
 
 ```python

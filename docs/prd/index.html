@@ -2101,18 +2101,25 @@ settings:
   sourceNodeId: string;
   sourceLayerId?: string; // required for node-level authoring; hidden from users
   label: string;
-  kind: &quot;navigate&quot; | &quot;invoke&quot;;
+  kind: &quot;navigate&quot; | &quot;invoke&quot; | &quot;input&quot;;
   relation?: &quot;expand&quot; | &quot;reference&quot;; // required for navigate
   targetLayerId?: string; // required for navigate; a layer may contain one node
   interactionTemplate?: {
     kind: &quot;message&quot; | &quot;node-action&quot;;
     text?: string;
   };
+  input?: {
+    control: &quot;text&quot; | &quot;single_select&quot; | &quot;multi_select&quot;;
+    prompt: string;
+    options?: Array&lt;{ key: string; label: string }&gt;;
+    minimumSelections?: number;
+  };
 };
 </code></pre>
 <ul>
 <li><code>navigate</code> opens an accepted layer without Complete. An expand relation develops the answer. A reference relation supplies context.</li>
 <li><code>invoke</code> creates one user-interaction node referring to the selected node and action, then calls Complete once.</li>
+<li><code>input</code> embeds a bounded text, single-select, or multi-select control in the node detail grammar. It is neither navigation nor an independent invocation.</li>
 <li>The product does not expose navigate relations or authoring provenance. These fields enforce graph semantics.</li>
 <li>Expand paths are recursive without a fixed depth. Reference paths do not increase expansion depth.</li>
 </ul>
@@ -2130,6 +2137,16 @@ settings:
 <li>An accepted action remains immutable. A successful invoke can gain an append-only resolution that projects navigation to its accepted result.</li>
 </ol>
 <p>The root output is exactly one interaction-authored expand action. The desktop follows it after acceptance. Later selections use ordinary local navigation.</p>
+<h4>Node-authored interaction input</h4>
+<ul>
+<li>An accepted input action is immutable, node-owned, and occurrence-scoped by presenting interaction, layer, and action IDs. Reuse of the same action in another accepted occurrence is a distinct attachment choice.</li>
+<li>The user may commit multiple input actions from one or more nodes before Send. Committed values are durable thread-draft attachments, remain visible while navigating, and can be detached explicitly.</li>
+<li>Send is the only execution boundary. It atomically creates a new root interaction and snapshots every committed attachment into one immutable submitted-input attempt.</li>
+<li>No input action is required. An empty message is valid when at least one attachment is submitted.</li>
+<li>Text values preserve authored text. Select values persist stable option keys plus their accepted labels, with multi-select keys canonically ordered. The harness receives unordered prompt/control/value snapshots without product-assigned priority.</li>
+<li>Failure or stop restores the attempt's attachments to the draft unless a newer commit already owns the same occurrence. The immutable attempt cannot be retried in place; the next Send creates a new root.</li>
+<li>Accepted input actions retain their authored payload in V1 conversation export even when unanswered. Accepted and terminal submitted input remains readable in compact history, safe diagnostics, and export. Import assigns fresh local identities, strips execution authority and digests, and keeps imported input read-only and inert.</li>
+</ul>
 <h3>7.3 Current proof boundary</h3>
 <ul>
 <li>Navigate actions open accepted descendant layers in Relayer Desktop and read-only Eval review.</li>
@@ -2317,7 +2334,7 @@ npm run eval:web
 <thead><tr><th>Tool</th><th>Contract</th></tr></thead>
 <tbody>
 <tr><td><code>screenshot(target, mode, label)</code></td><td>Observe the current viewport or capture a visible element. <code>mode = full</code> captures a complete rendered element as native-scale tiles when necessary.</td></tr>
-<tr><td><code>interact(elementRef, activate)</code></td><td>Activate a visible node, action, turn control, or other accessible control through one generic operation.</td></tr>
+<tr><td><code>interact(elementRef, activate?, value?)</code></td><td>Activate a visible control, or commission a separate scoped product operator to commit <code>{text}</code>, <code>{selectedKey}</code>, or <code>{selectedKeys}</code> through the ordinary input-draft HTTP surface. There is no sibling answer tool.</td></tr>
 <tr><td><code>history(delta)</code></td><td>Move backward or forward through review-session UI history using a positive or negative delta.</td></tr>
 <tr><td><code>reviewLayer(review)</code></td><td>Write or revise one screenshot-grounded layer assessment while the judge is exploring.</td></tr>
 <tr><td><code>reviewNode(review)</code></td><td>Write or revise one screenshot-grounded node assessment, including reviews of actions visible on that node.</td></tr>
@@ -2325,9 +2342,10 @@ npm run eval:web
 <tr><td>Read-only shell</td><td>Inspect the task artifact with non-mutating Git, search, and file-reading commands. Network access, arbitrary non-review tools, and workspace mutation remain disabled.</td></tr>
 </tbody></table>
 <p>There is no scroll tool and no graph-specific <code>openLayer</code> or <code>selectNode</code> shortcut. A visible viewport capture preserves the actual first impression. A full-element capture exposes an entire node-detail panel without shrinking long content into one unreadable image; tall captures return ordered tiles under one screenshot ID. Element references permit interaction but are not rubric evidence.</p>
-<p>The runner, not the judge, binds each screenshot to immutable state. This state includes execution, thread, turn, layer, selected node, activated action, navigation path, viewport, capture target, tile count, and content digest. A review cannot cite a screenshot whose recorded state does not match its claimed subject.</p>
+<p>The runner, not the judge, binds each screenshot to immutable state. This state includes execution, thread revision, turn, layer, selected node, activated action, navigation path, viewport, capture target, tile count, and content digest. A review cannot cite a screenshot whose recorded state does not match its claimed subject.</p>
+<p><code>ReviewSession</code> retains server-enforced read-only authority. Input answers and Send belong to a separately credentialed operator that the judge may commission only through <code>interact</code>. Each input action owns an independent advisory lock across versioned capture and persisted rating. This permits several same-node inputs to be captured before submission of the complete node review. The read-only product state exposes the selected thread's opaque input-draft revision as part of screenshot revision identity. Before commission, one durable receipt records the complete node rating, review revision, captures, and exact thread revisions. Commission of that capture set is atomic. The lock releases after its single capture-and-rate interval. Before completing, the ordinary product route must return the exact committed occurrence, action, value, and draft revision.</p>
 <h4>13.4.2 Literal recursive rubric</h4>
-<p>The rubric is a versioned manifest. Active recursive contract v5 uses human-experience rubric v10. Every layer uses the same criteria; the contract does not distinguish root and child layers. Node count is observable context, not a threshold. The judge decides from the rendered screenshot whether a layer is sparse, crowded, fragmented, balanced, or otherwise well organized.</p>
+<p>The rubric is a versioned manifest. Active recursive contract v6 uses human-experience rubric v11. Every layer uses the same criteria; the contract does not distinguish root and child layers. Node count is observable context, not a threshold. The judge decides from the rendered screenshot whether a layer is sparse, crowded, fragmented, balanced, or otherwise well organized. Historical v5/v10 records retain their original contracts and remain readable; the version bump deliberately breaks direct score comparability.</p>
 <table>
 <thead><tr><th>Subject</th><th>Required criteria</th><th>Required screenshot context</th></tr></thead>
 <tbody>
@@ -2335,13 +2353,16 @@ npm run eval:web
 <tr><td>Node</td><td>Layer fit, title-detail alignment, substance, detail presentation</td><td>Layer context plus selected-node detail; full-detail tiles when needed</td></tr>
 <tr><td>Navigate action inside its source node review</td><td>Placement, label expectation, destination delivery, added value</td><td>Visible source and destination reached through that action</td></tr>
 <tr><td>Invoke action inside its source node review</td><td>Placement, label expectation, apparent value</td><td>Visible source; invocation remains disabled in immutable review</td></tr>
+<tr><td>Input action inside its source node review</td><td>Answerability, option-set quality, control fit</td><td>Visible source with the rendered prompt, control, and authored options; quality is rated before any answer is supplied</td></tr>
 <tr><td>Turn</td><td>Answer quality, recursive coherence, navigation value, presentation quality, and follow-up progress when applicable</td><td>Representative evidence from completed layer, node, and action reviews</td></tr>
 </tbody></table>
 <p>Each criterion uses an ordered integer from 1 through 8, where higher is better. The integers intentionally have no canned meanings. The judge chooses a score from the criterion definition and observed graph, then records a criterion-specific reason and screenshot evidence explaining that exact judgment. Node <code>actionDelivery</code> may be <code>null</code> only when no destination is assessable. Node <code>recursiveQuality</code> may be <code>null</code> only when no expansion child exists. Turn <code>follow_up_progress</code> may be <code>null</code> when the request is not a follow-up. Every other occupied node, layer, and turn criterion requires a score.</p>
 <p><code>polish</code> is a separate node vector dimension for basic rendered integrity: clipping, readability, density, alignment, and control rendering. Polish provides no credit to content, action allocation, destination delivery, recursive quality, layer quality, turn quality, or task outcome.</p>
 <h4>13.4.3 Incremental screenshot-grounded review records</h4>
 <p>The judge writes reviews as it explores. <code>reviewLayer</code> persists one finalized layer result after its nodes and expansion children have been reviewed.</p>
-<p><code>reviewNode</code> persists one node record and its sequential expand/reference/invoke/stop allocation decisions. The record also contains missing-action opportunities and visible actions.</p>
+<p><code>reviewNode</code> persists one node record and its sequential expand/reference/invoke/input/stop allocation decisions. The record also contains missing-action opportunities and visible actions. A missing input opportunity is recorded when the response needs user information or a user choice but authored no suitable input action.</p>
+<p>Input-action quality is judged from the presented action before any operator may answer it. A text input has an intentionally empty option set; single- and multi-select inputs expose their complete authored choices. The v11 necessity counterweight penalizes questions whose answers already exist in the immutable task artifact. It also penalizes evading node-owned judgment and fragmenting one coherent decision into one question per node.</p>
+<p>The combined judge/operator trace may contain only the scoped review MCP tools, including commissioned input commit and Send. File mutation, web search, and every out-of-scope MCP tool remain forbidden. Independence applies to the immutable input-action quality ratings produced before commission; it does not describe the later round-trip grounding observation.</p>
 <p>Calling either tool again revises that subject's current record while preserving prior calls in the interaction trace. Applicable criterion keys come from the rubric manifest.</p>
 <pre><code class="language-typescript">reviewNode({ layerId, nodeId, evidence, score, semantic, allocationSteps, missingActionOpportunities, actions, findings });
 reviewLayer({ layerId, depth, nodeScores, nodeSemantics, criterionJudgments, materiallyMisleading, layerSummary, evidence });
@@ -2364,7 +2385,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
   },
   "allocationSteps": [{
     "step": 0,
-    "ranking": [{ "choice": "expand", "rank": 1 }, { "choice": "reference", "rank": 2 }, { "choice": "invoke", "rank": 3 }, { "choice": "stop", "rank": 4 }],
+    "ranking": [{ "choice": "expand", "rank": 1 }, { "choice": "reference", "rank": 2 }, { "choice": "invoke", "rank": 3 }, { "choice": "input", "rank": 4 }, { "choice": "stop", "rank": 5 }],
     "preferredChoice": "expand",
     "authoredChoice": "stop",
     "authoredActionId": null,
@@ -2411,6 +2432,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <p>Reference traversal processes each unique layer once and follows reference actions transitively. It does not activate inherited expand, invoke, or resolved-invoke actions.</p>
 <p>The judge still grades those visible inherited actions in their reference context.</p>
 <p>The final artifact preserves traces, screenshots, metadata, incremental reviews, rubric version, judge configuration, and completion coverage.</p>
+<p>The opt-in node-input round-trip proof is separate from <code>npm run check</code>. A reasonable deployment-planning request exercises the fixed action matrix without naming implementation controls. It asks for a free-form deployment window, one exclusive rollout strategy, and several validation signals with a minimum of two. A live model must author the corresponding accepted text, single-select, and multi-select actions together on one decision node. The operator must commit each exactly once and Send them into a new root with provenance-exact input children. The next candidate trace must contain every exact normalized semantic input snapshot. A screenshot-grounded gate requires the rendered follow-up to visibly apply the window, strategy, and every selected signal. Deterministic real-Electron proof exercises the editable production controls and the minimum-selection error. It also covers commit, reopen, Undo, rejected persistence, detach and recommit, input-only Send, send locking, and read-only submitted history. Large-text scaling remains usable. Up to three ordinary choices must fit the details rail without horizontal discovery. Node Details permanently reserves the annotation-editor region, so opening <code>+</code> never changes the detail viewport height. The detail region scrolls independently to its final control while the annotation editor remains visible.</p>
 <p>When the judge finds one material missing action, affected turn criteria and the overall presentation ceiling cannot exceed 6. Repeated material omissions or one critical omission cap them at 4. These are maximums, not assigned scores: the judge still chooses and explains the score warranted by the visible experience. Historical reviews retain their native scale when viewed alone; mixed-scale multi-turn projections normalize legacy scores proportionally before aggregation.</p>
 <p>The simulated-user judge grades only what the product made visible. Separate deterministic graders remain authoritative for graph integrity, mutation policy, repository diff, protected-file hashes, public and hidden tests, build results, and commit history. A visually strong graph cannot compensate for broken code, and correct hidden work cannot compensate for an unusable visible response.</p>
 <h3>13.5 Evaluation ladder</h3>

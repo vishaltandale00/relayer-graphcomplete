@@ -83,12 +83,27 @@ impl SqliteProductStore {
     ) -> Result<bool, StorageError> {
         let output = serde_json::to_string(output)
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND (completion_status IN ('not_started','running','submitted','waiting_for_approval') OR (completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%'))")
             .bind(output)
             .bind(interaction_id.value())
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
-        Ok(result.rows_affected() == 1)
+        if result.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        sqlx::query(
+            "UPDATE interaction_attempts
+             SET finished_at=COALESCE(finished_at,strftime('%s','now') || '000'),
+                 outcome='accepted',failure_category=NULL,effect_boundary='graph_write'
+             WHERE interaction_id=?1 AND outcome='running'",
+        )
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(true)
     }
 
     pub(crate) async fn permits_unselected_action_execution(

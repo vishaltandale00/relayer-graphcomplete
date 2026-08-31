@@ -611,6 +611,9 @@ export async function refreshState(
   appState.interactions = nextInteractions;
   appState.actionInvocations = nextActionInvocations;
   appState.approvals = nextApprovals;
+  appState.inputDraftRevision = Number.isSafeInteger(state.inputDraftRevision)
+    ? state.inputDraftRevision
+    : null;
   appState.capabilities = state.capabilities;
   appState.temporalSafeReason = projectionState?.safeReason ?? null;
   appState.temporalLifecycle = projectionState?.lifecycle ?? null;
@@ -730,6 +733,8 @@ export async function submitInteraction(
   modelSelection,
   contexts = [],
   contextConfirmationIds = [],
+  inputIdentityRevision = null,
+  inputDraftRevision = null,
 ) {
   if (!viewState.currentThreadId) throw new Error("Select a thread before sending a follow-up.");
   const threadId = viewState.currentThreadId;
@@ -750,6 +755,7 @@ export async function submitInteraction(
     modelSelection,
     contexts,
     contextConfirmationIds,
+    inputIdentityRevision,
   );
   try {
     const latestInteraction = appState.interactions
@@ -763,6 +769,7 @@ export async function submitInteraction(
       inputId,
       contexts,
       contextConfirmationIds,
+      inputDraftRevision,
     );
     const body = restoredDraftForInteraction(latestInteraction)
       ? retryBody
@@ -772,6 +779,7 @@ export async function submitInteraction(
         inputId,
         contexts,
         contextConfirmationIds,
+        inputDraftRevision,
       );
     const response = await request(path, {
       method: "POST",

@@ -4,11 +4,15 @@ mod current;
 mod edge;
 mod icon;
 mod ids;
+mod input;
 mod layer;
 mod node;
 mod record_state;
 
-pub use action::{ActionDraft, ActionKind, ActionVariant, GraphAction, NavigateRelation};
+pub use action::{
+    ActionDraft, ActionKind, ActionVariant, GraphAction, InputAction, InputControl, InputOption,
+    NavigateRelation, PresentingInputOccurrence,
+};
 pub use context::{
     InteractionContext, InteractionContextAction, InteractionContextDraft,
     InteractionContextTarget, InteractionInput, InteractionInputNode, interaction_input_digest,
@@ -23,7 +27,13 @@ pub use icon::{
     resolve_icon_name,
 };
 pub use ids::{
-    ActionId, EdgeId, LayerId, NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId,
+    ActionId, EdgeId, InteractionInputChildId, LayerId, NodeId,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId,
+};
+pub(crate) use input::canonical_submitted_input_bytes;
+pub use input::{
+    InteractionInputChild, InteractionInputPreparation, SubmittedInput, SubmittedInputDraft,
+    SubmittedInputValue, interaction_input_authority_digest, interaction_input_semantic_digest,
 };
 pub(crate) use layer::validate_authored_layout;
 pub use layer::{GraphLayer, LayerDraft, LayerLayout, NodePlacement, ResolvedLayer};

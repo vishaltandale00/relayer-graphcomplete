@@ -10,6 +10,24 @@ use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 impl SqliteProductStore {
+    pub(crate) async fn get_interaction_by_input_identity(
+        &self,
+        thread_id: ThreadId,
+        input_identity: &str,
+    ) -> Result<Option<Interaction>, StorageError> {
+        let id: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM interactions WHERE thread_id=?1 AND input_identity=?2",
+        )
+        .bind(thread_id.value())
+        .bind(input_identity)
+        .fetch_optional(&self.pool)
+        .await?;
+        match id {
+            Some(id) => self.get_interaction(InteractionId::from_database(id)).await,
+            None => Ok(None),
+        }
+    }
+
     pub(crate) async fn get_interaction_by_graph_node_id(
         &self,
         graph_node_id: i64,
@@ -31,14 +49,29 @@ impl SqliteProductStore {
         // Ordinary running completions cannot resume across a backend restart. Preserve
         // not_started rows: they are durable user drafts, including recoverable model failures.
         // Finalize the attempt in the same transaction: an interrupted harness has an unknown
-        // effect boundary and therefore must never be silently replayed after restart.
+        // effect boundary and therefore must never be silently replayed after restart. A
+        // submitted-input attempt quarantined by a retryable canonical read stays open only for
+        // graph reconciliation; it is never replayed through the provider.
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let finished_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time is before unix epoch")
             .as_millis()
             .to_string();
-        sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown' WHERE outcome='running'")
+        sqlx::query(
+            "UPDATE interaction_attempts
+             SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown'
+             WHERE outcome='running'
+               AND interaction_id NOT IN (
+                 SELECT interaction.id
+                 FROM interactions interaction
+                 JOIN interaction_submitted_input_attempts submitted
+                   ON submitted.interaction_id=interaction.id
+                 WHERE interaction.completion_status='failed'
+                   AND interaction.completion_error LIKE 'Canonical reconciliation pending:%'
+                   AND submitted.state NOT IN ('accepted','failed','stopped')
+               )",
+        )
             .bind(finished_at)
             .execute(&mut *transaction)
             .await?;
@@ -51,6 +84,127 @@ impl SqliteProductStore {
         .await?;
         transaction.commit().await?;
         Ok(result.rows_affected())
+    }
+
+    pub(crate) async fn fail_interrupted_submitted_input(
+        &self,
+        interaction_id: InteractionId,
+        harness_configuration_name: &str,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let finished_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_millis()
+            .to_string();
+        sqlx::query(
+            "UPDATE interaction_attempts
+             SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown'
+             WHERE interaction_id=?2 AND outcome='running'",
+        )
+        .bind(&finished_at)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        let result = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='failed',
+                 harness_configuration_name=COALESCE(harness_configuration_name,?1),
+                 completion_error=?2
+             WHERE id=?3
+               AND completion_status IN ('not_started','running','submitted','waiting_for_approval')
+               AND EXISTS (
+                 SELECT 1 FROM interaction_submitted_input_attempts
+                 WHERE interaction_id=interactions.id
+                   AND state NOT IN ('accepted','failed','stopped')
+               )
+               AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        )
+        .bind(harness_configuration_name)
+        .bind(error)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        if result.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    pub(crate) async fn quarantine_interrupted_submitted_input(
+        &self,
+        interaction_id: InteractionId,
+        harness_configuration_name: &str,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='failed',
+                 harness_configuration_name=COALESCE(harness_configuration_name,?1),
+                 completion_error=?2
+             WHERE id=?3
+               AND completion_status IN ('not_started','running','submitted','waiting_for_approval')
+               AND EXISTS (
+                 SELECT 1 FROM interaction_submitted_input_attempts
+                 WHERE interaction_id=interactions.id
+                   AND state NOT IN ('accepted','failed','stopped')
+               )
+               AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        )
+        .bind(harness_configuration_name)
+        .bind(error)
+        .bind(interaction_id.value())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn finalize_quarantined_submitted_input_failure(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let finished_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_millis()
+            .to_string();
+        sqlx::query(
+            "UPDATE interaction_attempts
+             SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown'
+             WHERE interaction_id=?2 AND outcome='running'",
+        )
+        .bind(&finished_at)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        let result = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='not_started',completion_error=?1
+             WHERE id=?2
+               AND completion_status='failed'
+               AND completion_error LIKE 'Canonical reconciliation pending:%'
+               AND EXISTS (
+                 SELECT 1 FROM interaction_submitted_input_attempts
+                 WHERE interaction_id=interactions.id
+                   AND state NOT IN ('accepted','failed','stopped')
+               )
+               AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        )
+        .bind(error)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        if result.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        transaction.commit().await?;
+        Ok(true)
     }
 
     pub(crate) async fn get_interaction(
@@ -274,6 +428,72 @@ impl SqliteProductStore {
     ) -> Result<bool, StorageError> {
         let receipt = serde_json::to_string(binding.effective_permission_receipt)
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let child_receipt = serde_json::to_string(binding.input_children)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let submitted_attempt: Option<(i64, String, String, String)> = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM interaction_submitted_input_attachments snapshot WHERE snapshot.interaction_id=attempt.interaction_id),interaction.input_identity,attempt.authority_digest,attempt.semantic_digest FROM interaction_submitted_input_attempts attempt JOIN interactions interaction ON interaction.id=attempt.interaction_id WHERE attempt.interaction_id=?1",
+        )
+        .bind(binding.interaction_id.value())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        match submitted_attempt.as_ref() {
+            Some((count, _, _, _)) if *count != binding.input_children.len() as i64 => {
+                return Err(StorageError::IncompatibleSchema(
+                    "graph child receipt does not match the reserved submitted input snapshot"
+                        .into(),
+                ));
+            }
+            None if !binding.input_children.is_empty() => {
+                return Err(StorageError::IncompatibleSchema(
+                    "graph returned submitted input children for an interaction without a reserved snapshot".into(),
+                ));
+            }
+            _ => {}
+        }
+        if let Some((_, input_identity, authority_digest, semantic_digest)) =
+            submitted_attempt.as_ref()
+        {
+            let rows = sqlx::query(
+                "SELECT presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json FROM interaction_submitted_input_attachments WHERE interaction_id=?1 ORDER BY presenting_interaction_node_id,presenting_layer_id,action_id",
+            )
+            .bind(binding.interaction_id.value())
+            .fetch_all(&mut *transaction)
+            .await?;
+            let expected = rows
+                .iter()
+                .map(super::interaction_contexts::submitted_input_from_row)
+                .collect::<Result<Vec<_>, _>>()?;
+            let returned = binding
+                .input_children
+                .iter()
+                .map(|child| relayer_graph_core::SubmittedInputDraft {
+                    occurrence: child.occurrence.clone(),
+                    action: child.action.clone(),
+                    value: child.value.clone(),
+                })
+                .collect::<Vec<_>>();
+            if returned != expected {
+                return Err(StorageError::IncompatibleSchema(
+                    "graph child receipt changed the reserved occurrence, action, or value snapshot"
+                        .into(),
+                ));
+            }
+            for (row, child) in rows.iter().zip(binding.input_children) {
+                let source_node_id: i64 = row.try_get("source_node_id")?;
+                if child.parent_interaction_node_id.value() != binding.graph_node_id
+                    || child.source_node_id.value() != source_node_id
+                    || child.attempt_key != *input_identity
+                    || child.authority_digest != *authority_digest
+                    || child.semantic_digest != *semantic_digest
+                {
+                    return Err(StorageError::IncompatibleSchema(
+                        "graph child receipt changed the reserved root, source, attempt, or digest binding"
+                            .into(),
+                    ));
+                }
+            }
+        }
         let result = sqlx::query("UPDATE interactions SET graph_node_id=?1,harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=NULL,completion_error=NULL WHERE id=?6 AND completion_status='submitted' AND graph_node_id IS NULL")
             .bind(binding.graph_node_id)
             .bind(binding.harness_configuration_name)
@@ -281,8 +501,25 @@ impl SqliteProductStore {
             .bind(binding.effective_execution_digest)
             .bind(receipt)
             .bind(binding.interaction_id.value())
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        if result.rows_affected() == 1 && submitted_attempt.is_some() {
+            let updated = sqlx::query(
+                "UPDATE interaction_submitted_input_attempts SET state='bound',graph_root_node_id=?1,child_receipt_json=?2,bound_at=strftime('%s','now') || '000' WHERE interaction_id=?3 AND state='preparing'",
+            )
+            .bind(binding.graph_node_id)
+            .bind(child_receipt)
+            .bind(binding.interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
+            if updated.rows_affected() != 1 {
+                return Err(StorageError::IncompatibleSchema(
+                    "submitted input attempt was not preparing while binding its graph receipt"
+                        .into(),
+                ));
+            }
+        }
+        transaction.commit().await?;
         Ok(result.rows_affected() == 1)
     }
 
@@ -302,6 +539,20 @@ impl SqliteProductStore {
         {
             return Err(StorageError::IncompatibleSchema(
                 "context confirmation IDs must be non-empty and unique".into(),
+            ));
+        }
+        let submitted_input_attempt: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=?1)",
+        )
+        .bind(interaction_id.value())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if submitted_input_attempt {
+            return Err(StorageError::Catalog(
+                crate::product::CatalogError::invalid(
+                    "submitted_input_retry_requires_new_send",
+                    "Send the restored committed inputs again to create a new immutable root and attempt.",
+                ),
             ));
         }
         let attempt: Option<(String, String)> = sqlx::query_as(
@@ -569,7 +820,27 @@ impl SqliteProductStore {
                 "interaction attempt was already terminal, missing, or owned by another interaction".into(),
             ));
         }
-        let interaction = if failure.return_to_unsent {
+        let restores_submitted_input = if failure.return_to_unsent {
+            sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=?1 AND state NOT IN ('accepted','failed','stopped'))")
+                .bind(failure.interaction_id.value())
+                .fetch_one(&mut *transaction)
+                .await?
+                != 0
+        } else {
+            false
+        };
+        let interaction = if restores_submitted_input {
+            // The submitted-input trigger restores the immutable attachment snapshot into a new
+            // draft. Keep this attempt terminal and inspectable; returning the interaction itself
+            // to unsent would erase its prepared graph and execution receipts before the trigger
+            // gets a chance to restore only the mutable draft authority.
+            sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=?1,completion_error=?2 WHERE id=?3 AND completion_status='running'")
+                .bind(failure.harness_configuration_name)
+                .bind(failure.error)
+                .bind(failure.interaction_id.value())
+                .execute(&mut *transaction)
+                .await?
+        } else if failure.return_to_unsent {
             sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
                 .bind(failure.harness_configuration_name)
                 .bind(failure.interaction_id.value())
@@ -919,6 +1190,7 @@ mod tests {
             input_digest: "sha256:retry-input",
             contexts: &contexts,
             context_confirmation_ids: &[],
+            submitted_input_draft_revision: None,
         };
         let first = store.claim_interaction_retry(
             thread.root_interaction_id,
@@ -960,6 +1232,7 @@ mod tests {
                     input_digest: "sha256:retry-input-conflict",
                     contexts: &conflicting_contexts,
                     context_confirmation_ids: &[],
+                    submitted_input_draft_revision: None,
                 },
                 &next_model,
                 "codex-basic",
@@ -993,6 +1266,9 @@ mod tests {
                 input_identity: "retry-input".into(),
                 input_digest: "sha256:retry-input".into(),
                 contexts,
+                submitted_inputs: vec![],
+                submitted_input_draft_revision: None,
+                semantic_digest: None,
             })
         );
         let receipt = interaction.latest_attempt.unwrap();

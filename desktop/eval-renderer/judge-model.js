@@ -44,9 +44,13 @@ function presentationReview(review, kind) {
     };
   }
   if (kind === "action" && review.kind && "allocationStep" in review) {
+    const criterionJudgments = review.kind === "input" ? review.inputActionJudgments : undefined;
     return {
       ...review,
-      ratings: {},
+      ratings: criterionJudgments
+        ? Object.fromEntries(Object.entries(criterionJudgments).map(([key, judgment]) => [key, judgment?.score ?? null]))
+        : {},
+      ...(criterionJudgments ? { criterionJudgments } : {}),
       summary: [review.labelAndPlacement, review.delivery, review.recursiveContribution].filter(Boolean).join(" "),
       findings: [],
     };
@@ -90,6 +94,7 @@ export function evidenceIdsForReview(review) {
   collectEvidence(review.semantic?.evidence, evidence);
   for (const step of asArray(review.allocationSteps)) collectEvidence(step?.evidence, evidence);
   for (const action of asArray(review.actions)) collectEvidence(action?.evidence, evidence);
+  collectEvidence(review.criterionJudgments, evidence);
   collectEvidence(review.scoreCeiling?.evidence, evidence);
   return [...evidence];
 }
@@ -238,8 +243,8 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
     ]),
   ];
 
-  const recursive = [2, 3, 4, 5].includes(review?.schemaVersion)
-    || ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5"].includes(review?.contractId);
+  const recursive = [2, 3, 4, 5, 6].includes(review?.schemaVersion)
+    || ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5", "recursive-presentation-judge-v6"].includes(review?.contractId);
   if (recursive) layers.sort((left, right) => right.depth - left.depth || left.position - right.position);
   return {
     kind: "turn",

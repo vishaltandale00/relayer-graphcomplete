@@ -204,6 +204,7 @@ pub(crate) struct InteractionResponse {
     latest_attempt: Option<InteractionAttemptResponse>,
     projection_fresh: bool,
     contexts: Vec<InteractionContextResponse>,
+    submitted_inputs: Vec<relayer_graph_core::SubmittedInput>,
 }
 
 impl From<Interaction> for InteractionResponse {
@@ -227,6 +228,7 @@ impl From<Interaction> for InteractionResponse {
             latest_attempt: interaction.latest_attempt.map(Into::into),
             projection_fresh: true,
             contexts: Vec::new(),
+            submitted_inputs: Vec::new(),
         }
     }
 }
@@ -264,6 +266,13 @@ impl InteractionResponse {
             .collect();
         self.contexts = project_interaction_contexts(intents, contexts, actions)?;
         Ok(())
+    }
+
+    pub(crate) fn set_submitted_inputs(
+        &mut self,
+        submitted_inputs: Vec<relayer_graph_core::SubmittedInput>,
+    ) {
+        self.submitted_inputs = submitted_inputs;
     }
 }
 
@@ -498,6 +507,7 @@ pub(crate) struct ProductStateResponse {
     approvals: Vec<ApprovalReceipt>,
     capabilities: CapabilitiesResponse,
     current_projection: Option<relayer_graph_core::CurrentProjectionPage>,
+    input_draft_revision: Option<i64>,
 }
 
 impl ProductStateResponse {
@@ -518,6 +528,11 @@ impl ProductStateResponse {
         self.current_projection = projection;
         self
     }
+
+    pub(crate) fn with_input_draft_revision(mut self, revision: Option<i64>) -> Self {
+        self.input_draft_revision = revision;
+        self
+    }
 }
 
 impl From<ProductState> for ProductStateResponse {
@@ -534,6 +549,7 @@ impl From<ProductState> for ProductStateResponse {
             approvals: state.approvals,
             capabilities: state.capabilities.into(),
             current_projection: None,
+            input_draft_revision: None,
         }
     }
 }

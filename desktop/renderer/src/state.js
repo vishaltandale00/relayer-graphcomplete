@@ -10,6 +10,7 @@ export const appState = {
   actionInvocations: [],
   pendingActionInvocations: [],
   approvals: [],
+  inputDraftRevision: null,
   pendingApprovalDecisions: [],
   permissionProfiles: [],
   defaultPermissionProfileId: null,

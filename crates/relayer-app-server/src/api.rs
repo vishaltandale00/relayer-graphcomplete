@@ -4,6 +4,8 @@ mod context_drafts;
 mod conversation_imports;
 mod environment;
 mod error;
+mod input_drafts;
+mod input_operator_sessions;
 mod model_settings;
 mod projects;
 mod state;
@@ -28,6 +30,12 @@ use tower_http::services::ServeDir;
 pub const CONTROL_COOKIE: &str = "relayer_control";
 
 #[derive(Clone)]
+pub(crate) struct InputOperatorSession {
+    pub(crate) thread_id: i64,
+    pub(crate) occurrences: HashSet<(i64, i64, i64)>,
+}
+
+#[derive(Clone)]
 pub(crate) struct AnnotationSession {
     pub(crate) thread_ids: HashSet<i64>,
     pub(crate) author_id: String,
@@ -49,6 +57,7 @@ pub(crate) struct ApiState {
     pub(crate) export_producer: crate::conversation_export::ExportProducer,
     pub(crate) approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
     pub(crate) annotation_sessions: Arc<Mutex<HashMap<String, AnnotationSession>>>,
+    pub(crate) input_operator_sessions: Arc<Mutex<HashMap<String, InputOperatorSession>>>,
     pub(crate) annotations_enabled: bool,
     pub(crate) environment_inspector: crate::environment::EnvironmentInspector,
     pub(crate) completion_brokers: CompletionBrokerRegistry,
@@ -109,6 +118,7 @@ pub(crate) fn router(
         export_producer: runtime.export_producer,
         approval_decisions,
         annotation_sessions: Arc::new(Mutex::new(HashMap::new())),
+        input_operator_sessions: Arc::new(Mutex::new(HashMap::new())),
         annotations_enabled,
         environment_inspector: crate::environment::EnvironmentInspector::new(),
         completion_brokers,
@@ -232,9 +242,26 @@ pub(crate) fn router(
                 .delete(context_drafts::dismiss_confirmation),
         )
         .route(
+            "/api/threads/{thread_id}/input-draft",
+            get(input_drafts::get),
+        )
+        .route(
+            "/api/threads/{thread_id}/input-draft/attachments",
+            axum::routing::put(input_drafts::commit),
+        )
+        .route(
+            "/api/threads/{thread_id}/input-draft/attachments/{presenting_interaction_node_id}/{presenting_layer_id}/{action_id}",
+            axum::routing::delete(input_drafts::detach),
+        )
+        .route(
             "/api/internal/annotation-sessions",
             axum::routing::post(annotations::register_session)
                 .delete(annotations::revoke_session),
+        )
+        .route(
+            "/api/internal/input-operator-sessions",
+            axum::routing::post(input_operator_sessions::register_session)
+                .delete(input_operator_sessions::revoke_session),
         )
         .route(
             "/api/annotations/snapshot",
@@ -267,6 +294,10 @@ pub(crate) fn router(
         .route(
             "/api/threads/{thread_id}/interactions/{interaction_id}/layers/{layer_id}",
             get(threads::get_layer),
+        )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/input-children",
+            get(threads::get_input_children),
         )
         .route(
             "/api/threads/{thread_id}/interactions/{interaction_id}/actions/{action_id}/invoke",

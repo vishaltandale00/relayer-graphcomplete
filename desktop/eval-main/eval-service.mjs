@@ -17,7 +17,7 @@ import {
   canonicalJson,
   checkNodeNavigation,
   checkBasicOutput,
-  GRAPH_PRESENTATION_RUBRIC_V10,
+  GRAPH_PRESENTATION_RUBRIC_V11,
   expandTestRun,
   gradeH3Workspace,
   gradeFrontierProjectWorkspace,
@@ -71,6 +71,16 @@ export const evalCases = Object.freeze([
     requiredChecks: Object.freeze(["node-navigation"]),
   }),
   recursiveCompleteEvalCase,
+  Object.freeze({
+    id: "empty-project.node-input-roundtrip.single-turn",
+    name: "Node input · authored round trip",
+    description: "Asks the model to author text, single-select, and multi-select inputs, then lets the simulated user answer all three through the product.",
+    prompts: Object.freeze([
+      "Help me prepare a deployment plan. Before planning, I still need to supply the exact deployment window, choose either Canary or Full rollout, and choose at least two validation signals from Health metrics, Logs, and Synthetic checks. Do not make those decisions for me. Ask for the three decisions together and wait for my response. Once I respond, produce a concise deployment plan that names and visibly applies the exact window, selected strategy, and each selected validation signal.",
+    ]),
+    requiredChecks: Object.freeze(["input-roundtrip"]),
+    requiredJudgeConfigurationIds: Object.freeze(["simulated-user", "simulated-user-sol-high"]),
+  }),
   h3ProjectEvalCase,
   ...h3AutonomousCases.map((entry) => Object.freeze({
     ...entry.definition,
@@ -396,14 +406,25 @@ export function presentationGradeFromTurns(turns, requested) {
     : completed.length === results.length && terminalWithoutReview.length === 0 ? "completed"
       : failed.length === results.length ? "failed" : "partial";
   const recursive = completed.length > 0 && completed.every((result) => (
-    [2, 3, 4, 5].includes(result.review?.schemaVersion)
-    && ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5"].includes(result.review?.contractId)
+    [2, 3, 4, 5, 6].includes(result.review?.schemaVersion)
+    && ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3", "recursive-presentation-judge-v4", "recursive-presentation-judge-v5", "recursive-presentation-judge-v6"].includes(result.review?.contractId)
   ));
   if (recursive) {
-    const scales = completed.map((result) => result.review?.schemaVersion === 5 ? 8 : 4);
+    const contractIds = [...new Set(completed.map((result) => result.review.contractId))].sort();
+    if (contractIds.includes("recursive-presentation-judge-v6") && contractIds.length > 1) {
+      return {
+        ...buildRecursiveGraphPresentationGrade({ status: "partial", scoreScaleMaximum: 8 }),
+        comparability: {
+          status: "incompatible",
+          contractIds,
+          reason: "Rubric v11 changes input-action judgment and cannot be aggregated with earlier recursive contracts.",
+        },
+      };
+    }
+    const scales = completed.map((result) => [5, 6].includes(result.review?.schemaVersion) ? 8 : 4);
     const scoreScaleMaximum = scales.includes(8) ? 8 : 4;
     const turnScore = (result, criterion) => {
-      const scale = result.review?.schemaVersion === 5 ? 8 : 4;
+      const scale = [5, 6].includes(result.review?.schemaVersion) ? 8 : 4;
       const score = scale === 8
         ? result.review?.turn?.criterionJudgments?.[criterion]?.score ?? null
         : result.review?.turn?.ratings?.[criterion] ?? null;
@@ -413,7 +434,7 @@ export function presentationGradeFromTurns(turns, requested) {
     };
     const scoreCeiling = (result) => {
       const maximum = result.review?.turn?.scoreCeiling?.maximum;
-      const scale = result.review?.schemaVersion === 5 ? 8 : 4;
+      const scale = [5, 6].includes(result.review?.schemaVersion) ? 8 : 4;
       return [1, 2, 3, 4, 5, 6, 7, 8].includes(maximum)
         ? maximum * (scoreScaleMaximum / scale)
         : null;
@@ -934,6 +955,14 @@ export class EvalService {
     const judgeConfigurationName = selection?.judgeConfigurationName;
     if (!Array.isArray(testCaseIds) || testCaseIds.some((id) => !evalCases.some((item) => item.id === id))) {
       throw new Error("Test run contains an unknown test case.");
+    }
+    const incompatibleJudgeCase = evalCases.find((item) => (
+      testCaseIds.includes(item.id)
+      && Array.isArray(item.requiredJudgeConfigurationIds)
+      && !item.requiredJudgeConfigurationIds.includes(judgeConfigurationName)
+    ));
+    if (incompatibleJudgeCase) {
+      throw new Error("Input round-trip cases require a compatible simulated-user judge configuration.");
     }
     if (testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID)) {
       const comparison = evalCases.find((item) => item.id === RECURSIVE_COMPLETE_EVAL_CASE_ID);
@@ -1694,12 +1723,8 @@ export class EvalService {
         checks.push(...recursiveCompleteChecks(execution));
       }
       execution.checks = checks;
-      const deterministicPassed = checks.length > 0 && checks.every((check) => check.passed);
-      const outcomeChecks = execution.caseSnapshot
-        ? checks.filter((check) => check.name.includes(":workspace:"))
-        : checks;
-      execution.outcomeGrade = outcomeGradeFromChecks(outcomeChecks, execution.caseSnapshot);
       let simulatedUserCompleted = true;
+      let inputRoundTripCompleted = !definition.requiredChecks?.includes("input-roundtrip");
       if (simulatedUserJudgeIds.has(execution.judgeConfiguration.name)) {
         const eligibleTurns = interactions
           .map(({ thread, interaction }, turnIndex) => ({ thread, interaction, turn: execution.turns[turnIndex] }))
@@ -1714,16 +1739,41 @@ export class EvalService {
             interaction,
             turn,
             reviewSequence: { index, count: eligibleTurns.length },
+            allowInputOperator: definition.requiredChecks?.includes("input-roundtrip") === true,
           });
           if (result.status !== "completed") simulatedUserCompleted = false;
+          if (definition.requiredChecks?.includes("input-roundtrip")) {
+            inputRoundTripCompleted = result.inputRoundTrip?.passed === true;
+            const roundTripChecks = (result.inputRoundTrip?.checks ?? []).map((check) => ({
+              ...copy(check),
+              name: `turn-${interaction.sequence}:${check.name}`,
+            }));
+            if (roundTripChecks.length === 0) {
+              roundTripChecks.push({
+                name: `turn-${interaction.sequence}:input-roundtrip:exercised`,
+                passed: false,
+                detail: result.inputRoundTrip?.detail || "The input round-trip live gate was not exercised.",
+              });
+            }
+            turn.deterministicChecks.push(...roundTripChecks);
+            execution.checks.push(...roundTripChecks);
+            turn.deterministicPassed = turn.deterministicChecks.length > 0
+              && turn.deterministicChecks.every((check) => check.passed);
+          }
         }
         if (eligibleTurns.length === 0) simulatedUserCompleted = false;
       }
+      const deterministicPassed = execution.checks.length > 0
+        && execution.checks.every((check) => check.passed);
+      const outcomeChecks = execution.caseSnapshot
+        ? execution.checks.filter((check) => check.name.includes(":workspace:"))
+        : execution.checks;
+      execution.outcomeGrade = outcomeGradeFromChecks(outcomeChecks, execution.caseSnapshot);
       execution.presentationGrade = presentationGradeFromTurns(
         execution.turns,
         simulatedUserJudgeIds.has(execution.judgeConfiguration.name),
       );
-      execution.passed = deterministicPassed && simulatedUserCompleted;
+      execution.passed = deterministicPassed && simulatedUserCompleted && inputRoundTripCompleted;
       execution.status = execution.passed ? "passed" : "failed";
       completeExecutionLifecycle(execution);
     } catch (error) {
@@ -1888,7 +1938,15 @@ export class EvalService {
     return { thread, humanInteractionIds, detail, semanticChildren };
   }
 
-  async #judgeAcceptedTurn({ execution, thread, interaction, turn, reviewSequence, provenance = null }) {
+  async #judgeAcceptedTurn({
+    execution,
+    thread,
+    interaction,
+    turn,
+    reviewSequence,
+    provenance = null,
+    allowInputOperator = false,
+  }) {
     const judgeConfigurationId = execution.judgeConfiguration.name;
     const judgeResultId = randomUUID();
     const previousTurnIds = execution.turns
@@ -1919,7 +1977,7 @@ export class EvalService {
       completedAt: null,
       artifactDirectory,
       artifactAuthority: "references",
-      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V10.rubricVersion,
+      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V11.rubricVersion,
       judgeConfiguration: copy(execution.judgeConfiguration),
       references: emptyJudgeReferences(),
       review: null,
@@ -1952,6 +2010,7 @@ export class EvalService {
           status: interaction.completionStatus,
         },
         reviewSequence: copy(reviewSequence),
+        allowInputOperator,
         request: {
           text: interaction.text,
           followUp: previousTurnIds.length > 0,
@@ -1960,7 +2019,7 @@ export class EvalService {
         },
         artifact: judgeArtifactForExecution(execution, turn),
         artifactEvidence: judgeArtifactEvidenceForExecution(execution, turn),
-        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V10),
+        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V11),
         judgeConfiguration: copy(execution.judgeConfiguration),
         ...(provenance === null ? {} : { provenance: copy(provenance) }),
       };
@@ -2502,6 +2561,13 @@ function normalizeJudgeOutput(output, initial) {
       : [],
     reviews: optionalReference(output.reviewRef),
     coverage: optionalReference(output.coverageRef),
+    ...(output.inputRoundTripRef === undefined ? {} : {
+      inputRoundTrip: optionalReference(output.inputRoundTripRef),
+    }),
+    ...(Array.isArray(output.inputRatingReceiptRefs) && output.inputRatingReceiptRefs.length > 0 ? {
+      inputRatings: output.inputRatingReceiptRefs
+        .filter((reference) => typeof reference === "string" && reference.length > 0),
+    } : {}),
   };
   const requiredReferences = [
     references.rubric,
@@ -2527,6 +2593,11 @@ function normalizeJudgeOutput(output, initial) {
     review: output.review && typeof output.review === "object" ? copy(output.review) : null,
     coverage: output.coverage && typeof output.coverage === "object" ? copy(output.coverage) : null,
     summary: typeof output.summary === "string" ? output.summary : null,
+    ...(output.inputRoundTrip === undefined ? {} : {
+      inputRoundTrip: output.inputRoundTrip && typeof output.inputRoundTrip === "object"
+        ? copy(output.inputRoundTrip)
+        : null,
+    }),
     error: missingReferenceError
       ?? (typeof output.error === "string" && output.error.length > 0
         ? output.error

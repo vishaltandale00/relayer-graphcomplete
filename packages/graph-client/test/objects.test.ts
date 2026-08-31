@@ -123,6 +123,54 @@ describe("agent-facing graph objects", () => {
     });
   });
 
+  it("authors structured input actions without a provider side channel", async () => {
+    let request: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      request = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ action: { id: 42, ...request, state: "draft" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    await graph.addAction(10, {
+      kind: "input",
+      sourceLayer: 20,
+      label: "Choose evidence",
+      control: "multi_select",
+      prompt: "Which evidence should be emphasized?",
+      options: [{ key: "logs", label: "Logs" }, { key: "traces", label: "Traces" }],
+      minimumSelections: 1,
+      clientKey: "evidence-input",
+    });
+
+    expect(request).toEqual({
+      clientKey: "evidence-input",
+      sourceNodeId: 10,
+      sourceLayerId: 20,
+      kind: "input",
+      label: "Choose evidence",
+      variant: "pill",
+      icon: null,
+      description: null,
+      control: "multi_select",
+      prompt: "Which evidence should be emphasized?",
+      options: [{ key: "logs", label: "Logs" }, { key: "traces", label: "Traces" }],
+      minimumSelections: 1,
+    });
+
+    await graph.addAction(10, {
+      kind: "input",
+      sourceLayer: 20,
+      label: "Explain",
+      control: "text",
+      prompt: "Explain the tradeoff",
+      clientKey: "text-input",
+    });
+    expect(request).not.toHaveProperty("options");
+  });
+
   it("exposes nullable interaction lease identity on node reads", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       nodes: [{
@@ -190,6 +238,27 @@ describe("agent-facing graph objects", () => {
       "http://127.0.0.1:1/api/graph/personal-presentation",
       expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }) }),
     );
+  });
+
+  it("reads submitted input snapshots without child or occurrence authority", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      interaction: { id: 10, kind: "user-interaction", icon: "user", title: "", detail: "", state: "accepted" },
+      contexts: [],
+      submittedInputs: [{
+        action: { control: "single_select", prompt: "Choose evidence", options: [{ key: "logs", label: "Logs" }] },
+        value: { selected: [{ key: "logs", label: "Logs" }] },
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 10 });
+
+    const input = await graph.getInteractionInput();
+
+    expect(input.submittedInputs?.[0]).toEqual({
+      action: { control: "single_select", prompt: "Choose evidence", options: [{ key: "logs", label: "Logs" }] },
+      value: { selected: [{ key: "logs", label: "Logs" }] },
+    });
+    expect(input.submittedInputs?.[0]).not.toHaveProperty("actionId");
+    expect(input.submittedInputs?.[0]).not.toHaveProperty("occurrence");
   });
 
   it("discards a submitted layer and refreshes its object reference", async () => {

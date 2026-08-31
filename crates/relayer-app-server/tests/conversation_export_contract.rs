@@ -19,6 +19,7 @@ fn action(
         description: None,
         target_layer_id: target_layer_id.map(Into::into),
         interaction_text: None,
+        input: None,
         state: ExportRecordState::Accepted,
     }
 }
@@ -36,7 +37,40 @@ fn invoke(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction
         description: None,
         target_layer_id: None,
         interaction_text: Some("Continue".into()),
+        input: None,
         state: ExportRecordState::Accepted,
+    }
+}
+
+fn input(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction {
+    ExportAction {
+        id: id.into(),
+        source_node_id: source_node_id.into(),
+        source_layer_id: Some(source_layer_id.into()),
+        kind: ExportActionKind::Input,
+        relation: None,
+        label: "Respond".into(),
+        variant: ExportActionVariant::Pill,
+        icon: None,
+        description: None,
+        target_layer_id: None,
+        interaction_text: None,
+        input: Some(ExportInputActionSnapshot {
+            control: ExportInputControl::Text,
+            prompt: "Explain".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        }),
+        state: ExportRecordState::Accepted,
+    }
+}
+
+fn option(key: &str, label: &str) -> ExportInputOption {
+    ExportInputOption {
+        key: key.into(),
+        label: label.into(),
+        unsupported_fields: Default::default(),
     }
 }
 
@@ -110,6 +144,7 @@ fn context(id: &str, annotations: &[&str]) -> ExportInteractionContext {
 fn receipt(status: ExportCompletionStatus) -> ExportCompletionReceipt {
     ExportCompletionReceipt {
         status,
+        attempt_outcome: None,
         harness_configuration_name: Some("codex-basic".into()),
         harness_configuration_digest: Some(format!("sha256:{}", "a".repeat(64))),
         model_selection: Some(ExportModelSelection {
@@ -168,6 +203,7 @@ fn records() -> Vec<ConversationExportRecord> {
             origin: ExportTurnOrigin::User,
             completion: receipt(ExportCompletionStatus::Accepted),
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: Some(accepted_view()),
         })),
     ]
@@ -195,6 +231,7 @@ fn two_turn_records() -> Vec<ConversationExportRecord> {
             },
             completion: receipt(ExportCompletionStatus::Accepted),
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: Some(ExportAcceptedView {
                 interaction_node_id: "node:interaction-2".into(),
                 root_action: action(
@@ -278,6 +315,21 @@ fn serializes_exactly_header_and_turn_records_and_round_trips() {
 }
 
 #[test]
+fn accepted_input_action_requires_its_authored_payload() {
+    let mut fixture = records();
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    let mut missing_payload = input("action:input", "node:1", "layer:1");
+    missing_payload.input = None;
+    turn.accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .push(missing_payload);
+
+    assert_rejected_with_parity(&fixture, "invalid_action_shape");
+}
+
+#[test]
 fn older_turns_without_context_fields_decode_as_empty_context() {
     let ConversationExportRecord::Turn(turn) = &records()[1] else {
         unreachable!()
@@ -316,6 +368,7 @@ fn context_round_trip_preserves_order_nonaccepted_turns_and_shared_snapshots() {
             origin: ExportTurnOrigin::User,
             completion: receipt(ExportCompletionStatus::Failed),
             contexts: vec![context("action:context-2", &["Still inspect this"])],
+            submitted_inputs: vec![],
             accepted_view: None,
         },
     )));
@@ -445,6 +498,79 @@ fn preserves_actual_completion_status_without_inventing_acceptance() {
         assert_eq!(serde_json::to_value(status).unwrap(), wire_name);
     }
 
+    let mut cancelled = records();
+    let ConversationExportRecord::Turn(turn) = &mut cancelled[1] else {
+        unreachable!()
+    };
+    turn.completion.status = ExportCompletionStatus::Stopped;
+    turn.completion.attempt_outcome = Some(ExportAttemptOutcome::Cancelled);
+    turn.accepted_view = None;
+    let encoded = serde_json::to_value(&cancelled[1]).unwrap();
+    assert_eq!(encoded["completion"]["status"], "stopped");
+    assert_eq!(encoded["completion"]["attemptOutcome"], "cancelled");
+    let decoded: ConversationExportRecord = serde_json::from_value(encoded).unwrap();
+    let ConversationExportRecord::Turn(decoded) = decoded else {
+        unreachable!()
+    };
+    assert_eq!(
+        decoded.completion.attempt_outcome,
+        Some(ExportAttemptOutcome::Cancelled)
+    );
+
+    for (status, outcome) in [
+        (
+            ExportCompletionStatus::Accepted,
+            ExportAttemptOutcome::ModelFailed,
+        ),
+        (
+            ExportCompletionStatus::Accepted,
+            ExportAttemptOutcome::Running,
+        ),
+        (
+            ExportCompletionStatus::Running,
+            ExportAttemptOutcome::Accepted,
+        ),
+    ] {
+        let mut impossible = records();
+        let ConversationExportRecord::Turn(turn) = &mut impossible[1] else {
+            unreachable!()
+        };
+        turn.completion.status = status;
+        turn.completion.attempt_outcome = Some(outcome);
+        if status != ExportCompletionStatus::Accepted {
+            turn.accepted_view = None;
+        }
+        assert_rejected_with_parity(&impossible, "attempt_outcome_status_mismatch");
+    }
+
+    for (status, outcome) in [
+        (
+            ExportCompletionStatus::Accepted,
+            Some(ExportAttemptOutcome::Accepted),
+        ),
+        (ExportCompletionStatus::Accepted, None),
+        (
+            ExportCompletionStatus::Running,
+            Some(ExportAttemptOutcome::Running),
+        ),
+        (
+            ExportCompletionStatus::Failed,
+            Some(ExportAttemptOutcome::ModelFailed),
+        ),
+    ] {
+        let mut valid = records();
+        let ConversationExportRecord::Turn(turn) = &mut valid[1] else {
+            unreachable!()
+        };
+        turn.completion.status = status;
+        turn.completion.attempt_outcome = outcome;
+        if status != ExportCompletionStatus::Accepted {
+            turn.accepted_view = None;
+        }
+        validate_export_records(&valid).unwrap();
+        validate_incrementally(&valid).unwrap();
+    }
+
     let mut accepted_without_view = records();
     let ConversationExportRecord::Turn(turn) = &mut accepted_without_view[1] else {
         unreachable!()
@@ -539,6 +665,7 @@ fn allows_reused_action_provenance_and_requires_action_origins_to_name_prior_inv
             },
             completion: receipt(ExportCompletionStatus::Accepted),
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: Some(ExportAcceptedView {
                 interaction_node_id: "node:interaction-2".into(),
                 root_action: action(
@@ -760,4 +887,372 @@ fn admitted_model_plan_requires_its_selected_family_and_orchestrator() {
         .unwrap()
         .family_revision += 1;
     assert_rejected_with_parity(&fixture, "admitted_model_plan_digest_mismatch");
+}
+
+#[test]
+fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
+    let mut fixture = two_turn_records();
+    let ConversationExportRecord::Turn(source_turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    let source_actions = &mut source_turn.accepted_view.as_mut().unwrap().layers[0].actions;
+    source_actions.extend([
+        input("action:text", "node:1", "layer:1"),
+        input("action:single", "node:1", "layer:1"),
+        input("action:multi", "node:1", "layer:1"),
+    ]);
+
+    let ConversationExportRecord::Turn(consuming_turn) = &mut fixture[2] else {
+        unreachable!()
+    };
+    consuming_turn.text.clear();
+    consuming_turn.interaction_node_id = Some("node:input-root-2".into());
+    consuming_turn.origin = ExportTurnOrigin::User;
+    consuming_turn.completion = receipt(ExportCompletionStatus::Failed);
+    consuming_turn.accepted_view = None;
+    let source = |action_id: &str| ExportInputSource {
+        interaction_node_id: "node:interaction-1".into(),
+        layer_id: "layer:1".into(),
+        action_id: action_id.into(),
+        node_id: "node:1".into(),
+    };
+    let single_options = vec![option("red", "Red"), option("blue", "Blue")];
+    let multi_options = vec![option("a", "Alpha"), option("b", "Beta")];
+    consuming_turn.submitted_inputs = vec![
+        ExportSubmittedInput {
+            id: "input-child:text".into(),
+            root_turn_id: "turn:2".into(),
+            source: source("action:text"),
+            action: ExportInputActionSnapshot {
+                control: ExportInputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: ExportSubmittedInputValue::Text {
+                text: "Because".into(),
+            },
+        },
+        ExportSubmittedInput {
+            id: "input-child:single".into(),
+            root_turn_id: "turn:2".into(),
+            source: source("action:single"),
+            action: ExportInputActionSnapshot {
+                control: ExportInputControl::SingleSelect,
+                prompt: "Choose one".into(),
+                options: single_options.clone(),
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: ExportSubmittedInputValue::Selected {
+                selected: vec![single_options[1].clone()],
+            },
+        },
+        ExportSubmittedInput {
+            id: "input-child:multi".into(),
+            root_turn_id: "turn:2".into(),
+            source: source("action:multi"),
+            action: ExportInputActionSnapshot {
+                control: ExportInputControl::MultiSelect,
+                prompt: "Choose several".into(),
+                options: multi_options.clone(),
+                minimum_selections: Some(2),
+                unsupported_fields: Default::default(),
+            },
+            value: ExportSubmittedInputValue::Selected {
+                selected: multi_options,
+            },
+        },
+    ];
+    consuming_turn.submitted_inputs.sort_by_key(|input| {
+        serde_json::to_vec(&(
+            &input.source.interaction_node_id,
+            &input.source.layer_id,
+            &input.source.action_id,
+            &input.source.node_id,
+            &input.action,
+            &input.value,
+        ))
+        .unwrap()
+    });
+
+    validate_export_records(&fixture).unwrap();
+    let mut jsonl = Vec::new();
+    for record in &fixture {
+        serde_json::to_writer(&mut jsonl, record).unwrap();
+        jsonl.push(b'\n');
+    }
+    assert_eq!(decode_export_jsonl(&jsonl).unwrap(), fixture);
+
+    let mut blank_activation_label = fixture.clone();
+    let ConversationExportRecord::Turn(turn) = &mut blank_activation_label[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0].actions[0].label = "  ".into();
+    assert_rejected_with_parity(&blank_activation_label, "string_empty");
+
+    let encoded = String::from_utf8(jsonl.clone()).unwrap();
+    let unsupported_control_jsonl =
+        encoded.replacen("\"control\":\"single_select\"", "\"control\":\"slider\"", 1);
+    let ExportReadError::Contract(error) =
+        decode_export_jsonl(unsupported_control_jsonl.as_bytes()).unwrap_err()
+    else {
+        panic!("unknown controls must reach contract validation")
+    };
+    assert_eq!(error.code, "input_action_control_unsupported");
+    let unsupported_control = unsupported_control_jsonl
+        .lines()
+        .enumerate()
+        .map(|(index, line)| decode_export_record_line(line.as_bytes(), index + 1).unwrap())
+        .collect::<Vec<_>>();
+    assert_rejected_with_parity(&unsupported_control, "input_action_control_unsupported");
+
+    let mut unresolved = fixture.clone();
+    let ConversationExportRecord::Turn(turn) = &mut unresolved[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].source.action_id = "action:missing".into();
+    assert_rejected_with_parity(&unresolved, "submitted_input_source_unresolved");
+
+    let mut invalid_single_minimum = fixture.clone();
+    let ConversationExportRecord::Turn(turn) = &mut invalid_single_minimum[2] else {
+        unreachable!()
+    };
+    let single = turn
+        .submitted_inputs
+        .iter_mut()
+        .find(|input| input.action.control == ExportInputControl::SingleSelect)
+        .unwrap();
+    single.action.minimum_selections = Some(1);
+    assert_rejected_with_parity(&invalid_single_minimum, "input_action_minimum_unexpected");
+
+    let single_only = || {
+        let mut records = fixture.clone();
+        let ConversationExportRecord::Turn(turn) = &mut records[2] else {
+            unreachable!()
+        };
+        turn.submitted_inputs
+            .retain(|input| input.action.control == ExportInputControl::SingleSelect);
+        records
+    };
+    let mut oversized_prompt = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut oversized_prompt[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.prompt = "p".repeat(2_001);
+    assert_rejected_with_parity(&oversized_prompt, "input_action_prompt_too_long");
+
+    let mut blank_prompt = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut blank_prompt[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.prompt = "  ".into();
+    assert_rejected_with_parity(&blank_prompt, "input_action_prompt_required");
+
+    let mut missing_options = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut missing_options[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options.clear();
+    assert_rejected_with_parity(&missing_options, "input_action_options_required");
+
+    let mut too_many_options = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut too_many_options[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options = (0..51)
+        .map(|index| option(&format!("key-{index}"), &format!("Option {index}")))
+        .collect();
+    assert_rejected_with_parity(&too_many_options, "input_action_option_count");
+
+    let mut invalid_key = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut invalid_key[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[0].key = " untrimmed".into();
+    assert_rejected_with_parity(&invalid_key, "input_action_option_key_invalid");
+
+    let mut duplicate_key = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut duplicate_key[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[1].key =
+        turn.submitted_inputs[0].action.options[0].key.clone();
+    assert_rejected_with_parity(&duplicate_key, "input_action_option_key_duplicate");
+
+    let mut blank_label = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut blank_label[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[0].label = "\t".into();
+    assert_rejected_with_parity(&blank_label, "input_action_option_label_required");
+
+    let mut oversized_label = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut oversized_label[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[0].label = "l".repeat(513);
+    assert_rejected_with_parity(&oversized_label, "input_action_option_label_too_long");
+
+    let multi_only = || {
+        let mut records = fixture.clone();
+        let ConversationExportRecord::Turn(turn) = &mut records[2] else {
+            unreachable!()
+        };
+        turn.submitted_inputs
+            .retain(|input| input.action.control == ExportInputControl::MultiSelect);
+        records
+    };
+
+    let mut canonical_selection = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut canonical_selection[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options = vec![option("é", "Accent"), option("z", "Zed")];
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Selected {
+        selected: vec![option("z", "Zed"), option("é", "Accent")],
+    };
+    validate_export_records(&canonical_selection).unwrap();
+    validate_incrementally(&canonical_selection).unwrap();
+
+    let mut reversed_selection = canonical_selection;
+    let ConversationExportRecord::Turn(turn) = &mut reversed_selection[2] else {
+        unreachable!()
+    };
+    let ExportSubmittedInputValue::Selected { selected } = &mut turn.submitted_inputs[0].value
+    else {
+        unreachable!()
+    };
+    selected.reverse();
+    let batch_error = validate_export_records(&reversed_selection).unwrap_err();
+    assert_eq!(batch_error.code, "input_selection_order_invalid");
+    assert_eq!(
+        batch_error.path,
+        "record[2].submittedInputs[0].value.selected"
+    );
+    let incremental_error = validate_incrementally(&reversed_selection).unwrap_err();
+    assert_eq!(incremental_error.code, batch_error.code);
+    assert_eq!(incremental_error.path, batch_error.path);
+
+    let mut invalid_minimum = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut invalid_minimum[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.minimum_selections = Some(3);
+    assert_rejected_with_parity(&invalid_minimum, "input_action_minimum_invalid");
+
+    let mut duplicate_selection = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut duplicate_selection[2] else {
+        unreachable!()
+    };
+    let duplicate = turn.submitted_inputs[0].action.options[0].clone();
+    let ExportSubmittedInputValue::Selected { selected } = &mut turn.submitted_inputs[0].value
+    else {
+        unreachable!()
+    };
+    selected.push(duplicate);
+    assert_rejected_with_parity(&duplicate_selection, "input_option_duplicate");
+
+    let mut unknown_selection = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut unknown_selection[2] else {
+        unreachable!()
+    };
+    let known = turn.submitted_inputs[0].action.options[1].clone();
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Selected {
+        selected: vec![option("missing", "Missing"), known],
+    };
+    assert_rejected_with_parity(&unknown_selection, "input_option_unknown");
+
+    let mut too_few_selections = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut too_few_selections[2] else {
+        unreachable!()
+    };
+    let selected = turn.submitted_inputs[0].action.options[0].clone();
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Selected {
+        selected: vec![selected],
+    };
+    assert_rejected_with_parity(&too_few_selections, "input_selection_count");
+
+    let text_only = || {
+        let mut records = fixture.clone();
+        let ConversationExportRecord::Turn(turn) = &mut records[2] else {
+            unreachable!()
+        };
+        turn.submitted_inputs
+            .retain(|input| input.action.control == ExportInputControl::Text);
+        records
+    };
+    let mut unknown_action_field = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut unknown_action_field[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0]
+        .action
+        .unsupported_fields
+        .insert("sliderMin".into(), serde_json::Value::from(1));
+    assert_rejected_with_parity(&unknown_action_field, "input_action_payload_unexpected");
+
+    let mut unknown_option_field = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut unknown_option_field[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[0]
+        .unsupported_fields
+        .insert("imageUrl".into(), serde_json::Value::from("banner.png"));
+    assert_rejected_with_parity(&unknown_option_field, "input_action_payload_unexpected");
+
+    let mut blank_text = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut blank_text[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Text { text: " ".into() };
+    assert_rejected_with_parity(&blank_text, "input_text_blank");
+
+    let mut maximum_text = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut maximum_text[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Text {
+        text: "x".repeat(MAX_STRING_BYTES),
+    };
+    validate_export_records(&maximum_text).unwrap();
+    validate_incrementally(&maximum_text).unwrap();
+
+    let mut oversized_text = maximum_text;
+    let ConversationExportRecord::Turn(turn) = &mut oversized_text[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Text {
+        text: "x".repeat(MAX_STRING_BYTES + 1),
+    };
+    let batch_error = validate_export_records(&oversized_text).unwrap_err();
+    assert_eq!(batch_error.code, "string_too_large");
+    assert_eq!(batch_error.path, "record[2].submittedInputs[0].value.text");
+    let incremental_error = validate_incrementally(&oversized_text).unwrap_err();
+    assert_eq!(incremental_error.code, batch_error.code);
+    assert_eq!(incremental_error.path, batch_error.path);
+
+    let mut text_with_options = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut text_with_options[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options = vec![option("extra", "Extra")];
+    assert_rejected_with_parity(&text_with_options, "input_action_options_unexpected");
+
+    let mut text_with_selected = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut text_with_selected[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Selected { selected: vec![] };
+    assert_rejected_with_parity(&text_with_selected, "input_action_snapshot_mismatch");
+
+    let mut select_with_text = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut select_with_text[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Text {
+        text: "wrong shape".into(),
+    };
+    assert_rejected_with_parity(&select_with_text, "input_action_snapshot_mismatch");
 }

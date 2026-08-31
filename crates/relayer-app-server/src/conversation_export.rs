@@ -6,7 +6,7 @@
 //! inference-free validation; snapshot construction and persistence live at
 //! higher product boundaries.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -20,6 +20,7 @@ pub const MAX_LAYERS_PER_TURN: usize = 10_000;
 pub const MAX_NODES_PER_LAYER: usize = 8;
 pub const MAX_EDGES_PER_LAYER: usize = 28;
 pub const MAX_ACTIONS_PER_LAYER: usize = 64;
+pub const MAX_SUBMITTED_INPUTS_PER_TURN: usize = 256;
 pub const MAX_STRING_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_PERMISSION_RECEIPT_BYTES: usize = 64 * 1024;
 
@@ -84,7 +85,72 @@ pub struct ConversationExportTurn {
     /// absent field as an empty list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contexts: Vec<ExportInteractionContext>,
+    /// Immutable, authority-free input children consumed by this turn. The
+    /// array is canonically sorted for stable bytes; siblings have no semantic
+    /// order. Older V1 readers deterministically decode an absent field as empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub submitted_inputs: Vec<ExportSubmittedInput>,
     pub accepted_view: Option<ExportAcceptedView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportSubmittedInput {
+    pub id: String,
+    /// The portable turn that owns the immutable child. This is root membership
+    /// without exposing a producer graph node or database identity.
+    pub root_turn_id: String,
+    pub source: ExportInputSource,
+    pub action: ExportInputActionSnapshot,
+    pub value: ExportSubmittedInputValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportInputSource {
+    pub interaction_node_id: String,
+    pub layer_id: String,
+    pub action_id: String,
+    pub node_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportInputControl {
+    Text,
+    SingleSelect,
+    MultiSelect,
+    #[serde(other)]
+    Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportInputOption {
+    pub key: String,
+    pub label: String,
+    #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unsupported_fields: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportInputActionSnapshot {
+    pub control: ExportInputControl,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<ExportInputOption>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_selections: Option<u32>,
+    #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unsupported_fields: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ExportSubmittedInputValue {
+    Text { text: String },
+    Selected { selected: Vec<ExportInputOption> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,10 +207,22 @@ pub enum ExportCompletionStatus {
     Stopped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportAttemptOutcome {
+    Running,
+    Accepted,
+    ModelFailed,
+    ExecutionFailed,
+    Cancelled,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportCompletionReceipt {
     pub status: ExportCompletionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_outcome: Option<ExportAttemptOutcome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness_configuration_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -307,6 +385,7 @@ pub enum ExportRecordState {
 pub enum ExportActionKind {
     Navigate,
     Invoke,
+    Input,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -345,6 +424,8 @@ pub struct ExportAction {
     pub target_layer_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ExportInputActionSnapshot>,
     pub state: ExportRecordState,
 }
 
@@ -477,6 +558,8 @@ pub struct ConversationExportValidator {
     edges_by_id: HashMap<String, [u8; 32]>,
     actions_by_id: HashMap<String, [u8; 32]>,
     context_actions_by_id: HashMap<String, [u8; 32]>,
+    input_action_ids: HashSet<String>,
+    submitted_input_ids: HashSet<String>,
 }
 
 impl ConversationExportValidator {
@@ -493,6 +576,8 @@ impl ConversationExportValidator {
             edges_by_id: HashMap::new(),
             actions_by_id: HashMap::new(),
             context_actions_by_id: HashMap::new(),
+            input_action_ids: HashSet::new(),
+            submitted_input_ids: HashSet::new(),
         })
     }
 
@@ -523,6 +608,36 @@ impl ConversationExportValidator {
             ));
         }
         validate_turn(turn, &path, &self.prior_invokes)?;
+        for (index, submitted) in turn.submitted_inputs.iter().enumerate() {
+            let submitted_path = format!("{path}.submittedInputs[{index}]");
+            if !self.submitted_input_ids.insert(submitted.id.clone()) {
+                return Err(ExportValidationError::new(
+                    "duplicate_submitted_input",
+                    format!("{submitted_path}.id"),
+                    "A submitted input child belongs to exactly one portable turn.",
+                ));
+            }
+            if submitted.root_turn_id != turn.id {
+                return Err(ExportValidationError::new(
+                    "submitted_input_root_mismatch",
+                    format!("{submitted_path}.rootTurnId"),
+                    "A submitted input child must name its consuming portable turn.",
+                ));
+            }
+            if !self
+                .interaction_ids
+                .contains(&submitted.source.interaction_node_id)
+                || !self.layers_by_id.contains_key(&submitted.source.layer_id)
+                || !self.nodes_by_id.contains_key(&submitted.source.node_id)
+                || !self.input_action_ids.contains(&submitted.source.action_id)
+            {
+                return Err(ExportValidationError::new(
+                    "submitted_input_source_unresolved",
+                    format!("{submitted_path}.source"),
+                    "Submitted input provenance must reference an input action occurrence in an earlier accepted turn.",
+                ));
+            }
+        }
         for context in &turn.contexts {
             if self.context_actions_by_id.contains_key(&context.id) {
                 return Err(ExportValidationError::new(
@@ -607,6 +722,13 @@ impl ConversationExportValidator {
                 &mut self.actions_by_id,
                 &self.root_action_ids,
             )?;
+            self.input_action_ids.extend(
+                view.layers
+                    .iter()
+                    .flat_map(|layer| &layer.actions)
+                    .filter(|action| action.kind == ExportActionKind::Input)
+                    .map(|action| action.id.clone()),
+            );
         }
         self.prior_invokes.insert(
             turn.id.clone(),
@@ -794,6 +916,7 @@ fn validate_turn(
         ));
     }
     validate_contexts(turn, path)?;
+    validate_submitted_inputs(turn, path)?;
     if let Some(interaction_node_id) = &turn.interaction_node_id {
         require_id(
             interaction_node_id,
@@ -808,20 +931,15 @@ fn validate_turn(
             "A turn with context must identify its authority-free interaction node.",
         ));
     }
-    if turn.text.trim().is_empty()
-        && !turn.contexts.iter().any(|context| {
-            context
-                .annotations
-                .iter()
-                .any(|annotation| !annotation.trim().is_empty())
-        })
-    {
+    if !turn.submitted_inputs.is_empty() && turn.interaction_node_id.is_none() {
         return Err(ExportValidationError::new(
-            "interaction_input_empty",
-            format!("{path}.text"),
-            "A portable turn requires non-whitespace message text or at least one annotation.",
+            "submitted_input_interaction_missing",
+            format!("{path}.interactionNodeId"),
+            "A turn with submitted input must identify its authority-free interaction root.",
         ));
     }
+    validate_materialized_turn_content(turn, path)?;
+    validate_completion_attempt_outcome(&turn.completion, path)?;
     require_string(
         &turn.completion.permission_profile_id,
         format!("{path}.completion.permissionProfileId"),
@@ -1036,6 +1154,52 @@ fn validate_turn(
     }
 }
 
+fn validate_completion_attempt_outcome(
+    completion: &ExportCompletionReceipt,
+    path: &str,
+) -> Result<(), ExportValidationError> {
+    let accepted_status = completion.status == ExportCompletionStatus::Accepted;
+    let accepted_outcome = completion.attempt_outcome == Some(ExportAttemptOutcome::Accepted);
+    let incompatible = match completion.attempt_outcome {
+        None => false,
+        Some(_) => accepted_status != accepted_outcome,
+    };
+    if incompatible {
+        return Err(ExportValidationError::new(
+            "attempt_outcome_status_mismatch",
+            format!("{path}.completion.attemptOutcome"),
+            "An accepted attempt outcome belongs only to an accepted completion, and an accepted completion cannot report a different terminal or running attempt outcome.",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_materialized_turn_content(
+    turn: &ConversationExportTurn,
+    path: &str,
+) -> Result<(), ExportValidationError> {
+    if turn.text.trim().is_empty()
+        && turn.submitted_inputs.is_empty()
+        && !turn.contexts.iter().any(|context| {
+            context
+                .annotations
+                .iter()
+                .any(|annotation| !annotation.trim().is_empty())
+        })
+        && !matches!(
+            turn.completion.status,
+            ExportCompletionStatus::Failed | ExportCompletionStatus::Stopped
+        )
+    {
+        return Err(ExportValidationError::new(
+            "interaction_input_empty",
+            format!("{path}.text"),
+            "A nonterminal or accepted portable turn requires message text, an annotation, or submitted input.",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_contexts(
     turn: &ConversationExportTurn,
     path: &str,
@@ -1090,6 +1254,307 @@ fn validate_contexts(
         }
     }
     Ok(())
+}
+
+fn validate_submitted_inputs(
+    turn: &ConversationExportTurn,
+    path: &str,
+) -> Result<(), ExportValidationError> {
+    if turn.submitted_inputs.len() > MAX_SUBMITTED_INPUTS_PER_TURN {
+        return Err(ExportValidationError::new(
+            "submitted_input_limit_exceeded",
+            format!("{path}.submittedInputs"),
+            format!("A turn may contain at most {MAX_SUBMITTED_INPUTS_PER_TURN} input children."),
+        ));
+    }
+    let mut ids = HashSet::new();
+    let mut occurrences = HashSet::new();
+    let mut previous_sort_key: Option<Vec<u8>> = None;
+    for (index, submitted) in turn.submitted_inputs.iter().enumerate() {
+        let submitted_path = format!("{path}.submittedInputs[{index}]");
+        require_id(&submitted.id, "input-child", format!("{submitted_path}.id"))?;
+        require_id(
+            &submitted.root_turn_id,
+            "turn",
+            format!("{submitted_path}.rootTurnId"),
+        )?;
+        require_id(
+            &submitted.source.interaction_node_id,
+            "node",
+            format!("{submitted_path}.source.interactionNodeId"),
+        )?;
+        require_id(
+            &submitted.source.layer_id,
+            "layer",
+            format!("{submitted_path}.source.layerId"),
+        )?;
+        require_id(
+            &submitted.source.action_id,
+            "action",
+            format!("{submitted_path}.source.actionId"),
+        )?;
+        require_id(
+            &submitted.source.node_id,
+            "node",
+            format!("{submitted_path}.source.nodeId"),
+        )?;
+        if !ids.insert(&submitted.id) {
+            return Err(ExportValidationError::new(
+                "duplicate_submitted_input",
+                format!("{submitted_path}.id"),
+                "A submitted input child may appear only once in a turn.",
+            ));
+        }
+        let occurrence = (
+            &submitted.source.interaction_node_id,
+            &submitted.source.layer_id,
+            &submitted.source.action_id,
+        );
+        if !occurrences.insert(occurrence) {
+            return Err(ExportValidationError::new(
+                "duplicate_submitted_input_occurrence",
+                format!("{submitted_path}.source"),
+                "One consuming turn may answer each exact input action occurrence once.",
+            ));
+        }
+        let sort_key = serde_json::to_vec(&(
+            &submitted.source.interaction_node_id,
+            &submitted.source.layer_id,
+            &submitted.source.action_id,
+            &submitted.source.node_id,
+            &submitted.action,
+            &submitted.value,
+        ))
+        .expect("portable submitted input sort key serializes");
+        if previous_sort_key
+            .as_ref()
+            .is_some_and(|previous| previous > &sort_key)
+        {
+            return Err(ExportValidationError::new(
+                "submitted_input_order_invalid",
+                format!("{path}.submittedInputs"),
+                "Submitted input siblings must use the canonical encoding order.",
+            ));
+        }
+        previous_sort_key = Some(sort_key);
+        validate_input_action_snapshot(&submitted.action, &format!("{submitted_path}.action"))?;
+        match submitted.action.control {
+            ExportInputControl::Text => match &submitted.value {
+                ExportSubmittedInputValue::Text { text } if text.trim().is_empty() => {
+                    return Err(ExportValidationError::new(
+                        "input_text_blank",
+                        format!("{submitted_path}.value"),
+                        "Enter non-whitespace text or detach the input.",
+                    ));
+                }
+                ExportSubmittedInputValue::Text { text } => {
+                    require_string(text, format!("{submitted_path}.value.text"))?;
+                }
+                ExportSubmittedInputValue::Selected { .. } => {
+                    return Err(ExportValidationError::new(
+                        "input_action_snapshot_mismatch",
+                        submitted_path,
+                        "Refresh the accepted action and recommit its value.",
+                    ));
+                }
+            },
+            ExportInputControl::SingleSelect | ExportInputControl::MultiSelect => {
+                let ExportSubmittedInputValue::Selected { selected } = &submitted.value else {
+                    return Err(ExportValidationError::new(
+                        "input_action_snapshot_mismatch",
+                        submitted_path,
+                        "Refresh the accepted action and recommit its value.",
+                    ));
+                };
+                for (option_index, option) in selected.iter().enumerate() {
+                    if let Some(field) = option.unsupported_fields.keys().next() {
+                        return Err(ExportValidationError::new(
+                            "input_action_payload_unexpected",
+                            format!("{submitted_path}.value.selected[{option_index}].{field}"),
+                            "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
+                        ));
+                    }
+                }
+                if selected
+                    .iter()
+                    .map(|option| &option.key)
+                    .collect::<HashSet<_>>()
+                    .len()
+                    != selected.len()
+                {
+                    return Err(ExportValidationError::new(
+                        "input_option_duplicate",
+                        format!("{submitted_path}.value"),
+                        "Remove repeated multi-select keys.",
+                    ));
+                }
+                if !selected.iter().all(|selected| {
+                    submitted
+                        .action
+                        .options
+                        .iter()
+                        .any(|option| option == selected)
+                }) {
+                    return Err(ExportValidationError::new(
+                        "input_option_unknown",
+                        format!("{submitted_path}.value"),
+                        "Select only keys from the accepted action snapshot.",
+                    ));
+                }
+                if submitted.action.control == ExportInputControl::MultiSelect
+                    && selected
+                        .windows(2)
+                        .any(|pair| pair[0].key.as_bytes() > pair[1].key.as_bytes())
+                {
+                    return Err(ExportValidationError::new(
+                        "input_selection_order_invalid",
+                        format!("{submitted_path}.value.selected"),
+                        "Sort selected options by exact UTF-8 key bytes before import.",
+                    ));
+                }
+                let count_valid = match submitted.action.control {
+                    ExportInputControl::SingleSelect => selected.len() == 1,
+                    ExportInputControl::MultiSelect => submitted
+                        .action
+                        .minimum_selections
+                        .is_none_or(|minimum| selected.len() >= minimum as usize),
+                    ExportInputControl::Text => unreachable!(),
+                    ExportInputControl::Unsupported => unreachable!(),
+                };
+                if !count_valid {
+                    return Err(ExportValidationError::new(
+                        "input_selection_count",
+                        format!("{submitted_path}.value"),
+                        "Meet that action's exact selection count or minimum.",
+                    ));
+                }
+            }
+            ExportInputControl::Unsupported => unreachable!(),
+        }
+    }
+    Ok(())
+}
+
+fn validate_input_action_snapshot(
+    action: &ExportInputActionSnapshot,
+    path: &str,
+) -> Result<(), ExportValidationError> {
+    if let Some(field) = action.unsupported_fields.keys().next() {
+        return Err(ExportValidationError::new(
+            "input_action_payload_unexpected",
+            format!("{path}.{field}"),
+            "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
+        ));
+    }
+    if action.control == ExportInputControl::Unsupported {
+        return Err(ExportValidationError::new(
+            "input_action_control_unsupported",
+            format!("{path}.control"),
+            "Use text, single_select, or multi_select.",
+        ));
+    }
+    if action.prompt.trim().is_empty() {
+        return Err(ExportValidationError::new(
+            "input_action_prompt_required",
+            format!("{path}.prompt"),
+            "Supply a non-whitespace prompt.",
+        ));
+    } else if action.prompt.len() > 2_000 {
+        return Err(ExportValidationError::new(
+            "input_action_prompt_too_long",
+            format!("{path}.prompt"),
+            "Shorten the UTF-8 prompt to 2,000 bytes.",
+        ));
+    }
+    if matches!(
+        action.control,
+        ExportInputControl::SingleSelect | ExportInputControl::MultiSelect
+    ) && action.options.is_empty()
+    {
+        return Err(ExportValidationError::new(
+            "input_action_options_required",
+            format!("{path}.options"),
+            "Supply 1 through 50 options for a select.",
+        ));
+    }
+    if action.control == ExportInputControl::Text && !action.options.is_empty() {
+        return Err(ExportValidationError::new(
+            "input_action_options_unexpected",
+            format!("{path}.options"),
+            "Remove options from a text action.",
+        ));
+    }
+    if action.options.len() > 50 {
+        return Err(ExportValidationError::new(
+            "input_action_option_count",
+            format!("{path}.options"),
+            "Keep the option count in 1..=50.",
+        ));
+    }
+    let mut option_keys = HashSet::new();
+    for (option_index, option) in action.options.iter().enumerate() {
+        if let Some(field) = option.unsupported_fields.keys().next() {
+            return Err(ExportValidationError::new(
+                "input_action_payload_unexpected",
+                format!("{path}.options[{option_index}].{field}"),
+                "Remove every field not defined by the selected input control, including navigate, invoke, or unknown subtype fields.",
+            ));
+        }
+        if option.key.is_empty()
+            || option.key.trim() != option.key
+            || option.key.contains('\0')
+            || option.key.len() > 128
+        {
+            return Err(ExportValidationError::new(
+                "input_action_option_key_invalid",
+                format!("{path}.options[{option_index}].key"),
+                "Use a nonempty, trimmed, NUL-free key of at most 128 bytes.",
+            ));
+        }
+        if option.label.trim().is_empty() {
+            return Err(ExportValidationError::new(
+                "input_action_option_label_required",
+                format!("{path}.options[{option_index}].label"),
+                "Supply a non-whitespace label.",
+            ));
+        } else if option.label.len() > 512 {
+            return Err(ExportValidationError::new(
+                "input_action_option_label_too_long",
+                format!("{path}.options[{option_index}].label"),
+                "Shorten the UTF-8 label to 512 bytes.",
+            ));
+        }
+        if !option_keys.insert(&option.key) {
+            return Err(ExportValidationError::new(
+                "input_action_option_key_duplicate",
+                format!("{path}.options[{option_index}].key"),
+                "Give every option an exact unique key.",
+            ));
+        }
+    }
+    match action.control {
+        ExportInputControl::Text | ExportInputControl::SingleSelect
+            if action.minimum_selections.is_some() =>
+        {
+            Err(ExportValidationError::new(
+                "input_action_minimum_unexpected",
+                format!("{path}.minimumSelections"),
+                "Remove it unless the control is multi-select.",
+            ))
+        }
+        ExportInputControl::MultiSelect
+            if action
+                .minimum_selections
+                .is_some_and(|minimum| minimum == 0 || minimum as usize > action.options.len()) =>
+        {
+            Err(ExportValidationError::new(
+                "input_action_minimum_invalid",
+                format!("{path}.minimumSelections"),
+                "Use an integer in 1..=options.length.",
+            ))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_optional_strings(
@@ -1472,21 +1937,31 @@ fn validate_action(action: &ExportAction, path: &str) -> Result<(), ExportValida
         ExportActionKind::Navigate
             if action.relation.is_some()
                 && action.target_layer_id.is_some()
-                && action.interaction_text.is_none() => {}
+                && action.interaction_text.is_none()
+                && action.input.is_none() => {}
         ExportActionKind::Invoke
             if action.relation.is_none()
                 && action.target_layer_id.is_none()
+                && action.input.is_none()
                 && action
                     .interaction_text
                     .as_deref()
                     .is_some_and(|text| !text.trim().is_empty()) => {}
+        ExportActionKind::Input
+            if action.relation.is_none()
+                && action.target_layer_id.is_none()
+                && action.interaction_text.is_none()
+                && action.input.is_some() => {}
         _ => {
             return Err(ExportValidationError::new(
                 "invalid_action_shape",
                 path,
-                "Navigate actions require relation and targetLayerId; invoke actions require interactionText.",
+                "Navigate actions require relation and targetLayerId; invoke actions require interactionText; input actions require an input payload and reject navigation and invocation fields.",
             ));
         }
+    }
+    if let Some(input) = &action.input {
+        validate_input_action_snapshot(input, &format!("{path}.input"))?;
     }
     if action.variant == ExportActionVariant::Card
         && action
