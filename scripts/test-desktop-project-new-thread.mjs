@@ -187,6 +187,20 @@ async function run() {
   };
   const evaluate = (source) => webContents.executeJavaScript(source);
   const click = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)})?.click()`);
+  const clickProjectAction = async (projectId) => {
+    const selector = `[data-project-new-thread="${projectId}"]`;
+    const point = await evaluate(`(() => {
+      const rect = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect();
+      return rect ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) } : null;
+    })()`);
+    if (!point) throw new Error(`Missing project action ${projectId}.`);
+    webContents.sendInputEvent({ type: "mouseMove", ...point });
+    await waitFor(`project action ${projectId} to reveal`, () => evaluate(`(
+      getComputedStyle(document.querySelector(${JSON.stringify(selector)})).opacity === '1'
+    )`));
+    webContents.sendInputEvent({ type: "mouseDown", button: "left", clickCount: 1, ...point });
+    webContents.sendInputEvent({ type: "mouseUp", button: "left", clickCount: 1, ...point });
+  };
   const setValue = (selector, value) => evaluate(`(() => {
     const input = document.querySelector(${JSON.stringify(selector)});
     input.value = ${JSON.stringify(value)};
@@ -229,6 +243,16 @@ async function run() {
         const value = row.getBoundingClientRect();
         return { x: value.x, y: value.y, width: value.width, height: value.height };
       })(),
+      containment: (() => {
+        const rowRect = row.getBoundingClientRect();
+        const actionRect = action.getBoundingClientRect();
+        const sidebarRect = document.querySelector('.sidebar').getBoundingClientRect();
+        return {
+          rowRight: rowRect.right,
+          actionRight: actionRect.right,
+          sidebarRight: sidebarRect.right,
+        };
+      })(),
     };
   })()`));
   if (resting.rowText !== "relayer-graphcomplete") {
@@ -245,6 +269,10 @@ async function run() {
   }
   if (resting.actionCount !== 1) {
     throw new Error(`The project row did not expose exactly one compose target: ${JSON.stringify(resting)}`);
+  }
+  if (resting.containment.rowRight > resting.containment.sidebarRight
+    || resting.containment.actionRight > resting.containment.sidebarRight) {
+    throw new Error(`The project row action escaped the sidebar: ${JSON.stringify(resting.containment)}`);
   }
   const longEmptyProject = await evaluate(`(() => {
     const row = document.querySelector('[data-project-row="${secondProject.id}"]');
@@ -301,7 +329,7 @@ async function run() {
 
   const pendingPrompt = "Keep this pending New Thread draft.";
   await setValue("#newThreadPrompt", pendingPrompt);
-  await click(`[data-project-new-thread="${project.id}"]`);
+  await clickProjectAction(project.id);
   await waitFor("the first project-scoped composer", () => evaluate(`(
     !document.querySelector('#newThreadView')?.classList.contains('hidden')
       && document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(pendingPrompt)}
@@ -319,7 +347,7 @@ async function run() {
     throw new Error(`The project action did not scope and preserve the pending draft: ${JSON.stringify(firstScope)}`);
   }
   await evaluate(`document.querySelector('#newThreadPrompt').blur()`);
-  await click(`[data-project-new-thread="${project.id}"]`);
+  await clickProjectAction(project.id);
   await waitFor("same-project activation to restore focus only", () => evaluate(`(
     document.activeElement?.id === 'newThreadPrompt'
       && document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(pendingPrompt)}
@@ -330,7 +358,7 @@ async function run() {
     throw new Error("Opening a project-scoped composer created a thread before Send.");
   }
 
-  await click(`[data-project-new-thread="${secondProject.id}"]`);
+  await clickProjectAction(secondProject.id);
   await waitFor("the cross-project scope change", () => evaluate(`(
     document.querySelector('#scopeLabel')?.textContent === ${JSON.stringify(secondProject.name)}
       && document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(pendingPrompt)}
@@ -340,7 +368,7 @@ async function run() {
   if (rowClickScope !== secondProject.name) {
     throw new Error("Clicking the project row itself unexpectedly opened or rescoped the composer.");
   }
-  await click(`[data-project-new-thread="${project.id}"]`);
+  await clickProjectAction(project.id);
   await waitFor("the original project scope to return", () => evaluate(`(
     document.querySelector('#scopeLabel')?.textContent === ${JSON.stringify(project.name)}
       && document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(pendingPrompt)}
@@ -360,7 +388,7 @@ async function run() {
       && document.querySelector('#threadPrompt')?.disabled === false
   )`));
   await setValue("#threadPrompt", followupPrompt);
-  await click(`[data-project-new-thread="${project.id}"]`);
+  await clickProjectAction(project.id);
   await waitFor("the separate empty pending composer", () => evaluate(`(
     !document.querySelector('#newThreadView')?.classList.contains('hidden')
       && document.querySelector('#newThreadPrompt')?.value === ''
@@ -373,7 +401,7 @@ async function run() {
     !document.querySelector('#threadView')?.classList.contains('hidden')
       && document.querySelector('#threadPrompt')?.value === ${JSON.stringify(followupPrompt)}
   )`));
-  await click(`[data-project-new-thread="${project.id}"]`);
+  await clickProjectAction(project.id);
   await waitFor("the pending project draft to return", () => evaluate(`(
     document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(separatePendingPrompt)}
       && document.querySelector('#scopeLabel')?.textContent === ${JSON.stringify(project.name)}
@@ -414,7 +442,7 @@ async function run() {
   await waitFor("the saved follow-up draft to clear after Send", () => evaluate(`(
     document.querySelector('#threadPrompt')?.value === ''
   )`), 20_000);
-  await click(`[data-project-new-thread="${project.id}"]`);
+  await clickProjectAction(project.id);
   await waitFor("the pending draft before Send", () => evaluate(`(
     document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(separatePendingPrompt)}
       && document.querySelector('#createThread')?.disabled === false
@@ -422,7 +450,7 @@ async function run() {
   await click(`[data-thread="${firstThread.id}"]`);
   const replacementFollowupPrompt = "Keep this replacement follow-up through pending Send.";
   await setValue("#threadPrompt", replacementFollowupPrompt);
-  await click(`[data-project-new-thread="${project.id}"]`);
+  await clickProjectAction(project.id);
   await waitFor("the pending draft after saved follow-up Send", () => evaluate(`(
     document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(separatePendingPrompt)}
       && document.querySelector('#createThread')?.disabled === false
@@ -438,8 +466,9 @@ async function run() {
   await waitFor("the second thread workspace", () => evaluate(`(
     !document.querySelector('#threadView')?.classList.contains('hidden')
       && document.querySelector('[data-thread="${secondThread.id}"]')?.classList.contains('active')
-  )`));
-  await click(`[data-project-new-thread="${project.id}"]`);
+      && document.querySelector('#threadPrompt')?.disabled === false
+  )`), 20_000);
+  await clickProjectAction(project.id);
   await waitFor("the cleared pending draft after Send", () => evaluate(`(
     !document.querySelector('#newThreadView')?.classList.contains('hidden')
       && document.querySelector('#newThreadPrompt')?.value === ''
@@ -458,7 +487,7 @@ async function run() {
     throw new Error(`${error.message} ${JSON.stringify(draftState)}`);
   }
   await setValue("#threadPrompt", "");
-  await click(`[data-project-new-thread="${project.id}"]`);
+  await clickProjectAction(project.id);
   await click(`[data-thread="${firstThread.id}"]`);
   await waitFor("the explicitly cleared saved-thread draft", () => evaluate(`(
     document.querySelector('#threadPrompt')?.value === ''
