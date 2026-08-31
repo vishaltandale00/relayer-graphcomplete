@@ -9,13 +9,14 @@ import { pathToFileURL } from "node:url";
 import { nativeBinaryName } from "../shared/target.mjs";
 
 import {
+  graphMemoryFixtureFactory,
   gradeInputRoundTripSet,
   gradeInputRoundTripControlSet,
   InputOperatorController,
   runInputGroundingJudge,
   taskSystemFixtureFactory,
 } from "@relayer/eval-runner";
-import { evalHarnessConfigurationPaths } from "./configuration-paths.mjs";
+import { evalHarnessConfigurationPaths, evalRuntimeTarget } from "./configuration-paths.mjs";
 import { EvalService } from "./eval-service.mjs";
 import { loadAtomicAnnotationSnapshots } from "./annotation-snapshot-loader.mjs";
 import { loadJudgeScreenshotArtifact } from "./judge-screenshot-loader.mjs";
@@ -63,12 +64,17 @@ const appServerBinary = app.isPackaged
   ? join(process.resourcesPath, "bin", nativeBinaryName("relayer-app-server"))
   : resolve(process.env.RELAYER_APP_SERVER_BINARY || join(repositoryRoot, "target", "debug", "relayer-app-server"));
 const harnessDirectory = app.isPackaged ? join(process.resourcesPath, "harnesses") : join(repositoryRoot, "harnesses");
+const evalTarget = evalRuntimeTarget({ isPackaged: app.isPackaged, environment: process.env });
 const permissionCatalogPath = app.isPackaged
   ? join(process.resourcesPath, "permissions", "desktop.json")
   : join(repositoryRoot, "permissions", "desktop.json");
 const productRendererDirectory = app.isPackaged ? join(process.resourcesPath, "renderer") : join(desktopDirectory, "renderer");
 const evalRendererDirectory = app.isPackaged ? join(process.resourcesPath, "eval-renderer") : join(desktopDirectory, "eval-renderer");
-const configurationPaths = evalHarnessConfigurationPaths({ harnessDirectory, isPackaged: app.isPackaged });
+const configurationPaths = evalHarnessConfigurationPaths({
+  harnessDirectory,
+  isPackaged: app.isPackaged,
+  targetKey: evalTarget.key,
+});
 if (!app.isPackaged) {
   const pythonClientPath = join(repositoryRoot, "python", "relayer-graph", "src");
   process.env.PYTHONPATH = [pythonClientPath, process.env.PYTHONPATH].filter(Boolean).join(delimiter);
@@ -115,7 +121,10 @@ const graphRuntime = new GraphCompleteRuntimeService({
   userDataDirectory,
   graphServerBinary,
   configurationPaths,
-  additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
+  additionalImplementations: {
+    "fixture.task-system": taskSystemFixtureFactory,
+    "fixture.graph-memory": graphMemoryFixtureFactory,
+  },
   codexBasicClientModuleUrl: graphClientModuleUrl,
   ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
   resolveCodexRuntime: () => managedCodexRuntime.resolve(),
@@ -543,6 +552,7 @@ async function start() {
     ensureModelCatalog: ensureEvalCodexCatalog,
     conversationImportEnabled: true,
     annotationSnapshotLoader: (threadIds) => loadAnnotationSnapshots(productSession, threadIds),
+    targetKey: evalTarget.key,
     onChanged: (runs) => dashboardWindow?.webContents.send("relayer-eval:runs-changed", runs),
   }).open();
   registerEvalIpc();

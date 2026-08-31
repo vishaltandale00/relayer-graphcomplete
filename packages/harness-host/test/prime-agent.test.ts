@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -373,9 +374,21 @@ describe("PrimeAgentHarness", () => {
       createAgentSessionFromServices,
     }) as never });
 
-    await Promise.all([
-      harness.complete(invokedRunContext(familyRunContext(41, "child-a", 0), 101)),
-      harness.complete(invokedRunContext(familyRunContext(42, "child-b", 2), 102)),
+    const firstExecution = harness.complete(invokedRunContext(familyRunContext(41, "child-a", 0), 101));
+    const secondExecution = harness.complete(invokedRunContext(familyRunContext(42, "child-b", 2), 102));
+    await Promise.all([firstExecution, secondExecution]);
+    const attachments = await Promise.all([firstExecution.attached, secondExecution.attached]);
+    expect(attachments).toEqual([
+      {
+        schemaVersion: 1,
+        provider: "prime-agent",
+        sessionDigest: `sha256:${createHash("sha256").update("/tmp/invoked-a.jsonl").digest("hex")}`,
+      },
+      {
+        schemaVersion: 1,
+        provider: "prime-agent",
+        sessionDigest: `sha256:${createHash("sha256").update("/tmp/invoked-b.jsonl").digest("hex")}`,
+      },
     ]);
 
     expect(open).toHaveBeenCalledWith("/tmp/root-prime-session.jsonl");
@@ -924,6 +937,36 @@ describe("PrimeAgentHarness", () => {
     expect(nativeInstructions?.[1]).toContain("every native child that can author graph content");
     expect(nativeInstructions?.[1]).not.toContain("Personal graph presentation preferences:");
     expect(nativeInstructions?.[1]).not.toContain("Decision-useful center");
+  });
+
+  it("includes Python graph-search guidance only for a query-v1 capability profile", async () => {
+    let disabledPrompt = "";
+    const disabled = await createHarness(primeSession("/tmp/search-disabled.jsonl", {
+      promptAndWait: vi.fn(async (text: string) => { disabledPrompt = text; }),
+    }), {
+      ...configuration,
+      graphCapabilityProfile: { search: "disabled" },
+    });
+    await disabled.complete(runContext(11, "disabled-token"));
+
+    let enabledPrompt = "";
+    const enabled = await createHarness(primeSession("/tmp/search-enabled.jsonl", {
+      promptAndWait: vi.fn(async (text: string) => { enabledPrompt = text; }),
+    }), {
+      ...configuration,
+      graphCapabilityProfile: { search: "query-v1" },
+    });
+    await enabled.complete(runContext(12, "enabled-token"));
+
+    expect(disabledPrompt).not.toContain("Graph search is available");
+    expect(disabledPrompt).not.toContain("GraphSearchRequest");
+    expect(enabledPrompt).toContain("Graph search is available");
+    expect(enabledPrompt).toContain("await graph.search(GraphSearchRequest(...))");
+    expect(enabledPrompt).toContain("query_contract_version=1");
+    expect(enabledPrompt).toContain('target={"scope": "project", "id": known_project_id}');
+    expect(enabledPrompt).toContain("Never invent, guess, or discover a target ID");
+    expect(enabledPrompt).toContain('result["type"] == "layer"');
+    expect(enabledPrompt).toContain('relation="reference"');
   });
 
   it("retries a presentation instruction reload after a transient failure", async () => {
@@ -1811,12 +1854,15 @@ function presentationRunContext(nodeId: number, token: string, versionId: number
   };
 }
 
-async function createHarness(session: PrimeAgentSessionFixture): Promise<PrimeAgentHarness> {
+async function createHarness(
+  session: PrimeAgentSessionFixture,
+  harnessConfiguration: HarnessConfiguration = configuration,
+): Promise<PrimeAgentHarness> {
   return PrimeAgentHarness.create({
     threadId: 7,
     workingDirectory: "/tmp/project",
     ...fullPermission,
-    configuration,
+    configuration: harnessConfiguration,
   }, { loadModule: async () => ({
     ...runScopeApi(),
     SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },

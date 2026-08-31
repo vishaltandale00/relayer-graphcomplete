@@ -1,10 +1,12 @@
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use relayer_graph_core::query::{QueryError, preflight_public_request_json};
 use relayer_graph_core::{
     ActionDraft, ActionId, ActionKind, CompletionOutput, CurrentTransition,
     CurrentTransitionReceipt, EdgeDraft, GraphAction, GraphDatabase, GraphError, GraphNode,
@@ -22,18 +24,40 @@ use std::{
 };
 use uuid::Uuid;
 
+#[cfg(feature = "ladybug")]
+pub mod search_index;
+
 #[derive(Clone)]
 pub struct ServerState {
     graph: GraphDatabase,
     sessions: Arc<Mutex<HashMap<String, RuntimeAuthority>>>,
     control_token: Arc<str>,
     temporal_features: TemporalFeatureConfig,
+    #[cfg(feature = "ladybug")]
+    search_index: Option<Arc<search_index::LadybugSearchIndex>>,
+    #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
+    search_cancellations: Arc<Mutex<VecDeque<search_index::QueryCancellation>>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum GraphSearchCapability {
+    #[default]
+    Disabled,
+    QueryV1,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GraphCapabilityProfile {
+    search: GraphSearchCapability,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RuntimeAuthority {
     node_id: NodeId,
     epoch: u64,
+    profile: GraphCapabilityProfile,
 }
 
 impl ServerState {
@@ -43,12 +67,53 @@ impl ServerState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             control_token: Arc::from(control_token.into()),
             temporal_features: TemporalFeatureConfig::default(),
+            #[cfg(feature = "ladybug")]
+            search_index: None,
+            #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
+            search_cancellations: Arc::default(),
         }
     }
 
     pub fn with_temporal_features(mut self, temporal_features: TemporalFeatureConfig) -> Self {
         self.temporal_features = temporal_features;
         self
+    }
+
+    #[cfg(feature = "ladybug")]
+    pub fn with_search_index(
+        mut self,
+        search_index: Arc<search_index::LadybugSearchIndex>,
+    ) -> Self {
+        self.graph = self.graph.with_search_index(search_index.clone());
+        self.search_index = Some(search_index);
+        self
+    }
+
+    #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
+    #[doc(hidden)]
+    pub fn with_contract_test_search_cancellation(
+        self,
+        cancellation: search_index::QueryCancellation,
+    ) -> Self {
+        self.search_cancellations
+            .lock()
+            .expect("search cancellation queue poisoned")
+            .push_back(cancellation);
+        self
+    }
+
+    #[cfg(feature = "ladybug")]
+    fn search_cancellation(&self) -> search_index::QueryCancellation {
+        #[cfg(feature = "crash-test-support")]
+        if let Some(cancellation) = self
+            .search_cancellations
+            .lock()
+            .expect("search cancellation queue poisoned")
+            .pop_front()
+        {
+            return cancellation;
+        }
+        search_index::QueryCancellation::default()
     }
 }
 
@@ -168,8 +233,91 @@ pub fn router(state: ServerState) -> Router {
             post(prepare_graph_completion),
         )
         .route("/api/graph/current/transitions", post(transition_current))
+        .route("/api/graph/search", post(search))
         .route("/api/graph/nodes/{id}/output", get(completion_output))
         .with_state(state)
+}
+
+#[cfg(feature = "ladybug")]
+async fn search(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    // The complete public contract boundary precedes all transport authority
+    // and store observations.
+    let preflight = preflight_public_request_json(&body).map_err(ApiError::query_contract)?;
+    let capability = capability(&state, &headers)?;
+    if capability.profile.search != GraphSearchCapability::QueryV1 {
+        return Err(ApiError::capability_not_granted());
+    }
+    let interaction_node_id = capability.node_id;
+    let permit = state
+        .graph
+        .query_read_permit(interaction_node_id, capability.epoch)
+        .await?;
+    let prepared = permit
+        .bind_prepared_public_query(preflight)
+        .map_err(ApiError::query_contract)?;
+    let index = state
+        .search_index
+        .as_ref()
+        .cloned()
+        .ok_or_else(ApiError::search_unavailable)?;
+    let cancellation = state.search_cancellation();
+    let mut cancel_on_drop = CancelSearchOnDrop(Some(cancellation.clone()));
+    // Keep the query future alive after an HTTP request future is dropped. The
+    // drop guard signals cancellation, and the detached query future owns the
+    // select branch that interrupts its exact Ladybug job before it exits.
+    let query = tokio::spawn(async move {
+        index
+            .execute_prepared(&permit, prepared, cancellation)
+            .await
+    });
+    let result = query
+        .await
+        .map_err(|_| ApiError::internal("graph search task stopped unexpectedly"))?
+        .map_err(|failure| match failure {
+            search_index::GraphQueryFailure::Contract(error) => ApiError::query_contract(error),
+            search_index::GraphQueryFailure::TargetNotReady { .. } => {
+                ApiError::search_unavailable()
+            }
+        })?;
+    cancel_on_drop.0 = None;
+    Ok(Json(result.outcome.to_json()))
+}
+
+#[cfg(not(feature = "ladybug"))]
+async fn search(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let preflight = preflight_public_request_json(&body).map_err(ApiError::query_contract)?;
+    let capability = capability(&state, &headers)?;
+    if capability.profile.search != GraphSearchCapability::QueryV1 {
+        return Err(ApiError::capability_not_granted());
+    }
+    let permit = state
+        .graph
+        .query_read_permit(capability.node_id, capability.epoch)
+        .await?;
+    permit
+        .bind_prepared_public_query(preflight)
+        .map_err(ApiError::query_contract)?;
+    Err(ApiError::search_unavailable())
+}
+
+#[cfg(feature = "ladybug")]
+struct CancelSearchOnDrop(Option<search_index::QueryCancellation>);
+
+#[cfg(feature = "ladybug")]
+impl Drop for CancelSearchOnDrop {
+    fn drop(&mut self) {
+        if let Some(cancellation) = &self.0 {
+            cancellation.cancel();
+        }
+    }
 }
 
 async fn begin_imported_conversation(
@@ -352,6 +500,8 @@ struct CreateInteractionRequest {
     mint_capability: bool,
     #[serde(default)]
     personal_presentation_profile: bool,
+    #[serde(default)]
+    graph_capability_profile: GraphCapabilityProfile,
 }
 
 fn default_mint_capability() -> bool {
@@ -488,7 +638,15 @@ async fn create_interaction(
         (node, actions, Vec::new())
     };
     let graph_token = if input.mint_capability {
-        Some(mint_capability(&state, interaction.id, None).await?)
+        Some(
+            mint_capability_with_profile(
+                &state,
+                interaction.id,
+                None,
+                input.graph_capability_profile,
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -896,6 +1054,8 @@ struct RemintCapabilityRequest {
     node_id: NodeId,
     #[serde(default)]
     graph_token: Option<String>,
+    #[serde(default)]
+    graph_capability_profile: GraphCapabilityProfile,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -912,14 +1072,36 @@ async fn remint_capability(
     require_bearer(&headers, &state.control_token)?;
     state.graph.writer_for_subgraph(input.node_id).await?;
     Ok(Json(RemintCapabilityResponse {
-        graph_token: mint_capability(&state, input.node_id, input.graph_token).await?,
+        graph_token: mint_capability_with_profile(
+            &state,
+            input.node_id,
+            input.graph_token,
+            input.graph_capability_profile,
+        )
+        .await?,
     }))
 }
 
+#[cfg(test)]
 async fn mint_capability(
     state: &ServerState,
     node_id: NodeId,
     requested_token: Option<String>,
+) -> Result<String, ApiError> {
+    mint_capability_with_profile(
+        state,
+        node_id,
+        requested_token,
+        GraphCapabilityProfile::default(),
+    )
+    .await
+}
+
+async fn mint_capability_with_profile(
+    state: &ServerState,
+    node_id: NodeId,
+    requested_token: Option<String>,
+    profile: GraphCapabilityProfile,
 ) -> Result<String, ApiError> {
     let graph_token = requested_token.unwrap_or_else(|| Uuid::new_v4().to_string());
     if graph_token.is_empty() {
@@ -930,13 +1112,14 @@ async fn mint_capability(
             .sessions
             .lock()
             .map_err(|_| ApiError::internal("session lock poisoned"))?;
-        if let Some(active) = sessions.get(&graph_token)
-            && active.node_id != node_id
-        {
-            return Err(ApiError::conflict(
-                "capability_token_conflict",
-                "graphToken is already bound to a different interaction",
-            ));
+        if let Some(active) = sessions.get(&graph_token) {
+            if active.node_id != node_id || active.profile != profile {
+                return Err(ApiError::conflict(
+                    "capability_token_conflict",
+                    "graphToken is already bound to a different interaction or capability profile",
+                ));
+            }
+            return Ok(graph_token);
         }
     }
     let epoch = state.graph.activate_completion_authority(node_id).await?;
@@ -945,7 +1128,14 @@ async fn mint_capability(
         .lock()
         .map_err(|_| ApiError::internal("session lock poisoned"))?;
     sessions.retain(|_, active| active.node_id != node_id);
-    sessions.insert(graph_token.clone(), RuntimeAuthority { node_id, epoch });
+    sessions.insert(
+        graph_token.clone(),
+        RuntimeAuthority {
+            node_id,
+            epoch,
+            profile,
+        },
+    );
     Ok(graph_token)
 }
 
@@ -1383,6 +1573,10 @@ fn session(state: &ServerState, headers: &HeaderMap) -> Result<RuntimeAuthority,
     session_for_token(state, token)
 }
 
+fn capability(state: &ServerState, headers: &HeaderMap) -> Result<RuntimeAuthority, ApiError> {
+    session(state, headers)
+}
+
 fn session_for_token(state: &ServerState, token: &str) -> Result<RuntimeAuthority, ApiError> {
     state
         .sessions
@@ -1418,6 +1612,32 @@ impl ApiError {
         Self(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({"error":{"code":"internal","message":message}}),
+        )
+    }
+
+    fn search_unavailable() -> Self {
+        Self(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error":{"code":"search_unavailable","message":"Graph search is temporarily unavailable."}}),
+        )
+    }
+
+    fn capability_not_granted() -> Self {
+        Self(
+            StatusCode::FORBIDDEN,
+            json!({"error":{"code":"capability_not_granted","message":"This graph capability does not grant search access."}}),
+        )
+    }
+
+    fn query_contract(error: QueryError) -> Self {
+        Self(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            json!({"error":{
+                "code": error.code,
+                "phase": error.phase,
+                "path": error.path,
+                "message": error.message,
+            }}),
         )
     }
 }
@@ -3862,5 +4082,157 @@ mod tests {
         );
         assert!(normalized["submittedInputs"][0].get("attemptKey").is_none());
         assert!(normalized["submittedInputs"][0].get("occurrence").is_none());
+    }
+}
+
+#[cfg(all(test, not(feature = "ladybug")))]
+mod no_ladybug_search_tests {
+    use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use tower::ServiceExt;
+
+    async fn body(response: Response) -> Value {
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn search_fails_closed_without_ladybug_after_selector_authority() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(None, ThreadId::new(73).unwrap(), "Search")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let graph_token = mint_capability_with_profile(
+            &state,
+            interaction.id,
+            None,
+            GraphCapabilityProfile {
+                search: GraphSearchCapability::QueryV1,
+            },
+        )
+        .await
+        .ok()
+        .unwrap();
+        let app = router(state);
+        let valid = r#"{"queryContractVersion":1,"query":"MATCH (n:Content) RETURN n","parameters":{},"budget":{}}"#;
+
+        let unavailable = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/search")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(valid))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            body(unavailable).await["error"]["code"],
+            "search_unavailable"
+        );
+
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/search")
+                    .header("content-type", "application/json")
+                    .body(Body::from(valid))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let malformed_precedes_authority = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/search")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"queryContractVersion":1,"query":"broken""#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            malformed_precedes_authority.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            body(malformed_precedes_authority).await["error"]["phase"],
+            "envelope"
+        );
+
+        for (request, code, phase) in [
+            (
+                r#"{"queryContractVersion":2,"query":"MATCH (n:Content) RETURN n","parameters":{},"budget":{}}"#,
+                "unsupported_query_contract_version",
+                "envelope",
+            ),
+            (
+                r#"{"queryContractVersion":1,"query":"CREATE (n:Content)","parameters":{},"budget":{}}"#,
+                "query_construct_forbidden",
+                "parse",
+            ),
+            (
+                r#"{"queryContractVersion":1,"query":"MATCH (n:Unknown) RETURN n","parameters":{},"budget":{}}"#,
+                "unknown_label",
+                "plan",
+            ),
+        ] {
+            let preflight_precedes_missing_authority_and_index = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/graph/search")
+                        .header("content-type", "application/json")
+                        .body(Body::from(request))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                preflight_precedes_missing_authority_and_index.status(),
+                StatusCode::UNPROCESSABLE_ENTITY
+            );
+            let error = body(preflight_precedes_missing_authority_and_index).await;
+            assert_eq!(error["error"]["code"], code);
+            assert_eq!(error["error"]["phase"], phase);
+        }
+
+        let explicit_current_target = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/search")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(
+                        r#"{"queryContractVersion":1,"target":{"scope":"thread","id":73},"query":"MATCH (n:Content) RETURN n","parameters":{},"budget":{}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            explicit_current_target.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            body(explicit_current_target).await["error"]["code"],
+            "search_unavailable"
+        );
     }
 }

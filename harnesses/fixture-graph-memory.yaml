@@ -1,0 +1,11 @@
+schemaVersion: 1
+name: fixture-graph-memory
+implementation: fixture.graph-memory
+implementationVersion: 1
+graphCapabilityProfile:
+  search: query-v1
+permissionBindings:
+  ask: {}
+  auto: {}
+  full: {}
+settings: {}

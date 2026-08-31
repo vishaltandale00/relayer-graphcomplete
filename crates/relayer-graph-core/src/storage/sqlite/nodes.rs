@@ -382,6 +382,19 @@ impl<'connection> NodeTable<'connection> {
         }
     }
 
+    pub(crate) async fn accepted_project_threads(
+        &mut self,
+        project_id: ProjectId,
+    ) -> Result<Vec<ThreadId>, GraphError> {
+        let thread_ids = sqlx::query_scalar::<_, i64>(
+            "SELECT DISTINCT thread_id FROM nodes WHERE project_id=?1 AND kind='user-interaction' AND state='accepted' AND owner_interaction_id IS NULL ORDER BY thread_id",
+        )
+        .bind(project_id.value())
+        .fetch_all(&mut *self.connection)
+        .await?;
+        thread_ids.into_iter().map(valid_thread_id).collect()
+    }
+
     pub(crate) async fn by_owner_and_key(
         &mut self,
         owner: NodeId,

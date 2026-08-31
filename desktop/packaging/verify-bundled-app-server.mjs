@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
-import { access, chmod, lstat, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import * as tar from "tar";
 
@@ -45,6 +47,7 @@ export async function verifyBundledAppServer(
     expectedArchitecture = process.arch === "x64" ? "x86_64" : process.arch,
     listPackageEntries = listPackage,
     verifyPrimeAgent = verifyPackagedPrimeAgent,
+    verifyGraphServer = verifyPackagedMacOSGraphServer,
     primeAgentTargetKey = `${platform}-${expectedArchitecture === "x86_64" ? "x64" : expectedArchitecture}`,
     primeAgentIntegrityPhase = "unsigned",
   } = {},
@@ -56,6 +59,7 @@ export async function verifyBundledAppServer(
   const graphClientPath = join(resourcesPath, "graph-client", "index.js");
   const markedPath = join(resourcesPath, "renderer", "vendor", "marked.umd.js");
   await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath), access(markedPath)]);
+  await verifyPackagedGraphClient(graphClientPath);
   const packagedEntries = new Set(listPackageEntries(join(resourcesPath, "app.asar")).map(normalizeAsarEntry));
   for (const entry of [
     "main/single-instance.mjs",
@@ -84,8 +88,60 @@ export async function verifyBundledAppServer(
         );
       }
     }
+    await verifyGraphServer(graphBinaryPath, { execute });
   }
   return { binaryPath, architecture: architectures };
+}
+
+export async function verifyPackagedMacOSGraphServer(
+  graphBinaryPath,
+  { execute = execFileAsync, commandTimeoutMs = 5_000 } = {},
+) {
+  const dependencyResult = await execute("/usr/bin/otool", ["-L", graphBinaryPath]);
+  const libraries = String(dependencyResult.stdout || "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.endsWith(":"))
+    .map((line) => line.split(/\s+/u)[0])
+    .filter(Boolean);
+  const nonSystem = libraries.filter((library) => (
+    !library.startsWith("/usr/lib/") && !library.startsWith("/System/Library/")
+  ));
+  if (nonSystem.length !== 0) {
+    throw new Error(`Packaged graph server imports non-system dynamic libraries: ${nonSystem.join(", ")}`);
+  }
+  const profile = await mkdtemp(join(tmpdir(), "relayer-packaged-graph-launch-"));
+  try {
+    const result = await execute(graphBinaryPath, [
+      "--database", join(profile, "ladybug"), "--ladybug-qualification",
+    ], { timeout: commandTimeoutMs, killSignal: "SIGKILL" });
+    let receipt;
+    try {
+      receipt = JSON.parse(String(result.stdout || "").trim());
+    } catch {
+      throw new Error("Packaged graph server clean launch returned an invalid receipt.");
+    }
+    if (receipt?.ready !== true || (receipt.state !== "created" && receipt.state !== "reopened")) {
+      throw new Error("Packaged graph server did not open a clean pinned Ladybug profile.");
+    }
+    return { libraries, state: receipt.state };
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+  }
+}
+
+export async function verifyPackagedGraphClient(graphClientPath) {
+  const digest = sha256(await readFile(graphClientPath));
+  let graphClient;
+  try {
+    graphClient = await import(`${pathToFileURL(graphClientPath).href}?sha256=${digest}`);
+  } catch (error) {
+    throw new Error("Bundled Relayer graph client cannot be imported.", { cause: error });
+  }
+  if (typeof graphClient.RelayerGraphClient !== "function"
+    || typeof graphClient.RelayerGraphClient.prototype?.search !== "function") {
+    throw new Error("Bundled Relayer graph client is missing RelayerGraphClient.prototype.search.");
+  }
 }
 
 export async function verifyPackagedCodexBrowserMcp(resourcesPath) {

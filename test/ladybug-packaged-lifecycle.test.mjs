@@ -2,13 +2,17 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
+import { requireLadybugDistributionLicenseReady } from "../desktop/packaging/pinned-ladybug-build.mjs";
+import { buildReleaseRustServers } from "../desktop/release/build-release.mjs";
+import { verifyPackagedMacOSGraphServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import {
   RECEIPT_INPUT_PATHS,
+  assertCaptureInputsMatchSourceCommit,
   captureLadybugPackagedLifecycle,
   inspectPortableExecutable,
   npmCommandForPlatform,
@@ -20,6 +24,7 @@ import {
   parseLadybugLockContention,
   parseDynamicLibraries,
   parseMinimumMacOSVersion,
+  resolveCaptureBuildDesktop,
   validatePreparedLadybugSource,
   verifyNoRuntimePaths,
   verifyNoBundledWindowsNativeLibraries,
@@ -102,6 +107,14 @@ function verifyReceiptShape(receipt, targetExpectation, expectedInputPaths = fro
 }
 
 describe("Ladybug packaged lifecycle qualification", () => {
+  it("accepts complete source and native distribution-license receipts", async () => {
+    const manifest = { licenseReceipt: { completeForDistribution: true } };
+    const nativeReceipt = { releaseBlockers: [] };
+    await expect(requireLadybugDistributionLicenseReady({
+      loadSourceManifest: async () => manifest,
+      verifyNativeReceipts: async () => nativeReceipt,
+    })).resolves.toEqual({ manifest, nativeReceipt });
+  });
   function minimalPe({
     machine = 0x8664,
     imports = ["KERNEL32.dll"],
@@ -198,12 +211,56 @@ describe("Ladybug packaged lifecycle qualification", () => {
     // `.gitattributes` pins the line endings the source digests depend on, so it
     // must stay in the authenticated set.
     expect(RECEIPT_INPUT_PATHS).toContain(".gitattributes");
+    expect(RECEIPT_INPUT_PATHS).toContain("desktop/packaging/pinned-ladybug-build.mjs");
     expect(new Set(RECEIPT_INPUT_PATHS).size).toBe(RECEIPT_INPUT_PATHS.length);
     // The frozen 23a2d3d1 receipts predate `.gitattributes` coverage. Every path
     // they authenticate must still be authenticated today; regenerating a receipt
     // then yields exactly RECEIPT_INPUT_PATHS.
     for (const path of frozenReceiptInputPaths) {
       expect(RECEIPT_INPUT_PATHS, `frozen receipt input dropped: ${path}`).toContain(path);
+    }
+  });
+
+  it("rejects a packaging helper that differs from the authenticated source commit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-ladybug-input-mismatch-"));
+    try {
+      for (const path of RECEIPT_INPUT_PATHS) {
+        await mkdir(dirname(join(root, path)), { recursive: true });
+        await writeFile(
+          join(root, path),
+          path === "desktop/packaging/pinned-ladybug-build.mjs" ? "working helper" : "committed input",
+        );
+      }
+      await expect(assertCaptureInputsMatchSourceCommit({
+        sourceCommit: "a".repeat(40),
+        repositoryRoot: root,
+        readCommittedInput: async () => Buffer.from("committed input"),
+      })).rejects.toThrow("desktop/packaging/pinned-ladybug-build.mjs differs from the exact source commit");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loads the packaging helper from the detached checkout unless a test injects one", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-ladybug-detached-helper-"));
+    try {
+      const helper = join(root, "desktop/packaging/build-development.mjs");
+      await mkdir(dirname(helper), { recursive: true });
+      await writeFile(helper, "export async function buildDevelopmentDesktop() { return 'detached-helper'; }\n");
+      const loaded = await resolveCaptureBuildDesktop({
+        checkout: root,
+        sourceCommit: "b".repeat(40),
+      });
+      expect(await loaded()).toBe("detached-helper");
+
+      const injected = async () => "injected-helper";
+      expect(await resolveCaptureBuildDesktop({
+        buildDesktop: injected,
+        checkout: root,
+        sourceCommit: "c".repeat(40),
+      })).toBe(injected);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
@@ -404,14 +461,23 @@ describe("Ladybug packaged lifecycle qualification", () => {
     }
   });
 
-  it("passes locked offline Cargo arguments only for qualification packaging", async () => {
+  it("passes locked offline Cargo arguments for a prepared qualification package", async () => {
     const calls = [];
     await buildDevelopmentDesktop({
       environment: {
         RELAYER_DESKTOP_TARGET: "macos-arm64",
         RELAYER_LADYBUG_QUALIFICATION: "1",
-        OPENSSL_DIR: "/tmp/prepared-openssl",
       },
+      prepareLadybug: async () => ({
+        environment: {
+          CARGO_NET_OFFLINE: "true",
+          LBUG_BUILD_FROM_SOURCE: "1",
+          LBUG_SOURCE_DIR: "/tmp/reviewed-lbug",
+          OPENSSL_DIR: "/tmp/prepared-openssl",
+          OPENSSL_STATIC: "1",
+        },
+        dispose: async () => {},
+      }),
       execute: async (command, args, options) => calls.push({ command, args, options }),
       repositoryRoot: "/tmp/exact-source",
       dependencyRoot: "/tmp/dependencies",
@@ -425,44 +491,197 @@ describe("Ladybug packaged lifecycle qualification", () => {
       "--locked", "--offline",
     ]);
     expect(calls[0].options.env.RUSTFLAGS).toBeUndefined();
-    expect(calls[0].options.env.CARGO_ENCODED_RUSTFLAGS.split("\u001f")).toEqual([
-      "--cfg", "ladybug_qualification",
-      "-L", "native=/tmp/prepared-openssl/lib",
-      "-l", "static=ssl",
-      "-l", "static=crypto",
-    ]);
+    // The OpenSSL link directives are the build script's job now, so packaging
+    // hands it only the prepared prefix and no compiler flags at all.
+    expect(calls[0].options.env.CARGO_ENCODED_RUSTFLAGS).toBeUndefined();
+    expect(calls[0].options.env.OPENSSL_DIR).toBe("/tmp/prepared-openssl");
     expect(calls[0].options.cwd).toBe("/tmp/exact-source");
     expect(calls[1].args[0]).toBe("/tmp/dependencies/node_modules/electron-builder/out/cli/cli.js");
   });
 
-  it("maps the prepared OpenSSL archives to MSVC static library names", async () => {
+  it("prepares pinned static OpenSSL for an ordinary Apple-Silicon desktop package", async () => {
     const calls = [];
+    let disposed = false;
     await buildDevelopmentDesktop({
-      environment: {
-        RELAYER_DESKTOP_TARGET: "windows-x64",
-        RELAYER_LADYBUG_QUALIFICATION: "1",
-        OPENSSL_DIR: "/tmp/prepared-openssl",
+      environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },
+      prepareLadybug: async ({ target }) => {
+        expect(target.key).toBe("macos-arm64");
+        return {
+          environment: {
+            CARGO_NET_OFFLINE: "true",
+            LBUG_BUILD_FROM_SOURCE: "1",
+            LBUG_SOURCE_DIR: "/tmp/reviewed-lbug",
+            OPENSSL_DIR: "/tmp/pinned-openssl",
+            OPENSSL_STATIC: "1",
+          },
+          dispose: async () => { disposed = true; },
+        };
       },
       execute: async (command, args, options) => calls.push({ command, args, options }),
       repositoryRoot: "/tmp/exact-source",
       dependencyRoot: "/tmp/dependencies",
     });
-    expect(calls[0].options.env.CARGO_ENCODED_RUSTFLAGS.split("\u001f")).toEqual([
-      "--cfg", "ladybug_qualification",
-      "-L", "native=/tmp/prepared-openssl/lib",
-      "-l", "static=libssl",
-      "-l", "static=libcrypto",
+    expect(calls[0].args).toEqual([
+      "build", "--release",
+      "-p", "relayer-app-server",
+      "-p", "relayer-graph-server",
+      "--target", "aarch64-apple-darwin",
+      "--locked", "--offline",
     ]);
+    expect(calls[0].options.env).toMatchObject({
+      CARGO_NET_OFFLINE: "true",
+      LBUG_BUILD_FROM_SOURCE: "1",
+      LBUG_SOURCE_DIR: "/tmp/reviewed-lbug",
+      OPENSSL_DIR: "/tmp/pinned-openssl",
+      OPENSSL_STATIC: "1",
+    });
+    expect(disposed).toBe(true);
   });
 
-  it("rejects qualification without the prepared static OpenSSL prefix", async () => {
+  it("blocks Apple-Silicon release construction while Ladybug distribution receipts are incomplete", async () => {
+    let prepareCalls = 0;
+    let executeCalls = 0;
+    await expect(buildReleaseRustServers({
+      contract: { targetKey: "macos-arm64", rustTarget: "aarch64-apple-darwin" },
+      environment: { RELAYER_DESKTOP_TARGET: "macos-arm64", RELAYER_DESKTOP_RELEASE: "1" },
+      prepareLadybug: async () => {
+        prepareCalls += 1;
+        throw new Error("license gate must run before source preparation");
+      },
+      execute: async () => { executeCalls += 1; },
+      repositoryRoot: join(import.meta.dirname, ".."),
+    })).rejects.toThrow("Ladybug distribution license receipts are not release-ready");
+    expect(prepareCalls).toBe(0);
+    expect(executeCalls).toBe(0);
+  });
+
+  it("builds the Apple-Silicon release servers from the pinned static source after the license gate passes", async () => {
+    const calls = [];
+    let disposed = false;
+    await buildReleaseRustServers({
+      contract: { targetKey: "macos-arm64", rustTarget: "aarch64-apple-darwin" },
+      environment: { RELAYER_DESKTOP_TARGET: "macos-arm64", RELAYER_DESKTOP_RELEASE: "1" },
+      verifyLadybugDistributionLicense: async () => {},
+      prepareLadybug: async ({ target }) => {
+        expect(target.key).toBe("macos-arm64");
+        return {
+          environment: {
+            CARGO_NET_OFFLINE: "true",
+            LBUG_BUILD_FROM_SOURCE: "1",
+            LBUG_SOURCE_DIR: "/tmp/reviewed-lbug",
+            OPENSSL_DIR: "/tmp/pinned-openssl",
+            OPENSSL_STATIC: "1",
+          },
+          dispose: async () => { disposed = true; },
+        };
+      },
+      execute: async (command, args, options) => calls.push({ command, args, options }),
+      repositoryRoot: "/tmp/exact-source",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      command: "cargo",
+      args: [
+        "build", "--release",
+        "-p", "relayer-app-server",
+        "-p", "relayer-graph-server",
+        "--target", "aarch64-apple-darwin",
+        "--locked", "--offline",
+      ],
+      options: {
+        cwd: "/tmp/exact-source",
+        env: {
+          CARGO_NET_OFFLINE: "true",
+          LBUG_BUILD_FROM_SOURCE: "1",
+          LBUG_SOURCE_DIR: "/tmp/reviewed-lbug",
+          OPENSSL_DIR: "/tmp/pinned-openssl",
+          OPENSSL_STATIC: "1",
+        },
+      },
+    });
+    expect(disposed).toBe(true);
+  });
+
+  it("rejects every deferred release target before preparation or Cargo execution", async () => {
+    for (const contract of [
+      { targetKey: "macos-x64", rustTarget: "x86_64-apple-darwin" },
+      { targetKey: "windows-x64", rustTarget: "x86_64-pc-windows-msvc" },
+    ]) {
+      let prepareCalls = 0;
+      let executeCalls = 0;
+      await expect(buildReleaseRustServers({
+        contract,
+        environment: { RELAYER_DESKTOP_RELEASE: "1", RELAYER_DESKTOP_TARGET: contract.targetKey },
+        prepareLadybug: async () => {
+          prepareCalls += 1;
+          throw new Error("deferred targets must not prepare");
+        },
+        execute: async () => { executeCalls += 1; },
+        repositoryRoot: "/tmp/exact-source",
+      })).rejects.toThrow(`Ladybug release packaging is not qualified for ${contract.targetKey}`);
+      expect(prepareCalls).toBe(0);
+      expect(executeCalls).toBe(0);
+    }
+  });
+
+  it("rejects ambient OpenSSL dependencies before launching a packaged graph server", async () => {
+    const launches = [];
+    await expect(verifyPackagedMacOSGraphServer("/tmp/Relayer.app/graph-server", {
+      execute: async (command, args) => {
+        launches.push({ command, args });
+        return {
+          stdout: "/tmp/Relayer.app/graph-server:\n\t/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib (compatibility version 3.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n",
+          stderr: "",
+        };
+      },
+    })).rejects.toThrow("non-system dynamic libraries");
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toEqual({ command: "/usr/bin/otool", args: ["-L", "/tmp/Relayer.app/graph-server"] });
+  });
+
+  it("verifies system-only closure and a clean pinned Ladybug launch", async () => {
+    const calls = [];
+    await expect(verifyPackagedMacOSGraphServer("/tmp/Relayer.app/graph-server", {
+      execute: async (command, args, options) => {
+        calls.push({ command, args, options });
+        if (command === "/usr/bin/otool") {
+          return {
+            stdout: "/tmp/Relayer.app/graph-server:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n",
+            stderr: "",
+          };
+        }
+        return { stdout: '{"ready":true,"state":"created"}\n', stderr: "" };
+      },
+    })).resolves.toEqual({ libraries: ["/usr/lib/libSystem.B.dylib"], state: "created" });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].command).toBe("/tmp/Relayer.app/graph-server");
+    expect(calls[1].args[0]).toBe("--database");
+    expect(calls[1].args[1]).toMatch(/relayer-packaged-graph-launch-/u);
+    expect(calls[1].args.slice(2)).toEqual(["--ladybug-qualification"]);
+    expect(calls[1].options).toEqual({ timeout: 5_000, killSignal: "SIGKILL" });
+  });
+
+  it("does not trust qualification paths without a prepare result", async () => {
+    let prepareCalls = 0;
     await expect(buildDevelopmentDesktop({
       environment: {
         RELAYER_DESKTOP_TARGET: "macos-arm64",
         RELAYER_LADYBUG_QUALIFICATION: "1",
+        CARGO_NET_OFFLINE: "true",
+        LBUG_BUILD_FROM_SOURCE: "1",
+        LBUG_SOURCE_DIR: "/tmp/arbitrary-lbug",
+        OPENSSL_DIR: "/tmp/arbitrary-openssl",
+        OPENSSL_STATIC: "1",
       },
-      execute: async () => {},
-    })).rejects.toThrow("requires the prepared static OPENSSL_DIR");
+      prepareLadybug: async () => {
+        prepareCalls += 1;
+        return undefined;
+      },
+      execute: async () => {
+        throw new Error("unprepared qualification must not execute");
+      },
+    })).rejects.toThrow("complete pinned static Ladybug/OpenSSL environment");
+    expect(prepareCalls).toBe(1);
   });
 
   it("rejects prepared environments or static archives that differ from recomputed inputs", async () => {

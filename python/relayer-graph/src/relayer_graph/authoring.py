@@ -11,8 +11,12 @@ from typing import Any, Literal, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .exceptions import (APIError, AuthenticationError, ConfigurationError, NotFound,
-                         TransportError, ValidationError, ValidationIssue)
+from .exceptions import (APIError, AuthenticationError, ConfigurationError,
+                         GraphQueryError, NotFound, TransportError,
+                         ValidationError, ValidationIssue)
+from .query import GraphSearchRequest, GraphSearchResult
+from .query_errors_generated import (GRAPH_QUERY_CONTRACT_VERSION,
+                                     GRAPH_QUERY_ERROR_PHASES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,7 +403,27 @@ class RelayerGraphClient:
             "transition": transition,
         })
 
-    async def _request(self, method: str, path: str, body: Any = None) -> Any:
+    async def search(self, request: GraphSearchRequest) -> GraphSearchResult:
+        """Search the current thread authorized by this active capability.
+
+        Python's blocking standard-library transport runs on a worker thread and
+        does not expose a truthful in-flight cancellation primitive. Callers may
+        narrow ``wallTimeMs`` in the request budget instead.
+        """
+        result = await self._request(
+            "POST", "/api/graph/search", request.to_wire(), graph_query=True
+        )
+        version = result.get("queryContractVersion") if isinstance(result, Mapping) else None
+        if (type(version) is not int
+                or version != GRAPH_QUERY_CONTRACT_VERSION):
+            raise APIError(
+                f"Graph search response must use query contract version {GRAPH_QUERY_CONTRACT_VERSION}",
+                status=200, details=result,
+            )
+        return result
+
+    async def _request(self, method: str, path: str, body: Any = None, *,
+                       graph_query: bool = False) -> Any:
         encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode()
         headers = {"accept": "application/json", "authorization": f"Bearer {self.token}"}
         if encoded is not None:
@@ -417,6 +441,14 @@ class RelayerGraphClient:
                 details = json.loads(raw or b"{}")
                 item = details.get("error", {}) if isinstance(details, Mapping) else {}
                 message = item.get("message", f"Graph request failed with HTTP {error.code}")
+                if (graph_query and isinstance(item, Mapping)
+                        and isinstance(item.get("code"), str)
+                        and GRAPH_QUERY_ERROR_PHASES.get(item["code"]) == item.get("phase")
+                        and isinstance(item.get("path"), str)):
+                    raise GraphQueryError(
+                        str(message), status=error.code, code=item["code"],
+                        phase=item["phase"], path=item["path"]
+                    ) from error
                 error_type = (
                     AuthenticationError if error.code in (401, 403)
                     else NotFound if error.code == 404

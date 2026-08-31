@@ -9,7 +9,21 @@
 </head>
 <body>
   <aside><span class="eyebrow">Candidate trace</span><h1 id="harness">Loading…</h1><p id="case"></p><nav id="turns"></nav></aside>
-  <main><header><div><span class="eyebrow" id="status"></span><h2 id="prompt"></h2></div><div id="coverage" class="coverage"></div></header><section id="summary" class="summary"></section><section id="events" class="events"></section></main>
+  <main>
+    <header><div><span class="eyebrow" id="status"></span><h2 id="prompt"></h2></div><div id="coverage" class="coverage"></div></header>
+    <section id="summary" class="summary"></section>
+    <section class="graph-evidence" aria-labelledby="graph-operations-heading">
+      <div class="section-heading">
+        <div><span class="eyebrow">Integrity-checked evidence</span><h3 id="graph-operations-heading">Graph operations</h3></div>
+        <span id="graph-operations-status" class="evidence-status"></span>
+      </div>
+      <div id="graph-operations" class="graph-operations"></div>
+    </section>
+    <section aria-labelledby="provider-events-heading">
+      <div class="section-heading"><h3 id="provider-events-heading">Provider events</h3></div>
+      <div id="events" class="events"></div>
+    </section>
+  </main>
   <script type="module" src="./trace.js"></script>
 </body>
 </html>

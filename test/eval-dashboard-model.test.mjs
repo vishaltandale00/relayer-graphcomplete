@@ -58,6 +58,50 @@ describe("Eval dashboard run presentation", () => {
     });
   });
 
+  it("isolates the four-cell recursive graph-memory experiment and authorizes twelve roots plus model-controlled children", () => {
+    const quartet = [
+      "codex-eval-lantern-search-disabled-recursion-disabled",
+      "codex-eval-lantern-search-query-v1-recursion-disabled",
+      "codex-eval-lantern-search-disabled-recursion-enabled",
+      "codex-eval-lantern-search-query-v1-recursion-enabled",
+    ];
+    expect(isolateRecursiveCompleteSelection(
+      ["empty-project.task-system.single-turn", "empty-project.recursive-graph-memory.launch-readiness"],
+      ["codex-basic"],
+      quartet.map((name) => ({ name })),
+    )).toEqual({
+      testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
+      harnessConfigurationNames: quartet,
+    });
+    const selection = {
+      testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
+      harnessConfigurationNames: quartet,
+      judgeConfigurationName: "deterministic-graph-contract",
+    };
+    expect(authorizeRecursiveCompleteSelection(selection, (message) => {
+      expect(message).toContain("twelve paid/live Codex root turns");
+      expect(message).toContain("additional model-controlled paid child executions");
+      return true;
+    })).toEqual({
+      ...selection,
+      liveAuthorization: {
+        confirmed: true,
+        credentialReference: "connected-product-provider",
+        rootProviderExecutions: 12,
+        agentAuthoredChildren: true,
+      },
+    });
+
+    expect(isolateRecursiveCompleteSelection(
+      ["empty-project.recursive-graph-memory.launch-readiness"],
+      [],
+      quartet.slice(0, 3).map((name) => ({ name })),
+    )).toEqual({
+      testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
+      harnessConfigurationNames: [],
+    });
+  });
+
   it("presents imported runs as external conversation review", () => {
     expect(runPanelCopy({ kind: "imported-conversation" })).toEqual({
       title: "Conversation review",
@@ -116,6 +160,34 @@ describe("Eval dashboard run presentation", () => {
     })).toMatchObject({
       substance: { label: "Unjudged", score: null },
       presentation: { label: "N/A", score: null, applicable: false },
+    });
+  });
+
+  it("keeps Lantern mechanism checks separate from human outcome qualification", () => {
+    const execution = {
+      id: "lantern",
+      lifecycle: { status: "complete" },
+      checks: [{ name: "graph-search-disabled", passed: true, detail: "No search was observed." }],
+      outcomeGrade: {
+        status: "unjudged",
+        qualified: null,
+        score: null,
+        reviewRequired: true,
+        criteria: [{ criterionId: "prior-retention", name: "Prior retention" }],
+      },
+      presentationGrade: { status: "unjudged", applicable: true, score: null },
+    };
+    expect(projectExecutionCell({ kind: "local-eval" }, execution)).toMatchObject({
+      substance: { label: "Human review", qualified: null, score: null },
+    });
+    expect(projectExecutionDossier({ kind: "local-eval" }, execution)).toMatchObject({
+      substance: {
+        gates: [],
+        criteria: [{ id: "prior-retention" }],
+      },
+      mechanism: {
+        checks: [{ id: "graph-search-disabled", passed: true, detail: "No search was observed." }],
+      },
     });
   });
 

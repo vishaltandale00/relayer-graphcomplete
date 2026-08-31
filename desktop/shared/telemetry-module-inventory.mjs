@@ -97,6 +97,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/main/services/desktop-harness-configuration.mjs",
     "desktop/main/services/electron-main-error-adapter.mjs",
     "desktop/main/services/folder-service.mjs",
+    "desktop/main/services/graph-operation-recorder.mjs",
     "desktop/main/services/graphcomplete-runtime.mjs",
     "desktop/main/services/prime-agent-runtime.mjs",
     "desktop/main/services/relayer-app-server.mjs",
@@ -187,6 +188,13 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
   "rust-graph-server": Object.freeze([
     "crates/relayer-graph-server/src/lib.rs",
     "crates/relayer-graph-server/src/main.rs",
+    "crates/relayer-graph-server/src/search_index.rs",
+    "crates/relayer-graph-server/src/search_index/contract_test_support.rs",
+    "crates/relayer-graph-server/src/search_index/lifecycle.rs",
+    "crates/relayer-graph-server/src/search_index/query.rs",
+    "crates/relayer-graph-server/src/search_index/schema.rs",
+    "crates/relayer-graph-server/src/search_index/store.rs",
+    "crates/relayer-graph-server/src/search_index/value.rs",
   ]),
 });
 

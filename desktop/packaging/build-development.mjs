@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { desktopTargetFromEnvironment } from "../shared/target.mjs";
+import {
+  preparePinnedLadybugForPackaging,
+  withPinnedLadybugPackagingEnvironment,
+} from "./pinned-ladybug-build.mjs";
 
 function run(command, args, options) {
   return new Promise((resolvePromise, reject) => {
@@ -21,38 +25,19 @@ export async function buildDevelopmentDesktop({
   execute = run,
   repositoryRoot = resolve(import.meta.dirname, "../.."),
   dependencyRoot = repositoryRoot,
+  prepareLadybug = preparePinnedLadybugForPackaging,
 } = {}) {
   const target = desktopTargetFromEnvironment(environment);
-  const cargoArguments = [
+  await withPinnedLadybugPackagingEnvironment({ environment, target, prepareLadybug }, async (
+    buildEnvironment,
+    cargoIntegrityArguments,
+  ) => execute("cargo", [
     "build", "--release",
     "-p", "relayer-app-server",
     "-p", "relayer-graph-server",
     "--target", target.rustTarget,
-  ];
-  if (environment.RELAYER_LADYBUG_QUALIFICATION === "1") {
-    if (environment.RUSTFLAGS || environment.CARGO_ENCODED_RUSTFLAGS) {
-      throw new Error("Ladybug qualification rejects ambient Rust compiler flags.");
-    }
-    if (!environment.OPENSSL_DIR) {
-      throw new Error("Ladybug qualification requires the prepared static OPENSSL_DIR.");
-    }
-    const opensslLibraryDirectory = resolve(environment.OPENSSL_DIR, "lib");
-    const opensslLibraries = target.platform === "win32"
-      ? ["libssl", "libcrypto"]
-      : ["ssl", "crypto"];
-    const encodedRustFlags = [
-      "--cfg", "ladybug_qualification",
-      "-L", `native=${opensslLibraryDirectory}`,
-      ...opensslLibraries.flatMap((library) => ["-l", `static=${library}`]),
-    ].join("\u001f");
-    environment = {
-      ...environment,
-      CARGO_ENCODED_RUSTFLAGS: encodedRustFlags,
-    };
-    delete environment.RUSTFLAGS;
-    cargoArguments.push("--locked", "--offline");
-  }
-  await execute("cargo", cargoArguments, { cwd: repositoryRoot, env: environment });
+    ...cargoIntegrityArguments,
+  ], { cwd: repositoryRoot, env: buildEnvironment }));
   const configuration = evalApplication
     ? "desktop/packaging/eval-electron-builder.mjs"
     : "desktop/packaging/electron-builder.mjs";

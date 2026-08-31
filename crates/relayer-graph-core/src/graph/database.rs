@@ -1,38 +1,108 @@
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    collections::HashSet,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use tokio::sync::{
+    Mutex as AsyncMutex, OwnedMutexGuard, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock,
+};
 
 use crate::{
-    AcceptedGraphClosure, CompletionState, CurrentProjectionEvent, CurrentProjectionPage,
-    CurrentTransitionReceipt, GraphError, GraphNode, GraphWriter, InteractionContextAction,
-    InteractionContextDraft, InteractionContextTarget, InteractionInputChild, InteractionInputNode,
-    InteractionInputPreparation, InteractionInvocation, NodeId,
-    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
+    AcceptedGraphClosure, AcceptedGraphPublication, CompletionState, CurrentProjectionEvent,
+    CurrentProjectionPage, CurrentTransitionReceipt, GraphError, GraphNode, GraphWriter,
+    InteractionContextAction, InteractionContextDraft, InteractionContextTarget,
+    InteractionInputChild, InteractionInputNode, InteractionInputPreparation,
+    InteractionInvocation, NoSearchIndex, NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID,
+    PresentingInputOccurrence, ProjectId, SearchIndex, SearchIndexComponent,
+    SearchIndexRebuildClosure, SearchIndexRebuildSnapshot, SearchIndexRevision, SearchTarget,
     SubmittedInputDraft, TemporalFeatureConfig, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
     interaction_input_authority_digest, interaction_input_digest,
+    query::QueryReadPermit,
     storage::{
-        SqliteGraphStore,
+        GraphTransaction, SqliteGraphStore,
         sqlite::{
             actions::ActionTable, contexts::ContextTable, currents::CurrentTable,
-            input_children::InputChildTable, nodes::NodeTable,
+            input_children::InputChildTable, nodes::NodeTable, search_index::SearchIndexTable,
         },
     },
 };
 
+/// How long a search-index write may take before the save fails.
+///
+/// This is a ceiling, not a target: the SQLite write lock is held across the
+/// search write, so an unbounded one would stall every other writer. It matches
+/// the SQLite busy timeout, and #303 measures the latency that actually matters.
+pub const DEFAULT_SEARCH_INDEX_BUDGET: Duration = Duration::from_secs(5);
+
+/// How long indexing an imported conversation may take before the import fails.
+///
+/// An import is bulk and one-shot rather than interactive: it materializes every
+/// turn of a conversation and indexes them as one transaction, so it needs a
+/// ceiling of its own rather than the one sized for a single save.
+pub const DEFAULT_IMPORT_INDEX_BUDGET: Duration = Duration::from_secs(60);
+
 #[derive(Clone)]
 pub struct GraphDatabase {
     pub(crate) storage: SqliteGraphStore,
+    pub(crate) search_index: Arc<dyn SearchIndex>,
+    pub(crate) search_index_budget: Duration,
+    pub(crate) import_index_budget: Duration,
+    /// One lock per logical target, so concurrent submissions to one target
+    /// index in the order they commit while unrelated targets stay independent.
+    write_order: Arc<Mutex<HashMap<SearchTarget, Arc<AsyncMutex<()>>>>>,
+    /// Short publication barrier used only when a reconciled generation swaps.
+    /// Ordinary rebuilding does not hold it, so unrelated targets stay usable.
+    search_rebuild: Arc<RwLock<()>>,
+    #[cfg(feature = "crash-test-support")]
+    pub(crate) completion_crash_hook:
+        Option<Arc<dyn Fn(crate::CompletionCrashPoint) + Send + Sync + 'static>>,
 }
 
 impl GraphDatabase {
+    /// Open a graph with no search store attached. Accepted closures are recorded
+    /// in SQLite but indexed nowhere; the shipped server uses
+    /// [`GraphDatabase::open_with_index`] instead.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, GraphError> {
+        Self::open_with_index(path, Arc::new(NoSearchIndex)).await
+    }
+
+    /// Open a graph that indexes every accepted closure into `search_index`.
+    pub async fn open_with_index(
+        path: impl AsRef<Path>,
+        search_index: Arc<dyn SearchIndex>,
+    ) -> Result<Self, GraphError> {
         Ok(Self {
             storage: SqliteGraphStore::open(path).await?,
+            search_index,
+            search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
+            import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
+            write_order: Arc::default(),
+            search_rebuild: Arc::default(),
+            #[cfg(feature = "crash-test-support")]
+            completion_crash_hook: None,
         })
     }
 
     pub async fn in_memory() -> Result<Self, GraphError> {
+        Self::in_memory_with_index(Arc::new(NoSearchIndex)).await
+    }
+
+    pub async fn in_memory_with_index(
+        search_index: Arc<dyn SearchIndex>,
+    ) -> Result<Self, GraphError> {
         Ok(Self {
             storage: SqliteGraphStore::in_memory().await?,
+            search_index,
+            search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
+            import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
+            write_order: Arc::default(),
+            search_rebuild: Arc::default(),
+            #[cfg(feature = "crash-test-support")]
+            completion_crash_hook: None,
         })
     }
 
@@ -53,6 +123,235 @@ impl GraphDatabase {
         CurrentTable::new(&mut transaction)
             .set_temporal_features(config)
             .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// The search store this graph indexes into. Startup reconciliation reads it
+    /// without going through the write path.
+    pub fn search_index(&self) -> &Arc<dyn SearchIndex> {
+        &self.search_index
+    }
+
+    /// Attach a reconciled derived store without reopening canonical SQLite.
+    pub fn with_search_index(mut self, search_index: Arc<dyn SearchIndex>) -> Self {
+        self.search_index = search_index;
+        self
+    }
+
+    pub(crate) async fn enter_search_publication(&self) -> OwnedRwLockReadGuard<()> {
+        self.search_rebuild.clone().read_owned().await
+    }
+
+    /// Finish the canonical half of one already-committed search publication.
+    /// A failed SQLite COMMIT is ambiguous, so quarantine the target before the
+    /// error escapes; an exact retry may safely advance the store and clear it.
+    pub(crate) async fn commit_indexed_write(
+        &self,
+        transaction: GraphTransaction,
+        target: SearchTarget,
+    ) -> Result<(), GraphError> {
+        match transaction.commit().await {
+            Ok(()) => {
+                self.search_index.canonical_commit_confirmed(target);
+                Ok(())
+            }
+            // The publication boundary quarantines the target before Ladybug
+            // commits, so an ambiguous SQLite failure must preserve that exact
+            // pending identity rather than overwrite it here.
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Freeze accepted-search publication briefly while startup verifies that a
+    /// side-by-side candidate still represents the latest canonical snapshot.
+    pub async fn lock_search_rebuild(&self) -> OwnedRwLockWriteGuard<()> {
+        self.search_rebuild.clone().write_owned().await
+    }
+
+    /// Read the complete canonical rebuild input from one SQLite snapshot.
+    pub async fn search_index_rebuild_snapshot(
+        &self,
+    ) -> Result<SearchIndexRebuildSnapshot, GraphError> {
+        let mut transaction = self.storage.begin_read().await?;
+        let currents = CurrentTable::new(&mut transaction)
+            .published_currents()
+            .await?;
+        let mut closures = Vec::with_capacity(currents.len());
+        for current in currents {
+            let node_id = current.completion_id;
+            let scope = NodeTable::new(&mut transaction)
+                .interaction_scope(node_id)
+                .await?;
+            let root_action = crate::graph::completion::read_output_on(&mut transaction, &scope)
+                .await?
+                .map(|output| output.root_action);
+            let closure: AcceptedGraphPublication =
+                crate::graph::completion::read_accepted_publication_on(
+                    &mut transaction,
+                    &scope,
+                    current.layer_id,
+                    root_action,
+                )
+                .await?;
+            closures.push(SearchIndexRebuildClosure {
+                target: SearchTarget::new(scope.project_id, scope.thread_id),
+                published_to: crate::publication_targets(scope.project_id, scope.thread_id),
+                closure,
+            });
+        }
+        let mut targets = SearchIndexTable::new(&mut transaction).revisions().await?;
+        let mut known = targets
+            .iter()
+            .map(|(target, _)| *target)
+            .collect::<HashSet<_>>();
+        // Search receipts were introduced after accepted graphs already existed.
+        // Every canonical closure still establishes an ordering target even when
+        // its historical database has no receipt row yet. One deterministic
+        // rebuild transaction carries every historical closure for that target.
+        for item in &closures {
+            if known.insert(item.target) {
+                targets.push((item.target, SearchIndexRevision::FIRST));
+            }
+        }
+        targets.sort_by_key(|(target, _)| (target.kind(), target.id()));
+        transaction.commit().await?;
+        Ok(SearchIndexRebuildSnapshot { targets, closures })
+    }
+
+    /// Bound how long a search-index write may take before the save fails.
+    pub fn with_search_index_budget(mut self, budget: Duration) -> Self {
+        self.search_index_budget = budget;
+        self
+    }
+
+    /// When the search-index work for a save that starts now must be done. One
+    /// deadline covers the whole sequence, because what it bounds is how long the
+    /// global SQLite write lock is held.
+    pub(crate) fn expiry(&self) -> tokio::time::Instant {
+        tokio::time::Instant::now() + self.search_index_budget
+    }
+
+    /// The deadline for indexing a whole imported conversation.
+    pub(crate) fn import_expiry(&self) -> tokio::time::Instant {
+        tokio::time::Instant::now() + self.import_index_budget
+    }
+
+    /// Bound how long indexing an imported conversation may take.
+    pub fn with_import_index_budget(mut self, budget: Duration) -> Self {
+        self.import_index_budget = budget;
+        self
+    }
+
+    /// Install a one-shot-test observer at the six durable completion boundaries.
+    ///
+    /// This API does not exist in ordinary product builds. It is enabled only by
+    /// the explicit crash-proof feature used by #301's deterministic harness.
+    #[cfg(feature = "crash-test-support")]
+    pub fn with_completion_crash_hook(
+        mut self,
+        hook: Arc<dyn Fn(crate::CompletionCrashPoint) + Send + Sync + 'static>,
+    ) -> Self {
+        self.completion_crash_hook = Some(hook);
+        self
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    pub(crate) fn hit_completion_crash_point(&self, point: crate::CompletionCrashPoint) {
+        if let Some(hook) = &self.completion_crash_hook {
+            hook(point);
+        }
+    }
+
+    /// Take this target's place in line. Submissions to one target are ordered
+    /// against each other and against nothing else.
+    pub(crate) async fn order_writes_to(&self, target: SearchTarget) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut write_order = self
+                .write_order
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            // Locks are only ever cloned under this guard, so an entry nobody
+            // else holds is idle and can go. Without this the map keeps one
+            // entry per target for the life of the process.
+            write_order.retain(|_, lock| Arc::strong_count(lock) > 1);
+            write_order.entry(target).or_default().clone()
+        };
+        lock.lock_owned().await
+    }
+
+    /// The last revision this target is known to have committed to the search
+    /// store, or `None` when it has never been indexed.
+    pub async fn search_index_revision(
+        &self,
+        target: SearchTarget,
+    ) -> Result<Option<SearchIndexRevision>, GraphError> {
+        let mut connection = self.storage.acquire().await?;
+        SearchIndexTable::new(&mut connection)
+            .revision(target)
+            .await
+    }
+
+    /// Read one tracked search-store version. These are answered from SQLite
+    /// alone, so they stay available exactly when the store is corrupt or
+    /// version-incompatible and cannot be opened.
+    pub async fn search_index_version(
+        &self,
+        component: SearchIndexComponent,
+    ) -> Result<Option<String>, GraphError> {
+        let mut connection = self.storage.acquire().await?;
+        SearchIndexTable::new(&mut connection)
+            .version(component)
+            .await
+    }
+
+    pub async fn record_search_index_version(
+        &self,
+        component: SearchIndexComponent,
+        version: &str,
+    ) -> Result<(), GraphError> {
+        let mut transaction = self.storage.begin_write().await?;
+        SearchIndexTable::new(&mut transaction)
+            .record_version(component, version)
+            .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Replace the active store's compatibility receipt atomically.
+    pub async fn record_search_index_versions(
+        &self,
+        versions: &[(SearchIndexComponent, String)],
+    ) -> Result<(), GraphError> {
+        let mut transaction = self.storage.begin_write().await?;
+        for (component, version) in versions {
+            SearchIndexTable::new(&mut transaction)
+                .record_version(*component, version)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Publish the complete rebuild receipt only after the generation pointer
+    /// names a reopen-validated store. This also upgrades accepted history from
+    /// before target receipts existed.
+    pub async fn record_search_index_rebuild_receipt(
+        &self,
+        targets: &[(SearchTarget, SearchIndexRevision)],
+        versions: &[(SearchIndexComponent, String)],
+    ) -> Result<(), GraphError> {
+        let mut transaction = self.storage.begin_write().await?;
+        for (target, revision) in targets {
+            SearchIndexTable::new(&mut transaction)
+                .record_revision(*target, *revision)
+                .await?;
+        }
+        for (component, version) in versions {
+            SearchIndexTable::new(&mut transaction)
+                .record_version(*component, version)
+                .await?;
+        }
         transaction.commit().await?;
         Ok(())
     }
@@ -435,6 +734,35 @@ impl GraphDatabase {
             .await?;
         transaction.commit().await?;
         Ok(())
+    }
+
+    /// Mint the search entitlement from canonical interaction provenance. A
+    /// public target is only a selector and never supplies authority.
+    pub async fn query_read_permit(
+        &self,
+        interaction_node_id: NodeId,
+        authority_epoch: u64,
+    ) -> Result<QueryReadPermit, GraphError> {
+        let mut transaction = self.storage.begin_read().await?;
+        let mut scope = NodeTable::new(&mut transaction)
+            .interaction_scope(interaction_node_id)
+            .await?;
+        scope.authority_epoch = Some(authority_epoch);
+        scope.require_active_authority(&mut transaction).await?;
+        let readable_threads = match scope.project_id {
+            Some(project_id) => {
+                NodeTable::new(&mut transaction)
+                    .accepted_project_threads(project_id)
+                    .await?
+            }
+            None => vec![scope.thread_id],
+        };
+        transaction.commit().await?;
+        Ok(QueryReadPermit::canonical_scope(
+            scope.thread_id,
+            scope.project_id,
+            readable_threads,
+        ))
     }
 
     pub async fn accepted_graph_closure(

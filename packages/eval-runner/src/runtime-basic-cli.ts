@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCodexBasicFactory, loadHarnessConfigurations, productHarnessImplementations, type HarnessConfiguration } from "@relayer/harness-host";
+import { graphMemoryFixtureConfiguration, graphMemoryFixtureFactory } from "./fixtures/graph-memory.js";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "./fixtures/task-system.js";
 import { expandTestRun, type TestRunSelection } from "./run-plan.js";
-import { basicEvalCaseId, basicEvalPythonPath, executionDirectory, runBasicRuntimeEval, type BasicJudgeConfiguration } from "./runtime-basic.js";
+import { basicEvalCaseId, basicEvalPythonPath, executionDirectory, graphMemoryEvalCaseId, runBasicRuntimeEval, type BasicJudgeConfiguration } from "./runtime-basic.js";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 process.env.PYTHONPATH = basicEvalPythonPath(process.env.PYTHONPATH);
@@ -19,15 +20,17 @@ async function main(): Promise<void> {
     throw new Error("Select at least one harness configuration with --configuration");
   }
 
+  const defaultCaseIds = testCaseIds.length === 0 ? [basicEvalCaseId] : testCaseIds;
+  const defaultFixture = selectDefaultFixture(defaultCaseIds);
   const harnessConfigurations = requestedConfigurations.length === 0
-    ? new Map([[taskSystemFixtureConfiguration.name, taskSystemFixtureConfiguration]])
+    ? new Map([[defaultFixture.configuration.name, defaultFixture.configuration]])
     : await resolveHarnessConfigurations(requestedConfigurations);
   const judgeConfiguration = resolveJudgeConfiguration(singleArgument("--judge-configuration") ?? "none");
   const selection: TestRunSelection<BasicJudgeConfiguration> = {
     testRunId,
-    testCaseIds: testCaseIds.length === 0 ? [basicEvalCaseId] : testCaseIds,
+    testCaseIds: defaultCaseIds,
     harnessConfigurationNames: requestedConfigurations.length === 0
-      ? [taskSystemFixtureConfiguration.name]
+      ? [defaultFixture.configuration.name]
       : requestedConfigurations,
     judgeConfiguration,
   };
@@ -41,6 +44,7 @@ async function main(): Promise<void> {
   const managedCodexExecutable = codexBinary ? resolve(codexBinary) : undefined;
   const implementations = productHarnessImplementations({
     "fixture.task-system": taskSystemFixtureFactory,
+    "fixture.graph-memory": graphMemoryFixtureFactory,
     ...(candidateUsesCodex ? { "codex.basic": createCodexBasicFactory({ codexPathOverride: managedCodexExecutable! }) } : {}),
   });
   const results = [];
@@ -65,6 +69,19 @@ async function main(): Promise<void> {
   const passed = results.every((result) => result.passed);
   console.log(JSON.stringify({ testRunId, executions: results, passed }));
   if (!passed) process.exitCode = 1;
+}
+
+function selectDefaultFixture(testCaseIds: readonly string[]): {
+  readonly configuration: HarnessConfiguration;
+} {
+  const needsGraphMemory = testCaseIds.includes(graphMemoryEvalCaseId);
+  const needsOther = testCaseIds.some((caseId) => caseId !== graphMemoryEvalCaseId);
+  if (needsGraphMemory && needsOther) {
+    throw new Error("Default inference-free runtime Eval cannot mix graph-memory and other cases; select an explicit compatible harness configuration.");
+  }
+  return {
+    configuration: needsGraphMemory ? graphMemoryFixtureConfiguration : taskSystemFixtureConfiguration,
+  };
 }
 
 async function resolveHarnessConfigurations(names: readonly string[]): Promise<ReadonlyMap<string, HarnessConfiguration>> {

@@ -1,0 +1,7 @@
+# The `lbug` crate's own build script prefers a prebuilt native library, and absent
+# this it downloads whatever upstream release is newest — v0.19.1 today — rather
+# than the `=0.18.0` pin the #261 qualification gate actually certified. Forcing
+# the source build makes it compile the reviewed core bundled inside the pinned
+# crate, with no network access. See docs/evidence/issue-261-ladybug-qualification.md.
+[env]
+LBUG_BUILD_FROM_SOURCE = "1"

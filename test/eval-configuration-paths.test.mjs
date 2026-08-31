@@ -3,13 +3,44 @@ import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { loadHarnessConfigurations } from "../packages/harness-host/src/configuration.ts";
-import { evalHarnessConfigurationPaths } from "../desktop/eval-main/configuration-paths.mjs";
+import {
+  evalHarnessConfigurationPaths,
+  evalRuntimeTarget,
+} from "../desktop/eval-main/configuration-paths.mjs";
 import { DEFAULT_DESKTOP_HARNESS_CONFIGURATION } from "../desktop/main/services/desktop-harness-configuration.mjs";
 
 const names = (paths) => paths.map((path) => basename(path));
 const repositoryRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 
 describe("Eval harness configuration availability", () => {
+  it("uses actual packaged runtime identity instead of an environment-spoofed graph-search target", () => {
+    const spoofed = { RELAYER_DESKTOP_TARGET: "macos-arm64" };
+    expect(evalRuntimeTarget({
+      isPackaged: true,
+      environment: spoofed,
+      platform: "darwin",
+      architecture: "x64",
+    }).key).toBe("macos-x64");
+    expect(evalRuntimeTarget({
+      isPackaged: true,
+      environment: spoofed,
+      platform: "win32",
+      architecture: "x64",
+    }).key).toBe("windows-x64");
+    expect(evalRuntimeTarget({
+      isPackaged: true,
+      environment: { RELAYER_DESKTOP_TARGET: "windows-x64" },
+      platform: "darwin",
+      architecture: "arm64",
+    }).key).toBe("macos-arm64");
+    expect(evalRuntimeTarget({
+      isPackaged: false,
+      environment: spoofed,
+      platform: "win32",
+      architecture: "x64",
+    }).key).toBe("macos-arm64");
+  });
+
   it("includes Prime configurations when the development package is available", () => {
     const packageAvailable = vi.fn(() => true);
 
@@ -17,18 +48,27 @@ describe("Eval harness configuration availability", () => {
       harnessDirectory: "/tmp/harnesses",
       isPackaged: false,
       packageAvailable,
+      targetKey: "macos-arm64",
     }))).toEqual([
       "fixture-task-system.yaml",
+      "fixture-graph-memory.yaml",
       "codex-basic.yaml",
+      "codex-basic-graph-search.yaml",
       "codex-basic-high.yaml",
       "codex-eval-complete-disabled.yaml",
       "codex-eval-complete-enabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "claude-basic-graph-search.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
       "prime-agent-basic.yaml",
+      "prime-agent-basic-graph-search.yaml",
       "prime-agent-deep.yaml",
       "prime-agent-layered-navigation-luna.yaml",
     ]);
@@ -40,15 +80,23 @@ describe("Eval harness configuration availability", () => {
       harnessDirectory: "/tmp/harnesses",
       isPackaged: false,
       packageAvailable: () => false,
+      targetKey: "macos-arm64",
     }))).toEqual([
       "fixture-task-system.yaml",
+      "fixture-graph-memory.yaml",
       "codex-basic.yaml",
+      "codex-basic-graph-search.yaml",
       "codex-basic-high.yaml",
       "codex-eval-complete-disabled.yaml",
       "codex-eval-complete-enabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "claude-basic-graph-search.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
     ]);
@@ -61,25 +109,61 @@ describe("Eval harness configuration availability", () => {
       harnessDirectory: "/tmp/harnesses",
       isPackaged: true,
       packageAvailable,
+      targetKey: "macos-arm64",
     }))).toEqual([
       "fixture-task-system.yaml",
+      "fixture-graph-memory.yaml",
       "codex-basic.yaml",
+      "codex-basic-graph-search.yaml",
       "codex-basic-high.yaml",
       "codex-eval-complete-disabled.yaml",
       "codex-eval-complete-enabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "claude-basic-graph-search.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
     ]);
     expect(packageAvailable).not.toHaveBeenCalled();
   });
 
+  it("keeps baseline harnesses but omits graph-search experiments off Apple Silicon", () => {
+    for (const targetKey of ["macos-x64", "windows-x64"]) {
+      const available = names(evalHarnessConfigurationPaths({
+        harnessDirectory: "/tmp/harnesses",
+        isPackaged: false,
+        packageAvailable: () => true,
+        targetKey,
+      }));
+      expect(available).toEqual(expect.arrayContaining([
+        "fixture-task-system.yaml",
+        "codex-basic.yaml",
+        "claude-basic.yaml",
+        "prime-agent-basic.yaml",
+      ]));
+      expect(available).not.toEqual(expect.arrayContaining([
+        "fixture-graph-memory.yaml",
+        "codex-basic-graph-search.yaml",
+        "claude-basic-graph-search.yaml",
+        "prime-agent-basic-graph-search.yaml",
+        "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
+        "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
+        "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
+        "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
+      ]));
+    }
+  });
+
   it("resolves the multi-agent configuration through the generic Eval catalog path", async () => {
     const catalog = await loadHarnessConfigurations(evalHarnessConfigurationPaths({
       harnessDirectory: resolve(repositoryRoot, "harnesses"),
       isPackaged: true,
+      targetKey: "macos-arm64",
     }));
 
     expect([...catalog.keys()]).toContain("codex-layered-navigation-luna");
@@ -92,6 +176,58 @@ describe("Eval harness configuration availability", () => {
       implementation: "codex.basic",
       settings: { promptProfile: "layered-navigation-multi-agent-v1" },
     });
+  });
+
+  it("keeps each graph-search treatment identical to its baseline except for identity and query authority", async () => {
+    const catalog = await loadHarnessConfigurations(evalHarnessConfigurationPaths({
+      harnessDirectory: resolve(repositoryRoot, "harnesses"),
+      isPackaged: false,
+      packageAvailable: () => true,
+      targetKey: "macos-arm64",
+    }));
+
+    for (const [controlName, treatmentName] of [
+      ["codex-basic", "codex-basic-graph-search"],
+      ["claude-basic", "claude-basic-graph-search"],
+      ["prime-agent-basic", "prime-agent-basic-graph-search"],
+    ]) {
+      const control = structuredClone(catalog.get(controlName));
+      const treatment = structuredClone(catalog.get(treatmentName));
+      expect(control?.graphCapabilityProfile).toEqual({ search: "disabled" });
+      expect(treatment?.graphCapabilityProfile).toEqual({ search: "query-v1" });
+      if (control) {
+        control.name = "comparison";
+        control.revision = 1;
+        control.graphCapabilityProfile = { search: "comparison" };
+      }
+      if (treatment) {
+        treatment.name = "comparison";
+        treatment.revision = 1;
+        treatment.graphCapabilityProfile = { search: "comparison" };
+      }
+      expect(treatment).toEqual(control);
+    }
+  });
+
+  it("loads the Apple-Silicon-only Codex quartet without exposing non-runnable combined provider cells", async () => {
+    const catalog = await loadHarnessConfigurations(evalHarnessConfigurationPaths({
+      harnessDirectory: resolve(repositoryRoot, "harnesses"),
+      isPackaged: false,
+      packageAvailable: () => false,
+      targetKey: "macos-arm64",
+    }));
+
+    expect(catalog.get("codex-eval-lantern-search-query-v1-recursion-enabled")).toMatchObject({
+      implementation: "codex.basic",
+      complete: { agentAuthored: true },
+      graphCapabilityProfile: { search: "query-v1" },
+      settings: {
+        personalPresentationVersion: "personal-presentation-v2",
+        promptProfile: "layered-navigation-multi-agent-v1",
+      },
+    });
+    expect(catalog.has("claude-eval-complete-graph-search")).toBe(false);
+    expect(catalog.has("prime-agent-eval-complete-graph-search")).toBe(false);
   });
 
   it("keeps the layered Codex harness product-facing and the high variant internal", async () => {

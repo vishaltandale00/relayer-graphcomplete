@@ -409,14 +409,19 @@ describe("desktop skeleton", () => {
     expect(evalMain).toContain("productSession.readOnlyCookie");
     expect(evalMain).toContain("claimPrimaryDesktopInstance");
     expect(evalMain).toContain("createReviewWindow(executionId)");
-    expect(evalMain).toContain("evalHarnessConfigurationPaths({ harnessDirectory, isPackaged: app.isPackaged })");
+    expect(evalMain).toContain("evalRuntimeTarget({ isPackaged: app.isPackaged, environment: process.env })");
+    expect(evalMain).toContain("targetKey: evalTarget.key");
     expect(evalMain).toContain("process.env.PYTHONPATH");
     expect(evalDashboard).toContain("Test cases");
     expect(evalDashboard).toContain("Harnesses under test");
+    expect(evalDashboard).toContain("Ablation presets");
     expect(evalDashboard).toContain("Open the judge review or the read-only production workspace");
     expect(evalDashboard).not.toContain('id="judgeOutputPanel"');
     expect(evalDashboardMain).toContain("Judge review ↗");
     expect(evalDashboardMain).toContain("Product workspace ↗");
+    expect(evalDashboardMain).toContain("bindAblationControls");
+    expect(evalDashboardMain).toContain("selectionFromControls");
+    expect(evalDashboardMain).toContain("createRunFromControls");
     expect(evalDashboardMain).not.toContain("renderJudgeOutput");
     expect(evalPreload).toContain("openJudgeReview");
     expect(evalPreload).toContain("loadJudgeScreenshot");
@@ -822,6 +827,8 @@ describe("desktop skeleton", () => {
       expect(session.graphControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).not.toBe(session.graphControlToken);
+      expect(session.graphUrl).toBe("http://127.0.0.1:43125");
+      expect(service.graphOperationRecorder).toBeNull();
       expect(session.configurationNames).toEqual(["codex-basic"]);
       const catalog = JSON.parse(await readFile(session.catalogPath, "utf8"));
       expect(catalog.unavailableConfigurations).toEqual([expect.objectContaining({
@@ -2500,7 +2507,7 @@ describe("desktop skeleton", () => {
       await Promise.all([
         writeFile(bundledBinary, "binary-fixture"),
         writeFile(bundledGraphBinary, "binary-fixture"),
-        writeFile(bundledGraphClient, "client-fixture"),
+        writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} }\n"),
         writeFile(bundledMarked, "marked-fixture"),
         writeFile(join(bundledCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
         writeFile(bundledCodexBrowserScript, "helper-fixture"),
@@ -2515,40 +2522,59 @@ describe("desktop skeleton", () => {
         "node_modules/@relayer/eval-runner/dist/index.js",
       ];
       const verifyPrimeAgent = async () => ({ sourceCommit: "fixture", packages: 4 });
+      const verifyGraphServer = async () => ({
+        libraries: ["/usr/lib/libSystem.B.dylib"],
+        state: "created",
+      });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
         verifyPrimeAgent,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
         expectedArchitecture: "x86_64",
         listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
         verifyPrimeAgent,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "x86_64" });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
         verifyPrimeAgent,
       })).rejects.toThrow("must contain only arm64");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/graph-client/dist/index.js"),
+        verifyGraphServer,
         verifyPrimeAgent,
       })).rejects.toThrow("missing node_modules/@relayer/graph-client/dist/index.js");
+      await writeFile(bundledGraphClient, "export class RelayerGraphClient {}\n");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
+        verifyPrimeAgent,
+      })).rejects.toThrow("missing RelayerGraphClient.prototype.search");
+      await writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} }\n");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"),
+        verifyGraphServer,
         verifyPrimeAgent,
       })).rejects.toThrow("missing node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js"),
+        verifyGraphServer,
         verifyPrimeAgent,
       })).rejects.toThrow("missing node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js");
       await rm(bundledCodexBrowserScript);
@@ -2556,6 +2582,7 @@ describe("desktop skeleton", () => {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
         verifyPrimeAgent,
       })).rejects.toThrow(/chrome-devtools-mcp\.js|ENOENT/);
       await writeFile(bundledCodexBrowserScript, "helper-fixture");
@@ -2565,6 +2592,7 @@ describe("desktop skeleton", () => {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
         verifyPrimeAgent,
       })).rejects.toThrow("Bundled Codex browser helper files are invalid.");
       await rm(bundledCodexBrowserScript, { recursive: true });
@@ -2573,6 +2601,7 @@ describe("desktop skeleton", () => {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
         verifyPrimeAgent: async () => { throw Object.assign(new Error("missing nested Prime asset"), { code: "ENOENT" }); },
       })).rejects.toThrow("missing nested Prime asset");
 
@@ -2585,7 +2614,7 @@ describe("desktop skeleton", () => {
       await Promise.all([
         writeFile(join(windowsPath, "resources", "bin", "relayer-app-server.exe"), "binary-fixture"),
         writeFile(join(windowsPath, "resources", "bin", "relayer-graph-server.exe"), "binary-fixture"),
-        writeFile(join(windowsPath, "resources", "graph-client", "index.js"), "client-fixture"),
+        writeFile(join(windowsPath, "resources", "graph-client", "index.js"), "export class RelayerGraphClient { search() {} }\n"),
         writeFile(join(windowsPath, "resources", "renderer", "vendor", "marked.umd.js"), "marked-fixture"),
         writeFile(join(windowsCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
         writeFile(join(windowsCodexBrowserRoot, "build", "src", "bin", "chrome-devtools-mcp.js"), "helper-fixture"),

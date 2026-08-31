@@ -8,6 +8,7 @@ import type {
   HarnessRunContext,
   HarnessSessionState,
   HarnessTraceSupport,
+  JsonObject,
 } from "../types.js";
 import { buildLayeredNavigationPrompt } from "./codex-basic.js";
 import {
@@ -103,10 +104,22 @@ export class ClaudeBasicHarness implements Harness {
   }
 
   complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
-    return nativeExecutionHandle(this.execute(context, signal));
+    let resolveAttached!: (identity: JsonObject) => void;
+    let rejectAttached!: (error: unknown) => void;
+    const attached = new Promise<JsonObject>((resolve, reject) => {
+      resolveAttached = resolve;
+      rejectAttached = reject;
+    });
+    const execution = this.execute(context, resolveAttached, signal);
+    void execution.catch(rejectAttached);
+    return nativeExecutionHandle(execution, undefined, attached);
   }
 
-  private async execute(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+  private async execute(
+    context: HarnessRunContext,
+    attach: (identity: JsonObject) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (context.model === undefined || context.access === undefined) {
       throw new Error("claude.basic requires an exact model and execution access");
     }
@@ -144,8 +157,12 @@ export class ClaudeBasicHarness implements Harness {
       context.access,
       context.completionBroker,
       resumeSessionId,
+      attach,
       signal,
     );
+    if (!isRoot && result.sessionId === undefined) {
+      throw new Error("Claude invoked completion did not expose a durable native session identity");
+    }
     await context.trace.emit({
       type: "message",
       data: { role: "assistant", text: redactPersonalPresentationResult(context, result.text) },
@@ -183,6 +200,7 @@ export class ClaudeBasicHarness implements Harness {
     access: HarnessExecutionAccess,
     completionBroker: HarnessRunContext["completionBroker"],
     resumeSessionId?: string,
+    attach?: (identity: JsonObject) => void,
     signal?: AbortSignal,
   ): Promise<{ text: string; sessionId?: string }> {
     const runtime = claudeRuntime(access);
@@ -217,7 +235,7 @@ export class ClaudeBasicHarness implements Harness {
           stderr: () => {},
         },
       });
-      return await collectClaudeResult(messages, signal);
+      return await collectClaudeResult(messages, attach, signal);
     } catch {
       if (signal?.aborted) throw abortReason(signal);
       throw new Error("Claude Agent SDK completion failed.");
@@ -234,6 +252,7 @@ export class ClaudeBasicHarness implements Harness {
       this.completeModuleUrl,
       "Claude",
       includePersonalPresentation,
+      this.context.configuration.graphCapabilityProfile?.search === "query-v1",
     );
   }
 }
@@ -350,13 +369,21 @@ function normalizePathKey(environment: Record<string, string>, platform: NodeJS.
 
 async function collectClaudeResult(
   messages: AsyncIterable<unknown>,
+  attach?: (identity: JsonObject) => void,
   signal?: AbortSignal,
 ): Promise<{ text: string; sessionId?: string }> {
   let sessionId: string | undefined;
+  let attached = false;
   for await (const message of messages) {
     if (signal?.aborted) throw abortReason(signal);
     if (!isRecord(message)) continue;
-    if (typeof message.session_id === "string" && message.session_id !== "") sessionId = message.session_id;
+    if (typeof message.session_id === "string" && message.session_id.trim() !== "") {
+      sessionId = message.session_id;
+      if (!attached) {
+        attached = true;
+        attach?.(Object.freeze({ schemaVersion: 1, provider: "claude", sessionId }));
+      }
+    }
     if (message.type !== "result") continue;
     if (message.subtype !== "success" || typeof message.result !== "string") {
       throw new Error("Claude Agent SDK returned an unsuccessful result.");

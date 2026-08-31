@@ -5,10 +5,9 @@ import { createInterface } from "node:readline";
 import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep, win32 as win32Path } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
-import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
 import { desktopTargetFromEnvironment } from "../desktop/shared/target.mjs";
 import {
   createLadybugCargoEnvironment,
@@ -27,11 +26,47 @@ export const RECEIPT_INPUT_PATHS = [
   "crates/relayer-graph-server/Cargo.toml",
   "crates/relayer-graph-server/src/main.rs",
   "desktop/packaging/build-development.mjs",
+  "desktop/packaging/pinned-ladybug-build.mjs",
   "desktop/shared/target.mjs",
   "scripts/capture-ladybug-packaged-lifecycle.mjs",
   "scripts/prepare-ladybug-source.mjs",
   "vendor/ladybug/source-build-manifest.json",
 ];
+
+export async function assertCaptureInputsMatchSourceCommit({
+  sourceCommit,
+  repositoryRoot = resolve("."),
+  readCommittedInput = async (path) => {
+    const { stdout } = await execFileAsync("git", ["show", `${sourceCommit}:${path}`], {
+      encoding: "buffer",
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return stdout;
+  },
+} = {}) {
+  for (const path of RECEIPT_INPUT_PATHS) {
+    const [working, committed] = await Promise.all([
+      readFile(join(repositoryRoot, path)),
+      readCommittedInput(path),
+    ]);
+    assert.equal(
+      createHash("sha256").update(working).digest("hex"),
+      createHash("sha256").update(committed).digest("hex"),
+      `${path} differs from the exact source commit`,
+    );
+  }
+}
+
+export async function resolveCaptureBuildDesktop({ buildDesktop, checkout, sourceCommit }) {
+  if (buildDesktop) return buildDesktop;
+  const moduleUrl = pathToFileURL(join(checkout, "desktop/packaging/build-development.mjs"));
+  moduleUrl.searchParams.set("sourceCommit", sourceCommit);
+  const loaded = await import(moduleUrl.href);
+  if (typeof loaded.buildDevelopmentDesktop !== "function") {
+    throw new Error("detached source commit does not export buildDevelopmentDesktop");
+  }
+  return loaded.buildDevelopmentDesktop;
+}
 
 export function parseDynamicLibraries(output) {
   // `otool -L` prints one header per Mach-O architecture ("<path>:" for a thin
@@ -576,7 +611,7 @@ export async function captureLadybugPackagedLifecycle({
   sourceOutput,
   sourceCommit,
   environment = process.env,
-  buildDesktop = buildDevelopmentDesktop,
+  buildDesktop,
 } = {}) {
   if (!sourceOutput) throw new Error("Ladybug packaged capture requires a prepared source directory");
   if (!/^[0-9a-f]{40}$/u.test(sourceCommit || "")) {
@@ -657,24 +692,7 @@ export async function captureLadybugPackagedLifecycle({
     checkoutAdded = true;
     const { stdout: checkoutStatus } = await execFileAsync("git", ["status", "--porcelain"], { cwd: checkout });
     if (checkoutStatus !== "") throw new Error("detached qualification checkout is not clean");
-    for (const path of [
-      ".gitattributes",
-      "desktop/packaging/build-development.mjs",
-      "desktop/shared/target.mjs",
-      "scripts/capture-ladybug-packaged-lifecycle.mjs",
-      "scripts/prepare-ladybug-source.mjs",
-      "vendor/ladybug/source-build-manifest.json",
-    ]) {
-      const { stdout: committed } = await execFileAsync("git", ["show", `${sourceCommit}:${path}`], {
-        encoding: "buffer",
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      assert.equal(
-        createHash("sha256").update(await readFile(resolve(path))).digest("hex"),
-        createHash("sha256").update(committed).digest("hex"),
-        `${path} differs from the exact source commit`,
-      );
-    }
+    await assertCaptureInputsMatchSourceCommit({ sourceCommit });
     const npmCommand = npmCommandForPlatform();
     await execFileAsync(npmCommand.executable, [
       ...npmCommand.prefixArgs,
@@ -703,11 +721,27 @@ export async function captureLadybugPackagedLifecycle({
       maxBuffer: 10 * 1024 * 1024,
     });
     const startedAt = Date.now() - 1_000;
-    await buildDesktop({
+    const buildDetachedDesktop = await resolveCaptureBuildDesktop({ buildDesktop, checkout, sourceCommit });
+    await buildDetachedDesktop({
       environment: {
         ...buildEnvironment,
         CARGO_TARGET_DIR: cargoTarget,
         RELAYER_CARGO_TARGET_DIR: cargoTarget,
+      },
+      prepareLadybug: async ({ target: buildTarget }) => {
+        assert.equal(buildTarget.key, target.key, "qualification build target changed after source validation");
+        assert.equal(
+          buildTarget.rustTarget,
+          target.rustTarget,
+          "qualification Rust target changed after source validation",
+        );
+        return {
+          environment: sourceEnvironment.environment,
+          environmentMustBeUnset: sourceEnvironment.environmentMustBeUnset,
+          // The validated tree belongs to the outer qualification capture and
+          // remains live through packaged launch verification.
+          dispose: async () => {},
+        };
       },
       repositoryRoot: checkout,
       dependencyRoot: checkout,

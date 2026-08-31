@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ActionId, ActionKind, GraphError, InputAction, LayerId, NodeId,
-    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
-    SubmittedInputValue, ThreadId, graph::InteractionScope, storage::sqlite::actions::ActionTable,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId, SearchTarget,
+    SubmittedInputValue, ThreadId, graph::InteractionScope, graph::completion,
+    storage::sqlite::actions::ActionTable, storage::sqlite::imports::ImportTable,
     storage::sqlite::input_children::validate_value,
 };
 
@@ -257,6 +258,14 @@ impl crate::GraphDatabase {
         &self,
         import_id: &str,
     ) -> Result<ImportedConversationReceipt, GraphError> {
+        // Taken before the write transaction, like every other accept path, so
+        // submissions to this target index in the order they commit.
+        let target = {
+            let mut connection = self.storage.acquire().await?;
+            ImportTable::new(&mut connection).target(import_id).await?
+        };
+        let _order = self.order_writes_to(target).await;
+        let _publication = self.enter_search_publication().await;
         let mut tx = self.storage.begin_write().await?;
         let metadata = load_metadata(&mut tx, import_id).await?;
         let turn_count: i64 =
@@ -778,7 +787,50 @@ impl crate::GraphDatabase {
                 ));
             }
         }
-        tx.commit().await?;
+        // An import is an accept path like any other, so its closures reach the
+        // search store before SQLite commits. The whole conversation goes in as
+        // one search transaction carrying one revision: the turns were authored
+        // together and there is no point at which a partial import is meaningful.
+        let mut closures = Vec::new();
+        for receipt in &receipts {
+            let Some(node_id) = receipt.graph_node_id else {
+                continue;
+            };
+            let node_id = crate::NodeId::new(node_id)
+                .ok_or_else(|| GraphError::Internal("invalid imported root node ID".into()))?;
+            let scope = InteractionScope {
+                project_id: metadata.project_id,
+                thread_id: metadata.thread_id,
+                root_node_id: node_id,
+                read_only: false,
+                authority_epoch: None,
+            };
+            if let Some(closure) =
+                completion::read_accepted_closure_on(&mut tx, &scope, node_id).await?
+            {
+                closures.push(closure.into());
+            }
+        }
+        let indexed = !closures.is_empty();
+        if indexed
+            && let Err(error) = completion::index_and_record(
+                self,
+                &mut tx,
+                target,
+                closures,
+                crate::publication_targets(metadata.project_id, metadata.thread_id),
+                self.import_expiry(),
+            )
+            .await
+        {
+            tx.rollback().await?;
+            return Err(error);
+        }
+        if indexed {
+            self.commit_indexed_write(tx, target).await?;
+        } else {
+            tx.commit().await?;
+        }
         for receipt in &mut receipts {
             if let Some(node_id) = receipt.graph_node_id {
                 receipt.output = self
@@ -825,13 +877,75 @@ impl crate::GraphDatabase {
     }
 
     pub async fn remove_imported_conversation(&self, import_id: &str) -> Result<(), GraphError> {
-        let mut tx = self.storage.begin_write().await?;
-        let thread_id: Option<i64> =
-            sqlx::query_scalar("SELECT thread_id FROM graph_imports WHERE import_id=?1")
+        let metadata: Option<(Option<i64>, i64)> = {
+            let mut connection = self.storage.acquire().await?;
+            sqlx::query_as("SELECT project_id,thread_id FROM graph_imports WHERE import_id=?1")
                 .bind(import_id)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut *connection)
+                .await?
+        };
+        let Some((project_id, thread_id)) = metadata else {
+            return Ok(());
+        };
+        let project_id = project_id.and_then(ProjectId::new);
+        let thread_id = ThreadId::new(thread_id)
+            .ok_or_else(|| GraphError::Internal("graph import has an invalid thread".into()))?;
+        let target = SearchTarget::new(project_id, thread_id);
+        let _order = self.order_writes_to(target).await;
+        let _publication = self.enter_search_publication().await;
+        let mut tx = self.storage.begin_write().await?;
+        let still_present: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM graph_imports WHERE import_id=?1)")
+                .bind(import_id)
+                .fetch_one(&mut *tx)
                 .await?;
-        if let Some(thread_id) = thread_id {
+        let mut indexed = false;
+        if still_present {
+            let externally_referenced: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM actions a \
+                 JOIN layers target ON target.id=a.target_layer_id \
+                 WHERE target.thread_id=?1 AND a.thread_id<>?1)",
+            )
+            .bind(thread_id.value())
+            .fetch_one(&mut *tx)
+            .await?;
+            if externally_referenced {
+                return Err(GraphError::Forbidden(
+                    "imported conversation is referenced by another thread".into(),
+                ));
+            }
+            let current_ids: Vec<i64> = sqlx::query_scalar(
+                "SELECT state.interaction_node_id FROM completion_states state \
+                 JOIN nodes n ON n.id=state.interaction_node_id \
+                 WHERE n.thread_id=?1 AND state.current_layer_id IS NOT NULL \
+                 ORDER BY state.interaction_node_id",
+            )
+            .bind(thread_id.value())
+            .fetch_all(&mut *tx)
+            .await?;
+            let mut publications = Vec::with_capacity(current_ids.len());
+            for id in current_ids {
+                let node_id = NodeId::new(id).ok_or_else(|| {
+                    GraphError::Internal("imported completion has an invalid interaction".into())
+                })?;
+                let scope = crate::storage::sqlite::nodes::NodeTable::new(&mut tx)
+                    .interaction_scope(node_id)
+                    .await?;
+                let output = completion::read_output_on(&mut tx, &scope)
+                    .await?
+                    .ok_or_else(|| {
+                        GraphError::Internal("imported completion output is missing".into())
+                    })?;
+                publications.push(
+                    completion::read_accepted_publication_on(
+                        &mut tx,
+                        &scope,
+                        output.root_layer.layer.id,
+                        Some(output.root_action),
+                    )
+                    .await?,
+                );
+            }
             for statement in [
                 "DELETE FROM graph_projection_outbox WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
                 "DELETE FROM current_revisions WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
@@ -848,7 +962,7 @@ impl crate::GraphDatabase {
                 "DELETE FROM nodes WHERE thread_id=?1",
             ] {
                 sqlx::query(statement)
-                    .bind(thread_id)
+                    .bind(thread_id.value())
                     .execute(&mut *tx)
                     .await?;
             }
@@ -856,8 +970,28 @@ impl crate::GraphDatabase {
                 .bind(import_id)
                 .execute(&mut *tx)
                 .await?;
+            // Exercise every canonical foreign-key boundary before the first
+            // derived deletion. These SQLite writes remain uncommitted while
+            // Ladybug removes the same publications; a derived failure rolls
+            // this transaction back, while a canonical dependency can never
+            // leave Ladybug ahead of a deletion SQLite refused.
+            if !publications.is_empty() {
+                completion::remove_from_index_and_record(
+                    self,
+                    &mut tx,
+                    target,
+                    publications,
+                    self.import_expiry(),
+                )
+                .await?;
+                indexed = true;
+            }
         }
-        tx.commit().await?;
+        if indexed {
+            self.commit_indexed_write(tx, target).await?;
+        } else {
+            tx.commit().await?;
+        }
         Ok(())
     }
 }

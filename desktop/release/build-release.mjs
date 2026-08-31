@@ -13,6 +13,11 @@ import { verifyMacOSApplication } from "./verify-macos-app.mjs";
 import { verifyPackagedDesktopContract } from "./verify-packaged-contract.mjs";
 import { verifyDesktopUpdateZip } from "./verify-update-zip.mjs";
 import { verifyWindowsRelease } from "./verify-windows-app.mjs";
+import {
+  preparePinnedLadybugForPackaging,
+  requireLadybugDistributionLicenseReady,
+  withPinnedLadybugPackagingEnvironment,
+} from "../packaging/pinned-ladybug-build.mjs";
 
 function run(command, args, options) {
   return new Promise((resolvePromise, reject) => {
@@ -25,7 +30,39 @@ function run(command, args, options) {
   });
 }
 
-export async function buildDesktopRelease({ channelName = process.argv[2], environment = process.env } = {}) {
+export async function buildReleaseRustServers({
+  contract,
+  environment,
+  execute = run,
+  prepareLadybug = preparePinnedLadybugForPackaging,
+  repositoryRoot,
+  verifyLadybugDistributionLicense = requireLadybugDistributionLicenseReady,
+}) {
+  const target = { key: contract.targetKey, rustTarget: contract.rustTarget };
+  if (target.key !== "macos-arm64") {
+    throw new Error(`Ladybug release packaging is not qualified for ${target.key}.`);
+  }
+  await verifyLadybugDistributionLicense();
+  return withPinnedLadybugPackagingEnvironment({ environment, target, prepareLadybug }, async (
+    buildEnvironment,
+    cargoIntegrityArguments,
+  ) => execute("cargo", [
+    "build", "--release",
+    "-p", "relayer-app-server",
+    "-p", "relayer-graph-server",
+    "--target", contract.rustTarget,
+    ...cargoIntegrityArguments,
+  ], {
+    cwd: repositoryRoot,
+    env: { ...buildEnvironment, CARGO_PROFILE_RELEASE_DEBUG: "1" },
+  }));
+}
+
+export async function buildDesktopRelease({
+  channelName = process.argv[2],
+  environment = process.env,
+  prepareLadybug = preparePinnedLadybugForPackaging,
+} = {}) {
   if (channelName !== "stable" && channelName !== "preview") {
     throw new Error("Usage: node desktop/release/build-release.mjs <stable|preview>");
   }
@@ -39,14 +76,11 @@ export async function buildDesktopRelease({ channelName = process.argv[2], envir
   };
   const contract = await loadDesktopReleaseContract({ environment: releaseEnvironment, desktopRoot });
 
-  await run("cargo", [
-    "build", "--release",
-    "-p", "relayer-app-server",
-    "-p", "relayer-graph-server",
-    "--target", contract.rustTarget,
-  ], {
-    cwd: repositoryRoot,
-    env: { ...releaseEnvironment, CARGO_PROFILE_RELEASE_DEBUG: "1" },
+  await buildReleaseRustServers({
+    contract,
+    environment: releaseEnvironment,
+    prepareLadybug,
+    repositoryRoot,
   });
   await rm(distRoot, { recursive: true, force: true });
   const builderArguments = contract.platform === "darwin"

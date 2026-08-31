@@ -1,0 +1,57 @@
+.ablation-presets {
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 16px;
+}
+
+.ablation-presets legend {
+  padding: 0 6px;
+  color: #c9cdd1;
+  font-weight: 700;
+}
+
+.ablation-presets > p {
+  margin: 2px 0 12px;
+  color: var(--muted);
+}
+
+.ablation-options {
+  display: grid;
+  gap: 8px;
+}
+
+.ablation-preset {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 14px;
+  border: 1px solid var(--strong);
+  border-radius: 9px;
+  background: var(--raised);
+  padding: 12px;
+  text-align: left;
+}
+
+.ablation-preset:hover {
+  border-color: var(--blue);
+  background: #202429;
+}
+
+.ablation-preset b,
+.ablation-preset small {
+  grid-column: 1;
+}
+
+.ablation-preset small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.ablation-preset span {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--blue);
+  font-size: 10px;
+}

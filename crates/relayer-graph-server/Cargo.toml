@@ -4,10 +4,19 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Ladybug ships in the product, so the package job's status certifies the gate.
+# Building without it still has to work, to keep the toolchain requirement
+# separable from the rest of the crate.
+default = ["ladybug"]
+ladybug = ["dep:lbug"]
+crash-test-support = ["relayer-graph-core/crash-test-support"]
+
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+lbug = { version = "=0.18.0", default-features = false, optional = true }
 relayer-graph-core = { path = "../relayer-graph-core" }
 relayer-telemetry-capability = { path = "../relayer-telemetry-capability" }
 serde.workspace = true
@@ -15,12 +24,40 @@ serde_json.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 
-[target.'cfg(ladybug_qualification)'.dependencies]
-lbug = { version = "=0.18.0", default-features = false }
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(ladybug_qualification)'] }
-
 [dev-dependencies]
+sha2.workspace = true
+sqlx.workspace = true
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
+
+[[test]]
+name = "graph_query_v1_conformance"
+required-features = ["crash-test-support"]
+
+[[test]]
+name = "graph_search_route"
+required-features = ["crash-test-support"]
+
+[[test]]
+name = "ladybug_crash_reconciliation"
+required-features = ["crash-test-support"]
+
+[[test]]
+name = "ladybug_search_index"
+required-features = ["crash-test-support"]
+
+[[test]]
+name = "ladybug_search_lifecycle"
+required-features = ["crash-test-support"]
+
+[[test]]
+name = "search_index_corpus"
+required-features = ["crash-test-support"]
+
+[[example]]
+name = "search"
+required-features = ["crash-test-support"]
+
+[[bench]]
+name = "ladybug_index_save_latency"
+harness = false

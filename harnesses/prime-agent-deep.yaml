@@ -2,7 +2,7 @@ schemaVersion: 1
 name: prime-agent-deep
 implementation: prime.agent
 implementationVersion: 1
-revision: 1
+revision: 2
 permissionBindings:
   ask:
     boundary: workspace-write@1
@@ -25,6 +25,8 @@ modelRules:
       modelIdRegex: ".*"
   deny: []
 executionAccessContracts: [secret@1]
+graphCapabilityProfile:
+  search: disabled
 settings:
   thinkingLevel: high
   rlmMaxDepth: 4

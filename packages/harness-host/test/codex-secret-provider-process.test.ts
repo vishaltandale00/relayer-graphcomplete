@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { createRequire } from "node:module";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -146,6 +146,148 @@ describe("Codex secret-provider process boundary", () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   }, 20_000);
+
+  nativeDarwinIt("uses the invoked child's fresh graph capability in a pinned-Codex shell after a parent completion", async () => {
+    const codexBinary = resolvePinnedCodexBinary();
+    const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-invoked-capability-"));
+    temporaryDirectories.push(codexHome);
+    const parentToken = "parent-capability-token";
+    const childToken = "child-capability-token";
+    const graphTokens = [parentToken, childToken] as const;
+    const graphCapabilityUses: string[] = [];
+    let graphRequestNumber = 0;
+    const graphServer = createServer((request, response) => {
+      const authorization = request.headers.authorization ?? "";
+      graphRequestNumber += 1;
+      graphCapabilityUses.push(authorization === `Bearer ${parentToken}`
+        ? "parent"
+        : authorization === `Bearer ${childToken}` ? "child" : "unknown");
+      const expected = `Bearer ${graphTokens[graphRequestNumber - 1] ?? "unexpected"}`;
+      if (request.method !== "GET" || request.url !== "/api/graph/input" || authorization !== expected) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { code: "invalid_capability" } }));
+        return;
+      }
+      const nodeId = graphRequestNumber;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        interaction: {
+          id: nodeId,
+          kind: "user-interaction",
+          icon: "user",
+          title: nodeId === 1 ? "Parent" : "Invoked child",
+          detail: "Read this interaction through the public graph client.",
+          state: "accepted",
+        },
+        contexts: [],
+      }));
+    });
+    await listenLoopback(graphServer);
+    const graphAddress = graphServer.address();
+    if (graphAddress === null || typeof graphAddress === "string") throw new Error("Loopback graph server did not expose a TCP port.");
+    const graphUrl = `http://127.0.0.1:${graphAddress.port}`;
+
+    const shellOutputs: string[] = [];
+    let requestNumber = 0;
+    const providerServer = createServer((request, response) => {
+      void captureRequest(request).then((captured) => {
+        requestNumber += 1;
+        if (requestNumber % 2 === 1) {
+          const expectedNodeId = (requestNumber + 1) / 2;
+          respondWithGraphInputProbe(response, expectedNodeId);
+          return;
+        }
+        shellOutputs.push(functionCallOutput(captured.body));
+        respondWithFinalMessage(response);
+      });
+    });
+    await listenLoopback(providerServer);
+    const providerAddress = providerServer.address();
+    if (providerAddress === null || typeof providerAddress === "string") throw new Error("Loopback provider did not expose a TCP port.");
+    const endpoint = `http://127.0.0.1:${providerAddress.port}/v1`;
+    await writeFile(join(codexHome, "config.toml"), [
+      'model_provider = "relayer_loopback"',
+      "[model_providers.relayer_loopback]",
+      'name = "Relayer loopback test provider"',
+      `base_url = ${JSON.stringify(endpoint)}`,
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      "supports_websockets = false",
+      "",
+    ].join("\n"));
+    const harness = new CodexBasicHarness({
+      threadId: 1,
+      permissionProfileId: "full",
+      permissionBinding: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
+      workingDirectory: process.cwd(),
+      configuration: {
+        schemaVersion: 1,
+        name: "codex-basic",
+        implementation: "codex.basic",
+        implementationVersion: 1,
+        permissionBindings: {
+          full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
+        },
+        settings: { skipGitRepoCheck: true },
+      },
+    });
+    const access = {
+      kind: "managed-runtime" as const,
+      contract: "managed-runtime@1" as const,
+      providerId: "codex",
+      adapterId: "codex-subscription",
+      adapterImplementationVersion: "1",
+      runtimeId: "codex",
+      version: pinnedCodexVersion(),
+      executable: codexBinary,
+      environment: {
+        CODEX_HOME: codexHome,
+        RELAYER_CODEX_BINARY: codexBinary,
+      },
+    };
+    const model = { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-test" };
+    const inputGraph = (id: number, title: string) => ({
+      id,
+      kind: "user-interaction" as const,
+      icon: "user" as const,
+      title,
+      detail: "Read this interaction through the public graph client.",
+      state: "accepted" as const,
+    });
+    const complete = (id: number, token: string, origin: { kind: "root" } | { kind: "invoke"; sourceCompletionId: number; actionId: number }) => {
+      const input = inputGraph(id, id === 1 ? "Parent" : "Invoked child");
+      return harness.complete({
+        inputGraph: input,
+        interactionInput: { interaction: input, contexts: [] },
+        origin,
+        model,
+        access,
+        graph: {
+          interactionNodeId: id,
+          acquireCapability: () => ({ url: graphUrl, token, nodeId: id }),
+        },
+        approvals: { request: async () => { throw new Error("Approval was not expected."); } },
+        trace: createNoopHarnessTraceSink(),
+      });
+    };
+    try {
+      await complete(1, parentToken, { kind: "root" });
+      await complete(2, childToken, { kind: "invoke", sourceCompletionId: 1, actionId: 102 });
+
+      expect(shellOutputs).toHaveLength(2);
+      expect(shellOutputs[0]).toContain("GRAPH_INPUT_NODE_1_OK");
+      expect(shellOutputs[1]).toContain("GRAPH_INPUT_NODE_2_OK");
+      expect(shellOutputs.join("\n")).not.toContain(parentToken);
+      expect(shellOutputs.join("\n")).not.toContain(childToken);
+      expect(graphCapabilityUses).toEqual(["parent", "child"]);
+    } finally {
+      harness.forceShutdown();
+      await Promise.all([
+        closeServer(providerServer),
+        closeServer(graphServer),
+      ]);
+    }
+  }, 30_000);
 });
 
 interface CapturedRequest {
@@ -225,6 +367,56 @@ function respondWithEnvironmentProbe(response: import("node:http").ServerRespons
     type: "response.completed", response: responseEnvelope("response_probe", "completed", [item]), sequence_number: 5,
   });
   response.end();
+}
+
+function respondWithGraphInputProbe(response: import("node:http").ServerResponse, expectedNodeId: number): void {
+  const clientModuleUrl = import.meta.resolve("@relayer/graph-client");
+  const script = [
+    `import { RelayerGraphClient } from ${JSON.stringify(clientModuleUrl)};`,
+    "try {",
+    "const input = await RelayerGraphClient.fromEnv().getInteractionInput();",
+    `if (input.interaction.id !== ${expectedNodeId}) throw new Error("Unexpected interaction node");`,
+    `console.log("GRAPH_INPUT_NODE_${expectedNodeId}_OK");`,
+    "} catch { console.log(\"GRAPH_INPUT_PROBE_FAILED\"); process.exitCode = 1; }",
+  ].join(" ");
+  const argumentsJson = JSON.stringify({
+    cmd: `node --input-type=module --eval ${shellSingleQuote(script)}`,
+  });
+  const item = {
+    id: `fc_graph_input_${expectedNodeId}`,
+    type: "function_call",
+    status: "completed",
+    arguments: argumentsJson,
+    call_id: `call_graph_input_${expectedNodeId}`,
+    name: "exec_command",
+  };
+  startEventStream(response);
+  sendEvent(response, "response.created", {
+    type: "response.created", response: responseEnvelope(`response_graph_input_${expectedNodeId}`, "in_progress", []), sequence_number: 0,
+  });
+  sendEvent(response, "response.output_item.added", {
+    type: "response.output_item.added", output_index: 0,
+    item: { ...item, status: "in_progress", arguments: "" }, sequence_number: 1,
+  });
+  sendEvent(response, "response.function_call_arguments.delta", {
+    type: "response.function_call_arguments.delta", item_id: item.id, output_index: 0,
+    delta: argumentsJson, sequence_number: 2,
+  });
+  sendEvent(response, "response.function_call_arguments.done", {
+    type: "response.function_call_arguments.done", item_id: item.id, output_index: 0,
+    arguments: argumentsJson, sequence_number: 3,
+  });
+  sendEvent(response, "response.output_item.done", {
+    type: "response.output_item.done", output_index: 0, item, sequence_number: 4,
+  });
+  sendEvent(response, "response.completed", {
+    type: "response.completed", response: responseEnvelope(`response_graph_input_${expectedNodeId}`, "completed", [item]), sequence_number: 5,
+  });
+  response.end();
+}
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function environmentProbeCommand(): string {
@@ -324,6 +516,17 @@ function resolvePinnedCodexBinary(): string {
   const target = codexTarget();
   const packageRoot = dirname(require.resolve(`${target.packageName}/package.json`));
   return join(packageRoot, "vendor", target.triple, "bin", target.executable);
+}
+
+async function listenLoopback(server: import("node:http").Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+}
+
+async function closeServer(server: import("node:http").Server): Promise<void> {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
 function codexTarget(): { packageName: string; triple: string; executable: string } {

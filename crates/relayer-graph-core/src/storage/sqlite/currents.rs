@@ -32,6 +32,18 @@ pub(crate) struct HeadMove<'a> {
     pub safe_reason: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PublishedCurrent {
+    pub completion_id: NodeId,
+    pub layer_id: LayerId,
+}
+
+#[derive(FromRow)]
+struct PublishedCurrentRow {
+    interaction_node_id: i64,
+    current_layer_id: i64,
+}
+
 #[derive(FromRow)]
 struct StateRow {
     interaction_node_id: i64,
@@ -370,6 +382,32 @@ impl<'connection> CurrentTable<'connection> {
             .into_iter()
             .map(state_from_row)
             .collect()
+    }
+
+    /// Every accepted current that contributes to a canonical search rebuild,
+    /// ordered deterministically by logical target and completion identity.
+    pub(crate) async fn published_currents(&mut self) -> Result<Vec<PublishedCurrent>, GraphError> {
+        sqlx::query_as::<_, PublishedCurrentRow>(
+            "SELECT state.interaction_node_id,state.current_layer_id FROM completion_states state JOIN nodes n ON n.id=state.interaction_node_id WHERE state.current_layer_id IS NOT NULL ORDER BY CASE WHEN n.project_id IS NULL THEN 1 ELSE 0 END,n.project_id,n.thread_id,state.interaction_node_id",
+        )
+        .fetch_all(&mut *self.connection)
+        .await?
+        .into_iter()
+        .map(|row| {
+            Ok(PublishedCurrent {
+                completion_id: NodeId::new(row.interaction_node_id).ok_or_else(|| {
+                    GraphError::Internal(
+                        "database returned an invalid completion interaction".into(),
+                    )
+                })?,
+                layer_id: LayerId::new(row.current_layer_id).ok_or_else(|| {
+                    GraphError::Internal(
+                        "database returned an invalid completion current layer".into(),
+                    )
+                })?,
+            })
+        })
+        .collect()
     }
 
     pub(crate) async fn receipt(

@@ -26,12 +26,16 @@ Run the receipt-only deterministic check with:
 npm run lint:ladybug-contract-probe
 ```
 
-Running the native probe additionally requires the pinned static OpenSSL prefix selected by the
-Issue #261 source-build receipt:
+The probe crate that produced this evidence was promoted into the product by Issue #299. Its
+schema, value lowerings and read-only gate are now
+`crates/relayer-graph-server/src/search_index/`, and the proofs it ran once run on every build in
+`crates/relayer-graph-server/tests/ladybug_search_index.rs`. What remains here is the captured
+evidence itself: the exact output, the coverage disposition, and the resolved dependency closure.
+
+The equivalent run today needs no RUSTFLAGS, because the OpenSSL link directives come from
+`relayer-graph-server`'s build script:
 
 ```sh
-OPENSSL_DIR=/absolute/pinned/openssl-prefix OPENSSL_STATIC=1 \
-  LIBRARY_PATH=/absolute/pinned/openssl-prefix/lib MACOSX_DEPLOYMENT_TARGET=13.3 \
-  RUSTFLAGS='-L native=/absolute/pinned/openssl-prefix/lib -l static=ssl -l static=crypto' \
-  cargo run --locked --manifest-path docs/evidence/issue-261-ladybug-contract-probe/Cargo.toml
+OPENSSL_DIR=/absolute/pinned/openssl-prefix MACOSX_DEPLOYMENT_TARGET=13.3 \
+  cargo test --locked -p relayer-graph-server --test ladybug_search_index
 ```

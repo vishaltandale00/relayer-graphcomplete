@@ -11,7 +11,11 @@ import { createNoopHarnessTraceSink } from "../src/trace.js";
 import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext, HarnessTraceEventInput } from "../src/types.js";
 import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
 
-function factoryContext(approvalMode: string, savedState = {}): HarnessFactoryContext {
+function factoryContext(
+  approvalMode: string,
+  savedState = {},
+  search: "disabled" | "query-v1" = "disabled",
+): HarnessFactoryContext {
   return {
     threadId: 1,
     workingDirectory: "/tmp",
@@ -24,6 +28,7 @@ function factoryContext(approvalMode: string, savedState = {}): HarnessFactoryCo
       implementation: "claude.basic",
       implementationVersion: 1,
       permissionBindings: { auto: { approvalMode } },
+      graphCapabilityProfile: { search },
       settings: {},
     },
   };
@@ -172,7 +177,13 @@ describe("ClaudeBasicHarness", () => {
         loadSdk,
         clientModuleUrl: "@relayer/graph-client",
       });
-      await harness.complete(runContext(secretAccess({ endpoint: "https://gateway.test/anthropic/v1" })));
+      const execution = harness.complete(runContext(secretAccess({ endpoint: "https://gateway.test/anthropic/v1" })));
+      await execution;
+      await expect(execution.attached).resolves.toEqual({
+        schemaVersion: 1,
+        provider: "claude",
+        sessionId: "session-1",
+      });
 
       expect(loadSdk).toHaveBeenCalledWith("file:///managed/claude-agent-sdk/sdk.mjs");
       expect(calls).toHaveLength(1);
@@ -182,6 +193,7 @@ describe("ClaudeBasicHarness", () => {
       expect(prompt).toContain("Use the harness's ordinary workspace tools and reasoning as needed");
       expect(prompt).not.toContain("Codex");
       expect(prompt).not.toContain("native delegation");
+      expect(prompt).not.toContain("Graph search is available");
       expectGraphPresentationGuidance(prompt);
       expect(prompt).toContain("graph with other live agents");
       expect(prompt).toContain("live, user-facing workspace");
@@ -239,6 +251,24 @@ describe("ClaudeBasicHarness", () => {
 
     expect(calls[0]?.prompt).toContain("graph.prepareComplete(invokeAction)");
     expect(calls[0]?.prompt).toContain("Import complete from");
+  });
+
+  it("includes graph-search guidance only for a query-v1 capability profile", async () => {
+    let prompt = "";
+    const harness = new ClaudeBasicHarness(factoryContext("ask", {}, "query-v1"), {
+      query: sdkQuery(
+        [{ type: "result", subtype: "success", result: "done", session_id: "session-1" }],
+        (input) => { prompt = input.prompt; },
+      ),
+      browserSdk: browserSdk(),
+    });
+
+    await harness.complete(runContext(managedAccess()));
+
+    expect(prompt).toContain("Graph search is available");
+    expect(prompt).toContain("await graph.search(request, options)");
+    expect(prompt).toContain('target: { scope: "project", id: knownProjectId }');
+    expect(prompt).toContain("Never invent, guess, or discover a target ID");
   });
 
   it("allows injecting query directly through the public factory seam", async () => {
@@ -461,6 +491,24 @@ describe("ClaudeBasicHarness", () => {
 
     await harness.complete(runContext(access));
     expect(calls[2]?.options.resume).toBe("root-session");
+  });
+
+  it("rejects an invoked completion that succeeds without a durable session identity", async () => {
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
+      query: sdkQuery([
+        { type: "result", subtype: "success", result: "child without a session" },
+      ]),
+      browserSdk: browserSdk(),
+    });
+    const context: HarnessRunContext = {
+      ...runContext(managedAccess()),
+      origin: { kind: "invoke", sourceCompletionId: 1, actionId: 101 },
+    };
+
+    const execution = harness.complete(context);
+
+    await expect(execution).rejects.toThrow("Claude invoked completion did not expose a durable native session identity");
+    await expect(execution.attached).rejects.toThrow("Claude invoked completion did not expose a durable native session identity");
   });
 
   it.each([

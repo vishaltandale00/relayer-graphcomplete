@@ -3,10 +3,10 @@
   "engine": "lbug",
   "version": "0.18.0",
   "sha256": {
-    "src/main.rs": "a350143307eeaa054e3252c2b144debe13b036ac65140c019dab7f9b09cc64dd",
     "Cargo.lock": "bf8f938478c497e2b134f535e4ba2497abd002d390aa309178f74731a565e3ac",
     "coverage.json": "9a4cc03044f721d4c49d6856e745b634dd7819368a5388ae500e7b6961f75ea1",
     "captured-output.txt": "624661384c19a52c016f4c039132675336db7a1c875e1fc06d7a482068040049"
   },
-  "frozenPositiveFixtureSha256": "5ef17df60d951763308c7018741786a19ab2d2e66ff7f1d97631957c0008fe13"
+  "frozenPositiveFixtureSha256": "5ef17df60d951763308c7018741786a19ab2d2e66ff7f1d97631957c0008fe13",
+  "promotedTo": "crates/relayer-graph-server/src/search_index/"
 }

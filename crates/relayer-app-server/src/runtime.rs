@@ -42,6 +42,8 @@ pub(crate) struct HarnessConfiguration {
     model_defaults: Option<HarnessModelDefaults>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     complete: Option<HarnessCompleteConfiguration>,
+    #[serde(default)]
+    graph_capability_profile: GraphCapabilityProfile,
     settings: Value,
 }
 
@@ -57,6 +59,20 @@ impl HarnessConfiguration {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HarnessCompleteConfiguration {
     agent_authored: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum GraphSearchCapability {
+    #[default]
+    Disabled,
+    QueryV1,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GraphCapabilityProfile {
+    search: GraphSearchCapability,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -716,6 +732,7 @@ impl RuntimeClient {
         let body = serde_json::json!({
             "nodeId": prepared.graph_node_id,
             "graphToken": &prepared.graph_token,
+            "graphCapabilityProfile": prepared.configuration.graph_capability_profile,
         });
         let mut attempt = 0;
         loop {
@@ -2419,8 +2436,9 @@ impl RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CONTROL_REQUEST_TIMEOUT, CompleteInteraction, HarnessCompleteConfiguration,
-        HarnessConfiguration, PreparedInteraction, PreparedInvocation, RuntimeClient, RuntimeError,
+        CONTROL_REQUEST_TIMEOUT, CompleteInteraction, GraphCapabilityProfile,
+        HarnessCompleteConfiguration, HarnessConfiguration, PreparedInteraction,
+        PreparedInvocation, RuntimeClient, RuntimeError,
     };
     use crate::{permissions::PermissionProfile, product::ExecutionHarnessPolicy};
     use axum::{
@@ -2704,6 +2722,7 @@ mod tests {
                 complete: Some(HarnessCompleteConfiguration {
                     agent_authored: true,
                 }),
+                graph_capability_profile: GraphCapabilityProfile::default(),
                 settings: json!({}),
             },
             model_selection: None,
@@ -3680,6 +3699,10 @@ mod tests {
             .route(
                 "/api/control/capabilities",
                 routing::post(|Json(body): Json<Value>| async move {
+                    assert_eq!(
+                        body["graphCapabilityProfile"],
+                        json!({ "search": "query-v1" })
+                    );
                     Json(json!({"graphToken": body["graphToken"]}))
                 })
                 .delete(move |headers: HeaderMap| {
@@ -3726,6 +3749,7 @@ mod tests {
                         "implementation": "test",
                         "implementationVersion": 1,
                         "permissionBindings": { "auto": {} },
+                        "graphCapabilityProfile": { "search": "query-v1" },
                         "settings": {}
                     },
                     "digest": "sha256:test"
@@ -3816,6 +3840,10 @@ mod tests {
             .route(
                 "/api/control/capabilities",
                 routing::post(|Json(body): Json<Value>| async move {
+                    assert_eq!(
+                        body["graphCapabilityProfile"],
+                        json!({ "search": "disabled" })
+                    );
                     Json(json!({"graphToken": body["graphToken"]}))
                 })
                 .delete(move |headers: HeaderMap| {
