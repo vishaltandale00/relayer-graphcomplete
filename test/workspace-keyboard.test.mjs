@@ -53,14 +53,75 @@ import {
   sendAttemptBlocksThread,
   releaseInFlightSend,
   settleNodeInputCommit,
+  selectInteractionSendIntentAfterInputReconciliation,
   settleConfirmationSendReplay,
   submittedInputHistoryPresentation,
   threadHasInFlightSend,
   settledComposerContextsWithConfirmations,
   transitionComposerDraftScope,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
+import {
+  createNodeInputDraftController,
+  createNodeInputDraftLoadQueue,
+} from "../desktop/renderer/src/node-input-controls.js";
 
 describe("product workspace keyboard behavior", () => {
+  it("waits for forced input reconciliation before rejecting stale replay authority", async () => {
+    let releaseReconciliation;
+    const reconciliation = new Promise((resolve) => { releaseReconciliation = resolve; });
+    const api = {
+      get: vi.fn()
+        .mockResolvedValueOnce({ threadId: 7, revision: 7, attachments: [{ id: "old" }] })
+        .mockImplementationOnce(() => reconciliation),
+      commit: vi.fn(),
+      detach: vi.fn(),
+    };
+    const controller = createNodeInputDraftController({ api });
+    const loads = createNodeInputDraftLoadQueue({
+      load: (threadId) => controller.load(threadId),
+    });
+    await loads.load(7);
+    const forcedReload = loads.load(7, { reload: true });
+    const staleIntent = interactionSendIntent({
+      threadId: 7,
+      draftScopeKey: "7:turn-a",
+      promptValue: "",
+      contexts: [],
+      modelSelection: { providerId: "fixture", modelId: "deterministic" },
+      inputDraftRevision: 7,
+    });
+    const readReplay = vi.fn(() => confirmationSendReplayIntent({
+      intent: staleIntent,
+      threadId: 7,
+      draftScopeKey: "7:turn-a",
+      promptRevision: 0,
+      contextRevision: 0,
+      replayContextRevision: 0,
+      modelSelection: staleIntent.modelSelection,
+      inputDraftRevision: controller.current(7).revision,
+    }));
+    const rebuild = vi.fn(() => ({
+      rebuilt: true,
+      inputDraftRevision: controller.current(7).revision,
+    }));
+
+    const selecting = selectInteractionSendIntentAfterInputReconciliation({
+      awaitInputDraft: () => loads.load(7),
+      selectionIsCurrent: () => true,
+      replayIntent: readReplay,
+      rebuildIntent: rebuild,
+    });
+    await Promise.resolve();
+    expect(readReplay).not.toHaveBeenCalled();
+    expect(rebuild).not.toHaveBeenCalled();
+
+    releaseReconciliation({ threadId: 7, revision: 8, attachments: [] });
+    await forcedReload;
+    await expect(selecting).resolves.toEqual({ rebuilt: true, inputDraftRevision: 8 });
+    expect(readReplay).toHaveBeenCalledOnce();
+    expect(rebuild).toHaveBeenCalledOnce();
+  });
+
   it("settles an async input commit without repainting a stale selection occurrence", async () => {
     const original = {
       threadId: "thread-a",

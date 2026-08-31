@@ -592,6 +592,17 @@ export function confirmationSendReplayIntent({
     : null;
 }
 
+export async function selectInteractionSendIntentAfterInputReconciliation({
+  awaitInputDraft,
+  selectionIsCurrent,
+  replayIntent,
+  rebuildIntent,
+}) {
+  await awaitInputDraft();
+  if (!selectionIsCurrent()) return null;
+  return replayIntent() || rebuildIntent();
+}
+
 export function confirmationSendFailureMayHaveCommitted(error) {
   return error?.status == null || Number(error.status) >= 500;
 }
@@ -1390,7 +1401,7 @@ export function createProductWorkspace({
   const ensureInputDraftLoaded = (threadId, { reload = false } = {}) => {
     if (!inputDraftController || threadId == null) return Promise.resolve(null);
     const key = String(threadId);
-    if (!reload && loadedInputDraftThreads.has(key)) {
+    if (!reload && loadedInputDraftThreads.has(key) && !inputDraftLoads.has(key)) {
       return Promise.resolve(inputDraftController.current(threadId));
     }
     const load = inputDraftLoads.load(threadId, { reload })
@@ -2859,8 +2870,9 @@ export function createProductWorkspace({
     resizeComposerTextarea(prompt);
     const contextDraftsReady = !contextDraftController
       || loadedContextDraftThreads.has(String(getThread()?.id));
+    const inputThreadId = String(getThread()?.id);
     const inputDraftsReady = !inputDraftController
-      || loadedInputDraftThreads.has(String(getThread()?.id));
+      || (loadedInputDraftThreads.has(inputThreadId) && !inputDraftLoads.has(inputThreadId));
     const inputAttachments = inputDraftController?.current(getThread()?.id)?.attachments || [];
     const failedConfirmationSend = failedConfirmationSends.get(String(getThread()?.id));
     const replayIntent = confirmationSendReplayIntent({
@@ -3116,21 +3128,14 @@ export function createProductWorkspace({
     const threadId = getThread()?.id;
     if (threadHasInFlightSend(inFlightSendThreads, threadId)
       || sendAttemptBlocksThread(sendAttempt?.threadId, threadId)) return;
-    const failedConfirmationSend = failedConfirmationSends.get(String(threadId));
-    const replayIntent = confirmationSendReplayIntent({
-      intent: failedConfirmationSend?.intent,
-      threadId,
+    const sendRequest = draftOverride ? null : {
+      failedConfirmationSend: failedConfirmationSends.get(String(threadId)),
       draftScopeKey: composerDraftScopeState.activeScopeKey,
       promptRevision: composerPromptRevision,
       contextRevision: composerContextState.revision,
-      replayContextRevision: failedConfirmationSend?.contextRevision,
       modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
-      inputDraftRevision: currentInputDraftRevision(threadId),
       inputCompositionRevision: currentInputCompositionRevision(threadId),
-    });
-    const intent = draftOverride
-      ? sendWarningIntent
-      : replayIntent || interactionSendIntent({
+      freshIntent: interactionSendIntent({
         threadId,
         draftScopeKey: composerDraftScopeState.activeScopeKey,
         promptValue: prompt.value,
@@ -3140,8 +3145,10 @@ export function createProductWorkspace({
         modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
         inputDraftRevision: currentInputDraftRevision(threadId),
         inputCompositionRevision: currentInputCompositionRevision(threadId),
-      });
-    if (!intent || !sendIntentIsCurrentThread(threadId, intent.threadId)) return;
+      }),
+    };
+    let intent = draftOverride ? sendWarningIntent : null;
+    let unconfirmedContextDrafts = [];
     const attempt = { threadId: String(threadId) };
     inFlightSendThreads.set(attempt.threadId, attempt);
     sendAttempt = attempt;
@@ -3153,16 +3160,38 @@ export function createProductWorkspace({
       if (!draftOverride && contextDraftController) {
         await ensureContextDraftsLoaded(threadId);
         if (!sendIntentIsCurrentThread(getThread()?.id, threadId) || sendAttempt !== attempt) return;
-        const drafts = contextDraftController.draftsForThread(threadId);
-        if (drafts.length > 0) {
-          openContextDraftSendWarning(drafts, intent);
+        unconfirmedContextDrafts = contextDraftController.draftsForThread(threadId);
+      }
+      if (!draftOverride) {
+        intent = await selectInteractionSendIntentAfterInputReconciliation({
+          awaitInputDraft: () => inputDraftController
+            ? ensureInputDraftLoaded(threadId)
+            : Promise.resolve(),
+          selectionIsCurrent: () => sendIntentIsCurrentThread(getThread()?.id, threadId)
+            && sendAttempt === attempt,
+          replayIntent: () => confirmationSendReplayIntent({
+            intent: sendRequest.failedConfirmationSend?.intent,
+            threadId,
+            draftScopeKey: sendRequest.draftScopeKey,
+            promptRevision: sendRequest.promptRevision,
+            contextRevision: sendRequest.contextRevision,
+            replayContextRevision: sendRequest.failedConfirmationSend?.contextRevision,
+            modelSelection: sendRequest.modelSelection,
+            inputDraftRevision: currentInputDraftRevision(threadId),
+            inputCompositionRevision: sendRequest.inputCompositionRevision,
+          }),
+          rebuildIntent: () => Object.freeze({
+            ...sendRequest.freshIntent,
+            inputDraftRevision: currentInputDraftRevision(threadId),
+          }),
+        });
+        if (!intent || !sendIntentIsCurrentThread(threadId, intent.threadId)) return;
+        if (unconfirmedContextDrafts.length > 0) {
+          openContextDraftSendWarning(unconfirmedContextDrafts, intent);
           return;
         }
       }
-      if (!draftOverride && inputDraftController) {
-        await ensureInputDraftLoaded(threadId);
-        if (!sendIntentIsCurrentThread(getThread()?.id, threadId) || sendAttempt !== attempt) return;
-      }
+      if (!intent || !sendIntentIsCurrentThread(threadId, intent.threadId)) return;
       if (draftOverride && contextDraftController) {
         await continueDraftOverrideAfterPersistence({
           controller: contextDraftController,

@@ -106,6 +106,12 @@ describe("node input control state", () => {
     expect(validateInputStage({ ...multiAction, minimumSelections: 1 }, [])?.code).toBe(
       "input_selection_count",
     );
+    expect(validateInputStage({ ...multiAction, minimumSelections: 0 }, [])?.code).toBe(
+      "input_selection_count",
+    );
+    expect(validateInputStage({ ...multiAction, minimumSelections: 1.5 }, ["a", "b"])?.code).toBe(
+      "input_selection_count",
+    );
     expect(validateInputStage({ control: "slider" }, 3)?.code).toBe(
       "input_action_control_unsupported",
     );
