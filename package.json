@@ -38,6 +38,7 @@
     "build:packages": "npm run build -w @relayer/graph-client && npm run build -w @relayer/harness-host && npm run build -w @relayer/eval-runner",
     "check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && tsc --noEmit && npm run check --workspaces --if-present && vitest run --maxWorkers=1 && npm run test:codex-secret-boundary && PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests && npm run lint:ladybug-receipt && npm run prd:check-readability",
     "test": "cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && vitest run",
+    "test:coverage:evidence-capture": "vitest run test/evidence-capture-integrity.test.mjs --maxWorkers=1 --coverage --coverage.include=scripts/evidence-capture-integrity.mjs --coverage.reporter=text --coverage.thresholds.lines=91.5 --coverage.thresholds.statements=88.6 --coverage.thresholds.functions=94.8 --coverage.thresholds.branches=84.4",
     "test:codex-secret-boundary": "RELAYER_RUN_CODEX_SECRET_BOUNDARY=1 vitest run packages/harness-host/test/codex-secret-provider-process.test.ts",
     "test:desktop:first-message": "npm run build && electron scripts/test-desktop-first-message.mjs",
     "test:desktop:context-draft-warning": "npm run build && node scripts/run-context-draft-warning-test.mjs",
@@ -76,6 +77,7 @@
   "devDependencies": {
     "@electron/asar": "3.4.1",
     "@types/node": "^22.20.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "app-builder-lib": "26.15.3",
     "electron": "43.0.0",
     "electron-builder": "26.15.3",
