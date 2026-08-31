@@ -394,6 +394,54 @@ async function run() {
     || !annotationScrollReach.annotationContained || !annotationScrollReach.annotationStayedPut) {
     throw new Error(`Node Details cannot scroll fully while annotating: ${JSON.stringify(annotationScrollReach)}`);
   }
+  const reviewCaptureScroll = await evaluate(`(async () => {
+    const { createReviewPresentationAdapter } = await import('./src/review-tools.js');
+    const detail = document.querySelector('#inspectorContent');
+    const lastInput = document.querySelector('#nodeInputActions .node-input-editor:last-child');
+    const maximumScroll = detail.scrollHeight - detail.clientHeight;
+    detail.scrollTop = Math.min(47, maximumScroll);
+    const originalScrollTop = detail.scrollTop;
+    const adapter = createReviewPresentationAdapter({
+      executionId: 'real-electron-node-input-capture',
+      getPresentationState: () => ({
+        threadId: '${thread.id}',
+        turnId: 'accepted-input-turn',
+        layerId: 'input-layer',
+        selectedNodeId: 'input-grammar',
+        navigationPath: [{ layerId: 'input-layer', viaActionId: null }],
+      }),
+      navigateHistory: async () => {},
+    });
+    const plan = await adapter.capturePlan({
+      target: { kind: 'element', elementRef: 'node-detail' },
+      mode: 'full',
+    });
+    const lastTile = plan.tiles.at(-1);
+    await adapter.prepareCaptureTile(lastTile);
+    const detailBounds = detail.getBoundingClientRect();
+    const lastInputBounds = lastInput.getBoundingClientRect();
+    const lowerSentinelVisible = lastInputBounds.top >= detailBounds.top - 1
+      && lastInputBounds.bottom <= detailBounds.bottom + 1;
+    const preparedScrollTop = detail.scrollTop;
+    await adapter.restoreCapture();
+    return {
+      captureOwnerId: document.querySelector('[data-review-capture="node-detail"]')?.id,
+      tileCount: plan.tiles.length,
+      lastTileScrollY: lastTile.scrollY,
+      preparedScrollTop,
+      lowerSentinelVisible,
+      originalScrollTop,
+      restoredScrollTop: detail.scrollTop,
+    };
+  })()`);
+  if (reviewCaptureScroll.captureOwnerId !== "inspectorContent"
+    || reviewCaptureScroll.tileCount < 2
+    || reviewCaptureScroll.lastTileScrollY <= 0
+    || reviewCaptureScroll.preparedScrollTop <= reviewCaptureScroll.originalScrollTop
+    || !reviewCaptureScroll.lowerSentinelVisible
+    || Math.abs(reviewCaptureScroll.restoredScrollTop - reviewCaptureScroll.originalScrollTop) > 1) {
+    throw new Error(`Full Node Details review capture did not tile lower content and restore scroll: ${JSON.stringify(reviewCaptureScroll)}`);
+  }
   await setValue("[aria-label='Annotation for Input grammar']", "Keep this note alongside the input actions.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("confirmed annotation attached without hiding node inputs", () => evaluate(`(() => (
