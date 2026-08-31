@@ -224,7 +224,7 @@ export class ProviderDefinitionService {
         const catalog = await this.#discover(runtime, signal);
         signal?.throwIfAborted();
         if (preparation.cancelled) throw new Error("Provider connection was cancelled.");
-        if (!catalog.models.some(({ visible }) => visible)) throw new Error("Provider did not report any visible models.");
+        if (catalog.provider?.status === "unavailable") throw new Error(catalog.provider.unavailableReason ?? "Provider is unavailable.");
         runtimeRegistrationAttempted = true;
         await this.onRuntimeReady(candidate, runtime);
         signal?.throwIfAborted();
@@ -314,7 +314,7 @@ export class ProviderDefinitionService {
       let runtimeRegistrationAttempted = false;
       try {
         const catalog = await this.#discover(pending.runtime, signal);
-        if (!catalog.models.some(({ visible }) => visible)) throw new Error("Provider did not report any visible models.");
+        if (catalog.provider?.status === "unavailable") throw new Error(catalog.provider.unavailableReason ?? "Provider is unavailable.");
         runtimeRegistrationAttempted = true;
         await this.onRuntimeReady(pending.candidate, pending.runtime);
         if (pending.reconnect === true) {

@@ -19,6 +19,7 @@ export type CodexAppServerSpawn = (
 export interface CodexAppServerTurnOptions {
   readonly codexPathOverride: string;
   readonly environment: Readonly<Record<string, string>>;
+  readonly codexConfigOverrides?: readonly string[];
   readonly savedThreadId?: string;
   readonly threadParams: JsonObject;
   readonly turnParams: JsonObject;
@@ -85,7 +86,8 @@ export function forceTerminateCodexProcessTree(
 /** Run one isolated stdio app-server process for one GraphComplete call. */
 export async function runCodexAppServerTurn(options: CodexAppServerTurnOptions): Promise<CodexAppServerTurnResult> {
   const executable = resolveCodexExecutable(options.codexPathOverride);
-  const child = (options.spawnProcess ?? spawn)(executable, ["app-server", "--listen", "stdio://"], {
+  const configArguments = (options.codexConfigOverrides ?? []).flatMap((value) => ["-c", value]);
+  const child = (options.spawnProcess ?? spawn)(executable, [...configArguments, "app-server", "--listen", "stdio://"], {
     detached: process.platform !== "win32",
     env: { ...options.environment },
     stdio: ["pipe", "pipe", "pipe"],

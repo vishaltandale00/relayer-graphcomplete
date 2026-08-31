@@ -2,7 +2,7 @@ schemaVersion: 1
 name: codex-basic
 implementation: codex.basic
 implementationVersion: 1
-revision: 3
+revision: 4
 permissionBindings:
   ask:
     sandboxMode: workspace-write
@@ -24,10 +24,6 @@ modelRules:
     - adapterId: codex-subscription
       modelIdRegex: ".*"
     - adapterId: openai-api
-      modelIdRegex: ".*"
-    - adapterId: openrouter
-      modelIdRegex: ".*"
-    - adapterId: vercel-ai-router
       modelIdRegex: ".*"
   deny: []
 executionAccessContracts: [managed-runtime@1, secret@1]
