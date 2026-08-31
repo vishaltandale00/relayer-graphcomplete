@@ -46,6 +46,8 @@ jobs:
           cache: npm
       - run: node scripts/check-node-version.mjs
       - run: npm ci
+      - name: Seed the locked Cargo dependency closure
+        run: cargo fetch --locked --target aarch64-apple-darwin
       - name: Build and inspect the actual target ASAR
         run: npm run desktop:pack
         env:
