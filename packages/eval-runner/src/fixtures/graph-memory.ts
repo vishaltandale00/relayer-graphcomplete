@@ -17,12 +17,13 @@ import {
   type HarnessTraceSupport,
 } from "@relayer/harness-host";
 
-export const graphMemorySearchQuery = "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $anchor RETURN l AS layer ORDER BY layer ASC";
+export const graphMemorySearchTitle = "Freshness acknowledged";
+export const graphMemorySearchQuery = "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $topic RETURN l AS layer ORDER BY layer ASC";
 export const graphMemorySearchBudget = Object.freeze({ resultRows: 1 });
 
-export function graphMemorySearchParameters(anchor: string) {
-  return { anchor: { type: "string" as const, value: anchor } };
-}
+export const graphMemorySearchParameters = Object.freeze({
+  topic: Object.freeze({ type: "string" as const, value: graphMemorySearchTitle }),
+});
 
 export const graphMemoryFixtureConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
@@ -85,16 +86,16 @@ async function authorFirstTurn(
   const beforeAcknowledgement = await graph.search({
     queryContractVersion: 1,
     query: graphMemorySearchQuery,
-    parameters: graphMemorySearchParameters(anchor),
+    parameters: graphMemorySearchParameters,
     budget: graphMemorySearchBudget,
   });
   if (beforeAcknowledgement.rows.length !== 0) {
-    throw new Error("Graph-memory anchor unexpectedly existed before first-turn acknowledgement");
+    throw new Error("Graph-memory search topic unexpectedly existed before first-turn acknowledgement");
   }
   const anchorNode = new NodeObject(
     "search",
-    anchor,
-    "This accepted node is the unique prior-completion anchor that the next turn must discover through graph search.",
+    graphMemorySearchTitle,
+    `This accepted node explains the prior acknowledgement that the next turn must discover through graph search.\n\nEvaluation witness: ${anchor}`,
     "concept",
     "memory-anchor",
   );
@@ -130,11 +131,11 @@ async function authorFirstTurn(
   const afterAcknowledgement = await graph.search({
     queryContractVersion: 1,
     query: graphMemorySearchQuery,
-    parameters: graphMemorySearchParameters(anchor),
+    parameters: graphMemorySearchParameters,
     budget: graphMemorySearchBudget,
   });
   if (afterAcknowledgement.rows.length !== 1 || afterAcknowledgement.rows[0]?.[0]?.type !== "layer") {
-    throw new Error("Graph-memory anchor was not searchable after first-turn acknowledgement");
+    throw new Error("Graph-memory search topic was not searchable after first-turn acknowledgement");
   }
 }
 
@@ -145,8 +146,8 @@ async function searchAndReferenceFirstTurn(
 ): Promise<void> {
   const draftDecoy = new NodeObject(
     "search",
-    anchor,
-    "This same-anchor draft must remain invisible to graph search.",
+    graphMemorySearchTitle,
+    "This same-topic draft must remain invisible to graph search.",
     "concept",
     "memory-draft-decoy",
   );
@@ -161,11 +162,11 @@ async function searchAndReferenceFirstTurn(
   const result = await graph.search({
     queryContractVersion: 1,
     query: graphMemorySearchQuery,
-    parameters: graphMemorySearchParameters(anchor),
+    parameters: graphMemorySearchParameters,
     budget: graphMemorySearchBudget,
   });
   if (result.rows.length !== 1 || result.rows[0]?.length !== 1) {
-    throw new Error(`Expected one prior accepted layer for graph-memory anchor, received ${result.rows.length}`);
+    throw new Error(`Expected one prior accepted layer for graph-memory search topic, received ${result.rows.length}`);
   }
   const searchedLayer = result.rows[0][0];
   if (searchedLayer?.type !== "layer") {

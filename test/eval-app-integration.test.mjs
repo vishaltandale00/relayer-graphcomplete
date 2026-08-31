@@ -144,7 +144,7 @@ describe("Relayer Eval application service", () => {
         path: "/api/graph/search",
         queryContractVersion: 1,
         query: graphMemorySearchQuery,
-        parameters: graphMemorySearchParameters(graphMemoryAnchor(completed.id)),
+        parameters: graphMemorySearchParameters,
         budget: graphMemorySearchBudget,
         status: 200,
         searchLayerIds: [execution.turns[0].rootLayerId],

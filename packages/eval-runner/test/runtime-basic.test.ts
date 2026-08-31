@@ -11,10 +11,11 @@ import {
   graphMemorySearchBudget,
   graphMemorySearchParameters,
   graphMemorySearchQuery,
+  graphMemorySearchTitle,
 } from "../src/fixtures/graph-memory.js";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkGraphMemorySecondTurn, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, graphMemoryAnchor, graphMemoryEvalCaseId, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkGraphMemoryFirstTurn, checkGraphMemorySecondTurn, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, graphMemoryAnchor, graphMemoryEvalCaseId, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -435,9 +436,14 @@ describe("first runtime evaluation", () => {
 
     expect(artifact.passed).toBe(true);
     expect(artifact.turns).toHaveLength(2);
-    expect(artifact.turns[0]!.output.rootLayer.nodes.filter((node) => (
-      node.title === graphMemoryAnchor(execution.testRunId)
-    ))).toHaveLength(1);
+    const searchTarget = artifact.turns[0]!.output.rootLayer.nodes.filter((node) => (
+      node.title === graphMemorySearchTitle
+    ));
+    expect(searchTarget).toHaveLength(1);
+    expect(searchTarget[0]!.detail).toContain(`Evaluation witness: ${graphMemoryAnchor(execution.testRunId)}`);
+    expect(artifact.turns[0]!.output.rootLayer.nodes.every((node) => (
+      !node.title.includes("GRAPH_MEMORY_ANCHOR:")
+    ))).toBe(true);
     expect(artifact.turns[1]!.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
       expect.objectContaining({ name: "search-request-contract", passed: true }),
@@ -455,7 +461,7 @@ describe("first runtime evaluation", () => {
     expect(evidence.searchRequest).toEqual({
       queryContractVersion: 1,
       query: graphMemorySearchQuery,
-      parameters: graphMemorySearchParameters(graphMemoryAnchor(execution.testRunId)),
+      parameters: graphMemorySearchParameters,
       budget: graphMemorySearchBudget,
     });
     const firstLayerId = artifact.turns[0]!.output.rootLayer.layer.id;
@@ -498,6 +504,65 @@ describe("first runtime evaluation", () => {
       expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
       expect.objectContaining({ name: "search-request-contract", passed: false }),
     ]));
+    const witnessAsParameterChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          ...evidence.searchRequest!,
+          parameters: {
+            topic: { type: "string", value: graphMemoryAnchor(execution.testRunId) },
+          },
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      true,
+    );
+    expect(witnessAsParameterChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+
+    const firstOutput = artifact.turns[0]!.output;
+    const searchTargetId = searchTarget[0]!.id;
+    const witness = `Evaluation witness: ${graphMemoryAnchor(execution.testRunId)}`;
+    const wrongCanvasTitle = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? node
+          : { ...node, title: graphMemoryAnchor(execution.testRunId) }),
+      },
+    };
+    const witnessOnWrongNode = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? { ...node, detail: node.detail.replace(witness, "") }
+          : { ...node, detail: `${node.detail}\n\n${witness}` }),
+      },
+    };
+    const duplicateWitness = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? node
+          : { ...node, detail: `${node.detail}\n\n${witness}` }),
+      },
+    };
+    for (const invalidOutput of [wrongCanvasTitle, witnessOnWrongNode, duplicateWitness]) {
+      expect(checkGraphMemoryFirstTurn(
+        invalidOutput,
+        graphMemoryAnchor(execution.testRunId),
+        invalidOutput.nodeId,
+      )).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "unique-memory-search-target", passed: false }),
+      ]));
+    }
   }, 30_000);
 
   it("uses the explicit managed Codex executable for every structured judge turn", async () => {
