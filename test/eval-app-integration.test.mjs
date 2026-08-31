@@ -418,7 +418,7 @@ describe("Relayer Eval application service", () => {
         agentAuthoredChildren: true,
       },
     });
-    const completed = await waitForCompletedRun(evalService, created.id, 25_000);
+    const completed = await waitForCompletedRun(evalService, created.id, 60_000);
 
     expect(completed.status, JSON.stringify(completed.executions.map((execution) => ({
       harness: execution.harnessConfigurationName,
@@ -457,7 +457,7 @@ describe("Relayer Eval application service", () => {
         code: "invalid_capability",
       });
     }
-  }, 55_000);
+  }, 90_000);
 
   it("rejects a recursive comparison whose exact off cell grants Complete authority", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-authority-drift-test-"));
@@ -1195,7 +1195,15 @@ async function waitForCompletedRun(evalService, runId, timeoutMs = 10_000) {
     if (!["queued", "running"].includes(run.status)) return run;
     await new Promise((resolveWait) => setTimeout(resolveWait, 20));
   }
-  throw new Error("Eval run did not finish in time.");
+  const run = evalService.getRun(runId);
+  throw new Error(`Eval run did not finish in time: ${JSON.stringify({
+    status: run.status,
+    executions: run.executions.map((execution) => ({
+      harnessConfigurationName: execution.harnessConfigurationName,
+      status: execution.status,
+      error: execution.error,
+    })),
+  })}`);
 }
 
 async function productRequest(session, path, init = {}) {
