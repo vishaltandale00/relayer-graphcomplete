@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -373,9 +374,21 @@ describe("PrimeAgentHarness", () => {
       createAgentSessionFromServices,
     }) as never });
 
-    await Promise.all([
-      harness.complete(invokedRunContext(familyRunContext(41, "child-a", 0), 101)),
-      harness.complete(invokedRunContext(familyRunContext(42, "child-b", 2), 102)),
+    const firstExecution = harness.complete(invokedRunContext(familyRunContext(41, "child-a", 0), 101));
+    const secondExecution = harness.complete(invokedRunContext(familyRunContext(42, "child-b", 2), 102));
+    await Promise.all([firstExecution, secondExecution]);
+    const attachments = await Promise.all([firstExecution.attached, secondExecution.attached]);
+    expect(attachments).toEqual([
+      {
+        schemaVersion: 1,
+        provider: "prime-agent",
+        sessionDigest: `sha256:${createHash("sha256").update("/tmp/invoked-a.jsonl").digest("hex")}`,
+      },
+      {
+        schemaVersion: 1,
+        provider: "prime-agent",
+        sessionDigest: `sha256:${createHash("sha256").update("/tmp/invoked-b.jsonl").digest("hex")}`,
+      },
     ]);
 
     expect(open).toHaveBeenCalledWith("/tmp/root-prime-session.jsonl");

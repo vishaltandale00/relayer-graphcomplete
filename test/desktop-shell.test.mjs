@@ -827,6 +827,8 @@ describe("desktop skeleton", () => {
       expect(session.graphControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).not.toBe(session.graphControlToken);
+      expect(session.graphUrl).toBe("http://127.0.0.1:43125");
+      expect(service.graphOperationRecorder).toBeNull();
       expect(session.configurationNames).toEqual(["codex-basic"]);
       const catalog = JSON.parse(await readFile(session.catalogPath, "utf8"));
       expect(catalog.unavailableConfigurations).toEqual([expect.objectContaining({

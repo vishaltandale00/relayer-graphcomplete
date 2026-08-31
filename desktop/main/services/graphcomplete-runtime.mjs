@@ -402,10 +402,12 @@ export class GraphCompleteRuntimeService {
       if (graphProcess.exitCode !== null || graphProcess.signalCode !== null) {
         throw new Error(`Relayer graph server stopped after readiness (${graphProcess.signalCode || graphProcess.exitCode || "unknown"}).`);
       }
-      const graphOperationRecorder = await this.#awaitStartupOperation(
-        startGraphOperationRecorder({ upstreamUrl: graphUrl }),
-        (lateRecorder) => lateRecorder.close(),
-      );
+      const graphOperationRecorder = this.candidateTrace
+        ? await this.#awaitStartupOperation(
+          startGraphOperationRecorder({ upstreamUrl: graphUrl }),
+          (lateRecorder) => lateRecorder.close(),
+        )
+        : null;
       this.graphOperationRecorder = graphOperationRecorder;
       let harnessHost;
       try {
@@ -434,7 +436,7 @@ export class GraphCompleteRuntimeService {
       } catch (error) { throw error; }
       this.harnessHost = harnessHost;
       this.session = Object.freeze({
-        graphUrl: graphOperationRecorder.url,
+        graphUrl: graphOperationRecorder?.url ?? graphUrl,
         harnessUrl: harnessHost.url,
         graphControlToken,
         harnessControlToken,

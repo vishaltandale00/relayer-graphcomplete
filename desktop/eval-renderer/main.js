@@ -5,6 +5,7 @@ import {
   projectExecutionCell,
   projectExecutionDossier,
   recursiveCompleteCaseId,
+  recursiveGraphMemoryCaseId,
   runPanelCopy,
 } from "./run-model.js";
 import {
@@ -50,7 +51,7 @@ function configure() {
   $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({
     id: item.name,
     name: item.name,
-    detail: `${item.implementation} · graph search ${item.graphCapabilityProfile?.search === "query-v1" ? "query-v1" : "off"}`,
+    detail: `${item.implementation} · graph search ${item.graphCapabilityProfile?.search === "query-v1" ? "query-v1" : "off"} · recursion ${item.complete?.agentAuthored === true ? "on" : "off"}`,
   }, "harnesses", item.name === "fixture-task-system")).join("");
   $("#judgeOptions").innerHTML = catalog.judges.map((item, index) => optionMarkup(item, "judge", index === 0)).join("");
   const syncJudgeCompatibility = () => {
@@ -80,18 +81,24 @@ function configure() {
     syncJudgeCompatibility();
     toast(`Selected ${selection.harnessConfigurationNames.length / 2} graph-search provider pairs.`);
   });
-  const recursiveOption = document.querySelector(`input[name="cases"][value="${recursiveCompleteCaseId}"]`);
-  if (recursiveOption) recursiveOption.onchange = () => {
-    if (!recursiveOption.checked) return;
-    const isolated = isolateRecursiveCompleteSelection([recursiveOption.value], []);
-    document.querySelectorAll('input[name="cases"]').forEach((input) => {
-      input.checked = isolated.testCaseIds.includes(input.value);
-    });
-    document.querySelectorAll('input[name="harnesses"]').forEach((input) => {
-      input.checked = isolated.harnessConfigurationNames.includes(input.value);
-    });
-    syncJudgeCompatibility();
-  };
+  for (const caseId of [recursiveCompleteCaseId, recursiveGraphMemoryCaseId]) {
+    const recursiveOption = document.querySelector(`input[name="cases"][value="${caseId}"]`);
+    if (recursiveOption) recursiveOption.onchange = () => {
+      if (!recursiveOption.checked) return;
+      const isolated = isolateRecursiveCompleteSelection(
+        [recursiveOption.value],
+        [],
+        catalog.harnessConfigurations,
+      );
+      document.querySelectorAll('input[name="cases"]').forEach((input) => {
+        input.checked = isolated.testCaseIds.includes(input.value);
+      });
+      document.querySelectorAll('input[name="harnesses"]').forEach((input) => {
+        input.checked = isolated.harnessConfigurationNames.includes(input.value);
+      });
+      syncJudgeCompatibility();
+    };
+  }
   syncJudgeCompatibility();
   show("configureView");
 }
@@ -318,6 +325,7 @@ function renderExecutionDossier(run, execution) {
         ${dossier.presentation.applicable ? `<dl class="metadata-grid presentation-metadata"><div><dt>Final score</dt><dd>${escapeHtml(dossier.presentation.label)}</dd></div><div><dt>Comprehension</dt><dd>${escapeHtml(dossier.presentation.comprehensionScore ?? "—")}</dd></div><div><dt>Rendered experience</dt><dd>${escapeHtml(dossier.presentation.renderedScore ?? "—")}</dd></div><div><dt>Raw score</dt><dd>${escapeHtml(dossier.presentation.rawScore ?? "—")}</dd></div><div><dt>Omission ceiling</dt><dd>${escapeHtml(dossier.presentation.scoreCeiling ?? "None")}</dd></div><div><dt>Depth decay</dt><dd>${escapeHtml(dossier.presentation.decay ?? "—")}</dd></div><div><dt>Worst layer</dt><dd>${worstLayerMarkup(dossier.presentation.worstLayer)}</dd></div><div><dt>Materially misleading layer</dt><dd>${escapeHtml(dossier.presentation.hasMateriallyMisleadingLayer === null ? "—" : dossier.presentation.hasMateriallyMisleadingLayer ? "Yes" : "No")}</dd></div><div><dt>Graded layers</dt><dd>${escapeHtml(dossier.presentation.layers.length || "—")}</dd></div><div><dt>Aggregation</dt><dd>${escapeHtml(dossier.presentation.comparability?.status === "incompatible" ? dossier.presentation.comparability.reason : dossier.presentation.aggregationMethod === "recursive_semantic_root" ? "Recursive semantic root" : aggregationLabel(dossier.presentation.aggregation))}</dd></div></dl>${evidenceMarkup(dossier.presentation.evidenceRefs)}` : '<p class="empty-note">Graph presentation does not apply to this harness.</p>'}
       </article>
     </section>
+    ${dossier.mechanism.checks.length ? `<section class="dossier-block"><div class="block-heading"><span class="eyebrow">Mechanism evidence</span><h3>Observed execution checks</h3></div>${findingsMarkup(dossier.mechanism.checks, "checks")}</section>` : ""}
     ${dossier.recursiveComplete.declared ? `<section class="dossier-block"><div class="block-heading"><span class="eyebrow">Agent-authored Complete</span><h3>${dossier.recursiveComplete.configured ? "Available" : "Unavailable"}</h3></div><dl class="metadata-grid"><div><dt>Broker authority observed</dt><dd>${escapeHtml(dossier.recursiveComplete.brokerAvailable === null ? "Not recorded" : dossier.recursiveComplete.brokerAvailable ? "Yes" : "No")}</dd></div><div><dt>Semantic children</dt><dd>${escapeHtml(dossier.recursiveComplete.children.length)}</dd></div></dl>${dossier.recursiveComplete.children.length ? `<div class="finding-list">${dossier.recursiveComplete.children.map((child) => `<article class="finding-row ${escapeHtml(child.status)}"><div><span class="finding-status">${escapeHtml(child.status)}</span><b>Completion ${escapeHtml(child.graphNodeId)}</b><strong>${escapeHtml(child.projectionCount)} revisions</strong></div><p>Source interaction ${escapeHtml(child.sourceInteractionId)} · action ${escapeHtml(child.sourceActionId)} · trace ${escapeHtml(child.traceStatus)}</p><button class="secondary" data-trace-execution="${escapeHtml(dossier.id)}" data-trace-interaction="${escapeHtml(child.interactionId)}" ${child.traceStatus === "complete" ? "" : "disabled"}>Child trace ↗</button></article>`).join("")}</div>` : '<p class="empty-note">No semantic child was recorded for this execution.</p>'}</section>` : ""}
     <footer class="dossier-actions">${importedJudgeActions}<button class="secondary" data-trace-execution="${escapeHtml(dossier.id)}" ${dossier.actions.traceable ? "" : "disabled"}>Candidate trace ↗</button><button class="secondary" data-judge-execution="${escapeHtml(dossier.id)}" ${dossier.actions.judgeReviewable ? "" : "disabled"}>Judge review ↗</button><button class="secondary" data-product-execution="${escapeHtml(dossier.id)}" ${dossier.actions.workspaceReviewable ? "" : "disabled"}>Product workspace ↗</button><button class="secondary" data-annotation-export="${escapeHtml(dossier.id)}" ${dossier.actions.annotationExportable ? "" : "disabled"}>Export annotations ↓</button></footer>`;
 }

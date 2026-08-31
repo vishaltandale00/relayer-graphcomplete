@@ -57,6 +57,10 @@ describe("Eval harness configuration availability", () => {
       "codex-basic-high.yaml",
       "codex-eval-complete-disabled.yaml",
       "codex-eval-complete-enabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
@@ -85,6 +89,10 @@ describe("Eval harness configuration availability", () => {
       "codex-basic-high.yaml",
       "codex-eval-complete-disabled.yaml",
       "codex-eval-complete-enabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
@@ -110,6 +118,10 @@ describe("Eval harness configuration availability", () => {
       "codex-basic-high.yaml",
       "codex-eval-complete-disabled.yaml",
       "codex-eval-complete-enabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
+      "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
+      "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
@@ -120,7 +132,7 @@ describe("Eval harness configuration availability", () => {
     expect(packageAvailable).not.toHaveBeenCalled();
   });
 
-  it("keeps baseline harnesses but omits every query-v1 configuration off Apple Silicon", () => {
+  it("keeps baseline harnesses but omits graph-search experiments off Apple Silicon", () => {
     for (const targetKey of ["macos-x64", "windows-x64"]) {
       const available = names(evalHarnessConfigurationPaths({
         harnessDirectory: "/tmp/harnesses",
@@ -139,6 +151,10 @@ describe("Eval harness configuration availability", () => {
         "codex-basic-graph-search.yaml",
         "claude-basic-graph-search.yaml",
         "prime-agent-basic-graph-search.yaml",
+        "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
+        "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
+        "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
+        "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       ]));
     }
   });
@@ -191,6 +207,27 @@ describe("Eval harness configuration availability", () => {
       }
       expect(treatment).toEqual(control);
     }
+  });
+
+  it("loads the Apple-Silicon-only Codex quartet without exposing non-runnable combined provider cells", async () => {
+    const catalog = await loadHarnessConfigurations(evalHarnessConfigurationPaths({
+      harnessDirectory: resolve(repositoryRoot, "harnesses"),
+      isPackaged: false,
+      packageAvailable: () => false,
+      targetKey: "macos-arm64",
+    }));
+
+    expect(catalog.get("codex-eval-lantern-search-query-v1-recursion-enabled")).toMatchObject({
+      implementation: "codex.basic",
+      complete: { agentAuthored: true },
+      graphCapabilityProfile: { search: "query-v1" },
+      settings: {
+        personalPresentationVersion: "personal-presentation-v2",
+        promptProfile: "layered-navigation-multi-agent-v1",
+      },
+    });
+    expect(catalog.has("claude-eval-complete-graph-search")).toBe(false);
+    expect(catalog.has("prime-agent-eval-complete-graph-search")).toBe(false);
   });
 
   it("keeps the layered Codex harness product-facing and the high variant internal", async () => {

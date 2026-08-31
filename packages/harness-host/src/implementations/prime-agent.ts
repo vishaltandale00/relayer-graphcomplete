@@ -415,13 +415,24 @@ export class PrimeAgentHarness implements Harness {
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason ?? new Error("Prime Agent completion was cancelled"));
     signal?.addEventListener("abort", abort, { once: true });
-    const execution = (context.origin.kind === "root"
-      ? this.executeRoot(context, controller.signal)
-      : this.executeInvoked(context, controller.signal))
+    if (context.origin.kind === "root") {
+      const execution = this.executeRoot(context, controller.signal)
+        .finally(() => signal?.removeEventListener("abort", abort));
+      return nativeExecutionHandle(execution, (reason) => controller.abort(new Error(reason)));
+    }
+    let resolveAttached!: (identity: JsonObject) => void;
+    let rejectAttached!: (error: unknown) => void;
+    const attached = new Promise<JsonObject>((resolve, reject) => {
+      resolveAttached = resolve;
+      rejectAttached = reject;
+    });
+    const execution = this.executeInvoked(context, resolveAttached, controller.signal)
       .finally(() => signal?.removeEventListener("abort", abort));
+    void execution.catch(rejectAttached);
     return nativeExecutionHandle(
       execution,
       (reason) => controller.abort(new Error(reason)),
+      attached,
     );
   }
 
@@ -435,7 +446,11 @@ export class PrimeAgentHarness implements Harness {
     await this.executeOn(session, context, signal);
   }
 
-  private async executeInvoked(context: HarnessRunContext, signal: AbortSignal): Promise<void> {
+  private async executeInvoked(
+    context: HarnessRunContext,
+    attach: (identity: JsonObject) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
     signal.throwIfAborted();
     if (this.forceShutdownStarted) throw new Error("Prime Agent harness is shutting down");
     const pending = this.createSession(this.createSessionManager()).then((session) => {
@@ -448,6 +463,7 @@ export class PrimeAgentHarness implements Harness {
     let lifecycle: PrimeAgentSessionLifecycle;
     try {
       lifecycle = await pending;
+      attach(primeSessionAttachment(lifecycle.session));
     } finally {
       this.pendingInvokedSessions.delete(pending);
     }
@@ -790,6 +806,17 @@ function primeSessionHandle(session: PrimeAgentSession): PrimeAgentSessionHandle
     disposeCompleted: false,
     guardInstalled: false,
   };
+}
+
+function primeSessionAttachment(session: PrimeAgentSession): JsonObject {
+  if (typeof session.sessionFile !== "string" || session.sessionFile === "") {
+    throw new Error("Prime Agent did not expose a durable native session identity");
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    provider: "prime-agent",
+    sessionDigest: `sha256:${createHash("sha256").update(session.sessionFile).digest("hex")}`,
+  });
 }
 
 function currentWorkspaceMechanicsPython(): string {

@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
+import { requireLadybugDistributionLicenseReady } from "../desktop/packaging/pinned-ladybug-build.mjs";
 import { buildReleaseRustServers } from "../desktop/release/build-release.mjs";
 import { verifyPackagedMacOSGraphServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import {
@@ -106,6 +107,14 @@ function verifyReceiptShape(receipt, targetExpectation, expectedInputPaths = fro
 }
 
 describe("Ladybug packaged lifecycle qualification", () => {
+  it("accepts complete source and native distribution-license receipts", async () => {
+    const manifest = { licenseReceipt: { completeForDistribution: true } };
+    const nativeReceipt = { releaseBlockers: [] };
+    await expect(requireLadybugDistributionLicenseReady({
+      loadSourceManifest: async () => manifest,
+      verifyNativeReceipts: async () => nativeReceipt,
+    })).resolves.toEqual({ manifest, nativeReceipt });
+  });
   function minimalPe({
     machine = 0x8664,
     imports = ["KERNEL32.dll"],
@@ -529,34 +538,67 @@ describe("Ladybug packaged lifecycle qualification", () => {
     expect(disposed).toBe(true);
   });
 
-  it("prepares the same pinned static boundary for signed Apple-Silicon release binaries", async () => {
+  it("blocks Apple-Silicon release construction while Ladybug distribution receipts are incomplete", async () => {
+    let prepareCalls = 0;
+    let executeCalls = 0;
+    await expect(buildReleaseRustServers({
+      contract: { targetKey: "macos-arm64", rustTarget: "aarch64-apple-darwin" },
+      environment: { RELAYER_DESKTOP_TARGET: "macos-arm64", RELAYER_DESKTOP_RELEASE: "1" },
+      prepareLadybug: async () => {
+        prepareCalls += 1;
+        throw new Error("license gate must run before source preparation");
+      },
+      execute: async () => { executeCalls += 1; },
+      repositoryRoot: join(import.meta.dirname, ".."),
+    })).rejects.toThrow("Ladybug distribution license receipts are not release-ready");
+    expect(prepareCalls).toBe(0);
+    expect(executeCalls).toBe(0);
+  });
+
+  it("builds the Apple-Silicon release servers from the pinned static source after the license gate passes", async () => {
     const calls = [];
     let disposed = false;
     await buildReleaseRustServers({
       contract: { targetKey: "macos-arm64", rustTarget: "aarch64-apple-darwin" },
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64", RELAYER_DESKTOP_RELEASE: "1" },
+      verifyLadybugDistributionLicense: async () => {},
+      prepareLadybug: async ({ target }) => {
+        expect(target.key).toBe("macos-arm64");
+        return {
+          environment: {
+            CARGO_NET_OFFLINE: "true",
+            LBUG_BUILD_FROM_SOURCE: "1",
+            LBUG_SOURCE_DIR: "/tmp/reviewed-lbug",
+            OPENSSL_DIR: "/tmp/pinned-openssl",
+            OPENSSL_STATIC: "1",
+          },
+          dispose: async () => { disposed = true; },
+        };
+      },
       execute: async (command, args, options) => calls.push({ command, args, options }),
-      prepareLadybug: async () => ({
-        environment: {
+      repositoryRoot: "/tmp/exact-source",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      command: "cargo",
+      args: [
+        "build", "--release",
+        "-p", "relayer-app-server",
+        "-p", "relayer-graph-server",
+        "--target", "aarch64-apple-darwin",
+        "--locked", "--offline",
+      ],
+      options: {
+        cwd: "/tmp/exact-source",
+        env: {
           CARGO_NET_OFFLINE: "true",
           LBUG_BUILD_FROM_SOURCE: "1",
           LBUG_SOURCE_DIR: "/tmp/reviewed-lbug",
           OPENSSL_DIR: "/tmp/pinned-openssl",
           OPENSSL_STATIC: "1",
         },
-        dispose: async () => { disposed = true; },
-      }),
-      repositoryRoot: "/tmp/exact-source",
+      },
     });
-    expect(calls).toHaveLength(1);
-    expect(calls[0].args).toEqual([
-      "build", "--release",
-      "-p", "relayer-app-server",
-      "-p", "relayer-graph-server",
-      "--target", "aarch64-apple-darwin",
-      "--locked", "--offline",
-    ]);
-    expect(calls[0].options.env.OPENSSL_DIR).toBe("/tmp/pinned-openssl");
     expect(disposed).toBe(true);
   });
 

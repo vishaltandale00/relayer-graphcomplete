@@ -177,7 +177,13 @@ describe("ClaudeBasicHarness", () => {
         loadSdk,
         clientModuleUrl: "@relayer/graph-client",
       });
-      await harness.complete(runContext(secretAccess({ endpoint: "https://gateway.test/anthropic/v1" })));
+      const execution = harness.complete(runContext(secretAccess({ endpoint: "https://gateway.test/anthropic/v1" })));
+      await execution;
+      await expect(execution.attached).resolves.toEqual({
+        schemaVersion: 1,
+        provider: "claude",
+        sessionId: "session-1",
+      });
 
       expect(loadSdk).toHaveBeenCalledWith("file:///managed/claude-agent-sdk/sdk.mjs");
       expect(calls).toHaveLength(1);
@@ -485,6 +491,24 @@ describe("ClaudeBasicHarness", () => {
 
     await harness.complete(runContext(access));
     expect(calls[2]?.options.resume).toBe("root-session");
+  });
+
+  it("rejects an invoked completion that succeeds without a durable session identity", async () => {
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
+      query: sdkQuery([
+        { type: "result", subtype: "success", result: "child without a session" },
+      ]),
+      browserSdk: browserSdk(),
+    });
+    const context: HarnessRunContext = {
+      ...runContext(managedAccess()),
+      origin: { kind: "invoke", sourceCompletionId: 1, actionId: 101 },
+    };
+
+    const execution = harness.complete(context);
+
+    await expect(execution).rejects.toThrow("Claude invoked completion did not expose a durable native session identity");
+    await expect(execution.attached).rejects.toThrow("Claude invoked completion did not expose a durable native session identity");
   });
 
   it.each([

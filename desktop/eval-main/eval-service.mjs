@@ -44,6 +44,9 @@ import {
   projectDeterministicChecksToOutcome,
   recursiveCompleteEvalCase,
   RECURSIVE_COMPLETE_EVAL_CASE_ID,
+  recursiveGraphMemoryEvalCase,
+  RECURSIVE_GRAPH_MEMORY_CASE_ID,
+  RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET,
   selectStandalonePermissionProfile,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
@@ -95,6 +98,10 @@ export const evalCases = Object.freeze([
     ]),
     requiredChecks: Object.freeze(["input-roundtrip"]),
     requiredJudgeConfigurationIds: Object.freeze(["simulated-user", "simulated-user-sol-high"]),
+  }),
+  Object.freeze({
+    ...recursiveGraphMemoryEvalCase,
+    gradeExecution: gradeRecursiveGraphMemoryExecution,
   }),
   h3ProjectEvalCase,
   ...h3AutonomousCases.map((entry) => Object.freeze({
@@ -168,6 +175,241 @@ async function gradeGraphMemoryExecution({ execution, interactions, loadGraphOpe
   };
 }
 
+export async function gradeRecursiveGraphMemoryExecution({ execution, interactions, loadGraphOperations }) {
+  if (interactions.length !== 3) {
+    throw new Error("Recursive graph-memory grading requires exactly three product turns.");
+  }
+  const productTurns = interactions.map(({ interaction }) => interaction);
+  if (productTurns.some((interaction) => !interaction.completionOutput)) {
+    throw new Error("Recursive graph-memory grading requires three completed graph outputs.");
+  }
+  const eventSets = await Promise.all(execution.turns.map((turn) => loadGraphOperations(turn)));
+  const roots = productTurns.map((interaction) => interaction.completionOutput.rootLayer.layer.id);
+  const priorTopics = ["Offline recovery covenant", "Constrained recovery revision"];
+  const searchEnabled = execution.harnessConfiguration?.graphCapabilityProfile?.search === "query-v1";
+  const recursionEnabled = execution.harnessConfiguration?.complete?.agentAuthored === true;
+  const turns = productTurns.map((interaction, index) => {
+    const output = interaction.completionOutput;
+    const checks = [
+      ...checkBasicOutput(output, interaction.graphNodeId),
+      {
+        name: "completion-broker-authority",
+        passed: execution.turns[index]?.candidateTrace?.completionBrokerAvailable === recursionEnabled,
+        detail: `Recursion is ${recursionEnabled ? "enabled" : "disabled"}; the portable Candidate Trace must record matching agent-authored Complete authority.`,
+      },
+    ];
+    const requiredHeading = priorTopics[index];
+    if (requiredHeading !== undefined) {
+      checks.push({
+        name: "requested-decision-section",
+        passed: output.rootLayer.nodes.filter((node) => node.title === requiredHeading).length === 1,
+        detail: `Turn ${index + 1} must retain exactly one requested “${requiredHeading}” decision section in its accepted root.`,
+      });
+    }
+    if (index === 0) return { checks };
+
+    const events = eventSets[index];
+    const searches = events.filter((event) => (
+      event.method === "POST"
+      && event.path === "/api/graph/search"
+      && event.status >= 200
+      && event.status < 300
+    ));
+    const requiredPriorRoots = index === 1 ? [roots[0]] : [roots[0], roots[1]];
+    const acceptedReferences = output.rootLayer.actions.filter((action) => (
+      action.state === "accepted"
+      && action.kind === "navigate"
+      && action.relation === "reference"
+      && action.sourceLayerId === output.rootLayer.layer.id
+      && requiredPriorRoots.includes(action.targetLayerId)
+    ));
+    const acknowledgement = events.filter((event) => (
+      event.method === "POST"
+      && (event.path === "/api/graph/submit" || event.path === "/api/graph/current/transitions")
+      && event.status >= 200
+      && event.status < 300
+      && (event.path !== "/api/graph/submit" || event.completionNodeId === output.nodeId)
+    )).at(-1);
+    const evidenceByRoot = requiredPriorRoots.map((root, rootIndex) => {
+      const search = searches.find((event) => matchesBoundedPriorWorkSearch(
+        event,
+        priorTopics[rootIndex],
+        root,
+      ));
+      const acceptedReference = acceptedReferences.find((action) => action.targetLayerId === root);
+      const referenceEvent = acceptedReference === undefined ? undefined : events.find((event) => (
+        event.method === "POST"
+        && event.path === "/api/graph/actions"
+        && event.status >= 200
+        && event.status < 300
+        && event.recordId === acceptedReference.id
+        && event.actionKind === acceptedReference.kind
+        && event.actionRelation === acceptedReference.relation
+        && event.actionSourceNodeId === acceptedReference.sourceNodeId
+        && event.actionSourceLayerId === acceptedReference.sourceLayerId
+        && event.actionTargetLayerId === acceptedReference.targetLayerId
+      ));
+      return { root, search, acceptedReference, referenceEvent };
+    });
+    const matchedSearches = evidenceByRoot.map(({ search }) => search).filter(Boolean);
+    const exactSearchSet = matchedSearches.length === searches.length
+      && new Set(matchedSearches).size === searches.length;
+    const searchedLayerIds = evidenceByRoot.flatMap(({ search }) => search?.searchLayerIds || []);
+    if (searchEnabled) {
+      checks.push({
+        name: "prior-work-search",
+        passed: exactSearchSet && evidenceByRoot.every(({ search }) => search !== undefined),
+        detail: `Follow-up ${index} must use bounded parameterized search to recover ${requiredPriorRoots.length} required prior accepted root${requiredPriorRoots.length === 1 ? "" : "s"}.`,
+      }, {
+        name: "prior-work-references",
+        passed: evidenceByRoot.every(({ acceptedReference, referenceEvent }) => (
+          acceptedReference !== undefined && referenceEvent !== undefined
+        )),
+        detail: "Every required searched root must remain attached to the accepted follow-up as typed supporting context.",
+      }, {
+        name: "search-reference-submit-order",
+        passed: acknowledgement !== undefined && evidenceByRoot.every(({ search, referenceEvent }) => (
+          search !== undefined
+          && referenceEvent !== undefined
+          && search.sequence < referenceEvent.sequence
+          && referenceEvent.sequence < acknowledgement.sequence
+        )),
+        detail: "Candidate Trace must show successful search before the matching accepted references and final acknowledgement.",
+      });
+    } else {
+      checks.push({
+        name: "graph-search-disabled",
+        passed: searches.length === 0,
+        detail: `Search is disabled for this cell; observed ${searches.length} successful graph-search operation${searches.length === 1 ? "" : "s"}.`,
+      });
+    }
+    if (index === 2) {
+      const allChildren = execution.semanticChildren || [];
+      const finalChildren = allChildren.filter((child) => (
+        String(child.sourceInteractionId) === String(interaction.id)
+      ));
+      const attachedFinalChildren = finalChildren.filter((child) => output.rootLayer.actions.some((action) => (
+        action.state === "accepted"
+        && action.kind === "invoke"
+        && action.id === child.sourceActionId
+        && action.sourceLayerId === output.rootLayer.layer.id
+        && action.targetLayerId === child.rootLayerId
+      )));
+      const childStopConditions = finalChildren.flatMap((child) => (
+        child.acceptedRootNodes || []
+      )).filter((node) => node.title === "Red-team stop condition" && node.detail.trim() !== "");
+      const parentStopConditions = output.rootLayer.nodes.filter((node) => (
+        node.title === "Red-team stop condition" && node.detail.trim() !== ""
+      ));
+      checks.push({
+        name: "final-red-team-stop-condition",
+        passed: parentStopConditions.length === 1,
+        detail: "Every cell must expose exactly one falsifiable Red-team stop condition in the final accepted memo.",
+      });
+      if (recursionEnabled) {
+        checks.push({
+          name: "semantic-child-observation",
+          passed: true,
+          detail: `Recursion was available; observed ${allChildren.length} descendant execution${allChildren.length === 1 ? "" : "s"}, ${finalChildren.length} from the final turn. Child creation remains observed behavior.`,
+        }, {
+          name: "final-child-attached",
+          passed: attachedFinalChildren.length === finalChildren.length,
+          detail: "Any claimed final specialist contribution must retain its settled result through an exact action-bound resolved invoke.",
+        }, {
+          name: "child-result-text-aligned",
+          passed: finalChildren.length === 0 || (childStopConditions.some((child) => (
+            parentStopConditions.length === 1 && child.detail === parentStopConditions[0].detail
+          ))
+          ),
+          detail: "The final memo and specialist result must expose the same falsifiable stop condition. This is semantic alignment evidence, not broker-delivery proof.",
+        });
+      } else {
+        const resolvedInvokes = productTurns.flatMap((turn) => turn.completionOutput.rootLayer.actions).filter((action) => (
+          action.state === "accepted"
+          && action.kind === "invoke"
+          && action.targetLayerId !== null
+          && action.targetLayerId !== undefined
+        ));
+        checks.push({
+          name: "recursion-disabled-no-semantic-child",
+          passed: allChildren.length === 0,
+          detail: `Recursion is disabled for this cell; observed ${allChildren.length} semantic child execution${allChildren.length === 1 ? "" : "s"}.`,
+        }, {
+          name: "recursion-disabled-no-resolved-invoke",
+          passed: resolvedInvokes.length === 0,
+          detail: `Recursion is disabled for this cell; observed ${resolvedInvokes.length} accepted resolved invoke action${resolvedInvokes.length === 1 ? "" : "s"}.`,
+        });
+      }
+    }
+    return {
+      checks,
+      evidence: {
+        successfulSearchCount: searches.length,
+        searchedLayerIds,
+        requiredPriorRoots,
+        referenceActionIds: evidenceByRoot.map(({ referenceEvent }) => referenceEvent?.recordId).filter(Number.isSafeInteger),
+      },
+    };
+  });
+  return { turns };
+}
+
+function matchesBoundedPriorWorkSearch(event, topic, rootLayerId) {
+  if (event.queryContractVersion !== 1
+    || event.target !== undefined
+    || event.resultTruncated !== false
+    || typeof event.query !== "string"
+    || event.parameters === null
+    || typeof event.parameters !== "object"
+    || Array.isArray(event.parameters)
+    || (event.budget !== undefined && (
+      event.budget === null
+      || typeof event.budget !== "object"
+      || Array.isArray(event.budget)
+    ))
+    || !Array.isArray(event.searchLayerIds)
+    || event.searchLayerIds.length !== 1
+    || event.searchLayerIds[0] !== rootLayerId) return false;
+  const parameterEntries = Object.entries(event.parameters);
+  if (parameterEntries.length !== 1) return false;
+  const [parameterName, parameter] = parameterEntries[0];
+  if (parameter === null
+    || typeof parameter !== "object"
+    || Array.isArray(parameter)
+    || parameter.type !== "string"
+    || parameter.value !== topic) return false;
+  const escapedName = parameterName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const resultRows = event.budget?.resultRows;
+  return (resultRows === undefined || (
+    Number.isSafeInteger(resultRows)
+    && resultRows >= 1
+    && resultRows <= 5
+  ))
+    && isNaturalPriorWorkQueryShape(event.query, escapedName);
+}
+
+function isNaturalPriorWorkQueryShape(query, escapedParameterName) {
+  const identifier = "[A-Za-z_][A-Za-z0-9_]*";
+  const layer = `(?<layer>${identifier})`;
+  const content = `(?<content>${identifier})`;
+  const relationship = `\\[\\s*(?:${identifier}\\s*)?:\\s*CONTAINS(?:\\s*\\{[^}]*\\})?\\s*\\]`;
+  const contains = `\\s*-\\s*${relationship}\\s*->\\s*`;
+  const containedBy = `\\s*<-\\s*${relationship}\\s*-\\s*`;
+  const layerNode = `\\(\\s*${layer}\\s*:\\s*Layer\\s*\\)`;
+  const contentNode = `\\(\\s*${content}\\s*:\\s*Content\\s*\\)`;
+  const titleProperty = "\\k<content>\\s*\\.\\s*title";
+  const parameter = `\\$${escapedParameterName}`;
+  const predicate = `\\s+WHERE\\s+(?:${titleProperty}\\s*=\\s*${parameter}|${parameter}\\s*=\\s*${titleProperty})`;
+  const projection = `\\s+RETURN\\s+(?:DISTINCT\\s+)?\\k<layer>(?:\\s+AS\\s+${identifier})?`;
+  const orderingExpression = `${identifier}(?:\\s*\\.\\s*${identifier})?`;
+  const ordering = `(?:\\s+ORDER\\s+BY\\s+${orderingExpression}(?:\\s+(?:ASC|DESC))?)?`;
+  const limit = "(?:\\s+LIMIT\\s+[1-8])?\\s*$";
+  const pathBinding = `(?:${identifier}\\s*=\\s*)?`;
+  const forward = new RegExp(`^\\s*MATCH\\s+${pathBinding}${layerNode}${contains}${contentNode}${predicate}${projection}${ordering}${limit}`, "iu");
+  const reverse = new RegExp(`^\\s*MATCH\\s+${pathBinding}${contentNode}${containedBy}${layerNode}${predicate}${projection}${ordering}${limit}`, "iu");
+  return forward.test(query) || reverse.test(query);
+}
+
 const h3CaseIds = new Set([
   H3_PROJECT_CASE_ID,
   H3_AUTONOMOUS_FIX_CASE_ID,
@@ -192,6 +434,29 @@ const ANNOTATION_EXPORT_EXECUTION_STATUSES = new Set(["passed", "failed", "impor
 const ANNOTATION_EXPORT_TURN_STATUSES = new Set(["accepted", "failed", "stopped"]);
 const SEMANTIC_CHILD_DISCOVERY_TIMEOUT_MS = 5_000;
 const execFileAsync = promisify(execFile);
+
+export function semanticChildDiscoveryObservation({
+  previousSignature = null,
+  stableSince,
+  signature,
+  now,
+  discoveryDeadline,
+  boundedObservation = true,
+}) {
+  const nextStableSince = signature === previousSignature ? stableSince : now;
+  return {
+    signature,
+    stableSince: nextStableSince,
+    stable: !boundedObservation || (
+      now >= discoveryDeadline
+      && now - nextStableSince >= SEMANTIC_CHILD_DISCOVERY_TIMEOUT_MS
+    ),
+  };
+}
+
+export function semanticChildDiscoveryIsBounded(harnessConfiguration) {
+  return typeof harnessConfiguration?.complete?.agentAuthored === "boolean";
+}
 
 function copy(value) {
   return structuredClone(value);
@@ -235,6 +500,32 @@ function outcomeGradeFromChecks(checks, caseSnapshot = null) {
   };
 }
 
+function recursiveGraphMemoryOutcomeGrade() {
+  return {
+    schemaVersion: 1,
+    kind: "task_outcome_grade",
+    status: "unjudged",
+    qualified: null,
+    score: null,
+    mandatoryGates: [],
+    criteria: [
+      "Prior-work retention across all three turns",
+      "Constraint revision and identification of the failed assumption",
+      "Five ranked launch risks",
+      "Measurable launch, rollback, and stop thresholds with six-week owners",
+      "Specialist contribution when one was actually created",
+    ].map((label, index) => ({
+      criterionId: `lantern-outcome-${index + 1}`,
+      label,
+      rating: null,
+      weight: 1,
+      rationale: "Compare this visible accepted result in the read-only product workspace; mechanism checks do not judge answer quality.",
+      evidenceRefs: [],
+    })),
+    reviewRequired: true,
+  };
+}
+
 function descendantInvocations(detail, rootInteractionIds) {
   const reachable = new Set(rootInteractionIds.map(String));
   const selected = [];
@@ -266,11 +557,19 @@ function combinedComparisonConfigurationIdentity(configuration) {
   return canonicalJson(normalized);
 }
 
+function recursiveGraphMemoryConfigurationIdentity(configuration) {
+  const normalized = copy(configuration);
+  delete normalized.name;
+  delete normalized.complete;
+  delete normalized.graphCapabilityProfile;
+  return canonicalJson(normalized);
+}
+
 function sameJson(left, right) {
   return canonicalJson(left) === canonicalJson(right);
 }
 
-export function recursiveCompleteChecks(execution) {
+export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = true } = {}) {
   const enabled = execution.harnessConfiguration?.complete?.agentAuthored === true;
   const root = execution.turns[0];
   const children = execution.semanticChildren || [];
@@ -281,9 +580,11 @@ export function recursiveCompleteChecks(execution) {
     detail: `Configuration requested agent-authored Complete ${enabled ? "enabled" : "disabled"}; root trace recorded broker authority ${String(observedBroker)}.`,
   }, {
     name: "agent-authored-complete:semantic-child-count",
-    passed: enabled ? children.length > 0 : children.length === 0,
+    passed: enabled ? (!requireChildWhenEnabled || children.length > 0) : children.length === 0,
     detail: enabled
-      ? `Expected at least one agent-authored semantic child within the ${SEMANTIC_CHILD_DISCOVERY_TIMEOUT_MS} ms post-root discovery window; observed ${children.length}.`
+      ? requireChildWhenEnabled
+        ? `Expected at least one agent-authored semantic child within the ${SEMANTIC_CHILD_DISCOVERY_TIMEOUT_MS} ms post-root discovery window; observed ${children.length}.`
+        : `Agent-authored Complete was available; child creation remains observed behavior and ${children.length} semantic child execution${children.length === 1 ? " was" : "s were"} recorded.`
       : `Expected no semantic children without broker authority; observed ${children.length}.`,
   }];
   if (!enabled) return checks;
@@ -298,11 +599,11 @@ export function recursiveCompleteChecks(execution) {
     detail: "Every semantic child must retain the exact source interaction, action, product interaction, and graph completion identities.",
   }, {
     name: "agent-authored-complete:child-terminal",
-    passed: children.length > 0 && children.every(childHasAcceptedResultSequence),
+    passed: children.length === 0 ? !requireChildWhenEnabled : children.every(childHasAcceptedResultSequence),
     detail: "Every semantic child must publish a current layer and settle as an accepted succeeded result with an ordered durable projection sequence.",
   }, {
     name: "agent-authored-complete:child-execution",
-    passed: children.length > 0 && children.every((child) => childHasDurableExecution(
+    passed: children.length === 0 ? !requireChildWhenEnabled : children.every((child) => childHasDurableExecution(
       child,
       execution.harnessConfiguration,
       execution.harnessConfigurationDigest,
@@ -310,7 +611,7 @@ export function recursiveCompleteChecks(execution) {
     detail: "Every semantic child must retain an exact attached and successfully settled provider execution binding.",
   }, {
     name: "agent-authored-complete:child-trace",
-    passed: children.length > 0 && children.every((child) => (
+    passed: children.length === 0 ? !requireChildWhenEnabled : children.every((child) => (
       child.candidateTrace?.status === "complete"
       && child.candidateTrace?.completionBrokerAvailable === true
     )),
@@ -352,6 +653,7 @@ function childHasAcceptedResultSequence(child) {
 function expectedAttachmentProvider(configuration) {
   if (configuration?.implementation === "codex.basic") return "codex";
   if (configuration?.implementation === "claude.basic") return "claude";
+  if (configuration?.implementation === "prime.agent") return "prime-agent";
   if (configuration?.implementation === "fixture.task-system") return "fixture";
   return null;
 }
@@ -1107,6 +1409,41 @@ export class EvalService {
         throw new Error(`Live agent-authored Complete comparison requires explicit confirmation, a connected provider credential reference, exactly ${liveProviderExecutions} root executions, and authorization for agent-authored child execution.`);
       }
     }
+    if (testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID)) {
+      const definition = evalCases.find((item) => item.id === RECURSIVE_GRAPH_MEMORY_CASE_ID);
+      if (!sameJson(testCaseIds, [RECURSIVE_GRAPH_MEMORY_CASE_ID])
+        || !sameJson(harnessConfigurationNames, RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET)) {
+        throw new Error(`The recursive graph-memory experiment must run alone with its exact ordered Codex quartet: ${RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET.join(", ")}.`);
+      }
+      const configurations = RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET.map((name) => this.configurations.get(name));
+      const factors = configurations.map((configuration) => ({
+        search: configuration?.graphCapabilityProfile?.search,
+        agentAuthored: configuration?.complete?.agentAuthored,
+      }));
+      const expectedFactors = [
+        { search: "disabled", agentAuthored: false },
+        { search: "query-v1", agentAuthored: false },
+        { search: "disabled", agentAuthored: true },
+        { search: "query-v1", agentAuthored: true },
+      ];
+      if (configurations.some((configuration) => configuration === undefined)
+        || !sameJson(factors, expectedFactors)
+        || configurations.some((configuration) => configuration?.implementation !== "codex.basic")
+        || configurations.some((configuration) => (
+          recursiveGraphMemoryConfigurationIdentity(configuration)
+            !== recursiveGraphMemoryConfigurationIdentity(configurations[0])
+        ))) {
+        throw new Error("The recursive graph-memory quartet must be one normalized Codex 2x2 varying only graph search and agent-authored Complete.");
+      }
+      const rootProviderExecutions = resolveEvalCasePrompts(definition, "authorization").length
+        * configurations.length;
+      if (selection?.liveAuthorization?.confirmed !== true
+        || selection.liveAuthorization.credentialReference !== "connected-product-provider"
+        || selection.liveAuthorization.rootProviderExecutions !== rootProviderExecutions
+        || selection.liveAuthorization.agentAuthoredChildren !== true) {
+        throw new Error(`The recursive graph-memory experiment requires explicit authorization for ${rootProviderExecutions} live roots and additional model-controlled agent-authored child execution.`);
+      }
+    }
     if (testCaseIds.some((id) => projectCaseIds.has(id)) && this.platform !== "darwin") {
       throw new Error("Pinned project cases are local Mac only.");
     }
@@ -1135,6 +1472,7 @@ export class EvalService {
       harnessConfigurationNames: [...harnessConfigurationNames],
       judgeConfigurationName,
       liveAuthorization: testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID)
+        || testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID)
         ? copy(selection?.liveAuthorization || null)
         : null,
       comparison: testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID) ? {
@@ -1149,6 +1487,19 @@ export class EvalService {
           "temporalRuntimeFeatures",
         ],
         variedField: "combined personalPresentationVersion and complete.agentAuthored experience",
+        passed: null,
+      } : testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID) ? {
+        kind: "graph-search-recursion-2x2",
+        temporalRuntimeFeatures: copy(RECURSIVE_TEMPORAL_FEATURES),
+        controlledFields: [
+          "task",
+          "implementation",
+          "settings",
+          "permissionBindings",
+          "providerModelSelection",
+          "temporalRuntimeFeatures",
+        ],
+        variedFields: ["graphCapabilityProfile.search", "complete.agentAuthored"],
         passed: null,
       } : null,
       executions: plans.map((plan) => {
@@ -1624,22 +1975,27 @@ export class EvalService {
   async #run(run) {
     run.status = "running";
     await this.#changed();
-    let recursivePairModelResolution;
+    let controlledComparisonModelResolution;
     for (const execution of run.executions) {
-      if (execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID
-        && recursivePairModelResolution !== undefined) {
-        execution.pinnedModelResolution = copy(recursivePairModelResolution);
+      const controlledComparison = execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID
+        || execution.testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID;
+      if (controlledComparison && controlledComparisonModelResolution !== undefined) {
+        execution.pinnedModelResolution = copy(controlledComparisonModelResolution);
       }
       await this.#execute(execution);
-      if (execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID
-        && recursivePairModelResolution === undefined
+      if (controlledComparison
+        && controlledComparisonModelResolution === undefined
         && execution.modelResolution !== undefined) {
-        recursivePairModelResolution = copy(execution.modelResolution);
+        controlledComparisonModelResolution = copy(execution.modelResolution);
       }
       await this.#changed();
     }
     if (run.comparison?.kind === "agent-authored-complete-pair") {
       this.#finalizeRecursiveComparison(run);
+      await this.#changed();
+    }
+    if (run.comparison?.kind === "graph-search-recursion-2x2") {
+      this.#finalizeRecursiveGraphMemoryComparison(run);
       await this.#changed();
     }
     const terminalStatus = run.executions.some((execution) => execution.status === "error")
@@ -1668,6 +2024,54 @@ export class EvalService {
       detail: controlled
         ? "The exact V1/off and V2/on cells used one pinned provider/model resolution and identical task and permission inputs."
         : "The combined-experience cells drifted outside their controlled provider, task, or permission inputs.",
+    };
+    for (const execution of executions) {
+      execution.checks.push(copy(check));
+      if (!controlled && execution.status !== "error") {
+        execution.status = "failed";
+        execution.passed = false;
+      }
+    }
+    run.comparison = {
+      ...run.comparison,
+      sourceRuntime: "single-eval-desktop-process",
+      providerModelResolution: copy(control?.modelResolution || null),
+      passed: controlled,
+      check,
+    };
+  }
+
+  #finalizeRecursiveGraphMemoryComparison(run) {
+    const executions = run.executions.filter(({ testCaseId }) => testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID);
+    const control = executions[0];
+    const workspaceThreadIds = executions.flatMap((execution) => execution.threadIds || []);
+    const controlled = executions.length === RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET.length
+      && sameJson(executions.map(({ harnessConfigurationName }) => harnessConfigurationName), RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET)
+      && executions.every((execution) => execution.threadIds?.length === 1)
+      && new Set(workspaceThreadIds.map(String)).size === RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET.length
+      && executions.every((execution) => sameJson(execution.modelResolution, control?.modelResolution))
+      && executions.every((execution) => sameJson(
+        execution.turns?.map(({ prompt }) => prompt),
+        control?.turns?.map(({ prompt }) => prompt),
+      ))
+      && executions.every((execution) => sameJson(
+        execution.turns?.map(({ modelSelection }) => modelSelection),
+        control?.turns?.map(({ modelSelection }) => modelSelection),
+      ))
+      && executions.every((execution) => sameJson(
+        execution.turns?.map(({ permissionProfileId }) => permissionProfileId),
+        control?.turns?.map(({ permissionProfileId }) => permissionProfileId),
+      ))
+      && executions.every((execution) => sameJson(
+        execution.turns?.map(({ effectivePermissionReceipt }) => effectivePermissionReceipt),
+        control?.turns?.map(({ effectivePermissionReceipt }) => effectivePermissionReceipt),
+      ));
+    const check = {
+      name: "graph-search-recursion:controlled-2x2",
+      passed: controlled,
+      detail: controlled
+        ? "All four cells used the exact ordered factor matrix, one pinned provider/model resolution, and identical task and permission inputs."
+        : "The four-cell experiment drifted outside its controlled factor, provider, task, model, or permission inputs.",
     };
     for (const execution of executions) {
       execution.checks.push(copy(check));
@@ -1860,7 +2264,9 @@ export class EvalService {
         checks.push(...turnChecks);
       }
       if (definition.requiredChecks?.includes("agent-authored-complete")) {
-        checks.push(...recursiveCompleteChecks(execution));
+        checks.push(...recursiveCompleteChecks(execution, {
+          requireChildWhenEnabled: definition.id !== RECURSIVE_GRAPH_MEMORY_CASE_ID,
+        }));
       }
       execution.checks = checks;
       let simulatedUserCompleted = true;
@@ -1908,7 +2314,9 @@ export class EvalService {
       const outcomeChecks = execution.caseSnapshot
         ? execution.checks.filter((check) => check.name.includes(":workspace:"))
         : execution.checks;
-      execution.outcomeGrade = outcomeGradeFromChecks(outcomeChecks, execution.caseSnapshot);
+      execution.outcomeGrade = definition.id === RECURSIVE_GRAPH_MEMORY_CASE_ID
+        ? recursiveGraphMemoryOutcomeGrade()
+        : outcomeGradeFromChecks(outcomeChecks, execution.caseSnapshot);
       execution.presentationGrade = presentationGradeFromTurns(
         execution.turns,
         simulatedUserJudgeIds.has(execution.judgeConfiguration.name),
@@ -2191,7 +2599,12 @@ export class EvalService {
   async #waitForSemanticChildren(execution, threadId, humanInteractionIds) {
     const deadline = Date.now() + 10 * 60_000;
     const discoveryDeadline = Date.now() + SEMANTIC_CHILD_DISCOVERY_TIMEOUT_MS;
-    const expectsSemanticChild = execution.harnessConfiguration?.complete?.agentAuthored === true;
+    const boundedObservation = semanticChildDiscoveryIsBounded(execution.harnessConfiguration);
+    let discoveryObservation = {
+      signature: null,
+      stableSince: Date.now(),
+      stable: false,
+    };
     for (;;) {
       const detail = await this.#productRequest(`/api/threads/${threadId}`);
       await this.#observeCurrentProjections(execution, detail);
@@ -2204,7 +2617,21 @@ export class EvalService {
         const child = interactionsById.get(String(invocation.resultInteractionId));
         return child === undefined || IN_PROGRESS_COMPLETION_STATUSES.has(child.completionStatus);
       });
-      if (pending.length === 0 && (invocations.length > 0 || !expectsSemanticChild || Date.now() >= discoveryDeadline)) {
+      const signature = canonicalJson(invocations.map((invocation) => ({
+        sourceInteractionId: invocation.sourceInteractionId,
+        actionId: invocation.actionId,
+        resultInteractionId: invocation.resultInteractionId,
+        completionStatus: interactionsById.get(String(invocation.resultInteractionId))?.completionStatus ?? null,
+      })));
+      discoveryObservation = semanticChildDiscoveryObservation({
+        previousSignature: discoveryObservation.signature,
+        stableSince: discoveryObservation.stableSince,
+        signature,
+        now: Date.now(),
+        discoveryDeadline,
+        boundedObservation,
+      });
+      if (pending.length === 0 && discoveryObservation.stable) {
         const semanticChildren = [];
         for (const invocation of invocations) {
           const child = interactionsById.get(String(invocation.resultInteractionId));
@@ -2219,6 +2646,11 @@ export class EvalService {
             graphNodeId: child.graphNodeId,
             status: child.completionStatus,
             rootLayerId: child.completionOutput?.rootLayer?.layer?.id ?? null,
+            acceptedRootNodes: copy((child.completionOutput?.rootLayer?.nodes || []).map((node) => ({
+              id: node.id,
+              title: node.title,
+              detail: node.detail,
+            }))),
             resultCompletionStatus: invocation.resultCompletionStatus,
             execution: copy(invocation.execution || null),
             candidateTrace: copy(execution.candidateTraceCaptures?.[String(child.id)] || disabledCandidateTrace()),
@@ -2239,7 +2671,8 @@ export class EvalService {
   }
 
   async #observeCurrentProjections(execution, detail) {
-    if (execution.testCaseId !== RECURSIVE_COMPLETE_EVAL_CASE_ID) return;
+    const definition = evalCases.find((candidate) => candidate.id === execution.testCaseId);
+    if (!definition?.requiredChecks?.includes("agent-authored-complete")) return;
     const evidence = execution.currentProjectionEvidence ||= { cursor: 0, observations: [] };
     const completionIds = new Set((detail.interactions || [])
       .map((interaction) => interaction.graphNodeId)
@@ -2355,7 +2788,10 @@ export class EvalService {
         descriptor,
         interaction,
         correlation,
-        { requireComplete: execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID },
+        {
+          requireComplete: execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID
+            || execution.testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID,
+        },
       );
       execution.candidateTraceCaptures ||= {};
       execution.candidateTraceCaptures[String(interaction.id)] = {

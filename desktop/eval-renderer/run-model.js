@@ -16,6 +16,13 @@ export const recursiveCompleteHarnessPair = Object.freeze([
   "codex-eval-complete-disabled",
   "codex-eval-complete-enabled",
 ]);
+export const recursiveGraphMemoryCaseId = "empty-project.recursive-graph-memory.launch-readiness";
+export const recursiveGraphMemoryHarnessQuartet = Object.freeze([
+  "codex-eval-lantern-search-disabled-recursion-disabled",
+  "codex-eval-lantern-search-query-v1-recursion-disabled",
+  "codex-eval-lantern-search-disabled-recursion-enabled",
+  "codex-eval-lantern-search-query-v1-recursion-enabled",
+]);
 
 export function judgeConfigurationCompatibleWithCases(cases, selectedCaseIds, judgeId) {
   return selectedCaseIds.every((caseId) => {
@@ -25,7 +32,15 @@ export function judgeConfigurationCompatibleWithCases(cases, selectedCaseIds, ju
   });
 }
 
-export function isolateRecursiveCompleteSelection(testCaseIds, harnessConfigurationNames) {
+export function isolateRecursiveCompleteSelection(testCaseIds, harnessConfigurationNames, harnessConfigurations = []) {
+  if (testCaseIds.includes(recursiveGraphMemoryCaseId)) {
+    const availableNames = new Set(harnessConfigurations.map(({ name }) => name));
+    const quartet = recursiveGraphMemoryHarnessQuartet.filter((name) => availableNames.has(name));
+    return {
+      testCaseIds: [recursiveGraphMemoryCaseId],
+      harnessConfigurationNames: quartet.length === recursiveGraphMemoryHarnessQuartet.length ? quartet : [],
+    };
+  }
   if (!testCaseIds.includes(recursiveCompleteCaseId)) {
     return { testCaseIds: [...testCaseIds], harnessConfigurationNames: [...harnessConfigurationNames] };
   }
@@ -36,6 +51,21 @@ export function isolateRecursiveCompleteSelection(testCaseIds, harnessConfigurat
 }
 
 export function authorizeRecursiveCompleteSelection(selection, confirmLiveRun) {
+  if (selection.testCaseIds.includes(recursiveGraphMemoryCaseId)) {
+    const confirmed = confirmLiveRun(
+      "Run the four-cell Lantern comparison using twelve paid/live Codex root turns? The two recursion-enabled cells may launch additional model-controlled paid child executions through the connected product provider.",
+    );
+    if (!confirmed) return null;
+    return {
+      ...structuredClone(selection),
+      liveAuthorization: {
+        confirmed: true,
+        credentialReference: "connected-product-provider",
+        rootProviderExecutions: 12,
+        agentAuthoredChildren: true,
+      },
+    };
+  }
   if (!selection.testCaseIds.includes(recursiveCompleteCaseId)) return structuredClone(selection);
   const confirmed = confirmLiveRun(
     "Run two live Codex root cells for the agent-authored Complete comparison? The enabled root may launch additional agent-authored child execution. All of these use paid/live inference through the connected product provider.",
@@ -151,9 +181,12 @@ export function projectExecutionCell(run, execution) {
   }
   const lifecycleStatus = execution.lifecycle?.status ?? legacyLifecycleStatus(execution.status);
   const checks = asArray(execution.checks);
+  const humanComparisonRequired = execution.outcomeGrade?.reviewRequired === true;
   const outcomeStatus = judgmentStatus(execution.outcomeGrade, lifecycleStatus, checks.length > 0);
   const outcomeScore = finiteScore(execution.outcomeGrade?.score);
-  const qualified = typeof execution.outcomeGrade?.qualified === "boolean"
+  const qualified = humanComparisonRequired
+    ? null
+    : typeof execution.outcomeGrade?.qualified === "boolean"
     ? execution.outcomeGrade.qualified
     : run?.kind === "imported-conversation"
       ? null
@@ -185,7 +218,9 @@ export function projectExecutionCell(run, execution) {
     },
     substance: {
       status: outcomeStatus,
-      label: outcomeScore === null ? legacyCheckLabel ?? judgmentLabel(outcomeStatus) : scoreLabel(outcomeScore),
+      label: humanComparisonRequired
+        ? "Human review"
+        : outcomeScore === null ? legacyCheckLabel ?? judgmentLabel(outcomeStatus) : scoreLabel(outcomeScore),
       score: outcomeScore,
       qualified,
     },
@@ -209,7 +244,10 @@ export function projectExecutionDossier(run, execution) {
   const declaredGates = asArray(outcome.mandatoryGates).length
     ? asArray(outcome.mandatoryGates)
     : asArray(outcome.gates);
-  const gates = declaredGates.length ? declaredGates : legacyGates;
+  const humanComparisonRequired = outcome.reviewRequired === true;
+  const gates = declaredGates.length
+    ? declaredGates
+    : humanComparisonRequired ? [] : legacyGates;
   const semanticChildren = asArray(execution.semanticChildren);
   const traceable = [...asArray(execution.turns), ...semanticChildren]
     .some((turn) => Boolean(turn?.candidateTrace));
@@ -233,6 +271,9 @@ export function projectExecutionDossier(run, execution) {
       gates: gates.map(gateProjection),
       criteria: asArray(outcome.criteria).map(criterionProjection),
       evidenceRefs: asArray(outcome.evidenceRefs).map(evidenceRefLabel),
+    },
+    mechanism: {
+      checks: humanComparisonRequired ? legacyGates.map(gateProjection) : [],
     },
     presentation: {
       ...cell.presentation,

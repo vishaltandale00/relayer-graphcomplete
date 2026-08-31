@@ -1,0 +1,40 @@
+schemaVersion: 1
+name: codex-eval-lantern-search-disabled-recursion-enabled
+implementation: codex.basic
+implementationVersion: 1
+revision: 1
+complete:
+  agentAuthored: true
+graphCapabilityProfile:
+  search: disabled
+permissionBindings:
+  ask:
+    sandboxMode: workspace-write
+    approvalPolicy: on-request
+    approvalsReviewer: user
+    networkAccessEnabled: true
+  auto:
+    sandboxMode: workspace-write
+    approvalPolicy: on-request
+    approvalsReviewer: auto_review
+    networkAccessEnabled: true
+  full:
+    sandboxMode: danger-full-access
+    approvalPolicy: never
+modelCompatibility:
+  - providerId: codex
+modelRules:
+  allow:
+    - adapterId: codex-subscription
+      modelIdRegex: ".*"
+  deny: []
+executionAccessContracts: [managed-runtime@1, secret@1]
+modelDefaults:
+  familyPolicy:
+    id: codex-default-family
+    version: 2
+settings:
+  modelReasoningEffort: medium
+  personalPresentationVersion: personal-presentation-v2
+  promptProfile: layered-navigation-multi-agent-v1
+  skipGitRepoCheck: true

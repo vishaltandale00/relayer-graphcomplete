@@ -8,8 +8,30 @@ import {
   loadLadybugSourceManifest,
   stageLadybugSources,
 } from "../../scripts/prepare-ladybug-source.mjs";
+import { verifyLadybugNativeReceipts } from "../../scripts/verify-ladybug-native-receipts.mjs";
 
 const QUALIFIED_TARGET = "macos-arm64";
+
+export async function requireLadybugDistributionLicenseReady({
+  loadSourceManifest = loadLadybugSourceManifest,
+  verifyNativeReceipts = verifyLadybugNativeReceipts,
+} = {}) {
+  const [manifest, nativeReceipt] = await Promise.all([
+    loadSourceManifest(),
+    verifyNativeReceipts(),
+  ]);
+  const sourceComplete = manifest?.licenseReceipt?.completeForDistribution === true;
+  const nativeBlockers = Array.isArray(nativeReceipt?.releaseBlockers)
+    ? nativeReceipt.releaseBlockers
+    : ["invalid-native-license-receipt"];
+  if (!sourceComplete || nativeBlockers.length !== 0) {
+    throw new Error(
+      "Ladybug distribution license receipts are not release-ready: "
+      + `source complete=${sourceComplete}; native blockers=${nativeBlockers.join(",") || "none"}.`,
+    );
+  }
+  return { manifest, nativeReceipt };
+}
 
 export async function preparePinnedLadybugForPackaging({ target }) {
   if (target.key !== QUALIFIED_TARGET) {

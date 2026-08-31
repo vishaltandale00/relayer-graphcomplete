@@ -15,6 +15,7 @@ import { verifyDesktopUpdateZip } from "./verify-update-zip.mjs";
 import { verifyWindowsRelease } from "./verify-windows-app.mjs";
 import {
   preparePinnedLadybugForPackaging,
+  requireLadybugDistributionLicenseReady,
   withPinnedLadybugPackagingEnvironment,
 } from "../packaging/pinned-ladybug-build.mjs";
 
@@ -35,11 +36,13 @@ export async function buildReleaseRustServers({
   execute = run,
   prepareLadybug = preparePinnedLadybugForPackaging,
   repositoryRoot,
+  verifyLadybugDistributionLicense = requireLadybugDistributionLicenseReady,
 }) {
   const target = { key: contract.targetKey, rustTarget: contract.rustTarget };
   if (target.key !== "macos-arm64") {
     throw new Error(`Ladybug release packaging is not qualified for ${target.key}.`);
   }
+  await verifyLadybugDistributionLicense();
   return withPinnedLadybugPackagingEnvironment({ environment, target, prepareLadybug }, async (
     buildEnvironment,
     cargoIntegrityArguments,
