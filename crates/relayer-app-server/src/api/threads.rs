@@ -425,7 +425,10 @@ pub(super) async fn project_interaction(
                 if imported_thread {
                     response.set_submitted_inputs(input.submitted_inputs.clone());
                 } else if !durable_submitted_inputs.is_empty()
-                    && input.submitted_inputs != durable_submitted_inputs
+                    && !submitted_input_semantic_multisets_match(
+                        &input.submitted_inputs,
+                        &durable_submitted_inputs,
+                    )
                 {
                     response.mark_projection_stale();
                     eprintln!(
@@ -471,6 +474,27 @@ pub(super) async fn project_interaction(
         }
     }
     Ok(response)
+}
+
+fn submitted_input_semantic_multisets_match(
+    left: &[relayer_graph_core::SubmittedInput],
+    right: &[relayer_graph_core::SubmittedInput],
+) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let canonicalize = |inputs: &[relayer_graph_core::SubmittedInput]| {
+        inputs
+            .iter()
+            .map(|input| serde_json::to_value(input).and_then(|value| serde_json::to_vec(&value)))
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let (Ok(mut left), Ok(mut right)) = (canonicalize(left), canonicalize(right)) else {
+        return false;
+    };
+    left.sort_unstable();
+    right.sort_unstable();
+    left == right
 }
 
 async fn project_interactions(
@@ -2611,6 +2635,7 @@ mod tests {
         storage::SqliteProductStore,
     };
     use axum::{Router, routing};
+    use relayer_graph_core::{InputAction, InputControl, SubmittedInput, SubmittedInputValue};
     use std::{
         collections::HashMap,
         fs,
@@ -3392,6 +3417,31 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let task = tokio::spawn(axum::serve(listener, app).into_future());
         (format!("http://{address}/"), task)
+    }
+
+    #[test]
+    fn submitted_input_projection_compares_semantic_multisets_not_occurrence_order() {
+        let submitted = |prompt: &str, text: &str| SubmittedInput {
+            action: InputAction {
+                control: InputControl::Text,
+                prompt: prompt.into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: SubmittedInputValue::Text { text: text.into() },
+        };
+        let first = submitted("Zulu prompt", "first value");
+        let second = submitted("Alpha prompt", "second value");
+
+        assert!(submitted_input_semantic_multisets_match(
+            &[first.clone(), second.clone()],
+            &[second.clone(), first.clone()],
+        ));
+        assert!(!submitted_input_semantic_multisets_match(
+            &[first.clone(), second],
+            &[first.clone(), first],
+        ));
     }
 
     #[test]
