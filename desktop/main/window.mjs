@@ -13,9 +13,11 @@ export function createWindowFactory({
   desktopDirectory,
   getAppearance,
   updater,
+  openExternal,
   onWindowCreated = () => {},
   issueErrorReporter = () => null,
 }) {
+  if (typeof openExternal !== "function") throw new TypeError("External browser authority is required.");
   let rendererGeneration = 0;
   let activeReporterState = null;
   const revokeReporter = (state) => {
@@ -78,15 +80,29 @@ export function createWindowFactory({
     window.webContents.on("did-fail-load", (_event, code, description) => {
       console.error(`Renderer load failed (${code}): ${description}`);
     });
+    const openSafeExternal = (target) => {
+      try {
+        const url = new URL(target);
+        if (url.origin === productOrigin) return false;
+        if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+        void Promise.resolve(openExternal(url.href)).catch(() => undefined);
+        return true;
+      } catch {}
+      return false;
+    };
     const preventUntrustedNavigation = (event, target) => {
       try {
         if (new URL(target).origin === productOrigin) return;
       } catch {}
       event.preventDefault();
+      openSafeExternal(target);
     };
     window.webContents.on("will-navigate", preventUntrustedNavigation);
     window.webContents.on("will-redirect", preventUntrustedNavigation);
-    window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      openSafeExternal(url);
+      return { action: "deny" };
+    });
     await window.webContents.session.cookies.set({
       url: productSession.origin,
       name: productSession.cookie.name,

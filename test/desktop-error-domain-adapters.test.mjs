@@ -272,6 +272,7 @@ describe("desktop failure-domain adapters", () => {
       desktopDirectory: "/immutable-desktop",
       getAppearance: () => "dark",
       updater: { status: () => ({ phase: "development" }) },
+      openExternal: vi.fn(async () => undefined),
       issueErrorReporter,
     });
 
@@ -340,6 +341,7 @@ describe("desktop failure-domain adapters", () => {
       desktopDirectory: "/immutable-desktop",
       getAppearance: () => "dark",
       updater: { status: () => ({ phase: "development" }) },
+      openExternal: vi.fn(async () => undefined),
       issueErrorReporter: () => ({ report: vi.fn(), revoke }),
     });
 
@@ -373,6 +375,7 @@ describe("desktop failure-domain adapters", () => {
       desktopDirectory: "/immutable-desktop",
       getAppearance: () => "dark",
       updater: { status: () => ({ phase: "development" }) },
+      openExternal: vi.fn(async () => undefined),
       issueErrorReporter,
     });
     const session = {

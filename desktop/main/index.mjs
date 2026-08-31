@@ -273,6 +273,7 @@ if (primaryInstance) {
     desktopDirectory,
     getAppearance: () => appearance,
     updater,
+    openExternal: (url) => shell.openExternal(url),
     issueErrorReporter,
   });
 
