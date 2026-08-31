@@ -126,7 +126,7 @@ The manual run cannot publish. The tag run rejects a tag/version mismatch and a 
 
 ## Native macOS canaries
 
-After both an older Preview seed and a newer Preview target are published for the same macOS architecture, run the target-specific workflow with both versions, full source commits, and signed-candidate workflow run IDs:
+After both an older Preview seed and a newer Preview target are published for the same macOS architecture, run the target-specific workflow with both versions and full source commits. Supply the seed candidate run, the target's pinned manual candidate run, and the target's tagged publication run separately. The target candidate artifact exists only in the manual run; the target publication receipt exists only in the tagged run.
 
 - `Apple Silicon macOS Desktop Preview Canary` runs on `macos-15` and consumes only `macos-arm64` artifacts and receipts.
 - `Intel macOS Desktop Preview Canary` runs on `macos-15-intel` and consumes only `macos-x64` artifacts and receipts.
@@ -176,8 +176,8 @@ On the signed-in desktop, install Git and GitHub CLI, then check out the exact r
 
 ```powershell
 gh run download <seed-run-id> --name relayer-desktop-preview-windows-x64-<seed-commit> --dir seed
-gh run download <target-run-id> --name relayer-desktop-preview-windows-x64-<target-commit> --dir target
-gh run download <target-run-id> --name relayer-desktop-preview-publication-windows-x64-<target-commit> --dir publication
+gh run download <target-candidate-run-id> --name relayer-desktop-preview-windows-x64-<target-commit> --dir target
+gh run download <target-publication-run-id> --name relayer-desktop-preview-publication-windows-x64-<target-commit> --dir publication
 ```
 
 Run the interactive canary from an ordinary user PowerShell session:

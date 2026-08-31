@@ -2168,6 +2168,11 @@ describe("desktop skeleton", () => {
     const intelCanaryScript = await readFile(new URL("../desktop/release/run-macos-intel-canary.sh", import.meta.url), "utf8");
     const electronCanaryScript = await readFile(new URL("../desktop/release/electron-cdp-canary.mjs", import.meta.url), "utf8");
     const notarizationScript = await readFile(new URL("../desktop/release/notarize-and-staple.mjs", import.meta.url), "utf8");
+    const artifactRunIdsByStep = (workflow) => Object.fromEntries(
+      parseYaml(workflow).jobs.canary.steps
+        .filter((step) => step.with?.["run-id"])
+        .map((step) => [step.name, step.with["run-id"]]),
+    );
     expect(releaseWorkflow).toContain("if: ${{ always() && github.event_name == 'push' && needs.validate.result == 'success' && startsWith(github.ref, 'refs/tags/desktop-v') }}");
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main');
     expect(releaseWorkflow).toContain("RELAYER_DESKTOP_TAG_OBJECT_TYPE");
@@ -2200,11 +2205,21 @@ describe("desktop skeleton", () => {
     expect(arm64CanaryWorkflow).toContain("run-macos-arm64-canary.sh");
     expect(arm64CanaryWorkflow).toContain("relayer-desktop-preview-macos-arm64-");
     expect(arm64CanaryWorkflow).toContain("preview-publication-macos-arm64");
+    expect(artifactRunIdsByStep(arm64CanaryWorkflow)).toMatchObject({
+      "Download signed Apple Silicon target candidate": "${{ inputs.target_candidate_run_id }}",
+      "Download target Preview publication receipt": "${{ inputs.target_publication_run_id }}",
+    });
+    expect(arm64CanaryWorkflow).not.toContain("inputs.target_run_id");
     expect(arm64CanaryWorkflow).toContain("Relayer-${SEED_VERSION}-mac-arm64.dmg");
     expect(arm64CanaryWorkflow).toContain("- name: Preserve Apple Silicon install and updater evidence\n        if: ${{ always() }}");
     expect(intelCanaryWorkflow).toContain("runs-on: macos-15-intel");
     expect(intelCanaryWorkflow).toContain("run-macos-intel-canary.sh");
     expect(intelCanaryWorkflow).toContain("preview-publication-macos-x64");
+    expect(artifactRunIdsByStep(intelCanaryWorkflow)).toMatchObject({
+      "Download signed Intel target candidate": "${{ inputs.target_candidate_run_id }}",
+      "Download target Preview publication receipt": "${{ inputs.target_publication_run_id }}",
+    });
+    expect(intelCanaryWorkflow).not.toContain("inputs.target_run_id");
     expect(intelCanaryWorkflow).toContain("- name: Preserve Intel install and updater evidence\n        if: ${{ always() }}");
     expect(intelCanaryScript).toContain('run-macos-canary.sh" --target macos-x64 "$@"');
     expect(arm64CanaryScript).toContain('run-macos-canary.sh" --target macos-arm64 "$@"');
