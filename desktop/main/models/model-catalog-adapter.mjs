@@ -83,6 +83,8 @@ function sanitizeModel(model, providerId, index) {
     throw new Error(`${field}.availability must be available or unavailable.`);
   }
   const unavailableReason = optionalString(model?.unavailableReason, `${field}.unavailableReason`);
+  const unavailableReasonCode = optionalString(model?.unavailableReasonCode, `${field}.unavailableReasonCode`)
+    ?? (availability === "unavailable" ? "provider_reported_unavailable" : null);
   if (availability === "unavailable" && unavailableReason === null) {
     throw new Error(`${field}.unavailableReason is required when a model is unavailable.`);
   }
@@ -97,6 +99,7 @@ function sanitizeModel(model, providerId, index) {
     visible: boolean(model?.visible, `${field}.visible`),
     availability,
     unavailableReason,
+    unavailableReasonCode,
     availabilityNotice: optionalString(model?.availabilityNotice, `${field}.availabilityNotice`),
     isDefault: boolean(model?.isDefault, `${field}.isDefault`),
     replacementModelId: optionalStableIdString(model?.replacementModelId, `${field}.replacementModelId`),
@@ -217,7 +220,7 @@ export function toProductCatalogSnapshot(snapshot) {
       available: model.availability === "available",
       ...(model.availability === "unavailable" ? {
         unavailableReason: Object.freeze({
-          code: "provider_reported_unavailable",
+          code: model.unavailableReasonCode,
           message: model.unavailableReason,
         }),
       } : {}),

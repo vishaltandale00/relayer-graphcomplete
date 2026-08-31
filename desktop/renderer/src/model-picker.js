@@ -81,6 +81,17 @@ export function modelPickerClickIsOutside(root, target) {
   return !root.contains(target);
 }
 
+// Picker handlers re-render their panel, which detaches the clicked element before the
+// document-level dismissal listener sees the same click. Record the verdict in the capture
+// phase, while the element the person actually clicked is still in the tree.
+export function createModelPickerDismissWatcher(root) {
+  let dismiss = true;
+  return Object.freeze({
+    observe: (event) => { dismiss = modelPickerClickIsOutside(root, event.target); },
+    shouldDismiss: () => dismiss,
+  });
+}
+
 export function createModelPickerRequestGate() {
   let sequence = 0;
   return Object.freeze({
@@ -405,9 +416,11 @@ export function createModelPicker({
     options[index].focus();
     options[index].click();
   };
-  const outsideClick = (event) => {
-    if (modelPickerClickIsOutside(root, event.target)) close();
+  const dismissWatcher = createModelPickerDismissWatcher(root);
+  const outsideClick = () => {
+    if (dismissWatcher.shouldDismiss()) close();
   };
+  root.ownerDocument.addEventListener("click", dismissWatcher.observe, true);
   root.ownerDocument.addEventListener("click", outsideClick);
 
   render();
@@ -416,6 +429,7 @@ export function createModelPicker({
     close,
     dispose() {
       harnessValidationGate.invalidate();
+      root.ownerDocument.removeEventListener("click", dismissWatcher.observe, true);
       root.ownerDocument.removeEventListener("click", outsideClick);
       trigger.onclick = null;
       root.onkeydown = null;

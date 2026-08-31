@@ -40,6 +40,17 @@ export function providerDescriptorGroups(descriptors) {
 
 export function providerDefinitionStatus(definition) {
   const persistedLifecycle = definition?.lifecycleState;
+  const needsModelSetup = persistedLifecycle === "active"
+    && definition?.connected === true
+    && definition?.unavailableReason?.code === "provider_no_eligible_execution_models";
+  if (needsModelSetup) {
+    return {
+      lifecycle: "needs_model_setup",
+      label: "Needs model setup",
+      usable: false,
+      recovery: "refresh_models",
+    };
+  }
   const lifecycle = PROVIDER_LIFECYCLES.has(persistedLifecycle)
     ? (persistedLifecycle === "active" && definition?.connected === false ? "unavailable" : persistedLifecycle)
     : definition?.connected === false ? "unavailable" : "active";
@@ -47,6 +58,15 @@ export function providerDefinitionStatus(definition) {
   if (lifecycle === "tombstoned") return { lifecycle, label: "Removed provider", usable: false };
   if (lifecycle === "unavailable") return { lifecycle, label: "Connection unavailable", usable: false };
   return { lifecycle, label: "Connected", usable: true };
+}
+
+export function providerFamilyRecoveryResult(providerStatus, providerId) {
+  const definition = providerStatus?.definitions?.find(({ id }) => String(id) === String(providerId));
+  if (!definition) return { recovered: false, message: "Provider refresh completed, but default family setup could not be confirmed." };
+  if (definition.unavailableReason) {
+    return { recovered: false, message: definition.unavailableReason.message };
+  }
+  return { recovered: true, message: "Provider models and default family refreshed." };
 }
 
 export function providerLabelError(label, definitions, currentId = null) {
@@ -87,6 +107,9 @@ export function providerConnectionErrors(descriptor, values, definitions = []) {
 
 export function firstRunGateState({ hasCompletedOnboarding, providers, defaultResolution }) {
   if (hasCompletedOnboarding) return { blocked: false, reason: null };
+  if (providers.some((provider) => providerDefinitionStatus(provider).recovery === "refresh_models")) {
+    return { blocked: true, reason: "Refresh models and set up defaults for the connected provider." };
+  }
   if (!providers.some((provider) => providerDefinitionStatus(provider).usable)) {
     return { blocked: true, reason: "Connect a working provider to continue." };
   }

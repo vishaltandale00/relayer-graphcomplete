@@ -7,6 +7,7 @@ import {
   providerCreationPayload,
   providerDefinitionStatus,
   providerDescriptorGroups,
+  providerFamilyRecoveryResult,
   providerLabelError,
 } from "../desktop/renderer/src/provider-ui-model.js";
 
@@ -116,6 +117,42 @@ describe("provider renderer model", () => {
     })).toEqual({ blocked: false, reason: null });
     expect(firstRunGateState({ hasCompletedOnboarding: true, providers: [], defaultResolution: null }))
       .toEqual({ blocked: false, reason: null });
+  });
+
+  it("directs a connected zero-eligible provider to model refresh instead of another connection", () => {
+    expect(firstRunGateState({
+      hasCompletedOnboarding: false,
+      providers: [{
+        lifecycleState: "active",
+        connected: true,
+        unavailableReason: { code: "provider_no_eligible_execution_models", message: "No supported text models." },
+      }],
+      defaultResolution: null,
+    })).toEqual({
+      blocked: true,
+      reason: "Refresh models and set up defaults for the connected provider.",
+    });
+  });
+
+  it("does not announce recovery while the exact provider still has no eligible family", () => {
+    const status = { definitions: [{
+      id: "work",
+      unavailableReason: { code: "provider_no_eligible_execution_models", message: "No supported text models." },
+    }] };
+    expect(providerFamilyRecoveryResult(status, "work")).toEqual({
+      recovered: false,
+      message: "No supported text models.",
+    });
+    expect(providerFamilyRecoveryResult({ definitions: [{ id: "work", unavailableReason: null }] }, "work"))
+      .toEqual({ recovered: true, message: "Provider models and default family refreshed." });
+    expect(providerFamilyRecoveryResult({ definitions: [{
+      id: "work",
+      unavailableReason: { code: "provider_unavailable", message: "Provider credentials were rejected." },
+    }] }, "work")).toEqual({ recovered: false, message: "Provider credentials were rejected." });
+    expect(providerFamilyRecoveryResult({ definitions: [] }, "work")).toEqual({
+      recovered: false,
+      message: "Provider refresh completed, but default family setup could not be confirmed.",
+    });
   });
 
   it("labels pending and tombstoned definitions as unusable", () => {

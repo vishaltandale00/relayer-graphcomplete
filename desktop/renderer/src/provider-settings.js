@@ -1,7 +1,7 @@
 import { refreshNewThreadModelPicker } from "./composer-model-picker.js";
 import { refreshModelFamilySettings } from "./model-family-settings.js";
 import { createProviderSettingsConnectionController } from "./provider-settings-connection.js";
-import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
+import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload, providerFamilyRecoveryResult } from "./provider-ui-model.js";
 import { bindRovingRadioGroup, providerConnectionFormMarkup, providerDefinitionsMarkup, providerOptionsMarkup } from "./provider-ui.js";
 import { appState, desktop } from "./state.js";
 import { $, $$, toast } from "./ui.js";
@@ -68,6 +68,23 @@ function renderDefinitions() {
         refreshNewThreadModelPicker();
         setStatus("Provider reconnected.", "success");
       } catch (error) {
+        setStatus(error.message, "error");
+      }
+    };
+  });
+  $$('[data-provider-family-recovery]', $("#providerDefinitionList")).forEach((button) => {
+    button.onclick = async () => {
+      const providerId = button.dataset.providerFamilyRecovery;
+      setStatus("Refreshing provider models…");
+      try {
+        await desktop.models.refresh(providerId);
+        await refreshProviderSettings();
+        await refreshModelFamilySettings();
+        refreshNewThreadModelPicker();
+        const recovery = providerFamilyRecoveryResult(status, providerId);
+        setStatus(recovery.message, recovery.recovered ? "success" : "");
+      } catch (error) {
+        await refreshProviderSettings();
         setStatus(error.message, "error");
       }
     };
