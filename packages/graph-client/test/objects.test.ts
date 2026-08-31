@@ -159,6 +159,16 @@ describe("agent-facing graph objects", () => {
       options: [{ key: "logs", label: "Logs" }, { key: "traces", label: "Traces" }],
       minimumSelections: 1,
     });
+
+    await graph.addAction(10, {
+      kind: "input",
+      sourceLayer: 20,
+      label: "Explain",
+      control: "text",
+      prompt: "Explain the tradeoff",
+      clientKey: "text-input",
+    });
+    expect(request).not.toHaveProperty("options");
   });
 
   it("exposes nullable interaction lease identity on node reads", async () => {

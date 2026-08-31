@@ -781,6 +781,106 @@ fn redact_submitted_input(input: &mut ExportSubmittedInput, redactor: &ProjectPa
     }
 }
 
+pub(crate) fn portable_interaction_input_bytes(
+    project_path: Option<&str>,
+    text: &str,
+    contexts: &[crate::product::InteractionContextIntent],
+    submitted_inputs: &[relayer_graph_core::SubmittedInputDraft],
+    context_snapshots: &[relayer_graph_core::InteractionInputNode],
+) -> Result<usize, serde_json::Error> {
+    const PORTABLE_TURN_ENVELOPE_BYTES: usize = 1_024;
+    const PORTABLE_INPUT_IDENTITY_BYTES: usize = 512;
+    // Imported history may bind every context identity to the V1 128-byte maximum. The
+    // estimator's numeric stand-ins are shorter, so reserve the full four-field identity budget.
+    const PORTABLE_CONTEXT_IDENTITY_BYTES: usize = 4 * 128;
+
+    let redactor = ProjectPathRedactor::new(project_path);
+    let text = redactor.text(text);
+    let contexts = contexts
+        .iter()
+        .zip(context_snapshots)
+        .enumerate()
+        .map(|(index, (context, snapshot))| ExportInteractionContext {
+            id: format!(
+                "action:{}-{}-{}-{}",
+                context.target.source_interaction_node_id,
+                context.target.source_layer_id,
+                context.target.node_id,
+                index + 1
+            ),
+            target: ExportContextTargetSnapshot {
+                id: format!("node:{}", context.target.node_id),
+                kind: redactor.text(&snapshot.kind),
+                icon: redactor.text(&snapshot.icon),
+                title: redactor.text(&snapshot.title),
+                detail: redactor.text(&snapshot.detail),
+                state: ExportRecordState::Accepted,
+            },
+            source: ExportContextSource {
+                interaction_node_id: format!("node:{}", context.target.source_interaction_node_id),
+                layer_id: format!("layer:{}", context.target.source_layer_id),
+            },
+            annotations: context
+                .annotations
+                .iter()
+                .map(|annotation| redactor.text(annotation))
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let submitted_inputs = submitted_inputs
+        .iter()
+        .cloned()
+        .map(|mut input| {
+            input.action.prompt = redactor.text(&input.action.prompt);
+            let option_keys = injective_portable_option_keys(
+                input
+                    .action
+                    .options
+                    .iter()
+                    .map(|option| option.key.as_str()),
+                &redactor,
+            );
+            for option in &mut input.action.options {
+                option.key = option_keys
+                    .get(&option.key)
+                    .expect("submitted option key was indexed")
+                    .clone();
+                option.label = redactor.text(&option.label);
+            }
+            match &mut input.value {
+                relayer_graph_core::SubmittedInputValue::Text { text } => {
+                    *text = redactor.text(text)
+                }
+                relayer_graph_core::SubmittedInputValue::Selected { selected } => {
+                    for option in &mut *selected {
+                        option.key = option_keys
+                            .get(&option.key)
+                            .cloned()
+                            .unwrap_or_else(|| redactor.text(&option.key));
+                        option.label = redactor.text(&option.label);
+                    }
+                    selected.sort_by(|left, right| left.key.as_bytes().cmp(right.key.as_bytes()));
+                }
+            }
+            input
+        })
+        .collect::<Vec<_>>();
+
+    Ok(serde_json::to_vec(&(&text, &contexts, &submitted_inputs))?
+        .len()
+        .saturating_add(PORTABLE_TURN_ENVELOPE_BYTES)
+        .saturating_add(
+            submitted_inputs
+                .len()
+                .saturating_mul(PORTABLE_INPUT_IDENTITY_BYTES),
+        )
+        .saturating_add(
+            contexts
+                .len()
+                .saturating_mul(PORTABLE_CONTEXT_IDENTITY_BYTES),
+        ))
+}
+
 fn submitted_input_sort_key(input: &ExportSubmittedInput) -> Vec<u8> {
     serde_json::to_vec(&(
         &input.source.interaction_node_id,
@@ -1292,7 +1392,7 @@ mod tests {
     use super::{
         ContextInput, ImportedExportContext, PortableIds, ProjectPathRedactor, RuntimeContextInput,
         TurnExportContext, completion_status, export_action, export_contexts,
-        export_submitted_inputs, export_turn,
+        export_submitted_inputs, export_turn, portable_interaction_input_bytes,
     };
     use crate::{
         conversation_export::{ExportCompletionStatus, ExportTurnOrigin},
@@ -1569,22 +1669,56 @@ mod tests {
             }],
         };
 
+        let long_action_id = format!("action:{}", "a".repeat(121));
+        let long_target_id = format!("node:{}", "t".repeat(123));
+        let long_source_id = format!("node:{}", "s".repeat(123));
+        let long_layer_id = format!("layer:{}", "l".repeat(122));
+        let mut ids = PortableIds::default();
+        ids.bind_action(30, long_action_id.clone()).unwrap();
+        ids.bind_node(20, long_target_id.clone()).unwrap();
+        ids.bind_node(40, long_source_id.clone()).unwrap();
+        ids.bind_layer(50, long_layer_id.clone()).unwrap();
         let exported = export_contexts(
             &interaction,
             Some(&ContextInput::Runtime(runtime)),
             None,
-            &mut PortableIds::default(),
+            &mut ids,
             &ProjectPathRedactor::new(Some("/workspace/project")),
         )
         .unwrap();
-        assert_eq!(exported[0].id, "action:1");
-        assert_eq!(exported[0].target.id, "node:1");
-        assert_eq!(exported[0].source.interaction_node_id, "node:2");
-        assert_eq!(exported[0].source.layer_id, "layer:1");
+        assert_eq!(exported[0].id, long_action_id);
+        assert_eq!(exported[0].target.id, long_target_id);
+        assert_eq!(exported[0].source.interaction_node_id, long_source_id);
+        assert_eq!(exported[0].source.layer_id, long_layer_id);
         assert_eq!(
             exported[0].annotations,
             ["Inspect [project-path]/src", "Second"]
         );
+        let intent = InteractionContextIntent {
+            target: ProductInteractionContextTarget {
+                node_id: 20,
+                source_interaction_node_id: 40,
+                source_layer_id: 50,
+            },
+            annotations: vec!["Inspect /workspace/project/src".into(), "Second".into()],
+        };
+        let estimated = portable_interaction_input_bytes(
+            Some("/workspace/project"),
+            "",
+            &[intent],
+            &[],
+            &[target],
+        )
+        .unwrap();
+        let actual = serde_json::to_vec(&(
+            &"",
+            &exported,
+            &Vec::<relayer_graph_core::SubmittedInputDraft>::new(),
+        ))
+        .unwrap()
+        .len()
+        .saturating_add(1_024);
+        assert!(estimated >= actual, "{estimated} < {actual}");
     }
 
     #[test]

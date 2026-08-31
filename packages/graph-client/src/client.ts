@@ -122,7 +122,7 @@ export class RelayerGraphClient {
         description: action.description ?? null,
         control: action.control,
         prompt: action.prompt,
-        options: action.options ?? [],
+        ...(action.control === "text" ? {} : { options: action.options }),
         ...(action.minimumSelections === undefined ? {} : { minimumSelections: action.minimumSelections }),
       }),
     });

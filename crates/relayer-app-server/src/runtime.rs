@@ -1678,7 +1678,16 @@ impl RuntimeClient {
             .send()
             .await?;
         let value = response_json(response, StatusCode::OK).await?;
-        Ok(serde_json::from_value(value)?)
+        let snapshot: relayer_graph_core::InteractionInputNode = serde_json::from_value(value)?;
+        if snapshot.id != target.node_id
+            || snapshot.state != relayer_graph_core::RecordState::Accepted
+        {
+            return Err(RuntimeError::Protocol(
+                "canonical context occurrence returned a different or non-accepted target snapshot"
+                    .into(),
+            ));
+        }
+        Ok(snapshot)
     }
 
     pub(crate) async fn canonical_input_action_occurrence(

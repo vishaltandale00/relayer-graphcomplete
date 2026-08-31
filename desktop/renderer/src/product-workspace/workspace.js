@@ -4045,6 +4045,7 @@ export function createProductWorkspace({
         preserveHistoricalSelection,
       })) {
         nodeSelectionSequence += 1;
+        clearInputStagesForThread(getThread()?.id);
         selection.selectedNodeId = null;
         if (!["thread", "turn"].includes(annotationSubject?.anchor.kind)) {
           annotationSubject = null;
@@ -4185,6 +4186,7 @@ export function createProductWorkspace({
       preserveHistoricalSelection,
     })) {
       nodeSelectionSequence += 1;
+      clearInputStagesForThread(getThread()?.id);
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
     }
@@ -4548,9 +4550,10 @@ export function createProductWorkspace({
       inputFocusRequest = null;
       const editor = [...host.querySelectorAll("[data-input-occurrence-key]")]
         .find((item) => item.dataset.inputOccurrenceKey === requested.stageKey);
-      [...editor?.querySelectorAll("[data-option-key]") || []]
-        .find((item) => item.dataset.optionKey === requested.optionKey)
-        ?.focus({ preventScroll: true });
+      const replacement = [...editor?.querySelectorAll("[data-option-key]") || []]
+        .find((item) => item.dataset.optionKey === requested.optionKey);
+      replacement?.focus({ preventScroll: true });
+      replacement?.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   }
 

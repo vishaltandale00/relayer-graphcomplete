@@ -97,6 +97,23 @@ function nodeInputFixtureFactory() {
         `selection-guard-edge-${completionCount}`,
       );
       await graph.createEdge(selectionGuardEdge);
+      const navigationNode = new NodeObject(
+        "route",
+        "Navigation destination",
+        "Opening this accepted child layer clears renderer-local staged input.",
+        "concept",
+        `navigation-destination-${completionCount}`,
+      );
+      await graph.submitNode(navigationNode);
+      const navigationLayer = new LayerObject(
+        [navigationNode],
+        [],
+        new LayerLayoutObject([
+          new NodePlacementObject(navigationNode, 0.5, 0.5),
+        ]),
+        `navigation-layer-${completionCount}`,
+      );
+      await graph.submitLayer(navigationLayer);
       const layer = new LayerObject(
         [node, selectionGuardNode],
         [selectionGuardEdge],
@@ -141,6 +158,14 @@ function nodeInputFixtureFactory() {
         ],
         minimumSelections: 2,
         clientKey: `evidence-${completionCount}`,
+      });
+      await graph.addAction(node, {
+        kind: "navigate",
+        relation: "expand",
+        sourceLayer: layer,
+        label: "Open navigation destination",
+        target: navigationLayer,
+        clientKey: `navigate-away-${completionCount}`,
       });
       await graph.addAction(interaction.id, {
         kind: "navigate",
@@ -267,7 +292,7 @@ async function run() {
   await waitFor("three embedded Node Details inputs", () => evaluate(`(() => (
     document.querySelectorAll('#nodeInputActions .node-input-editor').length === 3
       && document.querySelectorAll('#nodeInputActions .node-input-option-rail').length === 2
-      && document.querySelector('#detailActions')?.classList.contains('hidden')
+      && document.querySelector('#detailActions .action-control')?.textContent.includes('Open navigation destination')
   ))()`));
   await waitFor("initial input draft load recovers through the bounded retry", () => (
     initialDraftLoadRequests >= 2
@@ -376,6 +401,41 @@ async function run() {
     const selected = document.querySelectorAll('.node-input-option-rail')[0].querySelector('[aria-checked="true"]');
     return selected?.dataset.optionKey === 'route-2' && document.activeElement === selected;
   })()`));
+
+  await evaluate(`(() => {
+    const rail = document.querySelectorAll('.node-input-option-rail')[0];
+    rail.scrollLeft = 0;
+    const first = rail.querySelector('.node-input-option');
+    first.focus();
+    first.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  })()`);
+  await waitFor("replacement single-select option scrolls into view", () => evaluate(`(() => {
+    const rail = document.querySelectorAll('.node-input-option-rail')[0];
+    const selected = rail.querySelector('[aria-checked="true"]');
+    if (selected?.dataset.optionKey !== 'route-8' || document.activeElement !== selected) return false;
+    const railBounds = rail.getBoundingClientRect();
+    const selectedBounds = selected.getBoundingClientRect();
+    return rail.scrollLeft > 0 && selectedBounds.left >= railBounds.left - 1
+      && selectedBounds.right <= railBounds.right + 1;
+  })()`));
+
+  await setValue(".node-input-text", "Discard this staged value on navigation");
+  await evaluate(`(() => {
+    const action = [...document.querySelectorAll('#detailActions .action-control')]
+      .find((button) => button.textContent.includes('Open navigation destination'));
+    action?.click();
+  })()`);
+  await waitFor("navigation closes the input inspector", () => evaluate(`(() => (
+    document.querySelectorAll('.graph-node').length === 1
+      && document.querySelector('.graph-node b')?.textContent === 'Navigation destination'
+      && document.querySelector('#inspector')?.classList.contains('hidden')
+  ))()`));
+  await click("[aria-label='Go to Response']");
+  await waitFor("root input layer restored after navigation", () => evaluate(`document.querySelectorAll('.graph-node').length === 2`));
+  await clickNode("Input grammar");
+  await waitFor("navigation discarded renderer-local staged input", () => evaluate(`(
+    document.querySelector('.node-input-text')?.value === 'Recovered after initial draft load retry'
+  )`));
 
   let releaseDelayedCommit;
   let delayedCommitObserved = false;

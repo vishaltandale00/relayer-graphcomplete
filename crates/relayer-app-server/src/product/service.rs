@@ -42,6 +42,7 @@ pub(crate) struct RetryInteractionCommand<'a> {
     pub(crate) text: &'a str,
     pub(crate) input_identity: &'a str,
     pub(crate) contexts: &'a [super::InteractionContextIntent],
+    pub(crate) context_snapshots: &'a [relayer_graph_core::InteractionInputNode],
     pub(crate) context_confirmation_ids: &'a [String],
     pub(crate) input_draft_revision: Option<i64>,
     pub(crate) model_selection: &'a InteractionModelSelection,
@@ -52,6 +53,7 @@ pub(crate) struct CreateIdentifiedInteractionCommand<'a> {
     pub(crate) text: &'a str,
     pub(crate) input_identity: &'a str,
     pub(crate) contexts: &'a [super::InteractionContextIntent],
+    pub(crate) context_snapshots: &'a [relayer_graph_core::InteractionInputNode],
     pub(crate) context_confirmation_ids: &'a [String],
     pub(crate) input_draft_revision: Option<i64>,
     pub(crate) model_selection: Option<&'a InteractionModelSelection>,
@@ -1180,8 +1182,14 @@ impl ProductService {
             action_input_draft.revision,
             !submitted_inputs.is_empty(),
         )?;
-        let input_digest =
-            validated_interaction_input_digest(command.text, command.contexts, &submitted_inputs)?;
+        let project_path = self.thread_project_path(thread_id).await?;
+        let input_digest = validated_interaction_input_digest(
+            command.text,
+            command.contexts,
+            &submitted_inputs,
+            command.context_snapshots,
+            project_path.as_deref(),
+        )?;
         self.storage
             .insert_interaction_input(
                 thread_id,
@@ -1937,8 +1945,14 @@ impl ProductService {
             action_input_draft.revision,
             !submitted_inputs.is_empty(),
         )?;
-        let input_digest =
-            validated_interaction_input_digest(command.text, command.contexts, &submitted_inputs)?;
+        let project_path = self.thread_project_path(interaction.thread_id).await?;
+        let input_digest = validated_interaction_input_digest(
+            command.text,
+            command.contexts,
+            &submitted_inputs,
+            command.context_snapshots,
+            project_path.as_deref(),
+        )?;
         self.storage
             .claim_interaction_retry(
                 interaction_id,
@@ -2235,6 +2249,21 @@ impl ProductService {
             .await?
             .ok_or_else(|| ProductError::NotFound(format!("project {project_id}")))
     }
+
+    async fn thread_project_path(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Option<String>, ProductError> {
+        let thread = self
+            .storage
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("thread {thread_id}")))?;
+        match thread.project_id {
+            Some(project_id) => self.project_path(project_id).await.map(Some),
+            None => Ok(None),
+        }
+    }
 }
 
 fn input_draft_reservation_revision(
@@ -2340,7 +2369,14 @@ fn validated_interaction_input_digest(
     text: &str,
     contexts: &[super::InteractionContextIntent],
     submitted_inputs: &[relayer_graph_core::SubmittedInputDraft],
+    context_snapshots: &[relayer_graph_core::InteractionInputNode],
+    project_path: Option<&str>,
 ) -> Result<String, ProductError> {
+    if contexts.len() != context_snapshots.len() {
+        return Err(ProductError::Invalid(
+            "context snapshots must match the exact ordered context intents".into(),
+        ));
+    }
     if submitted_inputs.len() > crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN {
         return Err(ProductError::InputValidation {
             code: "submitted_input_limit_exceeded",
@@ -2348,6 +2384,25 @@ fn validated_interaction_input_digest(
             message: format!(
                 "A Send may contain at most {} submitted inputs.",
                 crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN
+            ),
+        });
+    }
+    let portable_input_bytes =
+        crate::conversation_export_service::portable_interaction_input_bytes(
+            project_path,
+            text,
+            contexts,
+            submitted_inputs,
+            context_snapshots,
+        )
+        .map_err(|error| ProductError::Invalid(error.to_string()))?;
+    if portable_input_bytes > crate::conversation_export::MAX_JSONL_LINE_BYTES {
+        return Err(ProductError::InputValidation {
+            code: "submitted_input_limit_exceeded",
+            path: "submittedInputs",
+            message: format!(
+                "The submitted input set is too large for the portable {}-byte turn record limit.",
+                crate::conversation_export::MAX_JSONL_LINE_BYTES
             ),
         });
     }
@@ -2628,12 +2683,132 @@ mod tests {
                 "",
                 &[],
                 &submitted_inputs[..crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN],
+                &[],
+                None,
             )
             .is_ok()
         );
 
         assert!(matches!(
-            validated_interaction_input_digest("", &[], &submitted_inputs),
+            validated_interaction_input_digest("", &[], &submitted_inputs, &[], None),
+            Err(ProductError::InputValidation {
+                code: "submitted_input_limit_exceeded",
+                path: "submittedInputs",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn input_send_rejects_submitted_values_above_the_portable_record_byte_limit() {
+        let value_bytes = crate::conversation_export::MAX_JSONL_LINE_BYTES / 8;
+        let submitted_inputs = (1..=9)
+            .map(|id| relayer_graph_core::SubmittedInputDraft {
+                occurrence: relayer_graph_core::PresentingInputOccurrence {
+                    presenting_interaction_node_id: relayer_graph_core::NodeId::new(id).unwrap(),
+                    presenting_layer_id: relayer_graph_core::LayerId::new(id).unwrap(),
+                    action_id: relayer_graph_core::ActionId::new(id).unwrap(),
+                },
+                action: relayer_graph_core::InputAction {
+                    control: relayer_graph_core::InputControl::Text,
+                    prompt: "Explain".into(),
+                    options: vec![],
+                    minimum_selections: None,
+                    unsupported_fields: Default::default(),
+                },
+                value: relayer_graph_core::SubmittedInputValue::Text {
+                    text: "x".repeat(value_bytes),
+                },
+            })
+            .collect::<Vec<_>>();
+
+        assert!(matches!(
+            validated_interaction_input_digest("", &[], &submitted_inputs, &[], None),
+            Err(ProductError::InputValidation {
+                code: "submitted_input_limit_exceeded",
+                path: "submittedInputs",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn input_send_measures_submitted_values_after_portable_project_path_redaction() {
+        let submitted_inputs = vec![relayer_graph_core::SubmittedInputDraft {
+            occurrence: relayer_graph_core::PresentingInputOccurrence {
+                presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+                presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+                action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+            },
+            action: relayer_graph_core::InputAction {
+                control: relayer_graph_core::InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: relayer_graph_core::SubmittedInputValue::Text {
+                text: "/a".repeat(1_200_000),
+            },
+        }];
+
+        assert!(matches!(
+            validated_interaction_input_digest("", &[], &submitted_inputs, &[], Some("/a")),
+            Err(ProductError::InputValidation {
+                code: "submitted_input_limit_exceeded",
+                path: "submittedInputs",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn input_send_measures_the_complete_known_portable_turn_envelope() {
+        let value_bytes = crate::conversation_export::MAX_STRING_BYTES;
+        let submitted_inputs = (1..=2)
+            .map(|id| relayer_graph_core::SubmittedInputDraft {
+                occurrence: relayer_graph_core::PresentingInputOccurrence {
+                    presenting_interaction_node_id: relayer_graph_core::NodeId::new(id).unwrap(),
+                    presenting_layer_id: relayer_graph_core::LayerId::new(id).unwrap(),
+                    action_id: relayer_graph_core::ActionId::new(id).unwrap(),
+                },
+                action: relayer_graph_core::InputAction {
+                    control: relayer_graph_core::InputControl::Text,
+                    prompt: "Explain".into(),
+                    options: vec![],
+                    minimum_selections: None,
+                    unsupported_fields: Default::default(),
+                },
+                value: relayer_graph_core::SubmittedInputValue::Text {
+                    text: "i".repeat(value_bytes),
+                },
+            })
+            .collect::<Vec<_>>();
+        let contexts = vec![crate::product::InteractionContextIntent {
+            target: crate::product::InteractionContextTarget {
+                node_id: 1,
+                source_interaction_node_id: 2,
+                source_layer_id: 3,
+            },
+            annotations: vec!["c".repeat(value_bytes)],
+        }];
+        let context_snapshots = vec![relayer_graph_core::InteractionInputNode {
+            id: relayer_graph_core::NodeId::new(1).unwrap(),
+            kind: "answer".into(),
+            icon: "document".into(),
+            title: "Context".into(),
+            detail: "d".repeat(value_bytes),
+            state: relayer_graph_core::RecordState::Accepted,
+        }];
+
+        assert!(matches!(
+            validated_interaction_input_digest(
+                &"t".repeat(value_bytes),
+                &contexts,
+                &submitted_inputs,
+                &context_snapshots,
+                None,
+            ),
             Err(ProductError::InputValidation {
                 code: "submitted_input_limit_exceeded",
                 path: "submittedInputs",

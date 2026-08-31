@@ -707,6 +707,54 @@ describe("review presentation capture synchronization", () => {
     expect(frames).toBe(2);
   });
 
+  it("reveals an off-screen input action before planning its full capture", async () => {
+    let revealed = false;
+    const scrollIntoView = vi.fn(() => { revealed = true; });
+    const inputAction = {
+      dataset: { reviewCapture: "input-action-41-10-13", reviewActionId: "13" },
+      isConnected: true,
+      hidden: false,
+      clientWidth: 320,
+      clientHeight: 120,
+      scrollWidth: 320,
+      scrollHeight: 120,
+      scrollLeft: 0,
+      scrollTop: 0,
+      matches: () => false,
+      getAttribute: (key) => key === "aria-label" ? "Input action: Deployment region" : null,
+      getBoundingClientRect: () => revealed
+        ? { x: 20, y: 420, left: 20, top: 420, right: 340, bottom: 540, width: 320, height: 120 }
+        : { x: 20, y: 720, left: 20, top: 720, right: 340, bottom: 840, width: 320, height: 120 },
+      scrollIntoView,
+    };
+    const root = {
+      querySelectorAll: (selector) => selector === "[data-review-capture]" ? [inputAction] : [],
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation("node-2"),
+      navigateHistory: async () => {},
+      root,
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 600,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => callback(),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    await expect(adapter.capturePlan({
+      target: { kind: "element", elementRef: "input-action-41-10-13" },
+      mode: "full",
+    })).resolves.toMatchObject({
+      clip: { x: 20, y: 420, width: 320, height: 120 },
+      tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
+    });
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    await adapter.restoreCapture();
+  });
+
   it("does not complete node activation before the selected presentation changes", async () => {
     let current = presentation();
     let frames = 0;

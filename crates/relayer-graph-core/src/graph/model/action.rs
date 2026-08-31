@@ -68,7 +68,7 @@ pub struct InputOption {
     pub unsupported_fields: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InputAction {
     pub control: InputControl,
@@ -80,6 +80,42 @@ pub struct InputAction {
     pub minimum_selections: Option<usize>,
     #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub unsupported_fields: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InputActionWire {
+    control: InputControl,
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    options: Option<Vec<InputOption>>,
+    #[serde(default)]
+    minimum_selections: Option<usize>,
+    #[serde(default, flatten)]
+    unsupported_fields: BTreeMap<String, serde_json::Value>,
+}
+
+impl<'de> Deserialize<'de> for InputAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = InputActionWire::deserialize(deserializer)?;
+        let options_present = wire.options.is_some();
+        let options = wire.options.unwrap_or_default();
+        let mut unsupported_fields = wire.unsupported_fields;
+        if wire.control == InputControl::Text && options_present && options.is_empty() {
+            unsupported_fields.insert("options".into(), serde_json::Value::Array(Vec::new()));
+        }
+        Ok(Self {
+            control: wire.control,
+            prompt: wire.prompt,
+            options,
+            minimum_selections: wire.minimum_selections,
+            unsupported_fields,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -402,6 +438,9 @@ impl ActionDraft {
 
 fn validate_input_action(input: &InputAction, issues: &mut Vec<ValidationIssue>) {
     for field in input.unsupported_fields.keys() {
+        if field == "options" && input.control == InputControl::Text && input.options.is_empty() {
+            continue;
+        }
         issues.push(ValidationIssue::new(
             "input_action_payload_unexpected",
             field,
@@ -423,7 +462,7 @@ fn validate_input_action(input: &InputAction, issues: &mut Vec<ValidationIssue>)
     }
     match input.control {
         InputControl::Text => {
-            if !input.options.is_empty() {
+            if !input.options.is_empty() || input.unsupported_fields.contains_key("options") {
                 issues.push(ValidationIssue::new(
                     "input_action_options_unexpected",
                     "options",

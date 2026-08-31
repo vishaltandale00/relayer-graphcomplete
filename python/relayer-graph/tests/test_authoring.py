@@ -248,6 +248,16 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
             {"variant": "pill", "icon": None, "description": None},
         )
 
+        await self.client.add_input_action(
+            7,
+            "Explain",
+            "Explain the tradeoff",
+            control="text",
+            source_layer=8,
+            client_key="text-input",
+        )
+        self.assertNotIn("options", Handler.requests[-1][2])
+
     async def test_card_action_presentation_is_canonical_request_data(self):
         await self.client.add_navigate_action(
             7,

@@ -1089,16 +1089,6 @@ async fn submitted_input_projection_ignores_order_but_rejects_missing_values() {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO interaction_context_intents(interaction_id,position,target_node_id,source_interaction_node_id,source_layer_id) VALUES (?1,0,7,3,5)")
-        .bind(interaction_id)
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO interaction_context_annotations(interaction_id,context_position,position,text) VALUES (?1,0,0,'raw note')")
-        .bind(interaction_id)
-        .execute(&pool)
-        .await
-        .unwrap();
     sqlx::query("INSERT INTO interaction_submitted_input_attempts(interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,graph_root_node_id,child_receipt_json,created_at,bound_at,finished_at) VALUES (?1,?2,1,'sha256:authority','sha256:semantic','accepted',501,'[]','1','2','3')")
         .bind(interaction_id)
         .bind(thread_id)
@@ -1143,7 +1133,7 @@ async fn submitted_input_projection_ignores_order_but_rejects_missing_values() {
                     };
                     axum::Json(json!({
                         "interaction":{"id":501,"kind":"user-interaction","icon":"user","title":"Project two inputs","detail":"Project two inputs","state":"accepted"},
-                        "contexts":[{"type":"interaction.context","targetNode":{"id":7,"kind":"concept","icon":"box","title":"Target","detail":"Immutable target","state":"accepted"},"annotations":["raw note"]}],
+                        "contexts":[],
                         "submittedInputs":submitted_inputs
                     }))
                 }
@@ -1261,6 +1251,7 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
     .await;
     let overflow_thread = response_json(
         boundary_seed_app
+            .clone()
             .oneshot(api_request(
                 "POST",
                 "/api/threads",
@@ -1271,12 +1262,72 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
             .unwrap(),
     )
     .await;
+    let byte_overflow_thread = response_json(
+        boundary_seed_app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Reject oversized portable inputs" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let redaction_overflow_thread = response_json(
+        boundary_seed_app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Reject post-redaction portable inputs" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let context_overflow_thread = response_json(
+        boundary_seed_app
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Reject oversized portable context snapshot" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
     let max_thread_id = max_thread["id"].as_i64().unwrap();
     let overflow_thread_id = overflow_thread["id"].as_i64().unwrap();
+    let byte_overflow_thread_id = byte_overflow_thread["id"].as_i64().unwrap();
+    let redaction_overflow_thread_id = redaction_overflow_thread["id"].as_i64().unwrap();
+    let context_overflow_thread_id = context_overflow_thread["id"].as_i64().unwrap();
     seed_thread_with_current_test_model(&database, max_thread_id).await;
     seed_thread_with_current_test_model(&database, overflow_thread_id).await;
+    seed_thread_with_current_test_model(&database, byte_overflow_thread_id).await;
+    seed_thread_with_current_test_model(&database, redaction_overflow_thread_id).await;
+    seed_thread_with_current_test_model(&database, context_overflow_thread_id).await;
     seed_action_input_draft_count(&database, max_thread_id, 256).await;
     seed_action_input_draft_count(&database, overflow_thread_id, 257).await;
+    seed_action_input_draft_bytes(
+        &database,
+        byte_overflow_thread_id,
+        9,
+        relayer_app_server::conversation_export::MAX_JSONL_LINE_BYTES / 8,
+    )
+    .await;
+    seed_action_input_draft_bytes(&database, context_overflow_thread_id, 4, 3 * 1024 * 1024).await;
+    seed_thread_interactions_terminal(&database, context_overflow_thread_id).await;
+    seed_project_path_expanding_action_input_draft(
+        &database,
+        redaction_overflow_thread_id,
+        "/a",
+        1_200_000,
+    )
+    .await;
 
     let observed = Arc::new(Mutex::new(None));
     let observed_request = observed.clone();
@@ -1318,6 +1369,19 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
                     }
                     axum::Json(action)
                 }
+            }),
+        )
+        .route(
+            "/api/control/context-occurrences/canonical",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({
+                    "id": body["nodeId"],
+                    "kind": "answer",
+                    "icon": "document",
+                    "title": "Large resolved context",
+                    "detail": "c".repeat(relayer_app_server::conversation_export::MAX_STRING_BYTES),
+                    "state": "accepted"
+                }))
             }),
         )
         .route(
@@ -1368,6 +1432,27 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
                     }))
                 }
             }),
+        )
+        .route(
+            "/api/control/interactions/{id}/input",
+            axum::routing::get(|axum::extract::Path(id): axum::extract::Path<i64>| async move {
+                axum::Json(json!({
+                    "interaction": {
+                        "id": id,
+                        "kind": "user-interaction",
+                        "icon": "user",
+                        "title": "Portable input boundary fixture",
+                        "detail": "Portable input boundary fixture",
+                        "state": "accepted"
+                    },
+                    "contexts": [],
+                    "submittedInputs": []
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}/context-actions",
+            axum::routing::get(|| async { axum::Json(json!({"actions": []})) }),
         )
         .route(
             "/api/control/capabilities",
@@ -1438,6 +1523,135 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
     let overflow_send = response_json(overflow_send).await;
     assert_eq!(overflow_send["code"], "submitted_input_limit_exceeded");
     assert_eq!(overflow_send["path"], "submittedInputs");
+    let byte_overflow_send = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{byte_overflow_thread_id}/interactions"),
+            Some(json!({
+                "text": "Reject oversized portable inputs",
+                "inputId": "portable-input-byte-overflow",
+                "inputDraftRevision": 9
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        byte_overflow_send.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let byte_overflow_send = response_json(byte_overflow_send).await;
+    assert_eq!(byte_overflow_send["code"], "submitted_input_limit_exceeded");
+    assert_eq!(byte_overflow_send["path"], "submittedInputs");
+    let redaction_overflow_send = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{redaction_overflow_thread_id}/interactions"),
+            Some(json!({
+                "text": "Reject input that expands during portable redaction",
+                "inputId": "portable-input-redaction-overflow",
+                "inputDraftRevision": 1
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        redaction_overflow_send.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let redaction_overflow_send = response_json(redaction_overflow_send).await;
+    assert_eq!(
+        redaction_overflow_send["code"],
+        "submitted_input_limit_exceeded"
+    );
+    assert_eq!(redaction_overflow_send["path"], "submittedInputs");
+    let context_overflow_send = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{context_overflow_thread_id}/interactions"),
+            Some(json!({
+                "text": "Use the attached resolved context",
+                "inputId": "portable-context-snapshot-overflow",
+                "inputDraftRevision": 4,
+                "contexts": [{
+                    "target": {
+                        "nodeId": 9001,
+                        "sourceInteractionNodeId": 9002,
+                        "sourceLayerId": 9003
+                    },
+                    "annotations": ["Use the full target snapshot"]
+                }]
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        context_overflow_send.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let context_overflow_send = response_json(context_overflow_send).await;
+    assert_eq!(
+        context_overflow_send["code"],
+        "submitted_input_limit_exceeded"
+    );
+    assert_eq!(context_overflow_send["path"], "submittedInputs");
+    let context_export_after_rejected_send = app
+        .clone()
+        .oneshot(api_request(
+            "GET",
+            &format!("/api/threads/{context_overflow_thread_id}/export"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(context_export_after_rejected_send.status(), StatusCode::OK);
+    let context_export_after_rejected_send = to_bytes(
+        context_export_after_rejected_send.into_body(),
+        relayer_app_server::conversation_export::MAX_JSONL_LINE_BYTES,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        decode_export_jsonl(&context_export_after_rejected_send)
+            .unwrap()
+            .len(),
+        2
+    );
+    let export_after_rejected_send = app
+        .clone()
+        .oneshot(api_request(
+            "GET",
+            &format!("/api/threads/{redaction_overflow_thread_id}/export"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    let export_status = export_after_rejected_send.status();
+    let export_after_rejected_send = to_bytes(
+        export_after_rejected_send.into_body(),
+        relayer_app_server::conversation_export::MAX_JSONL_LINE_BYTES,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        export_status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&export_after_rejected_send)
+    );
+    assert_eq!(
+        decode_export_jsonl(&export_after_rejected_send)
+            .unwrap()
+            .len(),
+        2
+    );
     let pool = sqlite_pool(&database).await;
     let preserved_revision: i64 =
         sqlx::query_scalar("SELECT revision FROM action_input_drafts WHERE thread_id=?1")
@@ -1460,6 +1674,17 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
             .await
             .unwrap();
     assert_eq!(overflow_interactions, 1);
+    let byte_overflow_preserved: (i64, i64, i64) = sqlx::query_as(
+        "SELECT draft.revision,
+                (SELECT COUNT(*) FROM action_input_attachments attachment WHERE attachment.thread_id=draft.thread_id),
+                (SELECT COUNT(*) FROM interactions interaction WHERE interaction.thread_id=draft.thread_id)
+         FROM action_input_drafts draft WHERE draft.thread_id=?1",
+    )
+    .bind(byte_overflow_thread_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(byte_overflow_preserved, (9, 9, 1));
     pool.close().await;
     let occurrence = json!({
         "presentingInteractionNodeId": 101,
@@ -4087,6 +4312,10 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
             }),
         )
         .route(
+            "/api/control/context-occurrences/canonical",
+            axum::routing::post(canonical_accepted_context_node),
+        )
+        .route(
             "/api/control/capabilities",
             axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
                 axum::Json(json!({ "graphToken": body["graphToken"] }))
@@ -6335,7 +6564,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
 }
 
 #[tokio::test]
-async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_timestamp_change() {
+async fn invalid_context_client_errors_are_preserved_without_product_mutation() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -6372,19 +6601,47 @@ async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_t
             .unwrap();
     pool.close().await;
 
-    let graph = Router::new().route(
-        "/api/control/interactions",
-        axum::routing::post(|| async {
-            (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                axum::Json(json!({"error":{
-                    "code":"invalid_context_occurrence",
-                    "path":"contexts[0].target",
-                    "message":"forged provenance sourceInteractionNodeId=991 sourceLayerId=992"
-                }})),
-            )
-        }),
-    );
+    let graph = Router::new()
+        .route(
+            "/api/control/context-occurrences/canonical",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                if body["nodeId"] == 990 {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        axum::Json(json!({
+                            "code": "not_found",
+                            "error": "context target not found"
+                        })),
+                    )
+                        .into_response();
+                }
+                (
+                    StatusCode::OK,
+                    axum::Json(json!({
+                        "id": body["nodeId"],
+                        "kind": "answer",
+                        "icon": "document",
+                        "title": "Context target",
+                        "detail": "Context detail",
+                        "state": "accepted"
+                    })),
+                )
+                    .into_response()
+            }),
+        )
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(|| async {
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    axum::Json(json!({"error":{
+                        "code":"invalid_context_occurrence",
+                        "path":"contexts[0].target",
+                        "message":"forged provenance sourceInteractionNodeId=991 sourceLayerId=992"
+                    }})),
+                )
+            }),
+        );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(Router::new()).await;
     let catalog = root.join("catalog.json");
@@ -6406,6 +6663,22 @@ async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_t
     let app =
         open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
             .await;
+    let invalid_id = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text":"Invalid ID",
+                "inputId":"invalid-id",
+                "contexts":[{"target":{"nodeId":0,"sourceInteractionNodeId":2,"sourceLayerId":3},"annotations":["note"]}]
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid_id.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(response_json(invalid_id).await["code"], "invalid_input");
     for invalid in [
         json!({"text":"Missing identity","contexts":[{"target":{"nodeId":1,"sourceInteractionNodeId":2,"sourceLayerId":3},"annotations":["note"]}]}),
         json!({"text":"Blank annotation","inputId":"invalid-blank","contexts":[{"target":{"nodeId":1,"sourceInteractionNodeId":2,"sourceLayerId":3},"annotations":["   "]}]}),
@@ -6449,16 +6722,12 @@ async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_t
         ))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let outward = response_json(response).await;
     assert_eq!(
         outward,
-        json!({"error":"Relayer could not send this message. Your draft was preserved."})
+        json!({"code":"not_found","error":"context target not found"})
     );
-    let encoded = outward.to_string();
-    assert!(!encoded.contains("invalid_context_occurrence"));
-    assert!(!encoded.contains("991"));
-    assert!(!encoded.contains("992"));
 
     let context_free = app
         .clone()
@@ -6606,15 +6875,20 @@ async fn pre_binding_failure_restores_consumed_context_confirmation() {
         .unwrap();
     pool.close().await;
 
-    let graph = Router::new().route(
-        "/api/control/interactions",
-        axum::routing::post(|| async {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(json!({"error":"temporary graph failure"})),
-            )
-        }),
-    );
+    let graph = Router::new()
+        .route(
+            "/api/control/context-occurrences/canonical",
+            axum::routing::post(canonical_accepted_context_node),
+        )
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(|| async {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(json!({"error":"temporary graph failure"})),
+                )
+            }),
+        );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(Router::new()).await;
     let catalog = root.join("catalog.json");
@@ -7576,6 +7850,10 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
     let captured_digest = observed_digest.clone();
     let graph = Router::new()
         .route(
+            "/api/control/context-occurrences/canonical",
+            axum::routing::post(canonical_accepted_context_node),
+        )
+        .route(
             "/api/control/interactions",
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let observed_creates = observed_creates.clone();
@@ -7647,6 +7925,10 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
     let context_action_reads = Arc::new(AtomicUsize::new(0));
     let observed_context_action_reads = context_action_reads.clone();
     let graph = Router::new()
+        .route(
+            "/api/control/context-occurrences/canonical",
+            axum::routing::post(canonical_accepted_context_node),
+        )
         .route("/api/control/interactions", axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
             let create_digest = create_digest.clone();
             async move { axum::Json(json!({
@@ -7846,6 +8128,17 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
     fs::remove_dir_all(root).unwrap();
 }
 
+async fn canonical_accepted_context_node(axum::Json(body): axum::Json<Value>) -> axum::Json<Value> {
+    axum::Json(json!({
+        "id": body["nodeId"],
+        "kind": "concept",
+        "icon": "list",
+        "title": "Queue",
+        "detail": "Tasks",
+        "state": "accepted"
+    }))
+}
+
 async fn sqlite_pool(database: &Path) -> sqlx::SqlitePool {
     SqlitePoolOptions::new()
         .max_connections(1)
@@ -7937,6 +8230,96 @@ async fn seed_action_input_draft_count(database: &Path, thread_id: i64, count: i
             .await
             .unwrap();
     }
+    pool.close().await;
+}
+
+async fn seed_action_input_draft_bytes(
+    database: &Path,
+    thread_id: i64,
+    count: i64,
+    value_bytes: usize,
+) {
+    let pool = sqlite_pool(database).await;
+    sqlx::query(
+        "INSERT INTO action_input_drafts(thread_id,revision,updated_at) VALUES (?1,?2,'seed')",
+    )
+    .bind(thread_id)
+    .bind(count)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let action = json!({"control":"text","prompt":"Seeded portable input"}).to_string();
+    let value = json!({"text":"x".repeat(value_bytes)}).to_string();
+    for index in 0..count {
+        sqlx::query("INSERT INTO action_input_attachments(thread_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'seed')")
+            .bind(thread_id)
+            .bind(5_000 + index)
+            .bind(6_000 + index)
+            .bind(7_000 + index)
+            .bind(8_000 + index)
+            .bind(&action)
+            .bind(&value)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool.close().await;
+}
+
+async fn seed_thread_interactions_terminal(database: &Path, thread_id: i64) {
+    let pool = sqlite_pool(database).await;
+    sqlx::query("UPDATE interactions SET completion_status='failed',completion_error='seed terminal state' WHERE thread_id=?1")
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}
+
+async fn seed_project_path_expanding_action_input_draft(
+    database: &Path,
+    thread_id: i64,
+    project_path: &str,
+    repetitions: usize,
+) {
+    let pool = sqlite_pool(database).await;
+    sqlx::query(
+        "INSERT INTO projects(name,path,created_at,updated_at) VALUES ('Short path',?1,'seed','seed')",
+    )
+    .bind(project_path)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let project_id: i64 = sqlx::query_scalar("SELECT id FROM projects WHERE path=?1")
+        .bind(project_path)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE threads SET project_id=?1 WHERE id=?2")
+        .bind(project_id)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE interactions SET completion_status='failed',completion_error='seed terminal state' WHERE thread_id=?1")
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO action_input_drafts(thread_id,revision,updated_at) VALUES (?1,1,'seed')",
+    )
+    .bind(thread_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO action_input_attachments(thread_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) VALUES (?1,5000,6000,7000,8000,?2,?3,'seed')")
+        .bind(thread_id)
+        .bind(json!({"control":"text","prompt":"Seeded portable input"}).to_string())
+        .bind(json!({"text":project_path.repeat(repetitions)}).to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
     pool.close().await;
 }
 

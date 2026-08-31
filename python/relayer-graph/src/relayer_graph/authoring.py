@@ -325,9 +325,12 @@ class RelayerGraphClient:
             "label": label,
             "control": control,
             "prompt": prompt,
-            "options": [{"key": key, "label": option_label} for key, option_label in options],
             **_action_presentation(variant, icon, description),
         }
+        if control != "text":
+            payload["options"] = [
+                {"key": key, "label": option_label} for key, option_label in options
+            ]
         if minimum_selections is not None:
             payload["minimumSelections"] = minimum_selections
         return await self._request("POST", "/api/graph/actions", payload)

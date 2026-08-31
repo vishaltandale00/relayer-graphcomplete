@@ -3249,6 +3249,7 @@ mod tests {
         assert_eq!(unsupported["error"]["path"], "variant");
 
         let missing_prompt = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -3275,6 +3276,55 @@ mod tests {
             "input_action_prompt_required"
         );
         assert_eq!(missing_prompt["error"]["path"], "prompt");
+
+        let explicit_empty_options = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"empty-options","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Explain","control":"text","prompt":"Explain","options":[]}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            explicit_empty_options.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        let explicit_empty_options: Value = serde_json::from_slice(
+            &to_bytes(explicit_empty_options.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            explicit_empty_options["error"]["code"],
+            "input_action_options_unexpected"
+        );
+        assert_eq!(explicit_empty_options["error"]["path"], "options");
+
+        let omitted_options = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"omitted-options","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Explain","control":"text","prompt":"Explain"}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(omitted_options.status(), StatusCode::OK);
     }
 
     #[tokio::test]

@@ -292,7 +292,8 @@ export function gradeInputRoundTripControlSet(
   const exactOptions = (actual: readonly InputOptionSnapshot[], expected: readonly InputOptionSnapshot[]) => (
     new Set(actual.map(({ key }) => key)).size === actual.length
       && actual.every(({ key, label }) => key.trim() !== "" && label.trim() !== "")
-      && canonical(actual.map(({ label }) => label).sort()) === canonical(expected.map(({ label }) => label).sort())
+      && canonical(actual.map(({ key, label }) => canonical({ key, label })).sort())
+        === canonical(expected.map(({ key, label }) => canonical({ key, label })).sort())
   );
   const authoredInventory = authored.length === 3
     && authoredIds.size === 3

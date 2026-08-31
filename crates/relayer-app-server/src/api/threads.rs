@@ -410,12 +410,13 @@ pub(super) async fn project_interaction(
     let has_durable_context = durable_input
         .as_ref()
         .is_some_and(|input| !input.contexts.is_empty());
-    if has_durable_context || imported_thread {
+    let has_durable_submitted_inputs = !durable_submitted_inputs.is_empty();
+    if has_durable_context || has_durable_submitted_inputs || imported_thread {
         let Some((runtime, graph_node_id)) = state.runtime.as_ref().zip(graph_node_id) else {
-            if has_durable_context {
+            if has_durable_context || has_durable_submitted_inputs {
                 response.mark_projection_stale();
                 eprintln!(
-                    "could not project context for interaction {id}: graph input is unavailable"
+                    "could not project interaction input for interaction {id}: graph input is unavailable"
                 );
             }
             return Ok(response);
@@ -590,6 +591,9 @@ pub(super) async fn create_interaction(
             "Relayer could not send this message. Your draft was preserved.",
         ));
     }
+    let context_snapshots = canonical_context_snapshots(&state, &request.contexts)
+        .await
+        .map_err(context_snapshot_api_error)?;
     let identified = request.input_id.is_some() || !request.contexts.is_empty();
     let interaction = if identified {
         let input_id = request
@@ -604,6 +608,7 @@ pub(super) async fn create_interaction(
                     text: &request.text,
                     input_identity: &input_id,
                     contexts: &request.contexts,
+                    context_snapshots: &context_snapshots,
                     context_confirmation_ids: &request.context_confirmation_ids,
                     input_draft_revision: request.input_draft_revision,
                     model_selection: model_selection.as_ref(),
@@ -621,6 +626,9 @@ pub(super) async fn create_interaction(
                     crate::storage::StorageError::ContextDraftConflict { .. },
                 ),
             ) => return Err(error.into()),
+            Err(error @ crate::product::ProductError::InputValidation { .. }) => {
+                return Err(error.into());
+            }
             Err(
                 error @ crate::product::ProductError::Storage(
                     crate::storage::StorageError::ActionInputDraftConflict { .. },
@@ -705,6 +713,9 @@ pub(super) async fn retry_interaction(
         ));
     }
     let model_selection = InteractionModelSelection::try_from(request.model_selection)?;
+    let context_snapshots = canonical_context_snapshots(&state, &request.contexts)
+        .await
+        .map_err(context_snapshot_api_error)?;
     let claimed = state
         .product
         .claim_interaction_retry(
@@ -714,6 +725,7 @@ pub(super) async fn retry_interaction(
                 text: &request.text,
                 input_identity: &request.input_id,
                 contexts: &request.contexts,
+                context_snapshots: &context_snapshots,
                 context_confirmation_ids: &request.context_confirmation_ids,
                 input_draft_revision: request.input_draft_revision,
                 model_selection: &model_selection,
@@ -776,6 +788,49 @@ pub(super) async fn retry_interaction(
         });
     }
     Ok(Json(interaction.into()))
+}
+
+async fn canonical_context_snapshots(
+    state: &ApiState,
+    contexts: &[InteractionContextIntent],
+) -> Result<Vec<relayer_graph_core::InteractionInputNode>, ApiError> {
+    if contexts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let mut snapshots = Vec::with_capacity(contexts.len());
+    for context in contexts {
+        let target = relayer_graph_core::InteractionContextTarget {
+            node_id: relayer_graph_core::NodeId::new(context.target.node_id)
+                .ok_or_else(|| ApiError::invalid("context target nodeId must be positive"))?,
+            source_interaction_node_id: relayer_graph_core::NodeId::new(
+                context.target.source_interaction_node_id,
+            )
+            .ok_or_else(|| ApiError::invalid("context sourceInteractionNodeId must be positive"))?,
+            source_layer_id: relayer_graph_core::LayerId::new(context.target.source_layer_id)
+                .ok_or_else(|| ApiError::invalid("context sourceLayerId must be positive"))?,
+        };
+        snapshots.push(
+            runtime
+                .canonical_interaction_context_occurrence(&target)
+                .await?,
+        );
+    }
+    Ok(snapshots)
+}
+
+fn context_snapshot_api_error(error: ApiError) -> ApiError {
+    if error.is_deterministic_input_failure() {
+        return error;
+    }
+    eprintln!(
+        "context-bearing interaction snapshot resolution failed: {}",
+        error.internal_diagnostic()
+    );
+    ApiError::internal("Relayer could not send this message. Your draft was preserved.")
 }
 
 pub(crate) async fn resume_recovered_identified_interactions(state: ApiState) {

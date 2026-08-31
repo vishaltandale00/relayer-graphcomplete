@@ -68,12 +68,12 @@ describe("input round-trip structural gate", () => {
     });
   });
 
-  it("accepts model-authored option keys while preserving the exact committed snapshot", () => {
+  it("requires the fixed option keys as well as labels", () => {
     const underscored = requiredControls.map((entry) => ({
       ...entry,
       options: entry.options.map((option) => ({ ...option, key: option.key.replaceAll("-", "_") })),
     }));
-    expect(gradeInputRoundTripControlSet(underscored, underscored).passed).toBe(true);
+    expect(gradeInputRoundTripControlSet(underscored, underscored).checks[0]!.passed).toBe(false);
     expect(gradeInputRoundTripControlSet(underscored, requiredControls).checks[1]!.passed).toBe(false);
   });
 

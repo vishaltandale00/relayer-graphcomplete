@@ -188,7 +188,7 @@ export function createReviewPresentationAdapter({
     };
   }
 
-  function resolveTarget(target) {
+  async function resolveTarget(target) {
     if (target?.kind === "viewport") return null;
     if (target?.kind !== "element" || typeof target.elementRef !== "string") {
       throw new Error("Screenshot target must identify the viewport or one visible element.");
@@ -199,6 +199,12 @@ export function createReviewPresentationAdapter({
       .find((element) => element.dataset.reviewCapture === target.elementRef);
     const element = control || captureTarget;
     if (!element) throw new Error(`Unknown review target: ${target.elementRef}`);
+    const revealableInput = captureTarget?.dataset.reviewCapture?.startsWith("input-action-");
+    if (!isVisibleElement(element, windowObject) && revealableInput && captureTarget.scrollIntoView) {
+      captureTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
+      await nextFrame(windowObject);
+      await nextFrame(windowObject);
+    }
     if (!isVisibleElement(element, windowObject)) throw new Error(`Review target is not visible: ${target.elementRef}`);
     return element;
   }
@@ -211,7 +217,7 @@ export function createReviewPresentationAdapter({
     // therefore bind new metadata to pixels from the previously selected node.
     await nextFrame(windowObject);
     await nextFrame(windowObject);
-    const element = resolveTarget(target);
+    const element = await resolveTarget(target);
     if (!element) {
       if (mode === "full") throw new Error("Full capture requires a visible element target.");
       return {
