@@ -433,6 +433,41 @@ describe("secret-backed API adapters", () => {
     expect(adapter.executionAccess().modelCapabilities).not.toHaveProperty("unknown-limits");
   });
 
+  it("carries Vercel AI Gateway's exact per-model token capabilities into execution access", async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [
+        {
+          id: "deepseek/deepseek-v4-pro-0813",
+          name: "DeepSeek V4 Pro 0813",
+          type: "language",
+          context_window: 1_000_000,
+          max_tokens: 384_000,
+        },
+        {
+          id: "unknown-limits",
+          name: "Unknown limits",
+          type: "language",
+        },
+      ] }),
+    }));
+    const descriptor = productionProviderAdapterRegistry.get("vercel-ai-router");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("vercel-ai-router", descriptor.defaultEndpoint),
+      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
+    );
+
+    await adapter.connect();
+
+    expect(adapter.executionAccess()).toMatchObject({
+      modelCapabilities: {
+        "deepseek/deepseek-v4-pro-0813": { contextWindow: 1_000_000, maxOutputTokens: 384_000 },
+      },
+    });
+    expect(adapter.executionAccess().modelCapabilities).not.toHaveProperty("unknown-limits");
+  });
+
   it("refreshes OpenRouter discovery before execution when startup did not populate capabilities", async () => {
     const fetch = vi.fn(async () => ({
       ok: true,
@@ -455,6 +490,32 @@ describe("secret-backed API adapters", () => {
     expect(access.modelCapabilities["z-ai/glm-5.3"]).toEqual({
       contextWindow: 196_608,
       maxOutputTokens: 131_072,
+    });
+  });
+
+  it("refreshes Vercel discovery before execution when startup did not populate capabilities", async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{
+        id: "deepseek/deepseek-v4-pro-0813",
+        type: "language",
+        context_window: 1_000_000,
+        max_tokens: 384_000,
+      }] }),
+    }));
+    const descriptor = productionProviderAdapterRegistry.get("vercel-ai-router");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("vercel-ai-router", descriptor.defaultEndpoint),
+      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
+    );
+
+    const access = await adapter.executionAccess();
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(access.modelCapabilities["deepseek/deepseek-v4-pro-0813"]).toEqual({
+      contextWindow: 1_000_000,
+      maxOutputTokens: 384_000,
     });
   });
 

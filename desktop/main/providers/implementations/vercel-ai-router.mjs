@@ -12,6 +12,14 @@ function vercelModelEligibility(model) {
   return MODEL_CAPABILITY_UNKNOWN;
 }
 
+function tokenCapabilities(model) {
+  const contextWindow = model?.context_window;
+  const maxOutputTokens = model?.max_tokens;
+  if (!Number.isSafeInteger(contextWindow) || contextWindow < 1
+    || !Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1) return null;
+  return { contextWindow, maxOutputTokens };
+}
+
 export const vercelAiRouterDescriptor = Object.freeze({
   adapterId: "vercel-ai-router",
   implementationVersion: "2",
@@ -24,6 +32,9 @@ export const vercelAiRouterDescriptor = Object.freeze({
   catalog: { source: "provider-discovery" },
   create: ({ definition, fetch, secrets, managedRuntime, environment }) => new SecretApiProviderAdapter({
     definition, fetch, credentials: { apiKey: secrets?.["api-key"] }, headers: bearerHeaders,
-    managedRuntime, runtimeId: "codex", environment, modelEligibility: vercelModelEligibility,
+    modelCapabilities: tokenCapabilities,
+    modelEligibility: vercelModelEligibility,
+    requireCatalogBeforeExecution: true,
+    managedRuntime, runtimeId: "codex", environment,
   }),
 });

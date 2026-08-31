@@ -11,13 +11,20 @@ import { createNoopHarnessTraceSink } from "../src/trace.js";
 const SYNTHETIC_API_KEY = "relayer-process-boundary-test-key";
 const require = createRequire(import.meta.url);
 const temporaryDirectories: string[] = [];
+const nativeDarwinIt = process.platform === "darwin"
+  && process.env.RELAYER_RUN_CODEX_SECRET_BOUNDARY === "1"
+  ? it
+  : it.skip;
 
 describe("Codex secret-provider process boundary", () => {
   afterEach(async () => {
     await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
   });
 
-  it("authenticates the selected Responses endpoint while excluding provider secrets from model-requested shell tools", async () => {
+  // Run this native-process boundary in isolation. Codex 0.147's shell-policy
+  // behavior is not stable when many unrelated native tests execute in parallel,
+  // and non-Darwin binaries are not evidence for the shipped macOS boundary.
+  nativeDarwinIt("authenticates the selected Responses endpoint while excluding provider secrets from model-requested shell tools", async () => {
     const codexBinary = resolvePinnedCodexBinary();
     const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-secret-provider-"));
     temporaryDirectories.push(codexHome);

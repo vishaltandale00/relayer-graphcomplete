@@ -513,7 +513,9 @@ describe("PrimeAgentHarness", () => {
         adapterId,
         adapterId === "openrouter"
           ? { contextWindow: 196_608, maxOutputTokens: 131_072 }
-          : undefined,
+          : adapterId === "vercel-ai-router"
+            ? { contextWindow: 1_000_000, maxOutputTokens: 384_000 }
+            : undefined,
       ));
     }
     await harness.complete(singleAdapterRunContext(
@@ -541,7 +543,7 @@ describe("PrimeAgentHarness", () => {
       { api: "openai-responses", baseUrl: "https://provider-40.test/v1", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "anthropic-messages", baseUrl: "https://provider-41.test", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "openai-completions", baseUrl: "https://provider-42.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 196_608, maxTokens: 131_072, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", baseUrl: "https://provider-43.test/v1", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-43.test/v1", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 384_000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "openai-completions", baseUrl: "https://provider-44.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 2_048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "anthropic-messages", baseUrl: "https://provider-45.test/proxy/anthropic", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
     ]);

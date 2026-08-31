@@ -298,9 +298,12 @@ npx vitest run test/provider-adapters.test.mjs test/provider-onboarding-ipc.test
 cargo test -p relayer-app-server --test model_catalog_flow
 npm run evidence:provider-ux
 npm run evidence:model-selector
+npm run test:codex-secret-boundary
 ```
 
 The Vitest and Rust commands are D1 seams. `evidence:provider-ux` and `evidence:model-selector` are partial D2 captures; neither enumerates all 36 flow cells. `npm run evidence:prime-family:packaged` is a separate heavy packaged-app runner and is due only in its declared clean-install/release context.
+
+`npm run check` runs Vitest serially because concurrent repository runs have repeatedly raced while removing the shared `eval-data` fixture directory. It also invokes `test:codex-secret-boundary`: the real pinned Codex process boundary runs in isolation on macOS and is explicitly skipped elsewhere because a non-macOS binary does not prove the shipped desktop boundary.
 
 No current command maps all 36 flow cells to independently visible results, fixtures, reset boundaries, timeouts, stable error codes, request counts, and artifacts. A future deterministic D2 entry point such as `npm run evidence:provider-harness-matrix` is therefore a required but currently undefined mapping gap, not a command that may be claimed as run.
 
@@ -370,6 +373,7 @@ These observations are diagnostic inputs, not completion claims:
 - API-key providers now automatically receive a product-managed, provider-scoped family when the discovered catalog contains eligible models.
 - Codex Basic and Claude Basic now reject OpenRouter and Vercel; Prime Agent Basic is the tested router route.
 - API adapters now classify discovered execution eligibility from provider metadata and fail closed when capability evidence is unknown.
+- Vercel AI Gateway now carries its discovered `context_window` and `max_tokens` into Prime execution instead of falling back to a 4,096-token output limit. An interactive funded onboarding observation reached connection, managed-family creation, picker selection, and model invocation for DeepSeek and picker-selected Qwen; both remained running without `graph.submit` beyond the five-minute UX observation bound. That observation was not retained with the identities, receipt, request count, and artifact digest required above, so it is not execution proof and Vercel L1 remains indeterminate.
 - Managed Codex and Claude subscription paths still require the manual M1 run.
 - The default-harness/default-family Settings interaction needs a separate explicit UX decision; this matrix does not authorize silent family replacement.
 - The PRD reconciliation, complete 36-cell D2 runner, and evidence-redaction checker are still undefined certification blockers.
