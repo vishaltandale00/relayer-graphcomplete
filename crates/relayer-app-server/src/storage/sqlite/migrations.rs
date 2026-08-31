@@ -131,7 +131,7 @@ mod tests {
     #[tokio::test]
     async fn schema_23_personal_presentation_state_survives_input_migrations() {
         // Starts from the merged personal-presentation predecessor and upgrades
-        // through the input migrations (24-26). Published versions, the active
+        // through the input migrations (26-28). Published versions, the active
         // policy, a per-thread version override, and already-pinned interactions
         // must all come through unchanged.
         let file = tempfile::NamedTempFile::new().unwrap();
@@ -198,14 +198,14 @@ mod tests {
         );
         pool.close().await;
 
-        // Opening the store runs migrations 24 through 26.
+        // Opening the store runs migrations 24 through 28.
         let store = SqliteProductStore::open(file.path()).await.unwrap();
         let version: i64 =
             sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations WHERE success=1")
                 .fetch_one(&store.pool)
                 .await
                 .unwrap();
-        assert_eq!(version, 26);
+        assert_eq!(version, 28);
 
         let pinned_after: Vec<(i64, String, i64, i64)> = sqlx::query(
             "SELECT interaction_id,version_key,version_interaction_node_id,root_layer_id FROM interaction_personal_presentation_pins ORDER BY interaction_id",

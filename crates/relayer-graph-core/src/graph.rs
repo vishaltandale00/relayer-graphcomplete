@@ -26,8 +26,8 @@ pub use model::{
     PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
     RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer, SubmittedInput,
     SubmittedInputDraft, SubmittedInputValue, TemporalFeatureConfig, ThreadId,
-    interaction_input_authority_digest, interaction_input_digest, interaction_input_semantic_digest,
-    is_supported_icon, normalize_icon_name, resolve_icon_name,
+    interaction_input_authority_digest, interaction_input_digest,
+    interaction_input_semantic_digest, is_supported_icon, normalize_icon_name, resolve_icon_name,
 };
 pub use personal_presentation::{
     PersonalPresentationAttachment, PublishedPersonalPresentationVersion,

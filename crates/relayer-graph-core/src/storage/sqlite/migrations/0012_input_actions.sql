@@ -19,18 +19,19 @@ CREATE TABLE actions_new (
     source_layer_id INTEGER REFERENCES layers(id),
     relation TEXT CHECK(relation IN ('expand', 'reference')),
     type_id TEXT NOT NULL DEFAULT 'graph.action' CHECK(type_id IN ('graph.action', 'interaction.context')),
+    published_revision INTEGER CHECK(published_revision IS NULL OR published_revision > 0),
     UNIQUE(owner_interaction_id, source_node_id, client_key)
 );
 
 INSERT INTO actions_new(
     id,project_id,thread_id,source_node_id,kind,label,target_layer_id,interaction_text,
     response,state,owner_interaction_id,client_key,variant,icon,description,source_layer_id,
-    relation,type_id
+    relation,type_id,published_revision
 )
 SELECT
     id,project_id,thread_id,source_node_id,kind,label,target_layer_id,interaction_text,
     response,state,owner_interaction_id,client_key,variant,icon,description,source_layer_id,
-    relation,type_id
+    relation,type_id,published_revision
 FROM actions;
 
 DROP TABLE actions;

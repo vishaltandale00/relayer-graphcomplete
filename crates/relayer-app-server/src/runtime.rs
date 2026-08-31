@@ -2680,6 +2680,7 @@ mod tests {
             permission_profile_id: "auto".into(),
             effective_execution_digest: "sha256:execution".into(),
             effective_permission_receipt: json!({}),
+            input_children: vec![],
             configuration: HarnessConfiguration {
                 schema_version: 1,
                 name: "test".into(),

@@ -1912,6 +1912,7 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
             description: None,
             target_layer_id: None,
             interaction_text: Some("Investigate the published branch".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -1953,6 +1954,7 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
             description: None,
             target_layer_id: Some(current.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -2014,6 +2016,7 @@ async fn active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off(
             description: None,
             target_layer_id: None,
             interaction_text: Some("Investigate the gated branch".into()),
+            input: None,
         })
         .await
         .unwrap();

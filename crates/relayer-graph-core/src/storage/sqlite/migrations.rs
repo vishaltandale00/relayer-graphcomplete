@@ -19,7 +19,7 @@ pub(crate) async fn run(pool: &SqlitePool) -> Result<(), GraphError> {
             sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations WHERE success=TRUE")
                 .fetch_one(&mut *connection)
                 .await?;
-        latest_version.is_some_and(|version| version <= 10)
+        latest_version.is_some_and(|version| version <= 11)
     } else {
         false
     };
@@ -653,7 +653,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn schema_10_actions_rebuild_preserves_all_foreign_key_references() {
+    async fn schema_11_actions_rebuild_preserves_all_foreign_key_references() {
         let file = tempfile::NamedTempFile::new().unwrap();
         let url = format!("sqlite://{}", file.path().display());
         let pool = SqlitePoolOptions::new()
@@ -665,7 +665,7 @@ mod tests {
             migrations: Cow::Owned(
                 MIGRATOR
                     .iter()
-                    .filter(|migration| migration.version <= 10)
+                    .filter(|migration| migration.version <= 11)
                     .cloned()
                     .collect(),
             ),
@@ -745,7 +745,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn original_schema_11_history_reopens_and_preserves_action_references() {
+    async fn original_schema_12_history_reopens_and_preserves_action_references() {
         let file = tempfile::NamedTempFile::new().unwrap();
         let url = format!("sqlite://{}", file.path().display());
         let pool = SqlitePoolOptions::new()
@@ -757,7 +757,7 @@ mod tests {
             migrations: Cow::Owned(
                 MIGRATOR
                     .iter()
-                    .filter(|migration| migration.version <= 10)
+                    .filter(|migration| migration.version <= 11)
                     .cloned()
                     .collect(),
             ),
@@ -817,7 +817,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::raw_sql(include_str!("migrations/0011_input_actions.sql"))
+        sqlx::raw_sql(include_str!("migrations/0012_input_actions.sql"))
             .execute(&pool)
             .await
             .unwrap();
@@ -825,9 +825,16 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        let input_actions_checksum = MIGRATOR
+            .iter()
+            .find(|migration| migration.version == 12)
+            .unwrap()
+            .checksum
+            .as_ref();
         sqlx::query(
-            "INSERT INTO _sqlx_migrations(version,description,success,checksum,execution_time) VALUES (11,'input actions',TRUE,X'0bb72f0c41de4009f831f6759a0b199baf2587e10f7620946f4c7b0b5bdc3fdfbd102995cb03188a8d1d49c9ab0e0e36',0)",
+            "INSERT INTO _sqlx_migrations(version,description,success,checksum,execution_time) VALUES (12,'input actions',TRUE,?1,0)",
         )
+        .bind(input_actions_checksum)
         .execute(&pool)
         .await
         .unwrap();
@@ -857,7 +864,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cascade_damaged_schema_11_history_is_rejected_on_open() {
+    async fn cascade_damaged_schema_12_history_is_rejected_on_open() {
         let file = tempfile::NamedTempFile::new().unwrap();
         let url = format!("sqlite://{}", file.path().display());
         let pool = SqlitePoolOptions::new()
@@ -869,7 +876,7 @@ mod tests {
             migrations: Cow::Owned(
                 MIGRATOR
                     .iter()
-                    .filter(|migration| migration.version <= 10)
+                    .filter(|migration| migration.version <= 11)
                     .cloned()
                     .collect(),
             ),
@@ -925,7 +932,7 @@ mod tests {
             migrations: Cow::Owned(
                 MIGRATOR
                     .iter()
-                    .filter(|migration| migration.version <= 11)
+                    .filter(|migration| migration.version <= 12)
                     .cloned()
                     .collect(),
             ),
@@ -966,7 +973,8 @@ mod tests {
             include_str!("migrations/0008_interaction_context_actions.sql"),
             include_str!("migrations/0009_interaction_input_identity.sql"),
             include_str!("migrations/0010_personal_presentation_attachments.sql"),
-            include_str!("migrations/0011_input_actions.sql"),
+            include_str!("migrations/0011_temporal_completions.sql"),
+            include_str!("migrations/0012_input_actions.sql"),
         ] {
             sqlx::raw_sql(migration)
                 .execute(&mut connection)
@@ -981,7 +989,7 @@ mod tests {
         .unwrap();
 
         sqlx::raw_sql(include_str!(
-            "migrations/0012_interaction_input_children.sql"
+            "migrations/0013_interaction_input_children.sql"
         ))
         .execute(&mut connection)
         .await

@@ -4,9 +4,9 @@ use crate::{
     AcceptedGraphClosure, CompletionState, CurrentProjectionEvent, CurrentProjectionPage,
     CurrentTransitionReceipt, GraphError, GraphNode, GraphWriter, InteractionContextAction,
     InteractionContextDraft, InteractionContextTarget, InteractionInputChild, InteractionInputNode,
-    InteractionInputPreparation, InteractionInvocation, NodeId, PresentingInputOccurrence,
-    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, SubmittedInputDraft,
-    TemporalFeatureConfig, ThreadId,
+    InteractionInputPreparation, InteractionInvocation, NodeId,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
+    SubmittedInputDraft, TemporalFeatureConfig, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
     interaction_input_authority_digest, interaction_input_digest,
     storage::{
@@ -322,11 +322,13 @@ impl GraphDatabase {
                 other => other,
             })?;
         if let Some(node) = identified {
+            initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
             let scope = InteractionScope {
                 project_id,
                 thread_id,
                 root_node_id: node.id,
                 read_only: false,
+                authority_epoch: None,
             };
             let persisted_contexts = ContextTable::new(&mut transaction)
                 .actions(&scope)
@@ -370,11 +372,13 @@ impl GraphDatabase {
         nodes
             .set_input_identity(node.id, input_identity, authority_digest)
             .await?;
+        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
         let scope = InteractionScope {
             project_id,
             thread_id,
             root_node_id: node.id,
             read_only: false,
+            authority_epoch: None,
         };
         ContextTable::new(&mut transaction)
             .insert_all(&scope, contexts)

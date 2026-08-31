@@ -7,9 +7,8 @@ use crate::{
     storage::{
         GraphConnection,
         sqlite::{
-            actions::ActionTable, completions::CompletionTable, contexts::ContextTable,
-            currents::CurrentTable, edges::EdgeTable, input_children::InputChildTable, layers,
-            layers::LayerTable, nodes::NodeTable,
+            actions::ActionTable, contexts::ContextTable, currents::CurrentTable, edges::EdgeTable,
+            input_children::InputChildTable, layers, layers::LayerTable, nodes::NodeTable,
         },
     },
 };

@@ -6214,7 +6214,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 26);
+    assert_eq!(applied_migrations, 28);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -6299,7 +6299,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .unwrap();
     }
     sqlx::raw_sql(include_str!(
-        "../src/storage/sqlite/migrations/0025_submitted_input_attempts.sql"
+        "../src/storage/sqlite/migrations/0027_submitted_input_attempts.sql"
     ))
     .execute(&partial_index_pool)
     .await

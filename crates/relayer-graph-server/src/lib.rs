@@ -2254,6 +2254,7 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Canonical child input".into()),
+                input: None,
             })
             .await
             .unwrap();
@@ -3664,10 +3665,15 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let created: CreateInteractionResponse =
-            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let status = response.status();
+        let response_body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&response_body)
+        );
+        let created: CreateInteractionResponse = serde_json::from_slice(&response_body).unwrap();
         assert_eq!(created.input_children.len(), 1);
 
         let child = serde_json::to_value(&created.input_children[0]).unwrap();

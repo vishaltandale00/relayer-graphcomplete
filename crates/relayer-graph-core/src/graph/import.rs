@@ -667,6 +667,7 @@ impl crate::GraphDatabase {
                 thread_id: metadata.thread_id,
                 root_node_id: imported_node_id(parent)?,
                 read_only: false,
+                authority_epoch: None,
             };
             let mut child_position = 0i64;
             for (index, submitted) in turn.submitted_inputs.iter().enumerate() {

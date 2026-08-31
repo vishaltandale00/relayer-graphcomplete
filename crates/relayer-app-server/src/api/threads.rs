@@ -2988,6 +2988,7 @@ mod tests {
                 input_digest: None,
                 personal_presentation: None,
                 contexts: &[],
+                submitted_inputs: &[],
             })
             .await
             .unwrap();
@@ -3000,6 +3001,7 @@ mod tests {
                     harness_configuration_digest: &seeded.harness_configuration_digest,
                     effective_execution_digest: &seeded.effective_execution_digest,
                     effective_permission_receipt: &seeded.effective_permission_receipt,
+                    input_children: &seeded.input_children,
                 })
                 .await
                 .unwrap()
@@ -3060,6 +3062,7 @@ mod tests {
             },
             approval_decisions: Arc::new(Mutex::new(HashMap::new())),
             annotation_sessions: Arc::new(Mutex::new(HashMap::new())),
+            input_operator_sessions: Arc::new(Mutex::new(HashMap::new())),
             annotations_enabled: false,
             environment_inspector: crate::environment::EnvironmentInspector::new(),
             completion_brokers,

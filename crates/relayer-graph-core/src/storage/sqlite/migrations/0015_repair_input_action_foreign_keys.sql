@@ -1,5 +1,4 @@
--- Migration 0011 predates SQLx's transactional SQLite runner and must keep its
--- published checksum. The runner applies that exact migration with foreign-key
+-- Migration 0012 rebuilds the actions table. The runner applies it with foreign-key
 -- enforcement disabled before reaching this forward validation boundary.
 CREATE TEMP TABLE input_action_foreign_key_validation (
     valid INTEGER NOT NULL CHECK(valid = 1)

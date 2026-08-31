@@ -241,6 +241,7 @@ async function run() {
     desktopDirectory: join(repositoryRoot, "desktop"),
     getAppearance: () => "dark",
     updater: { status: () => ({ phase: "development" }) },
+    openExternal: async () => undefined,
   });
   window = await createWindow(productSession);
   window.setSize(1280, 820);
