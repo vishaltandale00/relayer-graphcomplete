@@ -309,6 +309,9 @@ async function boot() {
   });
   const account = await refreshAccount();
   await initializeProviderSettings();
+  desktop?.models?.connectivityChanged?.(navigator.onLine).catch(() => undefined);
+  window.addEventListener("online", () => desktop?.models?.connectivityChanged?.(true).catch(() => undefined));
+  window.addEventListener("offline", () => desktop?.models?.connectivityChanged?.(false).catch(() => undefined));
   if (productApiAvailable) await initializeModelFamilySettings();
   await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
   if (productApiAvailable) {

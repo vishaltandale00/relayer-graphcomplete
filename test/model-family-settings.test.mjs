@@ -318,7 +318,7 @@ describe("model family settings layout", () => {
     expect(html).toContain("Model families");
     expect(html).toContain("<h3>Defaults</h3>");
     expect(html).toContain("<b>Harness</b>");
-    expect(html).toContain("<b>Provider</b>");
+    expect(html).not.toContain('id="defaultProviderSelect"');
     const defaultsIndex = html.indexOf('class="model-defaults"');
     const dividerIndex = html.indexOf('class="model-settings-divider"');
     const familyHeadingIndex = html.indexOf('class="model-families-heading"');
@@ -357,6 +357,8 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("if (!settingsRefreshGate.isCurrent(refreshToken)) return false;");
     expect(settingsSource).toContain("const invalidDefault = defaultHarnessIsSelectable(");
     expect(settingsSource).toContain('$("#defaultHarnessSelect").disabled = savingDefaults');
+    expect(settingsSource).toContain('data-family-default="${index}"');
+    expect(settingsSource).not.toContain('$("#defaultProviderSelect")');
     expect(settingsSource).toContain("await preparePermissionProfiles(candidate)");
     expect(settingsSource).toContain("await saveModelDefaults({ [field]: candidate })");
     expect(settingsSource).toContain("resetNewThreadModelPicker();");

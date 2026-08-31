@@ -38,7 +38,7 @@ const variants = [
   { scene: "error", caption: "Authentication error", width: 1280, required: ["Authentication failed", "Check the API key"] },
   { scene: "unavailable", caption: "Unavailable provider", width: 1280, required: ["Connection unavailable", "OpenAI Work"] },
   { scene: "stale", caption: "Stale catalog member", width: 1280, required: ["This model is no longer in the provider catalog", "Work coding"] },
-  { scene: "removed", caption: "Provider removal in progress", width: 1280, required: ["Finishing removal", "Removing"] },
+  { scene: "removed", caption: "Provider removal in progress", width: 1280, required: ["Removing"] },
   { scene: "no-compatible", caption: "No compatible harness recovery", width: 1280, required: ["No compatible harness", "Connect another provider", "OpenAI Work"] },
   { scene: "authorization", caption: "Authorization pending", width: 1280, required: ["Complete sign-in in your browser", "Claude subscription"] },
 ];
@@ -151,6 +151,14 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
         if (readiness === "pending") await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
       }
       if (readiness !== "ready") throw new Error(`Evidence page did not become ready (${readiness}).`);
+      await cdp.call("Runtime.evaluate", {
+        expression: `(() => {
+          const onboarding = document.querySelector("#desktopAccountOnboarding");
+          const dismiss = document.querySelector("#desktopAccountOnboardingNotNow");
+          if (!onboarding?.classList.contains("hidden") && dismiss) dismiss.click();
+        })()`,
+      });
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
       const screenshot = await cdp.call("Page.captureScreenshot", { format: "png", fromSurface: true });
       await writeFile(frame, Buffer.from(screenshot.data, "base64"));
       const dom = await cdp.call("Runtime.evaluate", {
@@ -775,7 +783,7 @@ try {
       endpoint: ["Endpoint", "gateway.example.com/openai/v1"],
       family: ["Choose your default model family", "GPT-5.2"],
       "alternate-harness": ["Choose your default model family", "Claude basic", "Claude Sonnet"],
-      providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Default provider"],
+      providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Edit connection"],
       families: ["Work coding", "Fast review", "GPT-5.6 Sol"],
       harnesses: ["Harnesses", "Codex basic", "Default harness"],
       recovery: ["OpenAI Work is rate limited", "Review the provider adapter architecture"],

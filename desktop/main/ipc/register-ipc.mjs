@@ -8,6 +8,7 @@ export function registerDesktopIpc({
   credentials,
   accountChannel = credentials,
   modelCatalog,
+  providerConnectivityChanged = async () => {},
   providerDefinitions = null,
   validateProviderOnboarding = null,
   conversationExporter,
@@ -35,6 +36,7 @@ export function registerDesktopIpc({
   }
   ipcMain.handle("relayer:model-catalog-settings-open", () => modelCatalog.settingsOpened());
   ipcMain.handle("relayer:model-catalog-refresh", (_event, providerId) => modelCatalog.explicitRefresh(providerId));
+  ipcMain.handle("relayer:provider-connectivity", (_event, online) => providerConnectivityChanged(online === true));
   ipcMain.handle("relayer:provider-status", async () => {
     if (!providerDefinitions) return null;
     const saved = await settings.read();
@@ -95,6 +97,18 @@ export function registerDesktopIpc({
       providerId: result.providerDefinition.id,
     });
     return result;
+  });
+  ipcMain.handle("relayer:provider-retry", async (_event, { id }) => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    const result = await providerDefinitions.retryConnection(id);
+    getWindow()?.webContents.send("relayer:providers-changed", { kind: "checked", providerId: id });
+    return result;
+  });
+  ipcMain.handle("relayer:provider-edit", async (_event, { id, endpoint, fields }) => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    const definition = await providerDefinitions.edit(id, { endpoint, fields });
+    getWindow()?.webContents.send("relayer:providers-changed", { kind: "edited", providerId: id });
+    return definition;
   });
   ipcMain.handle("relayer:provider-remove", async (_event, { id }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");

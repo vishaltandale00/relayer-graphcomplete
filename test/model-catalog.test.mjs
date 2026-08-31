@@ -262,6 +262,53 @@ describe("provider-neutral model catalog", () => {
     expect(fakeDiscover).not.toHaveBeenCalled();
     expect(otherDiscover).toHaveBeenCalledOnce();
   });
+
+  it("publishes only outage-class connection health and never promotes a rate limit to provider-wide failure", async () => {
+    const published = [];
+    let status = 503;
+    const error = () => Object.assign(new Error("upstream detail"), { status });
+    const service = new ModelCatalogService({
+      adapters: [new FakeModelCatalogAdapter(async () => { throw error(); })],
+      retry: { attempts: 1 },
+      publishSnapshot: async (snapshot) => published.push(snapshot),
+    });
+
+    await expect(service.explicitRefresh("fake")).rejects.toThrow("upstream detail");
+    expect(published).toEqual([expect.objectContaining({
+      connected: false,
+      unavailableReason: {
+        code: "provider_temporarily_unavailable",
+        message: "Provider could not be reached",
+      },
+    })]);
+    status = 429;
+    await expect(service.explicitRefresh("fake")).rejects.toThrow("upstream detail");
+    expect(published).toHaveLength(1);
+  });
+
+  it("preserves provider health while the device is offline and immediately rechecks affected providers online", async () => {
+    const published = [];
+    let calls = 0;
+    let recover = false;
+    const service = new ModelCatalogService({
+      adapters: [new FakeModelCatalogAdapter(async () => {
+        calls += 1;
+        if (!recover) throw Object.assign(new Error("network down"), { code: "transport" });
+        return providerSnapshot({ models: [{ id: "recovered" }] });
+      })],
+      retry: { attempts: 1 },
+      publishSnapshot: async (snapshot) => published.push(snapshot),
+    });
+    await expect(service.explicitRefresh("fake")).rejects.toThrow("network down");
+    expect(published.at(-1)).toMatchObject({ connected: false });
+    await service.connectivityChanged(false);
+    await expect(service.explicitRefresh("fake")).rejects.toThrow("Device is offline");
+    expect(calls).toBe(1);
+    recover = true;
+    await service.connectivityChanged(true);
+    expect(calls).toBe(2);
+    expect(published.at(-1)).toMatchObject({ connected: true, models: [{ id: "recovered" }] });
+  });
 });
 
 describe("Codex model catalog adapter", () => {

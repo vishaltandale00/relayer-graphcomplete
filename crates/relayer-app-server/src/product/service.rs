@@ -225,6 +225,37 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn update_provider_with_catalog(
+        &self,
+        definition: super::ProviderDefinition,
+        mut snapshot: ProviderCatalogSnapshot,
+    ) -> Result<(), ProductError> {
+        if definition.id != snapshot.provider_id || definition.lifecycle_state != "active" {
+            return Err(super::CatalogError::invalid(
+                "provider_definition_invalid",
+                "Edited provider identity must match its catalog and be active.",
+            )
+            .into());
+        }
+        super::validate_stable_id(definition.id.as_str(), "providerId")?;
+        super::validate_stable_id(&definition.adapter_id, "adapterId")?;
+        if !snapshot.connected {
+            return Err(super::CatalogError::invalid(
+                "provider_disconnected",
+                "A provider edit must validate before it can be saved.",
+            )
+            .into());
+        }
+        let managed_policy = self
+            .apply_default_harness_family_policy(&definition, &mut snapshot)
+            .await?;
+        validate_provider_snapshot(&snapshot, managed_policy.as_ref())?;
+        self.storage
+            .update_provider_with_catalog(&definition, &snapshot, managed_policy.as_ref(), &now())
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) fn new(storage: SqliteProductStore, runtime_available: bool) -> Self {
         Self {
             storage,

@@ -190,7 +190,8 @@ pub(crate) fn router(
         )
         .route(
             "/api/internal/provider-definitions/staged",
-            axum::routing::post(model_settings::create_provider_with_catalog),
+            axum::routing::post(model_settings::create_provider_with_catalog)
+                .put(model_settings::update_provider_with_catalog),
         )
         .route(
             "/api/internal/conversation-imports",

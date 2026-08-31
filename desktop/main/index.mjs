@@ -449,6 +449,7 @@ if (primaryInstance) {
         }),
       },
       modelCatalog,
+      providerConnectivityChanged: (online) => providerComposition.connectivityChanged(online),
       providerDefinitions: providerSetup,
       validateProviderOnboarding: () => productServer.validateProviderOnboarding(),
       conversationExporter,

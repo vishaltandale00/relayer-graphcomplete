@@ -172,6 +172,7 @@ export function sanitizeModelCatalogSnapshot(snapshot) {
       label: nonEmptyString(snapshot.provider?.label, "provider.label"),
       status,
       unavailableReason,
+      unavailableReasonCode: optionalString(snapshot.provider?.unavailableReasonCode, "provider.unavailableReasonCode"),
     }),
     models,
     systemFamily: Object.freeze({
@@ -183,13 +184,14 @@ export function sanitizeModelCatalogSnapshot(snapshot) {
   });
 }
 
-export function unavailableModelCatalogSnapshot(adapter, reason) {
+export function unavailableModelCatalogSnapshot(adapter, reason, code = "provider_unavailable") {
   return sanitizeModelCatalogSnapshot({
     provider: {
       id: adapter.providerId,
       label: adapter.providerLabel,
       status: "unavailable",
       unavailableReason: reason instanceof Error ? reason.message : String(reason || "Provider catalog is unavailable."),
+      unavailableReasonCode: code,
     },
     models: [],
     systemFamily: {
@@ -208,7 +210,7 @@ export function toProductCatalogSnapshot(snapshot) {
     connected: sanitized.provider.status === "available",
     ...(sanitized.provider.status === "unavailable" ? {
       unavailableReason: Object.freeze({
-        code: "provider_unavailable",
+        code: sanitized.provider.unavailableReasonCode ?? "provider_unavailable",
         message: sanitized.provider.unavailableReason,
       }),
     } : {}),
