@@ -2341,6 +2341,16 @@ fn validated_interaction_input_digest(
     contexts: &[super::InteractionContextIntent],
     submitted_inputs: &[relayer_graph_core::SubmittedInputDraft],
 ) -> Result<String, ProductError> {
+    if submitted_inputs.len() > crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN {
+        return Err(ProductError::InputValidation {
+            code: "submitted_input_limit_exceeded",
+            path: "submittedInputs",
+            message: format!(
+                "A Send may contain at most {} submitted inputs.",
+                crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN
+            ),
+        });
+    }
     if text.trim().is_empty()
         && submitted_inputs.is_empty()
         && !contexts
@@ -2588,6 +2598,47 @@ mod tests {
                     ..
                 }
             ))
+        ));
+    }
+
+    #[test]
+    fn input_send_rejects_more_children_than_the_portable_turn_limit() {
+        let submitted = relayer_graph_core::SubmittedInputDraft {
+            occurrence: relayer_graph_core::PresentingInputOccurrence {
+                presenting_interaction_node_id: relayer_graph_core::NodeId::new(17).unwrap(),
+                presenting_layer_id: relayer_graph_core::LayerId::new(19).unwrap(),
+                action_id: relayer_graph_core::ActionId::new(23).unwrap(),
+            },
+            action: relayer_graph_core::InputAction {
+                control: relayer_graph_core::InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: relayer_graph_core::SubmittedInputValue::Text {
+                text: "exact".into(),
+            },
+        };
+        let submitted_inputs =
+            vec![submitted; crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN + 1];
+
+        assert!(
+            validated_interaction_input_digest(
+                "",
+                &[],
+                &submitted_inputs[..crate::conversation_export::MAX_SUBMITTED_INPUTS_PER_TURN],
+            )
+            .is_ok()
+        );
+
+        assert!(matches!(
+            validated_interaction_input_digest("", &[], &submitted_inputs),
+            Err(ProductError::InputValidation {
+                code: "submitted_input_limit_exceeded",
+                path: "submittedInputs",
+                ..
+            })
         ));
     }
 

@@ -30,11 +30,13 @@ import {
   createNodeInputDraftLoadQueue,
   initialInputStageValue,
   inputActionReviewRef,
+  inputKeyBelongsToThread,
   inspectedInputDraftRevision,
   inputOccurrenceKey,
   inputStageValuesEqual,
   restoreTextControlState,
   summarizeInputStage,
+  threadHasPendingInputMutation,
   threadInputOccurrenceKey,
   validateInputStage,
 } from "../node-input-controls.js";
@@ -1407,13 +1409,6 @@ export function createProductWorkspace({
   const contextDraftLoadRetryAttempts = new Map();
   let disposed = false;
 
-  const inputKeyBelongsToThread = (key, threadId) => {
-    try {
-      return JSON.parse(key)?.[0] === String(threadId);
-    } catch {
-      return false;
-    }
-  };
   const clearInputStagesForThread = (threadId) => {
     for (const collection of [inputStages, inputErrors, inputRailScroll, inputTouched]) {
       for (const key of collection.keys()) {
@@ -2927,7 +2922,7 @@ export function createProductWorkspace({
       && (modelPicker?.isReady() ?? false)
       && !contextEditor;
     send.disabled = threadHasInFlightSend(inFlightSendThreads, getThread()?.id)
-      || inputPending.size > 0
+      || threadHasPendingInputMutation(inputPending, getThread()?.id)
       || !contextDraftsReady || !inputDraftsReady || (!replayReady && !composerSubmissionReady(
       prompt.value,
       prompt.disabled,

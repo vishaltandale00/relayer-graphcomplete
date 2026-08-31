@@ -176,7 +176,12 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
       let capturedScreenshotId;
       try {
         const output = await reviewSession.screenshot(input);
-        if (!output?.ok) return { output, images: [] };
+        if (!output?.ok) {
+          const failedCapture = operatorCapture;
+          operatorCapture = null;
+          if (failedCapture) inputOperator.failCapture(failedCapture.captureId);
+          return { output, images: [] };
+        }
         const screenshot = output.screenshot;
         capturedScreenshotId = screenshot.screenshotId;
         if (operatorCapture) {

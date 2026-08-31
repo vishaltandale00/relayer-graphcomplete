@@ -657,6 +657,14 @@ describe("product workspace keyboard behavior", () => {
       "threadHasInFlightSend(inFlightSendThreads, getThread()?.id)",
     );
     expect(stagingSeam).not.toContain("Boolean(sendAttempt)");
+
+    const composerStart = workspaceSource.indexOf("const syncComposer = () => {");
+    const composerEnd = workspaceSource.indexOf("const releaseSendAttempt", composerStart);
+    const composerSeam = workspaceSource.slice(composerStart, composerEnd);
+    expect(composerSeam).toContain(
+      "threadHasPendingInputMutation(inputPending, getThread()?.id)",
+    );
+    expect(composerSeam).not.toContain("inputPending.size > 0");
   });
 
   it("retains the owning thread's in-flight lock across navigation", () => {

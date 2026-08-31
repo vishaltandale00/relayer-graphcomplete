@@ -74,6 +74,22 @@ export function threadInputOccurrenceKey(threadId, occurrence) {
   ]);
 }
 
+export function inputKeyBelongsToThread(key, threadId) {
+  if (threadId === undefined || threadId === null) return false;
+  try {
+    return JSON.parse(key)?.[0] === String(threadId);
+  } catch {
+    return false;
+  }
+}
+
+export function threadHasPendingInputMutation(pendingKeys, threadId) {
+  for (const key of pendingKeys) {
+    if (inputKeyBelongsToThread(key, threadId)) return true;
+  }
+  return false;
+}
+
 export function committedInputAttachment(draft, occurrence) {
   const key = inputOccurrenceKey(occurrence);
   return (draft?.attachments || []).find(

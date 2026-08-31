@@ -1245,6 +1245,38 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
     .await;
     let thread_id = thread["id"].as_i64().unwrap();
     seed_explicit_test_model_default(&database, thread_id).await;
+    let boundary_seed_app = open_app(&database, &root).await;
+    let max_thread = response_json(
+        boundary_seed_app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Exactly 256 inputs" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let overflow_thread = response_json(
+        boundary_seed_app
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Reject 257 inputs" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let max_thread_id = max_thread["id"].as_i64().unwrap();
+    let overflow_thread_id = overflow_thread["id"].as_i64().unwrap();
+    seed_thread_with_current_test_model(&database, max_thread_id).await;
+    seed_thread_with_current_test_model(&database, overflow_thread_id).await;
+    seed_action_input_draft_count(&database, max_thread_id, 256).await;
+    seed_action_input_draft_count(&database, overflow_thread_id, 257).await;
 
     let observed = Arc::new(Mutex::new(None));
     let observed_request = observed.clone();
@@ -1294,12 +1326,45 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
                 let observed_interaction_request = observed_interaction_request.clone();
                 async move {
                     *observed_interaction_request.lock().unwrap() = Some(body.clone());
+                    let submitted_inputs = serde_json::from_value::<
+                        Vec<relayer_graph_core::SubmittedInputDraft>,
+                    >(body["submittedInputs"].clone())
+                    .unwrap();
+                    let semantic_digest = relayer_graph_core::interaction_input_semantic_digest(
+                        body["text"].as_str().unwrap(),
+                        &submitted_inputs,
+                    )
+                    .unwrap();
+                    let input_children = body["submittedInputs"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .enumerate()
+                        .map(|(index, submitted)| {
+                            let action_id = submitted["actionId"].as_i64().unwrap();
+                            json!({
+                                "id": format!("interaction-input-child:{}", index + 1),
+                                "parentInteractionNodeId": 501,
+                                "occurrence": {
+                                    "presentingInteractionNodeId": submitted["presentingInteractionNodeId"],
+                                    "presentingLayerId": submitted["presentingLayerId"],
+                                    "actionId": action_id
+                                },
+                                "sourceNodeId": if action_id >= 3_000 { action_id + 1_000 } else { 401 },
+                                "action": submitted["action"],
+                                "value": submitted["value"],
+                                "attemptKey": body["inputIdentity"],
+                                "authorityDigest": body["inputDigest"],
+                                "semanticDigest": semantic_digest
+                            })
+                        })
+                        .collect::<Vec<_>>();
                     axum::Json(json!({
                         "node": {"id": 501},
                         "graphToken": "",
                         "inputIdentity": body["inputIdentity"],
                         "inputDigest": body["inputDigest"],
-                        "inputChildren": []
+                        "inputChildren": input_children
                     }))
                 }
             }),
@@ -1333,6 +1398,69 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
     )
     .unwrap();
     let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let max_send = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{max_thread_id}/interactions"),
+            Some(json!({
+                "text": "Accept the portable maximum",
+                "inputId": "portable-input-maximum",
+                "inputDraftRevision": 256
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(max_send.status(), StatusCode::CREATED);
+    assert_eq!(
+        observed_interaction.lock().unwrap().as_ref().unwrap()["submittedInputs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        256
+    );
+    let overflow_send = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{overflow_thread_id}/interactions"),
+            Some(json!({
+                "text": "Reject one over the portable maximum",
+                "inputId": "portable-input-overflow",
+                "inputDraftRevision": 257
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(overflow_send.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let overflow_send = response_json(overflow_send).await;
+    assert_eq!(overflow_send["code"], "submitted_input_limit_exceeded");
+    assert_eq!(overflow_send["path"], "submittedInputs");
+    let pool = sqlite_pool(&database).await;
+    let preserved_revision: i64 =
+        sqlx::query_scalar("SELECT revision FROM action_input_drafts WHERE thread_id=?1")
+            .bind(overflow_thread_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let preserved_attachments: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM action_input_attachments WHERE thread_id=?1")
+            .bind(overflow_thread_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(preserved_revision, 257);
+    assert_eq!(preserved_attachments, 257);
+    let overflow_interactions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM interactions WHERE thread_id=?1")
+            .bind(overflow_thread_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(overflow_interactions, 1);
+    pool.close().await;
     let occurrence = json!({
         "presentingInteractionNodeId": 101,
         "presentingLayerId": 201,
@@ -7692,6 +7820,54 @@ async fn seed_explicit_test_model_default(database: &Path, thread_id: i64) {
         .execute(&pool)
         .await
         .unwrap();
+    pool.close().await;
+}
+
+async fn seed_thread_with_current_test_model(database: &Path, thread_id: i64) {
+    let pool = sqlite_pool(database).await;
+    let family_id: i64 = sqlx::query_scalar(
+        "SELECT default_family_id FROM product_model_preferences WHERE singleton=1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE interactions SET completion_status='accepted',model_provider_id='codex',provider_model_id='test-model',model_family_id=?1 WHERE thread_id=?2")
+        .bind(family_id)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}
+
+async fn seed_action_input_draft_count(database: &Path, thread_id: i64, count: i64) {
+    let pool = sqlite_pool(database).await;
+    sqlx::query(
+        "INSERT INTO action_input_drafts(thread_id,revision,updated_at) VALUES (?1,?2,'seed')",
+    )
+    .bind(thread_id)
+    .bind(count)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let action = json!({
+        "control": "text",
+        "prompt": "Seeded portable input"
+    })
+    .to_string();
+    for index in 0..count {
+        sqlx::query("INSERT INTO action_input_attachments(thread_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'seed')")
+            .bind(thread_id)
+            .bind(1_000 + index)
+            .bind(2_000 + index)
+            .bind(3_000 + index)
+            .bind(4_000 + index)
+            .bind(&action)
+            .bind(json!({ "text": format!("value-{index}") }).to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
     pool.close().await;
 }
 

@@ -9,10 +9,12 @@ import {
   initialInputStageValue,
   inspectedInputDraftRevision,
   inputActionReviewRef,
+  inputKeyBelongsToThread,
   inputOccurrenceKey,
   inputStageValueForApi,
   inputStageValuesEqual,
   summarizeInputStage,
+  threadHasPendingInputMutation,
   threadInputOccurrenceKey,
   validateInputStage,
   restoreTextControlState,
@@ -75,6 +77,19 @@ describe("node input control state", () => {
     expect(threadInputOccurrenceKey(7, occurrence)).not.toBe(threadInputOccurrenceKey(8, occurrence));
     expect(createInputOccurrence(41, 52, 63)).toEqual(occurrence);
     expect(() => createInputOccurrence(41, null, 63)).toThrow("presentingLayerId is required");
+  });
+
+  it("scopes pending input mutations to their owning thread", () => {
+    const pending = new Set([
+      threadInputOccurrenceKey("thread-a", occurrence),
+      threadInputOccurrenceKey("thread-c", otherOccurrence),
+    ]);
+
+    expect(threadHasPendingInputMutation(pending, "thread-a")).toBe(true);
+    expect(threadHasPendingInputMutation(pending, "thread-b")).toBe(false);
+    expect(threadHasPendingInputMutation(new Set(), "thread-a")).toBe(false);
+    expect(threadHasPendingInputMutation(new Set(), undefined)).toBe(false);
+    expect(inputKeyBelongsToThread("not-json", "thread-a")).toBe(false);
   });
 
   it("looks up committed attachments and initializes renderer-local staged values", () => {

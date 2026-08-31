@@ -507,6 +507,57 @@ async function run() {
   window.webContents.setZoomFactor(1);
   await waitForPaint();
 
+  let pendingInputCommitHeld = false;
+  let releasePendingInputCommit;
+  const pendingInputCommitFilter = {
+    urls: [`${productSession.origin}/api/threads/${thread.id}/input-draft/attachments`],
+  };
+  window.webContents.session.webRequest.onBeforeRequest(
+    pendingInputCommitFilter,
+    (details, callback) => {
+      if (!pendingInputCommitHeld && details.method === "PUT") {
+        pendingInputCommitHeld = true;
+        releasePendingInputCommit = () => callback({});
+        return;
+      }
+      callback({});
+    },
+  );
+  await setValue("#threadPrompt", "Thread A is ready except for its pending input commit.");
+  await setValue(".node-input-text", "Thread A pending input replacement.");
+  await click("[aria-label='Commit Name the governing constraint']");
+  await waitFor("thread A input commit held in flight", () => pendingInputCommitHeld);
+  await waitFor("thread A Send disabled by its pending input", () => evaluate(`(
+    document.querySelector('#sendInteraction')?.disabled === true
+  )`));
+  await click(`[data-thread='${idleThread.id}']`);
+  await waitFor("thread B opens while A input commit is pending", () => evaluate(`(() => (
+    document.querySelector("[data-thread='${idleThread.id}']")?.classList.contains('active')
+      && document.querySelectorAll('.graph-node').length === 2
+      && document.querySelector('#threadPrompt')?.disabled === false
+  ))()`));
+  await setValue("#threadPrompt", "Thread B remains independently sendable.");
+  await waitFor("thread B Send remains enabled", () => evaluate(`(
+    document.querySelector('#sendInteraction')?.disabled === false
+  )`));
+  await click(`[data-thread='${thread.id}']`);
+  await waitFor("thread A restored with pending input", () => evaluate(`(() => (
+    document.querySelector("[data-thread='${thread.id}']")?.classList.contains('active')
+      && document.querySelectorAll('.graph-node').length === 2
+  ))()`));
+  await clickNode("Input grammar");
+  await waitFor("thread A Send remains disabled until input settlement", () => evaluate(`(
+    document.querySelector('#sendInteraction')?.disabled === true
+  )`));
+  releasePendingInputCommit();
+  window.webContents.session.webRequest.onBeforeRequest(pendingInputCommitFilter, null);
+  await waitFor("thread A input commit settles and Send unlocks", async () => (
+    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments?.some(
+      (attachment) => attachment.value?.text === "Thread A pending input replacement.",
+    )
+      && await evaluate(`document.querySelector('#sendInteraction')?.disabled === false`)
+  ));
+
   let pendingThreadSendHeld = false;
   let cancelPendingThreadSend;
   const pendingThreadSendFilter = {

@@ -287,6 +287,40 @@ describe("local Electron simulated-user judge adapter", () => {
     expect(screenshots).toEqual(new Map());
   });
 
+  it("fails an input capture when the screenshot request returns an unsuccessful result", async () => {
+    const occurrence = { presentingInteractionNodeId: 41, presentingLayerId: 10, actionId: 13 };
+    const session = {
+      state: vi.fn(async () => ({ threadRevision: "thread:7:input-draft:0" })),
+      screenshot: vi.fn(async () => ({ ok: false, error: "viewport unavailable" })),
+      interact: vi.fn(),
+      history: vi.fn(),
+    };
+    const operator = {
+      beginCapture: vi.fn(() => ({
+        captureId: "capture-unsuccessful",
+        threadRevision: "thread:7:input-draft:0",
+      })),
+      failCapture: vi.fn(),
+    };
+    const controller = createReviewSessionController(session, new Map(), {
+      inputOperator: operator,
+      inputBindings: new Map([["input-action-41-10-13", {
+        occurrence,
+        action: { control: "text", prompt: "When?" },
+      }]]),
+    });
+
+    await expect(controller.screenshot({
+      target: { kind: "element", elementRef: "input-action-41-10-13" },
+      mode: "full",
+      label: "Unsuccessful screenshot",
+    })).resolves.toEqual({
+      output: { ok: false, error: "viewport unavailable" },
+      images: [],
+    });
+    expect(operator.failCapture).toHaveBeenCalledWith("capture-unsuccessful");
+  });
+
   it("refuses operator Send until one commissioned input is committed and the production control is enabled", async () => {
     const session = {
       state: vi.fn(async () => ({
