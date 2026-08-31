@@ -137,90 +137,52 @@ describe("provider-neutral model catalog", () => {
     expect(published.at(-1).snapshot).toMatchObject({ models: [{ id: "model-5" }] });
   });
 
-  it("reuses an in-flight catalog refresh for concurrent pre-inference callers", async () => {
-    let active = 0;
-    let maximumActive = 0;
+  it("shares one pre-inference refresh while isolating caller cancellation", async () => {
     let calls = 0;
-    const published = [];
-    let releaseDiscovery;
-    const discoveryReleased = new Promise((resolve) => { releaseDiscovery = resolve; });
-    const service = new ModelCatalogService({
-      adapters: [new FakeModelCatalogAdapter(async () => {
-        calls += 1;
-        active += 1;
-        maximumActive = Math.max(maximumActive, active);
-        await discoveryReleased;
-        active -= 1;
-        return providerSnapshot({ models: [{ id: `model-${calls}` }] });
-      })],
-      publishSnapshot: async (snapshot, context) => published.push({ snapshot, context }),
-    });
-
-    const settingsRefresh = service.settingsOpened();
-    await vi.waitFor(() => expect(calls).toBe(1));
-    const firstInference = service.beforeInference();
-    const secondInference = service.beforeInference();
-    releaseDiscovery();
-    await Promise.all([settingsRefresh, firstInference, secondInference]);
-
-    expect(calls).toBe(1);
-    expect(maximumActive).toBe(1);
-    expect(published).toHaveLength(1);
-    expect(published[0].context.reason).toBe("settings-open");
-  });
-
-  it("does not publish a pre-inference snapshot after its trusted request is aborted", async () => {
-    let discoveryStarted;
-    const started = new Promise((resolve) => { discoveryStarted = resolve; });
-    const publishSnapshot = vi.fn();
-    const service = new ModelCatalogService({
-      adapters: [new FakeModelCatalogAdapter(({ signal }) => new Promise((_resolve, reject) => {
-        discoveryStarted();
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-      }))],
-      publishSnapshot,
-    });
-    const controller = new AbortController();
-    const refresh = service.beforeInference({ signal: controller.signal });
-    await started;
-
-    controller.abort(new Error("trusted refresh deadline exceeded"));
-
-    await expect(refresh).rejects.toThrow("trusted refresh deadline exceeded");
-    expect(publishSnapshot).not.toHaveBeenCalled();
-  });
-
-  it("isolates cancellation between callers sharing a pre-inference refresh", async () => {
     let releaseDiscovery;
     let discoverySignal;
     const discoveryReleased = new Promise((resolve) => { releaseDiscovery = resolve; });
-    const publishSnapshot = vi.fn(async () => {});
+    const published = [];
     const service = new ModelCatalogService({
       adapters: [new FakeModelCatalogAdapter(async ({ signal }) => {
+        calls += 1;
         discoverySignal = signal;
         await discoveryReleased;
         return providerSnapshot({ models: [{ id: "shared" }] });
       })],
-      publishSnapshot,
+      publishSnapshot: async (snapshot, context) => { published.push({ snapshot, context }); },
     });
+    const settings = service.settingsOpened();
+    await vi.waitFor(() => expect(discoverySignal).toBeInstanceOf(AbortSignal));
     const firstController = new AbortController();
     const secondController = new AbortController();
     const first = service.beforeInference({ providerId: "fake", signal: firstController.signal });
-    await vi.waitFor(() => expect(discoverySignal).toBeInstanceOf(AbortSignal));
     const second = service.beforeInference({ providerId: "fake", signal: secondController.signal });
 
     firstController.abort(new Error("first deadline expired"));
-
-    await expect(first).rejects.toThrow("first deadline expired");
-    expect(discoverySignal.aborted).toBe(false);
     releaseDiscovery();
-    await expect(second).resolves.toMatchObject({ models: [{ id: "shared" }] });
-    expect(publishSnapshot).toHaveBeenCalledOnce();
+    const settled = await Promise.allSettled([settings, first, second]);
+    expect({
+      statuses: settled.map(({ status }) => status),
+      cancelled: settled[1].reason.message,
+      survivor: settled[2].value.models.map(({ id }) => id),
+      discoveryAborted: discoverySignal.aborted,
+      calls,
+      reasons: published.map(({ context }) => context.reason),
+    }).toEqual({
+      statuses: ["fulfilled", "rejected", "fulfilled"],
+      cancelled: "first deadline expired",
+      survivor: ["shared"],
+      discoveryAborted: false,
+      calls: 1,
+      reasons: ["settings-open"],
+    });
   });
 
-  it("starts a fresh pre-inference refresh instead of joining an abandoned one", async () => {
+  it("abandons an unobserved refresh without publication and permits a fresh successor", async () => {
     let calls = 0;
     let firstSignal;
+    const publishSnapshot = vi.fn(async () => {});
     const service = new ModelCatalogService({
       adapters: [new FakeModelCatalogAdapter(({ signal }) => {
         calls += 1;
@@ -232,18 +194,17 @@ describe("provider-neutral model catalog", () => {
         }
         return providerSnapshot({ models: [{ id: "replacement" }] });
       })],
-      publishSnapshot: vi.fn(async () => {}),
+      publishSnapshot,
     });
     const expiredController = new AbortController();
     const expired = service.beforeInference({ providerId: "fake", signal: expiredController.signal });
     await vi.waitFor(() => expect(firstSignal).toBeInstanceOf(AbortSignal));
     expiredController.abort(new Error("deadline expired"));
-
-    const replacement = service.beforeInference({ providerId: "fake" });
-
     await expect(expired).rejects.toThrow("deadline expired");
+    const replacement = service.beforeInference({ providerId: "fake" });
     await expect(replacement).resolves.toMatchObject({ models: [{ id: "replacement" }] });
     expect(calls).toBe(2);
+    expect(publishSnapshot).toHaveBeenCalledOnce();
   });
 
   it("refreshes only the provider selected for inference", async () => {
@@ -362,7 +323,6 @@ describe("Codex model catalog adapter", () => {
     const unavailable = await new CodexModelCatalogAdapter({
       credentials: { account: async () => ({ status: "unavailable", account: null, error: "opaque-private-value" }), request },
     }).discover();
-
     expect(request).not.toHaveBeenCalled();
     expect(disconnected).toMatchObject({ provider: { status: "disconnected" }, models: [] });
     expect(unavailable).toMatchObject({
@@ -372,18 +332,16 @@ describe("Codex model catalog adapter", () => {
   });
 
   it("fails closed on malformed pages or repeated cursors", async () => {
-    const invalid = new CodexModelCatalogAdapter({
-      credentials: { account: async () => ({ status: "connected" }), request: async () => ({ data: null, nextCursor: null }) },
+    let response = { data: null, nextCursor: null };
+    const request = vi.fn(async () => response);
+    const adapter = new CodexModelCatalogAdapter({
+      credentials: { account: async () => ({ status: "connected" }), request },
     });
-    await expect(invalid.discover()).rejects.toThrow("invalid data page");
-
+    await expect(adapter.discover()).rejects.toThrow("invalid data page");
     let calls = 0;
-    const repeated = new CodexModelCatalogAdapter({
-      credentials: {
-        account: async () => ({ status: "connected" }),
-        request: async () => ({ data: [], nextCursor: calls++ === 0 ? "same" : "same" }),
-      },
-    });
-    await expect(repeated.discover()).rejects.toThrow("repeated a pagination cursor");
+    request.mockImplementation(async () => ({ data: [], nextCursor: calls++ === 0 ? "same" : "same" }));
+    await expect(adapter.discover()).rejects.toThrow("repeated a pagination cursor");
+    expect(request).toHaveBeenCalledTimes(3);
   });
+
 });

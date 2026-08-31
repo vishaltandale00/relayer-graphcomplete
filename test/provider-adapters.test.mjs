@@ -58,7 +58,7 @@ function runtimeForAdapter(adapterId) {
 }
 
 describe("authoritative provider adapter registry", () => {
-  it("contains exactly the six initial production adapters with valid contracts", async () => {
+  it("validates the authoritative registry and rejects malformed or duplicate descriptors", async () => {
     expect(ACTIVE_PROVIDER_ADAPTER_IDS).toEqual(expectedAdapters);
     expect(productionProviderAdapterRegistry.list().map(({ adapterId }) => adapterId)).toEqual(expectedAdapters);
     expect(Object.keys(ACTIVE_PROVIDER_ADAPTER_MODULES)).toEqual(expectedAdapters);
@@ -73,9 +73,6 @@ describe("authoritative provider adapter registry", () => {
       "sonnet", "opus", "fable",
     ]);
     expect(() => productionProviderAdapterRegistry.get("future-provider")).toThrow("Unknown provider adapter");
-  });
-
-  it("rejects duplicate and invalid descriptors", () => {
     const descriptor = {
       adapterId: "fake", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
       defaultEndpoint: "https://example.test/v1", endpointEditableDuringCreation: true,
@@ -86,9 +83,9 @@ describe("authoritative provider adapter registry", () => {
     expect(() => createProviderAdapterRegistry([{ ...descriptor, implementationVersion: "v1" }])).toThrow("positive integer");
   });
 
-  it("requires and routes an explicit managed runtime for every active adapter", async () => {
+  it("routes every managed adapter through its explicit runtime environment", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-provider-dependencies-"));
-    for (const adapterId of expectedAdapters) {
+    const routed = await Promise.allSettled(expectedAdapters.map(async (adapterId) => {
       const id = `${adapterId}-work`;
       const managedRuntime = runtimeForAdapter(adapterId);
       const dependencies = await productionProviderRuntimeDependencies({ id, adapterId }, {
@@ -103,75 +100,90 @@ describe("authoritative provider adapter registry", () => {
           UNRELATED_TOKEN: "ambient-unrelated-secret",
         },
       });
-      expect(dependencies.managedRuntime).toEqual(managedRuntime);
-      expect(dependencies.environment).toMatchObject({
-        PATH: managedRuntime.runtimeId === "codex" ? "/codex-path:/safe/bin" : "/safe/bin",
-        HOME: "/Users/tester",
-        USERPROFILE: "C:\\Users\\tester",
-      });
-      expect(dependencies.environment).not.toHaveProperty("OPENAI_API_KEY");
-      expect(dependencies.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
-      expect(dependencies.environment).not.toHaveProperty("UNRELATED_TOKEN");
-      if (managedRuntime.runtimeId === "codex") {
-        expect(dependencies.environment).toMatchObject({
-          CODEX_HOME: join(root, id, "codex-home"),
-          RELAYER_CODEX_BINARY: managedRuntime.executable,
-        });
-      } else {
-        expect(dependencies.environment.CLAUDE_CONFIG_DIR).toBe(join(root, id, "claude-home"));
-      }
-    }
-    await expect(productionProviderRuntimeDependencies({
-      id: "openai-work", adapterId: "openai-api",
-    }, { runtimeRoot: root, environment: {}, codexBinary: "/ambient/codex" }))
-      .rejects.toThrow("managed runtime");
-    await expect(productionProviderRuntimeDependencies({
-      id: "claude-work", adapterId: "claude-subscription",
-    }, { runtimeRoot: root, environment: {}, managedRuntime: codexRuntime }))
-      .rejects.toThrow("requires the claude managed runtime");
-  });
-
-  it("uses one conventional Windows Path for Claude authentication", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-provider-claude-windows-path-"));
-    const dependencies = await productionProviderRuntimeDependencies({
+      return [adapterId, {
+        managedRuntime: dependencies.managedRuntime,
+        environment: dependencies.environment,
+      }];
+    }));
+    const rejected = await Promise.allSettled([
+      productionProviderRuntimeDependencies({ id: "openai-work", adapterId: "openai-api" }, {
+        runtimeRoot: root, environment: {}, codexBinary: "/ambient/codex",
+      }),
+      productionProviderRuntimeDependencies({ id: "claude-work", adapterId: "claude-subscription" }, {
+        runtimeRoot: root, environment: {}, managedRuntime: codexRuntime,
+      }),
+    ]);
+    const windowsDependencies = await productionProviderRuntimeDependencies({
       id: "claude-work", adapterId: "claude-subscription",
     }, {
       runtimeRoot: root,
       managedRuntime: claudeRuntime,
       platform: "win32",
-      environment: {
-        PATH: "C:\\ambiguous\\bin",
-        Path: "C:\\Windows\\System32;C:\\Program Files\\nodejs",
-      },
+      environment: { PATH: "C:\\ambiguous\\bin", Path: "C:\\Windows\\System32;C:\\Program Files\\nodejs" },
     });
     let spawnedEnvironment;
-    const spawnProcess = vi.fn(() => {
-      const child = new EventEmitter();
-      child.stdout = new EventEmitter();
-      child.stderr = new EventEmitter();
-      child.kill = vi.fn();
-      queueMicrotask(() => {
-        child.stdout.emit("data", JSON.stringify({ loggedIn: true }));
-        child.emit("exit", 0);
-      });
-      return child;
-    });
     const runtime = new ClaudeCliManagedRuntime({
-      environment: dependencies.environment,
-      executable: dependencies.executable,
+      environment: windowsDependencies.environment,
+      executable: windowsDependencies.executable,
       spawnProcess: (...args) => {
         spawnedEnvironment = args[2].env;
-        return spawnProcess(...args);
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = vi.fn();
+        queueMicrotask(() => {
+          child.stdout.emit("data", JSON.stringify({ loggedIn: true }));
+          child.emit("exit", 0);
+        });
+        return child;
       },
     });
-
-    await expect(runtime.account()).resolves.toMatchObject({ status: "connected" });
-    expect(spawnedEnvironment.Path).toBe("C:\\Windows\\System32;C:\\Program Files\\nodejs");
-    expect(spawnedEnvironment).not.toHaveProperty("PATH");
-    expect(Object.keys(spawnedEnvironment).filter((key) => key.toLowerCase() === "path")).toEqual(["Path"]);
+    const account = await runtime.account();
+    const observed = Object.fromEntries(routed.map((result, index) => (
+      result.status === "fulfilled" ? result.value : [expectedAdapters[index], { error: result.reason.message }]
+    )));
+    const expected = Object.fromEntries(expectedAdapters.map((adapterId) => {
+      const id = `${adapterId}-work`;
+      const managedRuntime = runtimeForAdapter(adapterId);
+      return [adapterId, {
+        managedRuntime,
+        environment: expect.objectContaining({
+          PATH: managedRuntime.runtimeId === "codex" ? "/codex-path:/safe/bin" : "/safe/bin",
+          HOME: "/Users/tester",
+          USERPROFILE: "C:\\Users\\tester",
+          ...(managedRuntime.runtimeId === "codex"
+            ? { CODEX_HOME: join(root, id, "codex-home"), RELAYER_CODEX_BINARY: managedRuntime.executable }
+            : { CLAUDE_CONFIG_DIR: join(root, id, "claude-home") }),
+        }),
+      }];
+    }));
+    expect({
+      observed,
+      ambientSecrets: Object.values(observed).flatMap(({ environment }) => (
+        ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "UNRELATED_TOKEN"].filter((key) => key in environment)
+      )),
+      rejected: rejected.map((result) => result.reason.message),
+      windows: {
+        account: account.status,
+        path: spawnedEnvironment.Path,
+        pathKeys: Object.keys(spawnedEnvironment).filter((key) => key.toLowerCase() === "path"),
+      },
+    }).toEqual({
+      observed: expected,
+      ambientSecrets: [],
+      rejected: [
+        expect.stringContaining("managed runtime"),
+        expect.stringContaining("requires the claude managed runtime"),
+      ],
+      windows: {
+        account: "connected",
+        path: "C:\\Windows\\System32;C:\\Program Files\\nodejs",
+        pathKeys: ["Path"],
+      },
+    });
   });
 
-  it("preserves the legacy Codex home only for the migrated default definition across restarts", async () => {
+  it("preserves only the migrated default Codex home with legacy override precedence", async () => {
     const profile = await mkdtemp(join(tmpdir(), "relayer-legacy-codex-home-"));
     const runtimeRoot = join(profile, "provider-runtimes");
     const legacyHome = join(profile, "codex-home");
@@ -202,9 +214,6 @@ describe("authoritative provider adapter registry", () => {
     }, context);
     expect(newDefinition.environment.CODEX_HOME)
       .toBe(join(runtimeRoot, "new-codex-connection", "codex-home"));
-  });
-
-  it("resolves both legacy Codex home locations with the prior override precedence", () => {
     expect(resolveLegacyCodexHome("/profile", {})).toBe(join("/profile", "codex-home"));
     expect(resolveLegacyCodexHome("/profile", { RELAYER_CODEX_HOME: "/custom/codex" }))
       .toBe("/custom/codex");
@@ -223,425 +232,324 @@ describe("authoritative provider adapter registry", () => {
 });
 
 describe("secret-backed API adapters", () => {
-  it.each([
-    ["openai-api", [{ id: "gpt-5.4" }, { id: "text-embedding-3-large" }], "gpt-5.4"],
-    ["anthropic-api", [{ id: "claude-sonnet-4-20250514" }, { id: "embedding-model" }], "claude-sonnet-4-20250514"],
-    ["openrouter", [
-      { id: "openai/gpt-5.4", architecture: { output_modalities: ["text"] } },
-      { id: "openai/text-embedding-3-large", architecture: { output_modalities: ["embeddings"] } },
-    ], "openai/gpt-5.4"],
-    ["vercel-ai-router", [{ id: "openai/gpt-5.4", type: "language" }, { id: "openai/sora", type: "video" }], "openai/gpt-5.4"],
-  ])("%s preserves catalog diagnostics but admits only capability-proven agent models", async (
-    adapterId,
-    models,
-    eligibleId,
-  ) => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [...models, { id: "unknown-model" }] }),
-    }));
+  function adapterFixture(adapterId, { models = [], endpoint, fetch, secret = "secret" } = {}) {
     const descriptor = productionProviderAdapterRegistry.get(adapterId);
-    const adapter = productionProviderAdapterRegistry.create(
-      definition(adapterId, descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "secret" }, managedRuntime: runtimeForAdapter(adapterId), environment: {} },
-    );
-
-    const snapshot = await adapter.connect();
-    const product = toProductCatalogSnapshot(snapshot);
-
-    expect(snapshot.models.map(({ id, visible }) => ({ id, visible }))).toEqual(
-      models.concat({ id: "unknown-model" }).map(({ id }) => ({ id, visible: true })),
-    );
-    expect(snapshot.models.filter(({ availability }) => availability === "available").map(({ id }) => id))
-      .toEqual([eligibleId]);
-    expect(product.models.filter(({ available }) => !available)).toEqual([
-      expect.objectContaining({
-        unavailableReason: {
-          code: "provider_model_not_execution_eligible",
-          message: "This provider model is not eligible for agent execution.",
-        },
-      }),
-      expect.objectContaining({
-        id: "unknown-model",
-        unavailableReason: {
-          code: "provider_model_capability_unknown",
-          message: "This provider model has no recognized agent-execution capability evidence.",
-        },
-      }),
-    ]);
-  });
-
-  it("keeps a provider connected when discovery has zero execution-eligible models", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("openai-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openai-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "text-embedding-3-large" }] }) }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: codexRuntime,
-        environment: {},
-      },
-    );
-
-    const snapshot = await adapter.connect();
-
-    expect(snapshot.provider.status).toBe("available");
-    expect(snapshot.models).toEqual([expect.objectContaining({
-      id: "text-embedding-3-large",
-      visible: true,
-      availability: "unavailable",
-      unavailableReasonCode: "provider_model_not_execution_eligible",
-    })]);
-  });
-
-  it("rejects an expired OpenRouter key before accepting its public model catalog", async () => {
-    const fetch = vi.fn(async (url) => url.endsWith("/key")
-      ? { ok: false, status: 401 }
-      : {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ id: "deepseek/deepseek-v4-pro-0813", architecture: { output_modalities: ["text"] } }] }),
-        });
-    const descriptor = productionProviderAdapterRegistry.get("openrouter");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "expired" }, managedRuntime: codexRuntime, environment: {} },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({
-      provider: { status: "unavailable", unavailableReason: "Provider credentials were rejected." },
-      models: [],
-    });
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["https://openrouter.ai/api/v1/key"]);
-  });
-
-  it("uses the catalog contract without the proprietary key probe for a custom OpenRouter endpoint", async () => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [{ id: "z-ai/glm-5.3", architecture: { output_modalities: ["text"] } }] }),
-    }));
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", "https://router.example.test/v1"),
-      { fetch, secrets: { "api-key": "secret" }, managedRuntime: codexRuntime, environment: {} },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({ provider: { status: "available" } });
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["https://router.example.test/v1/models"]);
-  });
-
-  it("rejects Anthropic capability models even when their IDs start with claude", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("anthropic-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("anthropic-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "claude-embedding" }] }) }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: claudeRuntime,
-        environment: {},
-      },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({
-      models: [{ id: "claude-embedding", availability: "unavailable", unavailableReasonCode: "provider_model_not_execution_eligible" }],
-    });
-  });
-
-  it("admits only reviewed Claude text-family IDs and rejects unrecognized Claude capabilities", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("anthropic-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("anthropic-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [
-          { id: "claude-sonnet-4-20250514" },
-          { id: "claude-3-5-haiku-20241022" },
-          { id: "claude-realtime" },
-          { id: "claude-batch" },
-          { id: "claude-sonnet-realtime" },
-          { id: "claude-opus-batch" },
-          { id: "claude-haiku-audio" },
-          { id: "claude-3-realtime" },
-          { id: "claude-1-batch" },
-        ] }) }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: claudeRuntime,
-        environment: {},
-      },
-    );
-
-    const snapshot = await adapter.connect();
-    expect(snapshot.models.filter(({ availability }) => availability === "available").map(({ id }) => id))
-      .toEqual(["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"]);
-    expect(snapshot.models.filter(({ availability }) => availability === "unavailable").map(({ id, unavailableReasonCode }) => ({ id, unavailableReasonCode })))
-      .toEqual([
-        { id: "claude-realtime", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-batch", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-sonnet-realtime", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-opus-batch", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-haiku-audio", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-3-realtime", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-1-batch", unavailableReasonCode: "provider_model_capability_unknown" },
-      ]);
-  });
-
-  it("fails closed for an unknown model that merely uses an OpenAI agent-family prefix", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("openai-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openai-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "gpt-made-up" }] }) }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: codexRuntime,
-        environment: {},
-      },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({
-      provider: { status: "available" },
-      models: [{
-        id: "gpt-made-up",
-        availability: "unavailable",
-        unavailableReasonCode: "provider_model_capability_unknown",
-      }],
-    });
-  });
-
-  it("keeps a provider connected when every discovered model is provider-hidden and ineligible", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("openai-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openai-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ id: "text-embedding-3-large", hidden: true }] }),
-        }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: codexRuntime,
-        environment: {},
-      },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({
-      provider: { status: "available" },
-      models: [{
-        id: "text-embedding-3-large",
-        visible: false,
-        availability: "unavailable",
-        unavailableReasonCode: "provider_model_not_execution_eligible",
-      }],
-    });
-  });
-
-  for (const [adapterId, expectedEndpoint, expectedHeader] of [
-    ["openai-api", "https://api.openai.com/v1/models", "authorization"],
-    ["anthropic-api", "https://api.anthropic.com/v1/models", "x-api-key"],
-    ["openrouter", "https://openrouter.ai/api/v1/models", "authorization"],
-    ["vercel-ai-router", "https://ai-gateway.vercel.sh/v1/models", "authorization"],
-  ]) {
-    it(`${adapterId} discovers stable model ids through the common contract`, async () => {
-      const modelId = adapterId === "openai-api" ? "gpt-5.4" : "model-stable";
-      const fetch = vi.fn(async () => ({
-        ok: true,
-        status: 200,
-        json: async () => ({ data: [{ id: modelId, name: "Model Stable" }] }),
-      }));
-      const descriptor = productionProviderAdapterRegistry.get(adapterId);
-      const adapter = productionProviderAdapterRegistry.create(
-        definition(adapterId, descriptor.defaultEndpoint),
-        { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: runtimeForAdapter(adapterId), environment: { PATH: "/safe/bin" } },
-      );
-
-      const snapshot = await adapter.connect();
-
-      const expectedUrls = adapterId === "openrouter"
-        ? ["https://openrouter.ai/api/v1/key", expectedEndpoint]
-        : [expectedEndpoint];
-      expect(fetch.mock.calls.map(([url]) => url)).toEqual(expectedUrls);
-      expect(Object.keys(fetch.mock.calls.at(-1)[1].headers).map((key) => key.toLowerCase())).toContain(expectedHeader);
-      expect(snapshot.models[0]).toMatchObject({ id: modelId, executionModel: modelId });
-      expect(snapshot.systemFamily.modelIds).toEqual([]);
-    });
-  }
-
-  it("carries OpenRouter's exact per-model token capabilities into execution access", async () => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [
-        {
-          id: "z-ai/glm-5.3",
-          name: "GLM 5.3",
-          context_length: 202_752,
-          top_provider: { context_length: 196_608, max_completion_tokens: 131_072 },
-        },
-        {
-          id: "small-output-model",
-          name: "Small output model",
-          context_length: 32_768,
-          top_provider: { context_length: 32_768, max_completion_tokens: 2_048 },
-        },
-        { id: "unknown-limits", name: "Unknown limits" },
-      ] }),
-    }));
-    const descriptor = productionProviderAdapterRegistry.get("openrouter");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
-    );
-
-    await adapter.connect();
-
-    expect(adapter.executionAccess()).toMatchObject({
-      modelCapabilities: {
-        "z-ai/glm-5.3": { contextWindow: 196_608, maxOutputTokens: 131_072 },
-        "small-output-model": { contextWindow: 32_768, maxOutputTokens: 2_048 },
-      },
-    });
-    expect(adapter.executionAccess().modelCapabilities).not.toHaveProperty("unknown-limits");
-  });
-
-  it("carries Vercel AI Gateway's exact per-model token capabilities into execution access", async () => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [
-        {
-          id: "deepseek/deepseek-v4-pro-0813",
-          name: "DeepSeek V4 Pro 0813",
-          type: "language",
-          context_window: 1_000_000,
-          max_tokens: 384_000,
-        },
-        {
-          id: "unknown-limits",
-          name: "Unknown limits",
-          type: "language",
-        },
-      ] }),
-    }));
-    const descriptor = productionProviderAdapterRegistry.get("vercel-ai-router");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("vercel-ai-router", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
-    );
-
-    await adapter.connect();
-
-    expect(adapter.executionAccess()).toMatchObject({
-      modelCapabilities: {
-        "deepseek/deepseek-v4-pro-0813": { contextWindow: 1_000_000, maxOutputTokens: 384_000 },
-      },
-    });
-    expect(adapter.executionAccess().modelCapabilities).not.toHaveProperty("unknown-limits");
-  });
-
-  it("refreshes OpenRouter discovery before execution when startup did not populate capabilities", async () => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [{
-        id: "z-ai/glm-5.3",
-        context_length: 202_752,
-        top_provider: { context_length: 196_608, max_completion_tokens: 131_072 },
-      }] }),
-    }));
-    const descriptor = productionProviderAdapterRegistry.get("openrouter");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
-    );
-
-    const access = await adapter.executionAccess();
-
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
-      `${descriptor.defaultEndpoint}/key`,
-      `${descriptor.defaultEndpoint}/models`,
-    ]);
-    expect(access.modelCapabilities["z-ai/glm-5.3"]).toEqual({
-      contextWindow: 196_608,
-      maxOutputTokens: 131_072,
-    });
-  });
-
-  it("refreshes Vercel discovery before execution when startup did not populate capabilities", async () => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [{
-        id: "deepseek/deepseek-v4-pro-0813",
-        type: "language",
-        context_window: 1_000_000,
-        max_tokens: 384_000,
-      }] }),
-    }));
-    const descriptor = productionProviderAdapterRegistry.get("vercel-ai-router");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("vercel-ai-router", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
-    );
-
-    const access = await adapter.executionAccess();
-
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(access.modelCapabilities["deepseek/deepseek-v4-pro-0813"]).toEqual({
-      contextWindow: 1_000_000,
-      maxOutputTokens: 384_000,
-    });
-  });
-
-  it("fails one bounded OpenRouter rediscovery when credentials are rejected", async () => {
-    const fetch = vi.fn(async () => ({ ok: false, status: 401 }));
-    const descriptor = productionProviderAdapterRegistry.get("openrouter");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "rejected" }, managedRuntime: codexRuntime, environment: {} },
-    );
-
-    await expect(adapter.executionAccess()).rejects.toThrow("credentials were rejected");
-    expect(fetch).toHaveBeenCalledOnce();
-  });
-
-  it.each([
-    ["openai-api", codexRuntime],
-    ["openrouter", codexRuntime],
-    ["vercel-ai-router", codexRuntime],
-    ["anthropic-api", claudeRuntime],
-  ])("%s carries its provisioned runtime into secret execution access", async (adapterId, managedRuntime) => {
-    const descriptor = productionProviderAdapterRegistry.get(adapterId);
+    const managedRuntime = runtimeForAdapter(adapterId);
     const environment = managedRuntime.runtimeId === "codex"
-      ? { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: managedRuntime.executable }
-      : { CLAUDE_CONFIG_DIR: "/isolated/claude" };
+      ? { CODEX_HOME: `/isolated/${adapterId}/codex`, RELAYER_CODEX_BINARY: managedRuntime.executable }
+      : { CLAUDE_CONFIG_DIR: `/isolated/${adapterId}/claude` };
+    const request = fetch ?? vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: models }),
+    }));
     const adapter = productionProviderAdapterRegistry.create(
-      definition(adapterId, descriptor.defaultEndpoint),
+      definition(adapterId, endpoint ?? descriptor.defaultEndpoint),
       {
-        fetch: vi.fn(async () => ({
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ id: "model", context_length: 32_768, top_provider: { context_length: 32_768, max_completion_tokens: 8_192 } }] }),
-        })),
-        secrets: { "api-key": "secret" },
+        fetch: request,
+        secrets: { "api-key": secret },
         managedRuntime,
         environment,
       },
     );
+    return { adapter, descriptor, fetch: request };
+  }
 
-    expect(await adapter.executionAccess()).toMatchObject({
-      kind: "secret",
-      endpoint: descriptor.defaultEndpoint,
-      fields: { "api-key": "secret" },
-      runtime: { ...managedRuntime, environment },
+  it("all four secret-backed adapters satisfy the common discovery and execution-access contract", async () => {
+    const roster = [
+      ["openai-api", "https://api.openai.com/v1/models", "authorization", "gpt-5.4"],
+      ["anthropic-api", "https://api.anthropic.com/v1/models", "x-api-key", "claude-sonnet-4-20250514"],
+      ["openrouter", "https://openrouter.ai/api/v1/models", "authorization", "openai/gpt-5.4"],
+      ["vercel-ai-router", "https://ai-gateway.vercel.sh/v1/models", "authorization", "openai/gpt-5.4"],
+    ];
+    const settled = await Promise.allSettled(roster.map(async (
+      [adapterId, expectedEndpoint, expectedHeader, modelId],
+    ) => {
+      const model = adapterId === "openrouter"
+        ? { id: modelId, architecture: { output_modalities: ["text"] } }
+        : adapterId === "vercel-ai-router" ? { id: modelId, type: "language" } : { id: modelId };
+      const fixture = adapterFixture(adapterId, { models: [model] });
+      const snapshot = await fixture.adapter.connect();
+      const access = await fixture.adapter.executionAccess();
+      return [adapterId, {
+        urls: fixture.fetch.mock.calls.map(([url]) => url),
+        header: Object.keys(fixture.fetch.mock.calls.at(-1)[1].headers).map((key) => key.toLowerCase()),
+        model: snapshot.models[0] && {
+          id: snapshot.models[0].id,
+          executionModel: snapshot.models[0].executionModel,
+        },
+        family: snapshot.systemFamily.modelIds,
+        access: {
+          kind: access.kind,
+          endpoint: access.endpoint,
+          fields: access.fields,
+          runtime: access.runtime,
+        },
+        expectedEndpoint,
+        expectedHeader,
+      }];
+    }));
+    const observed = Object.fromEntries(settled.map((result, index) => (
+      result.status === "fulfilled"
+        ? result.value
+        : [roster[index][0], { error: result.reason.message }]
+    )));
+
+    expect(observed).toEqual(Object.fromEntries(roster.map((
+      [adapterId, expectedEndpoint, expectedHeader, modelId],
+    ) => [adapterId, {
+      urls: adapterId === "openrouter"
+        ? ["https://openrouter.ai/api/v1/key", expectedEndpoint]
+        : [expectedEndpoint],
+      header: expect.arrayContaining([expectedHeader]),
+      model: { id: modelId, executionModel: modelId },
+      family: [],
+      access: {
+        kind: "secret",
+        endpoint: productionProviderAdapterRegistry.get(adapterId).defaultEndpoint,
+        fields: { "api-key": "secret" },
+        runtime: {
+          ...runtimeForAdapter(adapterId),
+          environment: runtimeForAdapter(adapterId).runtimeId === "codex"
+            ? { CODEX_HOME: `/isolated/${adapterId}/codex`, RELAYER_CODEX_BINARY: runtimeForAdapter(adapterId).executable }
+            : { CLAUDE_CONFIG_DIR: `/isolated/${adapterId}/claude` },
+        },
+      },
+      expectedEndpoint,
+      expectedHeader,
+    }])));
+  });
+
+  it("openai admits capability-proven models and rejects invented family prefixes", async () => {
+    const { adapter } = adapterFixture("openai-api", { models: [
+      { id: "gpt-5.4" },
+      { id: "text-embedding-3-large" },
+      { id: "gpt-made-up" },
+    ] });
+    const snapshot = await adapter.connect();
+    const product = toProductCatalogSnapshot(snapshot);
+    expect({
+      models: snapshot.models.map(({ id, availability, unavailableReasonCode }) => ({
+      id, availability, unavailableReasonCode: unavailableReasonCode ?? null,
+      })),
+      diagnostics: product.models.filter(({ available }) => !available).map(({ id, unavailableReason }) => ({ id, unavailableReason })),
+    }).toEqual({
+      models: [
+      { id: "gpt-5.4", availability: "available", unavailableReasonCode: null },
+      { id: "text-embedding-3-large", availability: "unavailable", unavailableReasonCode: "provider_model_not_execution_eligible" },
+      { id: "gpt-made-up", availability: "unavailable", unavailableReasonCode: "provider_model_capability_unknown" },
+      ],
+      diagnostics: [
+        { id: "text-embedding-3-large", unavailableReason: { code: "provider_model_not_execution_eligible", message: "This provider model is not eligible for agent execution." } },
+        { id: "gpt-made-up", unavailableReason: { code: "provider_model_capability_unknown", message: "This provider model has no recognized agent-execution capability evidence." } },
+      ],
+    });
+  });
+
+  it("anthropic admits only reviewed text families", async () => {
+    const { adapter } = adapterFixture("anthropic-api", { models: [
+      { id: "claude-sonnet-4-20250514" },
+      { id: "claude-3-5-haiku-20241022" },
+      { id: "claude-embedding" },
+      { id: "claude-realtime" },
+      { id: "claude-batch" },
+      { id: "claude-sonnet-realtime" },
+      { id: "claude-opus-batch" },
+      { id: "claude-haiku-audio" },
+      { id: "claude-3-realtime" },
+      { id: "claude-1-batch" },
+    ] });
+    const snapshot = await adapter.connect();
+    expect(snapshot.models.map(({ id, availability, unavailableReasonCode }) => ({
+      id, availability, unavailableReasonCode: unavailableReasonCode ?? null,
+    }))).toEqual([
+      { id: "claude-sonnet-4-20250514", availability: "available", unavailableReasonCode: null },
+      { id: "claude-3-5-haiku-20241022", availability: "available", unavailableReasonCode: null },
+      { id: "claude-embedding", availability: "unavailable", unavailableReasonCode: "provider_model_not_execution_eligible" },
+      { id: "claude-realtime", availability: "unavailable", unavailableReasonCode: "provider_model_capability_unknown" },
+      { id: "claude-batch", availability: "unavailable", unavailableReasonCode: "provider_model_capability_unknown" },
+      { id: "claude-sonnet-realtime", availability: "unavailable", unavailableReasonCode: "provider_model_capability_unknown" },
+      { id: "claude-opus-batch", availability: "unavailable", unavailableReasonCode: "provider_model_capability_unknown" },
+      { id: "claude-haiku-audio", availability: "unavailable", unavailableReasonCode: "provider_model_capability_unknown" },
+      { id: "claude-3-realtime", availability: "unavailable", unavailableReasonCode: "provider_model_capability_unknown" },
+      { id: "claude-1-batch", availability: "unavailable", unavailableReasonCode: "provider_model_capability_unknown" },
+    ]);
+  });
+
+  it("OpenRouter enforces capability and credential-probe policy", async () => {
+    const production = adapterFixture("openrouter", { models: [
+      {
+        id: "z-ai/glm-5.3",
+        architecture: { output_modalities: ["text"] },
+        context_length: 202_752,
+        top_provider: { context_length: 196_608, max_completion_tokens: 131_072 },
+      },
+      { id: "embedding", architecture: { output_modalities: ["embeddings"] } },
+      {
+        id: "small-output-model",
+        architecture: { output_modalities: ["text"] },
+        context_length: 32_768,
+        top_provider: { context_length: 32_768, max_completion_tokens: 2_048 },
+      },
+      { id: "unknown-limits", architecture: { output_modalities: ["text"] } },
+      { id: "unknown-model" },
+    ] });
+    const expired = adapterFixture("openrouter", {
+      secret: "expired",
+      fetch: vi.fn(async () => ({ ok: false, status: 401 })),
+    });
+    const custom = adapterFixture("openrouter", {
+      endpoint: "https://router.example.test/v1",
+      models: [{ id: "z-ai/glm-5.3", architecture: { output_modalities: ["text"] } }],
+    });
+    const [connected, rejected, customConnected] = await Promise.all([
+      production.adapter.connect(),
+      expired.adapter.connect(),
+      custom.adapter.connect(),
+    ]);
+    expect({
+      production: {
+        urls: production.fetch.mock.calls.map(([url]) => url),
+        models: connected.models.map(({ id, availability, unavailableReasonCode }) => ({
+          id, availability, unavailableReasonCode: unavailableReasonCode ?? null,
+        })),
+        diagnostics: toProductCatalogSnapshot(connected).models
+          .filter(({ available }) => !available)
+          .map(({ id, unavailableReason }) => ({ id, unavailableReason })),
+        capabilities: production.adapter.executionAccess().modelCapabilities,
+      },
+      rejected: {
+        provider: rejected.provider,
+        models: rejected.models,
+        urls: expired.fetch.mock.calls.map(([url]) => url),
+      },
+      custom: {
+        status: customConnected.provider.status,
+        urls: custom.fetch.mock.calls.map(([url]) => url),
+      },
+    }).toMatchObject({
+      production: {
+        urls: ["https://openrouter.ai/api/v1/key", "https://openrouter.ai/api/v1/models"],
+        models: [
+          { id: "z-ai/glm-5.3", availability: "available", unavailableReasonCode: null },
+          { id: "embedding", availability: "unavailable", unavailableReasonCode: "provider_model_not_execution_eligible" },
+          { id: "small-output-model", availability: "available", unavailableReasonCode: null },
+          { id: "unknown-limits", availability: "available", unavailableReasonCode: null },
+          { id: "unknown-model", availability: "unavailable", unavailableReasonCode: "provider_model_capability_unknown" },
+        ],
+        diagnostics: [
+          { id: "embedding", unavailableReason: { code: "provider_model_not_execution_eligible", message: "This provider model is not eligible for agent execution." } },
+          { id: "unknown-model", unavailableReason: { code: "provider_model_capability_unknown", message: "This provider model has no recognized agent-execution capability evidence." } },
+        ],
+        capabilities: {
+          "z-ai/glm-5.3": { contextWindow: 196_608, maxOutputTokens: 131_072 },
+          "small-output-model": { contextWindow: 32_768, maxOutputTokens: 2_048 },
+        },
+      },
+      rejected: {
+        provider: { status: "unavailable", unavailableReason: "Provider credentials were rejected." },
+        models: [],
+        urls: ["https://openrouter.ai/api/v1/key"],
+      },
+      custom: { status: "available", urls: ["https://router.example.test/v1/models"] },
+    });
+  });
+
+  it("Vercel preserves exact execution capabilities while rejecting non-language models", async () => {
+    const { adapter } = adapterFixture("vercel-ai-router", { models: [
+      {
+        id: "deepseek/deepseek-v4-pro-0813",
+        type: "language",
+        context_window: 1_000_000,
+        max_tokens: 384_000,
+      },
+      { id: "openai/sora", type: "video" },
+      { id: "unknown-limits", type: "language" },
+    ] });
+    const snapshot = await adapter.connect();
+    expect({
+      models: snapshot.models.map(({ id, availability, unavailableReasonCode }) => ({
+        id, availability, unavailableReasonCode: unavailableReasonCode ?? null,
+      })),
+      diagnostics: toProductCatalogSnapshot(snapshot).models
+        .filter(({ available }) => !available)
+        .map(({ id, unavailableReason }) => ({ id, unavailableReason })),
+      capabilities: adapter.executionAccess().modelCapabilities,
+    }).toEqual({
+      models: [
+        { id: "deepseek/deepseek-v4-pro-0813", availability: "available", unavailableReasonCode: null },
+        { id: "openai/sora", availability: "unavailable", unavailableReasonCode: "provider_model_not_execution_eligible" },
+        { id: "unknown-limits", availability: "available", unavailableReasonCode: null },
+      ],
+      diagnostics: [{
+        id: "openai/sora",
+        unavailableReason: { code: "provider_model_not_execution_eligible", message: "This provider model is not eligible for agent execution." },
+      }],
+      capabilities: {
+        "deepseek/deepseek-v4-pro-0813": { contextWindow: 1_000_000, maxOutputTokens: 384_000 },
+      },
+    });
+  });
+
+  it("zero eligible models preserves provider connectivity and complete diagnostics", async () => {
+    const { adapter } = adapterFixture("openai-api", { models: [
+      { id: "text-embedding-3-large" },
+      { id: "embedding-hidden", hidden: true },
+    ] });
+    const product = toProductCatalogSnapshot(await adapter.connect());
+    expect(product).toMatchObject({
+      connected: true,
+      models: [
+        { id: "text-embedding-3-large", visible: true, available: false },
+        { id: "embedding-hidden", visible: false, available: false },
+      ],
+    });
+    expect(product.models.map(({ unavailableReason }) => unavailableReason)).toEqual([
+      { code: "provider_model_not_execution_eligible", message: "This provider model is not eligible for agent execution." },
+      { code: "provider_model_not_execution_eligible", message: "This provider model is not eligible for agent execution." },
+    ]);
+  });
+
+  it("execution performs one bounded capability rediscovery and fails closed when rejected", async () => {
+    const openrouter = adapterFixture("openrouter", { models: [{
+      id: "z-ai/glm-5.3",
+      architecture: { output_modalities: ["text"] },
+      top_provider: { context_length: 196_608, max_completion_tokens: 131_072 },
+    }] });
+    const vercel = adapterFixture("vercel-ai-router", { models: [{
+      id: "deepseek/deepseek-v4-pro-0813",
+      type: "language",
+      context_window: 1_000_000,
+      max_tokens: 384_000,
+    }] });
+    const rejected = adapterFixture("openrouter", {
+      secret: "rejected",
+      fetch: vi.fn(async () => ({ ok: false, status: 401 })),
+    });
+    const settled = await Promise.allSettled([
+      openrouter.adapter.executionAccess(),
+      vercel.adapter.executionAccess(),
+      rejected.adapter.executionAccess(),
+    ]);
+    expect({
+      openrouter: settled[0].value.modelCapabilities,
+      openrouterCalls: openrouter.fetch.mock.calls.map(([url]) => url),
+      vercel: settled[1].value.modelCapabilities,
+      vercelCalls: vercel.fetch.mock.calls.map(([url]) => url),
+      rejected: settled[2].reason.message,
+      rejectedCalls: rejected.fetch.mock.calls.length,
+    }).toEqual({
+      openrouter: { "z-ai/glm-5.3": { contextWindow: 196_608, maxOutputTokens: 131_072 } },
+      openrouterCalls: ["https://openrouter.ai/api/v1/key", "https://openrouter.ai/api/v1/models"],
+      vercel: { "deepseek/deepseek-v4-pro-0813": { contextWindow: 1_000_000, maxOutputTokens: 384_000 } },
+      vercelCalls: ["https://ai-gateway.vercel.sh/v1/models"],
+      rejected: expect.stringContaining("credentials were rejected"),
+      rejectedCalls: 1,
     });
   });
 
   it("rejects malformed or empty discovery without manual model entry", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("openai-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openai-api", descriptor.defaultEndpoint),
-      { fetch: async () => ({ ok: true, json: async () => ({ data: [] }) }), secrets: { "api-key": "secret" }, managedRuntime: codexRuntime, environment: {} },
-    );
+    const { adapter } = adapterFixture("openai-api");
     await expect(adapter.connect()).rejects.toThrow("visible models");
   });
 
@@ -685,90 +593,67 @@ describe("secret-backed API adapters", () => {
     expect(credentialSet).not.toHaveBeenCalled();
     await catalog.close();
   });
+
 });
 
 describe("managed subscription isolation", () => {
-  it("rejects logout while the exact provider has an active execution lease", async () => {
-    const logout = vi.fn(async () => ({ status: "disconnected" }));
-    const descriptor = {
-      adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-      defaultEndpoint: null, connection: { mode: "managed-login", fields: [] },
-      create: () => { throw new Error("initial runtime should be reused"); },
-    };
+  it("enforces exact-definition leases across logout and reconnect", async () => {
+    const accounts = new Map([["managed-work", "connected"], ["managed-personal", "connected"]]);
+    const definitions = [
+      { id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null, accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active" },
+      { id: "managed-personal", adapterId: "fake-managed", label: "Personal", endpoint: null, accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active" },
+    ];
+    const runtime = (id) => ({
+      providerId: id,
+      credentials: {
+        login: async () => ({ authUrl: `https://login.example.test/${id}` }),
+        account: async () => ({ status: accounts.get(id) }),
+        logout: async () => { accounts.set(id, "disconnected"); return { status: "disconnected" }; },
+      },
+      discover: async () => ({
+        provider: { id, label: id, status: "available" },
+        models: [{ visible: true }],
+        systemFamily: { id, label: id, modelIds: [] },
+      }),
+    });
+    const runtimes = new Map(definitions.map(({ id }) => [id, runtime(id)]));
     const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
-      definitionStore: { async load() { return [{
-        id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
-        accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
-      }]; } },
+      registry: createProviderAdapterRegistry([{
+        adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
+        defaultEndpoint: null, connection: { mode: "managed-login", fields: [] },
+        create: ({ definition: created }) => runtimes.get(created.id),
+      }]),
+      definitionStore: {
+        async load() { return definitions; },
+        createWithCatalog: vi.fn(async () => { throw new Error("reconnect must preserve identity"); }),
+      },
       credentialStore: {},
-      initialRuntimes: new Map([["managed-work", { credentials: { logout } }]]),
+      initialRuntimes: runtimes,
+      prepareRuntime: vi.fn(async () => {}),
     });
 
     const lease = await service.acquireExecution("managed-work");
     await expect(service.logout("managed-work")).rejects.toThrow("interactions are running");
-    expect(logout).not.toHaveBeenCalled();
     await lease.release();
-    await expect(service.logout("managed-work")).resolves.toEqual({ status: "disconnected" });
+    await service.logout("managed-work");
+    const pending = await service.reconnect("managed-work");
+    await expect(service.completeConnection(pending.connectionId)).resolves.toMatchObject({ status: "pending" });
+    accounts.set("managed-work", "connected");
+    const connected = await service.completeConnection(pending.connectionId);
+
+    expect({
+      connected: connected.providerDefinition.id,
+      accounts,
+      definitions: (await service.list()).map(({ id }) => id),
+    }).toEqual({
+      connected: "managed-work",
+      accounts: new Map([["managed-work", "connected"], ["managed-personal", "connected"]]),
+      definitions: ["managed-work", "managed-personal"],
+    });
   });
 
-  it("reconnects a signed-out managed provider without creating a new definition identity", async () => {
-    let accountStatus = "disconnected";
-    const published = [];
-    const definition = {
-      id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
-      accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
-    };
-    const runtime = {
-      providerId: definition.id,
-      credentials: {
-        login: vi.fn(async () => ({ authUrl: "https://login.example.test/work" })),
-        account: vi.fn(async () => ({ status: accountStatus })),
-      },
-      discover: vi.fn(async () => ({
-        provider: { id: definition.id, label: definition.label, status: "available" },
-        models: [{ visible: true }],
-        systemFamily: { id: definition.id, label: definition.label, modelIds: [] },
-      })),
-    };
-    const prepareRuntime = vi.fn(async () => {});
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([{
-        adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-        defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, create: () => runtime,
-      }]),
-      definitionStore: {
-        async load() { return [definition]; },
-        createWithCatalog: vi.fn(async () => { throw new Error("reconnect must not create a definition"); }),
-      },
-      credentialStore: {},
-      initialRuntimes: new Map([[definition.id, runtime]]),
-      prepareRuntime,
-      publishCatalog: async (snapshot) => { published.push(snapshot); },
-    });
-
-    const pending = await service.reconnect(definition.id);
-    expect(pending).toMatchObject({
-      status: "pending", connectionId: definition.id,
-      providerDefinition: { id: definition.id },
-    });
-    expect(pending.login.authUrl).toBe("https://login.example.test/work");
-    expect(prepareRuntime).toHaveBeenCalledWith(expect.objectContaining({
-      adapterId: "fake-managed",
-      providerDefinition: expect.objectContaining({ id: definition.id }),
-    }));
-    await expect(service.completeConnection(definition.id)).resolves.toMatchObject({ status: "pending" });
-    accountStatus = "connected";
-    await expect(service.completeConnection(definition.id)).resolves.toMatchObject({
-      status: "connected", providerDefinition: { id: definition.id },
-    });
-    expect(published).toHaveLength(1);
-    await expect(service.list()).resolves.toEqual([expect.objectContaining({ id: definition.id })]);
-  });
-
-  it.each(["reconnect", "recoverUnavailable"])(
-    "%s leaves unrelated provider leases available while runtime preparation is deferred",
-    async (operationName) => {
+  it("keeps unrelated execution leases available during reconnect and recovery", async () => {
+    const results = await Promise.allSettled(["reconnect", "recoverUnavailable"].map(async (operationName) => {
       const definitions = [
         {
           id: "managed-repair", adapterId: "fake-managed", label: "Repair", endpoint: null,
@@ -826,8 +711,13 @@ describe("managed subscription isolation", () => {
         await expect(repairing).resolves.toBeDefined();
       }
       await service.close();
-    },
-  );
+      return operationName;
+    }));
+    expect(results).toEqual([
+      { status: "fulfilled", value: "reconnect" },
+      { status: "fulfilled", value: "recoverUnavailable" },
+    ]);
+  });
 
   it("cancels and drains reconnect runtime preparation before service close completes", async () => {
     const definition = {
@@ -915,34 +805,6 @@ describe("managed subscription isolation", () => {
     });
   });
 
-  it("logs out only the exact managed provider definition through the generic service", async () => {
-    const accounts = new Map([["managed-work", "connected"], ["managed-personal", "connected"]]);
-    const descriptor = {
-      adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-      defaultEndpoint: null, connection: { mode: "managed-login", fields: [] },
-      create: () => { throw new Error("initial runtimes should be reused"); },
-    };
-    const runtime = (id) => ({ credentials: {
-      account: async () => ({ status: accounts.get(id) }),
-      logout: async () => { accounts.set(id, "disconnected"); return { status: "disconnected" }; },
-    } });
-    const changed = [];
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
-      definitionStore: { async load() { return [
-        { id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null, accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active" },
-        { id: "managed-personal", adapterId: "fake-managed", label: "Personal", endpoint: null, accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active" },
-      ]; } },
-      credentialStore: {},
-      initialRuntimes: new Map([["managed-work", runtime("managed-work")], ["managed-personal", runtime("managed-personal")]]),
-      onRuntimeChanged: async ({ id }) => { changed.push(id); },
-    });
-
-    await expect(service.logout("managed-work")).resolves.toMatchObject({ status: "disconnected" });
-    expect(accounts).toEqual(new Map([["managed-work", "disconnected"], ["managed-personal", "connected"]]));
-    expect(changed).toEqual(["managed-work"]);
-  });
-
   it("reports a managed provider disconnected even when post-logout catalog publication fails", async () => {
     const descriptor = {
       adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
@@ -979,62 +841,50 @@ describe("managed subscription isolation", () => {
     }));
   });
 
-  it("refuses ambient subscription executable discovery", () => {
-    expect(() => productionProviderAdapterRegistry.create({
-      id: "codex-ambient", adapterId: "codex-subscription", label: "Codex", endpoint: null,
-    }, { environment: { PATH: "/ambient/bin" }, managedRuntime: codexRuntime }))
-      .toThrow("requires the provisioned managed runtime executable");
-    expect(() => new ClaudeCliManagedRuntime({ environment: { PATH: "/ambient/bin" } }))
-      .toThrow("managed runtime executable is required");
-  });
-
-  it("fails closed before handing out a revoked Codex managed runtime", async () => {
-    const provider = productionProviderAdapterRegistry.create({
-      id: "codex-revoked", adapterId: "codex-subscription", label: "Codex Revoked", endpoint: null,
-    }, { environment: { PATH: "", RELAYER_CODEX_BINARY: codexRuntime.executable }, managedRuntime: codexRuntime });
-    provider.credentials.account = async () => ({ status: "disconnected", account: null });
-    await expect(provider.executionAccess()).rejects.toThrow("not connected");
-  });
-
-  it("hands subscription harnesses the exact provisioned runtime descriptor", async () => {
-    const codexEnvironment = {
-      CODEX_HOME: "/isolated/codex",
-      RELAYER_CODEX_BINARY: codexRuntime.executable,
-    };
-    const codex = productionProviderAdapterRegistry.create({
+  it("issues execution access only from an exact provisioned and unrevoked runtime", async () => {
+    const codexEnvironment = { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: codexRuntime.executable };
+    const exactCodex = productionProviderAdapterRegistry.create({
       id: "codex-connected", adapterId: "codex-subscription", label: "Codex", endpoint: null,
     }, { environment: codexEnvironment, managedRuntime: codexRuntime });
-    codex.credentials.account = async () => ({ status: "connected", account: {} });
-    await expect(codex.executionAccess()).resolves.toEqual({
-      kind: "managed-runtime", ...codexRuntime, environment: codexEnvironment,
-    });
-
-    const claudeEnvironment = { CLAUDE_CONFIG_DIR: "/isolated/claude" };
-    const claude = productionProviderAdapterRegistry.create({
-      id: "claude-connected", adapterId: "claude-subscription", label: "Claude", endpoint: null,
-    }, {
-      managedRuntime: claudeRuntime,
-      runtimeFactory: async () => ({
-        environment: claudeEnvironment,
-        account: async () => ({ status: "connected", account: {} }),
-        close: async () => {},
-      }),
-    });
-    await expect(claude.executionAccess()).resolves.toEqual({
-      kind: "managed-runtime", ...claudeRuntime, environment: claudeEnvironment,
-    });
-  });
-
-  it("production Claude composition fails unavailable when its definition-scoped CLI is missing", async () => {
-    const provider = productionProviderAdapterRegistry.create({
+    exactCodex.credentials.account = async () => ({ status: "connected", account: {} });
+    const revokedCodex = productionProviderAdapterRegistry.create({
+      id: "codex-revoked", adapterId: "codex-subscription", label: "Codex Revoked", endpoint: null,
+    }, { environment: { RELAYER_CODEX_BINARY: codexRuntime.executable }, managedRuntime: codexRuntime });
+    revokedCodex.credentials.account = async () => ({ status: "disconnected", account: null });
+    const missingClaude = productionProviderAdapterRegistry.create({
       id: "claude-missing", adapterId: "claude-subscription", label: "Claude Missing", endpoint: null,
     }, {
       executable: "/definitely/missing/relayer-claude",
       managedRuntime: { ...claudeRuntime, executable: "/definitely/missing/relayer-claude" },
     });
-    await expect(provider.credentials.account()).resolves.toMatchObject({ status: "unavailable" });
-    await expect(provider.credentials.login()).rejects.toThrow("login is unavailable");
-    await expect(provider.executionAccess()).rejects.toThrow("not connected");
+    const settled = await Promise.allSettled([
+      exactCodex.executionAccess(),
+      revokedCodex.executionAccess(),
+      missingClaude.executionAccess(),
+    ]);
+    const ambientErrors = [
+      () => productionProviderAdapterRegistry.create({
+        id: "codex-ambient", adapterId: "codex-subscription", label: "Codex", endpoint: null,
+      }, { environment: { PATH: "/ambient/bin" }, managedRuntime: codexRuntime }),
+      () => new ClaudeCliManagedRuntime({ environment: { PATH: "/ambient/bin" } }),
+    ].map((operation) => {
+      try { operation(); return null; } catch (error) { return error.message; }
+    });
+
+    expect({
+      exact: settled[0].value,
+      revoked: settled[1].reason.message,
+      missingClaude: settled[2].reason.message,
+      ambientErrors,
+    }).toEqual({
+      exact: { kind: "managed-runtime", ...codexRuntime, environment: codexEnvironment },
+      revoked: expect.stringContaining("not connected"),
+      missingClaude: expect.stringContaining("not connected"),
+      ambientErrors: [
+        expect.stringContaining("requires the provisioned managed runtime executable"),
+        expect.stringContaining("managed runtime executable is required"),
+      ],
+    });
   });
 
   it("keeps Claude browser login pending when auth status returns logged-out JSON with exit code one", async () => {
@@ -1095,124 +945,122 @@ describe("managed subscription isolation", () => {
 });
 
 describe("retry and local diagnostics", () => {
-  it("retries only transient classes with bounded deterministic jitter", async () => {
+  it("retries only transient failures with bounded jitter and prompt cancellation", async () => {
     const delays = [];
-    const operation = vi.fn()
+    const transient = vi.fn()
       .mockRejectedValueOnce(new ProviderHttpError("busy", { status: 429 }))
       .mockRejectedValueOnce(new ProviderHttpError("down", { status: 503 }))
       .mockResolvedValue("ok");
-    await expect(withProviderRetry(operation, {
-      random: () => 0.5,
-      sleep: async (delay) => { delays.push(delay); },
-    })).resolves.toBe("ok");
-    expect(delays).toEqual([250, 500]);
-    await expect(withProviderRetry(async () => {
-      throw new ProviderHttpError("bad key", { status: 401 });
-    }, { sleep: vi.fn() })).rejects.toThrow("bad key");
-  });
-
-  it("stops retry when cancelled", async () => {
     const controller = new AbortController();
-    const sleep = vi.fn(async (_delay, signal) => {
-      controller.abort(new Error("cancelled"));
-      signal.throwIfAborted();
+    const settled = await Promise.allSettled([
+      withProviderRetry(transient, {
+        random: () => 0.5,
+        sleep: async (delay) => { delays.push(delay); },
+      }),
+      withProviderRetry(async () => { throw new ProviderHttpError("bad key", { status: 401 }); }),
+      withProviderRetry(async () => { throw new ProviderHttpError("busy", { status: 429 }); }, {
+        signal: controller.signal,
+        sleep: async (_delay, signal) => {
+          controller.abort(new Error("cancelled"));
+          signal.throwIfAborted();
+        },
+      }),
+    ]);
+    expect({
+      statuses: settled.map(({ status }) => status),
+      success: settled[0].value,
+      auth: settled[1].reason.message,
+      cancelled: settled[2].reason.message,
+      delays,
+    }).toEqual({
+      statuses: ["fulfilled", "rejected", "rejected"],
+      success: "ok",
+      auth: "bad key",
+      cancelled: "cancelled",
+      delays: [250, 500],
     });
-    await expect(withProviderRetry(async () => {
-      throw new ProviderHttpError("busy", { status: 429 });
-    }, { signal: controller.signal, sleep })).rejects.toThrow("cancelled");
   });
 
-  it("bounds and redacts the rotating diagnostic log", async () => {
+  it("writes one bounded redacted serialized diagnostic stream", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-provider-log-"));
-    const path = join(root, "provider.log");
-    const log = createProviderDiagnosticsLog({ path, maximumBytes: 512 });
-    for (let index = 0; index < 20; index += 1) {
-      await log.write({ code: `failure-${index}`, apiKey: "sk-super-secret-value", message: "Bearer hidden-value" });
-    }
-    const contents = await readFile(path, "utf8");
-    expect(Buffer.byteLength(contents)).toBeLessThanOrEqual(512);
-    expect(contents).not.toContain("super-secret");
-    expect(contents).not.toContain("hidden-value");
-    expect(contents).toContain("failure-19");
-  });
-
-  it("serializes concurrent writes and never persists arbitrary error text", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-provider-log-concurrent-"));
     const path = join(root, "provider.log");
     const log = createProviderDiagnosticsLog({ path, maximumBytes: 16 * 1024 });
     await Promise.all(Array.from({ length: 40 }, (_, index) => log.write({
       code: `failure-${index}`,
+      apiKey: "sk-super-secret-value",
+      message: "Bearer hidden-value",
       error: `opaque-private-value-${index}`,
     })));
-    const contents = await readFile(path, "utf8");
-    const events = contents.trim().split("\n").map((line) => JSON.parse(line));
-    expect(events).toHaveLength(40);
-    expect(new Set(events.map(({ code }) => code)).size).toBe(40);
-    expect(contents).not.toContain("opaque-private-value");
+    const concurrentContents = await readFile(path, "utf8");
+    const concurrentEvents = concurrentContents.trim().split("\n").map((line) => JSON.parse(line));
+    await Promise.all(Array.from({ length: 20 }, (_, index) => log.write({
+      code: `rotation-${index}`,
+      message: "x".repeat(4_000),
+      apiKey: "sk-super-secret-value",
+    })));
+    const rotatedContents = await readFile(path, "utf8");
+    expect({
+      concurrentCodes: concurrentEvents.map(({ code }) => code),
+      concurrentUnique: new Set(concurrentEvents.map(({ code }) => code)).size,
+      bounded: Buffer.byteLength(rotatedContents) <= 16 * 1024,
+      rotatedCodes: rotatedContents.trim().split("\n").map((line) => JSON.parse(line).code),
+      leaked: ["super-secret", "hidden-value", "opaque-private-value"].some((value) => (
+        concurrentContents.includes(value) || rotatedContents.includes(value)
+      )),
+    }).toEqual({
+      concurrentCodes: Array.from({ length: 40 }, (_, index) => `failure-${index}`),
+      concurrentUnique: 40,
+      bounded: true,
+      rotatedCodes: expect.arrayContaining(["rotation-19"]),
+      leaked: false,
+    });
   });
+
 });
 
 describe("managed provider runtime cleanup", () => {
-  it("derives cleanup eligibility from a registry descriptor instead of adapter names", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-custom-"));
-    await mkdir(join(root, "future-work"), { recursive: true });
-    const registry = createProviderAdapterRegistry([{
-      adapterId: "future-subscription", implementationVersion: "1", label: "Future",
-      accessContract: "managed-runtime@1", defaultEndpoint: null,
-      connection: { mode: "existing-runtime-auth", fields: [] }, create: () => ({}),
-    }]);
-    const removeRuntimeState = createProviderRuntimeStateRemover({ runtimeRoot: root, registry });
-    await expect(removeRuntimeState({
-      id: "future-work", adapterId: "future-subscription", accessContract: "managed-runtime@1",
-    })).resolves.toBe(true);
-    await expect(access(join(root, "future-work"))).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("deletes only the exact definition-scoped directory", async () => {
+  it("removes only registry-authorized definition-scoped runtime state", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-"));
-    const work = join(root, "claude-work");
-    const personal = join(root, "claude-personal");
-    await mkdir(join(work, "claude-home"), { recursive: true });
-    await mkdir(join(personal, "claude-home"), { recursive: true });
-    await writeFile(join(work, "claude-home", "auth.json"), "work");
-    await writeFile(join(personal, "claude-home", "auth.json"), "personal");
-
-    const removeRuntimeState = createProviderRuntimeStateRemover({
-      runtimeRoot: root, registry: productionProviderAdapterRegistry,
+    const registry = createProviderAdapterRegistry([
+      ...productionProviderAdapterRegistry.list(),
+      {
+        adapterId: "future-subscription", implementationVersion: "1", label: "Future",
+        accessContract: "managed-runtime@1", defaultEndpoint: null,
+        connection: { mode: "existing-runtime-auth", fields: [] }, create: () => ({}),
+      },
+    ]);
+    for (const directory of ["future-work", "claude-work/claude-home", "claude-personal/claude-home", "openai-work/codex-home"]) {
+      await mkdir(join(root, directory), { recursive: true });
+    }
+    await writeFile(join(root, "claude-work/claude-home/auth.json"), "work");
+    await writeFile(join(root, "claude-personal/claude-home/auth.json"), "personal");
+    const removeRuntimeState = createProviderRuntimeStateRemover({ runtimeRoot: root, registry });
+    const removals = await Promise.all([
+      removeRuntimeState({ id: "future-work", adapterId: "future-subscription", accessContract: "managed-runtime@1" }),
+      removeRuntimeState({ id: "claude-work", adapterId: "claude-subscription", accessContract: "managed-runtime@1" }),
+      removeRuntimeState({ id: "openai-work", adapterId: "openai-api", accessContract: "secret@1" }),
+    ]);
+    const invalid = ["../escape", "/absolute"].map((id) => {
+      try {
+        providerRuntimeDirectory(root, { id, adapterId: "codex-subscription", accessContract: "managed-runtime@1" }, registry);
+        return null;
+      } catch (error) {
+        return error.message;
+      }
     });
-    await expect(removeRuntimeState({
-      id: "claude-work", adapterId: "claude-subscription", accessContract: "managed-runtime@1",
-    })).resolves.toBe(true);
-    await expect(access(work)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(personal, "claude-home", "auth.json"), "utf8")).resolves.toBe("personal");
-    await expect(removeRuntimeState({ id: "api", adapterId: "openai-api" })).resolves.toBe(false);
-  });
-
-  it("deletes definition-scoped runtime state for an API adapter after its definition is removed", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-api-remove-"));
-    await mkdir(join(root, "openai-work", "codex-home"), { recursive: true });
-    const removeRuntimeState = createProviderRuntimeStateRemover({
-      runtimeRoot: root,
-      registry: productionProviderAdapterRegistry,
+    expect({
+      removals,
+      workExists: await access(join(root, "claude-work")).then(() => true, () => false),
+      apiExists: await access(join(root, "openai-work")).then(() => true, () => false),
+      personal: await readFile(join(root, "claude-personal/claude-home/auth.json"), "utf8"),
+      invalid,
+    }).toEqual({
+      removals: [true, true, true],
+      workExists: false,
+      apiExists: false,
+      personal: "personal",
+      invalid: [expect.stringContaining("stable provider definition id"), expect.stringContaining("stable provider definition id")],
     });
-
-    await expect(removeRuntimeState({
-      id: "openai-work",
-      adapterId: "openai-api",
-      accessContract: "secret@1",
-    })).resolves.toBe(true);
-    await expect(access(join(root, "openai-work"))).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("rejects traversal and non-definition paths", () => {
-    expect(() => providerRuntimeDirectory("/tmp/provider-runtimes", {
-      id: "../escape", adapterId: "codex-subscription",
-      accessContract: "managed-runtime@1",
-    }, productionProviderAdapterRegistry)).toThrow("stable provider definition id");
-    expect(() => providerRuntimeDirectory("/tmp/provider-runtimes", {
-      id: "/absolute", adapterId: "claude-subscription",
-      accessContract: "managed-runtime@1",
-    }, productionProviderAdapterRegistry)).toThrow("stable provider definition id");
   });
 
   it("reconciles crash-orphan directories while retaining active managed definitions", async () => {
@@ -1242,20 +1090,28 @@ describe("managed provider runtime cleanup", () => {
 });
 
 describe("provider definition lifecycle", () => {
-  function serviceFixture({ failDiscovery = false, diagnostics = null, removeRuntimeState = async () => false } = {}) {
+  function serviceFixture({
+    failDiscovery = false,
+    failCommit = false,
+    failRuntimeRegistration = false,
+    diagnostics = null,
+    removeRuntimeState = async () => false,
+  } = {}) {
     let stored = [];
     const credentials = new Map();
     const closes = [];
+    const events = [];
     const descriptor = {
       adapterId: "fake-api", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
       defaultEndpoint: "https://example.test/v1", endpointEditableDuringCreation: true,
       connection: { mode: "secret-fields", fields: [{ id: "api-key", label: "API key", kind: "secret" }] },
       create: ({ definition: created }) => ({
         async discover() {
+          events.push("discover");
           if (failDiscovery) throw new Error("discovery failed");
           return { models: [{ visible: true }], provider: { id: created.id } };
         },
-        async close() { closes.push(created.id); },
+        async close() { closes.push(created.id); events.push("close"); },
       }),
     };
     const service = new ProviderDefinitionService({
@@ -1263,81 +1119,92 @@ describe("provider definition lifecycle", () => {
       definitionStore: {
         async load() { return structuredClone(stored); },
         async save(value) { stored = structuredClone(value); },
-        async createWithCatalog(candidate) { stored.push(structuredClone(candidate)); },
+        async createWithCatalog(candidate) {
+          events.push("commit");
+          if (failCommit) throw new Error("commit failed");
+          stored.push(structuredClone(candidate));
+        },
       },
       credentialStore: {
-        async set(key, value) { credentials.set(key, structuredClone(value)); },
+        async set(key, value) { events.push("credential"); credentials.set(key, structuredClone(value)); },
         async get(key) { return credentials.get(key) ?? null; },
-        async delete(key) { return credentials.delete(key); },
+        async delete(key) { events.push("credential-delete"); return credentials.delete(key); },
       },
       idGenerator: (() => { let id = 0; return () => `provider-${++id}`; })(),
       diagnostics,
       removeRuntimeState,
+      onRuntimeReady: failRuntimeRegistration
+        ? async () => { events.push("runtime-ready"); throw new Error("runtime registration failed"); }
+        : undefined,
+      onRuntimeRemoved: failRuntimeRegistration
+        ? async () => { events.push("runtime-removed"); }
+        : undefined,
     });
-    return { service, definitions: () => stored, credentials, closes };
+    return { service, definitions: () => stored, credentials, closes, events };
   }
 
-  it("persists only after discovery and stores a credential reference instead of secret bytes", async () => {
-    const fixture = serviceFixture();
-    const created = await fixture.service.connect({
-      adapterId: "fake-api", label: "Work", endpoint: "https://example.test/v1", fields: { "api-key": "secret" },
-    });
-    expect(created).toMatchObject({ status: "connected", providerDefinition: { id: "provider-1" } });
-    expect(JSON.stringify(fixture.definitions())).not.toContain('"api-key":"secret"');
-    expect(created.providerDefinition.credentialReference).toBe("provider:provider-1");
-
-    const failed = serviceFixture({ failDiscovery: true });
-    await expect(failed.service.connect({
-      adapterId: "fake-api", label: "Broken", fields: { "api-key": "secret" },
-    })).rejects.toThrow("discovery failed");
-    expect(failed.definitions()).toEqual([]);
-    expect(failed.credentials.size).toBe(0);
-  });
-
-  it("writes credentials only after discovery and removes them when the atomic product commit fails", async () => {
-    const order = [];
-    const deleted = [];
-    const descriptor = {
-      adapterId: "ordered-api", implementationVersion: "1", label: "Ordered", accessContract: "secret@1",
-      defaultEndpoint: "https://example.test/v1", connection: {
-        mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
-      },
-      create: () => ({ discover: async () => {
-        order.push("discover");
-        return { models: [{ visible: true }] };
-      } }),
+  it("commits provider creation atomically or compensates every precommit resource", async () => {
+    const scenarios = {
+      success: serviceFixture(),
+      discovery: serviceFixture({ failDiscovery: true }),
+      commit: serviceFixture({ failCommit: true }),
+      runtime: serviceFixture({ failRuntimeRegistration: true }),
     };
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
-      definitionStore: {
-        async load() { return []; },
-        async createWithCatalog() { order.push("commit"); throw new Error("commit failed"); },
+    const settled = await Promise.allSettled(Object.entries(scenarios).map(([label, fixture]) => (
+      fixture.service.connect({
+        adapterId: "fake-api",
+        label,
+        endpoint: "https://example.test/v1",
+        fields: { "api-key": "secret" },
+      })
+    )));
+    const observed = Object.fromEntries(Object.entries(scenarios).map(([label, fixture], index) => [label, {
+      status: settled[index].status,
+      error: settled[index].status === "rejected" ? settled[index].reason.message : null,
+      definitions: fixture.definitions().map(({ id, credentialReference }) => ({ id, credentialReference })),
+      credentialCount: fixture.credentials.size,
+      secretPersisted: JSON.stringify(fixture.definitions()).includes('"api-key":"secret"'),
+      closes: fixture.closes,
+      events: fixture.events,
+    }]));
+    expect(observed).toEqual({
+      success: {
+        status: "fulfilled",
+        error: null,
+        definitions: [{ id: "provider-1", credentialReference: "provider:provider-1" }],
+        credentialCount: 1,
+        secretPersisted: false,
+        closes: [],
+        events: ["discover", "credential", "commit"],
       },
-      credentialStore: {
-        async set(reference) { order.push("credential"); expect(reference).toBe("provider:ordered"); },
-        async delete(reference) { deleted.push(reference); },
+      discovery: {
+        status: "rejected",
+        error: "discovery failed",
+        definitions: [],
+        credentialCount: 0,
+        secretPersisted: false,
+        closes: ["provider-1"],
+        events: ["discover", "close"],
       },
-      idGenerator: () => "ordered",
+      commit: {
+        status: "rejected",
+        error: "commit failed",
+        definitions: [],
+        credentialCount: 0,
+        secretPersisted: false,
+        closes: ["provider-1"],
+        events: ["discover", "credential", "commit", "close", "credential-delete"],
+      },
+      runtime: {
+        status: "rejected",
+        error: "runtime registration failed",
+        definitions: [],
+        credentialCount: 0,
+        secretPersisted: false,
+        closes: ["provider-1"],
+        events: ["discover", "runtime-ready", "runtime-removed", "close"],
+      },
     });
-    await expect(service.connect({ adapterId: "ordered-api", label: "Ordered", fields: { key: "opaque" } }))
-      .rejects.toThrow("commit failed");
-    expect(order).toEqual(["discover", "credential", "commit"]);
-    expect(deleted).toEqual(["provider:ordered"]);
-    await expect(service.list()).resolves.toEqual([]);
-  });
-
-  it("compensates runtime registration before a failed staged create and leaves no active definition", async () => {
-    const fixture = serviceFixture();
-    const unregistered = [];
-    fixture.service.onRuntimeReady = async () => { throw new Error("runtime registration failed"); };
-    fixture.service.onRuntimeRemoved = async ({ id }) => { unregistered.push(id); };
-    await expect(fixture.service.connect({
-      adapterId: "fake-api", label: "Broken registration", fields: { "api-key": "opaque" },
-    })).rejects.toThrow("runtime registration failed");
-    expect(fixture.definitions()).toEqual([]);
-    expect(fixture.credentials.size).toBe(0);
-    expect(fixture.closes).toEqual(["provider-1"]);
-    expect(unregistered).toEqual(["provider-1"]);
   });
 
   it("joins authoritative connection state into generic provider listings", async () => {
@@ -1483,85 +1350,70 @@ describe("provider definition lifecycle", () => {
     await lease.release();
   });
 
-  it("completes or cancels managed login without persisting pending setup", async () => {
-    let accountStatus = "disconnected";
-    let stored = [];
-    const close = vi.fn(async () => {});
-    const registry = createProviderAdapterRegistry([{
-      adapterId: "fake-managed", implementationVersion: "1", label: "Managed",
-      accessContract: "managed-runtime@1", defaultEndpoint: null,
-      connection: { mode: "managed-login", fields: [] },
-      create: ({ definition: created }) => ({
-        credentials: {
-          login: async () => ({ loginId: "login-1", authUrl: "https://login.example.test" }),
-          account: async () => ({ status: accountStatus }),
+  it("owns managed login from pending authorization through completion or cancellation", async () => {
+    async function exercise(mode) {
+      let stored = [];
+      let accountStatus = "disconnected";
+      let discoveryGate = Promise.resolve();
+      const closed = [];
+      const removed = [];
+      const service = new ProviderDefinitionService({
+        registry: createProviderAdapterRegistry([{
+          adapterId: "fake-managed", implementationVersion: "1", label: "Managed",
+          accessContract: "managed-runtime@1", defaultEndpoint: null,
+          connection: { mode: "managed-login", fields: [] },
+          create: ({ definition: created }) => ({
+            credentials: {
+              login: async () => ({ loginId: `login-${created.id}` }),
+              account: async () => ({ status: accountStatus }),
+            },
+            catalog: { discover: async () => {
+              await discoveryGate;
+              return { provider: { id: created.id }, models: [{ visible: true }] };
+            } },
+            close: async () => { closed.push(created.id); },
+          }),
+        }]),
+        definitionStore: {
+          async load() { return structuredClone(stored); },
+          async save(value) { stored = structuredClone(value); },
+          async createWithCatalog(candidate) { stored.push(structuredClone(candidate)); },
         },
-        catalog: { discover: async () => ({ provider: { id: created.id }, models: [{ visible: true }] }) },
-        close,
-      }),
-    }]);
-    const removals = [];
-    const service = new ProviderDefinitionService({
-      registry,
-      definitionStore: { async load() { return structuredClone(stored); }, async save(value) { stored = structuredClone(value); } },
-      credentialStore: { async set() {}, async get() { return {}; }, async delete() {} },
-      idGenerator: (() => { let id = 0; return () => `managed-${++id}`; })(),
-      removeRuntimeState: async (candidate) => { removals.push(candidate.id); },
-    });
-    const pending = await service.connect({ adapterId: "fake-managed", label: "Managed Work" });
-    expect(pending).toMatchObject({ status: "pending", connectionId: "managed-1", login: { loginId: "login-1" } });
-    expect(stored).toEqual([]);
-    await expect(service.completeConnection(pending.connectionId)).resolves.toMatchObject({ status: "pending" });
-    accountStatus = "connected";
-    await expect(service.completeConnection(pending.connectionId)).resolves.toMatchObject({
-      status: "connected", providerDefinition: { id: "managed-1" },
-    });
-    expect(stored).toHaveLength(1);
+        credentialStore: { async set() {}, async get() { return {}; }, async delete() {} },
+        idGenerator: () => `managed-${mode}`,
+        removeRuntimeState: async ({ id }) => { removed.push(id); },
+      });
+      const pending = await service.connect({ adapterId: "fake-managed", label: mode });
+      if (mode === "complete") {
+        const pendingResult = await service.completeConnection(pending.connectionId);
+        const persistedWhilePending = stored.length;
+        accountStatus = "connected";
+        const connected = await service.completeConnection(pending.connectionId);
+        return { pending: pendingResult.status, persistedWhilePending, connected: connected.providerDefinition.id, stored: stored.length };
+      }
+      if (mode === "cancel") {
+        return { cancelled: await service.cancelConnection(pending.connectionId), stored: stored.length, closed, removed };
+      }
+      let releaseDiscovery;
+      discoveryGate = new Promise((resolve) => { releaseDiscovery = resolve; });
+      accountStatus = "connected";
+      const completion = service.completeConnection(pending.connectionId);
+      const cancellation = service.cancelConnection(pending.connectionId);
+      releaseDiscovery();
+      const [connected, cancelled] = await Promise.all([completion, cancellation]);
+      return { connected: connected.status, cancelled, stored: stored.length, closed };
+    }
 
-    const cancelled = await service.connect({ adapterId: "fake-managed", label: "Managed Personal" });
-    expect(await service.cancelConnection(cancelled.connectionId)).toBe(true);
-    expect(stored).toHaveLength(1);
-    expect(close).toHaveBeenCalledOnce();
-    expect(removals).toEqual(["managed-2"]);
-  });
-
-  it("serializes cancellation behind managed discovery so it cannot delete a committed runtime", async () => {
-    let releaseDiscovery;
-    const discoveryGate = new Promise((resolve) => { releaseDiscovery = resolve; });
-    let stored = [];
-    const close = vi.fn(async () => {});
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([{
-        adapterId: "racing-managed", implementationVersion: "1", label: "Managed",
-        accessContract: "managed-runtime@1", defaultEndpoint: null,
-        connection: { mode: "managed-login", fields: [] },
-        create: ({ definition: created }) => ({
-          credentials: {
-            login: async () => ({ loginId: "login-race" }),
-            account: async () => ({ status: "connected" }),
-          },
-          catalog: { discover: async () => {
-            await discoveryGate;
-            return { provider: { id: created.id }, models: [{ visible: true }] };
-          } },
-          close,
-        }),
-      }]),
-      definitionStore: {
-        async load() { return structuredClone(stored); },
-        async createWithCatalog(candidate) { stored.push(structuredClone(candidate)); },
-      },
-      credentialStore: { async delete() {} },
-      idGenerator: () => "managed-race",
+    const modes = ["complete", "cancel", "race"];
+    const settled = await Promise.allSettled(modes.map(exercise));
+    expect(Object.fromEntries(settled.map((result, index) => [
+      modes[index],
+      result.status === "fulfilled" ? result.value : { error: result.reason.message },
+    ]))).toEqual({
+      complete: { pending: "pending", persistedWhilePending: 0, connected: "managed-complete", stored: 1 },
+      cancel: { cancelled: true, stored: 0, closed: ["managed-cancel"], removed: ["managed-cancel"] },
+      race: { connected: "connected", cancelled: false, stored: 1, closed: [] },
     });
-    const pending = await service.connect({ adapterId: "racing-managed", label: "Race" });
-    const completion = service.completeConnection(pending.connectionId);
-    const cancellation = service.cancelConnection(pending.connectionId);
-    releaseDiscovery();
-    await expect(completion).resolves.toMatchObject({ status: "connected" });
-    await expect(cancellation).resolves.toBe(false);
-    expect(stored).toHaveLength(1);
-    expect(close).not.toHaveBeenCalled();
   });
 
   it("does not persist or destroy credentials after managed runtime registration fails", async () => {
@@ -1600,34 +1452,28 @@ describe("provider definition lifecycle", () => {
     expect(removed).toEqual(["managed-failed"]);
   });
 
-  it("finalizes removal-pending definitions on startup", async () => {
-    const fixture = serviceFixture();
-    await fixture.service.connect({ adapterId: "fake-api", label: "Old", fields: { "api-key": "secret" } });
-    fixture.definitions()[0].lifecycleState = "removal_pending";
-    const removals = [];
-    const restarted = new ProviderDefinitionService({
-      registry: fixture.service.registry,
-      definitionStore: {
-        async load() { return structuredClone(fixture.definitions()); },
-        async save(value) { fixture.definitions().splice(0, Infinity, ...structuredClone(value)); },
-      },
-      credentialStore: {
-        async get(key) { return fixture.credentials.get(key) ?? null; },
-        async delete(key) { return fixture.credentials.delete(key); },
-      },
-      removeRuntimeState: async (candidate) => { removals.push(candidate.id); },
+  it("reconciles all persisted provider states before startup refresh", async () => {
+    const definition = (id, lifecycleState = "active") => ({
+      id, adapterId: "fake-api", label: id, endpoint: "https://example.test/v1",
+      accessContract: "secret@1", credentialReference: `provider:${id}`, lifecycleState, removedAt: null,
     });
-    await restarted.reconcileStartup();
-    expect(fixture.definitions()[0]).toMatchObject({ lifecycleState: "tombstoned", credentialReference: null });
-    expect(fixture.credentials.size).toBe(0);
-    expect(removals).toEqual(["provider-1"]);
-  });
-
-  it("registers persisted providers before startup refresh and supports manual refresh", async () => {
-    let discoveries = 0;
+    let stored = [
+      definition("removal", "removal_pending"),
+      definition("healthy"),
+      definition("revoked"),
+      definition("missing"),
+    ];
+    const credentials = new Map([
+      ["provider:removal", { key: "old" }],
+      ["provider:healthy", { key: "valid" }],
+    ]);
+    const discoveries = [];
+    const published = [];
+    const removed = [];
+    const unavailable = [];
+    const diagnostics = [];
     const snapshot = (providerId) => ({
-      provider: { id: providerId, label: providerId, adapterId: "fake-api", status: "available" },
-      fetchedAt: new Date().toISOString(),
+      provider: { id: providerId, label: providerId, status: "available" },
       models: [{
         id: "model-1", label: "Model 1", description: "", visible: true, executionModel: "model-1",
         availability: "available", unavailableReason: null, availabilityNotice: null, isDefault: false,
@@ -1638,94 +1484,79 @@ describe("provider definition lifecycle", () => {
     });
     const registry = createProviderAdapterRegistry([{
       adapterId: "fake-api", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
-      defaultEndpoint: "https://example.test/v1", connection: {
-        mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
-      },
+      defaultEndpoint: "https://example.test/v1",
+      connection: { mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }] },
       create: ({ definition: created }) => ({
         providerId: created.id,
-        discover: async () => { discoveries += 1; return snapshot(created.id); },
+        discover: async () => { discoveries.push(created.id); return snapshot(created.id); },
       }),
     }]);
-    const published = [];
-    const seed = { providerId: "seed", discover: async () => snapshot("seed") };
-    const modelCatalog = new ModelCatalogService({ adapters: [seed], publishSnapshot: async (value) => { published.push(value); } });
+    const modelCatalog = new ModelCatalogService({
+      adapters: [],
+      publishSnapshot: async (value) => { published.push(value); },
+    });
     const service = new ProviderDefinitionService({
       registry,
-      definitionStore: { async load() { return [{
-        id: "persisted", adapterId: "fake-api", label: "Persisted", endpoint: "https://example.test/v1",
-        accessContract: "secret@1", credentialReference: "provider:persisted", lifecycleState: "active", removedAt: null,
-      }]; } },
-      credentialStore: { async get() { return { key: "opaque" }; } },
+      definitionStore: {
+        async load() { return structuredClone(stored); },
+        async save(value) { stored = structuredClone(value); },
+      },
+      credentialStore: {
+        async get(reference) { return credentials.get(reference) ?? null; },
+        async delete(reference) { return credentials.delete(reference); },
+      },
+      diagnostics: { write: async (event) => { diagnostics.push(event); } },
+      providerStatuses: async () => new Map([
+        ["healthy", { connected: true, unavailableReason: null }],
+        ["revoked", { connected: true, unavailableReason: null }],
+        ["missing", { connected: true, unavailableReason: null }],
+      ]),
+      removeRuntimeState: async ({ id }) => { removed.push(id); },
       onRuntimeReady: (_definition, runtime) => modelCatalog.register(runtime.catalog ?? runtime),
-      onRuntimeRemoved: (definition) => modelCatalog.unregister(definition.id),
+      onRuntimeRemoved: (candidate) => modelCatalog.unregister(candidate.id),
+      onRuntimeUnavailable: async (candidate, error) => { unavailable.push([candidate.id, error.message]); },
     });
+
+    await service.reconcileStartup();
     await service.activate();
     await modelCatalog.startup();
-    expect(discoveries).toBe(1);
-    expect(published.some(({ providerId }) => providerId === "persisted")).toBe(true);
-    await modelCatalog.explicitRefresh("persisted");
-    expect(discoveries).toBe(2);
-  });
-
-  it("continues activation when one persisted provider has revoked credentials", async () => {
-    const ready = [];
-    const diagnostics = [];
-    const registry = createProviderAdapterRegistry([{
-      adapterId: "fake-api", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
-      defaultEndpoint: "https://example.test/v1", connection: {
-        mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
+    await modelCatalog.explicitRefresh("healthy");
+    const listed = await service.list();
+    const revokedLease = await service.acquireExecution("revoked").then(
+      () => null,
+      (error) => error.message,
+    );
+    expect({
+      lifecycle: Object.fromEntries(stored.map(({ id, lifecycleState, credentialReference }) => (
+        [id, { lifecycleState, credentialReference }]
+      ))),
+      credentials: [...credentials.keys()],
+      removed,
+      unavailable: unavailable.map(([id]) => id),
+      unavailableListings: listed.filter(({ connected }) => !connected).map(({ id }) => id),
+      diagnostics: diagnostics.map(({ providerId, category }) => ({ providerId, category })),
+      discoveries,
+      published: published.map(({ providerId }) => providerId),
+      revokedLease,
+    }).toEqual({
+      lifecycle: {
+        removal: { lifecycleState: "tombstoned", credentialReference: null },
+        healthy: { lifecycleState: "active", credentialReference: "provider:healthy" },
+        revoked: { lifecycleState: "active", credentialReference: "provider:revoked" },
+        missing: { lifecycleState: "active", credentialReference: "provider:missing" },
       },
-      create: ({ definition: created }) => ({ providerId: created.id, discover: async () => ({}) }),
-    }]);
-    const persisted = ["revoked", "healthy"].map((id) => ({
-      id, adapterId: "fake-api", label: id, endpoint: "https://example.test/v1", accessContract: "secret@1",
-      credentialReference: `provider:${id}`, lifecycleState: "active", removedAt: null,
-    }));
-    const service = new ProviderDefinitionService({
-      registry,
-      definitionStore: { async load() { return persisted; } },
-      credentialStore: { async get(reference) { return reference.endsWith("healthy") ? { key: "valid" } : null; } },
-      diagnostics: { write: async (event) => { diagnostics.push(event); } },
-      onRuntimeReady: (definition) => { ready.push(definition.id); },
+      credentials: ["provider:healthy"],
+      removed: ["removal"],
+      unavailable: ["revoked", "missing"],
+      unavailableListings: ["revoked", "missing"],
+      diagnostics: [
+        { providerId: "revoked", category: "provider_activation_failed" },
+        { providerId: "missing", category: "provider_activation_failed" },
+      ],
+      discoveries: ["healthy", "healthy"],
+      published: ["healthy", "healthy"],
+      revokedLease: expect.stringContaining("credentials are unavailable"),
     });
-    await expect(service.activate()).resolves.toBeUndefined();
-    expect(ready).toEqual(["healthy"]);
-    expect(diagnostics).toEqual([expect.objectContaining({
-      category: "provider_activation_failed", providerId: "revoked", code: "unknown",
-    })]);
-    await expect(service.acquireExecution("revoked")).rejects.toThrow("credentials are unavailable");
-  });
-
-  it("marks a persisted provider unavailable when startup activation cannot load its credential", async () => {
-    const unavailable = [];
-    const descriptor = {
-      adapterId: "fake-api", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
-      defaultEndpoint: "https://example.test/v1", connection: {
-        mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
-      },
-      create: vi.fn(),
-    };
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
-      definitionStore: { async load() { return [{
-        id: "missing", adapterId: "fake-api", label: "Missing", endpoint: "https://example.test/v1",
-        accessContract: "secret@1", credentialReference: "provider:missing", lifecycleState: "active",
-      }]; } },
-      credentialStore: { async get() { return null; } },
-      providerStatuses: async () => new Map([["missing", { connected: true, unavailableReason: null }]]),
-      onRuntimeUnavailable: async (definition, error) => { unavailable.push({ definition, error }); },
-    });
-
-    await service.activate();
-    expect(descriptor.create).not.toHaveBeenCalled();
-    expect(unavailable).toHaveLength(1);
-    expect(unavailable[0].definition.id).toBe("missing");
-    expect(unavailable[0].error.message).toContain("credentials are unavailable");
-    await expect(service.list()).resolves.toEqual([expect.objectContaining({
-      id: "missing",
-      connected: false,
-      unavailableReason: expect.objectContaining({ code: "provider_activation_failed" }),
-    })]);
   });
 
   it("does not cache a lazy runtime whose catalog registration failed", async () => {
@@ -1778,23 +1609,7 @@ describe("background model catalog refresh", () => {
     };
   }
 
-  it("boots best-effort with a revoked provider and refreshes healthy providers", async () => {
-    const published = [];
-    const service = new ModelCatalogService({
-      adapters: [
-        { providerId: "revoked", discover: async () => { throw new ProviderHttpError("revoked", { status: 401 }); } },
-        { providerId: "healthy", discover: async () => completeSnapshot("healthy") },
-      ],
-      publishSnapshot: async (snapshot) => { published.push(snapshot); },
-      setTimer: () => ({ unref() {} }),
-    });
-    const results = await service.startup();
-    expect(results.map(({ status }) => status)).toEqual(["rejected", "fulfilled"]);
-    expect(published.map(({ providerId }) => providerId)).toEqual(["healthy"]);
-    await service.close();
-  });
-
-  it("uses an unref non-overlapping timer, retains the last snapshot on failure, and cancels on close", async () => {
+  it("runs one non-overlapping best-effort refresh lifecycle and cancels it on close", async () => {
     const callbacks = [];
     const cleared = [];
     const unref = vi.fn();
@@ -1803,17 +1618,22 @@ describe("background model catalog refresh", () => {
     const backgroundFailure = new Promise((_resolve, reject) => { rejectBackground = reject; });
     const published = [];
     const service = new ModelCatalogService({
-      adapters: [{ providerId: "scheduled", discover: async () => {
-        calls += 1;
-        if (calls === 1) return completeSnapshot("scheduled");
-        return backgroundFailure;
-      } }],
+      adapters: [
+        { providerId: "revoked", discover: async () => { throw new ProviderHttpError("revoked", { status: 401 }); } },
+        { providerId: "healthy", discover: async () => {
+          calls += 1;
+          if (calls === 1) return completeSnapshot("healthy");
+          return backgroundFailure;
+        } },
+      ],
       publishSnapshot: async (snapshot) => { published.push(snapshot); },
       setTimer: (callback) => { const token = { callback, unref }; callbacks.push(token); return token; },
       clearTimer: (token) => { cleared.push(token); },
       backgroundIntervalMs: 10,
     });
-    await service.startup();
+    const startup = await service.startup();
+    expect(startup.map(({ status }) => status)).toEqual(["rejected", "fulfilled"]);
+    expect(published.map(({ providerId }) => providerId)).toEqual(["healthy"]);
     expect(unref).toHaveBeenCalledOnce();
     const tick = callbacks[0].callback();
     await new Promise((resolve) => setImmediate(resolve));

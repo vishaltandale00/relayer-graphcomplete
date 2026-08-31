@@ -4,39 +4,13 @@ import { createProviderAdapterRegistry } from "../desktop/main/providers/provide
 import { createProviderComposition } from "../desktop/main/providers/provider-composition.mjs";
 
 describe("injectable production provider composition", () => {
-  it("publishes missing persisted credentials as unavailable and keeps explicit refresh deterministic", async () => {
+  it("starts an unavailable persisted provider and recovers it through explicit refresh", async () => {
     const published = [];
-    const composition = createProviderComposition({
-      registry: createProviderAdapterRegistry([{
-        adapterId: "fake-api", implementationVersion: "1", label: "Fake API",
-        accessContract: "secret@1", defaultEndpoint: "https://fake.example/v1",
-        connection: { mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }] },
-        create: vi.fn(),
-      }]),
-      definitionStore: { async load() { return [{
-        id: "missing", adapterId: "fake-api", label: "Missing API", endpoint: "https://fake.example/v1",
-        accessContract: "secret@1", credentialReference: "provider:missing", lifecycleState: "active",
-      }]; } },
-      credentialStore: { async get() { return null; }, async listReferences() { return ["provider:missing"]; } },
-      publishCatalog: async (snapshot) => { published.push(snapshot); },
-      modelCatalogOptions: { backgroundIntervalMs: 60_000 },
-    });
-
-    await composition.start();
-    expect(published).toEqual([expect.objectContaining({
-      providerId: "missing", connected: false, models: [],
-      unavailableReason: expect.objectContaining({ code: "provider_unavailable" }),
-    })]);
-    await composition.modelCatalog.explicitRefresh("missing");
-    expect(published).toHaveLength(2);
-    expect(published[1]).toEqual(published[0]);
-    await composition.close();
-  });
-
-  it("recovers an unavailable API provider through the existing explicit refresh surface", async () => {
-    const published = [];
+    const credentials = new Map([["provider:recoverable", { key: "opaque" }]]);
     let runtimeReady = false;
-    const prepareRuntime = vi.fn(async () => { runtimeReady = true; });
+    const prepareRuntime = vi.fn(async ({ providerDefinition }) => {
+      if (providerDefinition.id === "recoverable") runtimeReady = true;
+    });
     const create = vi.fn(({ definition }) => {
       if (!runtimeReady) throw new Error("managed runtime unavailable");
       return {
@@ -62,21 +36,38 @@ describe("injectable production provider composition", () => {
         connection: { mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }] },
         create,
       }]),
-      definitionStore: { async load() { return [{
-        id: "recoverable", adapterId: "recoverable-api", label: "Recoverable", endpoint: "https://recover.example/v1",
-        accessContract: "secret@1", credentialReference: "provider:recoverable", lifecycleState: "active",
-      }]; } },
-      credentialStore: { async get() { return { key: "opaque" }; }, async listReferences() { return ["provider:recoverable"]; } },
+      definitionStore: { async load() { return [
+        {
+          id: "recoverable", adapterId: "recoverable-api", label: "Recoverable", endpoint: "https://recover.example/v1",
+          accessContract: "secret@1", credentialReference: "provider:recoverable", lifecycleState: "active",
+        },
+        {
+          id: "missing", adapterId: "recoverable-api", label: "Missing", endpoint: "https://recover.example/v1",
+          accessContract: "secret@1", credentialReference: "provider:missing", lifecycleState: "active",
+        },
+      ]; } },
+      credentialStore: {
+        async get(reference) { return credentials.get(reference) ?? null; },
+        async listReferences() { return [...credentials.keys()]; },
+      },
       prepareRuntime,
       publishCatalog: async (snapshot) => { published.push(snapshot); },
       modelCatalogOptions: { backgroundIntervalMs: 60_000 },
     });
 
     await composition.start();
-    expect(published.at(-1)).toMatchObject({ providerId: "recoverable", connected: false });
+    expect(published).toEqual(expect.arrayContaining([
+      expect.objectContaining({ providerId: "recoverable", connected: false }),
+      expect.objectContaining({ providerId: "missing", connected: false }),
+    ]));
+    expect(create).toHaveBeenCalledOnce();
     expect(prepareRuntime).not.toHaveBeenCalled();
-    await composition.modelCatalog.explicitRefresh("recoverable");
+    await composition.modelCatalog.explicitRefresh("missing");
+    expect(published.at(-1)).toMatchObject({ providerId: "missing", connected: false });
+    expect(create).toHaveBeenCalledOnce();
     expect(prepareRuntime).toHaveBeenCalledOnce();
+    await composition.modelCatalog.explicitRefresh("recoverable");
+    expect(prepareRuntime).toHaveBeenCalledTimes(2);
     expect(create).toHaveBeenCalledTimes(2);
     expect(published.at(-1)).toMatchObject({
       providerId: "recoverable",
