@@ -11,6 +11,39 @@ export function runPanelCopy(run) {
   };
 }
 
+export const recursiveCompleteCaseId = "empty-project.recursive-complete.comparison";
+export const recursiveCompleteHarnessPair = Object.freeze([
+  "codex-eval-complete-disabled",
+  "codex-eval-complete-enabled",
+]);
+
+export function isolateRecursiveCompleteSelection(testCaseIds, harnessConfigurationNames) {
+  if (!testCaseIds.includes(recursiveCompleteCaseId)) {
+    return { testCaseIds: [...testCaseIds], harnessConfigurationNames: [...harnessConfigurationNames] };
+  }
+  return {
+    testCaseIds: [recursiveCompleteCaseId],
+    harnessConfigurationNames: [...recursiveCompleteHarnessPair],
+  };
+}
+
+export function authorizeRecursiveCompleteSelection(selection, confirmLiveRun) {
+  if (!selection.testCaseIds.includes(recursiveCompleteCaseId)) return structuredClone(selection);
+  const confirmed = confirmLiveRun(
+    "Run two live Codex root cells for the agent-authored Complete comparison? The enabled root may launch additional agent-authored child execution. All of these use paid/live inference through the connected product provider.",
+  );
+  if (!confirmed) return null;
+  return {
+    ...structuredClone(selection),
+    liveAuthorization: {
+      confirmed: true,
+      credentialReference: "connected-product-provider",
+      rootProviderExecutions: 2,
+      agentAuthoredChildren: true,
+    },
+  };
+}
+
 const asArray = (value) => Array.isArray(value) ? value : [];
 
 function finiteScore(value) {
@@ -166,7 +199,9 @@ export function projectExecutionDossier(run, execution) {
     ? asArray(outcome.mandatoryGates)
     : asArray(outcome.gates);
   const gates = declaredGates.length ? declaredGates : legacyGates;
-  const traceable = asArray(execution.turns).some((turn) => Boolean(turn?.candidateTrace));
+  const semanticChildren = asArray(execution.semanticChildren);
+  const traceable = [...asArray(execution.turns), ...semanticChildren]
+    .some((turn) => Boolean(turn?.candidateTrace));
   const hasJudgeOutput = asArray(execution.turns).some((turn) => (
     turn?.deterministicJudge || asArray(turn?.judgeResults).length > 0
   ));
@@ -213,6 +248,20 @@ export function projectExecutionDossier(run, execution) {
         ? asArray(presentation.evidenceRefs)
         : asArray(presentation.layers).flatMap((layer) => asArray(layer?.evidenceRefs)))
         .map(evidenceRefLabel),
+    },
+    recursiveComplete: {
+      declared: execution.harnessConfiguration?.complete !== undefined,
+      configured: execution.harnessConfiguration?.complete?.agentAuthored === true,
+      brokerAvailable: execution.turns?.[0]?.candidateTrace?.completionBrokerAvailable ?? null,
+      children: semanticChildren.map((child) => ({
+        interactionId: child.interactionId,
+        graphNodeId: child.graphNodeId,
+        sourceInteractionId: child.sourceInteractionId,
+        sourceActionId: child.sourceActionId,
+        status: child.status,
+        traceStatus: child.candidateTrace?.status ?? "disabled",
+        projectionCount: asArray(child.projectionObservations).length,
+      })),
     },
     error: execution.error ?? null,
     promotable: execution.promotable !== false,

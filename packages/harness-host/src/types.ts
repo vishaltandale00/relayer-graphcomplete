@@ -1,5 +1,6 @@
 import type { CompletionOutput, GraphCapability, GraphId, GraphNode, InteractionInput, ResolvedPersonalPresentation } from "@relayer/graph-client";
 import type { HarnessApprovalChannel } from "./approval-coordinator.js";
+import type { NativeExecutionHandle } from "./completion-execution.js";
 
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = Readonly<Record<string, JsonValue>>;
@@ -31,6 +32,10 @@ export interface HarnessModelDefaults {
   readonly familyPolicy: HarnessFamilyPolicyReference;
 }
 
+export interface HarnessCompleteConfiguration {
+  readonly agentAuthored: boolean;
+}
+
 export interface HarnessConfiguration {
   readonly schemaVersion: 1;
   readonly name: string;
@@ -43,6 +48,8 @@ export interface HarnessConfiguration {
   readonly modelRules?: HarnessModelRules;
   readonly executionAccessContracts?: readonly string[];
   readonly modelDefaults?: HarnessModelDefaults;
+  /** Explicit authority to expose agent-authored complete(inputGraph); root Complete is unaffected. */
+  readonly complete?: HarnessCompleteConfiguration;
   readonly settings: JsonObject;
 }
 
@@ -81,6 +88,7 @@ export type CoreTraceEventType =
   | "stream.completed"
   | "span.started"
   | "span.completed"
+  | "execution.scope"
   | "prompt"
   | "message"
   | "reasoning.summary"
@@ -190,13 +198,31 @@ export interface HarnessGraphScope {
   acquireCapability(): GraphCapability;
 }
 
+/** Execution-scoped transport for starting and observing prepared semantic children. */
+export interface HarnessCompletionBrokerScope {
+  readonly url: string;
+  readonly token: string;
+}
+
+/** Trusted provenance for one semantic Complete call. */
+export type CompletionOrigin =
+  | { readonly kind: "root" }
+  | {
+      readonly kind: "invoke";
+      readonly sourceCompletionId: GraphId;
+      readonly actionId: GraphId;
+    };
+
 export interface HarnessRunContext {
+  /** GraphComplete provenance; provider session identity is deliberately separate. */
+  readonly origin: CompletionOrigin;
   readonly inputGraph: GraphNode;
   /** Normalized model-visible input resolved from inputGraph; excludes context occurrence authority. */
   readonly interactionInput: InteractionInput;
   /** Control-attached hidden graph resolved from this exact interaction pointer. */
   readonly personalPresentation?: ResolvedPersonalPresentation;
   readonly graph: HarnessGraphScope;
+  readonly completionBroker?: HarnessCompletionBrokerScope;
   readonly approvals: HarnessApprovalChannel;
   /** Immutable admitted family plan. Its orchestrator is also exposed through model. */
   readonly modelPlan?: HarnessAdmittedModelPlan;
@@ -312,7 +338,9 @@ export interface InteractionModelSelection {
 
 export interface Harness {
   traceSupport?(): HarnessTraceSupport;
-  complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void>;
+  /** Root Complete is mandatory; this opts the same method into agent-invoked Complete. */
+  readonly supportsInvokedComplete?: true;
+  complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle | Promise<void>;
   state(): HarnessSessionState;
   dispose?(): void | Promise<void>;
   /** Immediately interrupt provider work so the host-owned dispose operation can finish. */

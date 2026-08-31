@@ -1,6 +1,10 @@
 import type { RelayerIconName } from "./icons.js";
 
 export type GraphId = number;
+
+export interface CompletionInputGraph {
+  readonly interactionNode: GraphId;
+}
 export type RecordState = "draft" | "accepted" | "stopped";
 
 export interface GraphNode {
@@ -69,6 +73,40 @@ export interface CompletionOutput {
   readonly nodeId: GraphId;
   readonly rootAction: GraphAction;
   readonly rootLayer: ResolvedLayer;
+}
+
+export type CompletionLifecycle = "active" | "succeeded" | "stopped" | "failed";
+export type StopReason = "cancelled_by_user";
+
+export interface TemporalFeatureConfig {
+  readonly configVersion: number;
+  readonly schemaRead: boolean;
+  readonly rootCurrentWrite: boolean;
+  readonly projectionUi: boolean;
+  readonly invokeResolution: boolean;
+  readonly providerRecursion: boolean;
+}
+
+export interface CompletionState {
+  readonly completionId: GraphId;
+  readonly lifecycle: CompletionLifecycle;
+  readonly headRevision: number;
+  readonly currentLayerId?: GraphId | null;
+  readonly finalLayerId?: GraphId | null;
+  readonly safeReason?: string | null;
+  readonly temporalFeatures: TemporalFeatureConfig;
+}
+
+export interface CurrentTransitionReceipt {
+  readonly completionId: GraphId;
+  readonly revision: number;
+  readonly lifecycle: CompletionLifecycle;
+  readonly currentLayerId?: GraphId | null;
+  readonly finalLayerId?: GraphId | null;
+  readonly operationKey: string;
+  readonly requestDigest: string;
+  readonly snapshotDigest: string;
+  readonly projectionSequence: number;
 }
 
 export interface AcceptedGraphClosure {

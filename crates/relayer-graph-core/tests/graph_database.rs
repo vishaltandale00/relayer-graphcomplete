@@ -867,6 +867,12 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
         .expect("context control identity must not consume an LM client key");
     let output = writer.complete(interaction.id).await.unwrap();
     assert_eq!(output.root_layer.actions.len(), 0);
+    assert_eq!(
+        writer.complete(interaction.id).await.unwrap(),
+        output,
+        "legacy graph.submit remains retry-safe while temporal current is dark"
+    );
+    assert_eq!(writer.completion_output().await.unwrap(), Some(output));
     assert_eq!(writer.interaction_input().await.unwrap().contexts.len(), 1);
 }
 
@@ -975,6 +981,20 @@ async fn interaction_context_rejects_duplicate_invalid_and_empty_input_atomicall
         invalid,
         GraphError::Validation {
             code: "invalid_context_occurrence",
+            ..
+        }
+    ));
+    let invalid_root = database
+        .set_temporal_features(TemporalFeatureConfig {
+            root_current_write: true,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        invalid_root,
+        GraphError::Validation {
+            code: "invalid_temporal_feature_dependency",
             ..
         }
     ));
@@ -1187,6 +1207,603 @@ async fn product_identifiers_are_external_inputs() {
     let (database, interaction) = setup(Some(project(41)), thread(73)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
     assert_eq!(writer.node_id(), interaction.id);
+}
+
+#[tokio::test]
+async fn current_advance_is_atomic_durable_and_idempotent() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let interaction = database
+        .create_interaction(Some(project(1)), thread(1), "Publish useful work")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+
+    let initial = writer.current_completion().await.unwrap();
+    assert_eq!(initial.completion_id, interaction.id);
+    assert_eq!(initial.head_revision, 0);
+    assert_eq!(initial.current_layer_id, None);
+    assert_eq!(initial.lifecycle, CompletionLifecycle::Active);
+
+    let answer = node(&writer, "working-answer").await;
+    let layer = single_node_layer(&writer, "working-current", &answer).await;
+    let first = writer
+        .transition_current(
+            0,
+            "advance-working-current",
+            CurrentTransition::Advance { layer_id: layer.id },
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.revision, 1);
+    assert_eq!(first.current_layer_id, Some(layer.id));
+    assert_eq!(
+        writer.get_layer(layer.id).await.unwrap().layer.state,
+        RecordState::Accepted
+    );
+
+    let replay = writer
+        .transition_current(
+            0,
+            "advance-working-current",
+            CurrentTransition::Advance { layer_id: layer.id },
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay, first);
+
+    drop(writer);
+    database.close().await;
+    let reopened = GraphDatabase::open(file.path()).await.unwrap();
+    let recovered = reopened
+        .writer_for_subgraph(interaction.id)
+        .await
+        .unwrap()
+        .current_completion()
+        .await
+        .unwrap();
+    assert_eq!(recovered.head_revision, 1);
+    assert_eq!(recovered.current_layer_id, Some(layer.id));
+    assert_eq!(recovered.lifecycle, CompletionLifecycle::Active);
+}
+
+#[tokio::test]
+async fn returning_the_existing_current_appends_a_terminal_revision_without_cloning_graph() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let answer = node(&writer, "answer").await;
+    let layer = single_node_layer(&writer, "current", &answer).await;
+    writer
+        .transition_current(
+            0,
+            "advance-current",
+            CurrentTransition::Advance { layer_id: layer.id },
+        )
+        .await
+        .unwrap();
+    root_expand(&writer, &interaction, &layer).await;
+
+    let returned = writer
+        .transition_current(
+            1,
+            "return-current",
+            CurrentTransition::Return { layer_id: layer.id },
+        )
+        .await
+        .unwrap();
+    assert_eq!(returned.revision, 2);
+    assert_eq!(returned.lifecycle, CompletionLifecycle::Succeeded);
+    assert_eq!(returned.current_layer_id, Some(layer.id));
+    assert_eq!(returned.final_layer_id, Some(layer.id));
+    let state = writer.current_completion().await.unwrap();
+    assert_eq!(state.lifecycle, CompletionLifecycle::Succeeded);
+    assert_eq!(state.head_revision, 2);
+    assert_eq!(
+        writer
+            .completion_output()
+            .await
+            .unwrap()
+            .unwrap()
+            .root_layer
+            .layer
+            .id,
+        layer.id
+    );
+
+    let replay = writer
+        .transition_current(
+            1,
+            "return-current",
+            CurrentTransition::Return { layer_id: layer.id },
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay, returned);
+}
+
+#[tokio::test]
+async fn projection_outbox_preserves_each_revision_and_terminal_current() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let compatibility_completion = database
+        .create_interaction(Some(project(1)), thread(1), "Compatibility root")
+        .await
+        .unwrap();
+    database
+        .set_temporal_features(TemporalFeatureConfig {
+            schema_read: true,
+            root_current_write: true,
+            projection_ui: true,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap();
+    let interaction = database
+        .create_interaction(Some(project(1)), thread(1), "Explain the queue")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let answer = node(&writer, "progress").await;
+    let layer = single_node_layer(&writer, "progress-current", &answer).await;
+    let advanced = writer
+        .transition_current(
+            0,
+            "advance-progress",
+            CurrentTransition::Advance { layer_id: layer.id },
+        )
+        .await
+        .unwrap();
+    let unsafe_reason = writer
+        .transition_current(
+            1,
+            "unsafe-stop-reason",
+            CurrentTransition::Stop {
+                reason: "raw private tool trace".into(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        unsafe_reason,
+        GraphError::Validation {
+            code: "invalid_terminal_reason",
+            ..
+        }
+    ));
+    let stopped = writer
+        .transition_current(
+            1,
+            "stop-progress",
+            CurrentTransition::Stop {
+                reason: "cancelled_by_user".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(stopped.lifecycle, CompletionLifecycle::Stopped);
+    assert_eq!(stopped.current_layer_id, Some(layer.id));
+
+    let events = database.current_projection_events(0, 100).await.unwrap();
+    assert!(
+        events
+            .iter()
+            .all(|event| event.completion_id != compatibility_completion.id)
+    );
+    let events = events
+        .into_iter()
+        .filter(|event| event.completion_id == interaction.id)
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0].revision, 0);
+    assert_eq!(events[0].lifecycle, CompletionLifecycle::Active);
+    assert_eq!(events[0].current_layer_id, None);
+    assert_eq!(events[1].sequence, advanced.projection_sequence);
+    assert_eq!(events[1].revision, 1);
+    assert_eq!(events[1].lifecycle, CompletionLifecycle::Active);
+    assert_eq!(events[1].current_layer_id, Some(layer.id));
+    assert_eq!(events[2].sequence, stopped.projection_sequence);
+    assert_eq!(events[2].revision, 2);
+    assert_eq!(events[2].lifecycle, CompletionLifecycle::Stopped);
+    assert_eq!(events[2].current_layer_id, Some(layer.id));
+    assert_eq!(events[2].safe_reason.as_deref(), Some("cancelled_by_user"));
+
+    let first_page = database
+        .current_projection_page(&[interaction.id], 0, 1)
+        .await
+        .unwrap();
+    assert_eq!(first_page.states.len(), 1);
+    assert_eq!(first_page.states[0].completion_id, interaction.id);
+    assert_eq!(first_page.states[0].head_revision, stopped.revision);
+    assert_eq!(first_page.states[0].lifecycle, CompletionLifecycle::Stopped);
+    assert_eq!(
+        first_page.states[0].safe_reason.as_deref(),
+        Some("cancelled_by_user")
+    );
+    assert_eq!(first_page.events.len(), 1);
+    assert!(first_page.has_more);
+    let remaining = database
+        .current_projection_page(&[interaction.id], first_page.cursor, 10)
+        .await
+        .unwrap();
+    assert_eq!(remaining.events.len(), 2);
+    assert!(!remaining.has_more);
+
+    let replay = writer
+        .transition_current(
+            1,
+            "stop-progress",
+            CurrentTransition::Stop {
+                reason: "cancelled_by_user".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay, stopped);
+    assert_eq!(
+        database
+            .current_projection_events(0, 100)
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn temporal_rollout_flags_default_off_and_enforce_stage_dependencies() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    assert_eq!(
+        database.temporal_features().await.unwrap(),
+        TemporalFeatureConfig::default()
+    );
+    let invalid = database
+        .set_temporal_features(TemporalFeatureConfig {
+            projection_ui: true,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        invalid,
+        GraphError::Validation {
+            code: "invalid_temporal_feature_dependency",
+            ..
+        }
+    ));
+    let root = TemporalFeatureConfig {
+        schema_read: true,
+        root_current_write: true,
+        ..TemporalFeatureConfig::default()
+    };
+    database.set_temporal_features(root).await.unwrap();
+    assert_eq!(database.temporal_features().await.unwrap(), root);
+    let interaction = database
+        .create_interaction(Some(project(9)), thread(9), "Rollout-bound root")
+        .await
+        .unwrap();
+    assert_eq!(
+        database
+            .current_completion(interaction.id)
+            .await
+            .unwrap()
+            .temporal_features,
+        root
+    );
+    drop(database);
+
+    let reopened = GraphDatabase::open(file.path()).await.unwrap();
+    assert_eq!(reopened.temporal_features().await.unwrap(), root);
+    assert_eq!(
+        reopened
+            .current_completion(interaction.id)
+            .await
+            .unwrap()
+            .temporal_features,
+        root
+    );
+}
+
+#[tokio::test]
+async fn published_active_invoke_prepares_one_recursive_completion_with_canonical_input() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    database
+        .set_temporal_features(TemporalFeatureConfig {
+            schema_read: true,
+            root_current_write: true,
+            projection_ui: true,
+            invoke_resolution: true,
+            provider_recursion: true,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap();
+    let parent = database
+        .create_interaction(Some(project(1)), thread(1), "Parent task")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(parent.id).await.unwrap();
+    let source = node(&writer, "recursive-source").await;
+    let current = single_node_layer(&writer, "recursive-current", &source).await;
+    let invoke = writer
+        .add_action(&ActionDraft {
+            client_key: "recursive-child".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(current.id),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Investigate".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Investigate the published branch".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .transition_current(
+            0,
+            "publish-recursive-child",
+            CurrentTransition::Advance {
+                layer_id: current.id,
+            },
+        )
+        .await
+        .unwrap();
+
+    let parent_epoch = database
+        .activate_completion_authority(parent.id)
+        .await
+        .unwrap();
+    let recursive_writer = database
+        .writer_for_completion_authority(parent.id, parent_epoch)
+        .await
+        .unwrap();
+    let child = recursive_writer
+        .prepare_recursive_completion(invoke.id)
+        .await
+        .unwrap();
+    let later_source = node(&writer, "later-parent-current").await;
+    let later_current = single_node_layer(&writer, "later-current", &later_source).await;
+    writer
+        .add_action(&ActionDraft {
+            client_key: "retain-prior-current".into(),
+            source_node_id: later_source.id,
+            source_layer_id: Some(later_current.id),
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Reference),
+            label: "Prior current".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(current.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .transition_current(
+            1,
+            "advance-after-child-launch",
+            CurrentTransition::Advance {
+                layer_id: later_current.id,
+            },
+        )
+        .await
+        .unwrap();
+    let retry = recursive_writer
+        .prepare_recursive_completion(invoke.id)
+        .await
+        .unwrap();
+
+    assert_eq!(retry.id, child.id);
+    assert_eq!(child.detail, "Investigate the published branch");
+    assert_eq!(child.leased_action_id, Some(invoke.id));
+    let child_current = database.current_completion(child.id).await.unwrap();
+    assert_eq!(child_current.lifecycle, CompletionLifecycle::Active);
+    assert_eq!(child_current.head_revision, 0);
+    assert_ne!(child.id, parent.id);
+}
+
+#[tokio::test]
+async fn active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    database
+        .set_temporal_features(TemporalFeatureConfig {
+            schema_read: true,
+            root_current_write: true,
+            projection_ui: true,
+            invoke_resolution: true,
+            provider_recursion: false,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap();
+    let parent = database
+        .create_interaction(Some(project(1)), thread(1), "Parent task")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(parent.id).await.unwrap();
+    let source = node(&writer, "gated-source").await;
+    let current = single_node_layer(&writer, "gated-current", &source).await;
+    let invoke = writer
+        .add_action(&ActionDraft {
+            client_key: "gated-child".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(current.id),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Investigate".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Investigate the gated branch".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .transition_current(
+            0,
+            "publish-gated-child",
+            CurrentTransition::Advance {
+                layer_id: current.id,
+            },
+        )
+        .await
+        .unwrap();
+
+    let parent_epoch = database
+        .activate_completion_authority(parent.id)
+        .await
+        .unwrap();
+    let error = database
+        .writer_for_completion_authority(parent.id, parent_epoch)
+        .await
+        .unwrap()
+        .prepare_recursive_completion(invoke.id)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "invalid_invocation_source",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn remint_cuts_over_broker_epoch_and_terminal_state_denies_model_reads() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    database
+        .set_temporal_features(TemporalFeatureConfig {
+            schema_read: true,
+            root_current_write: true,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap();
+    let interaction = database
+        .create_interaction(Some(project(1)), thread(1), "Explain the queue")
+        .await
+        .unwrap();
+    let first_epoch = database
+        .activate_completion_authority(interaction.id)
+        .await
+        .unwrap();
+    let first = database
+        .writer_for_completion_authority(interaction.id, first_epoch)
+        .await
+        .unwrap();
+    let second_epoch = database
+        .activate_completion_authority(interaction.id)
+        .await
+        .unwrap();
+    let second = database
+        .writer_for_completion_authority(interaction.id, second_epoch)
+        .await
+        .unwrap();
+
+    let expired = first
+        .submit_node(&NodeDraft {
+            client_key: "expired".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Expired".into(),
+            detail: "Old broker generations cannot commit.".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        expired,
+        GraphError::Validation {
+            code: "authority_generation_expired",
+            ..
+        }
+    ));
+
+    let answer = node(&second, "authorized").await;
+    let layer = single_node_layer(&second, "authorized-current", &answer).await;
+    let model_failure = second
+        .transition_current(
+            0,
+            "model-owned-failure",
+            CurrentTransition::Fail {
+                reason: "provider_crashed".into(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(model_failure, GraphError::Forbidden(_)));
+    second
+        .transition_current(
+            0,
+            "advance-authorized",
+            CurrentTransition::Advance { layer_id: layer.id },
+        )
+        .await
+        .unwrap();
+    let abandoned = node(&second, "abandoned").await;
+    let abandoned_layer = single_node_layer(&second, "abandoned-layer", &abandoned).await;
+    second.discard_layer(abandoned_layer.id).await.unwrap();
+
+    let third_epoch = database
+        .activate_completion_authority(interaction.id)
+        .await
+        .unwrap();
+    let third = database
+        .writer_for_completion_authority(interaction.id, third_epoch)
+        .await
+        .unwrap();
+    let accepted_probe = second
+        .submit_node(&NodeDraft {
+            client_key: "authorized".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "authorized".into(),
+            detail: "detail authorized".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        accepted_probe,
+        GraphError::Validation {
+            code: "authority_generation_expired",
+            ..
+        }
+    ));
+    let stopped_probe = second.discard_layer(abandoned_layer.id).await.unwrap_err();
+    assert!(matches!(
+        stopped_probe,
+        GraphError::Validation {
+            code: "authority_generation_expired",
+            ..
+        }
+    ));
+
+    third
+        .transition_current(
+            1,
+            "stop-authorized",
+            CurrentTransition::Stop {
+                reason: "cancelled_by_user".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let terminal_read = third.get_node(answer.id).await.unwrap_err();
+    assert!(matches!(
+        terminal_read,
+        GraphError::Validation {
+            code: "authority_generation_expired",
+            ..
+        }
+    ));
+    assert!(third.completion_output().await.unwrap().is_none());
+    assert!(database.current_completion(interaction.id).await.is_ok());
 }
 
 #[tokio::test]

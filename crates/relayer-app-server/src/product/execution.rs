@@ -7,10 +7,12 @@ use crate::{
         ApprovalActor, ApprovalCorrelation, ApprovalDecision, ApprovalOutcome, ApprovalRequest,
         ApprovalResolution,
     },
+    completion_broker::{CompletionBrokerGrant, CompletionBrokerRegistry},
     permissions::PermissionCatalog,
     runtime::{
         ApprovalEvent, ApprovalEventSnapshot, CompleteInteraction, PreparedInteraction,
-        PreparedInvocation, RuntimeClient, RuntimeCompletion, RuntimeError,
+        PreparedInvocation, RuntimeClient, RuntimeCompletion, RuntimeCompletionBroker,
+        RuntimeError,
     },
 };
 use serde_json::Value;
@@ -31,6 +33,7 @@ pub(crate) struct InteractionExecutionService {
     standalone_workspaces_directory: PathBuf,
     approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
     execution_lease_reconciler: Option<crate::app_server::ExecutionLeaseReconciler>,
+    completion_brokers: CompletionBrokerRegistry,
 }
 
 impl InteractionExecutionService {
@@ -41,6 +44,7 @@ impl InteractionExecutionService {
         standalone_workspaces_directory: PathBuf,
         approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
         execution_lease_reconciler: Option<crate::app_server::ExecutionLeaseReconciler>,
+        completion_brokers: CompletionBrokerRegistry,
     ) -> Self {
         Self {
             product,
@@ -49,6 +53,7 @@ impl InteractionExecutionService {
             standalone_workspaces_directory,
             approval_decisions,
             execution_lease_reconciler,
+            completion_brokers,
         }
     }
 
@@ -363,7 +368,26 @@ impl InteractionExecutionService {
         };
         let expected_invocation = invocation;
         let prepared_graph_node_id = prepared.graph_node_id;
-        let completion = runtime.complete_prepared(&command, prepared);
+        let broker_url = runtime
+            .agent_authored_complete_available(&prepared)
+            .then(|| execution.completion_brokers.url())
+            .flatten();
+        let broker_lease = broker_url.as_ref().map(|_| {
+            execution.completion_brokers.issue(CompletionBrokerGrant {
+                thread_id: thread.id,
+                source_interaction_id: interaction.id,
+                source_completion_id: prepared_graph_node_id,
+            })
+        });
+        let completion_broker =
+            broker_lease
+                .as_ref()
+                .zip(broker_url.as_deref())
+                .map(|(lease, url)| RuntimeCompletionBroker {
+                    url,
+                    token: lease.token(),
+                });
+        let completion = runtime.complete_prepared(&command, prepared, completion_broker);
         tokio::pin!(completion);
         let mut cursor = 0;
         let mut harness_session_id = None;
@@ -684,6 +708,32 @@ impl InteractionExecutionService {
                     Ok(None) => {
                         let (category, effect_boundary, model_related) = error.attempt_failure();
                         let error_message = error.safe_failure_message().to_owned();
+                        let temporal_root = runtime.temporal_features().root_current_write;
+                        if temporal_root {
+                            let failure_operation = format!(
+                                "root-provider-failure:{}",
+                                attempt.unwrap_or(interaction.id.value())
+                            );
+                            if let Err(graph_error) = runtime
+                                .fail_graph_completion(
+                                    prepared_graph_node_id,
+                                    &failure_operation,
+                                    category,
+                                )
+                                .await
+                            {
+                                record_reconciliation_pending(
+                                    execution,
+                                    &thread,
+                                    &interaction,
+                                    &format!(
+                                        "runtime failed ({error}); graph completion failure could not be committed: {graph_error}"
+                                    ),
+                                )
+                                .await;
+                                return;
+                            }
+                        }
                         if let Some(attempt) = attempt {
                             let result = execution
                                 .product
@@ -701,12 +751,7 @@ impl InteractionExecutionService {
                                         },
                                         failure_category: category,
                                         effect_boundary,
-                                        // Issue #156 intentionally accepts duplicate-risk for the
-                                        // initial release: model failures restore the same draft even
-                                        // when the harness reports partial or durable effects. Graph
-                                        // writes remain authoritative; only the product binding is
-                                        // cleared so the user can explicitly send the draft again.
-                                        return_to_unsent: model_related,
+                                        return_to_unsent: model_related && !temporal_root,
                                         graph_node_id: error.graph_node_id(),
                                     },
                                 )
@@ -718,7 +763,7 @@ impl InteractionExecutionService {
                                     "could not atomically finalize failed attempt {attempt}: {persistence_error}"
                                 );
                             }
-                        } else if model_related {
+                        } else if model_related && !temporal_root {
                             return_model_failure_to_unsent(
                                 execution,
                                 &thread,
@@ -751,6 +796,28 @@ impl InteractionExecutionService {
                 }
             }
         }
+    }
+}
+
+async fn return_model_failure_to_unsent(
+    execution: &InteractionExecutionService,
+    thread: &Thread,
+    interaction: &Interaction,
+    error: String,
+) {
+    eprintln!(
+        "interaction {} model execution failed; returning it to unsent while preserving any durable effects: {error}",
+        interaction.id
+    );
+    if let Err(persistence_error) = execution
+        .product
+        .return_interaction_to_unsent(interaction.id, &thread.harness_configuration_name)
+        .await
+    {
+        eprintln!(
+            "could not return interaction {} to unsent: {persistence_error}; original failure: {error}",
+            interaction.id
+        );
     }
 }
 
@@ -854,28 +921,6 @@ async fn release_terminal_admission(
         && let Some(reconciler) = &execution.execution_lease_reconciler
     {
         reconciler.schedule();
-    }
-}
-
-async fn return_model_failure_to_unsent(
-    execution: &InteractionExecutionService,
-    thread: &Thread,
-    interaction: &Interaction,
-    error: String,
-) {
-    eprintln!(
-        "interaction {} model execution failed; returning it to unsent while preserving any durable effects: {error}",
-        interaction.id
-    );
-    if let Err(persistence_error) = execution
-        .product
-        .return_interaction_to_unsent(interaction.id, &thread.harness_configuration_name)
-        .await
-    {
-        eprintln!(
-            "could not return interaction {} to unsent: {persistence_error}; original failure: {error}",
-            interaction.id
-        );
     }
 }
 

@@ -29,6 +29,46 @@ function sameId(left, right) {
   return left != null && right != null && String(left) === String(right);
 }
 
+export function reconcileCurrentProjection(view, event) {
+  if (!view || !event || !sameId(view.completionId, event.completionId)) {
+    return { kind: "unrelated", view };
+  }
+  const knownRevision = Number(view.revision);
+  const revision = Number(event.revision);
+  if (!Number.isSafeInteger(revision) || revision <= knownRevision) {
+    return { kind: "stale", view };
+  }
+  if (Number(event.previousRevision) !== knownRevision) {
+    return { kind: "resync", view };
+  }
+  const nextTarget = event.currentLayerId == null
+    ? { kind: "anchor", completionId: event.completionId, revision }
+    : { kind: "layer", completionId: event.completionId, layerId: event.currentLayerId };
+  const wasFollowing = view.mode === "following"
+    && sameId(view.visibleTarget?.completionId, view.completionId)
+    && (view.visibleTarget?.kind === "anchor"
+      ? view.visibleTarget.revision === knownRevision
+      : sameId(view.visibleTarget?.layerId, view.currentLayerId));
+  const nextNodeIds = Array.isArray(event.currentNodeIds)
+    ? new Set(event.currentNodeIds.map(String))
+    : null;
+  return {
+    kind: wasFollowing ? "followed" : "pinned",
+    history: wasFollowing ? "replace" : "unchanged",
+    view: {
+      ...view,
+      revision,
+      lifecycle: event.lifecycle,
+      currentLayerId: event.currentLayerId ?? null,
+      finalLayerId: event.finalLayerId ?? null,
+      safeReason: event.safeReason ?? null,
+      visibleTarget: wasFollowing ? nextTarget : view.visibleTarget,
+      selectedNodeId: wasFollowing && view.selectedNodeId != null && nextNodeIds != null
+        && !nextNodeIds.has(String(view.selectedNodeId)) ? null : view.selectedNodeId,
+    },
+  };
+}
+
 export function createLayerNavigationCoordinator() {
   let latestRequestId = 0;
   return Object.freeze({
@@ -127,8 +167,8 @@ export function workspaceBreadcrumbItems(state, thread, selection) {
 }
 
 export function responseNodesForThread(state, thread) {
-  if (state.status !== "accepted") return [];
   if (state.visibleLayer?.nodes) return state.visibleLayer.nodes;
+  if (state.status !== "accepted") return [];
   const interaction = interactionForThread(state, thread);
   return state.nodes.filter((node) => node.metadata?.relayer?.responseLayerOwnerNodeId === interaction?.id);
 }

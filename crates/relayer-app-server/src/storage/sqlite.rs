@@ -3,6 +3,7 @@ mod annotations;
 mod approvals;
 mod attempts;
 mod catalog;
+mod completion_executions;
 mod context_drafts;
 mod conversation_imports;
 mod interaction_contexts;

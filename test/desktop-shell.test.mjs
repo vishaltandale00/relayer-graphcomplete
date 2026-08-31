@@ -3100,6 +3100,9 @@ describe("desktop skeleton", () => {
       state.nodes.push({ id: "response", metadata: { relayer: { responseLayerOwnerNodeId: first.rootNodeId } } });
       state.status = "submitted";
       expect(responseNodesForThread(state, first)).toEqual([]);
+      state.visibleLayer = { nodes: [{ id: "durable-current" }] };
+      expect(responseNodesForThread(state, first).map((node) => node.id)).toEqual(["durable-current"]);
+      state.visibleLayer = null;
       state.status = "accepted";
       expect(responseNodesForThread(state, first).map((node) => node.id)).toEqual(["response"]);
       expect(responseNodesForThread(state, second)).toEqual([]);

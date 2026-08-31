@@ -175,6 +175,18 @@ ActionVariant = Literal["chip", "pill", "wide", "card"]
 NavigateRelation = Literal["expand", "reference"]
 
 
+@dataclass(frozen=True, slots=True)
+class CompletionInputGraph:
+    interaction_node: int
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "CompletionInputGraph":
+        node = value.get("interactionNode")
+        if isinstance(node, bool) or not isinstance(node, int) or node < 1:
+            raise ValidationError("completion input graph has an invalid interactionNode")
+        return cls(node)
+
+
 class RelayerGraphClient:
     def __init__(self, url: str, token: str, node_id: int, *, timeout: float = 30.0) -> None:
         if not url or not token or node_id < 1:
@@ -297,6 +309,49 @@ class RelayerGraphClient:
         interaction_id = self.node_id if interaction_node is None else _node_id(interaction_node)
         return await self._request("GET", f"/api/graph/nodes/{interaction_id}/output")
 
+    async def get_current(self) -> Mapping[str, Any]:
+        """Read this completion's durable current head."""
+        return await self._request("GET", "/api/graph/current")
+
+    async def prepare_complete(self, action: int | Mapping[str, Any]) -> CompletionInputGraph:
+        """Prepare or exactly recover one semantic child from a published invoke action."""
+        action_id = _action_id(action)
+        value = await self._request(
+            "POST", "/api/graph/completions/prepare", {"actionId": action_id}
+        )
+        return CompletionInputGraph.from_dict(value)
+
+    async def advance_current(self, layer: LayerReference, *, expected_revision: int,
+                              operation_key: str) -> Mapping[str, Any]:
+        """Atomically publish a coherent owned layer and move the current pointer."""
+        return await self._transition_current(
+            expected_revision, operation_key,
+            {"kind": "advance", "layerId": _layer_id(layer)},
+        )
+
+    async def return_current(self, layer: LayerReference, *, expected_revision: int,
+                             operation_key: str) -> Mapping[str, Any]:
+        """Atomically publish and establish the completion's successful final current."""
+        return await self._transition_current(
+            expected_revision, operation_key,
+            {"kind": "return", "layerId": _layer_id(layer)},
+        )
+
+    async def stop_current(self, *, expected_revision: int, operation_key: str,
+                           reason: Literal["cancelled_by_user"]) -> Mapping[str, Any]:
+        """Stop this completion while preserving its last published current."""
+        return await self._transition_current(
+            expected_revision, operation_key, {"kind": "stop", "reason": reason}
+        )
+
+    async def _transition_current(self, expected_revision: int, operation_key: str,
+                                  transition: Mapping[str, Any]) -> Mapping[str, Any]:
+        return await self._request("POST", "/api/graph/current/transitions", {
+            "expectedRevision": expected_revision,
+            "operationKey": operation_key,
+            "transition": transition,
+        })
+
     async def _request(self, method: str, path: str, body: Any = None) -> Any:
         encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode()
         headers = {"accept": "application/json", "authorization": f"Bearer {self.token}"}
@@ -371,6 +426,19 @@ def _required(value: NodeReference | None) -> NodeReference:
     if value is None:
         raise ValueError("create_edge requires two node references")
     return value
+
+
+def _action_id(value: int | Mapping[str, Any]) -> int:
+    if isinstance(value, bool):
+        raise ValueError("action ID must be a positive integer")
+    if isinstance(value, int):
+        action_id = value
+    else:
+        action = value.get("action", value)
+        action_id = action.get("id") if isinstance(action, Mapping) else None
+    if isinstance(action_id, bool) or not isinstance(action_id, int) or action_id < 1:
+        raise ValueError("action must contain a positive persisted ID")
+    return action_id
 
 
 def _action_presentation(variant: ActionVariant, icon: str | None,

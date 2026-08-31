@@ -1,6 +1,7 @@
 export * from "./approval.js";
 export * from "./approval-coordinator.js";
 export * from "./configuration.js";
+export * from "./completion-execution.js";
 export * from "./implementations/codex-app-server.js";
 export * from "./implementations/codex-approvals.js";
 export * from "./implementations/codex-basic.js";

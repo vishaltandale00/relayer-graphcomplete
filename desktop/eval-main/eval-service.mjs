@@ -36,10 +36,13 @@ import {
   materializeFrontierProjectFixture,
   materializeH3ProjectFixture,
   projectDeterministicChecksToOutcome,
+  recursiveCompleteEvalCase,
+  RECURSIVE_COMPLETE_EVAL_CASE_ID,
   selectStandalonePermissionProfile,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
 import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
+import { RECURSIVE_TEMPORAL_FEATURES } from "../main/services/graphcomplete-runtime.mjs";
 import {
   buildAcceptedReviewTopology,
   gradeAcceptedReviewTopology,
@@ -67,6 +70,7 @@ export const evalCases = Object.freeze([
     ]),
     requiredChecks: Object.freeze(["node-navigation"]),
   }),
+  recursiveCompleteEvalCase,
   h3ProjectEvalCase,
   ...h3AutonomousCases.map((entry) => Object.freeze({
     ...entry.definition,
@@ -101,9 +105,13 @@ export const evalJudges = Object.freeze([
 const deterministicJudgeId = "deterministic-graph-contract";
 const simulatedUserJudgeId = "simulated-user";
 const simulatedUserJudgeIds = new Set([simulatedUserJudgeId, "simulated-user-sol-high"]);
+const IN_PROGRESS_COMPLETION_STATUSES = new Set([
+  "not_started", "running", "submitted", "preparing", "draft", "waiting_for_approval",
+]);
 const MAX_CONVERSATION_IMPORT_BYTES = 256 * 1024 * 1024;
 const ANNOTATION_EXPORT_EXECUTION_STATUSES = new Set(["passed", "failed", "imported"]);
 const ANNOTATION_EXPORT_TURN_STATUSES = new Set(["accepted", "failed", "stopped"]);
+const SEMANTIC_CHILD_DISCOVERY_TIMEOUT_MS = 5_000;
 const execFileAsync = promisify(execFile);
 
 function copy(value) {
@@ -146,6 +154,188 @@ function outcomeGradeFromChecks(checks, caseSnapshot = null) {
     verifierDigest: caseSnapshot.artifacts.verifier.contentDigest,
     rubricVersion: caseSnapshot.artifacts.outcomeRubric.rubricVersion,
   };
+}
+
+function descendantInvocations(detail, rootInteractionIds) {
+  const reachable = new Set(rootInteractionIds.map(String));
+  const selected = [];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const invocation of detail.actionInvocations || []) {
+      if (!reachable.has(String(invocation.sourceInteractionId))) continue;
+      if (selected.some((candidate) => (
+        String(candidate.sourceInteractionId) === String(invocation.sourceInteractionId)
+        && String(candidate.actionId) === String(invocation.actionId)
+        && String(candidate.resultInteractionId) === String(invocation.resultInteractionId)
+      ))) continue;
+      selected.push(invocation);
+      if (!reachable.has(String(invocation.resultInteractionId))) {
+        reachable.add(String(invocation.resultInteractionId));
+        changed = true;
+      }
+    }
+  }
+  return selected;
+}
+
+function combinedComparisonConfigurationIdentity(configuration) {
+  const normalized = copy(configuration);
+  delete normalized.name;
+  delete normalized.complete;
+  delete normalized.settings?.personalPresentationVersion;
+  return canonicalJson(normalized);
+}
+
+function sameJson(left, right) {
+  return canonicalJson(left) === canonicalJson(right);
+}
+
+export function recursiveCompleteChecks(execution) {
+  const enabled = execution.harnessConfiguration?.complete?.agentAuthored === true;
+  const root = execution.turns[0];
+  const children = execution.semanticChildren || [];
+  const observedBroker = root?.candidateTrace?.completionBrokerAvailable;
+  const checks = [{
+    name: "agent-authored-complete:broker-authority",
+    passed: observedBroker === enabled,
+    detail: `Configuration requested agent-authored Complete ${enabled ? "enabled" : "disabled"}; root trace recorded broker authority ${String(observedBroker)}.`,
+  }, {
+    name: "agent-authored-complete:semantic-child-count",
+    passed: enabled ? children.length > 0 : children.length === 0,
+    detail: enabled
+      ? `Expected at least one agent-authored semantic child within the ${SEMANTIC_CHILD_DISCOVERY_TIMEOUT_MS} ms post-root discovery window; observed ${children.length}.`
+      : `Expected no semantic children without broker authority; observed ${children.length}.`,
+  }];
+  if (!enabled) return checks;
+  checks.push({
+    name: "agent-authored-complete:child-provenance",
+    passed: children.every((child) => (
+      Number.isSafeInteger(child.sourceInteractionId)
+      && Number.isSafeInteger(child.sourceActionId)
+      && Number.isSafeInteger(child.interactionId)
+      && Number.isSafeInteger(child.graphNodeId)
+    )),
+    detail: "Every semantic child must retain the exact source interaction, action, product interaction, and graph completion identities.",
+  }, {
+    name: "agent-authored-complete:child-terminal",
+    passed: children.length > 0 && children.every(childHasAcceptedResultSequence),
+    detail: "Every semantic child must publish a current layer and settle as an accepted succeeded result with an ordered durable projection sequence.",
+  }, {
+    name: "agent-authored-complete:child-execution",
+    passed: children.length > 0 && children.every((child) => childHasDurableExecution(
+      child,
+      execution.harnessConfiguration,
+      execution.harnessConfigurationDigest,
+    )),
+    detail: "Every semantic child must retain an exact attached and successfully settled provider execution binding.",
+  }, {
+    name: "agent-authored-complete:child-trace",
+    passed: children.length > 0 && children.every((child) => (
+      child.candidateTrace?.status === "complete"
+      && child.candidateTrace?.completionBrokerAvailable === true
+    )),
+    detail: "Every semantic child must have a complete portable candidate trace that records nested completion-broker authority.",
+  });
+  return checks;
+}
+
+function childHasAcceptedResultSequence(child) {
+  const observations = [...(child.projectionObservations || [])]
+    .sort((left, right) => left.sequence - right.sequence);
+  const activeRoot = observations.find((observation) => (
+    observation.revision === 0 && observation.lifecycle === "active"
+  ));
+  const published = observations.find((observation) => (
+    observation.revision >= 1
+    && observation.lifecycle === "active"
+    && Number.isSafeInteger(observation.currentLayerId)
+  ));
+  const terminal = observations.at(-1);
+  return child.status === "accepted"
+    && child.resultCompletionStatus === "accepted"
+    && Number.isSafeInteger(child.rootLayerId)
+    && activeRoot !== undefined
+    && published !== undefined
+    && terminal?.lifecycle === "succeeded"
+    && terminal.currentLayerId === child.rootLayerId
+    && observations.every((observation, index) => {
+      if (index === 0) {
+        return observation.revision === 0 && observation.previousRevision === null;
+      }
+      const previous = observations[index - 1];
+      return observation.sequence > previous.sequence
+        && observation.revision === previous.revision + 1
+        && observation.previousRevision === previous.revision;
+    });
+}
+
+function expectedAttachmentProvider(configuration) {
+  if (configuration?.implementation === "codex.basic") return "codex";
+  if (configuration?.implementation === "claude.basic") return "claude";
+  if (configuration?.implementation === "fixture.task-system") return "fixture";
+  return null;
+}
+
+function childHasDurableExecution(child, configuration, configurationDigest) {
+  const evidence = child.execution;
+  const expectedProvider = expectedAttachmentProvider(configuration);
+  return evidence?.interactionId === child.interactionId
+    && evidence?.graphCompletionId === child.graphNodeId
+    && evidence?.harnessConfigurationName === configuration?.name
+    && evidence?.harnessConfigurationDigest === configurationDigest
+    && typeof evidence?.modelExecutionDigest === "string"
+    && evidence.modelExecutionDigest.startsWith("sha256:")
+    && evidence?.phase === "settled"
+    && evidence?.attached === true
+    && evidence?.attachmentSchemaVersion === 1
+    && evidence?.attachmentProvider === expectedProvider
+    && evidence?.settled === true
+    && evidence?.safeReason === null
+    && evidence?.settlementNodeId === child.graphNodeId
+    && evidence?.settlementRootLayerId === child.rootLayerId;
+}
+
+export async function validateCandidateTrace(directory, descriptor, interaction, correlation, { requireComplete = false } = {}) {
+  const eventsBytes = await readFile(join(directory, "events.jsonl"));
+  const eventLines = eventsBytes.toString("utf8").trim().split("\n").filter(Boolean);
+  const events = eventLines.map((line) => JSON.parse(line));
+  const eventsSha256 = `sha256:${createHash("sha256").update(eventsBytes).digest("hex")}`;
+  const manifest = JSON.parse(await readFile(join(directory, "manifest.json"), "utf8"));
+  const eventsArtifact = manifest?.artifacts?.events;
+  const declaredCoverage = manifest?.declaredCoverage || {};
+  const achievedCoverage = manifest?.achievedCoverage || {};
+  const declaredCoverageSatisfied = Object.entries(declaredCoverage).every(([feature, level]) => (
+    level !== "full" || achievedCoverage[feature] === "full"
+  ));
+  const failures = [
+    [!requireComplete || descriptor.status === "complete", "descriptor-status"],
+    [!requireComplete || descriptor.truncated !== true, "not-truncated"],
+    [descriptor.sha256 === eventsSha256, "descriptor-sha"],
+    [descriptor.byteLength === eventsBytes.byteLength, "descriptor-bytes"],
+    [descriptor.eventCount === eventLines.length, "descriptor-events"],
+    [manifest?.schemaVersion === 1, "manifest-schema"],
+    [manifest?.format === descriptor.format, "manifest-format"],
+    [manifest?.status === descriptor.status, "manifest-status"],
+    [manifest?.traceId === descriptor.traceId, "manifest-trace"],
+    [manifest?.productInteractionId === interaction.id, "product-interaction"],
+    [manifest?.interactionNodeId === interaction.graphNodeId, "graph-completion"],
+    [Object.entries(correlation).every(([key, value]) => manifest?.correlation?.[key] === value), "correlation"],
+    [eventsArtifact?.ref === "events.jsonl", "event-ref"],
+    [eventsArtifact?.sha256 === eventsSha256, "event-sha"],
+    [eventsArtifact?.byteLength === eventsBytes.byteLength, "event-bytes"],
+    [eventsArtifact?.eventCount === eventLines.length, "event-count"],
+    [!requireComplete || declaredCoverageSatisfied, "declared-coverage"],
+  ].filter(([passed]) => !passed).map(([, name]) => name);
+  if (failures.length > 0) {
+    throw new Error(`Candidate trace ${interaction.id} failed integrity checks: ${failures.join(", ")}.`);
+  }
+  const scopeEvents = events.filter((event) => event.type === "execution.scope");
+  const marker = scopeEvents[0]?.data?.completionBrokerAvailable;
+  if (scopeEvents.length !== 1 || typeof marker !== "boolean") {
+    throw new Error(`Candidate trace ${interaction.id} did not record exactly one valid broker-scope marker.`);
+  }
+  return marker;
 }
 
 function mandatoryGateReceipt(gate, checks) {
@@ -597,6 +787,7 @@ export class EvalService {
       harnessConfigurations: [...this.configurations.values()].map((configuration) => ({
         name: configuration.name,
         implementation: configuration.implementation,
+        complete: copy(configuration.complete ?? { agentAuthored: false }),
         settings: copy(configuration.settings),
       })),
       judges: copy(evalJudges.filter((judge) => (
@@ -693,9 +884,10 @@ export class EvalService {
     for (const run of this.runs) {
       const execution = run.executions.find((candidate) => candidate.id === executionId);
       if (!execution) continue;
+      const traceCandidates = [...(execution.turns || []), ...(execution.semanticChildren || [])];
       const turn = interactionId === undefined || interactionId === null
         ? execution.turns[0]
-        : execution.turns.find((candidate) => String(candidate.interactionId) === String(interactionId));
+        : traceCandidates.find((candidate) => String(candidate.interactionId) === String(interactionId));
       if (!turn) throw new Error(`Unknown Eval turn: ${interactionId}`);
       const expectedRef = [
         "executions",
@@ -726,6 +918,7 @@ export class EvalService {
             prompt: candidate.prompt,
             candidateTrace: copy(candidate.candidateTrace),
           })),
+          semanticChildren: copy(execution.semanticChildren || []),
         },
         turn: copy(turn),
         manifest,
@@ -741,6 +934,33 @@ export class EvalService {
     const judgeConfigurationName = selection?.judgeConfigurationName;
     if (!Array.isArray(testCaseIds) || testCaseIds.some((id) => !evalCases.some((item) => item.id === id))) {
       throw new Error("Test run contains an unknown test case.");
+    }
+    if (testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID)) {
+      const comparison = evalCases.find((item) => item.id === RECURSIVE_COMPLETE_EVAL_CASE_ID);
+      if (!sameJson(testCaseIds, [RECURSIVE_COMPLETE_EVAL_CASE_ID])
+        || !sameJson(harnessConfigurationNames, comparison.requiredHarnessConfigurationNames)) {
+        throw new Error(`The agent-authored Complete comparison must run alone with its exact ordered Codex pair: ${comparison.requiredHarnessConfigurationNames.join(", ")}.`);
+      }
+      const pair = comparison.requiredHarnessConfigurationNames.map((name) => (
+        this.configurations.get(name)
+      ));
+      if (pair.some((configuration) => configuration === undefined)
+        || pair[0]?.complete?.agentAuthored !== false
+        || pair[1]?.complete?.agentAuthored !== true
+        || pair[0]?.settings?.personalPresentationVersion !== "personal-presentation-v1"
+        || pair[1]?.settings?.personalPresentationVersion !== "personal-presentation-v2"
+        || combinedComparisonConfigurationIdentity(pair[0]) !== combinedComparisonConfigurationIdentity(pair[1])) {
+        throw new Error("The visible-working-state recursive configurations differ outside their approved V1/off and V2/on experience pair.");
+      }
+      const liveProviderExecutions = pair.filter(({ implementation }) => implementation !== "fixture.task-system").length;
+      if (liveProviderExecutions > 0 && (
+        selection?.liveAuthorization?.confirmed !== true
+        || selection.liveAuthorization.credentialReference !== "connected-product-provider"
+        || selection.liveAuthorization.rootProviderExecutions !== liveProviderExecutions
+        || selection.liveAuthorization.agentAuthoredChildren !== true
+      )) {
+        throw new Error(`Live agent-authored Complete comparison requires explicit confirmation, a connected provider credential reference, exactly ${liveProviderExecutions} root executions, and authorization for agent-authored child execution.`);
+      }
     }
     if (testCaseIds.some((id) => projectCaseIds.has(id)) && this.platform !== "darwin") {
       throw new Error("Pinned project cases are local Mac only.");
@@ -769,6 +989,23 @@ export class EvalService {
       testCaseIds: [...testCaseIds],
       harnessConfigurationNames: [...harnessConfigurationNames],
       judgeConfigurationName,
+      liveAuthorization: testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID)
+        ? copy(selection?.liveAuthorization || null)
+        : null,
+      comparison: testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID) ? {
+        kind: "agent-authored-complete-pair",
+        temporalRuntimeFeatures: copy(RECURSIVE_TEMPORAL_FEATURES),
+        controlledFields: [
+          "task",
+          "implementation",
+          "settings except personalPresentationVersion",
+          "permissionBindings",
+          "providerModelSelection",
+          "temporalRuntimeFeatures",
+        ],
+        variedField: "combined personalPresentationVersion and complete.agentAuthored experience",
+        passed: null,
+      } : null,
       executions: plans.map((plan) => {
         const definition = evalCases.find((candidate) => candidate.id === plan.testCaseId);
         return {
@@ -790,6 +1027,8 @@ export class EvalService {
         },
         threadIds: [],
         turns: [],
+        semanticChildren: [],
+        currentProjectionEvidence: { cursor: 0, observations: [] },
         candidateTraceCaptures: {},
         checks: [],
         outcomeGrade: {
@@ -1240,8 +1479,22 @@ export class EvalService {
   async #run(run) {
     run.status = "running";
     await this.#changed();
+    let recursivePairModelResolution;
     for (const execution of run.executions) {
+      if (execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID
+        && recursivePairModelResolution !== undefined) {
+        execution.pinnedModelResolution = copy(recursivePairModelResolution);
+      }
       await this.#execute(execution);
+      if (execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID
+        && recursivePairModelResolution === undefined
+        && execution.modelResolution !== undefined) {
+        recursivePairModelResolution = copy(execution.modelResolution);
+      }
+      await this.#changed();
+    }
+    if (run.comparison?.kind === "agent-authored-complete-pair") {
+      this.#finalizeRecursiveComparison(run);
       await this.#changed();
     }
     const terminalStatus = run.executions.some((execution) => execution.status === "error")
@@ -1251,6 +1504,40 @@ export class EvalService {
     await this.#writeRunBundle(run, terminalStatus);
     run.status = terminalStatus;
     await this.#changed();
+  }
+
+  #finalizeRecursiveComparison(run) {
+    const executions = run.executions.filter(({ testCaseId }) => testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID);
+    const [control, treatment] = executions;
+    const controlled = executions.length === 2
+      && control?.harnessConfigurationName === "codex-eval-complete-disabled"
+      && treatment?.harnessConfigurationName === "codex-eval-complete-enabled"
+      && sameJson(control?.modelResolution, treatment?.modelResolution)
+      && sameJson(control?.turns?.map(({ prompt }) => prompt), treatment?.turns?.map(({ prompt }) => prompt))
+      && sameJson(control?.turns?.map(({ modelSelection }) => modelSelection), treatment?.turns?.map(({ modelSelection }) => modelSelection))
+      && sameJson(control?.turns?.map(({ permissionProfileId }) => permissionProfileId), treatment?.turns?.map(({ permissionProfileId }) => permissionProfileId))
+      && sameJson(control?.turns?.map(({ effectivePermissionReceipt }) => effectivePermissionReceipt), treatment?.turns?.map(({ effectivePermissionReceipt }) => effectivePermissionReceipt));
+    const check = {
+      name: "agent-authored-complete:controlled-pair",
+      passed: controlled,
+      detail: controlled
+        ? "The exact V1/off and V2/on cells used one pinned provider/model resolution and identical task and permission inputs."
+        : "The combined-experience cells drifted outside their controlled provider, task, or permission inputs.",
+    };
+    for (const execution of executions) {
+      execution.checks.push(copy(check));
+      if (!controlled && execution.status !== "error") {
+        execution.status = "failed";
+        execution.passed = false;
+      }
+    }
+    run.comparison = {
+      ...run.comparison,
+      sourceRuntime: "single-eval-desktop-process",
+      providerModelResolution: copy(control?.modelResolution || null),
+      passed: controlled,
+      check,
+    };
   }
 
   async #execute(execution) {
@@ -1270,8 +1557,11 @@ export class EvalService {
         ? await this.#executeProjectCase(execution, definition)
         : [await this.#executeStandaloneCase(execution, definition)];
       execution.threadIds = executedThreads.map(({ thread }) => thread.id);
-      const interactions = executedThreads.flatMap(({ thread, threadDefinition, permissionResolution, detail, workspaceChecks, workspaceArtifacts }) => (
-        detail.interactions.map((interaction, threadTurnIndex) => ({
+      execution.semanticChildren = executedThreads.flatMap(({ semanticChildren = [] }) => semanticChildren);
+      const interactions = executedThreads.flatMap(({ thread, humanInteractionIds, threadDefinition, permissionResolution, detail, workspaceChecks, workspaceArtifacts }) => (
+        detail.interactions
+          .filter((interaction) => humanInteractionIds.some((id) => String(id) === String(interaction.id)))
+          .map((interaction, threadTurnIndex) => ({
           thread,
           threadDefinition,
           permissionResolution,
@@ -1279,7 +1569,7 @@ export class EvalService {
           threadTurnIndex,
           workspaceChecks: workspaceChecks.get(String(interaction.id)) || [],
           artifact: workspaceArtifacts?.get(String(interaction.id)) || null,
-        }))
+          }))
       ));
       execution.turns = interactions.map(({ thread, threadDefinition, permissionResolution, interaction, threadTurnIndex, artifact }, turnIndex) => ({
         threadId: thread.id,
@@ -1308,6 +1598,12 @@ export class EvalService {
       }));
       delete execution.candidateTraceCaptures;
       execution.promotable = execution.turns.every((turn) => !this.candidateTraceRequired || turn.candidateTrace.status === "complete");
+      if (definition.requiredChecks?.includes("agent-authored-complete")) {
+        execution.promotable = execution.promotable
+          && execution.semanticChildren.every((child) => (
+            !this.candidateTraceRequired || child.candidateTrace?.status === "complete"
+          ));
+      }
       const checks = [];
       for (const [turnIndex, executedTurn] of interactions.entries()) {
         const { interaction, threadDefinition, workspaceChecks } = executedTurn;
@@ -1394,6 +1690,9 @@ export class EvalService {
         turn.deterministicPassed = turnChecks.length > 0 && turnChecks.every((check) => check.passed);
         checks.push(...turnChecks);
       }
+      if (definition.requiredChecks?.includes("agent-authored-complete")) {
+        checks.push(...recursiveCompleteChecks(execution));
+      }
       execution.checks = checks;
       const deterministicPassed = checks.length > 0 && checks.every((check) => check.passed);
       const outcomeChecks = execution.caseSnapshot
@@ -1438,14 +1737,13 @@ export class EvalService {
   }
 
   async #executeStandaloneCase(execution, definition) {
-    const thread = await this.#createAndRunThread({
+    const executed = await this.#createAndRunThread({
       execution,
       title: definition.name,
       prompts: definition.prompts,
       permissionProfileId: selectStandalonePermissionProfile(execution.harnessConfiguration),
     });
-    const detail = await this.#productRequest(`/api/threads/${thread.id}`);
-    return { thread, threadDefinition: null, detail, workspaceChecks: new Map() };
+    return { ...executed, threadDefinition: null, workspaceChecks: new Map() };
   }
 
   async #executeProjectCase(execution, definition) {
@@ -1494,7 +1792,7 @@ export class EvalService {
       const workspaceChecks = new Map();
       const workspaceArtifacts = new Map();
       const permissionResolution = execution.permissionProfileResolutions[threadIndex];
-      const thread = await this.#createAndRunThread({
+      const executed = await this.#createAndRunThread({
         execution,
         title: `${definition.name} · ${threadDefinition.name}`,
         prompts: threadDefinition.prompts,
@@ -1515,17 +1813,18 @@ export class EvalService {
           }
         },
       });
-      const detail = await this.#productRequest(`/api/threads/${thread.id}`);
-      executedThreads.push({ thread, threadDefinition, permissionResolution, detail, workspaceChecks, workspaceArtifacts });
+      executedThreads.push({ ...executed, threadDefinition, permissionResolution, workspaceChecks, workspaceArtifacts });
     }
     return executedThreads;
   }
 
   async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {} }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
-    let selectedModel;
-    let productModelSelection;
-    if (execution.harnessConfiguration.implementation === "claude.basic") {
+    let selectedModel = execution.pinnedModelResolution?.selectedModel;
+    let productModelSelection = execution.pinnedModelResolution?.productModelSelection;
+    if (execution.pinnedModelResolution !== undefined) {
+      // The treatment cell uses the control cell's exact provider/model resolution.
+    } else if (execution.harnessConfiguration.implementation === "claude.basic") {
       selectedModel = await this.#productRequest(
         `/api/model-selection/default?harnessId=${encodeURIComponent(execution.harnessConfigurationName)}`,
       );
@@ -1548,6 +1847,10 @@ export class EvalService {
         throw new Error(`Eval has no available model for ${execution.harnessConfigurationName}.`);
       }
     }
+    execution.modelResolution = {
+      selectedModel: copy(selectedModel ?? null),
+      productModelSelection,
+    };
     const thread = await this.#productRequest("/api/threads", {
       method: "POST",
       body: {
@@ -1560,7 +1863,8 @@ export class EvalService {
       },
     });
     execution.threadIds.push(thread.id);
-    const rootInteraction = await this.#waitForInteraction(thread.id, thread.rootInteractionId);
+    const humanInteractionIds = [thread.rootInteractionId];
+    const rootInteraction = await this.#waitForInteraction(execution, thread.id, thread.rootInteractionId);
     await this.#captureCandidateTrace(execution, rootInteraction);
     await afterTurn(thread.rootInteractionId, 0);
     for (const [offset, prompt] of prompts.slice(1).entries()) {
@@ -1571,11 +1875,17 @@ export class EvalService {
           ...evalModelSelectionRequest(selectedModel, productModelSelection),
         },
       });
-      const completedInteraction = await this.#waitForInteraction(thread.id, interaction.id);
+      humanInteractionIds.push(interaction.id);
+      const completedInteraction = await this.#waitForInteraction(execution, thread.id, interaction.id);
       await this.#captureCandidateTrace(execution, completedInteraction);
       await afterTurn(interaction.id, offset + 1);
     }
-    return thread;
+    const { detail, semanticChildren } = await this.#waitForSemanticChildren(
+      execution,
+      thread.id,
+      humanInteractionIds,
+    );
+    return { thread, humanInteractionIds, detail, semanticChildren };
   }
 
   async #judgeAcceptedTurn({ execution, thread, interaction, turn, reviewSequence, provenance = null }) {
@@ -1666,16 +1976,128 @@ export class EvalService {
     return judgeResult;
   }
 
-  async #waitForInteraction(threadId, interactionId) {
+  async #waitForInteraction(execution, threadId, interactionId) {
     const deadline = Date.now() + 10 * 60_000;
     while (Date.now() < deadline) {
       const detail = await this.#productRequest(`/api/threads/${threadId}`);
+      await this.#observeCurrentProjections(execution, detail);
       const interaction = detail.interactions.find((candidate) => candidate.id === interactionId);
       if (!interaction) throw new Error(`Product interaction ${interactionId} disappeared.`);
-      if (!["not_started", "running", "submitted"].includes(interaction.completionStatus)) return interaction;
+      if (!IN_PROGRESS_COMPLETION_STATUSES.has(interaction.completionStatus)) return interaction;
       await new Promise((resolveWait) => setTimeout(resolveWait, 250));
     }
     throw new Error(`Product interaction ${interactionId} did not finish within 10 minutes.`);
+  }
+
+  async #waitForSemanticChildren(execution, threadId, humanInteractionIds) {
+    const deadline = Date.now() + 10 * 60_000;
+    const discoveryDeadline = Date.now() + SEMANTIC_CHILD_DISCOVERY_TIMEOUT_MS;
+    const expectsSemanticChild = execution.harnessConfiguration?.complete?.agentAuthored === true;
+    for (;;) {
+      const detail = await this.#productRequest(`/api/threads/${threadId}`);
+      await this.#observeCurrentProjections(execution, detail);
+      const invocations = descendantInvocations(detail, humanInteractionIds);
+      const interactionsById = new Map((detail.interactions || []).map((interaction) => [
+        String(interaction.id),
+        interaction,
+      ]));
+      const pending = invocations.filter((invocation) => {
+        const child = interactionsById.get(String(invocation.resultInteractionId));
+        return child === undefined || IN_PROGRESS_COMPLETION_STATUSES.has(child.completionStatus);
+      });
+      if (pending.length === 0 && (invocations.length > 0 || !expectsSemanticChild || Date.now() >= discoveryDeadline)) {
+        const semanticChildren = [];
+        for (const invocation of invocations) {
+          const child = interactionsById.get(String(invocation.resultInteractionId));
+          if (!child) throw new Error(`Semantic child ${invocation.resultInteractionId} disappeared.`);
+          await this.#backfillCurrentProjection(execution, child);
+          await this.#captureCandidateTrace(execution, child);
+          semanticChildren.push({
+            threadId,
+            sourceInteractionId: invocation.sourceInteractionId,
+            sourceActionId: invocation.actionId,
+            interactionId: child.id,
+            graphNodeId: child.graphNodeId,
+            status: child.completionStatus,
+            rootLayerId: child.completionOutput?.rootLayer?.layer?.id ?? null,
+            resultCompletionStatus: invocation.resultCompletionStatus,
+            execution: copy(invocation.execution || null),
+            candidateTrace: copy(execution.candidateTraceCaptures?.[String(child.id)] || disabledCandidateTrace()),
+            projectionObservations: copy(
+              execution.currentProjectionEvidence?.observations?.filter((observation) => (
+                String(observation.completionId) === String(child.graphNodeId)
+              )) || [],
+            ),
+          });
+        }
+        return { detail, semanticChildren };
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Semantic children did not settle within 10 minutes: ${pending.map(({ resultInteractionId }) => resultInteractionId).join(", ")}.`);
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    }
+  }
+
+  async #observeCurrentProjections(execution, detail) {
+    if (execution.testCaseId !== RECURSIVE_COMPLETE_EVAL_CASE_ID) return;
+    const evidence = execution.currentProjectionEvidence ||= { cursor: 0, observations: [] };
+    const completionIds = new Set((detail.interactions || [])
+      .map((interaction) => interaction.graphNodeId)
+      .filter((id) => Number.isSafeInteger(id))
+      .map(String));
+    if (completionIds.size === 0) return;
+    const state = await this.#productRequest(`/api/state?currentProjectionAfter=${evidence.cursor}`);
+    const observedAt = new Date().toISOString();
+    const statuses = new Map((detail.interactions || []).map((interaction) => [
+      String(interaction.graphNodeId),
+      interaction.completionStatus,
+    ]));
+    for (const event of state.currentProjection?.events || []) {
+      if (!completionIds.has(String(event.completionId))) continue;
+      evidence.observations.push({
+        observedAt,
+        completionId: event.completionId,
+        sequence: event.sequence,
+        revision: event.revision,
+        previousRevision: event.previousRevision ?? null,
+        lifecycle: event.lifecycle,
+        currentLayerId: event.currentLayerId ?? null,
+        productStatus: statuses.get(String(event.completionId)) ?? "unknown",
+        observedPreTerminal: IN_PROGRESS_COMPLETION_STATUSES.has(
+          statuses.get(String(event.completionId)),
+        ),
+      });
+    }
+    evidence.cursor = state.currentProjection?.cursor ?? evidence.cursor;
+  }
+
+  async #backfillCurrentProjection(execution, interaction) {
+    if (!Number.isSafeInteger(interaction.graphNodeId)) return;
+    const evidence = execution.currentProjectionEvidence ||= { cursor: 0, observations: [] };
+    const completionId = String(interaction.graphNodeId);
+    const existingSequences = new Set(evidence.observations
+      .filter((observation) => String(observation.completionId) === completionId)
+      .map((observation) => observation.sequence));
+    const state = await this.#productRequest(
+      `/api/state?currentProjectionAfter=0&currentProjectionCompletionId=${completionId}`,
+    );
+    const observedAt = new Date().toISOString();
+    for (const event of state.currentProjection?.events || []) {
+      if (existingSequences.has(event.sequence)) continue;
+      evidence.observations.push({
+        observedAt,
+        completionId: event.completionId,
+        sequence: event.sequence,
+        revision: event.revision,
+        previousRevision: event.previousRevision ?? null,
+        lifecycle: event.lifecycle,
+        currentLayerId: event.currentLayerId ?? null,
+        productStatus: interaction.completionStatus,
+        observedPreTerminal: false,
+        recoveredAfterDiscovery: true,
+      });
+    }
   }
 
   async #captureCandidateTrace(execution, interaction) {
@@ -1709,16 +2131,37 @@ export class EvalService {
       // Export remains authoritative when an optional pre-export lookup is unavailable.
     }
     try {
-      const descriptor = await this.candidateTraceExporter(interaction.id, targetDirectory, {
+      const correlation = {
         runId: execution.testRunId,
         executionId: execution.id,
         interactionId: String(interaction.id),
         harnessConfigurationName: execution.harnessConfigurationName,
         model: candidateModel(execution.harnessConfiguration),
-      });
+      };
+      const deadline = Date.now() + 30_000;
+      let descriptor;
+      for (;;) {
+        try {
+          descriptor = await this.candidateTraceExporter(interaction.id, targetDirectory, correlation);
+          break;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (message !== `No candidate trace exists for product interaction ${interaction.id}`
+            || Date.now() >= deadline) throw error;
+          await new Promise((wait) => setTimeout(wait, 50));
+        }
+      }
+      const completionBrokerAvailable = await validateCandidateTrace(
+        targetDirectory,
+        descriptor,
+        interaction,
+        correlation,
+        { requireComplete: execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID },
+      );
       execution.candidateTraceCaptures ||= {};
       execution.candidateTraceCaptures[String(interaction.id)] = {
         ...copy(descriptor),
+        completionBrokerAvailable,
         ...(descriptor.personalPresentationVersionId === undefined
           && pinnedPersonalPresentationVersionId !== undefined
           ? { personalPresentationVersionId: pinnedPersonalPresentationVersionId }

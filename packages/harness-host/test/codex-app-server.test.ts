@@ -99,15 +99,18 @@ describe("Codex app-server transport", () => {
       }
     });
     const onThreadId = vi.fn();
+    const onTurnId = vi.fn();
 
     const result = await runCodexAppServerTurn(options(fake, {
       ...(savedThreadId === undefined ? {} : { savedThreadId }),
       onThreadId,
+      onTurnId,
       codexConfigOverrides: ['model_provider="relayer_execution_provider"'],
     }));
 
     expect(result).toEqual({ threadId: savedThreadId ?? "thread-new", turnId: "turn-1", status: "completed" });
     expect(onThreadId).toHaveBeenCalledWith(savedThreadId ?? "thread-new");
+    expect(onTurnId).toHaveBeenCalledWith(savedThreadId ?? "thread-new", "turn-1");
     expect(fake.messages.map(({ method }) => method).filter(Boolean)).toEqual([
       "initialize",
       "initialized",
@@ -127,6 +130,50 @@ describe("Codex app-server transport", () => {
       args: ["-c", 'model_provider="relayer_execution_provider"', "app-server", "--listen", "stdio://"],
     });
     expect(fake.spawnOptions?.detached).toBe(process.platform !== "win32");
+    expect(fake.killed).toBe(true);
+  });
+
+  it("waits for native thread attachment before starting the turn", async () => {
+    let releaseAttachment: (() => void) | undefined;
+    const attachment = new Promise<void>((resolve) => { releaseAttachment = resolve; });
+    const fake = new FakeCodexProcess((message) => {
+      if (message.method === "initialize") fake.respond(message.id, {});
+      if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1" } });
+        queueMicrotask(() => fake.notify("turn/completed", {
+          threadId: "thread-new",
+          turn: { id: "turn-1", status: "completed", error: null },
+        }));
+      }
+    });
+
+    const running = runCodexAppServerTurn(options(fake, {
+      onThreadId: async () => attachment,
+    }));
+    await vi.waitFor(() => expect(fake.messages.some((request) => request.method === "thread/start")).toBe(true));
+    expect(fake.messages.some((request) => request.method === "turn/start")).toBe(false);
+
+    releaseAttachment?.();
+    await expect(running).resolves.toMatchObject({ threadId: "thread-new", turnId: "turn-1" });
+  });
+
+  it("cancels a stalled thread-attachment fence without starting a turn", async () => {
+    const controller = new AbortController();
+    const fake = new FakeCodexProcess((message) => {
+      if (message.method === "initialize") fake.respond(message.id, {});
+      if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
+    });
+    const running = runCodexAppServerTurn(options(fake, {
+      signal: controller.signal,
+      onThreadId: () => new Promise<void>(() => {}),
+    }));
+    await vi.waitFor(() => expect(fake.messages.some((request) => request.method === "thread/start")).toBe(true));
+
+    controller.abort(new Error("cancel attachment"));
+
+    await expect(running).rejects.toThrow("cancel attachment");
+    expect(fake.messages.some((request) => request.method === "turn/start")).toBe(false);
     expect(fake.killed).toBe(true);
   });
 

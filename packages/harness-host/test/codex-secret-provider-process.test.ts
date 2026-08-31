@@ -82,6 +82,7 @@ describe("Codex secret-provider process boundary", () => {
     const completion = harness.complete({
       inputGraph,
       interactionInput: { interaction: inputGraph, contexts: [] },
+      origin: { kind: "root" },
       model: { providerId: "openai-test", adapterId: "openai-api", modelId: "gpt-test" },
       access: {
         kind: "secret",

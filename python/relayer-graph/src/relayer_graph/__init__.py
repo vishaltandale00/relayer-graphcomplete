@@ -1,6 +1,6 @@
 """Object-based Python client for the GraphComplete Rust graph engine."""
 
-from .authoring import (ActionVariant, EdgeObject, GraphAuthoringClient, GraphEdge,
+from .authoring import (ActionVariant, CompletionInputGraph, EdgeObject, GraphAuthoringClient, GraphEdge,
                         GraphLayer, GraphNode, InteractionContext, InteractionInput,
                         InteractionInputNode,
                         LayerLayout, LayerLayoutObject,
@@ -13,6 +13,8 @@ from .icons import (RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES,
                     is_supported_relayer_icon, normalize_relayer_icon_name,
                     resolve_relayer_icon_name)
 from .session import GraphSession
+from .completion import (CompletionCurrent, CompletionCurrentSnapshot, CompletionHandle,
+                         CompletionTerminalError, complete)
 
 Client = RelayerGraphClient
 GraphClient = RelayerGraphClient
@@ -24,6 +26,9 @@ __all__ = [
     "GraphNode", "GraphEdge", "GraphLayer", "InteractionContext", "InteractionInput", "InteractionInputNode",
     "NodePlacement", "LayerLayout",
     "ActionVariant", "NavigateRelation",
+    "CompletionInputGraph",
+    "complete", "CompletionHandle", "CompletionCurrent", "CompletionCurrentSnapshot",
+    "CompletionTerminalError",
     "RelayerGraphError", "ConfigurationError", "TransportError", "APIError",
     "AuthenticationError", "NotFound", "ValidationError", "ValidationIssue",
     "RELAYER_ICON_NAMES", "RELAYER_ICON_ALIASES", "normalize_relayer_icon_name",

@@ -108,6 +108,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
   "node-harness-host": Object.freeze([
     "packages/harness-host/dist/approval-coordinator.js",
     "packages/harness-host/dist/approval.js",
+    "packages/harness-host/dist/completion-execution.js",
     "packages/harness-host/dist/configuration.js",
     "packages/harness-host/dist/host.js",
     "packages/harness-host/dist/implementations/claude-basic-browser.js",
@@ -141,6 +142,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "crates/relayer-app-server/src/api/types.rs",
     "crates/relayer-app-server/src/app_server.rs",
     "crates/relayer-app-server/src/approval.rs",
+    "crates/relayer-app-server/src/completion_broker.rs",
     "crates/relayer-app-server/src/conversation_export.rs",
     "crates/relayer-app-server/src/conversation_export_service.rs",
     "crates/relayer-app-server/src/conversation_import_service.rs",
@@ -165,6 +167,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "crates/relayer-app-server/src/storage/sqlite/approvals.rs",
     "crates/relayer-app-server/src/storage/sqlite/attempts.rs",
     "crates/relayer-app-server/src/storage/sqlite/catalog.rs",
+    "crates/relayer-app-server/src/storage/sqlite/completion_executions.rs",
     "crates/relayer-app-server/src/storage/sqlite/context_drafts.rs",
     "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs",
     "crates/relayer-app-server/src/storage/sqlite/interaction_contexts.rs",

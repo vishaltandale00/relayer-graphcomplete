@@ -5,10 +5,11 @@ Relayer GraphComplete is an open-source, graph-native agent workspace with a har
 The canonical external product boundary remains conceptually:
 
 ```ts
-const result = await complete(inputGraph);
+const completion = complete(inputGraph);
+const result = await completion.result;
 ```
 
-The root package does not export this top-level function yet. `inputGraph` points to the current user-interaction node. The selected thread harness keeps its working directory and provider session, while each `complete()` call receives a separate graph scope. A model turn ending does not mean the graph is complete; the harness must finish with `graph.submit(interactionNode)`.
+The root package exports this top-level function and `configureCompletionRuntime(runtime)`, which the process owner uses to inject the trusted preparation and execution implementation. `inputGraph` is only `{ interactionNode }`, a pointer to an already-prepared canonical interaction. A GraphComplete thread is a graph of completions. Each `complete()` call receives a completion-bound graph broker and a provider-native execution attachment; the adapter may reuse provider-session state as a behavior-preserving optimization. A model turn ending does not mean the graph is complete. The compatibility path finishes with `graph.submit(interactionNode)`; temporal-capable clients may durably advance the completion's current layer before returning its final layer.
 
 The working desktop reaches this boundary through the Rust app server and persistent `HarnessHost`. There is intentionally no second structured-output path: every supported harness produces accepted product output through graph-tool writes and explicit submission.
 
@@ -32,7 +33,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 - The selected harness owns model execution and any provider-native delegation it uses. Codex may use native subagents and Prime Agent may use its native RLM children; GraphComplete does not add another scheduler.
 - GraphComplete owns graph records, active-interaction write authority, validation, accepted-history integrity, and explicit submission. Accepted records are immutable except for ADR 0005's exact one-shot leased-invoke target transition.
-- Relayer owns a hidden, versioned personal-presentation profile. Each execution atomically pins one accepted profile completion through a control-only attachment; the harness renders it without adding preference records to visible response topology or exports. See [ADR 0009](docs/decisions/0009-personal-presentation-graph-attachments.md).
+- Relayer owns a hidden, versioned personal-presentation profile. Each execution atomically pins one accepted profile completion through a control-only attachment; semantic children inherit that exact pin, and the harness renders it without adding preference records to visible response topology or exports. Published V2 adds a graph-owned Visible working state preference while V1 remains active. See [ADR 0009](docs/decisions/0009-personal-presentation-graph-attachments.md).
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
 - Provider adapters own authentication, model discovery, and provider-specific execution details. Product records use stable provider, model, harness, and permission identifiers.
@@ -43,7 +44,7 @@ The implemented basic loop is:
 2. The Node host resolves the thread's harness once and keeps that object alive.
 3. The host supplies the current graph scope only for that `complete()` call. Harness-authored programs give every persisted node, edge, layer, and action an explicit stable client key, so editing and rerunning the whole program updates the same current-interaction drafts while their identity-owning context remains unchanged. An action's source node is part of that identity, so repair keeps each draft action on its original source node. The harness submits node objects, creates undirected edges, packages the exact visible layer with one versioned normalized placement per node, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement. An intentionally abandoned orphan draft layer may be preserved as stopped history with `discardLayer`; authors must not invent navigation merely to make abandoned work reachable.
 4. The host reads the accepted output and closes the turn's in-memory graph scope. The calling runtime that minted the graph capability revokes its token after the Complete call settles. The host has a separate API credential and never receives graph control authority. A cached client from an earlier IPython turn cannot modify a later interaction.
-5. `graph.submit(interactionNode)` recursively validates typed `expand` and `reference` navigation, exact source-layer provenance, layer size, and complete authored layouts, then atomically accepts only the current authored closure. Flat answers remain valid. See [ADR 0005](docs/decisions/0005-layered-navigation-contract.md).
+5. `graph.submit(interactionNode)` recursively validates typed `expand` and `reference` navigation, exact source-layer provenance, layer size, and complete authored layouts, then atomically returns the current authored closure. Temporal `advance` uses the same validation and acceptance boundary while preserving the exact prior current through graph-native navigation. Flat answers remain valid. See [ADR 0005](docs/decisions/0005-layered-navigation-contract.md) and [ADR 0008](docs/decisions/0008-temporal-current-and-completion-brokers.md).
 6. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
 
 Independent self-assessment will later add an optional review gate to this same loop.
@@ -117,6 +118,69 @@ The live command is not part of `npm run check` and is the only part of this
 case that invokes inference; its evidence parser and grader run in the default
 deterministic test suite.
 
+### Recursive Complete live run
+
+Recursive `complete(inputGraph)` is off in the shipped app. A developer-only
+switch enables the whole persisted feature chain it depends on. It is not a
+product setting and has no user-visible control:
+
+```sh
+RELAYER_DEV_PROVIDER_RECURSION=1 npm run desktop:dev
+```
+
+The opt-in live run drives one fixed synthetic task through the same runtime and
+app server the desktop uses, with recursion enabled and disabled on the same
+build. It records whether the agent created a semantic child by its own
+decision, the ordered sequence of root and child current-pointer revisions,
+sanitized durable execution evidence, complete portable candidate traces, and
+diagnostic timings. A single enabled/disabled pair is not performance proof.
+
+Credentials live in one local file. Copy the template and fill it in;
+`live-run.local.json` is gitignored and must never be committed:
+
+```sh
+cp live-run.example.json live-run.local.json
+```
+
+Each entry under `runs` is one named profile pairing a harness with a provider.
+`auth.kind` is one of `openrouter`, `openai-api`, `anthropic-api`, or
+`codex-subscription`. The key kinds read `auth.apiKey` from the file. The
+subscription kind keeps every secret out of the file: log in once against the
+isolated provider home the file names, and leave `auth.apiKey` null.
+
+Select one profile per invocation, so a run never spends more than intended:
+
+```sh
+RELAYER_RECURSIVE_LIVE_RUN=1 npm run live:recursive-complete -- --profile prime-openrouter
+RELAYER_RECURSIVE_LIVE_RUN=1 npm run live:recursive-complete -- --profile codex-openai
+```
+
+A `codex.basic` profile also needs `codexExecutable` and `codexHome`, and runs
+inside that home so it never picks up an unrelated provider login. A
+`prime.agent` profile needs neither; it reaches its provider directly and
+accepts only a key.
+
+Each attempt writes an immutable
+`.relayer/live/recursive-complete/<profile>/<run-id>/run.json`; `latest.json`
+only points to the newest attempt. The artifact binds the source workspace,
+harness configuration, and executable bytes without recording authentication or
+provider-native thread identities. An enabled run passes only after a semantic
+child is durably launched, attached, settled, and observed with a succeeded
+terminal graph revision. The disabled arm must have no broker authority or
+child execution. Both root and child traces must be complete, untruncated, and
+full coverage.
+
+This is a Check 1 execution receipt. It proves that agent-authored
+`complete(inputGraph)` launched and settled a real semantic child. It does not
+claim that the parent read or semantically incorporated `child.result`; that
+requires separate broker-delivery and semantic review evidence.
+
+The run spends real inference and is excluded from `npm run check`; its analysis,
+zero-inference production preflight, and pass rules run in the default
+deterministic suite. The first authorized Codex subscription attempt completed
+normally but created no semantic child, so it failed Check 1. Semantic coherence
+is graded separately and blocks merge on its own.
+
 The opt-in Ask-profile desktop proof intentionally bypasses npm so inherited
 `NODE_OPTIONS` cannot execute before its trust boundary. Invoke the fixed system
 shell by its repository path with an explicit, operator-trusted absolute path
@@ -152,7 +216,7 @@ npm install
 npm run desktop:dev
 ```
 
-Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. The product configuration uses layered navigation, makes Codex-native subagents available when useful, and retains medium reasoning while the model remains an independent picker selection. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability. The accepted layer owns semantic node placement in normalized coordinates. The graph workspace projects it into a stable world plane while fit, pan, zoom, resizing, and the details inspector change only the camera. Dragging a node is an ephemeral local view override. Historical coordinate-free layers use a deterministic viewport-independent fallback without rewriting accepted history. Product and read-only Eval use this same renderer path. `codex-basic-high` remains an internal Eval configuration and is rejected by Relayer Desktop even as a development override. Before startup recovery, a runtime that includes `codex-basic` but omits `codex-basic-high` migrates product threads formerly pinned to the high configuration; Eval catalogs that still include both configurations are unchanged. Harness-state schema v6 backs up older state, then preserves provider continuity when Desktop registers the exact layered `codex-basic` replacement for a revision-1 or revision-2 schema-v4/v5 Codex session, including deferred legacy sessions. Eval registration keeps its high sessions unchanged.
+Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. The product configuration uses layered navigation, makes Codex-native subagents available when useful, and retains medium reasoning while the model remains an independent picker selection. The current Codex adapter normally reuses its root provider session across follow-up completions while giving each one a fresh graph capability. Fresh-session context reconstruction remains a recursive-rollout qualification requirement rather than current live evidence. The accepted layer owns semantic node placement in normalized coordinates. The graph workspace projects it into a stable world plane while fit, pan, zoom, resizing, and the details inspector change only the camera. Dragging a node is an ephemeral local view override. Historical coordinate-free layers use a deterministic viewport-independent fallback without rewriting accepted history. Product and read-only Eval use this same renderer path. `codex-basic-high` remains an internal Eval configuration and is rejected by Relayer Desktop even as a development override. Before startup recovery, a runtime that includes `codex-basic` but omits `codex-basic-high` migrates product threads formerly pinned to the high configuration; Eval catalogs that still include both configurations are unchanged. Harness-state schema v6 backs up older state, then preserves provider continuity when Desktop registers the exact layered `codex-basic` replacement for a revision-1 or revision-2 schema-v4/v5 Codex session, including deferred legacy sessions. Eval registration keeps its high sessions unchanged.
 
 To try the Prime Agent harness in the real Relayer chat, install the repository
 dependencies and use the checked-in runtime:
@@ -193,6 +257,25 @@ npm run eval-app:dev
 ```
 
 The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
+
+The dashboard also exposes the non-default **Visible working state · recursive
+comparison** case and its required Codex pair:
+
+- `codex-eval-complete-disabled`
+- `codex-eval-complete-enabled`
+
+Selecting that case isolates and selects both configurations. It is deliberately a
+combined product-experience comparison, not an isolated causal measurement: the off
+cell pins V1 and disables agent-authored Complete, while the on cell pins V2 and enables
+it. They hold the Codex harness implementation, provider/model settings, permissions,
+natural task, and temporal runtime substrate fixed. The execution dossier
+separates semantic children from human turns and exposes each child's source
+action, attached provider execution, successful settlement, terminal projection,
+and candidate trace. The deterministic fixture proves this comparison path without
+inference. A live run starts two Codex subscription root executions and the enabled
+root may start additional agent-authored child execution. That scope must be confirmed
+explicitly in the dashboard; the treatment is pinned to the control's resolved
+provider and model before it starts.
 
 The candidate catalog includes twelve deep calibration cases: seven coding cases, including three evaluator-owned greenfield products, and five research, planning, creative, and forecasting cases. They are a graph-presentation calibration corpus for recursive-judge tuning and human labeling, not the full verifiable-work benchmark. Each materializes an isolated Git workspace and records a sealed reference, lightweight deterministic completion gates, and an outcome rubric separately from graph-presentation judgment. Coding fixtures begin with a failing behavioral contract; open-research fixtures provide no curated source bundle and require the candidate to leave a durable deliverable and source trail. A passing completion gate does not claim that the implementation or artifact is substantively good. Candidate cases remain calibration-only until human review promotes them.
 

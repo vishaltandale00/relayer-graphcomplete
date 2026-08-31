@@ -83,6 +83,7 @@ impl<'connection> NodeTable<'connection> {
         text: &str,
         invocation: Option<InteractionInvocation>,
     ) -> Result<GraphNode, GraphError> {
+        let mut canonical_text = text.to_owned();
         if let Some(invocation) = invocation {
             if let Some((existing, stored_source_interaction_id)) = self
                 .interaction_by_leased_action(invocation.source_action_id)
@@ -99,7 +100,8 @@ impl<'connection> NodeTable<'connection> {
                     .await?;
                 return Ok(existing);
             }
-            self.validate_lease_source(project_id, thread_id, invocation, false)
+            canonical_text = self
+                .validate_lease_source(project_id, thread_id, invocation, false)
                 .await?;
         }
         let result = sqlx::query(
@@ -107,7 +109,7 @@ impl<'connection> NodeTable<'connection> {
         )
         .bind(project_id.map(ProjectId::value))
         .bind(thread_id.value())
-        .bind(text)
+        .bind(&canonical_text)
         .bind(invocation.map(|value| value.source_action_id.value()))
         .bind(invocation.map(|value| value.source_interaction_node_id.value()))
         .execute(&mut *self.connection)
@@ -117,8 +119,8 @@ impl<'connection> NodeTable<'connection> {
             leased_action_id: invocation.map(|value| value.source_action_id),
             kind: "user-interaction".into(),
             icon: "user".into(),
-            title: text.into(),
-            detail: text.into(),
+            title: canonical_text.clone(),
+            detail: canonical_text,
             state: RecordState::Accepted,
         })
     }
@@ -210,7 +212,7 @@ impl<'connection> NodeTable<'connection> {
         thread_id: ThreadId,
         invocation: InteractionInvocation,
         allow_existing_lease: bool,
-    ) -> Result<(), GraphError> {
+    ) -> Result<String, GraphError> {
         #[derive(FromRow)]
         struct LeaseSourceRow {
             project_id: Option<i64>,
@@ -218,18 +220,37 @@ impl<'connection> NodeTable<'connection> {
             action_kind: String,
             target_layer_id: Option<i64>,
             action_state: String,
+            interaction_text: Option<String>,
             in_completion: i64,
         }
 
         let row = sqlx::query_as::<_, LeaseSourceRow>(
             r#"
-            WITH RECURSIVE reachable_layers(id) AS (
+            WITH RECURSIVE presentation_roots(id) AS (
                 SELECT root.target_layer_id
                 FROM completions completion
                 JOIN actions root ON root.id=completion.root_action_id
                 WHERE completion.interaction_node_id=?1
                   AND root.state='accepted'
                   AND root.target_layer_id IS NOT NULL
+                UNION
+                SELECT current.current_layer_id
+                FROM completion_states current
+                WHERE current.interaction_node_id=?1
+                  AND current.lifecycle='active'
+                  AND current.temporal_provider_recursion=1
+                  AND current.current_layer_id IS NOT NULL
+                UNION
+                SELECT revision.current_layer_id
+                FROM current_revisions revision
+                JOIN completion_states current
+                  ON current.interaction_node_id=revision.interaction_node_id
+                WHERE revision.interaction_node_id=?1
+                  AND current.temporal_provider_recursion=1
+                  AND revision.current_layer_id IS NOT NULL
+                  AND ?3=1
+            ), reachable_layers(id) AS (
+                SELECT id FROM presentation_roots
                 UNION
                 SELECT child.target_layer_id
                 FROM reachable_layers reachable
@@ -241,34 +262,44 @@ impl<'connection> NodeTable<'connection> {
             )
             SELECT source.project_id,source.thread_id,
                    action.kind AS action_kind,action.target_layer_id,action.state AS action_state,
-                   (action.id=(
-                       SELECT completion.root_action_id
-                       FROM completions completion
-                       WHERE completion.interaction_node_id=?1
-                   ) OR EXISTS(
+                   action.interaction_text,
+                   EXISTS(
                        SELECT 1
                        FROM reachable_layers reachable
                        JOIN layer_actions membership ON membership.layer_id=reachable.id
                        WHERE membership.action_id=action.id
-                   )) AS in_completion
+                   ) AS in_completion
             FROM nodes source
             JOIN actions action ON action.id=?2
             WHERE source.id=?1
               AND source.kind='user-interaction'
               AND source.state='accepted'
               AND source.owner_interaction_id IS NULL
-              AND EXISTS(SELECT 1 FROM completions WHERE interaction_node_id=source.id)
+              AND (EXISTS(SELECT 1 FROM completions WHERE interaction_node_id=source.id)
+                   OR EXISTS(
+                       SELECT 1 FROM completion_states current
+                       WHERE current.interaction_node_id=source.id
+                         AND current.lifecycle='active'
+                         AND current.temporal_provider_recursion=1
+                         AND current.current_layer_id IS NOT NULL
+                   )
+                   OR (?3=1 AND EXISTS(
+                       SELECT 1 FROM completion_states current
+                       WHERE current.interaction_node_id=source.id
+                         AND current.temporal_provider_recursion=1
+                   )))
             "#,
         )
         .bind(invocation.source_interaction_node_id.value())
         .bind(invocation.source_action_id.value())
+        .bind(i64::from(allow_existing_lease))
         .fetch_optional(&mut *self.connection)
         .await?;
         let Some(row) = row else {
             return Err(GraphError::validation(
                 "invalid_invocation_source",
                 "invocation",
-                "The invocation source must identify an accepted interaction completion and action.",
+                "The invocation source must identify a terminal completion or provider-recursion-enabled active current and its published action.",
             ));
         };
         let source_project_id = row.project_id.map(valid_project_id).transpose()?;
@@ -286,7 +317,7 @@ impl<'connection> NodeTable<'connection> {
             return Err(GraphError::validation(
                 "action_not_in_source_completion",
                 "invocation.sourceActionId",
-                "The source action is not a member of that interaction's accepted completion.",
+                "The source action is not a member of that interaction's published presentation.",
             ));
         }
         if ActionKind::parse(&row.action_kind)? != ActionKind::Invoke
@@ -305,7 +336,11 @@ impl<'connection> NodeTable<'connection> {
                 "The source invoke action is already resolved.",
             ));
         }
-        Ok(())
+        row.interaction_text.ok_or_else(|| {
+            GraphError::Internal(
+                "accepted invoke action is missing canonical interaction text".into(),
+            )
+        })
     }
 
     pub(crate) async fn interaction_scope(
@@ -329,6 +364,7 @@ impl<'connection> NodeTable<'connection> {
                     thread_id: valid_thread_id(row.thread_id)?,
                     root_node_id: node_id,
                     read_only: row.imported != 0,
+                    authority_epoch: None,
                 })
             }
             _ => Err(GraphError::Forbidden(
@@ -497,14 +533,23 @@ impl<'connection> NodeTable<'connection> {
         Ok(nodes)
     }
 
-    pub(crate) async fn accept_owned(
+    pub(crate) async fn publish_owned(
         &mut self,
         id: NodeId,
         owner: NodeId,
+        revision: Option<u64>,
     ) -> Result<(), GraphError> {
-        sqlx::query("UPDATE nodes SET state='accepted' WHERE id=?1 AND owner_interaction_id=?2")
+        let revision = revision
+            .map(|value| {
+                i64::try_from(value).map_err(|_| {
+                    GraphError::Internal("completion revision exceeds SQLite range".into())
+                })
+            })
+            .transpose()?;
+        sqlx::query("UPDATE nodes SET state='accepted',published_revision=COALESCE(published_revision,?3) WHERE id=?1 AND owner_interaction_id=?2")
             .bind(id.value())
             .bind(owner.value())
+            .bind(revision)
             .execute(&mut *self.connection)
             .await?;
         Ok(())

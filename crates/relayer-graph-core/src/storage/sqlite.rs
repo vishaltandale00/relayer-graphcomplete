@@ -1,6 +1,7 @@
 pub(crate) mod actions;
 pub(crate) mod completions;
 pub(crate) mod contexts;
+pub(crate) mod currents;
 pub(crate) mod edges;
 pub(crate) mod layers;
 pub(crate) mod migrations;
@@ -28,7 +29,7 @@ impl SqliteGraphStore {
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal)
+            .synchronous(SqliteSynchronous::Full)
             .busy_timeout(Duration::from_secs(5));
         let pool = SqlitePoolOptions::new()
             .max_connections(4)

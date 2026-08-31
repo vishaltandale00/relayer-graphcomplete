@@ -104,6 +104,7 @@ describe("managed runtime provider Connect boundary", () => {
     });
     const inputGraph = { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" };
     await harness.complete({
+      origin: { kind: "root" },
       inputGraph, interactionInput: { interaction: inputGraph, contexts: [] },
       model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-test" },
       access: acquired.access,

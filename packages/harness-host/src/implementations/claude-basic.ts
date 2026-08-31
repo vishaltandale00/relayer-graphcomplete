@@ -1,4 +1,5 @@
 import type { GraphCapability } from "@relayer/graph-client";
+import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import type {
   Harness,
   HarnessExecutionAccess,
@@ -57,6 +58,7 @@ export interface ClaudeBasicDependencies {
   readonly browser?: ClaudeBasicBrowserDependencies;
   readonly loadSdk?: (moduleUrl: string) => Promise<ClaudeSdkModule>;
   readonly clientModuleUrl?: string;
+  readonly completeModuleUrl?: string;
   readonly platform?: NodeJS.Platform;
 }
 
@@ -67,7 +69,9 @@ interface ClaudeRuntimeDescriptor {
 }
 
 export class ClaudeBasicHarness implements Harness {
+  readonly supportsInvokedComplete = true;
   private readonly clientModuleUrl: string;
+  private readonly completeModuleUrl: string;
   private sessionId: string | undefined;
   private sessionProviderDefinitionId: string | undefined;
   private sessionPersonalPresentationVersionId: number | null | undefined;
@@ -77,6 +81,7 @@ export class ClaudeBasicHarness implements Harness {
     private readonly dependencies: ClaudeBasicDependencies = {},
   ) {
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
+    this.completeModuleUrl = dependencies.completeModuleUrl ?? new URL("../../../../dist/index.js", import.meta.url).href;
     const savedSessionId = context.savedState?.claudeSessionId;
     const savedProviderDefinitionId = context.savedState?.claudeSessionProviderDefinitionId;
     const savedPresentationVersionId = context.savedState?.claudeSessionPersonalPresentationVersionId;
@@ -97,7 +102,11 @@ export class ClaudeBasicHarness implements Harness {
     }
   }
 
-  async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+  complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
+    return nativeExecutionHandle(this.execute(context, signal));
+  }
+
+  private async execute(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     if (context.model === undefined || context.access === undefined) {
       throw new Error("claude.basic requires an exact model and execution access");
     }
@@ -108,30 +117,40 @@ export class ClaudeBasicHarness implements Harness {
       throw new Error("claude.basic requires execution access for the selected provider definition");
     }
     const providerDefinitionId = context.model.providerId;
+    const isRoot = context.origin.kind === "root";
     const personalPresentationVersionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
-    if (this.sessionProviderDefinitionId !== providerDefinitionId) {
+    if (isRoot && this.sessionProviderDefinitionId !== providerDefinitionId) {
       this.sessionId = undefined;
       this.sessionProviderDefinitionId = undefined;
       this.sessionPersonalPresentationVersionId = undefined;
     }
-    if (this.sessionId !== undefined
+    if (isRoot && this.sessionId !== undefined
       && this.sessionPersonalPresentationVersionId !== personalPresentationVersionId) {
       this.sessionId = undefined;
       this.sessionProviderDefinitionId = undefined;
       this.sessionPersonalPresentationVersionId = undefined;
     }
+    const resumeSessionId = isRoot ? this.sessionId : undefined;
     const graph = context.graph.acquireCapability();
     const prompt = this.prompt(context);
     await context.trace.emit({
       type: "prompt",
       data: { text: this.prompt(context, false), interactionNodeId: context.inputGraph.id },
     });
-    const result = await this.run(prompt, context.model.modelId, graph, context.access, signal);
+    const result = await this.run(
+      prompt,
+      context.model.modelId,
+      graph,
+      context.access,
+      context.completionBroker,
+      resumeSessionId,
+      signal,
+    );
     await context.trace.emit({
       type: "message",
       data: { role: "assistant", text: redactPersonalPresentationResult(context, result.text) },
     });
-    if (result.sessionId) {
+    if (isRoot && result.sessionId) {
       this.sessionId = result.sessionId;
       this.sessionProviderDefinitionId = providerDefinitionId;
       this.sessionPersonalPresentationVersionId = personalPresentationVersionId;
@@ -162,10 +181,12 @@ export class ClaudeBasicHarness implements Harness {
     model: string,
     graph: GraphCapability,
     access: HarnessExecutionAccess,
+    completionBroker: HarnessRunContext["completionBroker"],
+    resumeSessionId?: string,
     signal?: AbortSignal,
   ): Promise<{ text: string; sessionId?: string }> {
     const runtime = claudeRuntime(access);
-    const environment = executionEnvironment(access, runtime.environment, graph, this.dependencies.platform);
+    const environment = executionEnvironment(access, runtime.environment, graph, completionBroker, this.dependencies.platform);
     const permissionMode = claudePermissionMode(this.context.permissionBinding.approvalMode);
     const abortController = new AbortController();
     const abort = () => abortController.abort(signal?.reason ?? new Error("Claude completion was cancelled"));
@@ -189,7 +210,7 @@ export class ClaudeBasicHarness implements Harness {
           permissionMode,
           ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
           pathToClaudeCodeExecutable: runtime.executable,
-          ...(this.sessionId === undefined ? {} : { resume: this.sessionId }),
+          ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
           abortController,
           // Provider stderr can contain prompts, credentials, account identifiers,
           // or upstream response bodies. Drain it, but never surface or persist it.
@@ -210,6 +231,8 @@ export class ClaudeBasicHarness implements Harness {
       context,
       this.clientModuleUrl,
       undefined,
+      this.completeModuleUrl,
+      "Claude",
       includePersonalPresentation,
     );
   }
@@ -285,6 +308,7 @@ function executionEnvironment(
   access: HarnessExecutionAccess,
   runtimeEnvironment: Readonly<Record<string, string>>,
   graph: GraphCapability,
+  completionBroker: HarnessRunContext["completionBroker"],
   platform = process.platform,
 ): Record<string, string> {
   const environment = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => (
@@ -308,6 +332,10 @@ function executionEnvironment(
   environment.RELAYER_GRAPH_URL = graph.url;
   environment.RELAYER_GRAPH_TOKEN = graph.token;
   environment.RELAYER_NODE_ID = String(graph.nodeId);
+  if (completionBroker !== undefined) {
+    environment.RELAYER_COMPLETE_URL = completionBroker.url;
+    environment.RELAYER_COMPLETE_TOKEN = completionBroker.token;
+  }
   return environment;
 }
 

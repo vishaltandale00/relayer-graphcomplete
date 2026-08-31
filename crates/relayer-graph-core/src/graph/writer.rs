@@ -1,13 +1,14 @@
 use crate::{
-    ActionDraft, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase, GraphEdge, GraphError,
-    GraphLayer, GraphNode, InteractionInput, LayerDraft, LayerId, NavigateRelation, NodeDraft,
-    NodeId, RecordState, ResolvedLayer,
-    graph::{InteractionScope, completion, model::LayerCandidate},
+    ActionDraft, ActionId, CompletionOutput, CompletionState, CurrentTransition,
+    CurrentTransitionReceipt, EdgeDraft, GraphAction, GraphDatabase, GraphEdge, GraphError,
+    GraphLayer, GraphNode, InteractionInput, InteractionInvocation, LayerDraft, LayerId,
+    NavigateRelation, NodeDraft, NodeId, RecordState, ResolvedLayer,
+    graph::{InteractionScope, completion, database::initialize_completion, model::LayerCandidate},
     storage::{
         GraphConnection,
         sqlite::{
-            actions::ActionTable, completions::CompletionTable, contexts::ContextTable,
-            edges::EdgeTable, layers, layers::LayerTable, nodes::NodeTable,
+            actions::ActionTable, contexts::ContextTable, currents::CurrentTable, edges::EdgeTable,
+            layers, layers::LayerTable, nodes::NodeTable,
         },
     },
 };
@@ -26,11 +27,62 @@ impl GraphWriter {
         self.scope.root_node_id
     }
 
+    pub async fn prepare_recursive_completion(
+        &self,
+        action_id: ActionId,
+    ) -> Result<GraphNode, GraphError> {
+        let mut transaction = self.database.storage.begin_write().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let child = NodeTable::new(&mut transaction)
+            .insert_interaction(
+                self.scope.project_id,
+                self.scope.thread_id,
+                "",
+                Some(InteractionInvocation {
+                    source_interaction_node_id: self.scope.root_node_id,
+                    source_action_id: action_id,
+                }),
+            )
+            .await?;
+        initialize_completion(
+            &mut transaction,
+            &child,
+            self.scope.project_id,
+            self.scope.thread_id,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(child)
+    }
+
+    /// Reads one accepted action this completion authored.
+    ///
+    /// A published invoke occurrence is accepted at the revision that published it, long
+    /// before its completion returns, so this deliberately does not read a final output.
+    pub async fn accepted_authored_action(
+        &self,
+        action_id: ActionId,
+    ) -> Result<Option<GraphAction>, GraphError> {
+        let mut transaction = self.database.storage.begin_read().await?;
+        let record = ActionTable::new(&mut transaction)
+            .authored_accepted(&self.scope, action_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(record.map(|record| record.action))
+    }
+
     pub async fn interaction_input(&self) -> Result<InteractionInput, GraphError> {
-        let mut connection = self.database.storage.acquire().await?;
-        ContextTable::new(&mut connection)
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let input = ContextTable::new(&mut transaction)
             .interaction_input(&self.scope)
-            .await
+            .await?;
+        transaction.commit().await?;
+        Ok(input)
     }
 
     pub async fn submit_node(&self, draft: &NodeDraft) -> Result<GraphNode, GraphError> {
@@ -41,6 +93,9 @@ impl GraphWriter {
         };
         let draft = &normalized_draft;
         let mut transaction = self.database.storage.begin_write().await?;
+        if self.scope.authority_epoch.is_some() {
+            self.ensure_writable(&mut transaction).await?;
+        }
         let existing = NodeTable::new(&mut transaction)
             .by_owner_and_key(self.scope.root_node_id, &draft.client_key)
             .await?;
@@ -54,7 +109,9 @@ impl GraphWriter {
                 "This node was already accepted. Create a new node and connect it to the old node instead of editing history.",
             ));
         }
-        self.ensure_writable(&mut transaction).await?;
+        if self.scope.authority_epoch.is_none() {
+            self.ensure_writable(&mut transaction).await?;
+        }
         let mut nodes = NodeTable::new(&mut transaction);
         let node = match existing {
             Some(record) if record.node.state == RecordState::Draft => {
@@ -149,6 +206,9 @@ impl GraphWriter {
 
     pub async fn discard_layer(&self, id: LayerId) -> Result<GraphLayer, GraphError> {
         let mut transaction = self.database.storage.begin_write().await?;
+        if self.scope.authority_epoch.is_some() {
+            self.ensure_writable(&mut transaction).await?;
+        }
         let record = LayerTable::new(&mut transaction)
             .record(&self.scope, id)
             .await?
@@ -169,7 +229,9 @@ impl GraphWriter {
             }
             RecordState::Draft => {}
         }
-        self.ensure_writable(&mut transaction).await?;
+        if self.scope.authority_epoch.is_none() {
+            self.ensure_writable(&mut transaction).await?;
+        }
         if LayerTable::new(&mut transaction)
             .is_reachable_from_root(self.scope.root_node_id, id)
             .await?
@@ -307,10 +369,23 @@ impl GraphWriter {
                         format!("Target layer {layer_id} does not exist. Submit that layer first."),
                     )
                 })?;
+            let root_reuses_current = if draft.source_node_id == self.scope.root_node_id
+                && draft.relation == Some(NavigateRelation::Expand)
+                && target.owner == self.scope.root_node_id
+                && target.layer.state == RecordState::Accepted
+            {
+                let current = CurrentTable::new(&mut transaction)
+                    .state(self.scope.root_node_id)
+                    .await?;
+                current.lifecycle == crate::CompletionLifecycle::Active
+                    && current.current_layer_id == Some(layer_id)
+            } else {
+                false
+            };
             match draft.relation {
                 Some(NavigateRelation::Expand)
                     if target.owner != self.scope.root_node_id
-                        || target.layer.state != RecordState::Draft =>
+                        || (target.layer.state != RecordState::Draft && !root_reuses_current) =>
                 {
                     return Err(GraphError::validation(
                         "expand_target_must_be_current_draft",
@@ -358,27 +433,45 @@ impl GraphWriter {
     }
 
     pub async fn get_node(&self, id: NodeId) -> Result<GraphNode, GraphError> {
-        let mut connection = self.database.storage.acquire().await?;
-        NodeTable::new(&mut connection)
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let node = NodeTable::new(&mut transaction)
             .visible(&self.scope, id)
-            .await
+            .await?;
+        transaction.commit().await?;
+        Ok(node)
     }
 
     pub async fn neighbors(&self, id: NodeId) -> Result<Vec<GraphNode>, GraphError> {
-        let mut connection = self.database.storage.acquire().await?;
-        let mut nodes = NodeTable::new(&mut connection);
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let mut nodes = NodeTable::new(&mut transaction);
         nodes.visible(&self.scope, id).await?;
-        nodes.neighbors(&self.scope, id).await
+        let neighbors = nodes.neighbors(&self.scope, id).await?;
+        transaction.commit().await?;
+        Ok(neighbors)
     }
 
     pub async fn get_layer(&self, id: LayerId) -> Result<ResolvedLayer, GraphError> {
-        let mut connection = self.database.storage.acquire().await?;
-        layers::resolve(&mut connection, &self.scope, id, false).await
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let layer = layers::resolve(&mut transaction, &self.scope, id, false).await?;
+        transaction.commit().await?;
+        Ok(layer)
     }
 
     pub async fn get_layer_owner(&self, id: LayerId) -> Result<NodeId, GraphError> {
-        let mut connection = self.database.storage.acquire().await?;
-        let record = LayerTable::new(&mut connection)
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let record = LayerTable::new(&mut transaction)
             .record(&self.scope, id)
             .await?
             .ok_or_else(|| GraphError::NotFound(format!("layer {id}")))?;
@@ -387,11 +480,60 @@ impl GraphWriter {
                 "layer {id} is not readable by this interaction"
             )));
         }
+        transaction.commit().await?;
         Ok(record.owner)
     }
 
     pub async fn completion_output(&self) -> Result<Option<CompletionOutput>, GraphError> {
-        completion::read_output(&self.database, &self.scope).await
+        let mut transaction = self.database.storage.begin_read().await?;
+        let state = CurrentTable::new(&mut transaction)
+            .state(self.scope.root_node_id)
+            .await?;
+        if state.lifecycle != crate::CompletionLifecycle::Active {
+            self.scope
+                .require_generation_authority(&mut transaction)
+                .await?;
+        } else {
+            self.scope
+                .require_active_authority(&mut transaction)
+                .await?;
+        }
+        let output = completion::read_output_on(&mut transaction, &self.scope).await?;
+        transaction.commit().await?;
+        Ok(output)
+    }
+
+    pub async fn current_completion(&self) -> Result<CompletionState, GraphError> {
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let current = CurrentTable::new(&mut transaction)
+            .state(self.scope.root_node_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(current)
+    }
+
+    pub async fn transition_current(
+        &self,
+        expected_revision: u64,
+        operation_key: &str,
+        intent: CurrentTransition,
+    ) -> Result<CurrentTransitionReceipt, GraphError> {
+        if self.scope.read_only {
+            return Err(GraphError::Forbidden(
+                "imported conversation graphs are immutable".into(),
+            ));
+        }
+        completion::transition_current(
+            &self.database,
+            &self.scope,
+            expected_revision,
+            operation_key,
+            &intent,
+        )
+        .await
     }
 
     pub async fn complete(&self, interaction: NodeId) -> Result<CompletionOutput, GraphError> {
@@ -410,13 +552,14 @@ impl GraphWriter {
                 "imported conversation graphs are immutable".into(),
             ));
         }
-        if CompletionTable::new(connection)
-            .root_action(self.scope.root_node_id)
-            .await?
-            .is_some()
-        {
+        self.scope.require_active_authority(connection).await?;
+        let current = CurrentTable::new(connection)
+            .state(self.scope.root_node_id)
+            .await?;
+        if current.lifecycle != crate::CompletionLifecycle::Active {
             return Err(GraphError::Forbidden(
-                "this interaction already has an accepted completion".into(),
+                "this interaction already has an accepted completion or terminal completion state"
+                    .into(),
             ));
         }
         Ok(())

@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::Parser;
-use relayer_graph_core::GraphDatabase;
+use relayer_graph_core::{GraphDatabase, TemporalFeatureConfig};
 use relayer_graph_server::{ServerState, router};
 use relayer_telemetry_capability::{
     PanicEventDefinition, PanicReporter, install_panic_reporter, read_capability_bootstrap,
@@ -23,6 +23,16 @@ struct Arguments {
     database: String,
     #[arg(long)]
     control_token: Option<String>,
+    #[arg(long)]
+    temporal_schema_read: bool,
+    #[arg(long)]
+    temporal_root_current_write: bool,
+    #[arg(long)]
+    temporal_projection_ui: bool,
+    #[arg(long)]
+    temporal_invoke_resolution: bool,
+    #[arg(long)]
+    temporal_provider_recursion: bool,
     #[cfg(ladybug_qualification)]
     #[arg(long, hide = true)]
     ladybug_qualification: bool,
@@ -92,6 +102,18 @@ async fn run(
     let graph = GraphDatabase::open(&arguments.database)
         .await
         .context("open graph database")?;
+    let temporal_features = TemporalFeatureConfig {
+        config_version: 1,
+        schema_read: arguments.temporal_schema_read,
+        root_current_write: arguments.temporal_root_current_write,
+        projection_ui: arguments.temporal_projection_ui,
+        invoke_resolution: arguments.temporal_invoke_resolution,
+        provider_recursion: arguments.temporal_provider_recursion,
+    };
+    graph
+        .set_temporal_features(temporal_features)
+        .await
+        .context("persist temporal feature config")?;
     let listener =
         tokio::net::TcpListener::bind(SocketAddr::new(arguments.host, arguments.port)).await?;
     let address = listener.local_addr()?;
@@ -99,9 +121,12 @@ async fn run(
         "{}",
         serde_json::json!({"ready":true,"url":format!("http://{address}")})
     );
-    axum::serve(listener, router(ServerState::new(graph, control_token)))
-        .with_graceful_shutdown(shutdown_signal(parent_disconnected))
-        .await?;
+    axum::serve(
+        listener,
+        router(ServerState::new(graph, control_token).with_temporal_features(temporal_features)),
+    )
+    .with_graceful_shutdown(shutdown_signal(parent_disconnected))
+    .await?;
     Ok(())
 }
 

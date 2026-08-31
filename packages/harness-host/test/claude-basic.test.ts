@@ -104,6 +104,7 @@ function runContext(access: HarnessRunContext["access"]): HarnessRunContext {
   if (!access) throw new Error("test access is required");
   const inputGraph = { id: 4, kind: "user-interaction", icon: "user", title: "Question", detail: "Explain", state: "accepted" as const };
   return {
+    origin: { kind: "root" },
     inputGraph,
     interactionInput: { interaction: inputGraph, contexts: [] },
     graph: { interactionNodeId: 4, acquireCapability: () => ({ url: "http://127.0.0.1:9", token: "token", nodeId: 4 }) },
@@ -182,6 +183,13 @@ describe("ClaudeBasicHarness", () => {
       expect(prompt).not.toContain("Codex");
       expect(prompt).not.toContain("native delegation");
       expectGraphPresentationGuidance(prompt);
+      expect(prompt).toContain("graph with other live agents");
+      expect(prompt).toContain("live, user-facing workspace");
+      expect(prompt).toContain("await graph.getCurrent()");
+      expect(prompt).toContain("await graph.advanceCurrent(");
+      expect(prompt).toContain("Advancing current does not complete the interaction");
+      expect(prompt).not.toContain("graph.prepareComplete(");
+      expect(prompt).not.toContain("Import complete from");
       expect(options).toMatchObject({
         cwd: "/tmp",
         model: "claude-sonnet-4",
@@ -205,6 +213,32 @@ describe("ClaudeBasicHarness", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("adds semantic Complete mechanics only when the completion broker grants authority", async () => {
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
+      loadSdk: async () => ({
+        ...browserSdk(),
+        query: sdkQuery([
+          { type: "system", subtype: "init", session_id: "session-1" },
+          { type: "result", subtype: "success", result: "done", session_id: "session-1" },
+        ], (input) => calls.push(input)),
+      }),
+      clientModuleUrl: "@relayer/graph-client",
+    });
+    const context = runContext(managedAccess());
+
+    await harness.complete({
+      ...context,
+      completionBroker: {
+        url: "http://127.0.0.1:43125/api/completions",
+        token: "12345678901234567890123456789012",
+      },
+    });
+
+    expect(calls[0]?.prompt).toContain("graph.prepareComplete(invokeAction)");
+    expect(calls[0]?.prompt).toContain("Import complete from");
   });
 
   it("allows injecting query directly through the public factory seam", async () => {
@@ -392,6 +426,41 @@ describe("ClaudeBasicHarness", () => {
 
     expect(calls[0]?.options.resume).toBeUndefined();
     expect(calls[1]?.options.resume).toBe("session-1");
+  });
+
+  it("starts invoked completions in fresh sessions without replacing root continuity", async () => {
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits", {
+      claudeSessionId: "root-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
+    }), {
+      query: sequentialSdkQuery([
+        [{ type: "result", subtype: "success", result: "child a", session_id: "child-a" }],
+        [{ type: "result", subtype: "success", result: "child b", session_id: "child-b" }],
+        [{ type: "result", subtype: "success", result: "root", session_id: "root-session" }],
+      ], (input) => calls.push(input)),
+      browserSdk: browserSdk(),
+    });
+    const access = managedAccess();
+    const child = (actionId: number, childAccess: HarnessExecutionAccess = access): HarnessRunContext => ({
+      ...runContext(childAccess),
+      origin: { kind: "invoke", sourceCompletionId: 1, actionId },
+    });
+
+    await Promise.all([
+      harness.complete(child(101)),
+      harness.complete(child(102, secretAccess())),
+    ]);
+    expect(calls.slice(0, 2).map(({ options }) => options.resume)).toEqual([undefined, undefined]);
+    expect(harness.state()).toEqual({
+      claudeSessionId: "root-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
+    });
+
+    await harness.complete(runContext(access));
+    expect(calls[2]?.options.resume).toBe("root-session");
   });
 
   it.each([

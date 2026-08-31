@@ -1422,6 +1422,161 @@ impl ProductService {
         })
     }
 
+    pub(crate) async fn invoke_action_recursively(
+        &self,
+        source_interaction_id: InteractionId,
+        action_id: i64,
+        text: &str,
+    ) -> Result<InvokeActionOutcome, ProductError> {
+        if action_id <= 0 {
+            return Err(ProductError::Invalid(
+                "action ID must be a positive integer".into(),
+            ));
+        }
+        let source = self.get_interaction(source_interaction_id).await?;
+        if self.storage.thread_is_imported(source.thread_id).await? {
+            return Err(ProductError::Invalid(
+                "imported conversation actions cannot execute".into(),
+            ));
+        }
+        if let Some(existing) = self
+            .get_action_invocation(source_interaction_id, action_id)
+            .await?
+        {
+            return Ok(existing);
+        }
+        let text = required(text, "interactionText")?;
+        let outcome = self
+            .storage
+            .insert_recursive_action_invocation(source_interaction_id, action_id, text)
+            .await?;
+        Ok(match outcome {
+            ActionInvocationInsertOutcome::Created {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: true,
+            },
+            ActionInvocationInsertOutcome::Existing {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: false,
+            },
+        })
+    }
+
+    pub(crate) async fn completion_execution(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<Option<crate::storage::CompletionExecution>, ProductError> {
+        Ok(self
+            .storage
+            .get_completion_execution(interaction_id)
+            .await?)
+    }
+
+    pub(crate) async fn reserve_completion_execution(
+        &self,
+        binding: crate::storage::CompletionExecutionBinding<'_>,
+        timestamp: &str,
+    ) -> Result<crate::storage::CompletionExecutionReserveOutcome, ProductError> {
+        Ok(self
+            .storage
+            .reserve_completion_execution(binding, timestamp)
+            .await?)
+    }
+
+    pub(crate) async fn claim_completion_execution_launching(
+        &self,
+        interaction_id: InteractionId,
+        permission_origin_digest: &str,
+        timestamp: &str,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .claim_completion_execution_launching(
+                interaction_id,
+                permission_origin_digest,
+                timestamp,
+            )
+            .await?)
+    }
+
+    pub(crate) async fn attach_completion_execution(
+        &self,
+        interaction_id: InteractionId,
+        permission_origin_digest: &str,
+        attachment: &serde_json::Value,
+        timestamp: &str,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .attach_completion_execution(
+                interaction_id,
+                permission_origin_digest,
+                attachment,
+                timestamp,
+            )
+            .await?)
+    }
+
+    pub(crate) async fn settle_completion_execution(
+        &self,
+        interaction_id: InteractionId,
+        permission_origin_digest: &str,
+        settlement: Option<&serde_json::Value>,
+        safe_reason: Option<&str>,
+        timestamp: &str,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .settle_completion_execution(
+                interaction_id,
+                permission_origin_digest,
+                settlement,
+                safe_reason,
+                timestamp,
+            )
+            .await?)
+    }
+
+    pub(crate) async fn finalize_completion_execution_accepted(
+        &self,
+        completion: AcceptedInteractionCompletion<'_>,
+        permission_origin_digest: &str,
+        timestamp: &str,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .finalize_completion_execution_accepted(completion, permission_origin_digest, timestamp)
+            .await?)
+    }
+
+    pub(crate) async fn finalize_completion_execution_failed(
+        &self,
+        interaction_id: InteractionId,
+        permission_origin_digest: &str,
+        harness_configuration_name: &str,
+        safe_reason: &str,
+        timestamp: &str,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .finalize_completion_execution_failed(
+                interaction_id,
+                permission_origin_digest,
+                harness_configuration_name,
+                safe_reason,
+                timestamp,
+            )
+            .await?)
+    }
+
     pub(crate) async fn stage_conversation_import(
         &self,
         input: NewConversationImport<'_>,

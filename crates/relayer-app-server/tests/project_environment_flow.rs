@@ -362,6 +362,7 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
             platform: "test".into(),
             architecture: "test".into(),
         },
+        completion_broker_origin: None,
     })
     .await
     .unwrap()

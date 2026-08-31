@@ -14,8 +14,9 @@ function entry({
   turnId = 10,
   navigationPath = [{ layerId: 100, viaActionId: null }],
   selectedNodeId = null,
+  temporalCurrent = null,
 } = {}) {
-  return { threadId, turnId, navigationPath, selectedNodeId };
+  return { threadId, turnId, navigationPath, selectedNodeId, temporalCurrent };
 }
 
 function layerIdentity(layerId, threadId = 1, turnId = 10) {
@@ -52,10 +53,23 @@ describe("navigation history", () => {
         { layerId: "101", viaActionId: "501" },
       ],
       selectedNodeId: "7",
+      temporalCurrent: null,
     });
     expect(Object.isFrozen(normalized)).toBe(true);
     expect(Object.isFrozen(normalized.navigationPath)).toBe(true);
     expect(Object.isFrozen(normalized.navigationPath[0])).toBe(true);
+  });
+
+  it("persists normalized temporal follow intent in the history entry", () => {
+    const normalized = normalizeNavigationEntry(entry({
+      temporalCurrent: { completionId: 42, revision: 3, mode: "following" },
+    }));
+    expect(normalized.temporalCurrent).toEqual({
+      completionId: "42",
+      revision: 3,
+      mode: "following",
+    });
+    expect(Object.isFrozen(normalized.temporalCurrent)).toBe(true);
   });
 
   it("seeds exactly once and deduplicates an adjacent logical presentation", () => {

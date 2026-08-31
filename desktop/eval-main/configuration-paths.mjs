@@ -11,6 +11,8 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "fixture-task-system.yaml"),
     join(harnessDirectory, "codex-basic.yaml"),
     join(harnessDirectory, "codex-basic-high.yaml"),
+    join(harnessDirectory, "codex-eval-complete-disabled.yaml"),
+    join(harnessDirectory, "codex-eval-complete-enabled.yaml"),
     join(harnessDirectory, "codex-layered-navigation-luna.yaml"),
     join(harnessDirectory, "codex-multi-agent-layered-navigation.yaml"),
     join(harnessDirectory, "claude-basic.yaml"),

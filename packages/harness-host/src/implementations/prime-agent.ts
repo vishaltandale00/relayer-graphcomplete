@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import type { GraphCapability } from "@relayer/graph-client";
+import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { MAX_HARNESS_APPROVAL_TEXT_LENGTH } from "../approval.js";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { HarnessApprovalRequestTerminatedError } from "../approval-coordinator.js";
@@ -19,7 +20,7 @@ import type {
   HarnessTraceSupport,
   JsonObject,
 } from "../types.js";
-import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
+import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 import {
   personalPresentationNativeInstructions,
   personalPresentationPrompt,
@@ -183,6 +184,7 @@ type PrimeAgentKernelBoundaryFactory = (
 
 interface PrimeAgentRunContext {
   readonly graph: HarnessRunContext["graph"];
+  readonly completionBroker?: HarnessRunContext["completionBroker"];
 }
 
 interface PrimeAgentRequestAccess {
@@ -225,6 +227,65 @@ interface PrimeAgentExecutionScope {
   readonly presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>;
 }
 
+class PrimeAgentSessionLifecycle {
+  private forceShutdownStarted = false;
+  private gracefullyDisposed = false;
+  private gracefulDisposePromise: Promise<void> | undefined;
+  private nativeDisposeInProgress = false;
+  private nativeDisposeCompleted = false;
+  private readonly nativeSessionDispose: () => void;
+
+  constructor(readonly session: PrimeAgentSession) {
+    this.nativeSessionDispose = session.dispose.bind(session);
+    session.dispose = () => this.disposeNativeOnce();
+  }
+
+  dispose(): Promise<void> {
+    if (this.gracefulDisposePromise !== undefined) return this.gracefulDisposePromise;
+    if (this.nativeDisposeCompleted) return Promise.resolve();
+    this.gracefulDisposePromise = Promise.resolve()
+      .then(async () => {
+        if (this.nativeDisposeCompleted) return;
+        if (this.session.disposeAsync !== undefined) await this.session.disposeAsync();
+        else if (!this.nativeDisposeCompleted) this.disposeNativeOnce();
+        if (!this.nativeDisposeCompleted && this.session.disposeAsync !== undefined) {
+          // A conforming disposeAsync drains resources and owns native disposal.
+          // Mark the lifecycle terminal even if it does not call the guarded
+          // synchronous boundary itself.
+          this.nativeDisposeCompleted = true;
+        }
+        this.gracefullyDisposed = true;
+      })
+      .catch((error: unknown) => {
+        if (!this.nativeDisposeCompleted) throw error;
+      });
+    return this.gracefulDisposePromise;
+  }
+
+  forceShutdown(): void {
+    if (this.forceShutdownStarted || this.gracefullyDisposed) return;
+    this.forceShutdownStarted = true;
+    try {
+      void this.session.abort().catch(() => undefined);
+    } catch {
+      // Force disposal must continue if a nonconforming provider throws
+      // synchronously instead of returning a rejected abort promise.
+    }
+    this.disposeNativeOnce();
+  }
+
+  private disposeNativeOnce(): void {
+    if (this.nativeDisposeInProgress || this.nativeDisposeCompleted) return;
+    this.nativeDisposeInProgress = true;
+    try {
+      this.nativeSessionDispose();
+      this.nativeDisposeCompleted = true;
+    } finally {
+      this.nativeDisposeInProgress = false;
+    }
+  }
+}
+
 const PRIME_ADAPTERS: Readonly<Record<string, PrimeAdapterMapping>> = Object.freeze({
   "openai-api": Object.freeze({ api: "openai-responses", implementationVersion: "2" }),
   "anthropic-api": Object.freeze({ api: "anthropic-messages", implementationVersion: "2" }),
@@ -233,9 +294,12 @@ const PRIME_ADAPTERS: Readonly<Record<string, PrimeAdapterMapping>> = Object.fre
 });
 
 export class PrimeAgentHarness implements Harness {
+  readonly supportsInvokedComplete = true;
   private forceShutdownStarted = false;
   private gracefullyDisposed = false;
   private gracefulDisposePromise: Promise<void> | undefined;
+  private readonly invokedSessions = new Set<PrimeAgentSessionLifecycle>();
+  private readonly pendingInvokedSessions = new Set<Promise<PrimeAgentSessionLifecycle>>();
   private sessionHandle: PrimeAgentSessionHandle | undefined;
   private sessionPersonalPresentationVersionId: number | null | undefined;
   private readonly presentationInstructions: { current: string };
@@ -272,6 +336,12 @@ export class PrimeAgentHarness implements Harness {
       if (run === undefined) throw new Error("relayer.graph.current requires an active GraphComplete run");
       return capabilityResponse(run.graph.acquireCapability());
     });
+    const completeCurrent = primeAgent.createHostRequestHandler<PrimeAgentRunContext>(async (_payload, invocation) => {
+      if (!invocation.isCurrent() || invocation.signal.aborted) throw new Error("The completion run is no longer active");
+      const broker = invocation.runContext?.completionBroker;
+      if (broker === undefined) throw new Error("relayer.complete.current requires an active completion broker");
+      return Object.freeze({ url: broker.url, token: broker.token });
+    });
     const savedSessionFile = context.savedState?.primeAgentSessionFile;
     const savedPresentationVersionId = context.savedState?.primeAgentSessionPersonalPresentationVersionId;
     const validSavedPresentationVersion = savedPresentationVersionId === undefined
@@ -301,7 +371,10 @@ export class PrimeAgentHarness implements Harness {
         services,
         sessionManager,
         tools: ["ipython"],
-        hostRequestHandlers: { "relayer.graph.current": graphCurrent },
+        hostRequestHandlers: {
+          "relayer.graph.current": graphCurrent,
+          "relayer.complete.current": completeCurrent,
+        },
         telemetryDisabled: true,
         ...(configuration.thinkingLevel === undefined ? {} : { thinkingLevel: configuration.thinkingLevel }),
         ...(configuration.rlmMaxDepth === undefined ? {} : { rlmMaxDepth: configuration.rlmMaxDepth }),
@@ -337,13 +410,71 @@ export class PrimeAgentHarness implements Harness {
     );
   }
 
-  async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
-    signal?.throwIfAborted();
+  complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
+    if (signal?.aborted) return nativeExecutionHandle(Promise.reject(signal.reason));
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal?.reason ?? new Error("Prime Agent completion was cancelled"));
+    signal?.addEventListener("abort", abort, { once: true });
+    const execution = (context.origin.kind === "root"
+      ? this.executeRoot(context, controller.signal)
+      : this.executeInvoked(context, controller.signal))
+      .finally(() => signal?.removeEventListener("abort", abort));
+    return nativeExecutionHandle(
+      execution,
+      (reason) => controller.abort(new Error(reason)),
+    );
+  }
+
+  private async executeRoot(context: HarnessRunContext, signal: AbortSignal): Promise<void> {
     const candidateSession = this.sessionFor(context);
     const session = candidateSession instanceof Promise ? await candidateSession : candidateSession;
+    if (signal.aborted) {
+      await session.abort();
+      signal.throwIfAborted();
+    }
+    await this.executeOn(session, context, signal);
+  }
+
+  private async executeInvoked(context: HarnessRunContext, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (this.forceShutdownStarted) throw new Error("Prime Agent harness is shutting down");
+    const pending = this.createSession(this.createSessionManager()).then((session) => {
+      const lifecycle = new PrimeAgentSessionLifecycle(session);
+      this.invokedSessions.add(lifecycle);
+      if (this.forceShutdownStarted) lifecycle.forceShutdown();
+      return lifecycle;
+    });
+    this.pendingInvokedSessions.add(pending);
+    let lifecycle: PrimeAgentSessionLifecycle;
+    try {
+      lifecycle = await pending;
+    } finally {
+      this.pendingInvokedSessions.delete(pending);
+    }
+    let executionOutcome: OperationOutcome<void> | undefined;
+    let disposalOutcome: OperationOutcome<void> | undefined;
+    try {
+      executionOutcome = this.forceShutdownStarted
+        ? { ok: false, error: new Error("Prime Agent harness is shutting down") }
+        : await operationOutcome(() => this.executeOn(lifecycle.session, context, signal));
+    } finally {
+      disposalOutcome = await operationOutcome(() => lifecycle.dispose());
+      this.invokedSessions.delete(lifecycle);
+    }
+    const failures = [executionOutcome, disposalOutcome]
+      .flatMap((outcome) => outcome !== undefined && !outcome.ok ? [outcome.error] : []);
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "Prime Agent invoked execution or disposal failed");
+  }
+
+  private async executeOn(session: PrimeAgentSession, context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     this.throwIfShuttingDown();
     const execution = createPrimeAgentModelScope(context, this.primeAgent);
-    const runContext: PrimeAgentRunContext = Object.freeze({ graph: context.graph });
+    const runContext: PrimeAgentRunContext = Object.freeze({
+      graph: context.graph,
+      ...(context.completionBroker === undefined ? {} : { completionBroker: context.completionBroker }),
+    });
     const permissions = createPrimeAgentPermissionScopes({
       context,
       runContext,
@@ -424,14 +555,23 @@ export class PrimeAgentHarness implements Harness {
 
   dispose(): Promise<void> {
     if (this.gracefulDisposePromise !== undefined) return this.gracefulDisposePromise;
-    if (this.sessionHandle?.disposeCompleted === true) return Promise.resolve();
     this.gracefulDisposePromise = Promise.resolve()
       .then(async () => {
-        if (this.sessionHandle !== undefined) await this.disposeSession(this.sessionHandle);
+        await Promise.allSettled([...this.pendingInvokedSessions]);
+        const childOutcomes = await Promise.allSettled(
+          [...this.invokedSessions].map((lifecycle) => lifecycle.dispose()),
+        );
+        const childFailures = childOutcomes.flatMap((outcome) => outcome.status === "rejected" ? [outcome.reason] : []);
+        const rootOutcome = await operationOutcome(async () => {
+          if (this.sessionHandle !== undefined) await this.disposeSession(this.sessionHandle);
+        });
+        const failures = [
+          ...childFailures,
+          ...(rootOutcome.ok ? [] : [rootOutcome.error]),
+        ];
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) throw new AggregateError(failures, "Prime Agent session disposal failed");
         this.gracefullyDisposed = true;
-      })
-      .catch((error: unknown) => {
-        if (this.sessionHandle?.disposeCompleted !== true) throw error;
       });
     return this.gracefulDisposePromise;
   }
@@ -439,6 +579,10 @@ export class PrimeAgentHarness implements Harness {
   forceShutdown(): void {
     if (this.forceShutdownStarted || this.gracefullyDisposed) return;
     this.forceShutdownStarted = true;
+    for (const lifecycle of this.invokedSessions) lifecycle.forceShutdown();
+    for (const pending of this.pendingInvokedSessions) {
+      void pending.then((lifecycle) => lifecycle.forceShutdown(), () => undefined);
+    }
     const handle = this.sessionHandle;
     if (handle === undefined) return;
     this.installNativeDisposeGuard(handle);
@@ -563,7 +707,8 @@ export class PrimeAgentHarness implements Harness {
     }
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response.
 
-${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${GRAPH_PRESENTATION_GUIDANCE}
+${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -575,6 +720,8 @@ Use this entry point:
 
 from relayer_graph import GraphSession
 graph = await GraphSession.current()
+
+${currentWorkspaceMechanicsPython()}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. Never rely on generated client keys in authored code.
 
@@ -591,7 +738,8 @@ If a graph call fails, edit and rerun the same authoring code with the same clie
     const interaction = context.inputGraph;
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
-${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${GRAPH_PRESENTATION_GUIDANCE}
+${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -603,6 +751,8 @@ Use this entry point:
 
 from relayer_graph import GraphSession
 graph = await GraphSession.current()
+
+${currentWorkspaceMechanicsPython()}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. For example, use NodeObject("info", "Summary", "...", client_key="summary-node"), EdgeObject((summary_node, detail_node), client_key="summary-detail-edge"), and LayerObject(nodes, edges, layout, client_key="response-layer"). Never rely on generated client keys in authored code. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interaction.id}); call it only after the full response has been authored.
 
@@ -638,6 +788,10 @@ function primeSessionHandle(session: PrimeAgentSession): PrimeAgentSessionHandle
     disposeCompleted: false,
     guardInstalled: false,
   };
+}
+
+function currentWorkspaceMechanicsPython(): string {
+  return `Read current with current = await graph.get_current(). After submitting a layer, you may update the pointer with await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="a-stable-operation-key").`;
 }
 
 function primeRuntimeProvenance(serialized: string | undefined): JsonObject | undefined {

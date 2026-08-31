@@ -552,6 +552,39 @@ impl crate::GraphDatabase {
             .bind(action_ids[&view.root_action.id])
             .execute(&mut *tx)
             .await?;
+            let root_layer = layer_ids[&view.root_layer_id];
+            sqlx::query(
+                "INSERT INTO completion_states(interaction_node_id,lifecycle,head_revision,current_layer_id,final_layer_id) VALUES (?1,'succeeded',1,?2,?2)",
+            )
+            .bind(root)
+            .bind(root_layer)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO current_revisions(interaction_node_id,revision,transition,base_revision,current_layer_id,lifecycle) VALUES (?1,0,'initial',NULL,NULL,'active')",
+            )
+            .bind(root)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO current_revisions(interaction_node_id,revision,transition,base_revision,current_layer_id,lifecycle,operation_key,request_digest,snapshot_digest) VALUES (?1,1,'return',0,?2,'succeeded','imported-flat-return','imported-flat-return','imported-accepted-closure')",
+            )
+            .bind(root)
+            .bind(root_layer)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO completion_authorities(interaction_node_id,author_eligible,read_entitlement,read_entitlement_digest,authority_epoch) VALUES (?1,0,'imported-read-only','imported',0)",
+            )
+            .bind(root)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO graph_projection_outbox(interaction_node_id,revision,event_kind) VALUES (?1,0,'initialized'),(?1,1,'returned')",
+            )
+            .bind(root)
+            .execute(&mut *tx)
+            .await?;
             let receipt = &mut receipts[usize::try_from(position).unwrap()];
             receipt.root_layer_id = Some(layer_ids[&view.root_layer_id]);
             receipt.root_action_id = Some(action_ids[&view.root_action.id]);
@@ -674,6 +707,10 @@ impl crate::GraphDatabase {
                 .await?;
         if let Some(thread_id) = thread_id {
             for statement in [
+                "DELETE FROM graph_projection_outbox WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
+                "DELETE FROM current_revisions WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
+                "DELETE FROM completion_authorities WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
+                "DELETE FROM completion_states WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
                 "DELETE FROM completions WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
                 "DELETE FROM layer_actions WHERE layer_id IN (SELECT id FROM layers WHERE thread_id=?1)",
                 "DELETE FROM actions WHERE thread_id=?1",

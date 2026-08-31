@@ -1,4 +1,7 @@
-use super::{SqliteProductStore, catalog, interactions};
+use super::{
+    SqliteProductStore, catalog, interactions,
+    personal_presentation::personal_presentation_attachment_state,
+};
 use crate::product::{
     ActionInvocation, CatalogError, Interaction, InteractionId, InteractionModelSelection,
     ModelFamilyId, ProviderId, ThreadId,
@@ -15,12 +18,18 @@ impl SqliteProductStore {
         fetch_action_invocations_for_export(&mut connection, thread_id).await
     }
 
+    /// Resolves the graph invoke occurrence one result interaction was created from.
+    ///
+    /// A running source is included deliberately. A human clicks an invoke action only after
+    /// its turn is accepted, but an agent delegates from a completion that is still running,
+    /// and that occurrence is what binds its child's identity. The graph engine, not this
+    /// lookup, decides whether the occurrence is a published and leasable one.
     pub(crate) async fn invocation_graph_source(
         &self,
         result_interaction_id: InteractionId,
     ) -> Result<Option<(i64, i64)>, StorageError> {
         sqlx::query_as(
-            "SELECT source.graph_node_id,ai.action_id FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id WHERE ai.result_interaction_id=?1 AND ai.authoritative=1 AND source.completion_status='accepted' AND source.graph_node_id IS NOT NULL",
+            "SELECT source.graph_node_id,ai.action_id FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id WHERE ai.result_interaction_id=?1 AND ai.authoritative=1 AND source.completion_status IN ('accepted','running') AND source.graph_node_id IS NOT NULL",
         )
         .bind(result_interaction_id.value())
         .fetch_optional(&self.pool)
@@ -138,10 +147,39 @@ impl SqliteProductStore {
         action_id: i64,
         text: &str,
     ) -> Result<ActionInvocationInsertOutcome, StorageError> {
+        self.insert_action_invocation_with_mode(source_interaction_id, action_id, text, false)
+            .await
+    }
+
+    pub(crate) async fn insert_recursive_action_invocation(
+        &self,
+        source_interaction_id: InteractionId,
+        action_id: i64,
+        text: &str,
+    ) -> Result<ActionInvocationInsertOutcome, StorageError> {
+        self.insert_action_invocation_with_mode(source_interaction_id, action_id, text, true)
+            .await
+    }
+
+    async fn insert_action_invocation_with_mode(
+        &self,
+        source_interaction_id: InteractionId,
+        action_id: i64,
+        text: &str,
+        recursive: bool,
+    ) -> Result<ActionInvocationInsertOutcome, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some((invocation, interaction)) =
             existing_for_action_scope(&mut transaction, source_interaction_id, action_id).await?
         {
+            if recursive {
+                validate_inherited_personal_presentation(
+                    &mut transaction,
+                    source_interaction_id,
+                    interaction.id,
+                )
+                .await?;
+            }
             transaction.commit().await?;
             return Ok(ActionInvocationInsertOutcome::Existing {
                 invocation,
@@ -165,14 +203,24 @@ impl SqliteProductStore {
         .bind(thread_id.value())
         .fetch_one(&mut *transaction)
         .await?;
-        if interaction_in_progress {
+        if interaction_in_progress && !recursive {
             return Err(StorageError::Catalog(CatalogError::invalid(
                 "interaction_in_progress",
                 "Wait for the active interaction to finish.",
             )));
         }
-        let source_accepted: bool = source.try_get::<String, _>("completion_status")? == "accepted"
-            && source.try_get::<Option<i64>, _>("graph_node_id")?.is_some();
+        let source_status: String = source.try_get("completion_status")?;
+        let source_has_graph = source.try_get::<Option<i64>, _>("graph_node_id")?.is_some();
+        let source_accepted = source_status == "accepted" && source_has_graph;
+        if recursive
+            && (!source_has_graph
+                || !matches!(source_status.as_str(), "running" | "submitted" | "accepted"))
+        {
+            return Err(StorageError::Catalog(CatalogError::invalid(
+                "recursive_source_inactive",
+                "Recursive Complete requires an active or accepted graph-bound source completion.",
+            )));
+        }
         let model_selection = match (model_provider_id, provider_model_id, model_family_id) {
             (Some(provider_id), Some(model_id), Some(family_id)) if family_id > 0 => {
                 Some(InteractionModelSelection {
@@ -243,6 +291,33 @@ impl SqliteProductStore {
             latest_attempt: None,
             created_at: timestamp.clone(),
         };
+        if recursive {
+            // Interaction insertion may have pinned the version active for the thread at this
+            // instant. A semantic child belongs to the source task tree instead: replace that
+            // transaction-local choice with the source interaction's exact immutable pin (or
+            // exact legacy absence) before this transaction becomes visible.
+            sqlx::query(
+                "DELETE FROM interaction_personal_presentation_pins WHERE interaction_id=?1",
+            )
+            .bind(interaction.id.value())
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "INSERT INTO interaction_personal_presentation_pins(interaction_id,version_key,version_interaction_node_id,root_layer_id,pinned_at) SELECT ?1,version_key,version_interaction_node_id,root_layer_id,?2 FROM interaction_personal_presentation_pins WHERE interaction_id=?3",
+            )
+            .bind(interaction.id.value())
+            .bind(&timestamp)
+            .bind(source_interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "INSERT INTO legacy_unpinned_personal_presentation_interactions(interaction_id) SELECT ?1 WHERE EXISTS(SELECT 1 FROM legacy_unpinned_personal_presentation_interactions WHERE interaction_id=?2)",
+            )
+            .bind(interaction.id.value())
+            .bind(source_interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
+        }
         sqlx::query(
             "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative) VALUES (?1,?2,?3,?4,1,1)",
         )
@@ -270,6 +345,23 @@ impl SqliteProductStore {
             interaction,
         })
     }
+}
+
+async fn validate_inherited_personal_presentation(
+    connection: &mut SqliteConnection,
+    source_interaction_id: InteractionId,
+    child_interaction_id: InteractionId,
+) -> Result<(), StorageError> {
+    let source = personal_presentation_attachment_state(connection, source_interaction_id).await?;
+    let child = personal_presentation_attachment_state(connection, child_interaction_id).await?;
+    if source != child {
+        return Err(StorageError::PersonalPresentationConflict(format!(
+            "semantic child {} does not inherit the exact personal presentation attachment of source interaction {}",
+            child_interaction_id.value(),
+            source_interaction_id.value(),
+        )));
+    }
+    Ok(())
 }
 
 pub(super) async fn fetch_action_invocations(
@@ -512,6 +604,196 @@ mod tests {
                 .unwrap()
         );
         reopened.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn recursive_invocations_can_bind_concurrent_children_while_the_parent_is_active() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-recursive-action-invocation-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        for (key, node_id, layer_id) in [
+            ("personal-presentation-v1", 501, 601),
+            ("personal-presentation-v2", 502, 602),
+        ] {
+            store
+                .publish_personal_presentation_version(
+                    key,
+                    node_id,
+                    layer_id,
+                    &serde_json::json!({"nodeId":node_id,"rootLayer":{"layer":{"id":layer_id}}}),
+                    "0",
+                )
+                .await
+                .unwrap();
+        }
+        seed_test_model_selection(&store).await;
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Active recursive source",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model_selection),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE interactions SET completion_status='running',graph_node_id=701 WHERE id=?1",
+        )
+        .bind(thread.root_interaction_id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        store
+            .activate_personal_presentation_version("personal-presentation-v2")
+            .await
+            .unwrap();
+
+        let (first, second) = tokio::join!(
+            store.insert_recursive_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "First semantic child",
+            ),
+            store.insert_recursive_action_invocation(
+                thread.root_interaction_id,
+                42,
+                "Second semantic child",
+            ),
+        );
+        let first = first.unwrap();
+        let second = second.unwrap();
+        let child_id = |outcome: &ActionInvocationInsertOutcome| match outcome {
+            ActionInvocationInsertOutcome::Created { interaction, .. }
+            | ActionInvocationInsertOutcome::Existing { interaction, .. } => interaction.id,
+        };
+        assert_ne!(child_id(&first), child_id(&second));
+        for child in [child_id(&first), child_id(&second)] {
+            assert_eq!(
+                store
+                    .prepare_personal_presentation_pin(child, None, "2")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .version_key,
+                "personal-presentation-v1"
+            );
+        }
+        store.pool.close().await;
+        drop(store);
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        assert_eq!(
+            store
+                .prepare_personal_presentation_pin(child_id(&first), None, "3")
+                .await
+                .unwrap()
+                .unwrap()
+                .version_key,
+            "personal-presentation-v1"
+        );
+
+        let retry = store
+            .insert_recursive_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Ignored exact retry text",
+            )
+            .await
+            .unwrap();
+        assert_eq!(child_id(&first), child_id(&retry));
+        assert!(matches!(
+            retry,
+            ActionInvocationInsertOutcome::Existing { .. }
+        ));
+
+        sqlx::query("UPDATE interaction_personal_presentation_pins SET version_key='personal-presentation-v2',version_interaction_node_id=502,root_layer_id=602 WHERE interaction_id=?1")
+            .bind(child_id(&first).value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .insert_recursive_action_invocation(
+                    thread.root_interaction_id,
+                    41,
+                    "Mismatched retry",
+                )
+                .await,
+            Err(StorageError::PersonalPresentationConflict(_))
+        ));
+
+        let ordinary = match store
+            .insert_action_invocation(thread.root_interaction_id, 43, "User action")
+            .await
+        {
+            Ok(_) => panic!("ordinary invocation unexpectedly bypassed active interaction"),
+            Err(error) => error,
+        };
+        match ordinary {
+            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let legacy_thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Legacy recursive source",
+                project_id: None,
+                initial_message: "Legacy prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model_selection),
+                timestamp: "4",
+            })
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM interaction_personal_presentation_pins WHERE interaction_id=?1")
+            .bind(legacy_thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO legacy_unpinned_personal_presentation_interactions(interaction_id) VALUES (?1)")
+            .bind(legacy_thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE interactions SET completion_status='running',graph_node_id=702 WHERE id=?1",
+        )
+        .bind(legacy_thread.root_interaction_id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let legacy_child = store
+            .insert_recursive_action_invocation(
+                legacy_thread.root_interaction_id,
+                44,
+                "Legacy semantic child",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .prepare_personal_presentation_pin(child_id(&legacy_child), None, "5")
+                .await
+                .unwrap(),
+            None
+        );
+
+        store.pool.close().await;
         std::fs::remove_file(path).unwrap();
     }
 

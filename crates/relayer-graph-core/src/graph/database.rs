@@ -1,14 +1,15 @@
 use std::path::Path;
 
 use crate::{
-    AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, InteractionContextAction,
+    AcceptedGraphClosure, CompletionState, CurrentProjectionEvent, CurrentProjectionPage,
+    CurrentTransitionReceipt, GraphError, GraphNode, GraphWriter, InteractionContextAction,
     InteractionContextDraft, InteractionContextTarget, InteractionInputNode, InteractionInvocation,
-    NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId,
+    NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, TemporalFeatureConfig, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
     interaction_input_digest,
     storage::{
         SqliteGraphStore,
-        sqlite::{contexts::ContextTable, nodes::NodeTable},
+        sqlite::{contexts::ContextTable, currents::CurrentTable, nodes::NodeTable},
     },
 };
 
@@ -30,6 +31,27 @@ impl GraphDatabase {
         })
     }
 
+    pub async fn temporal_features(&self) -> Result<TemporalFeatureConfig, GraphError> {
+        let mut transaction = self.storage.begin_read().await?;
+        let config = CurrentTable::new(&mut transaction)
+            .temporal_features()
+            .await?;
+        transaction.commit().await?;
+        Ok(config)
+    }
+
+    pub async fn set_temporal_features(
+        &self,
+        config: TemporalFeatureConfig,
+    ) -> Result<(), GraphError> {
+        let mut transaction = self.storage.begin_write().await?;
+        CurrentTable::new(&mut transaction)
+            .set_temporal_features(config)
+            .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn create_interaction(
         &self,
         project_id: Option<ProjectId>,
@@ -48,11 +70,14 @@ impl GraphDatabase {
         invocation: Option<InteractionInvocation>,
     ) -> Result<GraphNode, GraphError> {
         reject_reserved_profile_thread(thread_id)?;
-        require_nonempty(text, "text")?;
+        if invocation.is_none() {
+            require_nonempty(text, "text")?;
+        }
         let mut transaction = self.storage.begin_write().await?;
         let node = NodeTable::new(&mut transaction)
             .insert_interaction(project_id, thread_id, text, invocation)
             .await?;
+        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
         transaction.commit().await?;
         Ok(node)
     }
@@ -81,11 +106,13 @@ impl GraphDatabase {
         let node = NodeTable::new(&mut transaction)
             .insert_interaction(project_id, thread_id, text, None)
             .await?;
+        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
         let scope = InteractionScope {
             project_id,
             thread_id,
             root_node_id: node.id,
             read_only: false,
+            authority_epoch: None,
         };
         let actions = ContextTable::new(&mut transaction)
             .insert_all(&scope, contexts)
@@ -166,16 +193,17 @@ impl GraphDatabase {
             ));
         }
         let mut transaction = self.storage.begin_write().await?;
-        let mut nodes = NodeTable::new(&mut transaction);
-        if let Some(node) = nodes
+        if let Some(node) = NodeTable::new(&mut transaction)
             .identified_interaction(thread_id, input_identity, input_digest)
             .await?
         {
+            initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
             let scope = InteractionScope {
                 project_id,
                 thread_id,
                 root_node_id: node.id,
                 read_only: false,
+                authority_epoch: None,
             };
             let actions = ContextTable::new(&mut transaction).actions(&scope).await?;
             let persisted = actions
@@ -211,10 +239,11 @@ impl GraphDatabase {
                 "An interaction needs non-whitespace message text or at least one non-whitespace context annotation.",
             ));
         }
-        let node = nodes
+        let node = NodeTable::new(&mut transaction)
             .insert_interaction(project_id, thread_id, text, None)
             .await?;
-        nodes
+        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
+        NodeTable::new(&mut transaction)
             .set_input_identity(node.id, input_identity, input_digest)
             .await?;
         let scope = InteractionScope {
@@ -222,6 +251,7 @@ impl GraphDatabase {
             thread_id,
             root_node_id: node.id,
             read_only: false,
+            authority_epoch: None,
         };
         let actions = ContextTable::new(&mut transaction)
             .insert_all(&scope, contexts)
@@ -231,13 +261,49 @@ impl GraphDatabase {
     }
 
     pub async fn writer_for_subgraph(&self, node_id: NodeId) -> Result<GraphWriter, GraphError> {
-        let scope = {
+        let mut transaction = self.storage.begin_write().await?;
+        let scope = NodeTable::new(&mut transaction)
+            .interaction_scope(node_id)
+            .await?;
+        initialize_completion_scope(&mut transaction, &scope).await?;
+        transaction.commit().await?;
+        Ok(GraphWriter::new(self.clone(), scope))
+    }
+
+    pub async fn writer_for_completion_authority(
+        &self,
+        node_id: NodeId,
+        authority_epoch: u64,
+    ) -> Result<GraphWriter, GraphError> {
+        let mut scope = {
             let mut connection = self.storage.acquire().await?;
             NodeTable::new(&mut connection)
                 .interaction_scope(node_id)
                 .await?
         };
+        scope.authority_epoch = Some(authority_epoch);
         Ok(GraphWriter::new(self.clone(), scope))
+    }
+
+    pub async fn activate_completion_authority(&self, node_id: NodeId) -> Result<u64, GraphError> {
+        let mut transaction = self.storage.begin_write().await?;
+        NodeTable::new(&mut transaction)
+            .interaction_scope(node_id)
+            .await?;
+        let epoch = CurrentTable::new(&mut transaction)
+            .activate_authority(node_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(epoch)
+    }
+
+    pub async fn cutover_completion_authority(&self, node_id: NodeId) -> Result<(), GraphError> {
+        let mut transaction = self.storage.begin_write().await?;
+        CurrentTable::new(&mut transaction)
+            .cutover_authority(node_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn accepted_graph_closure(
@@ -245,6 +311,46 @@ impl GraphDatabase {
         node_id: NodeId,
     ) -> Result<Option<AcceptedGraphClosure>, GraphError> {
         crate::graph::completion::read_accepted_closure(self, node_id).await
+    }
+
+    pub async fn current_completion(&self, node_id: NodeId) -> Result<CompletionState, GraphError> {
+        self.writer_for_subgraph(node_id)
+            .await?
+            .current_completion()
+            .await
+    }
+
+    pub async fn current_projection_events(
+        &self,
+        after_sequence: u64,
+        limit: u32,
+    ) -> Result<Vec<CurrentProjectionEvent>, GraphError> {
+        crate::graph::completion::projections_after(self, after_sequence, limit).await
+    }
+
+    pub async fn current_projection_page(
+        &self,
+        completion_ids: &[NodeId],
+        after_sequence: u64,
+        limit: u32,
+    ) -> Result<CurrentProjectionPage, GraphError> {
+        crate::graph::completion::projection_page(self, completion_ids, after_sequence, limit).await
+    }
+
+    pub async fn current_transition_receipt(
+        &self,
+        node_id: NodeId,
+        operation_key: &str,
+    ) -> Result<Option<CurrentTransitionReceipt>, GraphError> {
+        let mut transaction = self.storage.begin_read().await?;
+        NodeTable::new(&mut transaction)
+            .interaction_scope(node_id)
+            .await?;
+        let receipt = CurrentTable::new(&mut transaction)
+            .receipt(node_id, operation_key)
+            .await?;
+        transaction.commit().await?;
+        Ok(receipt)
     }
 
     pub async fn interaction_invocation(
@@ -312,6 +418,32 @@ impl GraphDatabase {
     pub async fn close(&self) {
         self.storage.close().await;
     }
+}
+
+pub(crate) async fn initialize_completion(
+    connection: &mut crate::storage::GraphConnection,
+    node: &GraphNode,
+    project_id: Option<ProjectId>,
+    thread_id: ThreadId,
+) -> Result<(), GraphError> {
+    let scope = InteractionScope {
+        project_id,
+        thread_id,
+        root_node_id: node.id,
+        read_only: false,
+        authority_epoch: None,
+    };
+    initialize_completion_scope(connection, &scope).await
+}
+
+async fn initialize_completion_scope(
+    connection: &mut crate::storage::GraphConnection,
+    scope: &InteractionScope,
+) -> Result<(), GraphError> {
+    let (entitlement, digest) = scope.read_entitlement();
+    CurrentTable::new(connection)
+        .initialize(scope.root_node_id, !scope.read_only, &entitlement, &digest)
+        .await
 }
 
 fn reject_reserved_profile_thread(thread_id: ThreadId) -> Result<(), GraphError> {

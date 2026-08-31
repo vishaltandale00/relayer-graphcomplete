@@ -84,6 +84,45 @@ describe("agent-facing graph objects", () => {
     expect(requests[0]).toMatchObject({ variant: "pill", icon: null, description: null });
   });
 
+  it("prepares a canonical child pointer from one persisted invoke action", async () => {
+    let observed: { url: string; body: unknown; authorization: string | null } | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      observed = {
+        url,
+        body: JSON.parse(String(init.body)),
+        authorization: new Headers(init.headers).get("authorization"),
+      };
+      return new Response(JSON.stringify({ interactionNode: 91 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "parent", nodeId: 1 });
+    const action: ActionObject = {
+      kind: "invoke",
+      label: "Child",
+      interactionText: "Do child work",
+      sourceLayer: 7,
+      ref: {
+        id: 44,
+        sourceNodeId: 2,
+        sourceLayerId: 7,
+        kind: "invoke",
+        label: "Child",
+        variant: "pill",
+        interactionText: "Do child work",
+        state: "accepted",
+      },
+    };
+
+    await expect(graph.prepareComplete(action)).resolves.toEqual({ interactionNode: 91 });
+    expect(observed).toEqual({
+      url: "http://127.0.0.1:1/api/graph/completions/prepare",
+      body: { actionId: 44 },
+      authorization: "Bearer parent",
+    });
+  });
+
   it("exposes nullable interaction lease identity on node reads", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       nodes: [{

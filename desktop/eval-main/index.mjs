@@ -18,7 +18,10 @@ import {
   createLocalSimulatedUserJudgeRunner,
   resolveLocalSimulatedUserAutorun,
 } from "./simulated-user-judge.mjs";
-import { GraphCompleteRuntimeService } from "../main/services/graphcomplete-runtime.mjs";
+import {
+  GraphCompleteRuntimeService,
+  RECURSIVE_TEMPORAL_FEATURES,
+} from "../main/services/graphcomplete-runtime.mjs";
 import { inspectCodexBrowserMcpRuntime } from "../main/services/codex-browser-mcp-runtime.mjs";
 import { RelayerAppServerService } from "../main/services/relayer-app-server.mjs";
 import { claimPrimaryDesktopInstance } from "../main/single-instance.mjs";
@@ -101,6 +104,10 @@ const graphRuntime = new GraphCompleteRuntimeService({
   ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
   resolveCodexRuntime: () => managedCodexRuntime.resolve(),
   acquireProviderExecution: acquireEvalProviderExecution,
+  // Eval keeps the temporal substrate coherent for every matrix cell. The selected
+  // harness configuration independently controls whether agent-authored Complete is
+  // exposed, so control and treatment can share one production-faithful runtime.
+  temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
   candidateTrace: {
     directory: join(userDataDirectory, "eval-data", "candidate-trace-spool"),
     policy: {

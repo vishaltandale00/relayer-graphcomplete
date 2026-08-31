@@ -38,6 +38,13 @@ const codexBasicConfiguration: HarnessConfiguration = {
 describe("CodexBasicHarness", () => {
   it("renders V1 after generic guidance and leaves neutral V0 at baseline", () => {
     const baseline = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
+    const brokerAuthorized = buildLayeredNavigationPrompt({
+      ...runContext(1, "token"),
+      completionBroker: {
+        url: "http://127.0.0.1:43125/api/completions",
+        token: "completion-broker-secret-token-1234567890",
+      },
+    }, "@relayer/graph-client");
     const neutral = buildLayeredNavigationPrompt(personalPresentationRunContext(false), "@relayer/graph-client");
     const treatment = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client");
     const codexProviderPrompt = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client", undefined, false);
@@ -49,10 +56,23 @@ describe("CodexBasicHarness", () => {
     expect(treatment.indexOf("Graph presentation guidance:")).toBeLessThan(
       treatment.indexOf("Personal graph presentation preferences:"),
     );
+    expect(treatment.indexOf("live, user-facing workspace")).toBeLessThan(
+      treatment.indexOf("Personal graph presentation preferences:"),
+    );
     expect(treatment.indexOf("Personal graph presentation preferences:")).toBeLessThan(
       treatment.indexOf("Normalized interaction input:"),
     );
     expect(codexProviderPrompt).toBe(baseline);
+    expect(baseline).toContain("graph with other live agents");
+    expect(baseline).toContain("live, user-facing workspace");
+    expect(baseline).toContain("await graph.getCurrent()");
+    expect(baseline).toContain("await graph.advanceCurrent(");
+    expect(baseline).toContain("Advancing current does not complete the interaction");
+    expect(baseline).not.toContain("graph.prepareComplete(");
+    expect(baseline).not.toContain("Import complete from");
+    expect(baseline).not.toContain("semantic completion is unavailable");
+    expect(brokerAuthorized).toContain("graph.prepareComplete(invokeAction)");
+    expect(brokerAuthorized).toContain("Import complete from");
   });
 
   it("reuses a native Codex thread only while its pinned presentation version is unchanged", async () => {
@@ -600,6 +620,85 @@ describe("CodexBasicHarness", () => {
     });
   });
 
+  it("starts recursive semantic completions in fresh Codex threads without replacing root continuity", async () => {
+    const submissions: CodexAppServerTurnOptions[] = [];
+    const harness = new CodexBasicHarness({
+      ...context("auto"),
+      savedState: {
+        codexThreadId: "root-thread",
+        codexThreadPersonalPresentationVersionId: null,
+      },
+    }, {
+      codexPathOverride: "/managed/codex",
+      runAppServerTurn: async (options) => {
+        submissions.push(options);
+        const invocation = submissions.length;
+        const threadId = options.savedThreadId ?? `child-thread-${invocation}`;
+        await options.onThreadId(threadId);
+        await options.onTurnId?.(threadId, `turn-${invocation}`);
+        return { threadId, turnId: `turn-${invocation}`, status: "completed" };
+      },
+    });
+
+    const admitted = (id: number, token: string): HarnessRunContext => ({
+      ...runContext(id, token),
+      origin: { kind: "invoke", sourceCompletionId: 1, actionId: id + 100 },
+      model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-test" },
+      access: codexAccess(),
+    });
+    const first = harness.complete(admitted(2, "child-token-a"));
+    const second = harness.complete(admitted(3, "child-token-b"));
+    await Promise.all([first, second]);
+
+    await expect(first.attached).resolves.toEqual({
+      schemaVersion: 1,
+      provider: "codex",
+      threadId: "child-thread-1",
+      turnId: "turn-1",
+    });
+    await expect(second.attached).resolves.toEqual({
+      schemaVersion: 1,
+      provider: "codex",
+      threadId: "child-thread-2",
+      turnId: "turn-2",
+    });
+    expect(submissions.map(({ savedThreadId, environment }) => [
+      savedThreadId,
+      environment.RELAYER_GRAPH_TOKEN,
+      environment.RELAYER_NODE_ID,
+    ])).toEqual([
+      [undefined, "child-token-a", "2"],
+      [undefined, "child-token-b", "3"],
+    ]);
+    expect(harness.state()).toEqual({
+      codexThreadId: "root-thread",
+      codexThreadPersonalPresentationVersionId: null,
+    });
+
+    await harness.complete(runContext(1, "root-token"));
+    expect(submissions[2]?.savedThreadId).toBe("root-thread");
+    expect(harness.state()).toEqual({
+      codexThreadId: "root-thread",
+      codexThreadPersonalPresentationVersionId: null,
+    });
+  });
+
+  it("fails recursive Codex execution closed without fresh admission and access", async () => {
+    const runAppServerTurn = vi.fn(async () => ({
+      threadId: "unreachable",
+      turnId: "unreachable",
+      status: "completed" as const,
+    }));
+    const harness = harnessFixture("auto", runAppServerTurn);
+
+    await expect(harness.complete({
+      ...runContext(2, "child-token"),
+      origin: { kind: "invoke", sourceCompletionId: 1, actionId: 102 },
+    }))
+      .rejects.toThrow("requires an explicitly admitted model and execution-scoped access");
+    expect(runAppServerTurn).not.toHaveBeenCalled();
+  });
+
   it("passes only the selected execution-scoped provider secret to Codex", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "ambient-anthropic-secret");
     vi.stubEnv("CODEX_HOME", "/ambient/codex-home");
@@ -735,6 +834,31 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.environment).not.toHaveProperty("OPENAI_API_KEY");
     expect(submitted?.environment.RELAYER_GRAPH_TOKEN).toBe("authoritative-graph-token");
     expect(submitted?.environment.RELAYER_GRAPH_URL).toBe("http://127.0.0.1:43123");
+  });
+
+  it("passes broker authority without leaking its URL or token into implementation traces", async () => {
+    const trace = recordingTrace();
+    let submitted: CodexAppServerTurnOptions | undefined;
+    const harness = harnessFixture("auto", async (options) => {
+      submitted = options;
+      options.onThreadId("broker-thread");
+      return { threadId: "broker-thread", turnId: "turn-1", status: "completed" };
+    });
+    const completionBroker = {
+      url: "http://127.0.0.1:43125/api/completions",
+      token: "completion-broker-secret-token-1234567890",
+    };
+
+    await harness.complete({ ...runContext(1, "graph-token", trace.sink), completionBroker });
+
+    expect(submitted?.environment.RELAYER_COMPLETE_URL).toBe(completionBroker.url);
+    expect(submitted?.environment.RELAYER_COMPLETE_TOKEN).toBe(completionBroker.token);
+    expect(JSON.stringify(trace.events)).not.toContain(completionBroker.url);
+    expect(JSON.stringify(trace.events)).not.toContain(completionBroker.token);
+
+    const unavailableTrace = recordingTrace();
+    await harness.complete(runContext(2, "second-graph-token", unavailableTrace.sink));
+    expect(JSON.stringify(unavailableTrace.events)).not.toContain("completionBrokerAvailable");
   });
 
   it("rejects a provider model that codex.basic cannot execute before starting a thread", async () => {
@@ -1136,6 +1260,7 @@ function harnessFixture(
 function runContext(id: number, token: string, trace: HarnessTraceSink = createNoopHarnessTraceSink()): HarnessRunContext {
   const inputGraph = { id, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" as const };
   return {
+    origin: { kind: "root" },
     inputGraph,
     interactionInput: { interaction: inputGraph, contexts: [] },
     graph: {

@@ -229,6 +229,27 @@ export function createProviderExecutionAccessBroker(acquireProviderExecution) {
   });
 }
 
+/**
+ * Developer-only enable path for the recursive Complete seam.
+ *
+ * This is not a product setting and has no user-visible control. Recursive completions
+ * need the whole persisted feature chain, so one switch turns on every prerequisite.
+ * Whether the feature ships enabled by default is decided from live-run timing evidence.
+ */
+export const RECURSIVE_TEMPORAL_FEATURES = Object.freeze({
+  schemaRead: true,
+  rootCurrentWrite: true,
+  projectionUi: true,
+  invokeResolution: true,
+  providerRecursion: true,
+});
+
+export function developerTemporalFeatures(environment = process.env) {
+  return String(environment.RELAYER_DEV_PROVIDER_RECURSION ?? "").trim() === "1"
+    ? RECURSIVE_TEMPORAL_FEATURES
+    : {};
+}
+
 export class GraphCompleteRuntimeService {
   constructor({
     userDataDirectory,
@@ -244,6 +265,7 @@ export class GraphCompleteRuntimeService {
     harnessHostModuleUrl,
     candidateTrace,
     acquireProviderExecution,
+    temporalFeatures = {},
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
@@ -264,6 +286,13 @@ export class GraphCompleteRuntimeService {
     this.harnessHostModuleUrl = harnessHostModuleUrl;
     this.candidateTrace = candidateTrace;
     this.acquireProviderExecution = acquireProviderExecution;
+    this.temporalFeatures = Object.freeze({
+      schemaRead: temporalFeatures.schemaRead === true,
+      rootCurrentWrite: temporalFeatures.rootCurrentWrite === true,
+      projectionUi: temporalFeatures.projectionUi === true,
+      invokeResolution: temporalFeatures.invokeResolution === true,
+      providerRecursion: temporalFeatures.providerRecursion === true,
+    });
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
@@ -348,9 +377,14 @@ export class GraphCompleteRuntimeService {
       let graphUrl;
       try {
         graphProcess = this.spawnProcess(this.graphServerBinary, [
-          "--database", join(runtimeDirectory, "graph.sqlite3"),
-          "--port", "0",
-          "--authenticated-error-capability-stdin",
+           "--database", join(runtimeDirectory, "graph.sqlite3"),
+           "--port", "0",
+           ...(this.temporalFeatures.schemaRead ? ["--temporal-schema-read"] : []),
+           ...(this.temporalFeatures.rootCurrentWrite ? ["--temporal-root-current-write"] : []),
+           ...(this.temporalFeatures.projectionUi ? ["--temporal-projection-ui"] : []),
+           ...(this.temporalFeatures.invokeResolution ? ["--temporal-invoke-resolution"] : []),
+           ...(this.temporalFeatures.providerRecursion ? ["--temporal-provider-recursion"] : []),
+           "--authenticated-error-capability-stdin",
         ], { stdio: ["pipe", "pipe", "pipe"] });
         this.graphProcess = graphProcess;
         graphProcess.stdin?.on("error", () => {});
@@ -360,8 +394,8 @@ export class GraphCompleteRuntimeService {
         graphUrl = await this.#awaitStartupOperation(this.#waitForGraph(graphProcess));
       } catch (error) {
         if (!this.closing) this.#reportGraphStartupFailure(error);
-        throw error;
-      }
+         throw error;
+       }
       this.#superviseGraph(graphProcess);
       if (graphProcess.exitCode !== null || graphProcess.signalCode !== null) {
         throw new Error(`Relayer graph server stopped after readiness (${graphProcess.signalCode || graphProcess.exitCode || "unknown"}).`);

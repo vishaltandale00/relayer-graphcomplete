@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -16,13 +17,42 @@ import {
 } from "@relayer/eval-runner";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { EvalService } from "../desktop/eval-main/eval-service.mjs";
-import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
+import {
+  EvalService,
+  recursiveCompleteChecks,
+  validateCandidateTrace,
+} from "../desktop/eval-main/eval-service.mjs";
+import {
+  GraphCompleteRuntimeService,
+  RECURSIVE_TEMPORAL_FEATURES,
+} from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import { recursiveCompleteFixtureFactory } from "./support/recursive-complete-fixture.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const services = [];
 const directories = [];
+
+function recursiveComparisonConfiguration(name, agentAuthored, personalPresentationVersion) {
+  return [
+    "schemaVersion: 1",
+    `name: ${name}`,
+    "implementation: fixture.task-system",
+    "implementationVersion: 1",
+    "complete:",
+    `  agentAuthored: ${agentAuthored}`,
+    "permissionBindings:",
+    "  ask: {}",
+    "  auto: {}",
+    "  full: {}",
+    "modelCompatibility:",
+    "  - providerId: codex",
+    "executionAccessContracts: [managed-runtime@1]",
+    "settings:",
+    `  personalPresentationVersion: ${personalPresentationVersion}`,
+    "",
+  ].join("\n");
+}
 
 afterEach(async () => {
   for (const service of services.splice(0).reverse()) await service.close();
@@ -30,6 +60,299 @@ afterEach(async () => {
 });
 
 describe("Relayer Eval application service", () => {
+  it("rejects discontinuous child projections and duplicate trace scope markers", async () => {
+    const checks = recursiveCompleteChecks({
+      harnessConfiguration: { implementation: "fixture.task-system", complete: { agentAuthored: true } },
+      harnessConfigurationDigest: "sha256:config",
+      turns: [{ candidateTrace: { completionBrokerAvailable: true } }],
+      semanticChildren: [{
+        sourceInteractionId: 1,
+        sourceActionId: 2,
+        interactionId: 3,
+        graphNodeId: 4,
+        rootLayerId: 77,
+        status: "accepted",
+        resultCompletionStatus: "accepted",
+        projectionObservations: [
+          { sequence: 1, revision: 0, previousRevision: null, lifecycle: "active", currentLayerId: null },
+          { sequence: 2, revision: 2, previousRevision: 0, lifecycle: "active", currentLayerId: 77 },
+          { sequence: 3, revision: 3, previousRevision: 2, lifecycle: "succeeded", currentLayerId: 77 },
+        ],
+        execution: {},
+        candidateTrace: { status: "complete", completionBrokerAvailable: true },
+      }],
+    });
+    expect(checks.find(({ name }) => name.endsWith(":child-terminal"))?.passed).toBe(false);
+
+    const directory = await mkdtemp(join(tmpdir(), "relayer-eval-trace-scope-test-"));
+    directories.push(directory);
+    const eventsBytes = Buffer.from([
+      JSON.stringify({ type: "execution.scope", data: { completionBrokerAvailable: true } }),
+      JSON.stringify({ type: "execution.scope", data: { completionBrokerAvailable: true } }),
+      "",
+    ].join("\n"));
+    await writeFile(join(directory, "events.jsonl"), eventsBytes);
+    const digest = `sha256:${createHash("sha256").update(eventsBytes).digest("hex")}`;
+    const descriptor = {
+      status: "complete",
+      truncated: false,
+      sha256: digest,
+      byteLength: eventsBytes.byteLength,
+      eventCount: 2,
+      format: "relayer-harness-trace-v1",
+      traceId: "trace-1",
+    };
+    await writeFile(join(directory, "manifest.json"), JSON.stringify({
+      schemaVersion: 1,
+      format: descriptor.format,
+      status: descriptor.status,
+      traceId: descriptor.traceId,
+      productInteractionId: 3,
+      interactionNodeId: 4,
+      correlation: { runId: "run-1" },
+      declaredCoverage: {},
+      achievedCoverage: {},
+      artifacts: { events: { ref: "events.jsonl", sha256: digest, byteLength: eventsBytes.byteLength, eventCount: 2 } },
+    }));
+    await expect(validateCandidateTrace(
+      directory,
+      descriptor,
+      { id: 3, graphNodeId: 4 },
+      { runId: "run-1" },
+      { requireComplete: true },
+    )).rejects.toThrow("exactly one valid broker-scope marker");
+  });
+
+  it("requires explicit root and recursive-child authorization before queuing the live Codex pair", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-live-authorization-test-"));
+    directories.push(dataDirectory);
+    const evalService = await new EvalService({
+      stateFile: join(dataDirectory, "test-runs.json"),
+      productSession: {
+        origin: "http://127.0.0.1:1",
+        cookie: { name: "unused", value: "unused" },
+      },
+      configurationPaths: [
+        join(repositoryRoot, "harnesses", "codex-eval-complete-disabled.yaml"),
+        join(repositoryRoot, "harnesses", "codex-eval-complete-enabled.yaml"),
+      ],
+    }).open();
+
+    await expect(evalService.createRun({
+      testCaseIds: ["empty-project.recursive-complete.comparison"],
+      harnessConfigurationNames: [
+        "codex-eval-complete-disabled",
+        "codex-eval-complete-enabled",
+      ],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("requires explicit confirmation");
+    expect(evalService.listRuns()).toEqual([]);
+  });
+
+  it("rejects a recursive comparison whose exact off cell grants Complete authority", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-authority-drift-test-"));
+    directories.push(dataDirectory);
+    const disabledPath = join(dataDirectory, "codex-eval-complete-disabled.yaml");
+    const enabledPath = join(dataDirectory, "codex-eval-complete-enabled.yaml");
+    await writeFile(disabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-disabled",
+      true,
+      "personal-presentation-v1",
+    ));
+    await writeFile(enabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-enabled",
+      true,
+      "personal-presentation-v2",
+    ));
+    const evalService = await new EvalService({
+      stateFile: join(dataDirectory, "test-runs.json"),
+      productSession: {
+        origin: "http://127.0.0.1:1",
+        cookie: { name: "unused", value: "unused" },
+      },
+      configurationPaths: [disabledPath, enabledPath],
+    }).open();
+
+    await expect(evalService.createRun({
+      testCaseIds: ["empty-project.recursive-complete.comparison"],
+      harnessConfigurationNames: [
+        "codex-eval-complete-disabled",
+        "codex-eval-complete-enabled",
+      ],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("approved V1/off and V2/on experience pair");
+  });
+
+  it("runs an authority-isolated agent-authored Complete pair and preserves child evidence outside human turns", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-test-"));
+    directories.push(dataDirectory);
+    const disabledPath = join(dataDirectory, "codex-eval-complete-disabled.yaml");
+    const enabledPath = join(dataDirectory, "codex-eval-complete-enabled.yaml");
+    await writeFile(disabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-disabled",
+      false,
+      "personal-presentation-v1",
+    ));
+    await writeFile(enabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-enabled",
+      true,
+      "personal-presentation-v2",
+    ));
+    const observed = { fireAndForget: true, childDelayMs: 100 };
+    const recursiveFactory = recursiveCompleteFixtureFactory(observed);
+    const runtime = new GraphCompleteRuntimeService({
+      userDataDirectory: dataDirectory,
+      graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
+      configurationPaths: [disabledPath, enabledPath],
+      temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
+      additionalImplementations: {
+        "fixture.task-system": (context) => (
+          context.configuration.complete?.agentAuthored
+            ? recursiveFactory(context)
+            : taskSystemFixtureFactory(context)
+        ),
+      },
+      acquireProviderExecution: async (providerId) => ({
+        definition: { id: providerId, adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
+        descriptor: { adapterId: "codex-subscription", accessContract: "managed-runtime@1", implementationVersion: "1" },
+        runtime: { async executionAccess() { return { kind: "managed-runtime", environment: {} }; } },
+        async release() {},
+      }),
+      candidateTrace: {
+        directory: join(dataDirectory, "eval-data", "candidate-trace-spool"),
+        policy: {
+          mode: "required",
+          requiredFeatures: {},
+          includeNativeArtifacts: false,
+          maxBytesPerTurn: 1_000_000,
+          maxEventsPerTurn: 1_000,
+        },
+      },
+    });
+    services.push(runtime);
+    const product = new RelayerAppServerService({
+      userDataDirectory: dataDirectory,
+      binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
+      webDirectory: join(repositoryRoot, "desktop", "renderer"),
+      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
+      runtimeSession: await runtime.start(),
+      defaultHarnessConfiguration: "codex-eval-complete-disabled",
+      allowHarnessOverride: true,
+    });
+    services.push(product);
+    const productSession = await product.start();
+    await product.publishProviderCatalog({
+      providerId: "codex",
+      label: "Fixture provider",
+      connected: true,
+      models: [{
+        id: "fixture-model",
+        label: "Fixture model",
+        order: 0,
+        visible: true,
+        available: true,
+        providerDefault: true,
+        metadata: {},
+      }],
+      systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
+    });
+    await productRequest(productSession, "/api/model-families", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Fixture models",
+        enabled: true,
+        members: [{ providerId: "codex", modelId: "fixture-model" }],
+      }),
+    });
+    const evalService = await new EvalService({
+      stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
+      productSession,
+      configurationPaths: [disabledPath, enabledPath],
+      candidateTraceExporter: (interactionId, targetDirectory, correlation) => (
+        runtime.exportCandidateTrace(interactionId, targetDirectory, correlation)
+      ),
+      candidateTraceRequired: true,
+    }).open();
+
+    await expect(evalService.createRun({
+      testCaseIds: ["empty-project.recursive-complete.comparison"],
+      harnessConfigurationNames: [
+        "codex-eval-complete-enabled",
+        "codex-eval-complete-disabled",
+      ],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("exact ordered Codex pair");
+
+    const created = await evalService.createRun({
+      testCaseIds: ["empty-project.recursive-complete.comparison"],
+      harnessConfigurationNames: [
+        "codex-eval-complete-disabled",
+        "codex-eval-complete-enabled",
+      ],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const completed = await waitForCompletedRun(evalService, created.id);
+    expect(completed.status, JSON.stringify({
+      observed,
+      executions: completed.executions.map((execution) => ({
+        harnessConfigurationName: execution.harnessConfigurationName,
+        status: execution.status,
+        error: execution.error,
+        checks: execution.checks,
+        turns: execution.turns.map(({ interactionId, graphNodeId, candidateTrace }) => ({
+          interactionId,
+          graphNodeId,
+          candidateTrace,
+        })),
+        semanticChildren: execution.semanticChildren,
+      })),
+    }, null, 2)).toBe("passed");
+    const control = completed.executions.find((execution) => execution.harnessConfigurationName.endsWith("disabled"));
+    const treatment = completed.executions.find((execution) => execution.harnessConfigurationName.endsWith("enabled"));
+    expect(completed.comparison).toMatchObject({
+      kind: "agent-authored-complete-pair",
+      passed: true,
+      check: { name: "agent-authored-complete:controlled-pair", passed: true },
+    });
+    expect(treatment.modelResolution).toEqual(control.modelResolution);
+    expect(control.turns).toHaveLength(1);
+    expect(control.turns[0].candidateTrace).toMatchObject({
+      status: "complete",
+      completionBrokerAvailable: false,
+    });
+    expect(control.semanticChildren).toEqual([]);
+    expect(treatment.turns).toHaveLength(1);
+    expect(treatment.turns[0].candidateTrace).toMatchObject({
+      status: "complete",
+      completionBrokerAvailable: true,
+    });
+    expect(treatment.semanticChildren).toHaveLength(1);
+    expect(observed.fireAndForgetStarted).toBe(true);
+    expect(treatment.semanticChildren[0]).toMatchObject({
+      status: "accepted",
+      candidateTrace: { status: "complete", completionBrokerAvailable: true },
+      execution: {
+        phase: "settled",
+        attached: true,
+        attachmentSchemaVersion: 1,
+        attachmentProvider: "fixture",
+        settled: true,
+        safeReason: null,
+      },
+    });
+    expect(treatment.semanticChildren[0].projectionObservations.map(({ lifecycle }) => lifecycle))
+      .toEqual(expect.arrayContaining(["active", "succeeded"]));
+    const childTrace = await evalService.candidateTraceContext(
+      treatment.id,
+      treatment.semanticChildren[0].interactionId,
+    );
+    expect(childTrace.manifest).toMatchObject({
+      format: "relayer-harness-trace-v1",
+      correlation: { executionId: treatment.id },
+    });
+    expect(childTrace.events.map(({ type }) => type)).toContain("execution.scope");
+  }, 20_000);
+
   it("runs case × harness executions through the product server and preserves reviewable threads", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-app-test-"));
     directories.push(dataDirectory);
@@ -304,9 +627,14 @@ async function waitForCompletedRun(evalService, runId) {
   throw new Error("Eval run did not finish in time.");
 }
 
-async function productRequest(session, path) {
+async function productRequest(session, path, init = {}) {
   const response = await fetch(new URL(path, session.origin), {
-    headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
+    ...init,
+    headers: {
+      Cookie: `${session.cookie.name}=${session.cookie.value}`,
+      ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+      ...init.headers,
+    },
   });
   const value = await response.json();
   if (!response.ok) throw new Error(JSON.stringify(value));

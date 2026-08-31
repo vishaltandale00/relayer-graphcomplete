@@ -38,6 +38,7 @@ export function parseHarnessConfiguration(value: unknown): HarnessConfiguration 
     modelRules,
     executionAccessContracts,
     modelDefaults,
+    complete,
     settings,
   } = value;
   if (schemaVersion !== 1) throw new Error(`Unsupported harness configuration schema version: ${String(schemaVersion)}`);
@@ -65,6 +66,7 @@ export function parseHarnessConfiguration(value: unknown): HarnessConfiguration 
     throw new Error("Model-selecting harness configurations require executionAccessContracts so a selected provider cannot fall back to ambient credentials");
   }
   const parsedModelDefaults = parseModelDefaults(modelDefaults);
+  const parsedComplete = parseCompleteConfiguration(complete);
   if (!isJsonObject(settings)) throw new Error("Harness implementation settings must be a JSON object");
   return {
     schemaVersion,
@@ -77,8 +79,20 @@ export function parseHarnessConfiguration(value: unknown): HarnessConfiguration 
     ...(parsedModelRules ? { modelRules: parsedModelRules } : {}),
     ...(parsedAccessContracts ? { executionAccessContracts: parsedAccessContracts } : {}),
     ...(parsedModelDefaults ? { modelDefaults: parsedModelDefaults } : {}),
+    ...(parsedComplete ? { complete: parsedComplete } : {}),
     settings,
   };
+}
+
+function parseCompleteConfiguration(value: unknown): HarnessConfiguration["complete"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)
+    || Object.keys(value).length !== 1
+    || Object.keys(value)[0] !== "agentAuthored"
+    || typeof value.agentAuthored !== "boolean") {
+    throw new Error("Harness complete must contain only a boolean agentAuthored field");
+  }
+  return { agentAuthored: value.agentAuthored };
 }
 
 function parseModelRules(value: unknown): HarnessModelRules | undefined {
@@ -173,6 +187,11 @@ export function harnessAllowsModel(
   if (rules.deny.some((rule) => ruleMatches(rule, selection.adapterId!, selection.modelId))) return false;
   return rules.allow.length === 0
     || rules.allow.some((rule) => ruleMatches(rule, selection.adapterId!, selection.modelId));
+}
+
+/** Common, pinned authority for exposing agent-authored complete(inputGraph). */
+export function harnessAllowsAgentAuthoredComplete(configuration: HarnessConfiguration): boolean {
+  return configuration.complete?.agentAuthored === true;
 }
 
 function ruleMatches(rule: HarnessModelRule, adapterId: string, modelId: string): boolean {

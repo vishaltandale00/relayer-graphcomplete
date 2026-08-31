@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import pickle
@@ -9,11 +10,11 @@ import types
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from relayer_graph import (APIError, ConfigurationError, EdgeObject, GraphNode, GraphSession,
+from relayer_graph import (APIError, CompletionCurrentSnapshot, CompletionInputGraph, ConfigurationError, EdgeObject, GraphNode, GraphSession,
                            LayerLayoutObject, LayerObject, NodeObject,
                            NodePlacementObject,
-                           RELAYER_ICON_NAMES, RelayerGraphClient, ValidationError,
-                           is_supported_relayer_icon, resolve_relayer_icon_name)
+                           RELAYER_ICON_NAMES, RelayerGraphClient, TransportError, ValidationError,
+                           complete, is_supported_relayer_icon, resolve_relayer_icon_name)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -35,7 +36,14 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("content-length", "0"))) or b"{}")
         Handler.requests.append((self.path, dict(self.headers), body))
         Handler.next_id += 1
-        if self.path.endswith("/nodes") and body["title"] == "server-error":
+        if self.path == "/api/completions":
+            self._reply({"completionId": body["interactionNode"]}, 201)
+        elif self.path == "/api/completions/91/stop":
+            self._reply({
+                "cancelled": True, "completionId": 91, "lifecycle": "stopped",
+                "revision": 4, "reason": body["reason"],
+            })
+        elif self.path.endswith("/nodes") and body["title"] == "server-error":
             self._reply({"error": {"message": "database failed"}}, 500)
         elif self.path.endswith("/nodes") and not body["title"].strip():
             self._reply({"error": {"message": "title is required", "issues": [{
@@ -51,12 +59,39 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.endswith("/discard"):
             layer_id = int(self.path.split("/")[-2])
             self._reply({"layer": {"id": layer_id, "nodes": [1], "edges": [], "state": "stopped"}})
+        elif self.path.endswith("/current/transitions"):
+            transition = body["transition"]
+            self._reply({
+                "completionId": 7,
+                "revision": body["expectedRevision"] + 1,
+                "lifecycle": "active",
+                "currentLayerId": transition["layerId"],
+                "finalLayerId": None,
+                "operationKey": body["operationKey"],
+                "requestDigest": "sha256:request",
+                "snapshotDigest": "sha256:snapshot",
+                "projectionSequence": 2,
+            })
+        elif self.path.endswith("/completions/prepare"):
+            self._reply({"interactionNode": 91})
         else:
             self._reply({"ok": True})
 
     def do_GET(self):
         Handler.requests.append((self.path, dict(self.headers), None))
-        if self.path.endswith("/input"):
+        if self.path == "/api/completions/91/current":
+            self._reply({
+                "completionId": 91, "lifecycle": "active", "headRevision": 2,
+                "currentLayerId": 8, "finalLayerId": None,
+            })
+        elif self.path == "/api/completions/91/result":
+            self._reply({"current": {
+                "completionId": 91, "lifecycle": "active", "headRevision": 3,
+                "currentLayerId": 8, "finalLayerId": None,
+            }}, 202)
+        elif self.path == "/api/completions/91/result?afterRevision=3":
+            self._reply({"layer": {"id": 9}, "nodes": [], "edges": [], "actions": []})
+        elif self.path.endswith("/input"):
             self._reply({
                 "interaction": {"id": 7, "kind": "user-interaction", "icon": "user", "title": "Compare", "detail": "Compare", "state": "accepted"},
                 "contexts": [{
@@ -67,6 +102,14 @@ class Handler(BaseHTTPRequestHandler):
             })
         elif self.path.endswith("/output"):
             self._reply({"nodeId": 7, "rootAction": {}, "rootLayer": {}})
+        elif self.path.endswith("/current"):
+            self._reply({
+                "completionId": 7,
+                "lifecycle": "active",
+                "headRevision": 0,
+                "currentLayerId": None,
+                "finalLayerId": None,
+            })
         else:
             self._reply({"error": {"message": "not found"}}, 404)
 
@@ -118,6 +161,20 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         output = await self.client.get_completion_output()
         self.assertEqual(output["nodeId"], 7)
         self.assertEqual(Handler.requests[-1][0], "/api/graph/nodes/7/output")
+
+    async def test_current_handle_reads_and_advances_with_explicit_cas_identity(self):
+        current = await self.client.get_current()
+        self.assertEqual(current["headRevision"], 0)
+        receipt = await self.client.advance_current(
+            19, expected_revision=0, operation_key="publish-progress"
+        )
+        self.assertEqual(receipt["revision"], 1)
+        self.assertEqual(Handler.requests[-1][0], "/api/graph/current/transitions")
+        self.assertEqual(Handler.requests[-1][2], {
+            "expectedRevision": 0,
+            "operationKey": "publish-progress",
+            "transition": {"kind": "advance", "layerId": 19},
+        })
 
     async def test_interaction_input_is_typed_and_preserves_annotation_order(self):
         input = await self.client.get_interaction_input()
@@ -238,6 +295,88 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         orphan = NodeObject("box", "Orphan", "Not submitted")
         with self.assertRaisesRegex(ValueError, "must be submitted"):
             await self.client.create_edge(orphan, 7)
+
+    async def test_prepares_a_canonical_child_pointer_from_a_persisted_invoke(self):
+        prepared = await self.client.prepare_complete({"action": {"id": 44}})
+        self.assertEqual(prepared.interaction_node, 91)
+        path, headers, body = Handler.requests[-1]
+        self.assertEqual(path, "/api/graph/completions/prepare")
+        self.assertEqual(headers["Authorization"], f"Bearer {self.client.token}")
+        self.assertEqual(body, {"actionId": 44})
+
+    async def test_complete_returns_a_live_handle_before_broker_settlement(self):
+        previous = os.environ.copy()
+        try:
+            os.environ["RELAYER_COMPLETE_URL"] = self.url + "/api/completions"
+            os.environ["RELAYER_COMPLETE_TOKEN"] = "broker-token"
+            handle = complete(CompletionInputGraph(91))
+            self.assertEqual(handle.completion_id, 91)
+            current = await handle.current.snapshot()
+            self.assertEqual((current.lifecycle, current.revision, current.current_layer_id), ("active", 2, 8))
+            result = await handle.result
+            self.assertEqual(result["layer"]["id"], 9)
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+
+    async def test_complete_observes_nothing_until_the_child_result_is_awaited(self):
+        previous = os.environ.copy()
+        try:
+            os.environ["RELAYER_COMPLETE_URL"] = self.url + "/api/completions"
+            os.environ["RELAYER_COMPLETE_TOKEN"] = "broker-token"
+            handle = complete(CompletionInputGraph(91))
+            await handle.current.snapshot()
+            self.assertEqual(
+                [path for path, _, _ in Handler.requests if "/result" in path], []
+            )
+            await handle.result
+            self.assertEqual(
+                [path for path, _, _ in Handler.requests if "/result" in path],
+                ["/api/completions/91/result", "/api/completions/91/result?afterRevision=3"],
+            )
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+
+    async def test_complete_awaits_one_observation_however_often_the_result_is_read(self):
+        previous = os.environ.copy()
+        try:
+            os.environ["RELAYER_COMPLETE_URL"] = self.url + "/api/completions"
+            os.environ["RELAYER_COMPLETE_TOKEN"] = "broker-token"
+            handle = complete(CompletionInputGraph(91))
+            first, second = await asyncio.gather(handle.result, handle.result)
+            self.assertIs(first, second)
+            self.assertEqual(
+                len([path for path, _, _ in Handler.requests if "/result" in path]), 2
+            )
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+
+    async def test_stop_asks_the_broker_to_stop_the_child_it_invoked(self):
+        previous = os.environ.copy()
+        try:
+            os.environ["RELAYER_COMPLETE_URL"] = self.url + "/api/completions"
+            os.environ["RELAYER_COMPLETE_TOKEN"] = "broker-token"
+            handle = complete(CompletionInputGraph(91))
+            await handle.stop("the parent no longer needs this branch")
+            path, headers, body = Handler.requests[-1]
+            self.assertEqual(path, "/api/completions/91/stop")
+            self.assertEqual(headers["Authorization"], "Bearer broker-token")
+            self.assertEqual(body, {"reason": "the parent no longer needs this branch"})
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+
+    async def test_completion_current_rejects_coerced_identity_fields(self):
+        with self.assertRaisesRegex(TransportError, "invalid revision"):
+            CompletionCurrentSnapshot.from_dict({
+                "completionId": 91,
+                "lifecycle": "active",
+                "headRevision": "2",
+                "currentLayerId": 8,
+                "finalLayerId": None,
+            })
 
     async def test_current_session_uses_the_prime_agent_host_scope(self):
         requests = []

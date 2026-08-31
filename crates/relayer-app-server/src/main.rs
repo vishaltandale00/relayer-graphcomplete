@@ -109,6 +109,11 @@ async fn run(
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("Relayer app server only binds to 127.0.0.1");
     }
+    let listener = tokio::net::TcpListener::bind(SocketAddr::new(arguments.host, arguments.port))
+        .await
+        .context("bind Relayer app server")?;
+    let address = listener.local_addr()?;
+    let app_origin = format!("http://{address}");
     std::fs::create_dir_all(&arguments.data_dir).context("create product data directory")?;
     if !arguments.web_dir.is_dir() {
         anyhow::bail!(
@@ -143,6 +148,7 @@ async fn run(
         (None, None, None, None, None) => None,
         _ => anyhow::bail!("GraphComplete runtime arguments must be supplied together"),
     };
+    let completion_broker_origin = runtime.as_ref().map(|_| app_origin.clone());
     let app_server = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database,
         web_directory: arguments.web_dir,
@@ -157,18 +163,15 @@ async fn run(
             platform: arguments.producer_platform,
             architecture: arguments.producer_architecture,
         },
+        completion_broker_origin,
     })
     .await
     .context("open Relayer app server")?;
-    let listener = tokio::net::TcpListener::bind(SocketAddr::new(arguments.host, arguments.port))
-        .await
-        .context("bind Relayer app server")?;
-    let address = listener.local_addr()?;
     println!(
         "{}",
         json!({
             "ready": true,
-            "origin": format!("http://{address}"),
+            "origin": app_origin,
             "cookieName": CONTROL_COOKIE,
         })
     );

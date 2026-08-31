@@ -357,9 +357,9 @@
 <tr><td>Relayer Harness</td><td>The package group that contains the graph runtime, harness host, and evaluations.</td></tr>
 <tr><td>Harness configuration</td><td>A named, versioned execution setup pinned to a thread. It selects one supported implementation.</td></tr>
 <tr><td>Provider adapter</td><td>The implementation boundary for authentication, model discovery, credentials, and provider-specific execution details.</td></tr>
-<tr><td>Thread</td><td>A saved conversation entry in Relayer Desktop.</td></tr>
+<tr><td>Thread</td><td>A saved graph of completions in Relayer Desktop. Its identity and context do not depend on one provider conversation or session.</td></tr>
 <tr><td>Interaction</td><td>One user event that calls Complete. A message or an authored node action can be an interaction.</td></tr>
-<tr><td>Complete</td><td>The operation <code>complete(inputGraph)</code>. It returns an accepted, stopped, or failed result.</td></tr>
+<tr><td>Complete</td><td>The operation <code>complete(inputGraph)</code>. It immediately returns a completion handle whose result promise settles from durable GraphComplete state.</td></tr>
 <tr><td>Accepted layer</td><td>The exact response layer that passed graph validation and acceptance.</td></tr>
 <tr><td>Project</td><td>A stable Relayer record for an authorized local folder.</td></tr>
 <tr><td>No-folder chat</td><td>A thread that uses an isolated app-owned directory. The UI label is <strong>No folder</strong>.</td></tr>
@@ -432,19 +432,46 @@
 <p>These runtime components are implemented and evaluated together. They remain separate packages. The graph engine is authoritative. Clients must not open its database directly. The harness host must not implement graph rules. The evaluation runner must not contain a second product or Complete implementation.</p>
 <p>The Rust app server creates product interactions and calls the same persistent Node harness host used by evaluation. It persists the accepted result and serves it to the renderer.</p>
 <h3>1.4 Relayer Desktop and Relayer Harness interface</h3>
-<p>The canonical external boundary is one Complete call. <code>inputGraph</code> is a small pointer. Its root is the current user-interaction node. It is not a serialized copy of the project graph.</p>
-<p>The root package does not export this boundary yet. Today, the Rust app server reaches the same executable seam through the persistent <code>HarnessHost</code>. Exporting <code>complete(inputGraph)</code> remains required.</p>
+<p>The canonical external boundary is one Complete call. <code>inputGraph</code> is a small pointer. Its root is one already-prepared canonical user-interaction node. It is not a serialized copy of the project graph. Human-root product code prepares that interaction from the user event. Trusted recursive adapter code prepares or exactly recovers an agent child from one immutable published invoke occurrence. Both paths then enter the same Complete module. Model-authored code cannot substitute an arbitrary interaction-shaped node or mint child authority.</p>
+<p>The root package exports this boundary and a process-owned configuration seam for injecting its trusted completion runtime. The Rust app server reaches the same executable seam through the persistent <code>HarnessHost</code>.</p>
 <pre><code class="language-ts">interface RelayerHarnessClient {
-  complete(inputGraph: { interactionNode: NodeReference }): Promise&lt;CompleteResult&gt;;
+  complete(inputGraph: { interactionNode: NodeReference }): CompletionHandle;
 }
 
-type CompleteResult =
-  | { status: &quot;accepted&quot;; interactionNode: NodeReference; display: ResolvedGraphLayer }
-  | { status: &quot;stopped&quot; | &quot;failed&quot;; interactionNode: NodeReference; retryable: boolean; message?: string };
+interface CompletionHandle {
+  readonly completionId: GraphId;
+  readonly current: CompletionCurrent;
+  readonly result: Promise&lt;ResolvedGraphLayer&gt;;
+}
+
+interface CompletionCurrent {
+  snapshot(): Promise&lt;CompletionCurrentSnapshot&gt;;
+}
+
+interface CompletionTerminalError extends Error {
+  readonly completionId: GraphId;
+  readonly lifecycle: &quot;stopped&quot; | &quot;failed&quot;;
+  readonly current: CompletionCurrentSnapshot;
+  readonly reason: string;
+}
 </code></pre>
-<p>The app server creates the interaction and passes its pointer to Complete. The selected harness uses its bound graph client to construct nodes, edges, layers, and actions, then ends by calling <code>graph.submit(interactionNode)</code>. The accepted result includes the fully resolved first layer so the desktop can display it immediately without a second request. The graph engine persists the same layer and serves later navigation. A model turn ending without submission is incomplete.</p>
+<p>Complete returns one handle after trusted preparation establishes or recovers the canonical completion identity.</p>
+<p>Preparation is a separate step, and it is the authority step. Agent code publishes an accepted invoke action, calls <code>prepareComplete(action)</code>, then calls Complete.</p>
+<p><code>complete(inputGraph)</code> establishes no identity of its own. It requires an already-prepared <code>interactionNode</code> and rejects anything else.</p>
+<p>Server-side capability derives from the published invoke occurrence. Exact-retry recovery keys off that same occurrence.</p>
+<p><code>current</code> observes the durable GraphComplete pointer. <code>result</code> resolves only from GraphComplete <code>succeeded</code> state and its canonical final layer.</p>
+<p>A model turn or provider process ending does not resolve it. Stopped and failed completions retain their last current and reject <code>result</code> with a structured terminal error. They never fabricate a final layer.</p>
+<p>A never-settling promise is not the contract. An awaiting agent must be able to observe child termination.</p>
+<p>The parent's own invoke action stays unresolved and navigable to the child's retained current. An unresolved invoke never means an unsettled handle.</p>
+<p>An agent may stop a completion whose invocation names it as the direct source. Grandchildren, siblings, and human or product callers may not.</p>
+<p><code>handle.stop(reason)</code> is that agent-only control. The stopped child retains its current and reports <code>stopped</code>.</p>
+<p>Observation is delivered as current-pointer revisions only. There is no token streaming, no partial-layer publication, and no additional event kind.</p>
+<p>An awaiting agent performs no repeated polling. The server holds one observation open and answers when the awaited completion advances, filtered to that caller's grant.</p>
+<p>Restart never reattaches. Interrupted active completions fail safely with <code>application_restart</code> and keep their retained current.</p>
+<p>No provider is asked whether its execution survived. Complete is never re-called as crash recovery for an already-started execution.</p>
+<p>The app server creates the human-root interaction and passes its pointer to Complete. A supported recursive provider adapter derives the prepared pointer from the invoking completion and exact published invoke occurrence. It then passes that same pointer to Complete. The selected harness uses its bound graph client to construct nodes, edges, layers, and actions, then returns with <code>current.return(layer)</code> or the compatible <code>graph.submit(interactionNode)</code>. The accepted result includes the fully resolved first layer so the desktop can display it immediately without a second request. The graph engine persists the same layer and serves later navigation. A model turn ending without Return is failure, never success.</p>
 <p>The product stores one named harness on the thread. Model is the primary composer choice. Advanced shows compatible harness configurations before thread creation. The pinned harness becomes read-only after creation.</p>
-<p>The selected harness owns model execution and provider-session reuse. The <code>prime.agent</code> implementation alone owns recursive child scheduling. Provider adapters own authentication and model discovery. Relayer product records do not expose raw credentials, provider flags, runtime sessions, or implementation-specific recursion policy.</p>
+<p>The selected harness owns model execution and provider-session reuse. Each explicitly supported recursive adapter, including Codex and Prime Agent, owns its provider-native child launch or binding, concurrency, waiting, messaging, and session behavior. GraphComplete, Relayer product, and the harness host do not add a recursive runnable queue, automatic parent wakeup, or incorporation policy. Provider adapters own authentication and model discovery. Relayer product records do not expose raw credentials, provider flags, runtime sessions, or implementation-specific recursion policy.</p>
 <h3>1.5 Items not in V1</h3>
 <p>V1 does not include arbitrary harness adapters, third-party conversation views, a generic agent protocol, or a public multi-harness conformance kit. Eval may compare supported harness, provider, and model configurations, but every run still exercises the Relayer product contract. A general platform should be reconsidered only after repeated implementations reveal a concrete reusable seam.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15">15. Canonical visual product reference</h2>
@@ -1879,18 +1906,29 @@ GET  /api/graph/nodes/:id/output
 <pre><code class="language-ts">type CompleteInputGraph = NodeReference;
 
 interface HarnessRunContext {
+  origin: { kind: &quot;root&quot; } | { kind: &quot;invoke&quot;; sourceCompletionId: GraphId; actionId: GraphId };
   inputGraph: GraphNode;
   graph: HarnessGraphScope;
 }
 
 interface Harness {
-  complete(context: HarnessRunContext, signal?: AbortSignal): Promise&lt;void&gt;;
+  complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle;
   state(): HarnessSessionState;
   dispose?(): void | Promise&lt;void&gt;;
 }
+
+interface NativeExecutionHandle {
+  readonly attached: Promise&lt;OpaqueHarnessState&gt;;
+  readonly settled: Promise&lt;ProviderExit&gt;;
+  stopSelf(reason: SafeReason): Promise&lt;void&gt;;
+}
 </code></pre>
-<p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to the current interaction node. The host resolves the pointer once and creates one run context. The persistent harness keeps its provider session and working directory, but it does not keep a current graph credential.</p>
-<p>Complete has one required job: build and submit one response graph under that interaction, or stop/fail explicitly. After the harness returns, the host reads the accepted result from Rust. A turn that ends without <code>graph.submit(interactionNode)</code> is a failure.</p>
+<p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to an already-prepared canonical interaction node. A GraphComplete thread is a graph of completions, not a provider conversation. The trusted human or invoke adapter prepares or exactly recovers the identity, origin, and capability before invoking the shared completion-execution module. The host resolves the pointer once and creates one run context. The persistent harness keeps its working directory and may retain provider-session state as an optimization, but it does not persist a current graph credential.</p>
+<p>Complete returns a <code>CompletionHandle</code> whose current and result are settled from durable GraphComplete state independently of <code>NativeExecutionHandle.settled</code>. A successful Return may resolve the semantic result while provider cleanup continues. Provider exit while GraphComplete remains active records trusted failure and never implies success. An explicit recursive call is bound or launched only through that provider adapter's defined native mechanism. Collaboration or RLM trace events alone never create semantic children.</p>
+<p>One GraphComplete completion owns one independently runnable provider execution attachment. Provider-native helpers remain inside that attachment and may share its completion authority. Their creation does not create GraphComplete children.</p>
+<p>An explicit <code>complete(inputGraph)</code> call creates a new semantic completion and a distinct provider execution attachment. The adapter may use a fresh provider session or safely multiplex an existing session.</p>
+<p>Required context and identity come from GraphComplete rather than hidden provider history. The attachment retains the harness's ordinary native helper infrastructure. A helper may ask its owning orchestrator to create semantic work, but helper topology is never mirrored automatically.</p>
+<p>Codex binds a semantic child to a fresh app-server thread and turn whose orchestrator receives the child scope. Codex-native subagents remain internal helpers for that orchestrator. Claude binds a semantic child to a fresh Agent SDK query that neither resumes nor replaces the root session. Prime binds a semantic child to a fresh ordinary Prime session and execution. Prime's RLM and subagents remain internal helpers unless that execution explicitly calls Complete again.</p>
 <h3>12.2 Persistent Node harness host</h3>
 <p>The Node harness host is a long-lived child process of the evaluator or Relayer app server. It resolves a small code-owned implementation map and lazily constructs one harness object per thread:</p>
 <pre><code class="language-ts">const harnessImplementations: Record&lt;string, HarnessFactory&gt; = {
@@ -1898,11 +1936,13 @@ interface Harness {
   &quot;prime.agent&quot;: createPrimeAgentHarness,
 };
 </code></pre>
-<p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host keeps the same JavaScript harness object and provider session alive across turns. Factories may initialize asynchronously.</p>
-<p>If the Node process or provider session expires, the host recreates the object from stored configuration and opaque provider resume state. The next Complete call supplies its own graph scope. Continuous conversation must not start a new provider conversation on every Complete call.</p>
-<p>The Relayer app server owns one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object. It serializes construction and Complete calls, forwards cancellation through an <code>AbortSignal</code>, and disposes live harnesses during shutdown. Harness objects for different threads can run concurrently. Only <code>prime.agent</code> owns recursive child-agent scheduling inside a completion.</p>
+<p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host may keep the same JavaScript harness object and provider session alive across turns when the adapter can safely reuse them. Factories may initialize asynchronously.</p>
+<p>If the Node process or provider session expires, the host recreates the object from stored configuration and opaque provider resume state when available. The next Complete call supplies its own graph scope and remains semantically valid even when the provider starts a fresh session. Session reuse should be used when obvious and behavior preserving, but continuous GraphComplete context must not depend on it.</p>
+<p>The Relayer app server owns one-active-human-root-completion coordination for a thread. The Node host owns the live JavaScript object and a completion registry keyed by canonical completion identity. It serializes construction and durable provider-session state mutation where required, but it does not place recursive provider work behind a thread-global Complete queue. Cancellation, approval, trace, capability, and settlement state are completion scoped. Parent terminality never waits for, cancels, settles, or incorporates an active child. Codex and Prime Agent each retain their native execution behavior; the host owns no recursive child-agent scheduler.</p>
 <h3>12.3 Minimal harness configuration</h3>
 <p>Each YAML file has a unique machine-readable <code>name</code>, selects an implementation type and version, and carries implementation-owned settings. The host validates only the common envelope. Each implementation validates its own settings. Prime Agent can add recursive model policy, review, and budget settings without changing host or product types.</p>
+<p>The common envelope may also declare <code>complete.agentAuthored</code>. Missing or <code>false</code> means agent-authored <code>complete(inputGraph)</code> is unavailable.</p>
+<p><code>true</code> grants only the capability to receive a completion broker when the runtime recursive temporal substrate is active. It does not select a provider strategy, add a scheduler, or mirror native subagents into GraphComplete. Product and harness boundaries both fail closed when either authority is absent. The shipped Desktop catalog does not opt in.</p>
 <pre><code class="language-yaml">schemaVersion: 1
 name: codex-basic
 implementation: codex.basic
@@ -1915,6 +1955,7 @@ settings:
 </code></pre>
 <p>The implementation registry defines which code can run. The configuration catalog defines the named production setups that users and evaluations can select. Many configurations can select the same implementation with different settings. Only configuration names must be unique. Duplicate names fail catalog loading. A thread is pinned to the full copied configuration, not only to an implementation type.</p>
 <p>A test run selects harness configurations. Test cases do not encode them. An opt-in live run can select <code>codex-basic</code> and <code>codex-basic-high</code>. The runner expands the same harness-agnostic cases across both configurations. Both configurations can resolve to the same <code>codex.basic</code> implementation.</p>
+<p>Relayer Eval additionally owns one non-default visible-working-state recursive comparison case. It requires the exact ordered pair <code>codex-eval-complete-disabled</code> and <code>codex-eval-complete-enabled</code> and runs alone. This comparison measures the combined product experience. It is not an isolated causal measurement. The off cell pins V1 and disables agent-authored Complete. The on cell pins V2 and enables it. The pair holds implementation, Codex subscription access, provider/model settings, permission bindings, natural task, and temporal runtime substrate constant. The treatment is pinned to the control cell's resolved provider and model. A real Codex pair requires an explicit dashboard confirmation for exactly two root provider executions plus any agent-authored child execution started by the enabled root. The disabled cell must record no broker authority and no semantic child. The enabled cell must record broker authority and at least one action-bound semantic child. That child must have an exact durable provider-execution attachment and successful settlement. It must also have an accepted succeeded current projection and a complete exportable trace recording nested broker authority. Eval waits up to five seconds after root completion for fire-and-forget child registration. No observed child fails the treatment. That failure is diagnostic; it does not prove that a later launch was impossible. Semantic children are evidence records separate from human turns. One pair proves functional availability and capture, not performance, parent semantic incorporation, or the isolated effect of either V2 or recursion.</p>
 <h3>12.4 First <code>codex.basic</code> implementation</h3>
 <p>The first harness uses the OpenAI Codex TypeScript package and the user&#39;s Relayer-scoped Codex login. Its purpose is to test whether the graph contract is simple enough for a coding agent to use, not to approximate the final GraphComplete policy.</p>
 <ul>
@@ -1971,17 +2012,25 @@ settings:
 <li><strong>Decision-useful center:</strong> foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations.</li>
 <li><strong>Adaptive progressive disclosure:</strong> keep information central when it is necessary for immediate understanding. Use graph actions when supporting evidence, implementation detail, or secondary context materially improves understanding or helps the user proceed. Do not add branches that repeat or decorate the central explanation.</li>
 </ul>
+<p>Published V2 is a third ordinary immutable completion in the same hidden profile thread; V1 remains active until a separate reviewed activation. V2 does not reuse or mutate V1 graph records. Its one required root layer owns self-contained versions of the two V1 concepts plus a third <code>presentation-preference</code> node:</p>
+<ul>
+<li><strong>Visible working state:</strong> for work that will not finish immediately, prefer establishing a useful current early. Prefer advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates.</li>
+</ul>
+<p>Decision-useful center is the V2 root layer's semantic hub. Ordinary undirected edges connect it to Adaptive progressive disclosure and Visible working state. Its authored triangular layout places the hub above the two related preferences. V2 has no nested preference layer.</p>
 <p>Interaction creation atomically pins one published, non-retired version through a control-owned attachment. The attachment references the accepted profile completion rather than copying it. Preparation, retry, recovery, and resumed provider sessions reuse the stored pin. Changing the active version affects only interactions created afterward. Invalid, missing, retired, mismatched, duplicate, or cross-scope versions fail before provider execution. Historical interactions without an attachment remain readable.</p>
+<p>An invoke-created semantic child atomically copies the source interaction's exact pinned version into its own control-owned attachment. It does not resolve the version active when the child is created. Retry and restart therefore preserve one personalization graph throughout a semantic task tree even if product policy changes while the root is running.</p>
 <p>The harness deterministically renders the pinned graph after generic GraphComplete guidance and before the task input. The root and provider-native children that can author graph content receive the same rendered guidance; unrelated delegates do not. Model and provider capabilities cannot create, replace, remove, or mutate the attachment or published preference graph.</p>
+<p>When current advancement is supported, the graph can be a useful working surface before terminal acceptance. An advance publishes a validated durable layer as current without completing the interaction. Later material changes may advance another immutable revision. Return establishes the final accepted layer. These presentations contain decision-useful work state, not token streaming, tool-by-tool narration, or private chain-of-thought. Semantic children are optional and do not define current-pointer progress.</p>
 <p>The attachment is not a response edge, action, context occurrence, or accepted response record. It never enters completion closure, root-action counting, graph navigation, visible topology, Node Details, ordinary history, or conversation export. Execution traces and Eval artifacts retain only the pinned version interaction ID. V0 and V1 use the existing terse case, layered Codex configuration, matrix, artifact format, production renderer, and screenshot-grounded presentation judge. They add no pairwise judge, new metric, layer-count gate, or paid default test.</p>
 <h4>Personal presentation verification checkpoints</h4>
 <ul>
-<li><strong>PPG-001 — graph authority and integrity:</strong> graph-core migration, publication, attachment, immutability, scope, and capability tests exercise the Rust storage and control seams through <code>npm run check</code>.</li>
-<li><strong>PPG-002 — product pinning and recovery:</strong> product persistence and runtime tests cover atomic active/explicit selection, idempotent preparation, later activation, retry, restart, and provider-session continuity through <code>npm run check</code>.</li>
-<li><strong>PPG-003 — harness guidance:</strong> renderer-ordering and Codex/Claude/Prime propagation tests cover V0 neutrality, exact V1 guidance, and root/native-child delivery. They cover explicit-null removal when a resumed session changes to V0. Run them through <code>npm run check</code>.</li>
+<li><strong>PPG-001 — graph authority and integrity:</strong> graph-core migration and V0/V1/V2 publication tests cover exact V2 root topology and layout. Attachment immutability, scope, and capability tests exercise the Rust storage and control seams. Run them through <code>npm run check</code>.</li>
+<li><strong>PPG-002 — product pinning and recovery:</strong> product persistence and runtime tests cover atomic active and explicit selection, semantic-child source-version inheritance, and idempotent preparation. They also cover later activation, retry, restart, and provider-session continuity. Run them through <code>npm run check</code>.</li>
+<li><strong>PPG-003 — harness guidance:</strong> renderer-ordering and Codex/Claude/Prime propagation tests cover V0 neutrality, exact graph-derived V1/V2 guidance, and root/native-child delivery. They cover explicit-null removal when a resumed session changes to V0. Run them through <code>npm run check</code>.</li>
 <li><strong>PPG-004 — hidden surfaces and attribution:</strong> completion, export, trace, artifact, and renderer-contract tests prove that preference infrastructure stays hidden. They keep the version ID attributable. Run them through <code>npm run check</code>.</li>
 <li><strong>PPG-005 — controlled visual comparison:</strong> the opt-in <code>RELAYER_EVAL_AUTORUN_PERSONAL_PRESENTATION=1</code> Relayer Eval run compares V0 and V1. It holds every non-preference input constant and records both existing presentation judgments.</li>
 <li><strong>PPG-006 — active product path:</strong> after reviewing PPG-005, run the opt-in product-default Eval on the exact reviewed commit. It must show a V1-pinned accepted graph. No preference attachment, version, prompt, graph record, badge, or control may appear in the ordinary workspace.</li>
+<li><strong>PPG-007 — visible working state:</strong> deterministic current tests cover <code>initialized → advanced → returned</code>, current follow versus explicit navigation pinning, retained stopped/failed current, and accepted output rendered alongside temporal <code>succeeded</code>. The later opt-in live demonstration uses a natural product request and the ordinary V2 path, not an Eval-specific prompt profile.</li>
 </ul>
 <p><strong>Required assembled verification:</strong> run <code>npm run check</code> and <code>npm run build</code>. Paid live evaluation remains opt-in and is required only for PPG-005 and PPG-006 evidence, never for the default suite.</p>
 <h3>4.4 Current proof boundary</h3>
@@ -2765,7 +2814,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <li>Rename, archive, pin, delete-entry, move-to-project, and unsent-draft recovery do not have product proof.</li>
 <li>API-key providers and operating-system secret storage do not have product proof.</li>
 <li>Prime Agent does not have clean-install live-product proof.</li>
-<li>The root package does not export the canonical <code>complete(inputGraph)</code> boundary.</li>
+<li>The root package exports canonical <code>complete(inputGraph)</code>; live app-server adoption of that exported seam does not yet have product proof.</li>
 <li>The Eval promotion bundle and retention contract remain incomplete.</li>
 <li>Windows signing, installation, and interactive updater canary remain blocked.</li>
 </ul>

@@ -96,6 +96,39 @@ describe("workspace navigation integration", () => {
     vi.restoreAllMocks();
   });
 
+  it("keeps accepted product status while rendering its succeeded temporal current", async () => {
+    const root = rootLayer(101, 11);
+    const turn = { ...interaction(1, 10, root), graphNodeId: 901 };
+    const state = productState([{ id: 10, title: "Accepted temporal result" }], [turn]);
+    state.currentProjection = {
+      cursor: 1,
+      hasMore: false,
+      events: [],
+      states: [{
+        completionId: 901,
+        headRevision: 1,
+        lifecycle: "succeeded",
+        currentLayerId: 101,
+        finalLayerId: 101,
+        safeReason: null,
+        temporalFeatures: { projectionUi: true },
+      }],
+    };
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) return state;
+      if (path.endsWith("/interactions/1/layers/101")) return root;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+
+    await controller.loadThread(10);
+
+    expect(controller.appState.status).toBe("accepted");
+    expect(controller.appState.temporalLifecycle).toBe("succeeded");
+    expect(controller.appState.visibleLayer).toBe(root);
+    expect(controller.appState.nodes.map(({ id }) => id)).toEqual([11]);
+  });
+
   it("restores thread, turn, path, numeric node selection, and deep-link URL", async () => {
     const layer1 = rootLayer(101, 11);
     const layer2 = rootLayer(201, 21);
@@ -1205,7 +1238,7 @@ describe("workspace navigation integration", () => {
       const restoreFirst = deferred();
       const restoreSecond = deferred();
       requestImplementation = vi.fn(async (path) => {
-        const stateMatch = path.match(/^\/api\/state\?threadId=(\d+)$/);
+        const stateMatch = path.match(/^\/api\/state\?threadId=(\d+)(?:&|$)/);
         if (stateMatch) return states.get(stateMatch[1]);
         if (path === "/api/threads/10") return restoreFirst.promise;
         if (path === "/api/threads/20") return restoreSecond.promise;
@@ -1221,7 +1254,7 @@ describe("workspace navigation integration", () => {
       restoreSecond.resolve({ thread: threads[1], interactions: [turn2], actionInvocations: [] });
       await expect(stale).rejects.toMatchObject({ code: "navigation_superseded" });
       await vi.advanceTimersByTimeAsync(600);
-      expect(requestImplementation.mock.calls.filter(([path]) => path === "/api/state?threadId=30"))
+      expect(requestImplementation.mock.calls.filter(([path]) => path.startsWith("/api/state?threadId=30")))
         .toHaveLength(1);
       restoreFirst.resolve({ thread: threads[0], interactions: [turn1], actionInvocations: [] });
 
