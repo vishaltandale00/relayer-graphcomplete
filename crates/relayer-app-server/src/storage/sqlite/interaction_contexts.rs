@@ -194,27 +194,31 @@ impl SqliteProductStore {
             .bind(thread_id.value())
             .fetch_all(&mut *tx)
             .await?;
-            let submitted_inputs = rows
-                .iter()
-                .map(submitted_input_from_row)
-                .collect::<Result<Vec<_>, _>>()?;
-            let authority_digest = relayer_graph_core::interaction_input_authority_digest(
-                input.text,
-                &submitted_inputs,
-            )
-            .map_err(|error| StorageError::Serialization(error.to_string()))?;
-            if authority_digest != input.input_digest {
-                return Err(StorageError::ActionInputDraftConflict {
-                    code: "input_draft_revision_conflict",
-                    message: "The committed interaction inputs no longer match the Send snapshot. Reload the draft and send again.".into(),
-                });
+            if rows.is_empty() {
+                None
+            } else {
+                let submitted_inputs =
+                    rows.iter()
+                        .map(submitted_input_from_row)
+                        .collect::<Result<Vec<_>, _>>()?;
+                let authority_digest = relayer_graph_core::interaction_input_authority_digest(
+                    input.text,
+                    &submitted_inputs,
+                )
+                .map_err(|error| StorageError::Serialization(error.to_string()))?;
+                if authority_digest != input.input_digest {
+                    return Err(StorageError::ActionInputDraftConflict {
+                        code: "input_draft_revision_conflict",
+                        message: "The committed interaction inputs no longer match the Send snapshot. Reload the draft and send again.".into(),
+                    });
+                }
+                let semantic_digest = relayer_graph_core::interaction_input_semantic_digest(
+                    input.text,
+                    &submitted_inputs,
+                )
+                .map_err(|error| StorageError::Serialization(error.to_string()))?;
+                Some((expected_revision, semantic_digest))
             }
-            let semantic_digest = relayer_graph_core::interaction_input_semantic_digest(
-                input.text,
-                &submitted_inputs,
-            )
-            .map_err(|error| StorageError::Serialization(error.to_string()))?;
-            (!rows.is_empty()).then_some((expected_revision, semantic_digest))
         } else {
             None
         };
@@ -538,8 +542,7 @@ mod tests {
                 .as_nanos(),
         ));
         let store = SqliteProductStore::open(&path).await.unwrap();
-        let input_digest =
-            relayer_graph_core::interaction_input_authority_digest("Prompt", &[]).unwrap();
+        let input_digest = relayer_graph_core::interaction_input_digest("Prompt", &[]).unwrap();
         let clean_thread = sqlx::query(
             "INSERT INTO threads(title,created_at,updated_at) VALUES ('Clean','1','1')",
         )

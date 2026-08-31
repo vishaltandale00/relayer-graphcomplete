@@ -34,8 +34,8 @@ let productSession;
 let window;
 let keepaliveWindow;
 let completionCount = 0;
-let releaseThirdCompletion;
-const thirdCompletionGate = new Promise((resolveGate) => { releaseThirdCompletion = resolveGate; });
+let releaseFourthCompletion;
+const fourthCompletionGate = new Promise((resolveGate) => { releaseFourthCompletion = resolveGate; });
 
 app.setName("Relayer Node Input Actions Test");
 app.setPath("userData", join(dataDirectory, "electron-profile"));
@@ -73,7 +73,7 @@ function nodeInputFixtureFactory() {
     async complete(context) {
       try {
         completionCount += 1;
-        if (completionCount === 3) await thirdCompletionGate;
+        if (completionCount === 4) await fourthCompletionGate;
         const graph = new RelayerGraphClient(context.graph.acquireCapability());
         const interaction = context.inputGraph;
       const node = new NodeObject(
@@ -223,6 +223,17 @@ async function run() {
     }),
   });
   await waitForAcceptedInteractions(thread.id, 1);
+  const idleThread = await productRequest("/api/threads", {
+    method: "POST",
+    body: JSON.stringify({
+      title: "Idle input actions",
+      initialMessage: "Author a second deterministic input surface.",
+      projectId: project.id,
+      harnessId: "fixture-task-system",
+      modelSelection: { familyId: family.id, providerId: "codex", modelId: "fixture-model" },
+    }),
+  });
+  await waitForAcceptedInteractions(idleThread.id, 1);
   const createWindow = createWindowFactory({
     BrowserWindow: function TestWindow(options) {
       return new BrowserWindow({ ...options, show: false, webPreferences: { ...options.webPreferences, backgroundThrottling: false } });
@@ -496,6 +507,78 @@ async function run() {
   window.webContents.setZoomFactor(1);
   await waitForPaint();
 
+  let pendingThreadSendHeld = false;
+  let cancelPendingThreadSend;
+  const pendingThreadSendFilter = {
+    urls: [`${productSession.origin}/api/threads/${thread.id}/interactions`],
+  };
+  window.webContents.session.webRequest.onBeforeRequest(
+    pendingThreadSendFilter,
+    (details, callback) => {
+      if (!pendingThreadSendHeld && details.method === "POST") {
+        pendingThreadSendHeld = true;
+        cancelPendingThreadSend = () => callback({ cancel: true });
+        return;
+      }
+      callback({});
+    },
+  );
+  await setValue("#threadPrompt", "Hold the owning thread Send while editing another thread.");
+  await click("#sendInteraction");
+  await waitFor("thread A Send held in flight", () => pendingThreadSendHeld);
+  await click(`[data-thread='${idleThread.id}']`);
+  await waitFor("idle thread B remains composable while A Send is pending", () => evaluate(`(() => (
+    document.querySelector("[data-thread='${idleThread.id}']")?.classList.contains('active')
+      && document.querySelectorAll('.graph-node').length === 2
+      && document.querySelector('#threadPrompt')?.disabled === false
+  ))()`));
+  await clickNode("Input grammar");
+  await click("#attachNodeContext");
+  await waitFor("thread B context staging remains usable", () => evaluate(`Boolean(
+    document.querySelector("[aria-label='Annotation for Input grammar']")
+  )`));
+  await click("[aria-label='Discard annotation draft for Input grammar']");
+  await waitFor("thread B context draft discarded", () => evaluate(`(
+    !document.querySelector("[aria-label='Annotation for Input grammar']")
+  )`));
+  await setValue(".node-input-text", "Thread B remains independently editable.");
+  await waitFor("thread B input commit remains enabled", () => evaluate(`(
+    document.querySelector("[aria-label='Commit Name the governing constraint']")?.disabled === false
+  )`));
+  await click("[aria-label='Commit Name the governing constraint']");
+  await waitFor("thread B input committed", async () => (
+    (await productRequest(`/api/threads/${idleThread.id}/input-draft`)).attachments?.some(
+      (attachment) => attachment.value?.text === "Thread B remains independently editable.",
+    )
+  ));
+  await click("[aria-label='Detach Name the governing constraint']");
+  await waitFor("thread B input detached", async () => (
+    (await productRequest(`/api/threads/${idleThread.id}/input-draft`)).attachments?.length === 0
+  ));
+
+  await click(`[data-thread='${thread.id}']`);
+  await waitFor("pending thread A restored", () => evaluate(`(() => (
+    document.querySelector("[data-thread='${thread.id}']")?.classList.contains('active')
+      && document.querySelectorAll('.graph-node').length === 2
+  ))()`));
+  await clickNode("Input grammar");
+  await waitFor("pending thread A input staging remains locked", () => evaluate(`(() => {
+    const controls = [...document.querySelectorAll('#nodeInputActions button, #nodeInputActions textarea')];
+    return controls.length > 0 && controls.every((control) => control.disabled);
+  })()`));
+  await evaluate(`document.querySelector('#attachNodeContext')?.click()`);
+  await waitForPaint();
+  if (await evaluate(`Boolean(document.querySelector("[aria-label='Annotation for Input grammar']"))`)) {
+    throw new Error("Pending thread A opened context staging while its Send was in flight.");
+  }
+  cancelPendingThreadSend();
+  window.webContents.session.webRequest.onBeforeRequest(pendingThreadSendFilter, null);
+  await waitFor("thread A staging unlocks after its Send settles", () => evaluate(`(() => (
+    document.querySelector('.node-input-text')?.disabled === false
+      && document.querySelector("[aria-label='Detach Name the governing constraint']")?.disabled === false
+      && document.querySelector('#threadPrompt')?.disabled === false
+  ))()`));
+
   await click("#attachNodeContext");
   await waitFor("replay snapshot annotation editor", () => evaluate(`Boolean(
     document.querySelector("[aria-label='Annotation for Input grammar']")
@@ -610,6 +693,9 @@ async function run() {
       : false;
   });
   await setValue(".node-input-text", submittedTextValue);
+  await waitFor("UI commit ready after response-loss reconciliation", () => evaluate(`(
+    document.querySelector("[aria-label='Commit Name the governing constraint']")?.disabled === false
+  )`));
   await click("[aria-label='Commit Name the governing constraint']");
   const revisionBeforeUiCommit = reconciledDraft.revision;
   reconciledDraft = await waitFor("UI commit advances reconciled input composition", async () => {
@@ -643,7 +729,7 @@ async function run() {
     && retryAttempt.modelSelection?.providerId === originalAttempt.modelSelection.providerId
     && retryAttempt.modelSelection?.modelId === originalAttempt.modelSelection.modelId;
   if (!retryPreservedSnapshot) {
-    releaseThirdCompletion();
+    releaseFourthCompletion();
     throw new Error(`Post-commit response-loss retry did not rotate identity and preserve the click-time snapshot: ${JSON.stringify({ originalAttempt, retryAttempt, reconciledRevision: reconciledDraft.revision })}`);
   }
   window.webContents.session.webRequest.onBeforeRequest(reconciliationFilter, null);
@@ -651,7 +737,7 @@ async function run() {
   await waitFor("input controls locked during send", () => evaluate(`(() => (
     document.querySelectorAll('#nodeInputActions button:not(:disabled), #nodeInputActions textarea:not(:disabled)').length === 0
   ))()`));
-  releaseThirdCompletion();
+  releaseFourthCompletion();
   const acceptedThread = await waitForAcceptedInteractions(thread.id, 3);
   await waitFor("submitted inputs rendered read-only", () => evaluate(`(() => (
     document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length === 1
@@ -717,7 +803,7 @@ async function run() {
 
 async function stop() {
   const failures = [];
-  releaseThirdCompletion();
+  releaseFourthCompletion();
   try {
     if (window && !window.isDestroyed()) window.destroy();
   } catch (error) {

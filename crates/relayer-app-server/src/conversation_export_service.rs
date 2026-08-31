@@ -667,6 +667,14 @@ fn export_submitted_inputs(
                     })
                 })
                 .transpose()?;
+            let option_keys = injective_portable_option_keys(
+                input
+                    .action
+                    .options
+                    .iter()
+                    .map(|option| option.key.as_str()),
+                redactor,
+            );
             let action = ExportInputActionSnapshot {
                 control: match input.action.control {
                     relayer_graph_core::InputControl::Text => ExportInputControl::Text,
@@ -689,7 +697,10 @@ fn export_submitted_inputs(
                     .options
                     .into_iter()
                     .map(|option| ExportInputOption {
-                        key: redactor.text(&option.key),
+                        key: option_keys
+                            .get(&option.key)
+                            .expect("accepted option key was indexed")
+                            .clone(),
                         label: redactor.text(&option.label),
                         unsupported_fields: Default::default(),
                     })
@@ -708,7 +719,10 @@ fn export_submitted_inputs(
                         selected: selected
                             .into_iter()
                             .map(|option| ExportInputOption {
-                                key: redactor.text(&option.key),
+                                key: option_keys
+                                    .get(&option.key)
+                                    .cloned()
+                                    .unwrap_or_else(|| redactor.text(&option.key)),
                                 label: redactor.text(&option.label),
                                 unsupported_fields: Default::default(),
                             })
@@ -737,15 +751,29 @@ fn export_submitted_inputs(
 
 fn redact_submitted_input(input: &mut ExportSubmittedInput, redactor: &ProjectPathRedactor) {
     input.action.prompt = redactor.text(&input.action.prompt);
+    let option_keys = injective_portable_option_keys(
+        input
+            .action
+            .options
+            .iter()
+            .map(|option| option.key.as_str()),
+        redactor,
+    );
     for option in &mut input.action.options {
-        option.key = redactor.text(&option.key);
+        option.key = option_keys
+            .get(&option.key)
+            .expect("portable option key was indexed")
+            .clone();
         option.label = redactor.text(&option.label);
     }
     match &mut input.value {
         ExportSubmittedInputValue::Text { text } => *text = redactor.text(text),
         ExportSubmittedInputValue::Selected { selected } => {
             for option in selected {
-                option.key = redactor.text(&option.key);
+                option.key = option_keys
+                    .get(&option.key)
+                    .cloned()
+                    .unwrap_or_else(|| redactor.text(&option.key));
                 option.label = redactor.text(&option.label);
             }
         }
@@ -1005,6 +1033,10 @@ fn export_input_action(
             ));
         }
     };
+    let option_keys = injective_portable_option_keys(
+        input.options.iter().map(|option| option.key.as_str()),
+        redactor,
+    );
     Ok(ExportInputActionSnapshot {
         control,
         prompt: redactor.text(&input.prompt),
@@ -1012,7 +1044,10 @@ fn export_input_action(
             .options
             .iter()
             .map(|option| ExportInputOption {
-                key: redactor.text(&option.key),
+                key: option_keys
+                    .get(&option.key)
+                    .expect("accepted option key was indexed")
+                    .clone(),
                 label: redactor.text(&option.label),
                 unsupported_fields: Default::default(),
             })
@@ -1118,6 +1153,35 @@ impl ProjectPathRedactor {
     fn optional(&self, value: Option<&str>) -> Option<String> {
         value.map(|value| self.text(value))
     }
+}
+
+fn injective_portable_option_keys<'a>(
+    keys: impl IntoIterator<Item = &'a str>,
+    redactor: &ProjectPathRedactor,
+) -> HashMap<String, String> {
+    let mut portable = HashMap::new();
+    let mut used = std::collections::HashSet::new();
+    for key in keys {
+        let base = redactor.text(key);
+        let mut candidate = base.clone();
+        let mut ordinal = 2;
+        while !used.insert(candidate.clone()) {
+            candidate = suffixed_portable_option_key(&base, ordinal);
+            ordinal += 1;
+        }
+        portable.insert(key.to_owned(), candidate);
+    }
+    portable
+}
+
+fn suffixed_portable_option_key(base: &str, ordinal: usize) -> String {
+    let suffix = format!("~{ordinal}");
+    let maximum_base_bytes = 128_usize.saturating_sub(suffix.len());
+    let mut end = base.len().min(maximum_base_bytes);
+    while !base.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{}", &base[..end], suffix)
 }
 
 #[derive(Default)]
@@ -1571,12 +1635,19 @@ mod tests {
             interaction_text: None,
             input: Some(InputAction {
                 control: InputControl::SingleSelect,
-                prompt: "Choose /workspace/project/target".into(),
-                options: vec![InputOption {
-                    key: "one".into(),
-                    label: "First /workspace/project target".into(),
-                    unsupported_fields: Default::default(),
-                }],
+                prompt: "Choose /private/tmp/project/target".into(),
+                options: vec![
+                    InputOption {
+                        key: "/private/tmp/project/target".into(),
+                        label: "Use /private/tmp/project target".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: "/tmp/project/target".into(),
+                        label: "Use /tmp/project target".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
                 minimum_selections: None,
                 unsupported_fields: Default::default(),
             }),
@@ -1586,7 +1657,7 @@ mod tests {
         let exported = export_action(
             &action,
             &mut PortableIds::default(),
-            &ProjectPathRedactor::new(Some("/workspace/project")),
+            &ProjectPathRedactor::new(Some("/private/tmp/project")),
         )
         .unwrap();
 
@@ -1596,7 +1667,10 @@ mod tests {
             crate::conversation_export::ExportInputControl::SingleSelect
         );
         assert_eq!(input.prompt, "Choose [project-path]/target");
-        assert_eq!(input.options[0].label, "First [project-path] target");
+        assert_eq!(input.options[0].key, "[project-path]/target");
+        assert_eq!(input.options[1].key, "[project-path]/target~2");
+        assert_eq!(input.options[0].label, "Use [project-path] target");
+        assert_eq!(input.options[1].label, "Use [project-path] target");
     }
 
     #[test]

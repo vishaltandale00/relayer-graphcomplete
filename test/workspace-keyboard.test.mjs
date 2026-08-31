@@ -638,10 +638,25 @@ describe("product workspace keyboard behavior", () => {
     });
   });
 
-  it("scopes an asynchronous send lock to the thread that owns it", () => {
+  it("scopes context and input staging to the thread that owns an asynchronous send", async () => {
     expect(sendAttemptBlocksThread("thread-a", "thread-a")).toBe(true);
     expect(sendAttemptBlocksThread("thread-a", "thread-b")).toBe(false);
     expect(sendAttemptBlocksThread(null, "thread-a")).toBe(false);
+
+    const workspaceSource = await readFile(new URL(
+      "../desktop/renderer/src/product-workspace/workspace.js",
+      import.meta.url,
+    ), "utf8");
+    const stagingStart = workspaceSource.indexOf("const contextStagingDisabled = () => {");
+    const stagingEnd = workspaceSource.indexOf("const closeDurableEditor", stagingStart);
+    const stagingSeam = workspaceSource.slice(stagingStart, stagingEnd);
+    expect(stagingSeam).toContain(
+      "sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)",
+    );
+    expect(stagingSeam).toContain(
+      "threadHasInFlightSend(inFlightSendThreads, getThread()?.id)",
+    );
+    expect(stagingSeam).not.toContain("Boolean(sendAttempt)");
   });
 
   it("retains the owning thread's in-flight lock across navigation", () => {

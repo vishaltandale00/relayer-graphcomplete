@@ -1080,43 +1080,69 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
 
     let observed = Arc::new(Mutex::new(None));
     let observed_request = observed.clone();
-    let graph = Router::new().route(
-        "/api/control/input-action-occurrences/canonical",
-        axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
-            let observed_request = observed_request.clone();
-            async move {
-                *observed_request.lock().unwrap() = Some(body.clone());
-                let action_id = body["occurrence"]["actionId"].as_i64().unwrap();
-                let mut action = json!({
-                    "id": action_id,
-                    "sourceNodeId": 401,
-                    "sourceLayerId": 201,
-                    "kind": "input",
-                    "label": "Add constraint",
-                    "variant": "pill",
-                    "control": "text",
-                    "prompt": "What constraint applies?",
-                    "state": "accepted"
-                });
-                if action_id == 302 {
-                    action["control"] = json!("multi_select");
-                    action["prompt"] = json!("Which optional signals apply?");
-                    action["options"] = json!([
-                        {"key": "logs", "label": "Logs"},
-                        {"key": "metrics", "label": "Metrics"}
-                    ]);
-                } else if action_id == 303 {
-                    action["control"] = json!("single_select");
-                    action["prompt"] = json!("Which rollout applies?");
-                    action["options"] = json!([
-                        {"key": "canary", "label": "Canary"},
-                        {"key": "full", "label": "Full rollout"}
-                    ]);
+    let observed_interaction = Arc::new(Mutex::new(None));
+    let observed_interaction_request = observed_interaction.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/input-action-occurrences/canonical",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let observed_request = observed_request.clone();
+                async move {
+                    *observed_request.lock().unwrap() = Some(body.clone());
+                    let action_id = body["occurrence"]["actionId"].as_i64().unwrap();
+                    let mut action = json!({
+                        "id": action_id,
+                        "sourceNodeId": 401,
+                        "sourceLayerId": 201,
+                        "kind": "input",
+                        "label": "Add constraint",
+                        "variant": "pill",
+                        "control": "text",
+                        "prompt": "What constraint applies?",
+                        "state": "accepted"
+                    });
+                    if action_id == 302 {
+                        action["control"] = json!("multi_select");
+                        action["prompt"] = json!("Which optional signals apply?");
+                        action["options"] = json!([
+                            {"key": "logs", "label": "Logs"},
+                            {"key": "metrics", "label": "Metrics"}
+                        ]);
+                    } else if action_id == 303 {
+                        action["control"] = json!("single_select");
+                        action["prompt"] = json!("Which rollout applies?");
+                        action["options"] = json!([
+                            {"key": "canary", "label": "Canary"},
+                            {"key": "full", "label": "Full rollout"}
+                        ]);
+                    }
+                    axum::Json(action)
                 }
-                axum::Json(action)
-            }
-        }),
-    );
+            }),
+        )
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let observed_interaction_request = observed_interaction_request.clone();
+                async move {
+                    *observed_interaction_request.lock().unwrap() = Some(body.clone());
+                    axum::Json(json!({
+                        "node": {"id": 501},
+                        "graphToken": "",
+                        "inputIdentity": body["inputIdentity"],
+                        "inputDigest": body["inputDigest"],
+                        "inputChildren": []
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({"graphToken": body["graphToken"]}))
+            })
+            .delete(|| async { axum::Json(json!({"revoked": true})) }),
+        );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(Router::new()).await;
     let catalog = root.join("catalog.json");
@@ -1127,7 +1153,9 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
             "configurations": [{
                 "configuration": {
                     "schemaVersion": 1, "name": "codex-basic", "implementation": "test",
-                    "implementationVersion": 1, "permissionBindings": {"ask": {}},
+                    "implementationVersion": 1, "permissionBindings": {"ask": {}, "auto": {}},
+                    "modelCompatibility": [{"providerId": "codex"}],
+                    "executionAccessContracts": ["managed-runtime@1"],
                     "settings": {}
                 },
                 "digest": "sha256:test"
@@ -1215,6 +1243,51 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
         .unwrap();
     assert_eq!(replayed_detach.status(), StatusCode::OK);
     assert_eq!(response_json(replayed_detach).await["revision"], 3);
+    let revision_only_send = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text": "Send after inspecting an empty input draft",
+                "inputId": "revision-only-empty-input-draft",
+                "inputDraftRevision": 3,
+                "contexts": [{
+                    "target": {
+                        "nodeId": 7,
+                        "sourceInteractionNodeId": 3,
+                        "sourceLayerId": 5
+                    },
+                    "annotations": ["Keep the ordinary context digest"]
+                }]
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    let revision_only_status = revision_only_send.status();
+    let revision_only_send = response_json(revision_only_send).await;
+    assert_eq!(
+        revision_only_status,
+        StatusCode::CREATED,
+        "{revision_only_send}"
+    );
+    assert_eq!(
+        revision_only_send["text"],
+        "Send after inspecting an empty input draft"
+    );
+    let prepared_input = observed_interaction.lock().unwrap().clone().unwrap();
+    assert_eq!(prepared_input["submittedInputs"], json!([]));
+    assert!(
+        prepared_input["inputDigest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:v1:")
+    );
+    assert_eq!(
+        prepared_input["contexts"][0]["annotations"],
+        json!(["Keep the ordinary context digest"])
+    );
     let empty_multi = app
         .clone()
         .oneshot(api_request(

@@ -2268,12 +2268,14 @@ export function createProductWorkspace({
   ));
   const contextStagingDisabled = () => {
     const status = composerStatusForThread(getState(), getThread());
-    return Boolean(sendAttempt) || contextStagingDisabledFor(
-      status,
-      capabilities.canCompose,
-      prompt.disabled,
-      restoredDraftActive,
-    );
+    return sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)
+      || threadHasInFlightSend(inFlightSendThreads, getThread()?.id)
+      || contextStagingDisabledFor(
+        status,
+        capabilities.canCompose,
+        prompt.disabled,
+        restoredDraftActive,
+      );
   };
   const closeDurableEditor = (ownerThreadId, draftId) => {
     if (contextEditor?.durable
