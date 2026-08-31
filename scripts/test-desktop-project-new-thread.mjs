@@ -22,6 +22,11 @@ let window;
 let keepaliveWindow;
 let exitCode = 1;
 let desktopSettings = createSettingsStore(dataDirectory);
+let tutorialState = {
+  status: "dismissed",
+  automaticEligible: false,
+};
+let automaticTutorialBegins = 0;
 
 app.setName("Relayer Project New Thread Test");
 const electronProfileDirectory = join(dataDirectory, "electron-profile");
@@ -43,10 +48,12 @@ function registerTestIpc() {
     definitions: [],
     hasCompletedOnboarding: true,
   }));
-  ipcMain.handle("relayer:tutorial-read", () => ({
-    status: "dismissed",
-    automaticEligible: false,
-  }));
+  ipcMain.handle("relayer:model-catalog-settings-open", () => null);
+  ipcMain.handle("relayer:tutorial-read", () => tutorialState);
+  ipcMain.handle("relayer:tutorial-begin-automatic", () => {
+    automaticTutorialBegins += 1;
+    return { started: true };
+  });
   ipcMain.handle("relayer:update-status", () => ({
     phase: "development",
     channel: "stable",
@@ -65,7 +72,9 @@ function unregisterTestIpc() {
     "relayer:composer-drafts-write",
     "relayer:folder-choose",
     "relayer:provider-status",
+    "relayer:model-catalog-settings-open",
     "relayer:tutorial-read",
+    "relayer:tutorial-begin-automatic",
     "relayer:update-status",
   ]) ipcMain.removeHandler(channel);
 }
@@ -414,6 +423,26 @@ async function run() {
     !document.querySelector('#threadView')?.classList.contains('hidden')
       && document.querySelector('#threadPrompt')?.disabled === false
   )`));
+  await evaluate(`(() => {
+    document.querySelector('[data-project-new-thread="${project.id}"]').click();
+    document.querySelector('#settingsButton').click();
+  })()`);
+  await waitFor("later Settings navigation to win over project activation", () => evaluate(`(
+    !document.querySelector('#settingsView')?.classList.contains('hidden')
+  )`));
+  await click("#settingsBackButton");
+  await waitFor("the saved thread after leaving Settings", () => evaluate(`(
+    !document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('[data-thread="${firstThread.id}"]')?.classList.contains('active')
+  )`));
+  await evaluate(`(() => {
+    document.querySelector('[data-project-new-thread="${project.id}"]').click();
+    document.querySelector('[data-thread="${firstThread.id}"]').click();
+  })()`);
+  await waitFor("later saved-thread navigation to win over project activation", () => evaluate(`(
+    !document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('[data-thread="${firstThread.id}"]')?.classList.contains('active')
+  )`));
   await setValue("#threadPrompt", followupPrompt);
   await clickProjectAction(project.id);
   await waitFor("the separate empty pending composer", () => evaluate(`(
@@ -524,6 +553,10 @@ async function run() {
   await waitFor("the explicitly cleared saved-thread draft", () => evaluate(`(
     document.querySelector('#threadPrompt')?.value === ''
   )`));
+  await waitFor("the explicit clear tombstone in the main-process store", async () => {
+    const saved = await desktopSettings.read();
+    return Object.values(saved.composerDrafts?.threadFollowups || {}).includes("");
+  });
 
   await clickProjectAction(project.id);
   await setValue("#newThreadPrompt", "Clear this pending draft with global New Thread.");
@@ -554,6 +587,11 @@ async function run() {
       pendingNewThread: folderDraft,
     },
   }));
+  tutorialState = {
+    status: "never-shown",
+    automaticEligible: true,
+  };
+  automaticTutorialBegins = 0;
   window.destroy();
   window = undefined;
   await openWindow();
@@ -562,6 +600,9 @@ async function run() {
       && document.querySelector('#scopeLabel')?.textContent === ${JSON.stringify(folderDraft.scope.label)}
       && document.querySelector('#folderSummary')?.textContent.includes(${JSON.stringify(folderDraft.scope.path)})
   )`));
+  if (automaticTutorialBegins !== 0) {
+    throw new Error("A restored pending draft was replaced by automatic onboarding.");
+  }
 
   process.stdout.write(`RELAYER_PROJECT_NEW_THREAD ${JSON.stringify({
     passed: true,

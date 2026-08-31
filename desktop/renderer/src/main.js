@@ -56,8 +56,9 @@ import {
   pendingNewThreadDraft,
   persistPendingNewThreadDraft,
 } from "./composer-drafts.js";
+import { createLatestRequestGate } from "./navigation-history.js";
 
-let projectComposerRequest = 0;
+const projectComposerGate = createLatestRequestGate();
 
 function applyPlatformCopy() {
   const isMac = desktop?.platform === "darwin";
@@ -149,6 +150,7 @@ async function openNewThreadComposer({
 async function maybeStartAutomaticTutorial(providerConnected) {
   const tutorial = onboardingTutorialController();
   if (!tutorial || evalReview) return false;
+  if (pendingNewThreadDraft()?.text) return false;
   if (!tutorialComposerReady()) return false;
   return tutorial.maybeStartAutomatic({
     providerConnected,
@@ -158,8 +160,8 @@ async function maybeStartAutomaticTutorial(providerConnected) {
 
 function bindEvents() {
   $("#newThread").onclick = async () => {
-    const request = ++projectComposerRequest;
-    const guard = () => projectComposerRequest === request;
+    const request = projectComposerGate.begin();
+    const guard = () => projectComposerGate.isCurrent(request);
     takeOverPendingAutomaticTutorial();
     if (!await prepareCurrentWorkspaceTransition() || !guard()) return;
     try {
@@ -178,8 +180,8 @@ function bindEvents() {
         String(candidate.id) === action.dataset.projectNewThread
       ));
       if (!project) return;
-      const request = ++projectComposerRequest;
-      const guard = () => projectComposerRequest === request;
+      const request = projectComposerGate.begin();
+      const guard = () => projectComposerGate.isCurrent(request);
       takeOverPendingAutomaticTutorial();
       if (viewState.mainView === "new"
         && viewState.selectedScope.kind === "project"
@@ -236,6 +238,7 @@ function bindEvents() {
     $("#collapseSidebar").setAttribute("aria-label", label);
   };
   $("#settingsButton").onclick = async () => {
+    projectComposerGate.invalidate();
     takeOverPendingAutomaticTutorial();
     if (!await prepareCurrentWorkspaceTransition()) return;
     cancelNavigationHistory();
@@ -332,6 +335,7 @@ function bindEvents() {
     const threadButton = event.target.closest("[data-thread]");
     if (threadButton) {
       event.preventDefault();
+      projectComposerGate.invalidate();
       void (async () => {
         if (!await prepareCurrentWorkspaceTransition()) return;
         await loadThread(threadButton.dataset.thread);

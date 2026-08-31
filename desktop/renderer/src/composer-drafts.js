@@ -90,11 +90,13 @@ export function threadFollowupDraft(scopeKey) {
 export function persistThreadFollowupDraft(scopeKey, text) {
   if (!scopeKey) return;
   const state = readState();
-  if (text) state.threadFollowups[scopeKey] = text;
-  else delete state.threadFollowups[scopeKey];
+  state.threadFollowups[scopeKey] = text;
   writeState(state);
 }
 
 export function clearThreadFollowupDraft(scopeKey) {
-  persistThreadFollowupDraft(scopeKey, "");
+  if (!scopeKey) return;
+  const state = readState();
+  delete state.threadFollowups[scopeKey];
+  writeState(state);
 }
