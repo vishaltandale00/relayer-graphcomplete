@@ -81,10 +81,20 @@ The audit checks environment branch policies, target-required secret and variabl
 1. Merge reviewed release changes to `main`.
 2. Increment `desktop/package.json` to one numeric version shared by all targets.
 3. Run `npm run check` and `npm run build` from the exact commit.
-4. Run `Desktop Signed Preview Candidates` manually to prove both enabled macOS signing jobs without publication.
-5. Review every release receipt and installer signature.
-6. Create `desktop-vX.Y.Z` on that exact `main` commit only after explicit publication approval.
-7. The tagged workflow publishes immutable artifacts for each enabled target and moves each Preview pointer last.
+4. Run `Desktop Signed Preview Candidates` manually to build the enabled signed candidates without publication. Record the successful workflow run ID and attempt, plus each enabled target artifact's numeric ID and `sha256:` digest from the GitHub Actions artifact API.
+5. Review every release receipt and installer signature from that manual run.
+6. After explicit publication approval, create one protected annotated tag on that exact `main` commit. Pin the reviewed manual run in the annotation; do not choose it by recency:
+
+   ```sh
+   git tag -a desktop-vX.Y.Z <full-main-commit> \
+     -m "Relayer Desktop X.Y.Z" \
+     -m "Candidate-Run: <successful-manual-workflow-run-id>/<run-attempt>" \
+     -m "Candidate-Artifact-macos-arm64: <artifact-id>/<sha256:digest>"
+   ```
+
+7. Push the tag once. The tagged workflow verifies that the pinned run attempt is a successful manual execution of the code-owned candidate workflow for the same `main` commit, resolves one unexpired artifact ID and SHA-256 digest per enabled target, downloads by that immutable artifact ID, and publishes those exact bytes. It does not rebuild, re-sign, re-notarize, rerun repository checks, or re-upload telemetry. The publisher records the candidate run, attempt, artifact ID, and artifact digest; it revalidates the release receipt, checksums, artifact bytes, and public objects before moving the Preview pointer last.
+
+A lightweight tag, a malformed or repeated `Candidate-Run` annotation, or a run from another attempt, workflow, event, repository, branch, commit, or artifact set fails closed. Never move or recreate a tag to repair that failure. If the tag annotation is wrong, leave the tag and version unpublished and prepare a new version. A workflow retry is valid only while it remains pinned to the same candidate run attempt and artifact identity; immutable-object and publication-receipt checks still reject different bytes.
 
 ### First Intel rollout
 
