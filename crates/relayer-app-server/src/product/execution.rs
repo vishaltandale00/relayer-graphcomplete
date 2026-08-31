@@ -954,6 +954,7 @@ async fn record_pre_execution_model_failure_to_unsent(
             policy,
             adapter_version,
             failure_category,
+            error: &error,
         })
         .await
     {

@@ -30,6 +30,29 @@ export function operatorInteractionIsTerminal(status) {
   return ["accepted", "failed", "cancelled", "stopped"].includes(status);
 }
 
+export function incompleteInputRoundTripEvidence(operatorTrace) {
+  const commits = operatorTrace.filter((event) => event.operation === "input_commit");
+  if (commits.length === 0) {
+    return {
+      schemaVersion: 1,
+      status: "not_exercised",
+      passed: false,
+      checks: [],
+      detail: "The simulated user did not commit an input and activate Send.",
+    };
+  }
+  if (!operatorTrace.some((event) => event.operation === "send")) {
+    return {
+      schemaVersion: 1,
+      status: "indeterminate",
+      passed: false,
+      checks: [],
+      detail: "The simulated user committed input, but the judge ended before activating Send.",
+    };
+  }
+  return null;
+}
+
 export function groundingRootNodeIds(interaction) {
   return (interaction?.completionOutput?.rootLayer?.nodes ?? [])
     .map((node) => String(node?.id ?? ""))
@@ -794,6 +817,13 @@ export function createLocalSimulatedUserJudgeRunner({
           inputOperatorAvailable: Boolean(inputOperator),
         });
       } catch (error) {
+        const inputRoundTrip = await captureInputRoundTripArtifacts({
+          context,
+          topology,
+          controller,
+          captureInputRoundTrip,
+          failureDetail: "The partial presentation review was retained, but input round-trip evidence capture failed.",
+        });
         return persistJudgeArtifacts({
           context,
           configuration: selectedConfiguration,
@@ -805,29 +835,17 @@ export function createLocalSimulatedUserJudgeRunner({
           coverage: store.coverage(),
           status: "partial",
           error: error instanceof Error ? error.message : String(error),
+          inputRoundTrip,
           inputRatingReceiptRefs: controller.inputRatingReceiptRefs(),
         });
       }
-      let inputRoundTrip = null;
-      if (context.allowInputOperator === true && typeof captureInputRoundTrip === "function") {
-        try {
-          inputRoundTrip = await captureInputRoundTrip({
-            context,
-            topology,
-            operatorTrace: controller.operatorTrace(),
-            artifactDirectory: join(context.artifactDirectory, "input-roundtrip"),
-          });
-        } catch (error) {
-          inputRoundTrip = {
-            schemaVersion: 1,
-            status: "failed",
-            passed: false,
-            checks: [],
-            detail: "The completed presentation review was retained, but input round-trip evidence capture failed.",
-            error: error instanceof Error ? error.message : String(error),
-          };
-        }
-      }
+      const inputRoundTrip = await captureInputRoundTripArtifacts({
+        context,
+        topology,
+        controller,
+        captureInputRoundTrip,
+        failureDetail: "The completed presentation review was retained, but input round-trip evidence capture failed.",
+      });
       const output = await persistJudgeArtifacts({
         context,
         configuration: selectedConfiguration,
@@ -857,6 +875,38 @@ export function createLocalSimulatedUserJudgeRunner({
       }
     }
   };
+}
+
+async function captureInputRoundTripArtifacts({
+  context,
+  topology,
+  controller,
+  captureInputRoundTrip,
+  failureDetail,
+}) {
+  if (context.allowInputOperator !== true || typeof captureInputRoundTrip !== "function") return null;
+  const operatorTrace = controller.operatorTrace();
+  try {
+    return {
+      ...await captureInputRoundTrip({
+        context,
+        topology,
+        operatorTrace,
+        artifactDirectory: join(context.artifactDirectory, "input-roundtrip"),
+      }),
+      operatorTrace,
+    };
+  } catch (error) {
+    return {
+      schemaVersion: 1,
+      status: "failed",
+      passed: false,
+      checks: [],
+      detail: failureDetail,
+      error: error instanceof Error ? error.message : String(error),
+      operatorTrace,
+    };
+  }
 }
 
 function assertExactOpenedTurn(state, expected) {

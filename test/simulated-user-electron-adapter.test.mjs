@@ -24,6 +24,7 @@ import {
   gradeAcceptedReviewTopology,
   groundingCaptureTargets,
   groundingRootNodeIds,
+  incompleteInputRoundTripEvidence,
   operatorInteractionIsTerminal,
   parseProductWriteResponse,
   persistInputRatingReceipt,
@@ -143,6 +144,20 @@ describe("local Electron simulated-user judge adapter", () => {
   it("treats cancelled operator follow-ups as terminal", () => {
     expect(operatorInteractionIsTerminal("cancelled")).toBe(true);
     expect(operatorInteractionIsTerminal("running")).toBe(false);
+  });
+
+  it("classifies a committed input without Send as indeterminate evidence", () => {
+    expect(incompleteInputRoundTripEvidence([])).toMatchObject({ status: "not_exercised" });
+    expect(incompleteInputRoundTripEvidence([{ operation: "input_commit", inputDraftRevision: 9 }]))
+      .toMatchObject({
+        status: "indeterminate",
+        passed: false,
+        detail: "The simulated user committed input, but the judge ended before activating Send.",
+      });
+    expect(incompleteInputRoundTripEvidence([
+      { operation: "input_commit", inputDraftRevision: 9 },
+      { operation: "send", response: { id: 99 } },
+    ])).toBeNull();
   });
 
   it("captures every visible root node when grounding an input follow-up", () => {
@@ -1486,6 +1501,113 @@ describe("local Electron simulated-user judge adapter", () => {
     });
 
     expect(result).toMatchObject({ status: "partial", review: { schemaVersion: 6 }, error: "fixture stops before paid inference" });
+  });
+
+  it("retains committed input evidence when the judge fails after the product writes", async () => {
+    const artifactDirectory = await temporaryDirectory();
+    const layers = acceptedLayers();
+    layers.get("10").actions.push({
+      id: 13,
+      sourceNodeId: 2,
+      kind: "input",
+      control: "text",
+      prompt: "What constraint matters most?",
+      state: "accepted",
+    });
+    const session = fakeReviewSession(join(artifactDirectory, "screenshots"));
+    const captureScreenshot = session.screenshot;
+    session.state = vi.fn(async () => ({
+      threadRevision: "thread:7:revision:1",
+      turnId: "41",
+      layerId: "10",
+      selectedNodeId: "2",
+      activatedActionId: null,
+      navigationPath: [{ layerId: "10", viaActionId: null }],
+      controls: [{ elementRef: "send-interaction", kind: "input-operator-send", disabled: false }],
+    }));
+    session.setInputOperatorCommitted = vi.fn(async () => {});
+    session.screenshot = vi.fn(async (input) => {
+      const output = await captureScreenshot(input);
+      output.screenshot.threadRevision = "thread:7:revision:1";
+      return output;
+    });
+    const operator = {
+      beginCapture: vi.fn(() => ({ captureId: "capture-13", threadRevision: "thread:7:revision:1" })),
+      failCapture: vi.fn(),
+      rateCaptures: vi.fn(),
+      state: vi.fn(() => ({ captures: [{ captureId: "capture-13", status: "capturing" }] })),
+      commit: vi.fn(async () => 9),
+      send: vi.fn(async () => ({ id: 99 })),
+    };
+    const runJudge = vi.fn(async ({ controller }) => {
+      await controller.screenshot({
+        target: { kind: "element", elementRef: "input-action-41-10-13" },
+        mode: "full",
+        label: "input-before-write",
+      });
+      await controller.recordInputRatings({
+        revision: 1,
+        review: {
+          layerId: "10",
+          nodeId: "2",
+          actions: [{
+            actionId: "13",
+            kind: "input",
+            evidence: ["shot-input-before-write"],
+            inputActionJudgments: {},
+          }],
+        },
+      });
+      await controller.interact({ elementRef: "input-action-41-10-13", value: { text: "Ship Friday" } });
+      await controller.interact({ elementRef: "send-interaction", activate: true });
+      throw new Error("judge failed after input submission");
+    });
+    const captureInputRoundTrip = vi.fn(async () => {
+      throw new Error("follow-up capture unavailable");
+    });
+    const runner = createLocalSimulatedUserJudgeRunner({
+      loadLayer: async ({ layerId }) => layers.get(String(layerId)),
+      openReviewSession: async () => ({
+        session,
+        state: { executionId: "execution-1", threadId: "7", turnId: "41", layerId: "10" },
+        release: vi.fn(async () => {}),
+      }),
+      resolveCodexRuntime: async () => codexRuntime,
+      createInputOperator: async () => operator,
+      runJudge,
+      captureInputRoundTrip,
+    });
+
+    const result = await runner({
+      artifactDirectory,
+      execution: { id: "execution-1" },
+      thread: { id: "7" },
+      turn: { id: "41", graphNodeId: "41", rootLayerId: "10" },
+      request: { text: "Review and answer the input." },
+      allowInputOperator: true,
+      reviewSequence: { index: 0, count: 1 },
+    });
+
+    expect(result).toMatchObject({
+      status: "partial",
+      error: "judge failed after input submission",
+      inputRoundTrip: {
+        status: "failed",
+        error: "follow-up capture unavailable",
+        operatorTrace: [
+          { operation: "input_commit", inputDraftRevision: 9 },
+          { operation: "send", response: { id: 99 } },
+        ],
+      },
+    });
+    expect(captureInputRoundTrip).toHaveBeenCalledWith(expect.objectContaining({
+      operatorTrace: [
+        expect.objectContaining({ operation: "input_commit", inputDraftRevision: 9 }),
+        expect.objectContaining({ operation: "send", response: { id: 99 } }),
+      ],
+    }));
+    expect(JSON.parse(await readFile(join(artifactDirectory, "input-roundtrip.json"), "utf8")))
+      .toMatchObject(result.inputRoundTrip);
   });
 
   it("refuses to relabel a historical recursive rubric as the active v6 contract", async () => {

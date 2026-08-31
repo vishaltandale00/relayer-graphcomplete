@@ -557,6 +557,9 @@ pub(super) async fn create_interaction(
             ));
         }
     }
+    if request.input_draft_revision.is_some() && request.input_id.is_none() {
+        return Err(ApiError::invalid("inputDraftRevision requires inputId"));
+    }
     let thread_detail = state.product.get_thread(thread_id).await?;
     let privileged_model_less_thread = state.allow_harness_override
         && thread_detail
@@ -766,6 +769,7 @@ pub(super) async fn retry_interaction(
                                 policy: None,
                                 adapter_version: None,
                                 failure_category: "configuration",
+                                error: error.message(),
                             })
                             .await
                         {

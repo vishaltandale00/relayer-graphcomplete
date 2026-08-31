@@ -28,6 +28,7 @@ import {
   createInputOperatorLease,
   createLocalSimulatedUserJudgeRunner,
   groundingCaptureTargets,
+  incompleteInputRoundTripEvidence,
   operatorInteractionIsTerminal,
   parseProductWriteResponse,
   releaseInputOperatorLease,
@@ -656,16 +657,9 @@ async function productWriteRequest(session, path, request, cookieHeader, respons
 
 async function captureInputRoundTripEvidence(session, { context, topology, operatorTrace, artifactDirectory }) {
   const commits = operatorTrace.filter((event) => event.operation === "input_commit");
+  const incompleteEvidence = incompleteInputRoundTripEvidence(operatorTrace);
+  if (incompleteEvidence) return incompleteEvidence;
   const send = operatorTrace.findLast((event) => event.operation === "send");
-  if (commits.length === 0 || !send) {
-    return {
-      schemaVersion: 1,
-      status: "not_exercised",
-      passed: false,
-      checks: [],
-      detail: "The simulated user did not commit an input and activate Send.",
-    };
-  }
   const interactionId = Number(send.response?.id);
   if (!Number.isSafeInteger(interactionId) || interactionId < 1) {
     throw new Error("Input operator Send returned no product interaction identity.");

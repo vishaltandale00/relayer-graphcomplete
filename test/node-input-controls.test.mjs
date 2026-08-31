@@ -42,6 +42,22 @@ function draft(revision, attachments = []) {
   return { threadId: 7, revision, attachments, updatedAt: `revision-${revision}` };
 }
 
+function responseAttachment({
+  inputOccurrence = occurrence,
+  action = textAction,
+  value = { text: "Accepted" },
+  draftRevision = 1,
+} = {}) {
+  return {
+    occurrence: inputOccurrence,
+    sourceNodeId: Number(inputOccurrence.actionId),
+    action,
+    value,
+    draftRevision,
+    committedAt: `revision-${draftRevision}`,
+  };
+}
+
 describe("node input control state", () => {
   it("bounds initial input-draft reloads to five backoff attempts", () => {
     expect([0, 1, 2, 3, 4, 5].map(inputDraftLoadRetryDelay))
@@ -243,7 +259,10 @@ describe("node input draft controller", () => {
     const api = {
       get: vi.fn()
         .mockImplementationOnce(() => initialLoad)
-        .mockResolvedValueOnce(draft(8, [{ occurrence, value: { text: "Restored" } }])),
+        .mockResolvedValueOnce(draft(8, [responseAttachment({
+          value: { text: "Restored" },
+          draftRevision: 8,
+        })])),
       commit: vi.fn(),
       detach: vi.fn(),
     };
@@ -263,12 +282,16 @@ describe("node input draft controller", () => {
     expect(api.get).toHaveBeenCalledTimes(2);
     expect(controller.current(7)).toEqual(draft(
       8,
-      [{ occurrence, value: { text: "Restored" } }],
+      [responseAttachment({ value: { text: "Restored" }, draftRevision: 8 })],
     ));
   });
 
   it("loads and applies commit/detach with the latest authoritative CAS revision", async () => {
-    const committed = { occurrence, action: singleAction, value: { selectedKeys: ["b"] } };
+    const committed = responseAttachment({
+      action: singleAction,
+      value: { selectedKeys: ["b"] },
+      draftRevision: 4,
+    });
     const api = {
       get: vi.fn(async () => draft(3)),
       commit: vi.fn(async () => draft(4, [committed])),
@@ -289,7 +312,10 @@ describe("node input draft controller", () => {
   });
 
   it("preserves the prior committed snapshot when validation or persistence fails", async () => {
-    const priorAttachment = { occurrence, action: textAction, value: { text: "Prior" } };
+    const priorAttachment = responseAttachment({
+      value: { text: "Prior" },
+      draftRevision: 9,
+    });
     const prior = draft(9, [priorAttachment]);
     const api = {
       get: vi.fn(async () => prior),
@@ -334,6 +360,130 @@ describe("node input draft controller", () => {
     expect(api.get).toHaveBeenCalledTimes(3);
   });
 
+  it("rejects malformed successful mutations and reconciles their ambiguous server state", async () => {
+    const committed = responseAttachment({ draftRevision: 10 });
+    const api = {
+      get: vi.fn()
+        .mockResolvedValueOnce(draft(9))
+        .mockResolvedValueOnce(draft(10, [committed]))
+        .mockResolvedValueOnce(draft(12)),
+      commit: vi.fn(async () => ({})),
+      detach: vi.fn(async () => ({ revision: 11, attachments: null })),
+    };
+    const controller = createNodeInputDraftController({ api });
+    await controller.load(7);
+
+    await expect(controller.commit(7, occurrence, textAction, "Accepted"))
+      .rejects.toMatchObject({ code: "input_draft_response_invalid" });
+    expect(controller.current(7)).toEqual(draft(10, [committed]));
+
+    await expect(controller.detach(7, occurrence))
+      .rejects.toMatchObject({ code: "input_draft_response_invalid" });
+    expect(controller.current(7)).toEqual(draft(12));
+    expect(api.commit).toHaveBeenCalledWith(
+      7,
+      occurrence,
+      { text: "Accepted" },
+      9,
+    );
+    expect(api.detach).toHaveBeenCalledWith(7, occurrence, 10);
+    expect(api.get).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects malformed attachment members before adopting a successful mutation", async () => {
+    const api = {
+      get: vi.fn()
+        .mockResolvedValueOnce(draft(4))
+        .mockResolvedValueOnce(draft(6)),
+      commit: vi.fn(async () => draft(5, [null])),
+      detach: vi.fn(),
+    };
+    const controller = createNodeInputDraftController({ api });
+    await controller.load(7);
+
+    await expect(controller.commit(7, occurrence, textAction, "Accepted"))
+      .rejects.toMatchObject({ code: "input_draft_response_invalid" });
+    expect(controller.current(7)).toEqual(draft(6));
+    expect(api.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects control-incompatible values, incomplete select actions, and future attachment revisions", async () => {
+    const malformedAttachments = [
+      responseAttachment({ value: { selectedKeys: ["a"] }, draftRevision: 5 }),
+      responseAttachment({ value: { text: "   " }, draftRevision: 5 }),
+      responseAttachment({
+        action: { control: "single_select", prompt: "Choose one", options: [] },
+        value: { selectedKeys: ["a"] },
+        draftRevision: 5,
+      }),
+      responseAttachment({
+        action: singleAction,
+        value: { selectedKeys: ["unknown"] },
+        draftRevision: 5,
+      }),
+      responseAttachment({
+        action: { control: "single_select", prompt: "Choose one", options: [null] },
+        value: { selectedKeys: ["a"] },
+        draftRevision: 5,
+      }),
+      responseAttachment({ draftRevision: 6 }),
+    ];
+    for (const malformed of malformedAttachments) {
+      const api = {
+        get: vi.fn()
+          .mockResolvedValueOnce(draft(4))
+          .mockResolvedValueOnce(draft(6)),
+        commit: vi.fn(async () => draft(5, [malformed])),
+        detach: vi.fn(),
+      };
+      const controller = createNodeInputDraftController({ api });
+      await controller.load(7);
+
+      await expect(controller.commit(7, occurrence, textAction, "Accepted"))
+        .rejects.toMatchObject({ code: "input_draft_response_invalid" });
+      expect(controller.current(7)).toEqual(draft(6));
+    }
+  });
+
+  it("requires exact revision and occurrence postconditions for successful mutations", async () => {
+    const retained = responseAttachment({ draftRevision: 4 });
+    const scenarios = [
+      { operation: "commit", response: draft(5) },
+      { operation: "commit", response: draft(4, [responseAttachment({ draftRevision: 4 })]) },
+      { operation: "detach", response: draft(5, [retained]) },
+    ];
+    for (const scenario of scenarios) {
+      const api = {
+        get: vi.fn()
+          .mockResolvedValueOnce(draft(4, scenario.operation === "detach" ? [retained] : []))
+          .mockResolvedValueOnce(draft(6)),
+        commit: vi.fn(async () => scenario.response),
+        detach: vi.fn(async () => scenario.response),
+      };
+      const controller = createNodeInputDraftController({ api });
+      await controller.load(7);
+
+      const mutation = scenario.operation === "commit"
+        ? controller.commit(7, occurrence, textAction, "Accepted")
+        : controller.detach(7, occurrence);
+      await expect(mutation).rejects.toMatchObject({ code: "input_draft_response_invalid" });
+      expect(controller.current(7)).toEqual(draft(6));
+    }
+  });
+
+  it("accepts an idempotent Detach response when the occurrence was already absent", async () => {
+    const api = {
+      get: vi.fn(async () => draft(4)),
+      commit: vi.fn(),
+      detach: vi.fn(async () => draft(4)),
+    };
+    const controller = createNodeInputDraftController({ api });
+    await controller.load(7);
+
+    await expect(controller.detach(7, occurrence)).resolves.toEqual(draft(4));
+    expect(api.detach).toHaveBeenCalledWith(7, occurrence, 4);
+  });
+
   it("requires an authoritative load before mutation", async () => {
     const api = { commit: vi.fn(), detach: vi.fn() };
     const controller = createNodeInputDraftController({ api });
@@ -351,7 +501,12 @@ describe("node input draft controller", () => {
       get: vi.fn(async () => draft(1)),
       commit: vi.fn(async (_threadId, receivedOccurrence, value, revision) => draft(
         revision + 1,
-        [{ occurrence: receivedOccurrence, action: singleAction, value }],
+        [responseAttachment({
+          inputOccurrence: receivedOccurrence,
+          action: singleAction,
+          value,
+          draftRevision: revision + 1,
+        })],
       )),
       detach: vi.fn(),
     };
@@ -374,7 +529,7 @@ describe("node input draft controller", () => {
       get: vi.fn(async () => draft(3)),
       commit: vi.fn(async () => {
         await commitGate;
-        return draft(4);
+        return draft(4, [responseAttachment({ value: { text: "next" }, draftRevision: 4 })]);
       }),
       detach: vi.fn(),
     };

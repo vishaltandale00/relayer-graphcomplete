@@ -39,6 +39,66 @@ const ANNOTATION_COOKIE: &str = "relayer_annotation";
 const INPUT_OPERATOR_COOKIE: &str = "relayer_input_operator";
 
 #[tokio::test]
+async fn interaction_post_rejects_input_draft_revision_without_input_id() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-input-revision-without-id-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({"initialMessage": "Keep the draft authoritative"})),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+
+    let response = app
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text": "Send without a stable retry identity",
+                "inputDraftRevision": 0
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "code": "invalid_input",
+            "error": "inputDraftRevision requires inputId"
+        })
+    );
+    let pool = sqlite_pool(&database).await;
+    let interaction_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM interactions WHERE thread_id=?1")
+            .bind(thread_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(interaction_count, 1);
+    pool.close().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn eval_input_operator_session_is_server_scoped_to_one_thread_and_occurrence() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)

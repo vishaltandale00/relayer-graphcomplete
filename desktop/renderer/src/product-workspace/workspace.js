@@ -1283,15 +1283,34 @@ export function beginNodeInputMutation({
   renderComposer();
 }
 
+export function compactSubmittedText(value, limit = 80) {
+  const prefix = [];
+  let hasContent = false;
+  let pendingSpace = false;
+  for (const codePoint of value) {
+    if (/\s/u.test(codePoint)) {
+      if (hasContent) pendingSpace = true;
+      continue;
+    }
+    if (pendingSpace) {
+      prefix.push(" ");
+      if (prefix.length > limit) break;
+    }
+    prefix.push(codePoint);
+    hasContent = true;
+    pendingSpace = false;
+    if (prefix.length > limit) break;
+  }
+  return prefix.length > limit
+    ? `${prefix.slice(0, limit - 1).join("")}…`
+    : prefix.join("");
+}
+
 export function submittedInputHistoryPresentation(input) {
   const prompt = input?.action?.prompt || "Input";
   if (typeof input?.value?.text === "string") {
     const fullValue = input.value.text;
-    const compactText = fullValue.replace(/\s+/gu, " ").trim();
-    const characters = [...compactText];
-    const compactValue = characters.length > 80
-      ? `${characters.slice(0, 79).join("")}…`
-      : compactText;
+    const compactValue = compactSubmittedText(fullValue);
     if (fullValue !== compactValue) {
       return Object.freeze({
         kind: "disclosure",

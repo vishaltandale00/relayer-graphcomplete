@@ -58,6 +58,7 @@ import {
   settleNodeInputCommit,
   selectInteractionSendIntentAfterInputReconciliation,
   settleConfirmationSendReplay,
+  compactSubmittedText,
   submittedInputHistoryPresentation,
   threadHasInFlightSend,
   settledComposerContextsWithConfirmations,
@@ -90,7 +91,12 @@ describe("product workspace keyboard behavior", () => {
     const reconciliation = new Promise((resolve) => { releaseReconciliation = resolve; });
     const api = {
       get: vi.fn()
-        .mockResolvedValueOnce({ threadId: 7, revision: 7, attachments: [{ id: "old" }] })
+        .mockResolvedValueOnce({
+          threadId: 7,
+          revision: 7,
+          attachments: [],
+          updatedAt: "revision-7",
+        })
         .mockImplementationOnce(() => reconciliation),
       commit: vi.fn(),
       detach: vi.fn(),
@@ -134,7 +140,12 @@ describe("product workspace keyboard behavior", () => {
     expect(readReplay).not.toHaveBeenCalled();
     expect(rebuild).not.toHaveBeenCalled();
 
-    releaseReconciliation({ threadId: 7, revision: 8, attachments: [] });
+    releaseReconciliation({
+      threadId: 7,
+      revision: 8,
+      attachments: [],
+      updatedAt: "revision-8",
+    });
     await forcedReload;
     await expect(selecting).resolves.toEqual({ rebuilt: true, inputDraftRevision: 8 });
     expect(readReplay).toHaveBeenCalledOnce();
@@ -305,6 +316,32 @@ describe("product workspace keyboard behavior", () => {
     });
     expect([...presentation.compactValue]).toHaveLength(80);
     expect(presentation.compactValue.endsWith("…")).toBe(true);
+
+    let iteratedCodePoints = 0;
+    const boundedSource = {
+      *[Symbol.iterator]() {
+        while (true) {
+          iteratedCodePoints += 1;
+          if (iteratedCodePoints > 81) {
+            throw new Error("compact history consumed beyond its bounded prefix");
+          }
+          yield iteratedCodePoints <= 79 ? "😀" : iteratedCodePoints === 80 ? "Z" : "x";
+        }
+      },
+    };
+    expect(compactSubmittedText(boundedSource)).toBe(`${"😀".repeat(79)}…`);
+    expect(iteratedCodePoints).toBe(81);
+
+    const huge = `${"😀".repeat(79)}Z${"x".repeat(4 * 1024 * 1024)}`;
+    expect(submittedInputHistoryPresentation({
+      action: { prompt: "Large rationale" },
+      value: { text: huge },
+    })).toMatchObject({
+      kind: "disclosure",
+      compactValue: `${"😀".repeat(79)}…`,
+      fullValue: huge,
+    });
+
     expect(submittedInputHistoryPresentation({
       action: { prompt: "Release channel" },
       value: { selected: [{ key: "preview", label: "Preview" }] },

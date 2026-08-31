@@ -24,6 +24,7 @@ pub(crate) struct PreExecutionModelFailure<'a> {
     pub(crate) policy: Option<&'a super::ExecutionHarnessPolicy>,
     pub(crate) adapter_version: Option<u32>,
     pub(crate) failure_category: &'a str,
+    pub(crate) error: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

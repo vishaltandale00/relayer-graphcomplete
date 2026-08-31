@@ -68,11 +68,30 @@ impl SqliteProductStore {
             ));
         }
         let id = inserted.last_insert_rowid();
-        let restored = sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status IN ('submitted','running')")
-            .bind(failure.harness_name)
-            .bind(failure.interaction_id.value())
-            .execute(&mut *transaction)
-            .await?;
+        let restores_submitted_input: bool = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=?1 AND state NOT IN ('accepted','failed','stopped'))",
+        )
+        .bind(failure.interaction_id.value())
+        .fetch_one(&mut *transaction)
+        .await?
+            != 0;
+        let restored = if restores_submitted_input {
+            // The trigger copies the immutable input snapshot back to mutable draft authority.
+            // Keep the failed Send terminal and retain receipts already bound before model
+            // admission; only ordinary interactions return to the unsent state below.
+            sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=?1,completion_error=?2 WHERE id=?3 AND completion_status IN ('submitted','running')")
+                .bind(failure.harness_name)
+                .bind(failure.error)
+                .bind(failure.interaction_id.value())
+                .execute(&mut *transaction)
+                .await?
+        } else {
+            sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status IN ('submitted','running')")
+                .bind(failure.harness_name)
+                .bind(failure.interaction_id.value())
+                .execute(&mut *transaction)
+                .await?
+        };
         if restored.rows_affected() != 1 {
             return Err(StorageError::IncompatibleSchema(
                 "interaction changed while recording its pre-execution model failure".into(),
@@ -646,6 +665,7 @@ mod tests {
                     policy: Some(&policy),
                     adapter_version: None,
                     failure_category: "provider_authentication",
+                    error: "Provider authentication failed.",
                 },
                 "10",
             )
@@ -674,6 +694,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(interaction.completion_status, "not_started");
+        assert_eq!(interaction.completion_error, None);
         assert_eq!(interaction.text, "hello");
         assert_eq!(interaction.latest_attempt.unwrap().id, attempt);
         let consumed_by: Option<i64> = sqlx::query_scalar(
@@ -704,6 +725,7 @@ mod tests {
                     policy: Some(&policy),
                     adapter_version: None,
                     failure_category: "configuration",
+                    error: "Harness configuration is unavailable.",
                 },
                 "11",
             )
@@ -716,6 +738,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(interaction.completion_status, "not_started");
+        assert_eq!(interaction.completion_error, None);
         assert_eq!(interaction.latest_attempt.unwrap().id, second_attempt);
         let consumed_by: Option<i64> = sqlx::query_scalar(
             "SELECT consumed_interaction_id FROM node_context_draft_resolutions WHERE draft_id='draft-retry'",
@@ -724,6 +747,145 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(consumed_by, None);
+    }
+
+    #[tokio::test]
+    async fn submitted_input_pre_execution_failure_restores_draft_without_erasing_bound_receipts() {
+        let (store, interaction_id, route) = seeded_store().await;
+        let thread_id: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+            .bind(interaction_id.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO action_input_drafts(thread_id,revision,updated_at) VALUES (?1,1,'1')",
+        )
+        .bind(thread_id)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO interaction_submitted_input_attempts(interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,graph_root_node_id,child_receipt_json,created_at,bound_at) VALUES (?1,?2,1,'sha256:authority','sha256:semantic','bound',77,'{\"child\":88}','1','2')")
+            .bind(interaction_id.value())
+            .bind(thread_id)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO interaction_submitted_input_attachments(interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) VALUES (?1,10,20,30,40,'{}','{}','1')")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE interactions SET graph_node_id=77,harness_configuration_digest='sha256:prepared',effective_execution_digest='sha256:execution',effective_permission_receipt_json=?1 WHERE id=?2")
+            .bind(r#"{"authority":"fixture"}"#)
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let policy = store
+            .load_execution_harness_policy("codex-basic")
+            .await
+            .unwrap();
+        let selection = InteractionModelSelection {
+            family_id: route.family_id,
+            provider_id: route.provider_id.clone(),
+            model_id: route.model_id.clone(),
+        };
+
+        let attempt = store
+            .record_pre_execution_model_failure(
+                PreExecutionModelFailure {
+                    interaction_id,
+                    harness_name: "codex-basic",
+                    selection: &selection,
+                    route: Some(&route),
+                    policy: Some(&policy),
+                    adapter_version: None,
+                    failure_category: "configuration",
+                    error: "Selected model is temporarily unavailable.",
+                },
+                "10",
+            )
+            .await
+            .unwrap();
+
+        let interaction = sqlx::query("SELECT completion_status,graph_node_id,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json,completion_error FROM interactions WHERE id=?1")
+            .bind(interaction_id.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(interaction.get::<String, _>("completion_status"), "failed");
+        assert_eq!(interaction.get::<Option<i64>, _>("graph_node_id"), Some(77));
+        assert_eq!(
+            interaction
+                .get::<Option<String>, _>("harness_configuration_digest")
+                .as_deref(),
+            Some("sha256:prepared")
+        );
+        assert_eq!(
+            interaction
+                .get::<Option<String>, _>("effective_execution_digest")
+                .as_deref(),
+            Some("sha256:execution")
+        );
+        assert_eq!(
+            interaction
+                .get::<Option<String>, _>("effective_permission_receipt_json")
+                .as_deref(),
+            Some(r#"{"authority":"fixture"}"#)
+        );
+        assert_eq!(
+            interaction
+                .get::<Option<String>, _>("completion_error")
+                .as_deref(),
+            Some("Selected model is temporarily unavailable.")
+        );
+        let immutable = sqlx::query("SELECT state,graph_root_node_id,child_receipt_json FROM interaction_submitted_input_attempts WHERE interaction_id=?1")
+            .bind(interaction_id.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(immutable.get::<String, _>("state"), "failed");
+        assert_eq!(
+            immutable.get::<Option<i64>, _>("graph_root_node_id"),
+            Some(77)
+        );
+        assert_eq!(
+            immutable
+                .get::<Option<String>, _>("child_receipt_json")
+                .as_deref(),
+            Some(r#"{"child":88}"#)
+        );
+        let restored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM action_input_attachments WHERE thread_id=?1 AND presenting_interaction_node_id=10 AND presenting_layer_id=20 AND action_id=30")
+            .bind(thread_id)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(restored, 1);
+        let restored_revision: i64 =
+            sqlx::query_scalar("SELECT revision FROM action_input_drafts WHERE thread_id=?1")
+                .bind(thread_id)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(restored_revision, 2);
+        let immutable_snapshot: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM interaction_submitted_input_attachments WHERE interaction_id=?1",
+        )
+        .bind(interaction_id.value())
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(immutable_snapshot, 1);
+        let failure_receipt: (String, String) =
+            sqlx::query_as("SELECT outcome,failure_category FROM interaction_attempts WHERE id=?1")
+                .bind(attempt)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            failure_receipt,
+            ("model_failed".into(), "configuration".into())
+        );
     }
 
     #[tokio::test]

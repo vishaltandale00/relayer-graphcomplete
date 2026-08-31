@@ -295,13 +295,121 @@ export function restoreTextControlState(control, state) {
   control.scrollLeft = state.scrollLeft;
 }
 
+function validDraftAttachment(attachment, draftRevision) {
+  if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) return false;
+  const occurrence = attachment.occurrence;
+  const action = attachment.action;
+  const value = attachment.value;
+  const occurrenceValid = occurrence
+    && typeof occurrence === "object"
+    && [
+      occurrence.presentingInteractionNodeId,
+      occurrence.presentingLayerId,
+      occurrence.actionId,
+    ].every((identity) => Number.isSafeInteger(identity) && identity > 0);
+  const optionsValid = action?.options === undefined || (
+    Array.isArray(action.options)
+    && action.options.every((option) => option
+      && typeof option === "object"
+      && typeof option.key === "string"
+      && typeof option.label === "string")
+  );
+  const actionValid = action
+    && typeof action === "object"
+    && SUPPORTED_CONTROLS.has(action.control)
+    && typeof action.prompt === "string"
+    && action.prompt.trim().length > 0
+    && optionsValid
+    && (action.control === "text"
+      ? (action.options === undefined || action.options.length === 0)
+        && action.minimumSelections === undefined
+      : Array.isArray(action.options)
+        && action.options.length > 0
+        && (action.control === "single_select"
+          ? action.minimumSelections === undefined
+          : action.minimumSelections === undefined
+            || (Number.isSafeInteger(action.minimumSelections)
+              && action.minimumSelections > 0
+              && action.minimumSelections <= action.options.length)));
+  const valueKeys = value && typeof value === "object" && !Array.isArray(value)
+    ? Object.keys(value)
+    : [];
+  const valueValid = valueKeys.length === 1 && (
+    (action?.control === "text" && valueKeys[0] === "text" && typeof value.text === "string")
+    || (action?.control !== "text" && valueKeys[0] === "selectedKeys"
+      && Array.isArray(value.selectedKeys)
+      && value.selectedKeys.every((selectedKey) => typeof selectedKey === "string"))
+  );
+  const stagedValue = action?.control === "text" ? value?.text : value?.selectedKeys;
+  const valueDomainValid = actionValid
+    && valueValid
+    && validateInputStage(action, stagedValue) === null;
+  return occurrenceValid
+    && Number.isSafeInteger(attachment.sourceNodeId)
+    && attachment.sourceNodeId > 0
+    && actionValid
+    && valueDomainValid
+    && Number.isSafeInteger(attachment.draftRevision)
+    && attachment.draftRevision > 0
+    && attachment.draftRevision <= draftRevision
+    && typeof attachment.committedAt === "string";
+}
+
+function invalidDraftResponse() {
+  const error = new Error("The server returned an invalid input draft response.");
+  error.name = "InputDraftResponseError";
+  error.code = "input_draft_response_invalid";
+  return error;
+}
+
+function inputActionsEqual(left, right) {
+  const options = (action) => (action?.options || []).map(({ key, label }) => ({ key, label }));
+  return left?.control === right?.control
+    && left?.prompt === right?.prompt
+    && (left?.minimumSelections ?? null) === (right?.minimumSelections ?? null)
+    && JSON.stringify(options(left)) === JSON.stringify(options(right));
+}
+
 function normalizedDraft(threadId, response) {
-  return immutableCopy({
-    ...response,
-    threadId: response?.threadId ?? threadId,
-    revision: response?.revision ?? 0,
-    attachments: response?.attachments || [],
-  });
+  const valid = response
+    && typeof response === "object"
+    && !Array.isArray(response)
+    && Number.isSafeInteger(response.threadId)
+    && String(response.threadId) === String(threadId)
+    && Number.isSafeInteger(response.revision)
+    && response.revision >= 0
+    && Array.isArray(response.attachments)
+    && response.attachments.every((attachment) => validDraftAttachment(attachment, response.revision))
+    && typeof response.updatedAt === "string";
+  if (!valid) {
+    throw invalidDraftResponse();
+  }
+  return immutableCopy(response);
+}
+
+function requireCommitPostcondition(threadId, response, current, occurrence, action, value) {
+  const draft = normalizedDraft(threadId, response);
+  const attachment = committedInputAttachment(draft, occurrence);
+  const valueMatches = action.control === "text"
+    ? attachment?.value?.text === value.text
+    : JSON.stringify([...(attachment?.value?.selectedKeys || [])].sort())
+      === JSON.stringify([...value.selectedKeys].sort());
+  if (draft.revision !== current.revision + 1
+    || !attachment
+    || !inputActionsEqual(attachment.action, action)
+    || !valueMatches) {
+    throw invalidDraftResponse();
+  }
+}
+
+function requireDetachPostcondition(threadId, response, current, occurrence) {
+  const draft = normalizedDraft(threadId, response);
+  const expectedRevision = committedInputAttachment(current, occurrence)
+    ? current.revision + 1
+    : current.revision;
+  if (draft.revision !== expectedRevision || committedInputAttachment(draft, occurrence)) {
+    throw invalidDraftResponse();
+  }
 }
 
 export function createNodeInputDraftLoadQueue({ load } = {}) {
@@ -354,8 +462,10 @@ export function createNodeInputDraftController({ api, onChange = () => {} } = {}
     }).catch(() => undefined);
     return next;
   };
-  const reconcileRevisionConflict = async (threadId, error) => {
-    if (error?.code !== "input_draft_revision_conflict") return;
+  const reconcileMutationFailure = async (threadId, error) => {
+    if (!["input_draft_revision_conflict", "input_draft_response_invalid"].includes(error?.code)) {
+      return;
+    }
     try {
       adopt(threadId, await api.get(threadId));
     } catch {
@@ -379,9 +489,10 @@ export function createNodeInputDraftController({ api, onChange = () => {} } = {}
         const current = requireCurrent(threadId);
         try {
           const response = await api.commit(threadId, occurrence, value, current.revision);
+          requireCommitPostcondition(threadId, response, current, occurrence, action, value);
           return adopt(threadId, response);
         } catch (error) {
-          await reconcileRevisionConflict(threadId, error);
+          await reconcileMutationFailure(threadId, error);
           throw error;
         }
       });
@@ -391,9 +502,10 @@ export function createNodeInputDraftController({ api, onChange = () => {} } = {}
         const current = requireCurrent(threadId);
         try {
           const response = await api.detach(threadId, occurrence, current.revision);
+          requireDetachPostcondition(threadId, response, current, occurrence);
           return adopt(threadId, response);
         } catch (error) {
-          await reconcileRevisionConflict(threadId, error);
+          await reconcileMutationFailure(threadId, error);
           throw error;
         }
       });
