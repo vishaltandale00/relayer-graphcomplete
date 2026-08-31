@@ -3277,6 +3277,35 @@ mod tests {
         );
         assert_eq!(missing_prompt["error"]["path"], "prompt");
 
+        let missing_control = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"missing-control","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Choose","prompt":"Choose a value"}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_control.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let missing_control: Value = serde_json::from_slice(
+            &to_bytes(missing_control.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            missing_control["error"]["code"],
+            "input_action_control_unsupported"
+        );
+        assert_eq!(missing_control["error"]["path"], "control");
+
         let explicit_empty_options = app
             .clone()
             .oneshot(
