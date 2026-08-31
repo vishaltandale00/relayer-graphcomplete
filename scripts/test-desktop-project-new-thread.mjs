@@ -410,7 +410,10 @@ async function run() {
       && document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(pendingPrompt)}
   )`));
   await waitFor("the first-message Send action", () => evaluate(`document.querySelector('#createThread')?.disabled === false`));
-  await click("#createThread");
+  await evaluate(`(() => {
+    document.querySelector('[data-project-new-thread="${secondProject.id}"]').click();
+    document.querySelector('#createThread').click();
+  })()`);
   const firstThread = await waitFor("the first project thread", async () => {
     const state = await productRequest(productSession, "/api/state");
     if (state.threads.length !== 1) return false;
@@ -494,7 +497,10 @@ async function run() {
   await waitFor("the saved follow-up Send action", () => evaluate(`(
     document.querySelector('#sendInteraction')?.disabled === false
   )`));
-  await click("#sendInteraction");
+  await evaluate(`(() => {
+    document.querySelector('[data-project-new-thread="${project.id}"]').click();
+    document.querySelector('#sendInteraction').click();
+  })()`);
   await waitFor("the saved follow-up draft to clear after Send", () => evaluate(`(
     document.querySelector('#threadPrompt')?.value === ''
   )`), 20_000);
@@ -553,7 +559,7 @@ async function run() {
   await waitFor("the explicitly cleared saved-thread draft", () => evaluate(`(
     document.querySelector('#threadPrompt')?.value === ''
   )`));
-  await waitFor("the explicit clear tombstone in the main-process store", async () => {
+  await waitFor("the failed-prompt clear tombstone in the main-process store", async () => {
     const saved = await desktopSettings.read();
     return Object.values(saved.composerDrafts?.threadFollowups || {}).includes("");
   });

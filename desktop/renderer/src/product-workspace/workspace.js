@@ -3352,7 +3352,9 @@ export function createProductWorkspace({
       preserve: false,
     });
     composerPromptRevision += 1;
-    persistThreadFollowupDraft(composerDraftScopeState.activeScopeKey, prompt.value);
+    persistThreadFollowupDraft(composerDraftScopeState.activeScopeKey, prompt.value, {
+      preserveEmpty: restoredDraftActive,
+    });
     syncComposer();
   };
   bindComposerKeydown(prompt, () => {

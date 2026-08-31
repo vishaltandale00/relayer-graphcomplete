@@ -978,6 +978,7 @@ describe("onboarding tutorial controller", () => {
     expect(onboarding).toContain("&& isComposerReady()");
     expect(onboarding).toContain("cancelPendingAutomatic,");
     expect(main).toContain("if (pendingNewThreadDraft()?.text) return false;");
+    expect(main).toContain('#createThread, #sendInteraction, #confirmContextDraftSend');
     expect(main.match(/takeOverPendingAutomaticTutorial\(\);/g)).toHaveLength(6);
     expect(main).toContain(`$("#newThreadPrompt").oninput = () => {
     takeOverPendingAutomaticTutorial();`);

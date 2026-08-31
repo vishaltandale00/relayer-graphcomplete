@@ -87,10 +87,11 @@ export function threadFollowupDraft(scopeKey) {
   return typeof value === "string" ? value : null;
 }
 
-export function persistThreadFollowupDraft(scopeKey, text) {
+export function persistThreadFollowupDraft(scopeKey, text, { preserveEmpty = false } = {}) {
   if (!scopeKey) return;
   const state = readState();
-  state.threadFollowups[scopeKey] = text;
+  if (text || preserveEmpty) state.threadFollowups[scopeKey] = text;
+  else delete state.threadFollowups[scopeKey];
   writeState(state);
 }
 
