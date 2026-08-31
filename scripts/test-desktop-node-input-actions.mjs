@@ -496,14 +496,108 @@ async function run() {
   window.webContents.setZoomFactor(1);
   await waitForPaint();
 
+  await click("#attachNodeContext");
+  await waitFor("replay snapshot annotation editor", () => evaluate(`Boolean(
+    document.querySelector("[aria-label='Annotation for Input grammar']")
+  )`));
+  await setValue(
+    "[aria-label='Annotation for Input grammar']",
+    "Preserve this click-time context through reconciliation.",
+  );
+  await click("[aria-label='Confirm annotation']");
+  await waitFor("replay snapshot context confirmed", () => evaluate(`(
+    document.querySelectorAll('.composer-context-pill:not(.composer-input-pill)').length === 1
+  )`));
+  await setValue("#threadPrompt", "Preserve this click-time prompt through reconciliation.");
+
+  await evaluate(`(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.__nodeInputInteractionAttempts = [];
+    window.__nodeInputLoseNextInteraction = true;
+    window.fetch = async (input, init = {}) => {
+      const url = typeof input === 'string' ? input : input.url;
+      const method = init.method || (typeof input === 'object' ? input.method : 'GET') || 'GET';
+      if (method === 'POST' && new URL(url, location.href).pathname.endsWith('/interactions')) {
+        window.__nodeInputInteractionAttempts.push(JSON.parse(init.body));
+        if (window.__nodeInputLoseNextInteraction) {
+          window.__nodeInputLoseNextInteraction = false;
+          throw new TypeError('Injected lost interaction response');
+        }
+      }
+      return originalFetch(input, init);
+    };
+  })()`);
+  let reconciliationHeld = false;
+  let releaseReconciliation;
+  const reconciliationFilter = { urls: [`${productSession.origin}/api/threads/*/input-draft`] };
+  window.webContents.session.webRequest.onBeforeRequest(reconciliationFilter, (details, callback) => {
+    if (!reconciliationHeld && details.method === "GET") {
+      reconciliationHeld = true;
+      releaseReconciliation = () => callback({});
+      return;
+    }
+    callback({});
+  });
+
   await click("#sendInteraction");
+  await waitFor("ambiguous Send queues forced input reconciliation", async () => (
+    reconciliationHeld
+      && await evaluate(`(
+        window.__nodeInputInteractionAttempts.length === 1
+          && document.querySelector('#sendInteraction')?.disabled === true
+      )`)
+  ));
+  await evaluate(`document.querySelector('#sendInteraction').dispatchEvent(new MouseEvent('click', { bubbles: true }))`);
+  await waitForPaint();
+  const prematureAttempts = await evaluate(`window.__nodeInputInteractionAttempts.length`);
+  const prematureThread = await productRequest(`/api/threads/${thread.id}`);
+  if (prematureAttempts !== 1 || prematureThread.interactions.length !== 1) {
+    throw new Error(`Send escaped pending input reconciliation: ${JSON.stringify({ prematureAttempts, interactions: prematureThread.interactions.length })}`);
+  }
+
+  const draftBeforeReconciliation = await productRequest(`/api/threads/${thread.id}/input-draft`);
+  const detachedForReconciliation = draftBeforeReconciliation.attachments.find(
+    (attachment) => attachment.action.prompt === "Choose supporting evidence",
+  );
+  const detachedOccurrence = detachedForReconciliation.occurrence;
+  await productRequest(
+    `/api/threads/${thread.id}/input-draft/attachments/${encodeURIComponent(detachedOccurrence.presentingInteractionNodeId)}/${encodeURIComponent(detachedOccurrence.presentingLayerId)}/${encodeURIComponent(detachedOccurrence.actionId)}?expectedRevision=${encodeURIComponent(draftBeforeReconciliation.revision)}`,
+    { method: "DELETE" },
+  );
+  releaseReconciliation();
+  await waitFor("advanced input revision adopted before retry", async () => {
+    const authoritative = await productRequest(`/api/threads/${thread.id}/input-draft`);
+    return authoritative.revision === draftBeforeReconciliation.revision + 1
+      && await evaluate(`document.querySelector('#sendInteraction')?.disabled === false`);
+  });
+
+  await click("#sendInteraction");
+  await waitFor("retry rebuilt from click-time snapshot", async () => {
+    const attempts = await evaluate(`window.__nodeInputInteractionAttempts`);
+    if (attempts.length !== 2) return false;
+    const original = attempts[0];
+    const retry = attempts[1];
+    return original.text === "Preserve this click-time prompt through reconciliation."
+      && original.inputDraftRevision === draftBeforeReconciliation.revision
+      && original.contexts?.[0]?.annotations?.[0]
+        === "Preserve this click-time context through reconciliation."
+      && original.modelSelection?.providerId === "codex"
+      && original.modelSelection?.modelId === "fixture-model"
+      && retry.text === original.text
+      && retry.inputDraftRevision === draftBeforeReconciliation.revision + 1
+      && retry.contexts?.[0]?.annotations?.[0] === original.contexts[0].annotations[0]
+      && retry.modelSelection?.providerId === original.modelSelection.providerId
+      && retry.modelSelection?.modelId === original.modelSelection.modelId;
+  });
+  window.webContents.session.webRequest.onBeforeRequest(reconciliationFilter, null);
+
   await waitFor("input controls locked during send", () => evaluate(`(() => (
     document.querySelectorAll('#nodeInputActions button:not(:disabled), #nodeInputActions textarea:not(:disabled)').length === 0
   ))()`));
   releaseSecondCompletion();
   const acceptedThread = await waitForAcceptedInteractions(thread.id, 2);
   await waitFor("submitted inputs rendered read-only", () => evaluate(`(() => (
-    document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length === 3
+    document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length === 2
       && document.querySelectorAll('.composer-input-pill').length === 0
   ))()`));
   const historyDisclosure = await evaluate(`(() => {
