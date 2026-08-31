@@ -172,6 +172,8 @@ export function validatePreviewCandidate({
   checksumText,
   version,
   sourceCommit,
+  candidateWorkflowRunId,
+  candidateWorkflowRunAttempt,
   artifactEvidence,
   target = desktopReleaseTarget(),
 } = {}) {
@@ -198,6 +200,8 @@ export function validatePreviewCandidate({
     releaseReceipt.channel !== "preview" ||
     releaseReceipt.manifest !== target.channels.preview.manifestName ||
     releaseReceipt.sourceCommit !== sourceCommit ||
+    (candidateWorkflowRunId && releaseReceipt.candidateWorkflowRunId !== candidateWorkflowRunId) ||
+    (candidateWorkflowRunAttempt && releaseReceipt.candidateWorkflowRunAttempt !== candidateWorkflowRunAttempt) ||
     releaseReceipt.appId !== DESKTOP_RELEASE.productionAppId ||
     releaseReceipt.architecture !== target.architecture ||
     releaseReceipt.minimumMacOSVersion !== target.minimumMacOSVersion ||
@@ -418,6 +422,8 @@ export async function publishDesktopPreview({
     checksumText: await readFile(join(distRoot, `${prefix}-SHA256SUMS.txt`), "utf8"),
     version,
     sourceCommit: provenance.sourceCommit,
+    candidateWorkflowRunId: provenance.candidateWorkflowRunId,
+    candidateWorkflowRunAttempt: provenance.candidateWorkflowRunAttempt,
     artifactEvidence: evidence,
     target,
   });
@@ -442,6 +448,44 @@ export async function publishDesktopPreview({
       version,
       manifestText,
     });
+
+    const receiptKey = `private/receipts/${target.key}/preview/${version}.json`;
+    const existingReceiptObject = await readObject({ bucket, key: receiptKey, execute });
+    let receipt = {
+      schemaVersion: 2,
+      channel: "preview",
+      target: target.key,
+      version,
+      sourceCommit: provenance.sourceCommit,
+      candidateWorkflowRunId: provenance.candidateWorkflowRunId,
+      candidateWorkflowRunAttempt: provenance.candidateWorkflowRunAttempt,
+      candidateArtifactId: provenance.candidateArtifactId,
+      candidateArtifactDigest: provenance.candidateArtifactDigest,
+      workflowRunId: provenance.workflowRunId,
+      workflowRunAttempt: provenance.workflowRunAttempt,
+      publishedAt: new Date().toISOString(),
+      artifacts: plan.map(({ name, size, sha256, sha512, key }) => ({ name, size, sha256, sha512, key })),
+      manifest: { key: pointerKey, size: manifestEvidence.size, sha256: manifestEvidence.sha256 },
+    };
+    if (existingReceiptObject) {
+      const existingReceipt = JSON.parse(existingReceiptObject.content);
+      const identity = (value) => ({
+        channel: value.channel,
+        target: value.target,
+        version: value.version,
+        sourceCommit: value.sourceCommit,
+        candidateWorkflowRunId: value.candidateWorkflowRunId,
+        candidateWorkflowRunAttempt: value.candidateWorkflowRunAttempt,
+        candidateArtifactId: value.candidateArtifactId,
+        candidateArtifactDigest: value.candidateArtifactDigest,
+        artifacts: value.artifacts,
+        manifest: value.manifest,
+      });
+      if (JSON.stringify(identity(existingReceipt)) !== JSON.stringify(identity(receipt))) {
+        throw new Error(`Preview ${version} already has a different publication receipt.`);
+      }
+      receipt = existingReceipt;
+    }
 
     for (const item of plan) {
       await ensureImmutableObject({
@@ -487,55 +531,6 @@ export async function publishDesktopPreview({
       fetchImpl,
     });
 
-    const receiptKey = `private/receipts/${target.key}/preview/${version}.json`;
-    const existingReceiptObject = await readObject({ bucket, key: receiptKey, execute });
-    let receipt = {
-      schemaVersion: 2,
-      channel: "preview",
-      target: target.key,
-      version,
-      sourceCommit: provenance.sourceCommit,
-      candidateWorkflowRunId: provenance.candidateWorkflowRunId,
-      candidateWorkflowRunAttempt: provenance.candidateWorkflowRunAttempt,
-      candidateArtifactId: provenance.candidateArtifactId,
-      candidateArtifactDigest: provenance.candidateArtifactDigest,
-      workflowRunId: provenance.workflowRunId,
-      workflowRunAttempt: provenance.workflowRunAttempt,
-      publishedAt: new Date().toISOString(),
-      artifacts: plan.map(({ name, size, sha256, sha512, key }) => ({ name, size, sha256, sha512, key })),
-      manifest: { key: pointerKey, size: manifestEvidence.size, sha256: manifestEvidence.sha256 },
-    };
-    if (existingReceiptObject) {
-      const existingReceipt = JSON.parse(existingReceiptObject.content);
-      const expectedIdentity = {
-        channel: receipt.channel,
-        target: receipt.target,
-        version: receipt.version,
-        sourceCommit: receipt.sourceCommit,
-        candidateWorkflowRunId: receipt.candidateWorkflowRunId,
-        candidateWorkflowRunAttempt: receipt.candidateWorkflowRunAttempt,
-        candidateArtifactId: receipt.candidateArtifactId,
-        candidateArtifactDigest: receipt.candidateArtifactDigest,
-        artifacts: receipt.artifacts,
-        manifest: receipt.manifest,
-      };
-      const existingIdentity = {
-        channel: existingReceipt.channel,
-        target: existingReceipt.target,
-        version: existingReceipt.version,
-        sourceCommit: existingReceipt.sourceCommit,
-        candidateWorkflowRunId: existingReceipt.candidateWorkflowRunId,
-        candidateWorkflowRunAttempt: existingReceipt.candidateWorkflowRunAttempt,
-        candidateArtifactId: existingReceipt.candidateArtifactId,
-        candidateArtifactDigest: existingReceipt.candidateArtifactDigest,
-        artifacts: existingReceipt.artifacts,
-        manifest: existingReceipt.manifest,
-      };
-      if (JSON.stringify(existingIdentity) !== JSON.stringify(expectedIdentity)) {
-        throw new Error(`Preview ${version} already has a different publication receipt.`);
-      }
-      receipt = existingReceipt;
-    }
     const receiptPath = join(distRoot, `preview-publication-${target.key}-${version}.json`);
     await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     if (!existingReceiptObject) {

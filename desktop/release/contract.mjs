@@ -179,6 +179,15 @@ export function resolveDesktopReleaseContract({
   if (updateBaseUrl !== target.updateBaseUrl) {
     throw new Error(`RELAYER_DESKTOP_UPDATE_BASE_URL must be exactly ${target.updateBaseUrl}.`);
   }
+  const candidateWorkflowRunId = value(environment, "RELAYER_DESKTOP_CANDIDATE_RUN_ID");
+  const candidateWorkflowRunAttempt = value(environment, "RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT");
+  if (
+    Boolean(candidateWorkflowRunId) !== Boolean(candidateWorkflowRunAttempt) ||
+    (candidateWorkflowRunId && !/^[1-9]\d*$/.test(candidateWorkflowRunId)) ||
+    (candidateWorkflowRunAttempt && !/^[1-9]\d*$/.test(candidateWorkflowRunAttempt))
+  ) {
+    throw new Error("Desktop candidate provenance requires positive workflow run and attempt IDs together.");
+  }
 
   let signingIdentity = null;
   let signingMode;
@@ -247,6 +256,8 @@ export function resolveDesktopReleaseContract({
     manifestName: channel.manifestName,
     updateBaseUrl,
     sourceCommit: normalizedCommit,
+    candidateWorkflowRunId: candidateWorkflowRunId || null,
+    candidateWorkflowRunAttempt: candidateWorkflowRunAttempt || null,
     signingIdentity,
     signingMode,
     notarizationMode,

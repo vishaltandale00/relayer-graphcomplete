@@ -11,6 +11,11 @@ function positiveRunId(value, label = "candidate workflow run ID") {
   return normalized;
 }
 
+function candidateJobName(target) {
+  if (target === "windows-x64") return "Windows x64 Preview (blocked)";
+  return `Sign and notarize ${target} Preview`;
+}
+
 export function parseDesktopPreviewCandidateTag({ objectType, message, version, targets = ["macos-arm64"] } = {}) {
   if (String(objectType || "").trim() !== "tag") {
     throw new Error("Desktop Preview publication requires an annotated release tag.");
@@ -49,6 +54,7 @@ export function parseDesktopPreviewCandidateTag({ objectType, message, version, 
 
 export function validateDesktopPreviewCandidateRun({
   run,
+  jobs,
   artifacts,
   candidateRunId,
   candidateRunAttempt,
@@ -69,17 +75,25 @@ export function validateDesktopPreviewCandidateRun({
     String(run?.run_attempt ?? "") !== expectedRunAttempt ||
     run?.event !== "workflow_dispatch" ||
     run?.status !== "completed" ||
-    run?.conclusion !== "success" ||
     String(run?.head_sha || "").toLowerCase() !== expectedCommit ||
     run?.head_branch !== "main" ||
     run?.path !== DESKTOP_SIGNED_PREVIEW_WORKFLOW_PATH ||
     run?.repository?.full_name !== expectedRepository
   ) {
-    throw new Error("Pinned Desktop Preview candidate run is not a successful manual run for this exact main commit and workflow.");
+    throw new Error("Pinned Desktop Preview candidate run is not a completed manual run for this exact main commit and workflow attempt.");
   }
+  const listedJobs = Array.isArray(jobs?.jobs) ? jobs.jobs : [];
   const listedArtifacts = Array.isArray(artifacts?.artifacts) ? artifacts.artifacts : [];
   const validatedArtifacts = {};
   for (const target of targets) {
+    const successfulJobs = listedJobs.filter((job) => (
+      job?.name === candidateJobName(target) &&
+      job?.status === "completed" &&
+      job?.conclusion === "success"
+    ));
+    if (successfulJobs.length !== 1) {
+      throw new Error(`Pinned Desktop Preview candidate attempt must contain one successful ${target} package job.`);
+    }
     const name = `relayer-desktop-preview-${target}-${expectedCommit}`;
     const pinned = candidateArtifacts?.[target];
     const artifactId = positiveRunId(pinned?.id, "candidate artifact ID");
@@ -126,12 +140,15 @@ export async function resolveDesktopPreviewCandidateRun({ environment = process.
   const baseUrl = `https://api.github.com/repos/${repository}/actions/runs/${candidateRunId}`;
   const runBeforeArtifacts = await fetchImpl(baseUrl, { headers })
     .then((response) => readJson(response, "candidate workflow run"));
+  const jobs = await fetchImpl(`${baseUrl}/attempts/${candidateRunAttempt}/jobs?per_page=100`, { headers })
+    .then((response) => readJson(response, "candidate workflow attempt jobs"));
   const artifacts = await fetchImpl(`${baseUrl}/artifacts?per_page=100`, { headers })
     .then((response) => readJson(response, "candidate artifacts"));
   const runAfterArtifacts = await fetchImpl(baseUrl, { headers })
     .then((response) => readJson(response, "candidate workflow run after artifact lookup"));
   validateDesktopPreviewCandidateRun({
     run: runBeforeArtifacts,
+    jobs,
     artifacts,
     candidateRunId,
     candidateRunAttempt,
@@ -141,6 +158,7 @@ export async function resolveDesktopPreviewCandidateRun({ environment = process.
   });
   return validateDesktopPreviewCandidateRun({
     run: runAfterArtifacts,
+    jobs,
     artifacts,
     candidateRunId,
     candidateRunAttempt,

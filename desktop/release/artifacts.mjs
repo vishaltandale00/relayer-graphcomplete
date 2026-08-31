@@ -121,6 +121,10 @@ function releaseReceipt(contract, evidence) {
     manifest: contract.manifestName,
     updateBaseUrl: contract.updateBaseUrl,
     sourceCommit: contract.sourceCommit,
+    ...(contract.candidateWorkflowRunId ? {
+      candidateWorkflowRunId: contract.candidateWorkflowRunId,
+      candidateWorkflowRunAttempt: contract.candidateWorkflowRunAttempt,
+    } : {}),
     signing: contract.platform === "darwin"
       ? { mode: contract.signingMode, appleTeamId: contract.appleTeamId, notarizationMode: contract.notarizationMode }
       : {

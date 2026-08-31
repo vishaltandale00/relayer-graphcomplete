@@ -127,6 +127,8 @@ jobs:
           RELAYER_DESKTOP_TARGET: ${{ matrix.target }}
           RELAYER_DESKTOP_SIGN_IDENTITY: ${{ secrets.RELAYER_DESKTOP_SIGN_IDENTITY }}
           RELAYER_DESKTOP_APPLE_API_KEY_P8: ${{ secrets.RELAYER_DESKTOP_APPLE_API_KEY }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ID: ${{ github.run_id }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: ${{ github.run_attempt }}
           APPLE_API_KEY_ID: ${{ secrets.RELAYER_DESKTOP_APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.RELAYER_DESKTOP_APPLE_API_ISSUER }}
           CSC_LINK: ${{ secrets.RELAYER_DESKTOP_CSC_LINK }}
@@ -258,6 +260,8 @@ jobs:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           RELAYER_DESKTOP_TARGET: windows-x64
           RELAYER_DESKTOP_SOURCE_COMMIT: ${{ github.sha }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ID: ${{ github.run_id }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: ${{ github.run_attempt }}
           RELAYER_DESKTOP_UPDATE_BASE_URL: https://updates.relayerlabs.ai/desktop/windows/x64
           RELAYER_WINDOWS_SIGNING_ENDPOINT: https://eus.codesigning.azure.net/
           RELAYER_WINDOWS_SIGNING_ACCOUNT: relayercodesigning
