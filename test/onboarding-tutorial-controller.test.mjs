@@ -961,7 +961,9 @@ describe("onboarding tutorial controller", () => {
     expect(main).toContain('$("#startTutorial").disabled = !ready;');
     expect(onboarding.indexOf('if (source === "manual" && !isComposerReady()) return false;'))
       .toBeLessThan(onboarding.indexOf("const attempt = ownedAttempt ?? claimStart(source);"));
-    expect(main).toContain('async function openNewThreadComposer({ prompt = "", guard = null } = {})');
+    expect(main).toContain("async function openNewThreadComposer({");
+    expect(main).toContain('scope = { kind: "standalone", label: "No folder" },');
+    expect(main).toContain("guard = null,");
     expect(main.indexOf("const applyPermissionProfiles = await preparePermissionProfiles("))
       .toBeLessThan(main.indexOf("if (guard && !guard()) return false;"));
     expect(main.indexOf("if (guard && !guard()) return false;"))

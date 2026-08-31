@@ -5,6 +5,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/renderer/src/api.js",
     "desktop/renderer/src/approval-model.js",
     "desktop/renderer/src/auth.js",
+    "desktop/renderer/src/composer-drafts.js",
     "desktop/renderer/src/composer-model-picker.js",
     "desktop/renderer/src/control-activation.js",
     "desktop/renderer/src/desktop-account.js",

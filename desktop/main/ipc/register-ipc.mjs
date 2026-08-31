@@ -1,5 +1,38 @@
 import { inspectFolder } from "../services/folder-service.mjs";
 
+const MAX_COMPOSER_DRAFT_BYTES = 1024 * 1024;
+const MAX_FOLLOWUP_DRAFTS = 256;
+
+export function normalizeComposerDrafts(value) {
+  const pending = value?.pendingNewThread;
+  const followups = value?.threadFollowups;
+  const normalized = {
+    pendingNewThread: pending && typeof pending.text === "string"
+      ? { text: pending.text, scope: pending.scope ?? null }
+      : null,
+    threadFollowups: followups && typeof followups === "object" && !Array.isArray(followups)
+      ? Object.fromEntries(Object.entries(followups).filter(([, text]) => typeof text === "string"))
+      : {},
+  };
+  if (Object.keys(normalized.threadFollowups).length > MAX_FOLLOWUP_DRAFTS
+    || Buffer.byteLength(JSON.stringify(normalized), "utf8") > MAX_COMPOSER_DRAFT_BYTES) {
+    throw new TypeError("Composer drafts exceed the local persistence limit.");
+  }
+  return normalized;
+}
+
+export function registerComposerDraftIpc({ ipcMain, settings }) {
+  ipcMain.handle("relayer:composer-drafts-read", async () => {
+    const saved = await settings.read();
+    return normalizeComposerDrafts(saved.composerDrafts);
+  });
+  ipcMain.handle("relayer:composer-drafts-write", async (_event, value) => {
+    const composerDrafts = normalizeComposerDrafts(value);
+    await settings.update((current) => ({ ...current, composerDrafts }));
+    return composerDrafts;
+  });
+}
+
 export function registerDesktopIpc({
   ipcMain,
   dialog,
@@ -128,6 +161,7 @@ export function registerDesktopIpc({
     await settings.update((current) => ({ ...current, appearance }));
     return { appearance };
   });
+  registerComposerDraftIpc({ ipcMain, settings });
   ipcMain.handle("relayer:tutorial-read", (_event, context) => tutorial.read(context));
   ipcMain.handle("relayer:tutorial-begin-automatic", (_event, context) => tutorial.beginAutomatic(context));
   ipcMain.handle("relayer:tutorial-begin-manual", () => tutorial.beginManual());

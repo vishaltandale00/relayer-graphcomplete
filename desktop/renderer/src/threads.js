@@ -73,6 +73,7 @@ import {
   resolveEnvironmentSnapshot,
 } from "./environment-context.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
+import { clearPendingNewThreadDraft } from "./composer-drafts.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -1341,7 +1342,7 @@ export async function createFirstThread(pickerPayloadOverride = null) {
         createId: () => crypto.randomUUID(),
       });
       viewState.currentThreadId = thread.id;
-      input.value = "";
+      clearSuccessfulNewThreadInput(input);
       renderSidebar();
       renderThread();
       return;
@@ -1366,7 +1367,7 @@ export async function createFirstThread(pickerPayloadOverride = null) {
       threadId: thread.id,
       interactionId: thread.rootInteractionId,
     });
-    input.value = "";
+    clearSuccessfulNewThreadInput(input);
     await loadThread(thread.id);
   } catch (error) {
     await refreshAfterModelSelectionRejection(error);
@@ -1378,6 +1379,11 @@ export async function createFirstThread(pickerPayloadOverride = null) {
     setNewThreadModelPickerDisabled(false);
     updateCreateThreadAvailability();
   }
+}
+
+function clearSuccessfulNewThreadInput(input) {
+  input.value = "";
+  clearPendingNewThreadDraft();
 }
 
 export function connectEvents() {

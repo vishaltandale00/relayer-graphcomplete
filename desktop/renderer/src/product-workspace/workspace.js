@@ -66,6 +66,11 @@ import {
   resolvedApprovalHistoryForThread,
   selectedPendingApproval,
 } from "../approval-model.js";
+import {
+  clearThreadFollowupDraft,
+  persistThreadFollowupDraft,
+  threadFollowupDraft,
+} from "../composer-drafts.js";
 
 export const GRAPH_NODE_ICON_RADIUS = 24;
 export const GRAPH_MIN_ZOOM = 0.4;
@@ -1048,6 +1053,7 @@ export function transitionComposerDraftScope(state, {
   currentPromptValue,
   currentPromptRevision = 0,
   restoredDraft = null,
+  persistedDraftText = null,
 }) {
   const nextScopeKey = composerDraftScopeKey(threadId, interactionId);
   if (state.activeScopeKey === nextScopeKey) {
@@ -1058,8 +1064,12 @@ export function transitionComposerDraftScope(state, {
     };
     const restorationArrived = restoredDraft
       && String(currentDraft.restoredDraftInteractionId) !== String(interactionId);
-    const promptValue = restorationArrived ? restoredDraft.text : currentPromptValue;
-    const promptRevision = restorationArrived
+    const persistedDraftChanged = persistedDraftText !== null
+      && persistedDraftText !== currentPromptValue;
+    const promptValue = persistedDraftChanged
+      ? persistedDraftText
+      : restorationArrived ? restoredDraft.text : currentPromptValue;
+    const promptRevision = restorationArrived || persistedDraftChanged
       ? currentPromptRevision + 1
       : currentPromptRevision;
     const drafts = new Map(state.drafts);
@@ -1086,7 +1096,13 @@ export function transitionComposerDraftScope(state, {
         ?.restoredDraftInteractionId ?? null,
     });
   }
-  if (!drafts.has(nextScopeKey)) {
+  if (persistedDraftText !== null) {
+    drafts.set(nextScopeKey, {
+      promptValue: persistedDraftText,
+      promptRevision: currentPromptRevision + 1,
+      restoredDraftInteractionId: restoredDraft ? interactionId : null,
+    });
+  } else if (!drafts.has(nextScopeKey)) {
     drafts.set(nextScopeKey, {
       promptValue: restoredDraft?.text ?? "",
       promptRevision: currentPromptRevision + 1,
@@ -3123,6 +3139,7 @@ export function createProductWorkspace({
       if (settlement.current.prompt !== currentComposer.prompt) {
         prompt.value = settlement.current.prompt.value;
         composerPromptRevision = settlement.current.prompt.revision;
+        clearThreadFollowupDraft(settlement.submittedScopeKey);
       }
       if (submittedConfirmationIds.length
         && String(getThread()?.id) === String(submittedThreadId)) {
@@ -3332,6 +3349,7 @@ export function createProductWorkspace({
       preserve: false,
     });
     composerPromptRevision += 1;
+    persistThreadFollowupDraft(composerDraftScopeState.activeScopeKey, prompt.value);
     syncComposer();
   };
   bindComposerKeydown(prompt, () => {
@@ -3758,6 +3776,9 @@ export function createProductWorkspace({
       currentPromptValue: prompt.value,
       currentPromptRevision: composerPromptRevision,
       restoredDraft,
+      persistedDraftText: threadFollowupDraft(
+        composerDraftScopeKey(threadId, latestInteraction?.id),
+      ),
     });
     composerDraftScopeState = draftTransition.state;
     prompt.value = draftTransition.promptValue;

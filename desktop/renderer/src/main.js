@@ -10,7 +10,7 @@ import {
   preparePermissionProfiles,
   togglePermissionMenu,
 } from "./permission-profiles.js";
-import { appState, desktop, evalReview, productApiAvailable, viewState } from "./state.js";
+import { appState, desktop, evalReview, productApiAvailable, query, viewState } from "./state.js";
 import {
   closeNewThreadModelPicker,
   initializeNewThreadModelPicker,
@@ -50,6 +50,11 @@ import {
   refreshDesktopAccountUi,
   revealDesktopWorkspace,
 } from "./desktop-account.js";
+import {
+  initializeComposerDrafts,
+  pendingNewThreadDraft,
+  persistPendingNewThreadDraft,
+} from "./composer-drafts.js";
 
 function applyPlatformCopy() {
   const isMac = desktop?.platform === "darwin";
@@ -85,7 +90,20 @@ function takeOverPendingAutomaticTutorial() {
   onboardingTutorialController()?.cancelPendingAutomatic();
 }
 
-async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
+function projectScope(project) {
+  return {
+    kind: "project",
+    projectId: project.id,
+    label: project.name,
+    path: project.path,
+  };
+}
+
+async function openNewThreadComposer({
+  prompt = "",
+  scope = { kind: "standalone", label: "No folder" },
+  guard = null,
+} = {}) {
   const applyPermissionProfiles = await preparePermissionProfiles(
     appState.modelSettings?.defaults?.harnessId,
   );
@@ -96,7 +114,7 @@ async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
   cancelNavigationHistory();
   viewState.currentThreadId = null;
   viewState.currentInteractionId = null;
-  selectScope({ kind: "standalone", label: "No folder" });
+  selectScope(scope);
   resetNewThreadModelPicker();
   setMainView("new");
   $("#newThreadPrompt").value = prompt;
@@ -125,6 +143,29 @@ function bindEvents() {
       toast(error.message);
     }
   };
+  $("#projectList").onclick = (event) => {
+    const action = event.target.closest("[data-project-new-thread]");
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void (async () => {
+      const project = appState.projects.find((candidate) => (
+        String(candidate.id) === action.dataset.projectNewThread
+      ));
+      if (!project) return;
+      if (viewState.mainView === "new"
+        && viewState.selectedScope.kind === "project"
+        && String(viewState.selectedScope.projectId) === String(project.id)) {
+        $("#newThreadPrompt").focus();
+        return;
+      }
+      if (!await prepareCurrentWorkspaceTransition()) return;
+      const draft = pendingNewThreadDraft();
+      const scope = projectScope(project);
+      persistPendingNewThreadDraft(draft?.text ?? "", scope);
+      await openNewThreadComposer({ prompt: draft?.text ?? "", scope });
+    })().catch((error) => toast(error.message));
+  };
   $("#scopeButton").onclick = () => {
     takeOverPendingAutomaticTutorial();
     closePermissionMenu();
@@ -144,6 +185,7 @@ function bindEvents() {
   $("#createThread").onclick = () => createFirstThread();
   $("#newThreadPrompt").oninput = () => {
     takeOverPendingAutomaticTutorial();
+    persistPendingNewThreadDraft($("#newThreadPrompt").value, viewState.selectedScope);
     updateCreateThreadAvailability();
   };
   bindComposerKeydown($("#newThreadPrompt"), () => {
@@ -282,6 +324,7 @@ async function boot() {
   if (evalReview) viewState.evalContext = await evalReview.context();
   applyPlatformCopy();
   bindEvents();
+  await initializeComposerDrafts();
   window.addEventListener("focus", () => {
     void refreshCurrentEnvironment({ force: true, minimumAgeMs: 1_000 }).catch(() => {});
   });
@@ -326,6 +369,16 @@ async function boot() {
   }
   updateCreateThreadAvailability();
   await refreshState(viewState.currentThreadId);
+  const pendingDraft = pendingNewThreadDraft();
+  if (pendingDraft?.text && !query.get("threadId")) {
+    const scope = pendingDraft.scope?.kind === "project"
+      ? appState.projects.find((project) => String(project.id) === String(pendingDraft.scope.projectId))
+      : null;
+    await openNewThreadComposer({
+      prompt: pendingDraft.text,
+      scope: scope ? projectScope(scope) : { kind: "standalone", label: "No folder" },
+    });
+  }
   await initializeDesktopAccountUi({
     desktop,
     offerOnboarding: account?.status === "connected",

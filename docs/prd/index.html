@@ -1051,7 +1051,19 @@ type InteractionModelBinding = {
 <li>A user can move a no-folder chat into an existing or new project. This action changes the thread scope and sidebar location. It must not create a second thread. It must not change the root interaction ID or remove graph history.</li>
 <li>Moving into a project affects subsequent interactions. Previously accepted turns retain the standalone scope and filesystem binding recorded when they ran.</li>
 </ul>
-<h3>3.3 Git-aware execution options</h3>
+<h3>3.3 Start a thread from a project row</h3>
+<p>A project row shows only its project marker and name while idle. It does not show a thread count.</p>
+<p>Pointer hover or keyboard focus reveals one trailing compose button. The row layout does not move when the button appears.</p>
+<p>The button's accessible name includes the project name. Only this button opens the project-scoped New Thread flow.</p>
+<p>The project row remains a separate target. Activating the row does not start a thread or change draft scope.</p>
+<p>The button opens the existing New Thread composer and selects the exact project. It does not create a thread before Send.</p>
+<p>The action preserves pending New Thread text while changing its project scope. Re-selecting the same project preserves and focuses that draft.</p>
+<p>An unsent follow-up remains owned by its saved thread. The project action opens or restores the separate pending New Thread draft.</p>
+<p>Both draft types persist locally across navigation and restart. A successful Send or explicit clearing removes the applicable draft.</p>
+<p>The sidebar does not show a badge, dot, label, or other draft-presence indicator.</p>
+<p>This feature does not change the global New Thread control or keyboard-shortcut behavior.</p>
+<p>The approved throwaway prototype at <code>desktop/renderer/project-row-hover.prototype.html</code> defines the visual behavior. It is design input, not implementation evidence.</p>
+<h3>3.4 Git-aware execution options</h3>
 <p>When the selected project is a Git repository, an execution control appears beside the folder control:</p>
 <ul>
 <li><strong>Local checkout:</strong> use the opened folder and its current branch.</li>
@@ -1059,7 +1071,7 @@ type InteractionModelBinding = {
 V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong>, matching the compact Codex-style decision. Base-branch, custom-location, and existing-worktree controls are deferred until a demonstrated product need. Non-Git folders do not show Git controls or empty Git status.</li>
 </ul>
 <p>Forking a thread can keep its current execution location or create a new worktree. The new interaction inherits the conversation graph and project ontology while retaining its own thread-specific history.</p>
-<h3>3.4 Permission profiles</h3>
+<h3>3.5 Permission profiles</h3>
 <p>The New Thread composer places a permission picker beside the folder control. It uses the product labels and availability returned by <code>GET /api/permission-profiles</code>; the renderer does not expose raw provider sandbox or approval flags. The initial selection is the Rust catalog's default profile.</p>
 <table>
 <thead><tr><th>Profile</th><th>User-facing behavior</th><th>Authority boundary</th></tr></thead>
@@ -1070,7 +1082,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </tbody>
 </table>
 <p>Unavailable profiles remain visible but disabled with a product-readable reason. If no profile is available, New Thread cannot send. The selected profile is written during thread creation, shown with the saved thread, and cannot be changed for later turns in that thread.</p>
-<h3>3.5 Requirements</h3>
+<h3>3.6 Requirements</h3>
 <ul>
 <li><strong>SCP-001:</strong> Send is disabled until the composer has text and a valid No folder or project scope.</li>
 <li><strong>SCP-002:</strong> No folder never receives a user folder path by implication; the stored internal scope remains <code>standalone</code>.</li>
@@ -1081,6 +1093,14 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <li><strong>SCP-007:</strong> New thread, fork, rename, archive, pin, delete-entry, and reopen actions are available from expected sidebar or thread menus.</li>
 <li><strong>SCP-008:</strong> Deleting a thread entry never deletes graph nodes referenced by another thread or turn.</li>
 <li><strong>SCP-009:</strong> A move from a no-folder chat must preserve the thread and graph identity. It must record the scope change. It must use the selected project only for later interactions.</li>
+<li><strong>SCP-010:</strong> An idle project row shows its marker and name without a thread count.</li>
+<li><strong>SCP-011:</strong> Hover or keyboard focus reveals one trailing project compose button without moving the row layout.</li>
+<li><strong>SCP-012:</strong> The compose button has a project-specific accessible name. No other project-row target starts this flow.</li>
+<li><strong>SCP-013:</strong> The button opens New Thread with the exact stable <code>projectId</code>. Thread creation still waits for Send.</li>
+<li><strong>SCP-014:</strong> Project selection preserves pending New Thread text. Re-selecting the same project only restores focus.</li>
+<li><strong>SCP-015:</strong> An unsent saved-thread follow-up remains attached to that thread when the project compose button opens New Thread.</li>
+<li><strong>SCP-016:</strong> Saved-thread and pending New Thread drafts survive navigation and restart. Send or explicit clearing removes only the applicable draft.</li>
+<li><strong>SCP-017:</strong> The sidebar does not indicate draft presence with a badge, dot, label, or equivalent marker.</li>
 <li><strong>PERM-001:</strong> New Thread exposes exactly Ask for approval, Approve for me, and Full access using the stable product IDs <code>ask</code>, <code>auto</code>, and <code>full</code>.</li>
 <li><strong>PERM-002:</strong> The picker selects the Rust catalog default on load and permits selection only when desktop policy and the selected harness both support the profile.</li>
 <li><strong>PERM-003:</strong> First send records <code>permissionProfileId</code> on the ordinary product thread before inference. Every later interaction inherits that pinned profile.</li>
@@ -1088,8 +1108,12 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <li><strong>PERM-005:</strong> Full access visibly states that filesystem and network access are not hard-confined.</li>
 <li><strong>PERM-006:</strong> Product UI and API contracts use stable profile IDs and product semantics, never raw provider sandbox or approval flags.</li>
 </ul>
-<h3>3.6 Verification</h3>
+<h3>3.7 Verification</h3>
 <p>Choice-driven tests cover each scope, Git option, and permission profile. Permission tests cover catalog defaulting, unavailable-profile fallback, no-profile failure, the exact thread-create request, pinned persistence, and the Full access disclosure. They also cover creation failure, revoked permission, duplicate projects, project moves, and both fork options. Filesystem and Git tests use temporary repositories. They must not change a user checkout.</p>
+<p>Project-row tests cover idle, hover, pointer exit, keyboard focus, long names, and empty projects. They assert one stable action target.</p>
+<p>Interaction tests prove exact project selection and no pre-Send thread creation. They cover same-project focus and cross-project draft preservation.</p>
+<p>Draft tests cover saved follow-ups, pending New Thread text, navigation, restart, successful Send, and explicit clearing. These tests use local deterministic fixtures.</p>
+<p>Rendered evidence must show the populated sidebar before hover, during hover, and after activation. Prototype screenshots do not satisfy this requirement.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15.2">15B. Work-context evidence</h2>
 <table>
 <thead>
@@ -1107,6 +1131,13 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td>The structural desktop scenario asserts New Thread, <code>scopeButton</code>, <code>scopeMenu</code>, and disabled empty send. The Rust integration scenario proves atomic thread/interaction creation and database reopen.</td>
 <td><code>SCP-001-E1</code>, <code>SCP-001-E2</code>, <code>APP-001-E1</code>, and <code>APP-001-E2</code></td>
 <td>No folder create/reopen is verified. Existing-project population, folder-dialog completion, Git detection, and local/new-worktree choice remain unverified, so the overall requirement group stays partial.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td>Project-row New Thread action and draft safety</td>
+<td><span class="delivery-status verified">Verified</span></td>
+<td><code>npm run test:desktop:project-new-thread</code> covers <code>SCP-010</code> through <code>SCP-017</code> through one production-renderer seam with deterministic fixtures and no paid inference.</td>
+<td>The scenario captures resting, hovered, and activated production renderer states under <code>.relayer/evidence/project-new-thread/</code>.</td>
+<td>None for this requirement group.</td>
 </tr>
 <tr class="requirement-row status-verified">
 <td>New Thread permission profile selection</td>

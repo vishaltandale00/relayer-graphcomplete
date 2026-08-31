@@ -634,7 +634,7 @@ describe("product workspace keyboard behavior", () => {
     }
     expect(workspaceSource).toContain("prepareSelectionChange: prepareNodeContextSelectionChange");
     expect(graphSource).toContain("productWorkspace?.prepareSelectionChange()");
-    expect(mainSource.match(/prepareCurrentWorkspaceTransition\(\)/g)).toHaveLength(3);
+    expect(mainSource.match(/prepareCurrentWorkspaceTransition\(\)/g)).toHaveLength(4);
   });
 
   it("presents every unconfirmed draft with stable accessible identity", () => {
