@@ -234,6 +234,7 @@ The ordinary test suite never invokes inference. `runtime-basic` remains a harne
 - `crates/relayer-graph-core/src/storage.rs` is the persistence boundary. `SqliteGraphStore` owns the SQLx pool and connection lifecycle, its table-specific modules contain all queries, and `storage/sqlite/migrations` contains both the embedded migration runner and versioned SQL. Graph behavior does not import SQLx. This mirrors the app server's `SqliteProductStore` boundary without introducing a transport API inside graph core.
 - `crates/relayer-graph-server` exposes that same core through the loopback API.
 - `packages/graph-client` is the typed Node authoring client and contains no graph persistence.
+- `packages/visual-assets` owns the deterministic logical visual-assets interface, scope and tag semantics, and the private generic-content Module used for digest indexing. It does not compile Node Details or inject asset inventory into harness prompts.
 - `packages/harness-host` owns persistent per-thread harness objects and code-owned implementations such as `codex.basic`.
 - `packages/eval-runner` owns harness-agnostic case/run expansion, deterministic checks, and the lower-level CLI artifact path. The Relayer Eval shell composes those contracts around the production app server and renderer.
 - `python/relayer-graph` is the Python authoring client and contains no graph persistence.
