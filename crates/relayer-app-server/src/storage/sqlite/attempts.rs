@@ -1343,6 +1343,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn submitted_input_model_failure_preserves_terminal_execution_receipts() {
+        let (store, interaction_id, route) = seeded_store().await;
+        let thread_id: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+            .bind(interaction_id.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO action_input_drafts(thread_id,revision,updated_at) VALUES (?1,1,'1')",
+        )
+        .bind(thread_id)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO interaction_submitted_input_attempts(interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,graph_root_node_id,child_receipt_json,created_at,bound_at) VALUES (?1,?2,1,'sha256:authority','sha256:semantic','running',77,'{}','1','2')")
+            .bind(interaction_id.value())
+            .bind(thread_id)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO interaction_submitted_input_attachments(interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) VALUES (?1,10,20,30,40,'{}','{}','1')")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE interactions SET graph_node_id=77,harness_configuration_digest='sha256:prepared',effective_execution_digest='sha256:execution',effective_permission_receipt_json=?1 WHERE id=?2")
+            .bind(r#"{"authority":"fixture"}"#)
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let attempt = store
+            .begin_interaction_attempt(receipt(interaction_id, &route), "10")
+            .await
+            .unwrap();
+
+        store
+            .fail_interaction_completion_with_attempt(
+                FailedInteractionCompletion {
+                    attempt_id: attempt,
+                    interaction_id,
+                    harness_configuration_name: "codex-basic",
+                    error: "provider stopped after graph binding",
+                    outcome: "model_failed",
+                    failure_category: "provider_timeout",
+                    effect_boundary: "graph_write",
+                    return_to_unsent: true,
+                    graph_node_id: None,
+                },
+                "11",
+            )
+            .await
+            .unwrap();
+
+        let row =
+            sqlx::query("SELECT completion_status,graph_node_id,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json,completion_error FROM interactions WHERE id=?1")
+                .bind(interaction_id.value())
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(row.get::<String, _>("completion_status"), "failed");
+        assert_eq!(row.get::<Option<i64>, _>("graph_node_id"), Some(77));
+        assert_eq!(
+            row.get::<Option<String>, _>("harness_configuration_digest")
+                .as_deref(),
+            Some("sha256:prepared")
+        );
+        assert_eq!(
+            row.get::<Option<String>, _>("effective_execution_digest")
+                .as_deref(),
+            Some("sha256:execution")
+        );
+        assert_eq!(
+            row.get::<Option<String>, _>("effective_permission_receipt_json")
+                .as_deref(),
+            Some(r#"{"authority":"fixture"}"#)
+        );
+        assert_eq!(
+            row.get::<Option<String>, _>("completion_error").as_deref(),
+            Some("provider stopped after graph binding")
+        );
+        let restored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM action_input_attachments WHERE thread_id=?1 AND presenting_interaction_node_id=10 AND presenting_layer_id=20 AND action_id=30")
+            .bind(thread_id)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(restored, 1);
+    }
+
+    #[tokio::test]
     async fn partial_effect_boundaries_are_terminal_inspectable_and_one_shot() {
         for boundary in ["partial_output", "graph_write", "tool_effect", "unknown"] {
             let (store, interaction_id, route) = seeded_store().await;

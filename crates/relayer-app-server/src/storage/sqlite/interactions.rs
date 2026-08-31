@@ -820,7 +820,27 @@ impl SqliteProductStore {
                 "interaction attempt was already terminal, missing, or owned by another interaction".into(),
             ));
         }
-        let interaction = if failure.return_to_unsent {
+        let restores_submitted_input = if failure.return_to_unsent {
+            sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=?1 AND state NOT IN ('accepted','failed','stopped'))")
+                .bind(failure.interaction_id.value())
+                .fetch_one(&mut *transaction)
+                .await?
+                != 0
+        } else {
+            false
+        };
+        let interaction = if restores_submitted_input {
+            // The submitted-input trigger restores the immutable attachment snapshot into a new
+            // draft. Keep this attempt terminal and inspectable; returning the interaction itself
+            // to unsent would erase its prepared graph and execution receipts before the trigger
+            // gets a chance to restore only the mutable draft authority.
+            sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=?1,completion_error=?2 WHERE id=?3 AND completion_status='running'")
+                .bind(failure.harness_configuration_name)
+                .bind(failure.error)
+                .bind(failure.interaction_id.value())
+                .execute(&mut *transaction)
+                .await?
+        } else if failure.return_to_unsent {
             sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
                 .bind(failure.harness_configuration_name)
                 .bind(failure.interaction_id.value())
