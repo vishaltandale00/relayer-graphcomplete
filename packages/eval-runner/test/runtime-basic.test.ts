@@ -15,7 +15,7 @@ import {
 } from "../src/fixtures/graph-memory.js";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkGraphMemoryFirstTurn, checkGraphMemorySecondTurn, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, graphMemoryAnchor, graphMemoryEvalCaseId, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkGraphMemoryFirstTurn, checkGraphMemorySecondTurn, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, graphMemoryEvalCaseId, graphMemorySearchRequestMode, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -440,9 +440,9 @@ describe("first runtime evaluation", () => {
       node.title === graphMemorySearchTitle
     ));
     expect(searchTarget).toHaveLength(1);
-    expect(searchTarget[0]!.detail).toContain(`Evaluation witness: ${graphMemoryAnchor(execution.testRunId)}`);
     expect(artifact.turns[0]!.output.rootLayer.nodes.every((node) => (
       !node.title.includes("GRAPH_MEMORY_ANCHOR:")
+      && !node.detail.includes("GRAPH_MEMORY_ANCHOR:")
     ))).toBe(true);
     expect(artifact.turns[1]!.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
@@ -498,13 +498,13 @@ describe("first runtime evaluation", () => {
         },
       },
       artifact.turns[1]!.interactionNodeId,
-      true,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
     );
     expect(launderedChecks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
       expect.objectContaining({ name: "search-request-contract", passed: false }),
     ]));
-    const witnessAsParameterChecks = checkGraphMemorySecondTurn(
+    const machineMarkerAsParameterChecks = checkGraphMemorySecondTurn(
       artifact.turns[1]!.output,
       artifact.turns[0]!.output,
       {
@@ -512,55 +512,150 @@ describe("first runtime evaluation", () => {
         searchRequest: {
           ...evidence.searchRequest!,
           parameters: {
-            topic: { type: "string", value: graphMemoryAnchor(execution.testRunId) },
+            topic: { type: "string", value: "GRAPH_MEMORY_ANCHOR:forbidden" },
           },
         },
       },
       artifact.turns[1]!.interactionNodeId,
-      true,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
     );
-    expect(witnessAsParameterChecks).toEqual(expect.arrayContaining([
+    expect(machineMarkerAsParameterChecks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
       expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const naturallyFormulatedChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          queryContractVersion: 1,
+          query: "MATCH (content:Content)<-[:CONTAINS]-(layer:Layer) WHERE content.title = $title RETURN layer AS layer LIMIT 1",
+          parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+          budget: graphMemorySearchBudget,
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "natural" },
+    );
+    expect(naturallyFormulatedChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: true }),
+    ]));
+    const admittedNaturalVariants = [
+      {
+        query: "MATCH (layer:Layer)-[membership:CONTAINS]->(content:Content) WHERE content.title = $title RETURN DISTINCT layer LIMIT 1",
+        budget: graphMemorySearchBudget,
+      },
+      {
+        query: "MATCH path = (layer:Layer)-[:CONTAINS { order: 0 }]->(content:Content) WHERE $title = content.title RETURN layer ORDER BY content.title ASC LIMIT 1",
+        budget: graphMemorySearchBudget,
+      },
+      {
+        query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer ORDER BY layer ASC",
+        budget: {},
+      },
+      {
+        query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer ORDER BY layer ASC",
+        budget: undefined,
+      },
+    ];
+    for (const { query, budget } of admittedNaturalVariants) {
+      expect(checkGraphMemorySecondTurn(
+        artifact.turns[1]!.output,
+        artifact.turns[0]!.output,
+        {
+          ...evidence,
+          searchRequest: {
+            queryContractVersion: 1,
+            query,
+            parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+            budget,
+          },
+        },
+        artifact.turns[1]!.interactionNodeId,
+        { requireDraftDecoy: true, searchRequestMode: "natural" },
+      )).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "search-request-contract", passed: true }),
+      ]));
+    }
+    expect(graphMemorySearchRequestMode("fixture.graph-memory")).toBe("exact");
+    expect(graphMemorySearchRequestMode("codex.basic")).toBe("natural");
+    expect(graphMemorySearchRequestMode("claude.basic")).toBe("natural");
+    expect(graphMemorySearchRequestMode("prime.agent")).toBe("natural");
+    const tautologicalQueryChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          queryContractVersion: 1,
+          query: "MATCH (layer:Layer) WHERE $title = $title RETURN layer AS layer LIMIT 1",
+          parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+          budget: graphMemorySearchBudget,
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "natural" },
+    );
+    expect(tautologicalQueryChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const truncatedEvidence = {
+      ...evidence,
+      auditEvents: evidence.auditEvents.map((event) => (
+        event.path === "/api/graph/search" && event.sequence > evidence.secondTurnStartSequence
+          ? { ...event, resultTruncated: true }
+          : event
+      )),
+    };
+    expect(checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      truncatedEvidence,
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: false }),
+      expect.objectContaining({ name: "draft-decoy-hidden", passed: false }),
     ]));
 
     const firstOutput = artifact.turns[0]!.output;
     const searchTargetId = searchTarget[0]!.id;
-    const witness = `Evaluation witness: ${graphMemoryAnchor(execution.testRunId)}`;
-    const wrongCanvasTitle = {
+    const duplicateNaturalTarget = {
       ...firstOutput,
       rootLayer: {
         ...firstOutput.rootLayer,
         nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
           ? node
-          : { ...node, title: graphMemoryAnchor(execution.testRunId) }),
+          : { ...node, title: graphMemorySearchTitle }),
       },
     };
-    const witnessOnWrongNode = {
-      ...firstOutput,
-      rootLayer: {
-        ...firstOutput.rootLayer,
-        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
-          ? { ...node, detail: node.detail.replace(witness, "") }
-          : { ...node, detail: `${node.detail}\n\n${witness}` }),
-      },
-    };
-    const duplicateWitness = {
+    const machineMarkerTitle = {
       ...firstOutput,
       rootLayer: {
         ...firstOutput.rootLayer,
         nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
           ? node
-          : { ...node, detail: `${node.detail}\n\n${witness}` }),
+          : { ...node, title: "GRAPH_MEMORY_ANCHOR:forbidden" }),
       },
     };
-    for (const invalidOutput of [wrongCanvasTitle, witnessOnWrongNode, duplicateWitness]) {
+    const machineMarkerDetail = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? node
+          : { ...node, detail: `${node.detail}\n\nGRAPH_MEMORY_ANCHOR:forbidden` }),
+      },
+    };
+    for (const invalidOutput of [duplicateNaturalTarget, machineMarkerTitle, machineMarkerDetail]) {
       expect(checkGraphMemoryFirstTurn(
         invalidOutput,
-        graphMemoryAnchor(execution.testRunId),
         invalidOutput.nodeId,
       )).toEqual(expect.arrayContaining([
-        expect.objectContaining({ name: "unique-memory-search-target", passed: false }),
+        expect.objectContaining({ name: "natural-memory-search-target", passed: false }),
       ]));
     }
   }, 30_000);

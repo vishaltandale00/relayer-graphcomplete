@@ -36,16 +36,17 @@ Use the actual returned numeric IDs, not these example values. Preserve the usef
 
 Do not create fake navigation to the orphan. Do not delete graph records. The accepted answer should clearly explain stable client keys, retry after partial persistence, and idempotent recovery.`;
 
-export function graphMemoryAnchor(testRunId: string): string {
-  return `GRAPH_MEMORY_ANCHOR:${testRunId}`;
+const graphMemoryPromptPair: readonly [string, string] = Object.freeze([
+  `Explain when newly saved graph content becomes available to future requests. Include exactly one section titled ${graphMemorySearchTitle}.`,
+  `Find your earlier ${graphMemorySearchTitle} explanation and link the original as supporting context in a concise follow-up. Do not recreate or paraphrase it.`,
+]);
+
+export function graphMemoryEvalPrompts(_testRunId?: string): readonly [string, string] {
+  return graphMemoryPromptPair;
 }
 
-export function graphMemoryEvalPrompts(testRunId: string): readonly [string, string] {
-  const anchor = graphMemoryAnchor(testRunId);
-  return [
-    `Create and submit a useful accepted graph explaining acknowledgement-level graph-search freshness. Include exactly one visible node whose title is exactly ${graphMemorySearchTitle}. In that node's detail, include exactly one line reading: Evaluation witness: ${anchor}`,
-    `Follow up in the same provider session using prior accepted graph state. The deterministic evaluation witness for this run is ${anchor}; it is evidence only and must not be used as the search parameter. Before authoring the response, invoke graph.search() with query contract version 1 and exactly parameters ${JSON.stringify(graphMemorySearchParameters)} and budget ${JSON.stringify(graphMemorySearchBudget)} to find the accepted Layer containing the Content whose title is exactly ${graphMemorySearchTitle}. Use exactly this query text:\n${graphMemorySearchQuery}\nThen submit a new accepted response layer with a typed navigate action whose relation is reference, whose sourceLayer is the new response layer, and whose target is the exact prior Layer identity returned by search. Finish with graph.submit(interactionNode). Do not hard-code or infer the prior layer ID.`,
-  ];
+export function graphMemorySearchRequestMode(implementation: string): "exact" | "natural" {
+  return implementation === "fixture.graph-memory" ? "exact" : "natural";
 }
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 
@@ -133,6 +134,7 @@ export interface ReplayRepairAuditEvent {
   readonly completionNodeId?: number;
   readonly completionRootLayerId?: number;
   readonly searchLayerIds?: readonly number[];
+  readonly resultTruncated?: boolean;
   readonly queryContractVersion?: number;
   readonly query?: string;
   readonly parameters?: Readonly<Record<string, unknown>>;
@@ -145,7 +147,6 @@ export interface ReplayRepairAuditEvent {
 }
 
 export interface GraphMemoryEvidence {
-  readonly anchor: string;
   readonly secondTurnStartSequence: number;
   readonly searchedLayerIds: readonly number[];
   readonly searchSequence?: number;
@@ -241,8 +242,7 @@ export async function runBasicRuntimeEval(options: {
         ? await readReplayRepairEvidence(complete.output, interaction.node.id, graphProcess.url, graphControlToken, graphAuditProxy?.events() ?? [])
         : undefined;
       const graphMemoryEvidence = isGraphMemory && turns.length === 1
-        ? readGraphMemoryEvidence(
-            graphMemoryAnchor(options.execution.testRunId),
+          ? readGraphMemoryEvidence(
             turns[0]!.output,
             complete.output,
             graphAuditProxy?.events() ?? [],
@@ -253,13 +253,16 @@ export async function runBasicRuntimeEval(options: {
         ? checkReplayRepairOutput(complete.output, repairEvidence, interaction.node.id)
         : isGraphMemory
           ? turns.length === 0
-            ? checkGraphMemoryFirstTurn(complete.output, graphMemoryAnchor(options.execution.testRunId), interaction.node.id)
+            ? checkGraphMemoryFirstTurn(complete.output, interaction.node.id)
             : checkGraphMemorySecondTurn(
                 complete.output,
                 turns[0]!.output,
                 graphMemoryEvidence,
                 interaction.node.id,
-                configuration.implementation === "fixture.graph-memory",
+                {
+                  requireDraftDecoy: configuration.implementation === "fixture.graph-memory",
+                  searchRequestMode: graphMemorySearchRequestMode(configuration.implementation),
+                },
               )
           : checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);
@@ -428,29 +431,24 @@ export function checkBasicOutput(
 
 export function checkGraphMemoryFirstTurn(
   output: CompletionOutput,
-  anchor: string,
   expectedInteractionNodeId = output.nodeId,
 ): EvalCheck[] {
   const matching = output.rootLayer.nodes.filter((node) => node.title === graphMemorySearchTitle);
-  const witness = `Evaluation witness: ${anchor}`;
-  const witnessLines = output.rootLayer.nodes.flatMap((node) => node.detail.split(/\r?\n/)).filter((line) => line.trim() === witness);
-  const matchingWitnessLines = matching.flatMap((node) => node.detail.split(/\r?\n/)).filter((line) => line.trim() === witness);
-  const canvasTitlesAreNatural = output.rootLayer.nodes.every((node) => !node.title.includes("GRAPH_MEMORY_ANCHOR:"));
+  const graphHasNoMachineMarker = output.rootLayer.nodes.every((node) => (
+    !node.title.includes("GRAPH_MEMORY_ANCHOR:")
+    && !node.detail.includes("GRAPH_MEMORY_ANCHOR:")
+  ));
   return [
     ...checkBasicOutput(output, expectedInteractionNodeId),
     {
-      name: "unique-memory-search-target",
-      passed: matching.length === 1
-        && witnessLines.length === 1
-        && matchingWitnessLines.length === 1
-        && canvasTitlesAreNatural,
-      detail: `The first accepted root contains one human-readable ${graphMemorySearchTitle} search target with exactly one run-unique evaluation witness.`,
+      name: "natural-memory-search-target",
+      passed: matching.length === 1 && graphHasNoMachineMarker,
+      detail: `The first accepted root contains one human-readable ${graphMemorySearchTitle} search target and no machine marker in visible content.`,
     },
   ];
 }
 
 export function readGraphMemoryEvidence(
-  anchor: string,
   firstOutput: CompletionOutput,
   secondOutput: CompletionOutput,
   auditEvents: readonly ReplayRepairAuditEvent[],
@@ -490,7 +488,6 @@ export function readGraphMemoryEvidence(
     && event.sequence < search.sequence
   )).at(-1);
   return {
-    anchor,
     secondTurnStartSequence,
     searchedLayerIds,
     ...(search === undefined ? {} : { searchSequence: search.sequence }),
@@ -514,8 +511,13 @@ export function checkGraphMemorySecondTurn(
   firstOutput: CompletionOutput,
   evidence: GraphMemoryEvidence | undefined,
   expectedInteractionNodeId = output.nodeId,
-  requireDraftDecoy = false,
+  options: {
+    readonly requireDraftDecoy?: boolean;
+    readonly searchRequestMode?: "exact" | "natural";
+  } = {},
 ): EvalCheck[] {
+  const requireDraftDecoy = options.requireDraftDecoy === true;
+  const searchRequestMode = options.searchRequestMode ?? "exact";
   const base = checkBasicOutput(output, expectedInteractionNodeId);
   if (evidence === undefined) {
     return [
@@ -585,20 +587,26 @@ export function checkGraphMemorySecondTurn(
       name: "search-returned-prior-root",
       passed: successfulSearches.length === 1
         && evidence.searchedLayerIds.length === 1
-        && evidence.searchedLayerIds[0] === priorLayerId,
+        && evidence.searchedLayerIds[0] === priorLayerId
+        && successfulSearches[0]?.resultTruncated === false,
       detail: "The one audited graph.search call returned exactly the first accepted root Layer identity.",
     },
     {
       name: "search-request-contract",
       passed: successfulSearches.length === 1
-        && matchesRequiredGraphMemorySearch(evidence.searchRequest),
-      detail: "The audited search used the exact admitted query contract, human-readable topic parameter, and bounded budget.",
+        && (searchRequestMode === "exact"
+          ? matchesRequiredGraphMemorySearch(evidence.searchRequest)
+          : matchesNaturalGraphMemorySearch(evidence.searchRequest)),
+      detail: searchRequestMode === "exact"
+        ? "The deterministic fixture used the exact admitted conformance query, natural topic parameter, and bounded budget."
+        : "The provider formulated one bounded parameterized query for the natural topic without a machine marker.",
     },
     ...(requireDraftDecoy ? [{
       name: "draft-decoy-hidden",
       passed: evidence.draftDecoyLayerId !== undefined
         && draftDecoyDiscard !== undefined
         && search !== undefined
+        && search.resultTruncated === false
         && search.sequence < draftDecoyDiscard.sequence,
       detail: "A same-topic draft layer existed during search, was absent from its exact result, and was stopped only afterward.",
     }] : []),
@@ -630,6 +638,54 @@ function matchesRequiredGraphMemorySearch(
     && topicParameter.value === graphMemorySearchTitle
     && Object.keys(request.budget).length === 1
     && request.budget.resultRows === graphMemorySearchBudget.resultRows;
+}
+
+function matchesNaturalGraphMemorySearch(
+  request: GraphMemoryEvidence["searchRequest"],
+): boolean {
+  if (request?.queryContractVersion !== 1 || typeof request.query !== "string"
+    || !isRecord(request.parameters)
+    || (request.budget !== undefined && !isRecord(request.budget))) return false;
+  const parameterKeys = Object.keys(request.parameters);
+  if (parameterKeys.length !== 1
+    || (request.budget !== undefined && !matchesNaturalGraphMemoryBudget(request.budget))) return false;
+  const parameterName = parameterKeys[0]!;
+  const parameter = request.parameters[parameterName];
+  return isRecord(parameter)
+    && Object.keys(parameter).length === 2
+    && parameter.type === "string"
+    && parameter.value === graphMemorySearchTitle
+    && isNaturalGraphMemoryQueryShape(request.query, parameterName)
+    && !JSON.stringify({ query: request.query, parameters: request.parameters }).includes("GRAPH_MEMORY_ANCHOR:");
+}
+
+function matchesNaturalGraphMemoryBudget(budget: Readonly<Record<string, unknown>>): boolean {
+  const resultRows = budget.resultRows;
+  return resultRows === undefined
+    || (Number.isSafeInteger(resultRows) && (resultRows as number) >= 1 && (resultRows as number) <= 8);
+}
+
+function isNaturalGraphMemoryQueryShape(query: string, parameterName: string): boolean {
+  const identifier = "[A-Za-z_][A-Za-z0-9_]*";
+  const layer = `(?<layer>${identifier})`;
+  const content = `(?<content>${identifier})`;
+  const relationship = `\\[\\s*(?:${identifier}\\s*)?:\\s*CONTAINS(?:\\s*\\{[^}]*\\})?\\s*\\]`;
+  const contains = `\\s*-\\s*${relationship}\\s*->\\s*`;
+  const containedBy = `\\s*<-\\s*${relationship}\\s*-\\s*`;
+  const layerNode = `\\(\\s*${layer}\\s*:\\s*Layer\\s*\\)`;
+  const contentNode = `\\(\\s*${content}\\s*:\\s*Content\\s*\\)`;
+  const escapedParameter = parameterName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const titleProperty = "\\k<content>\\s*\\.\\s*title";
+  const parameter = `\\$${escapedParameter}`;
+  const predicate = `\\s+WHERE\\s+(?:${titleProperty}\\s*=\\s*${parameter}|${parameter}\\s*=\\s*${titleProperty})`;
+  const projection = `\\s+RETURN\\s+(?:DISTINCT\\s+)?\\k<layer>(?:\\s+AS\\s+${identifier})?`;
+  const orderingExpression = `${identifier}(?:\\s*\\.\\s*${identifier})?`;
+  const ordering = `(?:\\s+ORDER\\s+BY\\s+${orderingExpression}(?:\\s+(?:ASC|DESC))?)?`;
+  const limit = "(?:\\s+LIMIT\\s+[1-8])?\\s*$";
+  const pathBinding = `(?:${identifier}\\s*=\\s*)?`;
+  const forward = new RegExp(`^\\s*MATCH\\s+${pathBinding}${layerNode}${contains}${contentNode}${predicate}${projection}${ordering}${limit}`, "i");
+  const reverse = new RegExp(`^\\s*MATCH\\s+${pathBinding}${contentNode}${containedBy}${layerNode}${predicate}${projection}${ordering}${limit}`, "i");
+  return forward.test(query) || reverse.test(query);
 }
 
 export function parseReportedReplayRepairEvidence(output: CompletionOutput): ReportedReplayRepairEvidence | undefined {
@@ -975,7 +1031,11 @@ function withSearchResult(
     const id = match === null ? Number.NaN : Number(match[1]);
     return Number.isSafeInteger(id) ? [id] : [];
   }) : []);
-  return { ...event, searchLayerIds: layerIds };
+  return {
+    ...event,
+    searchLayerIds: layerIds,
+    ...(typeof response.truncated === "boolean" ? { resultTruncated: response.truncated } : {}),
+  };
 }
 
 function withCompletion(

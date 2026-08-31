@@ -109,7 +109,7 @@ function withSearch(receipt, response) {
   return {
     ...receipt,
     searchLayerIds,
-    ...(response.truncated === true ? { resultTruncated: true } : {}),
+    ...(typeof response.truncated === "boolean" ? { resultTruncated: response.truncated } : {}),
   };
 }
 

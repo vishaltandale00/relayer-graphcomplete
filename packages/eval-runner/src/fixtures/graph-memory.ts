@@ -61,13 +61,12 @@ class GraphMemoryFixtureHarness implements Harness {
     this.turn += 1;
     const graph = new RelayerGraphClient(context.graph.acquireCapability());
     const prompt = renderInteractionInput(context.interactionInput);
-    const anchor = readAnchor(prompt);
     context.trace.emit({ type: "prompt", data: { text: prompt, kind: "fixture-input" } });
     context.trace.emit({ type: "tool.call.started", data: { tool: "fixture.graph-memory" } });
     if (this.turn === 1) {
-      await authorFirstTurn(graph, context, anchor);
+      await authorFirstTurn(graph, context);
     } else if (this.turn === 2) {
-      await searchAndReferenceFirstTurn(graph, context, anchor);
+      await searchAndReferenceFirstTurn(graph, context);
     } else {
       throw new Error(`Graph-memory fixture supports exactly two turns, received ${this.turn}`);
     }
@@ -81,7 +80,6 @@ export const graphMemoryFixtureFactory: HarnessFactory = () => new GraphMemoryFi
 async function authorFirstTurn(
   graph: RelayerGraphClient,
   context: HarnessRunContext,
-  anchor: string,
 ): Promise<void> {
   const beforeAcknowledgement = await graph.search({
     queryContractVersion: 1,
@@ -92,12 +90,12 @@ async function authorFirstTurn(
   if (beforeAcknowledgement.rows.length !== 0) {
     throw new Error("Graph-memory search topic unexpectedly existed before first-turn acknowledgement");
   }
-  const anchorNode = new NodeObject(
+  const searchTargetNode = new NodeObject(
     "search",
     graphMemorySearchTitle,
-    `This accepted node explains the prior acknowledgement that the next turn must discover through graph search.\n\nEvaluation witness: ${anchor}`,
+    "This accepted node explains the prior acknowledgement that the next turn must discover through graph search.",
     "concept",
-    "memory-anchor",
+    "memory-search-target",
   );
   const explanation = new NodeObject(
     "git-branch",
@@ -106,15 +104,15 @@ async function authorFirstTurn(
     "concept",
     "memory-explanation",
   );
-  await graph.submitNode(anchorNode);
+  await graph.submitNode(searchTargetNode);
   await graph.submitNode(explanation);
-  const edge = new EdgeObject([anchorNode, explanation], "memory-anchor-edge");
+  const edge = new EdgeObject([searchTargetNode, explanation], "memory-search-target-edge");
   await graph.createEdge(edge);
   const layer = new LayerObject(
-    [anchorNode, explanation],
+    [searchTargetNode, explanation],
     [edge],
     new LayerLayoutObject([
-      new NodePlacementObject(anchorNode, 0.25, 0.5),
+      new NodePlacementObject(searchTargetNode, 0.25, 0.5),
       new NodePlacementObject(explanation, 0.75, 0.5),
     ]),
     "memory-first-root",
@@ -134,7 +132,7 @@ async function authorFirstTurn(
     parameters: graphMemorySearchParameters,
     budget: graphMemorySearchBudget,
   });
-  if (afterAcknowledgement.rows.length !== 1 || afterAcknowledgement.rows[0]?.[0]?.type !== "layer") {
+  if (afterAcknowledgement.truncated || afterAcknowledgement.rows.length !== 1 || afterAcknowledgement.rows[0]?.[0]?.type !== "layer") {
     throw new Error("Graph-memory search topic was not searchable after first-turn acknowledgement");
   }
 }
@@ -142,7 +140,6 @@ async function authorFirstTurn(
 async function searchAndReferenceFirstTurn(
   graph: RelayerGraphClient,
   context: HarnessRunContext,
-  anchor: string,
 ): Promise<void> {
   const draftDecoy = new NodeObject(
     "search",
@@ -165,7 +162,7 @@ async function searchAndReferenceFirstTurn(
     parameters: graphMemorySearchParameters,
     budget: graphMemorySearchBudget,
   });
-  if (result.rows.length !== 1 || result.rows[0]?.length !== 1) {
+  if (result.truncated || result.rows.length !== 1 || result.rows[0]?.length !== 1) {
     throw new Error(`Expected one prior accepted layer for graph-memory search topic, received ${result.rows.length}`);
   }
   const searchedLayer = result.rows[0][0];
@@ -205,12 +202,6 @@ async function searchAndReferenceFirstTurn(
     clientKey: "memory-second-response",
   });
   await graph.submit(context.inputGraph.id);
-}
-
-function readAnchor(prompt: string): string {
-  const match = prompt.match(/GRAPH_MEMORY_ANCHOR:[a-z0-9_-](?:[a-z0-9._-]*[a-z0-9_-])?/i);
-  if (match === null) throw new Error("Graph-memory prompt is missing its unique anchor");
-  return match[0];
 }
 
 function numericLayerId(layer: GraphQueryLayerValue): number {

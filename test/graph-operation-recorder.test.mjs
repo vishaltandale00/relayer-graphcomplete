@@ -195,6 +195,7 @@ describe("desktop graph-operation recorder", () => {
       parameters: { anchor: { type: "string", value: "private anchor" } },
       budget: { note: "normal-[REDACTED]-suffix" },
       searchLayerIds: [9],
+      resultTruncated: false,
     });
     expect(events[3]).toMatchObject({ status: 403, errorCodes: ["forbidden"] });
     expect(descriptor).toMatchObject({

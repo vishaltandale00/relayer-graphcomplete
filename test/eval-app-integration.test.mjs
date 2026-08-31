@@ -13,7 +13,6 @@ import {
   H3_SEEDED_TREE,
   H3_UPSTREAM_COMMIT,
   H3_UPSTREAM_TREE,
-  graphMemoryAnchor,
   graphMemoryEvalCaseId,
   graphMemoryEvalPrompts,
   graphMemoryFixtureFactory,
@@ -38,7 +37,7 @@ afterEach(async () => {
 });
 
 describe("Relayer Eval application service", () => {
-  it("catalogs graph memory as a harness-neutral run-unique two-turn case", () => {
+  it("catalogs graph memory as a harness-neutral natural two-turn case", () => {
     const definition = evalCases.find((candidate) => candidate.id === graphMemoryEvalCaseId);
     const firstRun = resolveEvalCasePrompts(definition, "run-alpha");
     const secondRun = resolveEvalCasePrompts(definition, "run-beta");
@@ -49,9 +48,10 @@ describe("Relayer Eval application service", () => {
     });
     expect(firstRun).toEqual(graphMemoryEvalPrompts("run-alpha"));
     expect(firstRun).toHaveLength(2);
-    expect(firstRun.join("\n")).toContain(graphMemoryAnchor("run-alpha"));
-    expect(secondRun.join("\n")).toContain(graphMemoryAnchor("run-beta"));
-    expect(firstRun).not.toEqual(secondRun);
+    expect(firstRun.join("\n")).not.toContain("GRAPH_MEMORY_ANCHOR:");
+    expect(firstRun[1]).toBe("Find your earlier Freshness acknowledged explanation and link the original as supporting context in a concise follow-up. Do not recreate or paraphrase it.");
+    expect(firstRun[1]).not.toMatch(/graph search|graph\.search|query|parameter|budget|layer|accepted|hard-code|\bID\b/i);
+    expect(secondRun).toEqual(firstRun);
     expect(JSON.stringify(definition)).not.toContain("fixture.graph-memory");
     expect(JSON.stringify(definition)).not.toContain("codex.basic");
   });
@@ -116,17 +116,18 @@ describe("Relayer Eval application service", () => {
     expect(completed.status).toBe("passed");
     expect(execution.threadIds).toHaveLength(1);
     expect(execution.turns).toHaveLength(2);
-    expect(execution.turns[0].prompt).toContain(graphMemoryAnchor(completed.id));
+    expect(execution.turns.every((turn) => !turn.prompt.includes("GRAPH_MEMORY_ANCHOR:"))).toBe(true);
     expect(execution.turns[1].deterministicChecks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: expect.stringContaining("search-returned-prior-root"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("draft-decoy-hidden"), passed: true }),
       expect.objectContaining({ name: expect.stringContaining("typed-reference-target"), passed: true }),
       expect.objectContaining({ name: expect.stringContaining("ack-search-submit-order"), passed: true }),
     ]));
     expect(execution.turns[1].caseEvidence).toMatchObject({
-      anchor: graphMemoryAnchor(completed.id),
       searchedLayerIds: [execution.turns[0].rootLayerId],
       referenceActionId: expect.any(Number),
     });
+    expect(execution.turns[1].caseEvidence).not.toHaveProperty("anchor");
     const secondTrace = await evalService.candidateTraceContext(
       execution.id,
       execution.turns[1].interactionId,
@@ -148,6 +149,7 @@ describe("Relayer Eval application service", () => {
         budget: graphMemorySearchBudget,
         status: 200,
         searchLayerIds: [execution.turns[0].rootLayerId],
+        resultTruncated: false,
         sequence: expect.any(Number),
       }),
     ]));
@@ -171,6 +173,23 @@ describe("Relayer Eval application service", () => {
       id: graphMemoryEvalCaseId,
       threads: [{ id: execution.threadIds[0], name: "Graph memory · prior accepted reference" }],
     })]);
+
+    const secondCreated = await evalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const secondCompleted = await waitForCompletedRun(evalService, secondCreated.id, 20_000);
+    const secondExecution = secondCompleted.executions[0];
+    expect(secondCompleted.status).toBe("passed");
+    expect(secondExecution.threadIds).toHaveLength(1);
+    expect(secondExecution.threadIds[0]).not.toBe(execution.threadIds[0]);
+    expect(secondExecution.turns[0].rootLayerId).not.toBe(firstRoot);
+    expect(secondExecution.turns[1].caseEvidence).toMatchObject({
+      searchedLayerIds: [secondExecution.turns[0].rootLayerId],
+      referenceActionId: expect.any(Number),
+    });
+    expect(secondExecution.turns[1].caseEvidence.searchedLayerIds).not.toContain(firstRoot);
 
     let launderedTurns = 0;
     const launderedEvalService = await new EvalService({

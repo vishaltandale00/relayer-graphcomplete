@@ -35,7 +35,7 @@ import {
   gradeCalibrationWorkspace,
   graphMemoryEvalCaseId,
   graphMemoryEvalPrompts,
-  graphMemoryAnchor,
+  graphMemorySearchRequestMode,
   checkGraphMemoryFirstTurn,
   checkGraphMemorySecondTurn,
   readGraphMemoryEvidence,
@@ -132,16 +132,22 @@ async function gradeGraphMemoryExecution({ execution, interactions, loadGraphOpe
   const auditEvents = [...firstEvents, ...secondEvents].sort((left, right) => left.sequence - right.sequence);
   const secondTurnStartSequence = firstEvents.reduce((maximum, event) => Math.max(maximum, event.sequence), 0);
   const evidence = readGraphMemoryEvidence(
-    graphMemoryAnchor(execution.testRunId),
     first.completionOutput,
     second.completionOutput,
     auditEvents,
     secondTurnStartSequence,
   );
+  const deterministicFixture = execution.harnessConfiguration?.implementation === "fixture.graph-memory";
   return {
     turns: [
-      { checks: checkGraphMemoryFirstTurn(first.completionOutput, graphMemoryAnchor(execution.testRunId), first.graphNodeId) },
-      { checks: checkGraphMemorySecondTurn(second.completionOutput, first.completionOutput, evidence, second.graphNodeId, false), evidence },
+      { checks: checkGraphMemoryFirstTurn(first.completionOutput, first.graphNodeId) },
+      {
+        checks: checkGraphMemorySecondTurn(second.completionOutput, first.completionOutput, evidence, second.graphNodeId, {
+          requireDraftDecoy: deterministicFixture,
+          searchRequestMode: graphMemorySearchRequestMode(execution.harnessConfiguration.implementation),
+        }),
+        evidence,
+      },
     ],
   };
 }
