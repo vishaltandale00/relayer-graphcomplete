@@ -479,6 +479,27 @@ async fn imported_unanswered_input_action_keeps_its_authored_payload() {
         .unwrap();
     assert_eq!(imported.input.as_ref(), Some(&expected));
     assert!(receipt.skipped_submitted_inputs.is_empty());
+
+    let error = database
+        .canonical_input_action_occurrence(
+            None,
+            thread(9001),
+            &PresentingInputOccurrence {
+                presenting_interaction_node_id: NodeId::new(
+                    receipt.turns[0].graph_node_id.unwrap(),
+                )
+                .unwrap(),
+                presenting_layer_id: output.root_layer.layer.id,
+                action_id: imported.id,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation { code, path, .. }
+            if code == "input_action_not_in_occurrence" && path == "attachments[0].actionId"
+    ));
 }
 
 #[tokio::test]

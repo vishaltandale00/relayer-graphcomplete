@@ -59,7 +59,7 @@ impl<'connection> InputChildTable<'connection> {
                 ));
             }
             let accepted = ActionTable::new(&mut *self.connection)
-                .canonical_input_occurrence(scope, &draft.occurrence)
+                .canonical_input_occurrence(scope, &draft.occurrence, false)
                 .await
                 .map_err(|error| attachment_error(index, error))?;
             let accepted_action = accepted.input.ok_or_else(|| {

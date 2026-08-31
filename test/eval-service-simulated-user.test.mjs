@@ -419,6 +419,31 @@ describe("EvalService simulated-user result persistence", () => {
     expect(completed.executions[0].outcomeGrade).toMatchObject({ qualified: false });
   });
 
+  it("rejects an input round-trip run with the deterministic judge before execution", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      simulatedUserJudgeRunner: vi.fn(),
+    }).open();
+
+    const inputCase = service.catalog().cases.find(
+      ({ id }) => id === "empty-project.node-input-roundtrip.single-turn",
+    );
+    expect(inputCase.requiredJudgeConfigurationIds).toEqual([
+      "simulated-user",
+      "simulated-user-sol-high",
+    ]);
+    await expect(service.createRun({
+      testCaseIds: [inputCase.id],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow(
+      "Input round-trip cases require a compatible simulated-user judge configuration.",
+    );
+  });
+
   it("persists explicit partial and thrown-failure artifacts without losing deterministic evidence", async () => {
     const partialPaths = await testPaths();
     globalThis.fetch = fakeAcceptedProduct();

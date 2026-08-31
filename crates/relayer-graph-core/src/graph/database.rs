@@ -579,7 +579,7 @@ impl GraphDatabase {
         }
         let mut connection = self.storage.acquire().await?;
         ActionTable::new(&mut connection)
-            .canonical_input_occurrence(&scope, occurrence)
+            .canonical_input_occurrence(&scope, occurrence, false)
             .await
             .map_err(first_attachment_error)
     }

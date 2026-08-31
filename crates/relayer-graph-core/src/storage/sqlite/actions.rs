@@ -89,6 +89,7 @@ impl<'connection> ActionTable<'connection> {
         &mut self,
         scope: &InteractionScope,
         occurrence: &PresentingInputOccurrence,
+        allow_imported: bool,
     ) -> Result<GraphAction, GraphError> {
         let valid: i64 = sqlx::query_scalar(
             r#"
@@ -124,6 +125,11 @@ impl<'connection> ActionTable<'connection> {
                   AND presenting_interaction.kind='user-interaction'
                   AND presenting_interaction.state='accepted'
                   AND presenting_interaction.owner_interaction_id IS NULL
+                  AND (?6 OR NOT EXISTS(
+                      SELECT 1
+                      FROM graph_imports imported
+                      WHERE imported.thread_id=presenting_interaction.thread_id
+                  ))
                   AND presenting_layer.state='accepted'
                   AND input_action.state='accepted'
                   AND input_action.kind='input'
@@ -141,6 +147,7 @@ impl<'connection> ActionTable<'connection> {
         .bind(occurrence.action_id.value())
         .bind(scope.project_id.map(ProjectId::value))
         .bind(scope.thread_id.value())
+        .bind(allow_imported)
         .fetch_one(&mut *self.connection)
         .await?;
         if valid == 0 {

@@ -4,12 +4,26 @@ import {
   annotatedExecutionExportable,
   authorizeRecursiveCompleteSelection,
   isolateRecursiveCompleteSelection,
+  judgeConfigurationCompatibleWithCases,
   projectExecutionCell,
   projectExecutionDossier,
   runPanelCopy,
 } from "../desktop/eval-renderer/run-model.js";
 
 describe("Eval dashboard run presentation", () => {
+  it("filters judge choices against selected case requirements", () => {
+    const cases = [{
+      id: "input-roundtrip",
+      requiredJudgeConfigurationIds: ["simulated-user"],
+    }, { id: "ordinary" }];
+    expect(judgeConfigurationCompatibleWithCases(cases, ["ordinary"], "deterministic"))
+      .toBe(true);
+    expect(judgeConfigurationCompatibleWithCases(cases, ["input-roundtrip"], "deterministic"))
+      .toBe(false);
+    expect(judgeConfigurationCompatibleWithCases(cases, ["input-roundtrip"], "simulated-user"))
+      .toBe(true);
+  });
+
   it("isolates the recursive pair and requires an explicit paid child-aware authorization", () => {
     expect(isolateRecursiveCompleteSelection(
       ["empty-project.task-system.single-turn", "empty-project.recursive-complete.comparison"],

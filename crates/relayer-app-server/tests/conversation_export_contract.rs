@@ -1104,6 +1104,37 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
             .retain(|input| input.action.control == ExportInputControl::MultiSelect);
         records
     };
+
+    let mut canonical_selection = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut canonical_selection[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options = vec![option("é", "Accent"), option("z", "Zed")];
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Selected {
+        selected: vec![option("z", "Zed"), option("é", "Accent")],
+    };
+    validate_export_records(&canonical_selection).unwrap();
+    validate_incrementally(&canonical_selection).unwrap();
+
+    let mut reversed_selection = canonical_selection;
+    let ConversationExportRecord::Turn(turn) = &mut reversed_selection[2] else {
+        unreachable!()
+    };
+    let ExportSubmittedInputValue::Selected { selected } = &mut turn.submitted_inputs[0].value
+    else {
+        unreachable!()
+    };
+    selected.reverse();
+    let batch_error = validate_export_records(&reversed_selection).unwrap_err();
+    assert_eq!(batch_error.code, "input_selection_order_invalid");
+    assert_eq!(
+        batch_error.path,
+        "record[2].submittedInputs[0].value.selected"
+    );
+    let incremental_error = validate_incrementally(&reversed_selection).unwrap_err();
+    assert_eq!(incremental_error.code, batch_error.code);
+    assert_eq!(incremental_error.path, batch_error.path);
+
     let mut invalid_minimum = multi_only();
     let ConversationExportRecord::Turn(turn) = &mut invalid_minimum[2] else {
         unreachable!()
@@ -1177,6 +1208,30 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
     };
     turn.submitted_inputs[0].value = ExportSubmittedInputValue::Text { text: " ".into() };
     assert_rejected_with_parity(&blank_text, "input_text_blank");
+
+    let mut maximum_text = text_only();
+    let ConversationExportRecord::Turn(turn) = &mut maximum_text[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Text {
+        text: "x".repeat(MAX_STRING_BYTES),
+    };
+    validate_export_records(&maximum_text).unwrap();
+    validate_incrementally(&maximum_text).unwrap();
+
+    let mut oversized_text = maximum_text;
+    let ConversationExportRecord::Turn(turn) = &mut oversized_text[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Text {
+        text: "x".repeat(MAX_STRING_BYTES + 1),
+    };
+    let batch_error = validate_export_records(&oversized_text).unwrap_err();
+    assert_eq!(batch_error.code, "string_too_large");
+    assert_eq!(batch_error.path, "record[2].submittedInputs[0].value.text");
+    let incremental_error = validate_incrementally(&oversized_text).unwrap_err();
+    assert_eq!(incremental_error.code, batch_error.code);
+    assert_eq!(incremental_error.path, batch_error.path);
 
     let mut text_with_options = text_only();
     let ConversationExportRecord::Turn(turn) = &mut text_with_options[2] else {

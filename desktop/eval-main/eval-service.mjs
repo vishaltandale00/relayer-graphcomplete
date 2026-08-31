@@ -79,6 +79,7 @@ export const evalCases = Object.freeze([
       "Help me prepare a deployment plan. Before planning, I still need to supply the exact deployment window, choose either Canary or Full rollout, and choose at least two validation signals from Health metrics, Logs, and Synthetic checks. Do not make those decisions for me. Ask for the three decisions together and wait for my response. Once I respond, produce a concise deployment plan that names and visibly applies the exact window, selected strategy, and each selected validation signal.",
     ]),
     requiredChecks: Object.freeze(["input-roundtrip"]),
+    requiredJudgeConfigurationIds: Object.freeze(["simulated-user", "simulated-user-sol-high"]),
   }),
   h3ProjectEvalCase,
   ...h3AutonomousCases.map((entry) => Object.freeze({
@@ -954,6 +955,14 @@ export class EvalService {
     const judgeConfigurationName = selection?.judgeConfigurationName;
     if (!Array.isArray(testCaseIds) || testCaseIds.some((id) => !evalCases.some((item) => item.id === id))) {
       throw new Error("Test run contains an unknown test case.");
+    }
+    const incompatibleJudgeCase = evalCases.find((item) => (
+      testCaseIds.includes(item.id)
+      && Array.isArray(item.requiredJudgeConfigurationIds)
+      && !item.requiredJudgeConfigurationIds.includes(judgeConfigurationName)
+    ));
+    if (incompatibleJudgeCase) {
+      throw new Error("Input round-trip cases require a compatible simulated-user judge configuration.");
     }
     if (testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID)) {
       const comparison = evalCases.find((item) => item.id === RECURSIVE_COMPLETE_EVAL_CASE_ID);

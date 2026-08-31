@@ -1265,6 +1265,7 @@ describe("local Electron simulated-user judge adapter", () => {
       },
       thread: { id: "7" },
       turn: { id: "41", rootLayerId: "10" },
+      allowInputOperator: true,
       request: {
         text: "Explain the graph.",
         followUp: true,
@@ -1328,6 +1329,31 @@ describe("local Electron simulated-user judge adapter", () => {
       tools: [{ tool: "screenshot" }],
       codex: [{ type: "mcp_tool_call", tool: "screenshot" }],
     });
+
+    captureInputRoundTrip.mockClear();
+    const rejudgeDirectory = await temporaryDirectory();
+    const rejudge = await runner({
+      artifactDirectory: rejudgeDirectory,
+      execution: { id: "execution-1" },
+      artifact: {
+        kind: "git_workspace",
+        workingDirectory: rejudgeDirectory,
+        baseRevision: "base-commit",
+      },
+      thread: { id: "7" },
+      turn: { id: "41", rootLayerId: "10" },
+      request: {
+        text: "Rejudge the rendered graph without write authority.",
+        followUp: false,
+        previousTurnIds: [],
+        comparisonTurnIds: [],
+      },
+      allowInputOperator: false,
+      reviewSequence: { index: 0, count: 1 },
+    });
+    expect(captureInputRoundTrip).not.toHaveBeenCalled();
+    expect(rejudge).not.toHaveProperty("inputRoundTripRef");
+    expect(rejudge).not.toHaveProperty("inputRoundTrip");
   });
 
   it("rejects a window on the wrong turn before invoking the judge", async () => {

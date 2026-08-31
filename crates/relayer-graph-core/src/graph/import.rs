@@ -1110,7 +1110,7 @@ async fn resolve_imported_input_occurrence(
         action_id: imported_action_id(action_id)?,
     };
     let accepted = match ActionTable::new(connection)
-        .canonical_input_occurrence(scope, &occurrence)
+        .canonical_input_occurrence(scope, &occurrence, true)
         .await
     {
         Ok(accepted) => accepted,

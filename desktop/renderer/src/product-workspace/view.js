@@ -111,9 +111,9 @@ export function productWorkspaceMarkup() {
           </dialog>
         </div>
       </div>
-      <aside class="inspector hidden" id="inspector" data-review-capture="node-detail" aria-label="Selected node detail">
+      <aside class="inspector hidden" id="inspector" aria-label="Selected node detail">
         <div class="inspector-header"><span>Node details</span><div class="inspector-header-actions"><button class="icon-button hidden" id="attachNodeContext" type="button" title="Connect node to next message" aria-label="Connect node to next message">+</button><button class="icon-button" id="closeInspector" data-review-ref="close-node-detail" aria-label="Close node details">×</button></div></div>
-        <div class="inspector-content" id="inspectorContent">
+        <div class="inspector-content" id="inspectorContent" data-review-capture="node-detail" role="region" aria-label="Selected node detail content">
           <div class="node-heading"><div class="node-icon" id="detailIcon">N</div><div><small id="detailKind">CONCEPT</small><h2 id="detailTitle"></h2></div></div>
           <div class="node-content" id="detailContent"></div>
           <div class="node-input-actions hidden" id="nodeInputActions"></div>

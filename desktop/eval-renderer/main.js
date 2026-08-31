@@ -1,6 +1,7 @@
 import {
   authorizeRecursiveCompleteSelection,
   isolateRecursiveCompleteSelection,
+  judgeConfigurationCompatibleWithCases,
   projectExecutionCell,
   projectExecutionDossier,
   recursiveCompleteCaseId,
@@ -43,6 +44,25 @@ function configure() {
   $("#caseOptions").innerHTML = catalog.cases.map((item) => optionMarkup(item, "cases", item.defaultSelected !== false)).join("");
   $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({ id: item.name, name: item.name, detail: item.implementation }, "harnesses", item.name === "fixture-task-system")).join("");
   $("#judgeOptions").innerHTML = catalog.judges.map((item, index) => optionMarkup(item, "judge", index === 0)).join("");
+  const syncJudgeCompatibility = () => {
+    const selectedCaseIds = [...document.querySelectorAll('input[name="cases"]:checked')]
+      .map((input) => input.value);
+    const judgeInputs = [...document.querySelectorAll('input[name="judge"]')];
+    for (const input of judgeInputs) {
+      input.disabled = !judgeConfigurationCompatibleWithCases(
+        catalog.cases,
+        selectedCaseIds,
+        input.value,
+      );
+    }
+    if (!judgeInputs.some((input) => input.checked && !input.disabled)) {
+      const compatible = judgeInputs.find((input) => !input.disabled);
+      if (compatible) compatible.checked = true;
+    }
+  };
+  document.querySelectorAll('input[name="cases"]').forEach((input) => {
+    input.addEventListener("change", syncJudgeCompatibility);
+  });
   const recursiveOption = document.querySelector(`input[name="cases"][value="${recursiveCompleteCaseId}"]`);
   if (recursiveOption) recursiveOption.onchange = () => {
     if (!recursiveOption.checked) return;
@@ -53,7 +73,9 @@ function configure() {
     document.querySelectorAll('input[name="harnesses"]').forEach((input) => {
       input.checked = isolated.harnessConfigurationNames.includes(input.value);
     });
+    syncJudgeCompatibility();
   };
+  syncJudgeCompatibility();
   show("configureView");
 }
 

@@ -17,6 +17,14 @@ export const recursiveCompleteHarnessPair = Object.freeze([
   "codex-eval-complete-enabled",
 ]);
 
+export function judgeConfigurationCompatibleWithCases(cases, selectedCaseIds, judgeId) {
+  return selectedCaseIds.every((caseId) => {
+    const definition = cases.find((candidate) => candidate.id === caseId);
+    return !Array.isArray(definition?.requiredJudgeConfigurationIds)
+      || definition.requiredJudgeConfigurationIds.includes(judgeId);
+  });
+}
+
 export function isolateRecursiveCompleteSelection(testCaseIds, harnessConfigurationNames) {
   if (!testCaseIds.includes(recursiveCompleteCaseId)) {
     return { testCaseIds: [...testCaseIds], harnessConfigurationNames: [...harnessConfigurationNames] };

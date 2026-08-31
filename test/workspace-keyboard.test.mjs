@@ -547,6 +547,8 @@ describe("product workspace keyboard behavior", () => {
     );
 
     expect(detailContent).toBeGreaterThan(-1);
+    expect(markup).toContain('id="inspectorContent" data-review-capture="node-detail"');
+    expect(markup).not.toContain('id="inspector" data-review-capture="node-detail"');
     expect(detailContent).toBeLessThan(dock);
     expect(dock).toBeLessThan(evaluationPanel);
     expect(markup).toContain('aria-label="Node context annotation editor"');

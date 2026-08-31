@@ -809,7 +809,7 @@ export function createLocalSimulatedUserJudgeRunner({
         });
       }
       let inputRoundTrip = null;
-      if (typeof captureInputRoundTrip === "function") {
+      if (context.allowInputOperator === true && typeof captureInputRoundTrip === "function") {
         try {
           inputRoundTrip = await captureInputRoundTrip({
             context,

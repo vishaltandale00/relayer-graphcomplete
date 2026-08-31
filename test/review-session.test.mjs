@@ -755,6 +755,57 @@ describe("review presentation capture synchronization", () => {
     await adapter.restoreCapture();
   });
 
+  it("tiles the scrolling inspector content so a full node-detail capture reaches lower content", async () => {
+    const outerInspector = {
+      dataset: {},
+      scrollTop: 0,
+      clientWidth: 360,
+      clientHeight: 500,
+      scrollWidth: 360,
+      scrollHeight: 500,
+    };
+    const inspectorContent = {
+      dataset: { reviewCapture: "node-detail" },
+      isConnected: true,
+      hidden: false,
+      scrollLeft: 0,
+      scrollTop: 0,
+      clientWidth: 320,
+      clientHeight: 200,
+      scrollWidth: 320,
+      scrollHeight: 600,
+      matches: () => false,
+      getAttribute: (key) => key === "aria-label" ? "Selected node detail content" : null,
+      getBoundingClientRect: () => ({ x: 860, y: 100, left: 860, top: 100, right: 1180, bottom: 300, width: 320, height: 200 }),
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation("node-2"),
+      navigateHistory: async () => {},
+      root: {
+        querySelectorAll: (selector) => selector === "[data-review-capture]" ? [inspectorContent] : [],
+      },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => callback(),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    const plan = await adapter.capturePlan({
+      target: { kind: "element", elementRef: "node-detail" },
+      mode: "full",
+    });
+    expect(plan.tiles.map(({ scrollY }) => scrollY)).toEqual([0, 200, 400]);
+    await adapter.prepareCaptureTile(plan.tiles[2]);
+    expect(inspectorContent.scrollTop).toBe(400);
+    expect(outerInspector.scrollTop).toBe(0);
+    await adapter.restoreCapture();
+    expect(inspectorContent.scrollTop).toBe(0);
+  });
+
   it("does not complete node activation before the selected presentation changes", async () => {
     let current = presentation();
     let frames = 0;

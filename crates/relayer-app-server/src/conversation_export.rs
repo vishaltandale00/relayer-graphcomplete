@@ -1340,13 +1340,15 @@ fn validate_submitted_inputs(
         validate_input_action_snapshot(&submitted.action, &format!("{submitted_path}.action"))?;
         match submitted.action.control {
             ExportInputControl::Text => match &submitted.value {
-                ExportSubmittedInputValue::Text { text } if !text.trim().is_empty() => {}
-                ExportSubmittedInputValue::Text { .. } => {
+                ExportSubmittedInputValue::Text { text } if text.trim().is_empty() => {
                     return Err(ExportValidationError::new(
                         "input_text_blank",
                         format!("{submitted_path}.value"),
                         "Enter non-whitespace text or detach the input.",
                     ));
+                }
+                ExportSubmittedInputValue::Text { text } => {
+                    require_string(text, format!("{submitted_path}.value.text"))?;
                 }
                 ExportSubmittedInputValue::Selected { .. } => {
                     return Err(ExportValidationError::new(
@@ -1397,6 +1399,17 @@ fn validate_submitted_inputs(
                         "input_option_unknown",
                         format!("{submitted_path}.value"),
                         "Select only keys from the accepted action snapshot.",
+                    ));
+                }
+                if submitted.action.control == ExportInputControl::MultiSelect
+                    && selected
+                        .windows(2)
+                        .any(|pair| pair[0].key.as_bytes() > pair[1].key.as_bytes())
+                {
+                    return Err(ExportValidationError::new(
+                        "input_selection_order_invalid",
+                        format!("{submitted_path}.value.selected"),
+                        "Sort selected options by exact UTF-8 key bytes before import.",
                     ));
                 }
                 let count_valid = match submitted.action.control {
