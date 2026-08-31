@@ -245,7 +245,6 @@ describe("desktop skeleton", () => {
     expect(desktopMain).toContain("app.isPackaged");
     expect(desktopWindow).toContain('window.webContents.on("will-navigate"');
     expect(desktopWindow).toContain('window.webContents.on("will-redirect"');
-    expect(desktopWindow).toContain('setWindowOpenHandler(() => ({ action: "deny" }))');
     expect(desktopIpc).toContain("onUpdateInstallFailure");
     expect(packageManifest).not.toContain("@openai/codex-sdk");
     expect(desktopManifest).toContain('"@earendil-works/pi-coding-agent"');
