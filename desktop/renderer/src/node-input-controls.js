@@ -122,7 +122,10 @@ export function validateInputStage(action, value) {
   }
   const countValid = action.control === "single_select"
     ? keys.length === 1
-    : keys.length >= (action.minimumSelections ?? 1);
+    : action.minimumSelections == null
+      || (Number.isInteger(action.minimumSelections)
+        && action.minimumSelections > 0
+        && keys.length >= action.minimumSelections);
   return countValid
     ? null
     : validationIssue(

@@ -585,6 +585,7 @@ export function confirmationSendReplayIntent({
   if (intent.draftScopeKey !== draftScopeKey) return null;
   if (!Object.is(intent.submission.prompt.revision, promptRevision)) return null;
   if (!Object.is(replayContextRevision, contextRevision)) return null;
+  if (!Object.is(intent.inputDraftRevision ?? null, inputDraftRevision)) return null;
   if (!Object.is(intent.inputCompositionRevision ?? 0, inputCompositionRevision)) return null;
   return JSON.stringify(intent.modelSelection ?? null) === JSON.stringify(modelSelection ?? null)
     ? intent

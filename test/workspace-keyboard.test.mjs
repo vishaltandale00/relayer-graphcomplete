@@ -652,7 +652,7 @@ describe("product workspace keyboard behavior", () => {
     expect(confirmationSendFailureMayHaveCommitted({ status: 409 })).toBe(false);
   });
 
-  it("replays an ambiguous input-bearing send until the user changes the input composition", () => {
+  it("replays an ambiguous input send only while durable draft authority is unchanged", () => {
     const intent = interactionSendIntent({
       threadId: "thread-a",
       draftScopeKey: "thread-a:turn-a",
@@ -672,10 +672,20 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 0,
       replayContextRevision: 0,
       modelSelection: intent.modelSelection,
-      inputDraftRevision: null,
+      inputDraftRevision: 7,
       inputCompositionRevision: 3,
     };
     expect(confirmationSendReplayIntent(current)).toBe(intent);
+    const afterCommit = confirmationSendReplayIntent({
+      ...current,
+      inputDraftRevision: 8,
+    });
+    const afterDetach = confirmationSendReplayIntent({
+      ...current,
+      inputDraftRevision: 9,
+    });
+    expect(afterCommit).toBeNull();
+    expect(afterDetach).toBeNull();
     expect(confirmationSendReplayIntent({
       ...current,
       inputCompositionRevision: 4,

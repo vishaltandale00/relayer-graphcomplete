@@ -102,7 +102,8 @@ describe("node input control state", () => {
     expect(validateInputStage(singleAction, ["a", "b"])?.code).toBe("input_selection_count");
     expect(validateInputStage(multiAction, ["a"])?.code).toBe("input_selection_count");
     expect(validateInputStage(multiAction, ["b", "a"])).toBeNull();
-    expect(validateInputStage({ ...multiAction, minimumSelections: undefined }, [])?.code).toBe(
+    expect(validateInputStage({ ...multiAction, minimumSelections: undefined }, [])).toBeNull();
+    expect(validateInputStage({ ...multiAction, minimumSelections: 1 }, [])?.code).toBe(
       "input_selection_count",
     );
     expect(validateInputStage({ control: "slider" }, 3)?.code).toBe(
