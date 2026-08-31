@@ -1144,6 +1144,27 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
         .unwrap();
     assert_eq!(replayed.id, interaction.id);
     assert_eq!(replayed_actions, actions);
+    for replay_project in [Some(project(2)), None] {
+        let scope_conflict = database
+            .create_identified_interaction_with_context(
+                replay_project,
+                thread(2),
+                "Compare this",
+                "product:41",
+                &input_digest,
+                &drafts,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            scope_conflict,
+            GraphError::Validation {
+                code: "interaction_input_conflict",
+                path,
+                ..
+            } if path == "projectId"
+        ));
+    }
     let changed_digest = relayer_graph_core::interaction_input_digest("Changed", &drafts).unwrap();
     let conflict = database
         .create_identified_interaction_with_context(
@@ -3805,6 +3826,30 @@ async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
         .unwrap();
     assert_eq!(replayed.id, root.id);
     assert_eq!(replayed_children, children);
+    for replay_project in [Some(project(91)), None] {
+        let scope_conflict = database
+            .create_identified_interaction_with_inputs(
+                replay_project,
+                thread(91),
+                "",
+                InteractionInputPreparation {
+                    attempt_key: "attempt:90",
+                    authority_digest: &digest,
+                    contexts: &[],
+                    submitted_inputs: &second_order,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            scope_conflict,
+            GraphError::Validation {
+                code: "interaction_input_attempt_conflict",
+                path,
+                ..
+            } if path == "attemptKey"
+        ));
+    }
     assert_eq!(children.len(), 2);
     assert_eq!(children[0].parent_interaction_node_id, root.id);
     assert_eq!(children[0].source_node_id, source.id);

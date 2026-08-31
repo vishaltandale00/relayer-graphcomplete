@@ -199,7 +199,7 @@ impl GraphDatabase {
         }
         let mut transaction = self.storage.begin_write().await?;
         if let Some(node) = NodeTable::new(&mut transaction)
-            .identified_interaction(thread_id, input_identity, input_digest)
+            .identified_interaction(project_id, thread_id, input_identity, input_digest)
             .await?
         {
             initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
@@ -308,7 +308,7 @@ impl GraphDatabase {
         let mut transaction = self.storage.begin_write().await?;
         let mut nodes = NodeTable::new(&mut transaction);
         let identified = nodes
-            .identified_interaction(thread_id, input_identity, authority_digest)
+            .identified_interaction(project_id, thread_id, input_identity, authority_digest)
             .await
             .map_err(|error| match error {
                 GraphError::Validation {

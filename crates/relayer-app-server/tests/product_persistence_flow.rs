@@ -7108,6 +7108,45 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     .execute(&pool)
     .await
     .unwrap();
+    let unbound_interaction_id = sqlx::query(
+        "INSERT INTO interactions(
+            thread_id,sequence,text,created_at,completion_status,
+            harness_configuration_name,harness_configuration_digest,permission_profile_id,
+            effective_execution_digest,effective_permission_receipt_json,input_identity,input_digest
+         ) VALUES (?1,6,'Restore an unbound answer',?2,'submitted','codex-basic','sha256:test',
+            'auto','sha256:execution','{}','send-restart-unbound','sha256:unbound-input')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attempts(
+            interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,
+            created_at
+         ) VALUES (?1,?2,1,'sha256:unbound-input','sha256:unbound-semantic','preparing',?3)",
+    )
+    .bind(unbound_interaction_id)
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attachments(
+            interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,
+            source_node_id,action_json,value_json,committed_at
+         ) VALUES (?1,14,24,34,44,?2,?3,?4)",
+    )
+    .bind(unbound_interaction_id)
+    .bind(json!({"control":"text","prompt":"Unbound"}).to_string())
+    .bind(json!({"text":"restore unbound"}).to_string())
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
     pool.close().await;
 
     let catalog = root.join("catalog.json");
@@ -7131,6 +7170,15 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     let transient_missing_output_reads = Arc::new(AtomicUsize::new(0));
     let observed_transient_missing_output_reads = transient_missing_output_reads.clone();
     let graph = Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(|| async {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                )
+            }),
+        )
         .route(
             "/api/control/interactions/77",
             axum::routing::get(|| async {
@@ -7315,6 +7363,27 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     assert_eq!(transient_missing_pending.2, "running");
     assert_eq!(transient_missing_pending.3, "running");
     assert_eq!(transient_missing_pending.4, 0);
+    let unbound_failed: (String, String, String, i64) = sqlx::query_as(
+        "SELECT i.completion_status,COALESCE(i.completion_error,''),a.state,
+                (SELECT COUNT(*) FROM action_input_attachments d
+                 WHERE d.thread_id=i.thread_id AND d.action_id=34)
+         FROM interactions i
+         JOIN interaction_submitted_input_attempts a ON a.interaction_id=i.id
+         WHERE i.id=?1",
+    )
+    .bind(unbound_interaction_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(unbound_failed.0, "failed");
+    assert!(
+        !unbound_failed
+            .1
+            .starts_with("Canonical reconciliation pending:")
+    );
+    assert!(unbound_failed.1.contains("input draft was restored"));
+    assert_eq!(unbound_failed.2, "failed");
+    assert_eq!(unbound_failed.3, 1);
     let (status, error): (String, Option<String>) =
         sqlx::query_as("SELECT completion_status,completion_error FROM interactions WHERE id=?1")
             .bind(interaction_id)

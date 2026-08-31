@@ -1916,12 +1916,13 @@ fn validate_action(action: &ExportAction, path: &str) -> Result<(), ExportValida
         ExportActionKind::Input
             if action.relation.is_none()
                 && action.target_layer_id.is_none()
-                && action.interaction_text.is_none() => {}
+                && action.interaction_text.is_none()
+                && action.input.is_some() => {}
         _ => {
             return Err(ExportValidationError::new(
                 "invalid_action_shape",
                 path,
-                "Navigate actions require relation and targetLayerId; invoke actions require interactionText; input actions reject navigation and invocation fields.",
+                "Navigate actions require relation and targetLayerId; invoke actions require interactionText; input actions require an input payload and reject navigation and invocation fields.",
             ));
         }
     }

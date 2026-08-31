@@ -90,6 +90,72 @@ export function threadHasPendingInputMutation(pendingKeys, threadId) {
   return false;
 }
 
+export function inputDraftLoadRetryDelay(attempt) {
+  if (!Number.isSafeInteger(attempt) || attempt < 0) {
+    throw new TypeError("input draft retry attempt must be a non-negative safe integer");
+  }
+  if (attempt >= 5) return null;
+  return Math.min(500 * (2 ** attempt), 5_000);
+}
+
+export function createInputDraftLoadRetryScheduler({
+  setTimeout,
+  clearTimeout,
+  load,
+  isEligible,
+} = {}) {
+  if (![setTimeout, clearTimeout, load, isEligible].every((value) => typeof value === "function")) {
+    throw new TypeError("input draft retry scheduler dependencies are required");
+  }
+  const timers = new Map();
+  const attempts = new Map();
+  const key = (threadId) => String(requiredIdentity(threadId, "threadId"));
+  const reset = (threadId) => {
+    const threadKey = key(threadId);
+    const timer = timers.get(threadKey);
+    if (timer !== undefined) clearTimeout(timer);
+    timers.delete(threadKey);
+    attempts.delete(threadKey);
+  };
+  const schedule = (threadId) => {
+    const threadKey = key(threadId);
+    if (timers.has(threadKey)) return true;
+    const attempt = attempts.get(threadKey) || 0;
+    const delay = inputDraftLoadRetryDelay(attempt);
+    if (delay === null) return false;
+    attempts.set(threadKey, attempt + 1);
+    const timer = setTimeout(async () => {
+      timers.delete(threadKey);
+      if (!isEligible(threadId)) {
+        attempts.delete(threadKey);
+        return;
+      }
+      try {
+        await load(threadId);
+        attempts.delete(threadKey);
+      } catch {
+        schedule(threadId);
+      }
+    }, delay);
+    timers.set(threadKey, timer);
+    return true;
+  };
+  return Object.freeze({
+    schedule,
+    reset,
+    has: (threadId) => timers.has(key(threadId)),
+    suppressesLoad: (threadId) => {
+      const threadKey = key(threadId);
+      return timers.has(threadKey) || (attempts.get(threadKey) || 0) >= 5;
+    },
+    dispose() {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      attempts.clear();
+    },
+  });
+}
+
 export function committedInputAttachment(draft, occurrence) {
   const key = inputOccurrenceKey(occurrence);
   return (draft?.attachments || []).find(
@@ -265,6 +331,14 @@ export function createNodeInputDraftController({ api, onChange = () => {} } = {}
     }).catch(() => undefined);
     return next;
   };
+  const reconcileRevisionConflict = async (threadId, error) => {
+    if (error?.code !== "input_draft_revision_conflict") return;
+    try {
+      adopt(threadId, await api.get(threadId));
+    } catch {
+      // Preserve the mutation failure while leaving the last known draft intact.
+    }
+  };
 
   return Object.freeze({
     async load(threadId) {
@@ -280,15 +354,25 @@ export function createNodeInputDraftController({ api, onChange = () => {} } = {}
       const value = inputStageValueForApi(action, stagedValue);
       return enqueue(threadId, async () => {
         const current = requireCurrent(threadId);
-        const response = await api.commit(threadId, occurrence, value, current.revision);
-        return adopt(threadId, response);
+        try {
+          const response = await api.commit(threadId, occurrence, value, current.revision);
+          return adopt(threadId, response);
+        } catch (error) {
+          await reconcileRevisionConflict(threadId, error);
+          throw error;
+        }
       });
     },
     async detach(threadId, occurrence) {
       return enqueue(threadId, async () => {
         const current = requireCurrent(threadId);
-        const response = await api.detach(threadId, occurrence, current.revision);
-        return adopt(threadId, response);
+        try {
+          const response = await api.detach(threadId, occurrence, current.revision);
+          return adopt(threadId, response);
+        } catch (error) {
+          await reconcileRevisionConflict(threadId, error);
+          throw error;
+        }
       });
     },
   });

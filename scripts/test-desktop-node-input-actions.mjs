@@ -245,6 +245,18 @@ async function run() {
   });
   window = await createWindow(productSession);
   window.setSize(1280, 820);
+  let initialDraftLoadRequests = 0;
+  const initialDraftLoadFilter = {
+    urls: [`${productSession.origin}/api/threads/${thread.id}/input-draft`],
+  };
+  window.webContents.session.webRequest.onBeforeRequest(
+    initialDraftLoadFilter,
+    (details, callback) => {
+      if (details.method !== "GET") return callback({});
+      initialDraftLoadRequests += 1;
+      callback(initialDraftLoadRequests === 1 ? { cancel: true } : {});
+    },
+  );
   await window.loadURL(`${productSession.origin}/?threadId=${thread.id}`);
   await waitFor("production node-input workspace", () => evaluate(`(() => (
     !document.body.classList.contains('desktop-account-pending')
@@ -257,6 +269,17 @@ async function run() {
       && document.querySelectorAll('#nodeInputActions .node-input-option-rail').length === 2
       && document.querySelector('#detailActions')?.classList.contains('hidden')
   ))()`));
+  await waitFor("initial input draft load recovers through the bounded retry", () => (
+    initialDraftLoadRequests >= 2
+  ));
+  window.webContents.session.webRequest.onBeforeRequest(initialDraftLoadFilter, null);
+  await setValue(".node-input-text", "Recovered after initial draft load retry");
+  await click("[aria-label='Commit Name the governing constraint']");
+  await waitFor("recovered input authority accepts a real commit", async () => (
+    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments?.some(
+      (attachment) => attachment.value?.text === "Recovered after initial draft load retry",
+    )
+  ));
   const grammar = await evaluate(`(() => ({
     attachedToDetails: document.querySelector('#inspectorContent')?.contains(document.querySelector('#nodeInputActions')),
     prompts: [...document.querySelectorAll('.node-input-editor legend')].map((item) => item.textContent),
@@ -447,6 +470,44 @@ async function run() {
   await click("[aria-label='Undo Name the governing constraint']");
   const undone = await evaluate(`document.querySelector('.node-input-text')?.value`);
   if (undone !== submittedTextValue) throw new Error(`Undo did not restore committed text: ${JSON.stringify(undone)}`);
+
+  await setValue(".node-input-text", "Local value survives a revision conflict");
+  const draftBeforeConflict = await productRequest(`/api/threads/${thread.id}/input-draft`);
+  const textAttachmentBeforeConflict = draftBeforeConflict.attachments.find(
+    (attachment) => attachment.action.prompt === "Name the governing constraint",
+  );
+  const serverAdvancedDraft = await productRequest(
+    `/api/threads/${thread.id}/input-draft/attachments`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        occurrence: textAttachmentBeforeConflict.occurrence,
+        value: { text: "Concurrent server value" },
+        expectedRevision: draftBeforeConflict.revision,
+      }),
+    },
+  );
+  await click("[aria-label='Commit Name the governing constraint']");
+  await waitFor("revision conflict reload preserves the staged text", async () => (
+    await evaluate(`(() => (
+      document.querySelector('.node-input-error')?.textContent
+        && document.querySelector('.node-input-text')?.value === 'Local value survives a revision conflict'
+    ))()`)
+    && (await productRequest(`/api/threads/${thread.id}/input-draft`)).revision === serverAdvancedDraft.revision
+  ));
+  await click("[aria-label='Commit Name the governing constraint']");
+  await waitFor("staged text commits against reloaded revision authority", async () => (
+    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments.find(
+      (attachment) => attachment.action.prompt === "Name the governing constraint",
+    )?.value?.text === "Local value survives a revision conflict"
+  ));
+  await setValue(".node-input-text", submittedTextValue);
+  await click("[aria-label='Commit Name the governing constraint']");
+  await waitFor("original submitted text restored after conflict proof", async () => (
+    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments.find(
+      (attachment) => attachment.action.prompt === "Name the governing constraint",
+    )?.value?.text === submittedTextValue
+  ));
 
   let rejectedCommit = false;
   const commitFilter = { urls: [`${productSession.origin}/api/threads/*/input-draft/attachments`] };

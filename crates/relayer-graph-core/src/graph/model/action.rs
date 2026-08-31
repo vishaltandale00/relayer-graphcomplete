@@ -72,6 +72,7 @@ pub struct InputOption {
 #[serde(rename_all = "camelCase")]
 pub struct InputAction {
     pub control: InputControl,
+    #[serde(default)]
     pub prompt: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<InputOption>,

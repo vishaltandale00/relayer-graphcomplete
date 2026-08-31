@@ -16,10 +16,13 @@ import {
   INPUT_ROUNDTRIP_AUTORUN_ENV,
   INPUT_ROUNDTRIP_AUTORUN_FLAG,
   buildAcceptedReviewTopology,
+  buildInputGroundingTopology,
+  captureGroundingTargets,
   createInputOperatorLease,
   createLocalSimulatedUserJudgeRunner,
   createReviewSessionController,
   gradeAcceptedReviewTopology,
+  groundingCaptureTargets,
   groundingRootNodeIds,
   operatorInteractionIsTerminal,
   persistInputRatingReceipt,
@@ -92,6 +95,93 @@ describe("local Electron simulated-user judge adapter", () => {
     expect(groundingRootNodeIds({
       completionOutput: { rootLayer: { nodes: [{ id: 7 }, { id: 8 }, { id: 9 }] } },
     })).toEqual(["7", "8", "9"]);
+  });
+
+  it("plans grounding captures for every accepted descendant layer", async () => {
+    const layers = acceptedLayers({ includeGrandchild: true });
+    const topology = await buildAcceptedReviewTopology({
+      turnId: 41,
+      rootLayerId: 10,
+      loadLayer: async (layerId) => layers.get(String(layerId)),
+    });
+
+    expect(groundingCaptureTargets(topology)).toEqual([
+      { layerId: "10", nodeIds: ["2"], path: [] },
+      {
+        layerId: "20",
+        nodeIds: ["3"],
+        path: [{ sourceNodeId: "2", actionId: "11" }],
+      },
+      {
+        layerId: "30",
+        nodeIds: ["4"],
+        path: [
+          { sourceNodeId: "2", actionId: "11" },
+          { sourceNodeId: "3", actionId: "21" },
+        ],
+      },
+    ]);
+  });
+
+  it("loads grounding layers from the submitted-input follow-up turn", async () => {
+    const layers = acceptedLayers({ includeGrandchild: true });
+    const loadLayer = vi.fn(async ({ layerId }) => layers.get(String(layerId)));
+    const topology = await buildInputGroundingTopology({
+      threadId: 7,
+      interaction: {
+        id: 41,
+        graphNodeId: 2,
+        completionOutput: { rootLayer: { layer: { id: 10 } } },
+      },
+      loadLayer,
+    });
+
+    expect(topology.turnId).toBe("41");
+    expect(loadLayer).toHaveBeenCalledWith({ threadId: 7, turnId: 41, layerId: "10" });
+    expect(loadLayer).toHaveBeenCalledWith({ threadId: 7, turnId: 41, layerId: "20" });
+    expect(loadLayer).toHaveBeenCalledWith({ threadId: 7, turnId: 41, layerId: "30" });
+  });
+
+  it("rewinds grounding captures by action navigation only", async () => {
+    const calls = [];
+    let selectedNodeId = null;
+    const session = {
+      state: vi.fn(async () => ({ selectedNodeId })),
+      interact: vi.fn(async (input) => {
+        calls.push(["interact", input.elementRef]);
+        if (input.elementRef.startsWith("node-")) selectedNodeId = input.elementRef.slice(5);
+        if (input.elementRef.startsWith("action-")) selectedNodeId = null;
+      }),
+      screenshot: vi.fn(async ({ label }) => { calls.push(["screenshot", label]); return { label }; }),
+      history: vi.fn(async ({ delta }) => { calls.push(["history", delta]); selectedNodeId = "2"; }),
+    };
+    const targets = [
+      { layerId: "10", nodeIds: ["2"], path: [] },
+      {
+        layerId: "20",
+        nodeIds: ["3"],
+        path: [{ sourceNodeId: "2", actionId: "11" }],
+      },
+      {
+        layerId: "30",
+        nodeIds: ["4"],
+        path: [
+          { sourceNodeId: "2", actionId: "11" },
+          { sourceNodeId: "3", actionId: "21" },
+        ],
+      },
+    ];
+
+    await captureGroundingTargets(session, targets);
+
+    expect(session.history.mock.calls).toEqual([[{ delta: -1 }], [{ delta: -2 }]]);
+    expect(calls.filter(([kind]) => kind === "history")).toEqual([
+      ["history", -1],
+      ["history", -2],
+    ]);
+    expect(session.screenshot).toHaveBeenCalledTimes(3);
+    expect(session.interact.mock.calls.filter(([input]) => input.elementRef === "node-2"))
+      .toHaveLength(1);
   });
 
   it("uses a code-owned quality configuration with explicit reasoning", () => {
@@ -1026,7 +1116,16 @@ describe("local Electron simulated-user judge adapter", () => {
       };
     });
     const resolveCodexRuntime = vi.fn(async () => codexRuntime);
-    const runner = createLocalSimulatedUserJudgeRunner({ loadLayer, openReviewSession, resolveCodexRuntime, runJudge });
+    const captureInputRoundTrip = vi.fn(async () => {
+      throw new Error("candidate trace unavailable");
+    });
+    const runner = createLocalSimulatedUserJudgeRunner({
+      loadLayer,
+      openReviewSession,
+      resolveCodexRuntime,
+      runJudge,
+      captureInputRoundTrip,
+    });
 
     const result = await runner({
       artifactDirectory,
@@ -1085,7 +1184,13 @@ describe("local Electron simulated-user judge adapter", () => {
       ],
       coverage: { complete: true },
       summary: "Complete rendered review.",
+      inputRoundTrip: {
+        status: "failed",
+        passed: false,
+        error: "candidate trace unavailable",
+      },
     });
+    expect(captureInputRoundTrip).toHaveBeenCalledOnce();
     expect(JSON.parse(await readFile(join(artifactDirectory, "judge-configuration.json"), "utf8"))).toEqual({
       model: "gpt-5.6-sol",
       modelReasoningEffort: "high",

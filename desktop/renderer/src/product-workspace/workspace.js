@@ -28,6 +28,7 @@ import {
   createInputOccurrence,
   createNodeInputDraftController,
   createNodeInputDraftLoadQueue,
+  createInputDraftLoadRetryScheduler,
   initialInputStageValue,
   inputActionReviewRef,
   inputKeyBelongsToThread,
@@ -1407,6 +1408,7 @@ export function createProductWorkspace({
   const recoveredConfirmationThreads = new Set();
   const contextDraftLoadRetryTimers = new Map();
   const contextDraftLoadRetryAttempts = new Map();
+  let inputDraftLoadRetries = null;
   let disposed = false;
 
   const clearInputStagesForThread = (threadId) => {
@@ -1437,6 +1439,7 @@ export function createProductWorkspace({
       .then((draft) => {
         if (disposed) return draft;
         loadedInputDraftThreads.add(key);
+        inputDraftLoadRetries?.reset(threadId);
         if (String(getThread()?.id) === key) {
           renderComposerContexts();
           if (selection.selectedNodeId != null) {
@@ -1451,6 +1454,15 @@ export function createProductWorkspace({
       });
     return load;
   };
+
+  inputDraftLoadRetries = inputDraftController ? createInputDraftLoadRetryScheduler({
+    setTimeout: (callback, delay) => graphWindow.setTimeout(callback, delay),
+    clearTimeout: (timer) => graphWindow.clearTimeout(timer),
+    load: (threadId) => ensureInputDraftLoaded(threadId),
+    isEligible: (threadId) => !disposed
+      && String(getThread()?.id) === String(threadId)
+      && !loadedInputDraftThreads.has(String(threadId)),
+  }) : null;
 
   const prepareNodeContextSelectionChange = async () => {
     const requestSequence = ++nodeSelectionSequence;
@@ -3577,10 +3589,13 @@ export function createProductWorkspace({
         scheduleContextDraftLoadRetry(thread.id);
       });
     }
-    if (inputDraftController && !inputDraftLoads.has(threadId)) {
+    if (inputDraftController
+      && !inputDraftLoads.has(threadId)
+      && !inputDraftLoadRetries?.suppressesLoad(threadId)) {
       void ensureInputDraftLoaded(thread.id).catch((error) => {
         if (!disposed && String(getThread()?.id) === threadId) {
           toast(`Committed inputs could not be restored: ${error.message}`);
+          inputDraftLoadRetries?.schedule(thread.id);
         }
       });
     }
@@ -4459,6 +4474,7 @@ export function createProductWorkspace({
         inputPending.add(stageKey);
         inputErrors.delete(stageKey);
         renderNodeInputActions(state, node, actions);
+        syncComposer();
         try {
           const next = await inputDraftController.commit(
             thread.id,
@@ -4762,6 +4778,7 @@ export function createProductWorkspace({
     for (const timer of contextDraftLoadRetryTimers.values()) graphWindow.clearTimeout(timer);
     contextDraftLoadRetryTimers.clear();
     contextDraftLoadRetryAttempts.clear();
+    inputDraftLoadRetries?.dispose();
     graphDocument.defaultView.removeEventListener("resize", repositionContextDraftSendWarning);
     cancelInspectorFit();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);

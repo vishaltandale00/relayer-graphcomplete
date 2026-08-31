@@ -315,6 +315,21 @@ fn serializes_exactly_header_and_turn_records_and_round_trips() {
 }
 
 #[test]
+fn accepted_input_action_requires_its_authored_payload() {
+    let mut fixture = records();
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    let mut missing_payload = input("action:input", "node:1", "layer:1");
+    missing_payload.input = None;
+    turn.accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .push(missing_payload);
+
+    assert_rejected_with_parity(&fixture, "invalid_action_shape");
+}
+
+#[test]
 fn older_turns_without_context_fields_decode_as_empty_context() {
     let ConversationExportRecord::Turn(turn) = &records()[1] else {
         unreachable!()

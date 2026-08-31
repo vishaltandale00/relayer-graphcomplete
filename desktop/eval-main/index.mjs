@@ -23,9 +23,11 @@ import { ReviewSession } from "./review-session.mjs";
 import { loadReadyReviewWorkspace } from "./review-workspace-readiness.mjs";
 import {
   LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION as LOCAL_INPUT_GROUNDING_JUDGE_CONFIGURATION,
+  buildInputGroundingTopology,
+  captureGroundingTargets,
   createInputOperatorLease,
   createLocalSimulatedUserJudgeRunner,
-  groundingRootNodeIds,
+  groundingCaptureTargets,
   operatorInteractionIsTerminal,
   releaseInputOperatorLease,
   resolveLocalSimulatedUserAutorun,
@@ -727,7 +729,7 @@ async function captureInputRoundTripEvidence(session, { context, topology, opera
   });
   const structuralPassed = controlSet.passed && roundTripSet.passed;
   const groundingRating = structuralPassed
-    ? await captureInputGroundingRating({ context, interaction, commits, artifactDirectory })
+    ? await captureInputGroundingRating({ session, context, interaction, commits, artifactDirectory })
     : null;
   const groundingPassed = groundingRating?.status === "completed"
     && groundingRating.verdict === "grounded";
@@ -750,13 +752,22 @@ async function captureInputRoundTripEvidence(session, { context, topology, opera
   };
 }
 
-async function captureInputGroundingRating({ context, interaction, commits, artifactDirectory }) {
+async function captureInputGroundingRating({ session, context, interaction, commits, artifactDirectory }) {
   const rootLayerId = interaction.completionOutput?.rootLayer?.layer?.id;
   if (!rootLayerId) {
     return { schemaVersion: 1, status: "indeterminate", error: "Accepted input response has no visible root layer." };
   }
   let opened;
   try {
+    const topology = await buildInputGroundingTopology({
+      threadId: context.thread.id,
+      interaction,
+      loadLayer: ({ threadId, turnId, layerId }) => productRequest(session, (
+        `/api/threads/${encodeURIComponent(threadId)}`
+        + `/interactions/${encodeURIComponent(turnId)}`
+        + `/layers/${encodeURIComponent(layerId)}`
+      )),
+    });
     const screenshotDirectory = join(artifactDirectory, "grounding-screenshot");
     opened = await openAutomatedReviewSession({
       executionId: context.execution.id,
@@ -765,16 +776,8 @@ async function captureInputGroundingRating({ context, interaction, commits, arti
       rootLayerId,
       artifactDirectory: screenshotDirectory,
     });
-    const rootNodeIds = groundingRootNodeIds(interaction);
-    const captures = [];
-    for (const [index, rootNodeId] of rootNodeIds.entries()) {
-      await opened.session.interact({ elementRef: `node-${rootNodeId}`, activate: true });
-      captures.push(await opened.session.screenshot({
-        target: { kind: "element", elementRef: "node-detail" },
-        mode: "full",
-        label: `Input round-trip response root ${index + 1}`,
-      }));
-    }
+    const targets = groundingCaptureTargets(topology);
+    const captures = await captureGroundingTargets(opened.session, targets);
     if (captures.length === 0) {
       captures.push(await opened.session.screenshot({
         target: { kind: "viewport" },

@@ -670,7 +670,7 @@ impl RelayerAppServer {
                     if has_submitted_inputs {
                         let pending_error =
                             format!("{} {error}", crate::product::RECONCILIATION_PENDING_PREFIX);
-                        if error.is_retryable() {
+                        if error.is_retryable() && interaction.graph_node_id.is_some() {
                             storage
                                 .quarantine_interrupted_submitted_input(
                                     interaction.id,
@@ -679,13 +679,20 @@ impl RelayerAppServer {
                                 )
                                 .await?;
                         } else {
+                            let message = if interaction.graph_node_id.is_none() {
+                                format!(
+                                    "Submitted interaction input could not be bound to a canonical graph interaction during startup: {error}. The input draft was restored; send it again to create a new attempt."
+                                )
+                            } else {
+                                format!(
+                                    "Submitted interaction input could not be reconciled with canonical graph provenance: {error}. The input draft was restored; send it again only after resolving the provenance mismatch."
+                                )
+                            };
                             storage
                                 .fail_interrupted_submitted_input(
                                     interaction.id,
                                     &harness,
-                                    &format!(
-                                        "Submitted interaction input could not be reconciled with canonical graph provenance: {error}. The input draft was restored; send it again only after resolving the provenance mismatch."
-                                    ),
+                                    &message,
                                 )
                                 .await?;
                         }

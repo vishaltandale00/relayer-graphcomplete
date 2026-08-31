@@ -36,6 +36,81 @@ export function groundingRootNodeIds(interaction) {
     .filter(Boolean);
 }
 
+export function groundingCaptureTargets(topology) {
+  const layers = new Map((topology?.layers || []).map((layer) => [String(layer.id), layer]));
+  const rootLayerId = String(topology?.rootLayerId ?? "");
+  if (!rootLayerId || !layers.has(rootLayerId)) return [];
+  const pending = [{ layerId: rootLayerId, path: [] }];
+  const visited = new Set();
+  const targets = [];
+  for (let index = 0; index < pending.length; index += 1) {
+    const entry = pending[index];
+    if (visited.has(entry.layerId)) continue;
+    visited.add(entry.layerId);
+    const layer = layers.get(entry.layerId);
+    targets.push({
+      layerId: entry.layerId,
+      nodeIds: (layer?.nodeIds || []).map(String),
+      path: entry.path,
+    });
+    for (const action of layer?.actions || []) {
+      if (action.kind !== "navigate") continue;
+      const targetLayerId = String(action.targetLayerId ?? "");
+      if (!layers.has(targetLayerId) || visited.has(targetLayerId)) continue;
+      pending.push({
+        layerId: targetLayerId,
+        path: [...entry.path, {
+          sourceNodeId: String(action.sourceNodeId),
+          actionId: String(action.id),
+        }],
+      });
+    }
+  }
+  return targets;
+}
+
+export async function buildInputGroundingTopology({ threadId, interaction, loadLayer }) {
+  const rootLayerId = interaction?.completionOutput?.rootLayer?.layer?.id;
+  if (!rootLayerId) {
+    throw new Error("Accepted input response has no visible root layer.");
+  }
+  return buildAcceptedReviewTopology({
+    turnId: interaction.id,
+    presentingInteractionNodeId: interaction.graphNodeId,
+    rootLayerId,
+    loadLayer: (layerId) => loadLayer({
+      threadId,
+      turnId: interaction.id,
+      layerId,
+    }),
+  });
+}
+
+export async function captureGroundingTargets(session, targets) {
+  const captures = [];
+  const activateNode = async (nodeId) => {
+    const state = await session.state();
+    if (String(state.selectedNodeId ?? "") === String(nodeId)) return;
+    await session.interact({ elementRef: `node-${nodeId}`, activate: true });
+  };
+  for (const target of targets) {
+    for (const step of target.path) {
+      await activateNode(step.sourceNodeId);
+      await session.interact({ elementRef: `action-${step.actionId}`, activate: true });
+    }
+    for (const [index, nodeId] of target.nodeIds.entries()) {
+      await activateNode(nodeId);
+      captures.push(await session.screenshot({
+        target: { kind: "element", elementRef: "node-detail" },
+        mode: "full",
+        label: `Input round-trip response layer ${target.layerId} node ${index + 1}`,
+      }));
+    }
+    if (target.path.length > 0) await session.history({ delta: -target.path.length });
+  }
+  return captures;
+}
+
 export function createInputOperatorLease({ operator, revoke }) {
   if (!operator || typeof revoke !== "function") {
     throw new Error("Input operator lease requires an operator and revocation callback.");
@@ -673,14 +748,26 @@ export function createLocalSimulatedUserJudgeRunner({
           inputRatingReceiptRefs: controller.inputRatingReceiptRefs(),
         });
       }
-      const inputRoundTrip = typeof captureInputRoundTrip === "function"
-        ? await captureInputRoundTrip({
+      let inputRoundTrip = null;
+      if (typeof captureInputRoundTrip === "function") {
+        try {
+          inputRoundTrip = await captureInputRoundTrip({
             context,
             topology,
             operatorTrace: controller.operatorTrace(),
             artifactDirectory: join(context.artifactDirectory, "input-roundtrip"),
-          })
-        : null;
+          });
+        } catch (error) {
+          inputRoundTrip = {
+            schemaVersion: 1,
+            status: "failed",
+            passed: false,
+            checks: [],
+            detail: "The completed presentation review was retained, but input round-trip evidence capture failed.",
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
       const output = await persistJudgeArtifacts({
         context,
         configuration: selectedConfiguration,

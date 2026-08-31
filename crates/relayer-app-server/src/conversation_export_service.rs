@@ -715,19 +715,19 @@ fn export_submitted_inputs(
                     }
                 }
                 relayer_graph_core::SubmittedInputValue::Selected { selected } => {
-                    ExportSubmittedInputValue::Selected {
-                        selected: selected
-                            .into_iter()
-                            .map(|option| ExportInputOption {
-                                key: option_keys
-                                    .get(&option.key)
-                                    .cloned()
-                                    .unwrap_or_else(|| redactor.text(&option.key)),
-                                label: redactor.text(&option.label),
-                                unsupported_fields: Default::default(),
-                            })
-                            .collect(),
-                    }
+                    let mut selected = selected
+                        .into_iter()
+                        .map(|option| ExportInputOption {
+                            key: option_keys
+                                .get(&option.key)
+                                .cloned()
+                                .unwrap_or_else(|| redactor.text(&option.key)),
+                            label: redactor.text(&option.label),
+                            unsupported_fields: Default::default(),
+                        })
+                        .collect::<Vec<_>>();
+                    selected.sort_by(|left, right| left.key.as_bytes().cmp(right.key.as_bytes()));
+                    ExportSubmittedInputValue::Selected { selected }
                 }
             };
             Ok(ExportSubmittedInput {
@@ -769,13 +769,14 @@ fn redact_submitted_input(input: &mut ExportSubmittedInput, redactor: &ProjectPa
     match &mut input.value {
         ExportSubmittedInputValue::Text { text } => *text = redactor.text(text),
         ExportSubmittedInputValue::Selected { selected } => {
-            for option in selected {
+            for option in &mut *selected {
                 option.key = option_keys
                     .get(&option.key)
                     .cloned()
                     .unwrap_or_else(|| redactor.text(&option.key));
                 option.label = redactor.text(&option.label);
             }
+            selected.sort_by(|left, right| left.key.as_bytes().cmp(right.key.as_bytes()));
         }
     }
 }
@@ -1352,6 +1353,22 @@ mod tests {
                 prompt: "Choose /private/tmp/project/file".into(),
                 options: vec![
                     InputOption {
+                        key: "/tmp/project/target".into(),
+                        label: "From /tmp/project".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: "/private/tmp/project/target".into(),
+                        label: "From /private/tmp/project".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: SubmittedInputValue::Selected {
+                selected: vec![
+                    InputOption {
                         key: "/private/tmp/project/target".into(),
                         label: "From /private/tmp/project".into(),
                         unsupported_fields: Default::default(),
@@ -1362,15 +1379,6 @@ mod tests {
                         unsupported_fields: Default::default(),
                     },
                 ],
-                minimum_selections: None,
-                unsupported_fields: Default::default(),
-            },
-            value: SubmittedInputValue::Selected {
-                selected: vec![InputOption {
-                    key: "/tmp/project/target".into(),
-                    label: "From /tmp/project".into(),
-                    unsupported_fields: Default::default(),
-                }],
             },
             attempt_state: "failed".into(),
         }];
@@ -1392,8 +1400,11 @@ mod tests {
         assert_eq!(exported[0].action.options[0].key, "[project-path]/target");
         assert_eq!(exported[0].action.options[1].key, "[project-path]/target~2");
         assert_eq!(
-            serde_json::to_value(&exported).unwrap()[0]["value"]["selected"][0]["key"],
-            "[project-path]/target~2"
+            serde_json::to_value(&exported).unwrap()[0]["value"]["selected"],
+            serde_json::json!([
+                {"key":"[project-path]/target","label":"From [project-path]"},
+                {"key":"[project-path]/target~2","label":"From [project-path]"}
+            ])
         );
         let json = serde_json::to_string(&exported).unwrap();
         assert!(!json.contains("private/tmp/project"));
@@ -1424,8 +1435,11 @@ mod tests {
             "[project-path]/target~2"
         );
         assert_eq!(
-            serde_json::to_value(&reexported).unwrap()[0]["value"]["selected"][0]["key"],
-            "[project-path]/target~2"
+            serde_json::to_value(&reexported).unwrap()[0]["value"]["selected"],
+            serde_json::json!([
+                {"key":"[project-path]/target","label":"From [project-path]"},
+                {"key":"[project-path]/target~2","label":"From [project-path]"}
+            ])
         );
     }
 

@@ -3226,6 +3226,7 @@ mod tests {
         assert!(older["action"]["description"].is_null());
 
         let unsupported = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -3246,6 +3247,34 @@ mod tests {
                 .unwrap();
         assert_eq!(unsupported["error"]["code"], "unsupported_action_variant");
         assert_eq!(unsupported["error"]["path"], "variant");
+
+        let missing_prompt = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"missing-prompt","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Choose","control":"text"}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_prompt.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let missing_prompt: Value = serde_json::from_slice(
+            &to_bytes(missing_prompt.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            missing_prompt["error"]["code"],
+            "input_action_prompt_required"
+        );
+        assert_eq!(missing_prompt["error"]["path"], "prompt");
     }
 
     #[tokio::test]

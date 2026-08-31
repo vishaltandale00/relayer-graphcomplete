@@ -127,6 +127,7 @@ impl<'connection> NodeTable<'connection> {
 
     pub(crate) async fn identified_interaction(
         &mut self,
+        project_id: Option<ProjectId>,
         thread_id: ThreadId,
         input_identity: &str,
         input_digest: &str,
@@ -137,11 +138,19 @@ impl<'connection> NodeTable<'connection> {
         let Some(row) = row else {
             return Ok(None);
         };
-        let stored: String = sqlx::query_scalar("SELECT input_digest FROM nodes WHERE id=?1")
-            .bind(row.id)
-            .fetch_one(&mut *self.connection)
-            .await?;
-        if stored != input_digest {
+        let (stored_project_id, stored_digest): (Option<i64>, String) =
+            sqlx::query_as("SELECT project_id,input_digest FROM nodes WHERE id=?1")
+                .bind(row.id)
+                .fetch_one(&mut *self.connection)
+                .await?;
+        if stored_project_id != project_id.map(ProjectId::value) {
+            return Err(GraphError::validation(
+                "interaction_input_conflict",
+                "projectId",
+                "This interaction input identity belongs to a different project or standalone scope.",
+            ));
+        }
+        if stored_digest != input_digest {
             return Err(GraphError::validation(
                 "interaction_input_conflict",
                 "inputDigest",

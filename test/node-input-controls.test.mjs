@@ -4,9 +4,11 @@ import {
   captureTextControlState,
   committedInputAttachment,
   createInputOccurrence,
+  createInputDraftLoadRetryScheduler,
   createNodeInputDraftController,
   createNodeInputDraftLoadQueue,
   initialInputStageValue,
+  inputDraftLoadRetryDelay,
   inspectedInputDraftRevision,
   inputActionReviewRef,
   inputKeyBelongsToThread,
@@ -40,6 +42,57 @@ function draft(revision, attachments = []) {
 }
 
 describe("node input control state", () => {
+  it("bounds initial input-draft reloads to five backoff attempts", () => {
+    expect([0, 1, 2, 3, 4, 5].map(inputDraftLoadRetryDelay))
+      .toEqual([500, 1_000, 2_000, 4_000, 5_000, null]);
+  });
+
+  it("retries a failed input-draft load, recovers, and enforces the hard cutoff", async () => {
+    const scheduled = [];
+    const load = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary"))
+      .mockResolvedValueOnce(draft(4));
+    const scheduler = createInputDraftLoadRetryScheduler({
+      setTimeout: (callback, delay) => {
+        const timer = { callback, delay };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearTimeout: vi.fn(),
+      load,
+      isEligible: () => true,
+    });
+    scheduler.schedule(7);
+    expect(scheduled.map(({ delay }) => delay)).toEqual([500]);
+    await scheduled.shift().callback();
+    expect(scheduled.map(({ delay }) => delay)).toEqual([1_000]);
+    await scheduled.shift().callback();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(scheduler.has(7)).toBe(false);
+
+    const failingTimers = [];
+    const failing = createInputDraftLoadRetryScheduler({
+      setTimeout: (callback, delay) => {
+        const timer = { callback, delay };
+        failingTimers.push(timer);
+        return timer;
+      },
+      clearTimeout: vi.fn(),
+      load: vi.fn(async () => { throw new Error("offline"); }),
+      isEligible: () => true,
+    });
+    failing.schedule(9);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const timer = failingTimers.shift();
+      expect(timer).toBeDefined();
+      await timer.callback();
+    }
+    expect(failingTimers).toEqual([]);
+    expect(failing.has(9)).toBe(false);
+    expect(failing.suppressesLoad(9)).toBe(true);
+    failing.reset(9);
+    expect(failing.suppressesLoad(9)).toBe(false);
+  });
   it("gives every presenting input occurrence a distinct review reference", () => {
     expect(inputActionReviewRef(createInputOccurrence(41, 52, 63))).toBe("input-action-41-52-63");
     expect(inputActionReviewRef(createInputOccurrence(41, 53, 63))).toBe("input-action-41-53-63");
@@ -230,6 +283,30 @@ describe("node input draft controller", () => {
     );
     await expect(controller.detach(7, occurrence)).rejects.toThrow("disk unavailable");
     expect(controller.current(7)).toEqual(prior);
+  });
+
+  it("adopts fresh authority after commit and detach revision conflicts", async () => {
+    const conflict = () => Object.assign(new Error("revision conflict"), {
+      code: "input_draft_revision_conflict",
+    });
+    const api = {
+      get: vi.fn()
+        .mockResolvedValueOnce(draft(9))
+        .mockResolvedValueOnce(draft(11))
+        .mockResolvedValueOnce(draft(13)),
+      commit: vi.fn(async () => { throw conflict(); }),
+      detach: vi.fn(async () => { throw conflict(); }),
+    };
+    const controller = createNodeInputDraftController({ api });
+    await controller.load(7);
+
+    await expect(controller.commit(7, occurrence, textAction, "staged value"))
+      .rejects.toMatchObject({ code: "input_draft_revision_conflict" });
+    expect(controller.current(7)).toEqual(draft(11));
+    await expect(controller.detach(7, occurrence))
+      .rejects.toMatchObject({ code: "input_draft_revision_conflict" });
+    expect(controller.current(7)).toEqual(draft(13));
+    expect(api.get).toHaveBeenCalledTimes(3);
   });
 
   it("requires an authoritative load before mutation", async () => {

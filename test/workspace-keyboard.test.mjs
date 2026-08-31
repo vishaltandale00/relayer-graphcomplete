@@ -68,6 +68,18 @@ import {
 } from "../desktop/renderer/src/node-input-controls.js";
 
 describe("product workspace keyboard behavior", () => {
+  it("retries the initial input-draft load with a bounded thread-scoped timer", async () => {
+    const source = await readFile(new URL(
+      "../desktop/renderer/src/product-workspace/workspace.js",
+      import.meta.url,
+    ), "utf8");
+
+    expect(source).toContain("createInputDraftLoadRetryScheduler({");
+    expect(source).toContain("inputDraftLoadRetries?.schedule(thread.id);");
+    expect(source).toContain("!inputDraftLoadRetries?.suppressesLoad(threadId)");
+    expect(source).toContain("inputDraftLoadRetries?.dispose();");
+  });
+
   it("waits for forced input reconciliation before rejecting stale replay authority", async () => {
     let releaseReconciliation;
     const reconciliation = new Promise((resolve) => { releaseReconciliation = resolve; });

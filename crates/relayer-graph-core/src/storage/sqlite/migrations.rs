@@ -800,6 +800,10 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query("UPDATE actions SET published_revision=7 WHERE id=1")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query(
             "INSERT INTO interaction_context_actions(action_id,interaction_node_id,target_node_id,source_interaction_node_id,source_layer_id,position) VALUES (2,3,2,1,1,0)",
         )
@@ -848,6 +852,12 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(action_id, 1);
+        let published_revision: i64 =
+            sqlx::query_scalar("SELECT published_revision FROM actions WHERE id=1")
+                .fetch_one(&mut *connection)
+                .await
+                .unwrap();
+        assert_eq!(published_revision, 7);
         let context_action_id: i64 = sqlx::query_scalar(
             "SELECT action_id FROM interaction_context_actions WHERE interaction_node_id=3",
         )

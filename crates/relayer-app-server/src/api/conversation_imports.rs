@@ -1017,31 +1017,6 @@ mod tests {
         };
         accepted.interaction_node_id = Some("node:interaction-1".into());
         accepted.contexts = vec![context("action:context-accepted", &["First", "Second"])];
-        accepted.accepted_view.as_mut().unwrap().layers[0]
-            .actions
-            .extend([
-                export_action(
-                    "action:input-shared",
-                    "node:source",
-                    Some("layer:source"),
-                    ExportActionKind::Input,
-                    None,
-                ),
-                export_action(
-                    "action:input-text",
-                    "node:source",
-                    Some("layer:source"),
-                    ExportActionKind::Input,
-                    None,
-                ),
-                export_action(
-                    "action:input-multi",
-                    "node:source",
-                    Some("layer:source"),
-                    ExportActionKind::Input,
-                    None,
-                ),
-            ]);
         let options = vec![
             ExportInputOption {
                 key: "failed".into(),
@@ -1054,6 +1029,52 @@ mod tests {
                 unsupported_fields: Default::default(),
             },
         ];
+        let input_action = |id: &str,
+                            control: ExportInputControl,
+                            prompt: &str,
+                            action_options: Vec<ExportInputOption>,
+                            minimum_selections: Option<u32>| {
+            let mut action = export_action(
+                id,
+                "node:source",
+                Some("layer:source"),
+                ExportActionKind::Input,
+                None,
+            );
+            action.input = Some(ExportInputActionSnapshot {
+                control,
+                prompt: prompt.into(),
+                options: action_options,
+                minimum_selections,
+                unsupported_fields: Default::default(),
+            });
+            action
+        };
+        accepted.accepted_view.as_mut().unwrap().layers[0]
+            .actions
+            .extend([
+                input_action(
+                    "action:input-shared",
+                    ExportInputControl::SingleSelect,
+                    "Choose outcome",
+                    options.clone(),
+                    None,
+                ),
+                input_action(
+                    "action:input-text",
+                    ExportInputControl::Text,
+                    "Explain outcome",
+                    vec![],
+                    None,
+                ),
+                input_action(
+                    "action:input-multi",
+                    ExportInputControl::MultiSelect,
+                    "Choose evidence",
+                    options.clone(),
+                    Some(2),
+                ),
+            ]);
         for (sequence, status, suffix) in [
             (3, ExportCompletionStatus::Failed, "failed"),
             (4, ExportCompletionStatus::Stopped, "stopped"),

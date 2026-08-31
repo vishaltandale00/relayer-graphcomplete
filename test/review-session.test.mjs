@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReviewSession } from "../desktop/eval-main/review-session.mjs";
+import { captureGroundingTargets } from "../desktop/eval-main/simulated-user-judge.mjs";
 import { setControlActivationCompletion } from "../desktop/renderer/src/control-activation.js";
 import {
   accessibleControlName,
@@ -458,6 +459,107 @@ describe("ReviewSession", () => {
       "interact",
       "history",
       "history",
+    ]);
+  });
+
+  it("captures the root-child-grandchild fixture without reactivating selection or over-rewinding history", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-grounding-review-"));
+    directories.push(directory);
+    const stack = [];
+    const historyDeltas = [];
+    const nodeControl = (nodeId) => ({
+      elementRef: `node-${nodeId}`,
+      name: `Node ${nodeId}`,
+      role: "button",
+      disabled: false,
+      kind: "node",
+      actionId: null,
+    });
+    const actionControl = (actionId) => ({
+      elementRef: `action-${actionId}`,
+      name: `Action ${actionId}`,
+      role: "button",
+      disabled: false,
+      kind: "navigate-action",
+      actionId,
+    });
+    let state = reviewState({ controls: [nodeControl("2")] });
+    const select = (nodeId) => {
+      const actionId = state.layerId === "layer-1" && nodeId === "2" ? "11"
+        : state.layerId === "layer-2" && nodeId === "3" ? "21"
+          : null;
+      state = { ...state, selectedNodeId: nodeId, controls: actionId ? [actionControl(actionId)] : [] };
+    };
+    const navigate = (actionId) => {
+      stack.push(structuredClone(state));
+      const child = actionId === "11"
+        ? { layerId: "layer-2", nodeId: "3" }
+        : { layerId: "layer-3", nodeId: "4" };
+      state = reviewState({
+        layerId: child.layerId,
+        selectedNodeId: null,
+        activatedActionId: actionId,
+        navigationPath: [
+          ...state.navigationPath,
+          { layerId: child.layerId, viaActionId: actionId },
+        ],
+        controls: [nodeControl(child.nodeId)],
+      });
+    };
+    const electron = fakeElectron({
+      snapshot: async () => state,
+      activate: async ({ elementRef }) => {
+        if (elementRef.startsWith("node-")) select(elementRef.slice(5));
+        else navigate(elementRef.slice(7));
+        return state;
+      },
+      history: async ({ delta }) => {
+        historyDeltas.push(delta);
+        for (let count = 0; count < -delta; count += 1) state = stack.pop();
+        return state;
+      },
+      capturePlan: async () => ({
+        clip: { x: 0, y: 0, width: 320, height: 200 },
+        tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
+      }),
+      prepareCaptureTile: async ({ index }) => ({
+        index,
+        clip: { x: 0, y: 0, width: 320, height: 200 },
+      }),
+      restoreCapture: async () => state,
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: directory,
+      ipc: electron.ipc,
+      commandTimeoutMs: 100,
+    });
+    await session.open();
+
+    const captures = await captureGroundingTargets(session, [
+      { layerId: "layer-1", nodeIds: ["2"], path: [] },
+      {
+        layerId: "layer-2",
+        nodeIds: ["3"],
+        path: [{ sourceNodeId: "2", actionId: "11" }],
+      },
+      {
+        layerId: "layer-3",
+        nodeIds: ["4"],
+        path: [
+          { sourceNodeId: "2", actionId: "11" },
+          { sourceNodeId: "3", actionId: "21" },
+        ],
+      },
+    ]);
+
+    expect(captures).toHaveLength(3);
+    expect(historyDeltas).toEqual([-1, -2]);
+    expect(session.trace().filter((entry) => entry.elementRef === "node-2")).toHaveLength(1);
+    expect((await session.state()).navigationPath).toEqual([
+      { layerId: "layer-1", viaActionId: null },
     ]);
   });
 
