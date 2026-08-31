@@ -125,4 +125,11 @@ describe("CI workflow contract", () => {
     expect(prerequisiteIndex).toBeGreaterThan(-1);
     expect(testIndex).toBeGreaterThan(prerequisiteIndex);
   });
+
+  test("preserves PR parent history for complete Vitest evidence checks", () => {
+    for (const jobName of ["vitest", "full"]) {
+      const checkout = workflow.jobs[jobName].steps.find((step) => step.uses?.startsWith("actions/checkout@"));
+      expect(checkout.with["fetch-depth"]).toBe(0);
+    }
+  });
 });
