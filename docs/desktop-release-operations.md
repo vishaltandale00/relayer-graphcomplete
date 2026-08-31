@@ -81,10 +81,20 @@ The audit checks environment branch policies, target-required secret and variabl
 1. Merge reviewed release changes to `main`.
 2. Increment `desktop/package.json` to one numeric version shared by all targets.
 3. Run `npm run check` and `npm run build` from the exact commit.
-4. Run `Desktop Signed Preview Candidates` manually to prove both enabled macOS signing jobs without publication.
-5. Review every release receipt and installer signature.
-6. Create `desktop-vX.Y.Z` on that exact `main` commit only after explicit publication approval.
-7. The tagged workflow publishes immutable artifacts for each enabled target and moves each Preview pointer last.
+4. Run `Desktop Signed Preview Candidates` manually to build the enabled signed candidates without publication. Each signed release receipt seals its producing workflow run ID and attempt. Record the run ID and attempt, plus each enabled target artifact's numeric ID and `sha256:` digest from the GitHub Actions artifact API. A target remains eligible when its package job and artifact succeed even if an independent sibling target fails.
+5. Review every release receipt and installer signature from that manual run.
+6. After explicit publication approval, create one protected annotated tag on that exact `main` commit. Pin the reviewed manual run in the annotation; do not choose it by recency:
+
+   ```sh
+   git tag -a desktop-vX.Y.Z <full-main-commit> \
+     -m "Relayer Desktop X.Y.Z" \
+     -m "Candidate-Run: <successful-manual-workflow-run-id>/<run-attempt>" \
+     -m "Candidate-Artifact-macos-arm64: <artifact-id>/<sha256:digest>"
+   ```
+
+7. Push the tag once. The tagged workflow verifies that each pinned target job succeeded in the named manual attempt for the same `main` commit, resolves one unexpired artifact ID and SHA-256 digest per enabled target, downloads by that immutable artifact ID, and matches the run and attempt sealed inside the signed release receipt before publication. It does not rebuild, re-sign, re-notarize, rerun repository checks, or re-upload telemetry. The publisher records the candidate run, attempt, artifact ID, and artifact digest; it revalidates the release receipt, checksums, artifact bytes, existing immutable publication receipt, and public objects before moving the Preview pointer last.
+
+A lightweight tag, a malformed or repeated `Candidate-Run` annotation, or a run from another attempt, workflow, event, repository, branch, commit, or artifact set fails closed. Never move or recreate a tag to repair that failure. If the tag annotation is wrong, leave the tag and version unpublished and prepare a new version. A workflow retry is valid only while it remains pinned to the same candidate run attempt and artifact identity; immutable-object and publication-receipt checks still reject different bytes.
 
 ### First Intel rollout
 
@@ -116,7 +126,7 @@ The manual run cannot publish. The tag run rejects a tag/version mismatch and a 
 
 ## Native macOS canaries
 
-After both an older Preview seed and a newer Preview target are published for the same macOS architecture, run the target-specific workflow with both versions, full source commits, and signed-candidate workflow run IDs:
+After both an older Preview seed and a newer Preview target are published for the same macOS architecture, run the target-specific workflow with both versions and full source commits. Supply the seed candidate run, the target's pinned manual candidate run, and the target's tagged publication run separately. The target candidate artifact exists only in the manual run; the target publication receipt exists only in the tagged run.
 
 - `Apple Silicon macOS Desktop Preview Canary` runs on `macos-15` and consumes only `macos-arm64` artifacts and receipts.
 - `Intel macOS Desktop Preview Canary` runs on `macos-15-intel` and consumes only `macos-x64` artifacts and receipts.
@@ -166,8 +176,8 @@ On the signed-in desktop, install Git and GitHub CLI, then check out the exact r
 
 ```powershell
 gh run download <seed-run-id> --name relayer-desktop-preview-windows-x64-<seed-commit> --dir seed
-gh run download <target-run-id> --name relayer-desktop-preview-windows-x64-<target-commit> --dir target
-gh run download <target-run-id> --name relayer-desktop-preview-publication-windows-x64-<target-commit> --dir publication
+gh run download <target-candidate-run-id> --name relayer-desktop-preview-windows-x64-<target-commit> --dir target
+gh run download <target-publication-run-id> --name relayer-desktop-preview-publication-windows-x64-<target-commit> --dir publication
 ```
 
 Run the interactive canary from an ordinary user PowerShell session:

@@ -11,12 +11,17 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
   validate:
     name: Validate desktop candidate source
     runs-on: ubuntu-latest
+    outputs:
+      candidate_artifacts: ${{ steps.resolve-candidate.outputs.candidate_artifacts }}
+      candidate_run_id: ${{ steps.resolve-candidate.outputs.candidate_run_id }}
+      candidate_run_attempt: ${{ steps.resolve-candidate.outputs.candidate_run_attempt }}
     steps:
       - name: Checkout immutable source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -38,7 +43,11 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p 'require("./desktop/package.json").version')"
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            [[ "$GITHUB_REF" == refs/tags/desktop-v* ]] || {
+              echo "Desktop release publication requires a desktop-v* tag push" >&2
+              exit 1
+            }
             [[ "$GITHUB_REF_NAME" == "desktop-v${version}" ]] || {
               echo "Tag $GITHUB_REF_NAME does not match desktop-v${version}" >&2
               exit 1
@@ -54,15 +63,32 @@ jobs:
             }
           fi
 
+      - name: Resolve the pinned manual candidate run
+        id: resolve-candidate
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v') }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELAYER_DESKTOP_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          export RELAYER_DESKTOP_VERSION="${RELAYER_DESKTOP_VERSION#desktop-v}"
+          export RELAYER_DESKTOP_TAG_OBJECT_TYPE="$(git cat-file -t "$GITHUB_REF")"
+          export RELAYER_DESKTOP_TAG_MESSAGE="$(git for-each-ref --format='%(contents)' "$GITHUB_REF")"
+          node desktop/release/preview-candidate-run.mjs
+
       - name: Install locked dependencies
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: npm ci
 
       - name: Run repository checks
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: npm run check
 
   package-macos:
     name: Sign and notarize ${{ matrix.target }} Preview
     needs: validate
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     strategy:
       fail-fast: false
       matrix:
@@ -101,6 +127,8 @@ jobs:
           RELAYER_DESKTOP_TARGET: ${{ matrix.target }}
           RELAYER_DESKTOP_SIGN_IDENTITY: ${{ secrets.RELAYER_DESKTOP_SIGN_IDENTITY }}
           RELAYER_DESKTOP_APPLE_API_KEY_P8: ${{ secrets.RELAYER_DESKTOP_APPLE_API_KEY }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ID: ${{ github.run_id }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: ${{ github.run_attempt }}
           APPLE_API_KEY_ID: ${{ secrets.RELAYER_DESKTOP_APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.RELAYER_DESKTOP_APPLE_API_ISSUER }}
           CSC_LINK: ${{ secrets.RELAYER_DESKTOP_CSC_LINK }}
@@ -232,6 +260,8 @@ jobs:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           RELAYER_DESKTOP_TARGET: windows-x64
           RELAYER_DESKTOP_SOURCE_COMMIT: ${{ github.sha }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ID: ${{ github.run_id }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: ${{ github.run_attempt }}
           RELAYER_DESKTOP_UPDATE_BASE_URL: https://updates.relayerlabs.ai/desktop/windows/x64
           RELAYER_WINDOWS_SIGNING_ENDPOINT: https://eus.codesigning.azure.net/
           RELAYER_WINDOWS_SIGNING_ACCOUNT: relayercodesigning
@@ -271,11 +301,12 @@ jobs:
 
   publish-preview-macos:
     name: Publish ${{ matrix.target }} Preview update
-    # Run each publisher after the full build matrix settles. A missing artifact
-    # fails only its matching publisher, so one macOS target cannot block another.
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/desktop-v') }}
+    # A tag publishes only the manual candidate run pinned by its annotation.
+    # The skipped tag packaging job remains a declared dependency so a future
+    # target matrix cannot accidentally rebuild before publication.
+    if: ${{ always() && github.event_name == 'push' && needs.validate.result == 'success' && startsWith(github.ref, 'refs/tags/desktop-v') }}
     runs-on: ubuntu-latest
-    needs: [package-macos]
+    needs: [validate, package-macos]
     strategy:
       fail-fast: false
       matrix:
@@ -283,6 +314,7 @@ jobs:
     environment:
       name: desktop-update-preview
     permissions:
+      actions: read
       contents: read
       id-token: write
     steps:
@@ -307,8 +339,11 @@ jobs:
       - name: Download sealed candidate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: relayer-desktop-preview-${{ matrix.target }}-${{ github.sha }}
+          artifact-ids: ${{ fromJSON(needs.validate.outputs.candidate_artifacts)[matrix.target].id }}
           path: desktop/dist
+          merge-multiple: true
+          run-id: ${{ needs.validate.outputs.candidate_run_id }}
+          github-token: ${{ github.token }}
 
       - name: Assume Preview publication role
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
@@ -319,6 +354,10 @@ jobs:
       - name: Publish immutable artifacts and move Preview pointer
         env:
           DESKTOP_UPDATE_BUCKET: ${{ vars.DESKTOP_UPDATE_BUCKET }}
+          RELAYER_DESKTOP_CANDIDATE_ARTIFACT_DIGEST: ${{ fromJSON(needs.validate.outputs.candidate_artifacts)[matrix.target].digest }}
+          RELAYER_DESKTOP_CANDIDATE_ARTIFACT_ID: ${{ fromJSON(needs.validate.outputs.candidate_artifacts)[matrix.target].id }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ID: ${{ needs.validate.outputs.candidate_run_id }}
+          RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: ${{ needs.validate.outputs.candidate_run_attempt }}
           RELAYER_DESKTOP_TARGET: ${{ matrix.target }}
         run: npm run desktop:release:publish-preview -- --bucket "$DESKTOP_UPDATE_BUCKET"
 

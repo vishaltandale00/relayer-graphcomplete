@@ -49,6 +49,12 @@ import {
 import { desktopReleaseAppPath } from "../desktop/release/app-path.mjs";
 import { finalizeDesktopUpdateArtifact } from "../desktop/release/finalize-update-artifact.mjs";
 import { createDesktopCanaryEvidence, deriveDesktopCanaryTrace } from "../desktop/release/canary-evidence.mjs";
+import {
+  parseDesktopPreviewCandidateTag,
+  resolveDesktopPreviewCandidateRun,
+  validateDesktopPreviewCandidateRun,
+  writeDesktopPreviewCandidateOutputs,
+} from "../desktop/release/preview-candidate-run.mjs";
 import { verifyWindowsSignatures, windowsApplicationExecutables } from "../desktop/release/verify-windows-app.mjs";
 import {
   buildPutObjectArgs,
@@ -1993,6 +1999,217 @@ describe("desktop skeleton", () => {
     }
   });
 
+  it("pins Preview publication to one successful manual candidate attempt and artifact", async () => {
+    const sourceCommit = "a".repeat(40);
+    const repository = "vishaltandale00/relayer-graphcomplete";
+    const artifactDigest = `sha256:${"b".repeat(64)}`;
+    const tagArtifactLine = `Candidate-Artifact-macos-arm64: 777/${artifactDigest}`;
+    expect(parseDesktopPreviewCandidateTag({
+      objectType: "tag",
+      message: `Relayer Desktop 0.2.26\n\nCandidate-Run: 12345/2\n${tagArtifactLine}\n`,
+      version: "0.2.26",
+    })).toEqual({
+      candidateRunId: "12345",
+      candidateRunAttempt: "2",
+      candidateArtifacts: { "macos-arm64": { id: "777", digest: artifactDigest } },
+    });
+    expect(() => parseDesktopPreviewCandidateTag({
+      objectType: "commit",
+      message: `Relayer Desktop 0.2.26\n\nCandidate-Run: 12345/2\n${tagArtifactLine}\n`,
+      version: "0.2.26",
+    })).toThrow("annotated release tag");
+    for (const message of [
+      `Relayer Desktop 0.2.26\n\nCandidate-Run: 12345/2\nCandidate-Run: 67890/1\n${tagArtifactLine}\n`,
+      `Relayer Desktop 0.2.26\n\nCandidate-Run: 12345/2\n candidate-run: 67890/1\n${tagArtifactLine}\n`,
+      `Relayer Desktop 0.2.26\n\nCandidate-Run: 12345/2\nCANDIDATE-RUN: 67890/1\n${tagArtifactLine}\n`,
+    ]) {
+      expect(() => parseDesktopPreviewCandidateTag({ objectType: "tag", message, version: "0.2.26" }))
+        .toThrow("exactly one Candidate-Run");
+    }
+
+    const run = {
+      id: 12345,
+      run_attempt: 2,
+      event: "workflow_dispatch",
+      status: "completed",
+      conclusion: "failure",
+      head_sha: sourceCommit,
+      head_branch: "main",
+      path: ".github/workflows/desktop-signed-preview.yml",
+      repository: { full_name: repository },
+    };
+    const artifactName = `relayer-desktop-preview-macos-arm64-${sourceCommit}`;
+    const artifact = { id: 777, name: artifactName, expired: false, digest: artifactDigest };
+    const jobs = { jobs: [{
+      name: "Sign and notarize macos-arm64 Preview",
+      status: "completed",
+      conclusion: "success",
+    }] };
+    const artifacts = { artifacts: [artifact] };
+    const pinnedCandidateArtifacts = { "macos-arm64": { id: "777", digest: artifactDigest } };
+    const expectedCandidateArtifacts = {
+      "macos-arm64": { id: "777", name: artifactName, digest: artifact.digest },
+    };
+    expect(validateDesktopPreviewCandidateRun({
+      run,
+      jobs,
+      artifacts,
+      candidateRunId: "12345",
+      candidateRunAttempt: "2",
+      candidateArtifacts: pinnedCandidateArtifacts,
+      sourceCommit,
+      repository,
+    })).toEqual({
+      candidateRunId: "12345",
+      candidateRunAttempt: "2",
+      candidateArtifacts: expectedCandidateArtifacts,
+    });
+    const candidateWorkflow = parseYaml(await readFile(
+      new URL("../.github/workflows/desktop-signed-preview.yml", import.meta.url),
+      "utf8",
+    ));
+    for (const [target, jobName] of [
+      ["macos-x64", candidateWorkflow.jobs["package-macos"].name.replace("${{ matrix.target }}", "macos-x64")],
+      ["windows-x64", candidateWorkflow.jobs["package-windows"].name],
+    ]) {
+      const targetArtifactName = `relayer-desktop-preview-${target}-${sourceCommit}`;
+      expect(validateDesktopPreviewCandidateRun({
+        run,
+        jobs: { jobs: [{ name: jobName, status: "completed", conclusion: "success" }] },
+        artifacts: { artifacts: [{ ...artifact, name: targetArtifactName }] },
+        candidateRunId: "12345",
+        candidateRunAttempt: "2",
+        candidateArtifacts: { [target]: { id: "777", digest: artifactDigest } },
+        sourceCommit,
+        repository,
+        targets: [target],
+      }).candidateArtifacts[target]).toEqual({
+        id: "777",
+        name: targetArtifactName,
+        digest: artifactDigest,
+      });
+    }
+    const invalidRuns = [
+      [{ ...run, id: 12346 }, "12345", "2"],
+      [{ ...run, run_attempt: 3 }, "12345", "2"],
+      [{ ...run, event: "push" }, "12345", "2"],
+      [{ ...run, status: "in_progress" }, "12345", "2"],
+      [{ ...run, head_sha: "c".repeat(40) }, "12345", "2"],
+      [{ ...run, head_branch: "release" }, "12345", "2"],
+      [{ ...run, path: ".github/workflows/other.yml" }, "12345", "2"],
+      [{ ...run, repository: { full_name: "other/repository" } }, "12345", "2"],
+    ];
+    for (const [candidateRun, candidateRunId, candidateRunAttempt] of invalidRuns) {
+      expect(() => validateDesktopPreviewCandidateRun({
+        run: candidateRun,
+        jobs,
+        artifacts,
+        candidateRunId,
+        candidateRunAttempt,
+        candidateArtifacts: pinnedCandidateArtifacts,
+        sourceCommit,
+        repository,
+      })).toThrow("completed manual run");
+    }
+    expect(() => validateDesktopPreviewCandidateRun({
+      run,
+      jobs: { jobs: [{ ...jobs.jobs[0], conclusion: "failure" }] },
+      artifacts,
+      candidateRunId: "12345",
+      candidateRunAttempt: "2",
+      candidateArtifacts: pinnedCandidateArtifacts,
+      sourceCommit,
+      repository,
+    })).toThrow("successful macos-arm64 package job");
+    expect(() => validateDesktopPreviewCandidateRun({
+      run,
+      jobs,
+      artifacts: { artifacts: [{ name: artifactName, expired: true }] },
+      candidateRunId: "12345",
+      candidateRunAttempt: "2",
+      candidateArtifacts: pinnedCandidateArtifacts,
+      sourceCommit,
+      repository,
+    })).toThrow("exact unexpired");
+    expect(() => validateDesktopPreviewCandidateRun({
+      run,
+      jobs,
+      artifacts: { artifacts: [artifact, { ...artifact }] },
+      candidateRunId: "12345",
+      candidateRunAttempt: "2",
+      candidateArtifacts: pinnedCandidateArtifacts,
+      sourceCommit,
+      repository,
+    })).toThrow("exact unexpired");
+    for (const invalidPinnedArtifact of [
+      { id: "0", digest: artifactDigest },
+      { id: "777", digest: "sha256:not-a-digest" },
+    ]) {
+      expect(() => validateDesktopPreviewCandidateRun({
+        run,
+        jobs,
+        artifacts,
+        candidateRunId: "12345",
+        candidateRunAttempt: "2",
+        candidateArtifacts: { "macos-arm64": invalidPinnedArtifact },
+        sourceCommit,
+        repository,
+      })).toThrow(/positive integer|SHA-256 digest/);
+    }
+
+    const environment = {
+      RELAYER_DESKTOP_VERSION: "0.2.26",
+      RELAYER_DESKTOP_TAG_OBJECT_TYPE: "tag",
+      RELAYER_DESKTOP_TAG_MESSAGE: `Relayer Desktop 0.2.26\n\nCandidate-Run: 12345/2\n${tagArtifactLine}\n`,
+      GITHUB_REPOSITORY: repository,
+      GITHUB_TOKEN: "test-token",
+      GITHUB_SHA: sourceCommit,
+    };
+    const fetchImpl = async (url) => {
+      if (String(url).endsWith("/jobs?per_page=100")) {
+        expect(String(url)).toContain("/runs/12345/attempts/2/jobs?per_page=100");
+        return new Response(JSON.stringify(jobs), { status: 200 });
+      }
+      return new Response(JSON.stringify(
+        String(url).endsWith("/artifacts?per_page=100") ? artifacts : run,
+      ), { status: 200 });
+    };
+    const resolved = await resolveDesktopPreviewCandidateRun({ environment, fetchImpl });
+    expect(resolved.candidateArtifacts).toEqual(expectedCandidateArtifacts);
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-candidate-output-"));
+    try {
+      const outputPath = join(outputDirectory, "github-output");
+      await writeDesktopPreviewCandidateOutputs(outputPath, resolved);
+      const output = await readFile(outputPath, "utf8");
+      expect(output).toContain("candidate_run_id=12345\n");
+      expect(output).toContain("candidate_run_attempt=2\n");
+      const candidateArtifactsOutput = output.split("\n")
+        .find((line) => line.startsWith("candidate_artifacts="));
+      expect(JSON.parse(candidateArtifactsOutput.slice("candidate_artifacts=".length)))
+        .toEqual(expectedCandidateArtifacts);
+    } finally {
+      await rm(outputDirectory, { recursive: true, force: true });
+    }
+    await expect(resolveDesktopPreviewCandidateRun({
+      environment,
+      fetchImpl: async () => new Response("unavailable", { status: 503 }),
+    })).rejects.toThrow("GitHub returned HTTP 503");
+    let runReads = 0;
+    await expect(resolveDesktopPreviewCandidateRun({
+      environment,
+      fetchImpl: async (url) => {
+        if (String(url).endsWith("/jobs?per_page=100")) {
+          return new Response(JSON.stringify(jobs), { status: 200 });
+        }
+        if (String(url).endsWith("/artifacts?per_page=100")) {
+          return new Response(JSON.stringify(artifacts), { status: 200 });
+        }
+        runReads += 1;
+        return new Response(JSON.stringify(runReads === 2 ? { ...run, run_attempt: 3 } : run), { status: 200 });
+      },
+    })).rejects.toThrow("completed manual run");
+  });
+
   it("enforces one signed desktop release contract and seals its candidate artifacts", async () => {
     const releaseWorkflow = await readFile(new URL("../.github/workflows/desktop-signed-preview.yml", import.meta.url), "utf8");
     const stableWorkflow = await readFile(new URL("../.github/workflows/desktop-promote-stable.yml", import.meta.url), "utf8");
@@ -2004,15 +2221,32 @@ describe("desktop skeleton", () => {
     const intelCanaryScript = await readFile(new URL("../desktop/release/run-macos-intel-canary.sh", import.meta.url), "utf8");
     const electronCanaryScript = await readFile(new URL("../desktop/release/electron-cdp-canary.mjs", import.meta.url), "utf8");
     const notarizationScript = await readFile(new URL("../desktop/release/notarize-and-staple.mjs", import.meta.url), "utf8");
-    expect(releaseWorkflow).toContain("if: ${{ always() && startsWith(github.ref, 'refs/tags/desktop-v') }}");
+    const artifactRunIdsByStep = (workflow) => Object.fromEntries(
+      parseYaml(workflow).jobs.canary.steps
+        .filter((step) => step.with?.["run-id"])
+        .map((step) => [step.name, step.with["run-id"]]),
+    );
+    expect(releaseWorkflow).toContain("if: ${{ always() && github.event_name == 'push' && needs.validate.result == 'success' && startsWith(github.ref, 'refs/tags/desktop-v') }}");
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main');
+    expect(releaseWorkflow).toContain("RELAYER_DESKTOP_TAG_OBJECT_TYPE");
+    expect(releaseWorkflow).toContain("artifact-ids: ${{ fromJSON(needs.validate.outputs.candidate_artifacts)[matrix.target].id }}");
+    expect(releaseWorkflow).toContain("run-id: ${{ needs.validate.outputs.candidate_run_id }}");
+    expect(releaseWorkflow).toContain("github-token: ${{ github.token }}");
+    expect(releaseWorkflow).toContain("merge-multiple: true");
+    expect(releaseWorkflow).toContain("RELAYER_DESKTOP_CANDIDATE_RUN_ID: ${{ needs.validate.outputs.candidate_run_id }}");
+    expect(releaseWorkflow).toContain("RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: ${{ needs.validate.outputs.candidate_run_attempt }}");
+    expect(releaseWorkflow).toContain("RELAYER_DESKTOP_CANDIDATE_RUN_ID: ${{ github.run_id }}");
+    expect(releaseWorkflow).toContain("RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: ${{ github.run_attempt }}");
+    expect(releaseWorkflow).toContain("RELAYER_DESKTOP_CANDIDATE_ARTIFACT_ID: ${{ fromJSON(needs.validate.outputs.candidate_artifacts)[matrix.target].id }}");
+    expect(releaseWorkflow).toContain("RELAYER_DESKTOP_CANDIDATE_ARTIFACT_DIGEST: ${{ fromJSON(needs.validate.outputs.candidate_artifacts)[matrix.target].digest }}");
+    expect(releaseWorkflow).toContain("if: ${{ github.event_name == 'workflow_dispatch' }}");
     expect(releaseWorkflow).toContain("uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca");
     expect(releaseWorkflow).toContain("subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}");
     expect(releaseWorkflow).toContain("AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}");
     expect(releaseWorkflow).toContain("RELAYER_WINDOWS_PUBLISHER_NAME: ${{ vars.RELAYER_WINDOWS_PUBLISHER_NAME }}");
     expect(releaseWorkflow).toContain("Missing required Windows signing variable");
     expect(releaseWorkflow).toContain("if: ${{ false }}");
-    expect(releaseWorkflow).toContain("needs: [package-macos]");
+    expect(releaseWorkflow).toContain("needs: [validate, package-macos]");
     expect(releaseWorkflow).toContain("target: [macos-arm64]");
     expect(releaseWorkflow).not.toContain("macos-15-intel");
     expect(releaseWorkflow).not.toContain("needs: [package-macos, package-windows]");
@@ -2026,11 +2260,21 @@ describe("desktop skeleton", () => {
     expect(arm64CanaryWorkflow).toContain("run-macos-arm64-canary.sh");
     expect(arm64CanaryWorkflow).toContain("relayer-desktop-preview-macos-arm64-");
     expect(arm64CanaryWorkflow).toContain("preview-publication-macos-arm64");
+    expect(artifactRunIdsByStep(arm64CanaryWorkflow)).toMatchObject({
+      "Download signed Apple Silicon target candidate": "${{ inputs.target_candidate_run_id }}",
+      "Download target Preview publication receipt": "${{ inputs.target_publication_run_id }}",
+    });
+    expect(arm64CanaryWorkflow).not.toContain("inputs.target_run_id");
     expect(arm64CanaryWorkflow).toContain("Relayer-${SEED_VERSION}-mac-arm64.dmg");
     expect(arm64CanaryWorkflow).toContain("- name: Preserve Apple Silicon install and updater evidence\n        if: ${{ always() }}");
     expect(intelCanaryWorkflow).toContain("runs-on: macos-15-intel");
     expect(intelCanaryWorkflow).toContain("run-macos-intel-canary.sh");
     expect(intelCanaryWorkflow).toContain("preview-publication-macos-x64");
+    expect(artifactRunIdsByStep(intelCanaryWorkflow)).toMatchObject({
+      "Download signed Intel target candidate": "${{ inputs.target_candidate_run_id }}",
+      "Download target Preview publication receipt": "${{ inputs.target_publication_run_id }}",
+    });
+    expect(intelCanaryWorkflow).not.toContain("inputs.target_run_id");
     expect(intelCanaryWorkflow).toContain("- name: Preserve Intel install and updater evidence\n        if: ${{ always() }}");
     expect(intelCanaryScript).toContain('run-macos-canary.sh" --target macos-x64 "$@"');
     expect(arm64CanaryScript).toContain('run-macos-canary.sh" --target macos-arm64 "$@"');
@@ -2093,6 +2337,8 @@ describe("desktop skeleton", () => {
       RELAYER_DESKTOP_TARGET: "macos-arm64",
       RELAYER_DESKTOP_CHANNEL: "preview",
       RELAYER_DESKTOP_UPDATE_BASE_URL: DESKTOP_RELEASE.updateBaseUrl,
+      RELAYER_DESKTOP_CANDIDATE_RUN_ID: "12345",
+      RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: "2",
       RELAYER_DESKTOP_SIGN_IDENTITY: "Developer ID Application: VISHAL TANDALE (NZ253AL7U6)",
       APPLE_API_KEY: "/tmp/AuthKey_TEST.p8",
       APPLE_API_KEY_ID: "TESTKEY",
@@ -2116,6 +2362,8 @@ describe("desktop skeleton", () => {
       providerChannel: "beta",
       manifestName: "beta-mac.yml",
       sourceCommit,
+      candidateWorkflowRunId: "12345",
+      candidateWorkflowRunAttempt: "2",
       appleTeamId: "NZ253AL7U6",
     });
     const builder = createDesktopBuilderConfig(contract);
@@ -2229,6 +2477,7 @@ describe("desktop skeleton", () => {
       [{ ...releaseEnvironment, RELAYER_DESKTOP_SIGN_IDENTITY: "Apple Development: Example" }, "0.2.0", sourceCommit, "Developer ID Application"],
       [{ ...releaseEnvironment, APPLE_API_KEY: "" }, "0.2.0", sourceCommit, "notarytool"],
       [{ ...releaseEnvironment, CSC_LINK: "/tmp/certificate.p12" }, "0.2.0", sourceCommit, "provided together"],
+      [{ ...releaseEnvironment, RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: "" }, "0.2.0", sourceCommit, "run and attempt IDs together"],
       [releaseEnvironment, "0.2.0", "short", "40-character"],
     ];
     for (const [environment, version, commit, message] of invalidCases) {
@@ -2488,6 +2737,8 @@ describe("desktop skeleton", () => {
       manifest: "beta-mac.yml",
       updateBaseUrl: DESKTOP_RELEASE_TARGETS["macos-arm64"].updateBaseUrl,
       sourceCommit,
+      candidateWorkflowRunId: "99",
+      candidateWorkflowRunAttempt: "1",
       signing: {
         mode: "certificate-file",
         appleTeamId: DESKTOP_RELEASE.appleTeamId,
@@ -2510,12 +2761,28 @@ describe("desktop skeleton", () => {
       GITHUB_REF_NAME: `desktop-v${version}`,
       GITHUB_RUN_ID: "123",
       GITHUB_RUN_ATTEMPT: "2",
-    }, version)).toEqual({ sourceCommit, workflowRunId: "123", workflowRunAttempt: "2" });
+      RELAYER_DESKTOP_CANDIDATE_RUN_ID: "99",
+      RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: "1",
+      RELAYER_DESKTOP_CANDIDATE_ARTIFACT_ID: "777",
+      RELAYER_DESKTOP_CANDIDATE_ARTIFACT_DIGEST: `sha256:${"b".repeat(64)}`,
+    }, version)).toEqual({
+      sourceCommit,
+      workflowRunId: "123",
+      workflowRunAttempt: "2",
+      candidateWorkflowRunId: "99",
+      candidateWorkflowRunAttempt: "1",
+      candidateArtifactId: "777",
+      candidateArtifactDigest: `sha256:${"b".repeat(64)}`,
+    });
     expect(() => validatePreviewPublicationProvenance({
       GITHUB_SHA: sourceCommit,
       GITHUB_REF_NAME: "desktop-v0.2.1",
       GITHUB_RUN_ID: "123",
       GITHUB_RUN_ATTEMPT: "2",
+      RELAYER_DESKTOP_CANDIDATE_RUN_ID: "99",
+      RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: "1",
+      RELAYER_DESKTOP_CANDIDATE_ARTIFACT_ID: "777",
+      RELAYER_DESKTOP_CANDIDATE_ARTIFACT_DIGEST: `sha256:${"b".repeat(64)}`,
     }, version)).toThrow(`desktop-v${version}`);
 
     expect(() => validatePreviewCandidate({
@@ -2523,8 +2790,19 @@ describe("desktop skeleton", () => {
       checksumText,
       version,
       sourceCommit,
+      candidateWorkflowRunId: "99",
+      candidateWorkflowRunAttempt: "1",
       artifactEvidence: evidence,
     })).not.toThrow();
+    expect(() => validatePreviewCandidate({
+      releaseReceipt,
+      checksumText,
+      version,
+      sourceCommit,
+      candidateWorkflowRunId: "99",
+      candidateWorkflowRunAttempt: "2",
+      artifactEvidence: evidence,
+    })).toThrow("publication provenance");
     expect(() => validatePreviewCandidate({
       releaseReceipt,
       checksumText: checksumText.replace(dmg.sha256, "0".repeat(64)),
@@ -2770,6 +3048,8 @@ describe("desktop skeleton", () => {
         manifest: "beta-mac.yml",
         updateBaseUrl: DESKTOP_RELEASE_TARGETS["macos-arm64"].updateBaseUrl,
         sourceCommit,
+        candidateWorkflowRunId: "99",
+        candidateWorkflowRunAttempt: "1",
         signing: {
           mode: "certificate-file",
           appleTeamId: DESKTOP_RELEASE.appleTeamId,
@@ -2880,6 +3160,10 @@ describe("desktop skeleton", () => {
         GITHUB_REF_NAME: `desktop-v${version}`,
         GITHUB_RUN_ID: "123",
         GITHUB_RUN_ATTEMPT: "1",
+        RELAYER_DESKTOP_CANDIDATE_RUN_ID: "99",
+        RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: "1",
+        RELAYER_DESKTOP_CANDIDATE_ARTIFACT_ID: "777",
+        RELAYER_DESKTOP_CANDIDATE_ARTIFACT_DIGEST: `sha256:${"b".repeat(64)}`,
       };
       const pointerKey = "desktop/macos/arm64/beta-mac.yml";
       const historyKey = `private/history/macos-arm64/beta/${version}/beta-mac.yml`;
@@ -2914,13 +3198,44 @@ describe("desktop skeleton", () => {
         environment,
         execute,
         fetchImpl,
-      })).resolves.toMatchObject({ receipt: { version, sourceCommit } });
+      })).resolves.toMatchObject({
+        receipt: {
+          version,
+          sourceCommit,
+          candidateWorkflowRunId: "99",
+          candidateWorkflowRunAttempt: "1",
+          candidateArtifactId: "777",
+          candidateArtifactDigest: `sha256:${"b".repeat(64)}`,
+          workflowRunId: "123",
+        },
+      });
       const releaseWriteIndexes = writes
         .map((key, index) => key.startsWith(`desktop/macos/arm64/releases/${version}/`) ? index : -1)
         .filter((index) => index >= 0);
       expect(writes.indexOf(pointerKey)).toBeGreaterThan(Math.max(...releaseWriteIndexes));
       expect(writes.indexOf(pointerKey)).toBeGreaterThan(writes.indexOf(historyKey));
       expect(writes.indexOf(receiptKey)).toBeGreaterThan(writes.indexOf(pointerKey));
+
+      objects.delete(pointerKey);
+      const writesBeforeMismatchedRecovery = [...writes];
+      await expect(publishDesktopPreview({
+        bucket: "updates",
+        distRoot: directory,
+        environment: { ...environment, RELAYER_DESKTOP_CANDIDATE_ARTIFACT_ID: "778" },
+        execute,
+        fetchImpl,
+      })).rejects.toThrow("already has a different publication receipt");
+      expect(objects.has(pointerKey)).toBe(false);
+      expect(writes).toEqual(writesBeforeMismatchedRecovery);
+
+      await expect(publishDesktopPreview({
+        bucket: "updates",
+        distRoot: directory,
+        environment,
+        execute,
+        fetchImpl,
+      })).resolves.toMatchObject({ receipt: { candidateArtifactId: "777" } });
+      expect(objects.has(pointerKey)).toBe(true);
 
       const writesAfterSuccess = [...writes];
       await expect(publishDesktopPreview({

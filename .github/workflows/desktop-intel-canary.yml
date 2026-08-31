@@ -20,11 +20,15 @@ on:
         required: true
         type: string
       target_commit:
-        description: Full source commit for the target candidate and publication artifacts
+        description: Full source commit for the target candidate
         required: true
         type: string
-      target_run_id:
-        description: Signed Preview workflow run containing the target artifacts
+      target_candidate_run_id:
+        description: Manual signed Preview workflow run containing the target candidate
+        required: true
+        type: string
+      target_publication_run_id:
+        description: Tagged Preview workflow run containing the publication receipt
         required: true
         type: string
 
@@ -57,7 +61,8 @@ jobs:
           SEED_COMMIT: ${{ inputs.seed_commit }}
           TARGET_COMMIT: ${{ inputs.target_commit }}
           SEED_RUN_ID: ${{ inputs.seed_run_id }}
-          TARGET_RUN_ID: ${{ inputs.target_run_id }}
+          TARGET_CANDIDATE_RUN_ID: ${{ inputs.target_candidate_run_id }}
+          TARGET_PUBLICATION_RUN_ID: ${{ inputs.target_publication_run_id }}
         run: |
           set -euo pipefail
           [[ "$SEED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
@@ -65,7 +70,8 @@ jobs:
           [[ "$SEED_COMMIT" =~ ^[a-f0-9]{40}$ ]]
           [[ "$TARGET_COMMIT" =~ ^[a-f0-9]{40}$ ]]
           [[ "$SEED_RUN_ID" =~ ^[0-9]+$ ]]
-          [[ "$TARGET_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$TARGET_CANDIDATE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$TARGET_PUBLICATION_RUN_ID" =~ ^[0-9]+$ ]]
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -92,7 +98,7 @@ jobs:
         with:
           name: relayer-desktop-preview-macos-x64-${{ inputs.target_commit }}
           path: ${{ runner.temp }}/relayer-intel-target
-          run-id: ${{ inputs.target_run_id }}
+          run-id: ${{ inputs.target_candidate_run_id }}
           github-token: ${{ github.token }}
 
       - name: Download target Preview publication receipt
@@ -100,7 +106,7 @@ jobs:
         with:
           name: relayer-desktop-preview-publication-macos-x64-${{ inputs.target_commit }}
           path: ${{ runner.temp }}/relayer-intel-publication
-          run-id: ${{ inputs.target_run_id }}
+          run-id: ${{ inputs.target_publication_run_id }}
           github-token: ${{ github.token }}
 
       - name: Exercise DMG install and Preview update on native Intel macOS
