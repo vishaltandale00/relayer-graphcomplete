@@ -631,6 +631,7 @@ async function run() {
     && originalAttempt.inputDraftRevision === draftAtClick.revision
     && originalAttempt.contexts?.[0]?.annotations?.[0]
       === "Preserve this click-time context through reconciliation."
+    && originalAttempt.contextConfirmationIds?.length === 1
     && originalAttempt.modelSelection?.providerId === "codex"
     && originalAttempt.modelSelection?.modelId === "fixture-model"
     && retryAttempt.inputId !== originalAttempt.inputId
@@ -638,6 +639,7 @@ async function run() {
     && retryAttempt.inputDraftRevision === reconciledDraft.revision
     && retryAttempt.contexts?.[0]?.annotations?.[0]
       === originalAttempt.contexts[0].annotations[0]
+    && retryAttempt.contextConfirmationIds?.length === 0
     && retryAttempt.modelSelection?.providerId === originalAttempt.modelSelection.providerId
     && retryAttempt.modelSelection?.modelId === originalAttempt.modelSelection.modelId;
   if (!retryPreservedSnapshot) {
