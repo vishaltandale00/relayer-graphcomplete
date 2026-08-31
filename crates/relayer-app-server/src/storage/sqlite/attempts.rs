@@ -1424,6 +1424,41 @@ mod tests {
             row.get::<Option<String>, _>("completion_error").as_deref(),
             Some("provider stopped after graph binding")
         );
+        let immutable_receipt = sqlx::query("SELECT state,authority_digest,semantic_digest,graph_root_node_id,child_receipt_json,finished_at FROM interaction_submitted_input_attempts WHERE interaction_id=?1")
+            .bind(interaction_id.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(immutable_receipt.get::<String, _>("state"), "failed");
+        assert_eq!(
+            immutable_receipt.get::<String, _>("authority_digest"),
+            "sha256:authority"
+        );
+        assert_eq!(
+            immutable_receipt.get::<String, _>("semantic_digest"),
+            "sha256:semantic"
+        );
+        assert_eq!(
+            immutable_receipt.get::<Option<i64>, _>("graph_root_node_id"),
+            Some(77)
+        );
+        assert_eq!(
+            immutable_receipt
+                .get::<Option<String>, _>("child_receipt_json")
+                .as_deref(),
+            Some("{}")
+        );
+        assert!(
+            immutable_receipt
+                .get::<Option<String>, _>("finished_at")
+                .is_some()
+        );
+        let immutable_snapshot: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM interaction_submitted_input_attachments WHERE interaction_id=?1 AND presenting_interaction_node_id=10 AND presenting_layer_id=20 AND action_id=30")
+            .bind(interaction_id.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(immutable_snapshot, 1);
         let restored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM action_input_attachments WHERE thread_id=?1 AND presenting_interaction_node_id=10 AND presenting_layer_id=20 AND action_id=30")
             .bind(thread_id)
             .fetch_one(&store.pool)
