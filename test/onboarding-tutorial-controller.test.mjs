@@ -977,7 +977,7 @@ describe("onboarding tutorial controller", () => {
     expect(onboarding).toContain("guard: canOpen,");
     expect(onboarding).toContain("&& isComposerReady()");
     expect(onboarding).toContain("cancelPendingAutomatic,");
-    expect(main.match(/takeOverPendingAutomaticTutorial\(\);/g)).toHaveLength(5);
+    expect(main.match(/takeOverPendingAutomaticTutorial\(\);/g)).toHaveLength(6);
     expect(main).toContain(`$("#newThreadPrompt").oninput = () => {
     takeOverPendingAutomaticTutorial();`);
     expect(main).toContain(`$("#settingsButton").onclick = async () => {

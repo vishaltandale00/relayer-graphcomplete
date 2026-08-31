@@ -52,5 +52,8 @@ export function createSettingsStore(userDataPath) {
         return next;
       });
     },
+    async flush() {
+      await pendingMutation;
+    },
   };
 }

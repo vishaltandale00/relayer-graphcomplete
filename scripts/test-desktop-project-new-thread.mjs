@@ -305,6 +305,22 @@ async function run() {
   if (JSON.stringify(hoveredRect) !== JSON.stringify(resting.rect)) {
     throw new Error(`Hover moved the project row layout: ${JSON.stringify({ resting: resting.rect, hovered: hoveredRect })}`);
   }
+  const lightModeColors = await evaluate(`(() => {
+    document.documentElement.dataset.theme = "light";
+    const row = document.querySelector('[data-project-row="${project.id}"]');
+    const action = document.querySelector('[data-project-new-thread="${project.id}"]');
+    const result = {
+      row: getComputedStyle(row).color,
+      action: getComputedStyle(action).color,
+      text: getComputedStyle(document.documentElement).color,
+    };
+    document.documentElement.dataset.theme = "dark";
+    return result;
+  })()`);
+  if (lightModeColors.row !== lightModeColors.action
+    || lightModeColors.action !== lightModeColors.text) {
+    throw new Error(`The project action lost the light-mode row color: ${JSON.stringify(lightModeColors)}`);
+  }
   evidence.hover = await captureEvidence("02-hover");
   webContents.sendInputEvent({ type: "mouseMove", x: 800, y: 400 });
   await waitFor("the project action to hide after pointer exit", () => evaluate(`(
@@ -320,7 +336,7 @@ async function run() {
         opacity: getComputedStyle(action).opacity,
         pointerEvents: getComputedStyle(action).pointerEvents,
       };
-      return result.active && result.opacity === "1" ? result : false;
+      return result.active && result.opacity === "1" && result.pointerEvents === "auto" ? result : false;
     })()`)
   ));
   if (!focused.active || focused.opacity !== "1" || focused.pointerEvents !== "auto") {
@@ -358,7 +374,18 @@ async function run() {
     throw new Error("Opening a project-scoped composer created a thread before Send.");
   }
 
+  const programmaticPrompt = "Preserve a prompt populated without an input event.";
+  await evaluate(`document.querySelector('#newThreadPrompt').value = ${JSON.stringify(programmaticPrompt)}`);
   await clickProjectAction(secondProject.id);
+  await waitFor("the programmatically populated prompt to survive rescoping", () => evaluate(`(
+    document.querySelector('#scopeLabel')?.textContent === ${JSON.stringify(secondProject.name)}
+      && document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(programmaticPrompt)}
+  )`));
+  await setValue("#newThreadPrompt", pendingPrompt);
+  await evaluate(`(() => {
+    document.querySelector('[data-project-new-thread="${project.id}"]').click();
+    document.querySelector('[data-project-new-thread="${secondProject.id}"]').click();
+  })()`);
   await waitFor("the cross-project scope change", () => evaluate(`(
     document.querySelector('#scopeLabel')?.textContent === ${JSON.stringify(secondProject.name)}
       && document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(pendingPrompt)}
@@ -496,6 +523,44 @@ async function run() {
   await click(`[data-thread="${firstThread.id}"]`);
   await waitFor("the explicitly cleared saved-thread draft", () => evaluate(`(
     document.querySelector('#threadPrompt')?.value === ''
+  )`));
+
+  await clickProjectAction(project.id);
+  await setValue("#newThreadPrompt", "Clear this pending draft with global New Thread.");
+  await click("#newThread");
+  await waitFor("global New Thread to clear the pending draft", async () => {
+    const saved = await desktopSettings.read();
+    return await evaluate(`(
+      document.querySelector('#newThreadPrompt')?.value === ''
+        && document.querySelector('#scopeLabel')?.textContent === 'No folder'
+    )`) && saved.composerDrafts?.pendingNewThread == null;
+  });
+
+  const folderDraft = {
+    text: "Restore this exact folder-scoped draft.",
+    scope: {
+      kind: "folder",
+      label: "unregistered-worktree",
+      path: join(dataDirectory, "unregistered-worktree"),
+      git: true,
+      branch: "codex/folder-draft",
+    },
+  };
+  await desktopSettings.flush();
+  await desktopSettings.update((saved) => ({
+    ...saved,
+    composerDrafts: {
+      ...(saved.composerDrafts || {}),
+      pendingNewThread: folderDraft,
+    },
+  }));
+  window.destroy();
+  window = undefined;
+  await openWindow();
+  await waitFor("the exact folder-scoped draft after restart", () => evaluate(`(
+    document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(folderDraft.text)}
+      && document.querySelector('#scopeLabel')?.textContent === ${JSON.stringify(folderDraft.scope.label)}
+      && document.querySelector('#folderSummary')?.textContent.includes(${JSON.stringify(folderDraft.scope.path)})
   )`));
 
   process.stdout.write(`RELAYER_PROJECT_NEW_THREAD ${JSON.stringify({

@@ -51,10 +51,13 @@ import {
   revealDesktopWorkspace,
 } from "./desktop-account.js";
 import {
+  clearPendingNewThreadDraft,
   initializeComposerDrafts,
   pendingNewThreadDraft,
   persistPendingNewThreadDraft,
 } from "./composer-drafts.js";
+
+let projectComposerRequest = 0;
 
 function applyPlatformCopy() {
   const isMac = desktop?.platform === "darwin";
@@ -99,6 +102,25 @@ function projectScope(project) {
   };
 }
 
+function restoredDraftScope(scope) {
+  if (scope?.kind === "project") {
+    const project = appState.projects.find((candidate) => (
+      String(candidate.id) === String(scope.projectId)
+    ));
+    return project ? projectScope(project) : { kind: "standalone", label: "No folder" };
+  }
+  if (scope?.kind === "folder" && typeof scope.path === "string" && scope.path) {
+    return {
+      kind: "folder",
+      label: typeof scope.label === "string" && scope.label ? scope.label : scope.path,
+      path: scope.path,
+      git: scope.git === true,
+      ...(typeof scope.branch === "string" ? { branch: scope.branch } : {}),
+    };
+  }
+  return { kind: "standalone", label: "No folder" };
+}
+
 async function openNewThreadComposer({
   prompt = "",
   scope = { kind: "standalone", label: "No folder" },
@@ -111,13 +133,14 @@ async function openNewThreadComposer({
   applyPermissionProfiles?.();
   updateTutorialAvailability();
   if (guard && !guard()) return false;
+  const resolvedPrompt = typeof prompt === "function" ? prompt() : prompt;
   cancelNavigationHistory();
   viewState.currentThreadId = null;
   viewState.currentInteractionId = null;
   selectScope(scope);
   resetNewThreadModelPicker();
   setMainView("new");
-  $("#newThreadPrompt").value = prompt;
+  $("#newThreadPrompt").value = resolvedPrompt;
   updateCreateThreadAvailability();
   $("#newThreadPrompt").focus();
   return true;
@@ -135,10 +158,12 @@ async function maybeStartAutomaticTutorial(providerConnected) {
 
 function bindEvents() {
   $("#newThread").onclick = async () => {
-    if (!await prepareCurrentWorkspaceTransition()) return;
+    const request = ++projectComposerRequest;
+    const guard = () => projectComposerRequest === request;
     takeOverPendingAutomaticTutorial();
+    if (!await prepareCurrentWorkspaceTransition() || !guard()) return;
     try {
-      await openNewThreadComposer();
+      if (await openNewThreadComposer({ guard }) && guard()) clearPendingNewThreadDraft();
     } catch (error) {
       toast(error.message);
     }
@@ -153,17 +178,29 @@ function bindEvents() {
         String(candidate.id) === action.dataset.projectNewThread
       ));
       if (!project) return;
+      const request = ++projectComposerRequest;
+      const guard = () => projectComposerRequest === request;
+      takeOverPendingAutomaticTutorial();
       if (viewState.mainView === "new"
         && viewState.selectedScope.kind === "project"
         && String(viewState.selectedScope.projectId) === String(project.id)) {
         $("#newThreadPrompt").focus();
         return;
       }
-      if (!await prepareCurrentWorkspaceTransition()) return;
-      const draft = pendingNewThreadDraft();
+      if (!await prepareCurrentWorkspaceTransition() || !guard()) return;
       const scope = projectScope(project);
-      persistPendingNewThreadDraft(draft?.text ?? "", scope);
-      await openNewThreadComposer({ prompt: draft?.text ?? "", scope });
+      const opened = await openNewThreadComposer({
+        prompt: () => (
+          viewState.mainView === "new"
+            ? $("#newThreadPrompt").value
+            : pendingNewThreadDraft()?.text ?? ""
+        ),
+        scope,
+        guard,
+      });
+      if (opened && guard()) {
+        persistPendingNewThreadDraft($("#newThreadPrompt").value, scope);
+      }
     })().catch((error) => toast(error.message));
   };
   $("#scopeButton").onclick = () => {
@@ -371,12 +408,9 @@ async function boot() {
   await refreshState(viewState.currentThreadId);
   const pendingDraft = pendingNewThreadDraft();
   if (pendingDraft?.text && !query.get("threadId")) {
-    const scope = pendingDraft.scope?.kind === "project"
-      ? appState.projects.find((project) => String(project.id) === String(pendingDraft.scope.projectId))
-      : null;
     await openNewThreadComposer({
       prompt: pendingDraft.text,
-      scope: scope ? projectScope(scope) : { kind: "standalone", label: "No folder" },
+      scope: restoredDraftScope(pendingDraft.scope),
     });
   }
   await initializeDesktopAccountUi({

@@ -309,6 +309,7 @@ if (primaryInstance) {
       }
       void authenticatedErrorReporting?.close().catch(() => undefined);
       results.push(...await Promise.allSettled([
+        settings.flush(),
         providerComposition?.close(),
         graphRuntime.close(),
       ]));

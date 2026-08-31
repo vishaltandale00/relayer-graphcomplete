@@ -247,6 +247,7 @@ describe("desktop skeleton", () => {
     expect(desktopPreload).not.toContain("showSaveDialog");
     expect(desktopIpc).toContain('conversationExporter.save(threadId)');
     expect(desktopMain).toContain("Promise.allSettled");
+    expect(desktopMain).toContain("settings.flush(),");
     expect(desktopMain).toContain("Relayer app server stopped");
     expect(desktopMain).toContain("app.isPackaged");
     expect(desktopWindow).toContain('window.webContents.on("will-navigate"');
@@ -3418,7 +3419,24 @@ describe("desktop skeleton", () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-desktop-test-"));
     try {
       const settings = createSettingsStore(directory);
-      await settings.write({ appearance: "light", updateChannel: "preview" });
+      let releaseMutation;
+      let mutationStarted;
+      const mutationGate = new Promise((resolveGate) => { releaseMutation = resolveGate; });
+      const started = new Promise((resolveStarted) => { mutationStarted = resolveStarted; });
+      const pendingWrite = settings.update(async () => {
+        mutationStarted();
+        await mutationGate;
+        return { appearance: "light", updateChannel: "preview" };
+      });
+      await started;
+      let flushed = false;
+      const pendingFlush = settings.flush().then(() => { flushed = true; });
+      await Promise.resolve();
+      expect(flushed).toBe(false);
+      releaseMutation();
+      await pendingFlush;
+      expect(flushed).toBe(true);
+      await pendingWrite;
       expect(await settings.read()).toEqual({ appearance: "light", updateChannel: "preview" });
       expect(await readdir(directory)).toEqual(["desktop-settings.json"]);
 
