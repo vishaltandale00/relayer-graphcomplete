@@ -37,4 +37,5 @@ settings:
   modelReasoningEffort: medium
   personalPresentationVersion: personal-presentation-v2
   promptProfile: layered-navigation-multi-agent-v1
+  rootSessionMode: fresh
   skipGitRepoCheck: true

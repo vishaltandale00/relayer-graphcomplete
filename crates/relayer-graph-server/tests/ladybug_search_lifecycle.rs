@@ -65,6 +65,7 @@ async fn accepted_sqlite_graph(path: &std::path::Path) -> GraphDatabase {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -237,6 +238,7 @@ async fn add_second_accepted_target(database: &GraphDatabase) {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();

@@ -123,6 +123,7 @@ async fn build_and_complete(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(reference_child.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -139,6 +140,7 @@ async fn build_and_complete(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(child.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -155,6 +157,7 @@ async fn build_and_complete(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -763,6 +766,7 @@ async fn an_imported_conversation_is_searchable_against_a_real_store() {
                 interaction_node_id: None,
                 invoke_origin: None,
                 contexts: vec![],
+                submitted_inputs: vec![],
                 accepted_view: Some(ImportedAcceptedView {
                     interaction_node_id: "interaction-1".into(),
                     root_action: ImportedAction {
@@ -777,6 +781,7 @@ async fn an_imported_conversation_is_searchable_against_a_real_store() {
                         description: None,
                         target_layer_id: Some("layer-1".into()),
                         interaction_text: None,
+                        input: None,
                     },
                     root_layer_id: "layer-1".into(),
                     layers: vec![ImportedResolvedLayer {

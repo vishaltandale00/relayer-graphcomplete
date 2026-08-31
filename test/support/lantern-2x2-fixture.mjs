@@ -37,8 +37,21 @@ async function findPriorLayer(graph, topic) {
   return numericLayerId(result.rows[0][0]);
 }
 
-async function authorChild(context) {
-  const graph = new RelayerGraphClient(context.graph.acquireCapability());
+async function authorChild(context, observed) {
+  const capability = context.graph.acquireCapability();
+  const graph = new RelayerGraphClient(capability);
+  const [input, interaction] = await Promise.all([
+    graph.getInteractionInput(),
+    graph.getNode(context.inputGraph.id),
+  ]);
+  if (input.interaction.id !== context.inputGraph.id
+    || !Number.isSafeInteger(interaction.leasedActionId)
+    || interaction.leasedActionId < 1) {
+    throw new Error("Invoked Lantern child did not receive its exact leased interaction input");
+  }
+  observed.revokedChildCapabilityProbes.push(() => (
+    new RelayerGraphClient(capability).getNode(context.inputGraph.id)
+  ));
   const current = await graph.getCurrent();
   const node = new NodeObject("box", "Red-team stop condition", STOP_CONDITION, "concept", "red-team-condition");
   await graph.submitNode(node);
@@ -120,7 +133,7 @@ export function lantern2x2FixtureFactory(observed) {
         const invoked = context.origin?.kind === "invoke";
         if (!invoked) turn += 1;
         const execution = invoked
-          ? authorChild(context)
+          ? authorChild(context, observed)
           : authorRoot(context, turn, searchEnabled, recursionEnabled, observed);
         return nativeExecutionHandle(execution, undefined, Promise.resolve({
           schemaVersion: 1,

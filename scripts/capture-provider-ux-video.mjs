@@ -710,6 +710,15 @@ const server = createServer(async (request, response) => {
     if (/^\/api\/threads\/[^/]+\/context-drafts$/.test(url.pathname)) {
       return json(response, { drafts: [] });
     }
+    const inputDraftMatch = /^\/api\/threads\/([^/]+)\/input-draft$/.exec(url.pathname);
+    if (inputDraftMatch && request.method === "GET") {
+      return json(response, {
+        threadId: Number(decodeURIComponent(inputDraftMatch[1])),
+        revision: 0,
+        attachments: [],
+        updatedAt: "2026-08-31T00:00:00.000Z",
+      });
+    }
     if (url.pathname.endsWith("/retry") && request.method === "POST") {
       flowState.retryRequest = await requestJson(request);
       flowState.retrySubmitted = true;

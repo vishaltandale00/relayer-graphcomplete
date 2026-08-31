@@ -55,6 +55,7 @@ describe("Lantern graph-search × agent-authored recursion configurations", () =
         modelReasoningEffort: "medium",
         personalPresentationVersion: "personal-presentation-v2",
         promptProfile: "layered-navigation-multi-agent-v1",
+        rootSessionMode: "fresh",
         skipGitRepoCheck: true,
       },
     });

@@ -306,6 +306,7 @@ async fn author(
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            input: None,
         })
         .await?;
     Ok((interaction.id, writer))
@@ -406,6 +407,7 @@ async fn author_leased_return(
             description: None,
             target_layer_id: None,
             interaction_text: Some("Produce the delegated result".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -422,6 +424,7 @@ async fn author_leased_return(
             description: None,
             target_layer_id: Some(source_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -487,6 +490,7 @@ async fn author_leased_return(
             description: None,
             target_layer_id: Some(child_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -659,6 +663,7 @@ async fn return_after_advance_adds_the_terminal_root_action_once() {
             description: None,
             target_layer_id: Some(layer_id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -1161,6 +1166,7 @@ fn imported_conversation() -> ImportedConversation {
             interaction_node_id: None,
             invoke_origin: None,
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: Some(ImportedAcceptedView {
                 interaction_node_id: "interaction-1".into(),
                 root_action: ImportedAction {
@@ -1175,6 +1181,7 @@ fn imported_conversation() -> ImportedConversation {
                     description: None,
                     target_layer_id: Some("layer-1".into()),
                     interaction_text: None,
+                    input: None,
                 },
                 root_layer_id: "layer-1".into(),
                 layers: vec![ImportedResolvedLayer {

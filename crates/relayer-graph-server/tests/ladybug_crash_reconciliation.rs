@@ -123,6 +123,7 @@ async fn author(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(reference_child.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -139,6 +140,7 @@ async fn author(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(child.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -155,6 +157,7 @@ async fn author(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();

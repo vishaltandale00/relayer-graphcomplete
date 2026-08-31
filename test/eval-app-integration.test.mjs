@@ -328,7 +328,11 @@ describe("Relayer Eval application service", () => {
       "codex-eval-lantern-search-query-v1-recursion-enabled",
     ];
     const configurationPaths = names.map((name) => join(repositoryRoot, "harnesses", `${name}.yaml`));
-    const observed = { childCompletionIds: [], modelCatalogEnsures: [] };
+    const observed = {
+      childCompletionIds: [],
+      modelCatalogEnsures: [],
+      revokedChildCapabilityProbes: [],
+    };
     const runtime = new GraphCompleteRuntimeService({
       userDataDirectory: dataDirectory,
       graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
@@ -446,6 +450,13 @@ describe("Relayer Eval application service", () => {
     expect(completed.executions.every((execution) => (
       evalService.reviewContext(execution.id).cases[0].threadIds.length === 1
     ))).toBe(true);
+    expect(observed.revokedChildCapabilityProbes).toHaveLength(2);
+    for (const probe of observed.revokedChildCapabilityProbes) {
+      await expect(probe()).rejects.toMatchObject({
+        status: 401,
+        code: "invalid_capability",
+      });
+    }
   }, 55_000);
 
   it("rejects a recursive comparison whose exact off cell grants Complete authority", async () => {

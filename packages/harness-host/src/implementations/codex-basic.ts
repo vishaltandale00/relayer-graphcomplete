@@ -73,6 +73,7 @@ interface CodexBasicConfiguration {
   readonly webSearchMode?: CodexWebSearchMode;
   readonly skipGitRepoCheck?: boolean;
   readonly additionalDirectories?: readonly string[];
+  readonly rootSessionMode?: "resume" | "fresh";
 }
 
 interface ResolvedCodexConfiguration {
@@ -129,7 +130,9 @@ export class CodexBasicHarness implements Harness {
       || (typeof savedPresentationVersionId === "number"
         && Number.isSafeInteger(savedPresentationVersionId)
         && savedPresentationVersionId > 0);
-    if (typeof codexThreadId === "string" && validSavedPresentationVersion) {
+    if (resolved.settings.rootSessionMode !== "fresh"
+      && typeof codexThreadId === "string"
+      && validSavedPresentationVersion) {
       this.codexThreadId = codexThreadId;
       this.codexThreadPersonalPresentationVersionId = savedPresentationVersionId;
     }
@@ -167,7 +170,8 @@ export class CodexBasicHarness implements Harness {
     signal?: AbortSignal,
   ): Promise<void> {
     const personalPresentationVersionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
-    if (kind === "root" && this.codexThreadId !== undefined
+    const persistentRootSession = kind === "root" && this.resolved.settings.rootSessionMode !== "fresh";
+    if (persistentRootSession && this.codexThreadId !== undefined
       && this.codexThreadPersonalPresentationVersionId !== personalPresentationVersionId) {
       this.codexThreadId = undefined;
       this.codexThreadPersonalPresentationVersionId = undefined;
@@ -198,7 +202,7 @@ export class CodexBasicHarness implements Harness {
         environment,
         codexPathOverride: resolvedRuntime.executable,
         ...this.codexConfigOverrides(context.access),
-        ...(kind === "root" && this.codexThreadId !== undefined
+        ...(persistentRootSession && this.codexThreadId !== undefined
           ? { savedThreadId: this.codexThreadId }
           : {}),
         threadParams: this.threadParams(model, context, context.access),
@@ -214,7 +218,7 @@ export class CodexBasicHarness implements Harness {
         forceSignal: forceShutdown.signal,
         ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
         onThreadId: (threadId) => {
-          if (kind === "root") {
+          if (persistentRootSession) {
             this.codexThreadId = threadId;
             this.codexThreadPersonalPresentationVersionId = personalPresentationVersionId;
           }
@@ -1083,7 +1087,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
     throw new Error(`Unsupported codex.basic implementation version: ${selected.implementationVersion}`);
   }
   const configuration = selected.settings;
-  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories", "promptProfile", "personalPresentationVersion"]);
+  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories", "promptProfile", "personalPresentationVersion", "rootSessionMode"]);
   const unknown = Object.keys(configuration).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown codex.basic configuration field: ${unknown.join(", ")}`);
 
@@ -1093,6 +1097,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
   const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
+  const rootSessionMode = optionalEnum(configuration.rootSessionMode, ["resume", "fresh"] as const, "rootSessionMode");
   optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2"] as const, "personalPresentationVersion");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
@@ -1103,6 +1108,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
       ...(webSearchMode === undefined ? {} : { webSearchMode }),
       ...(skipGitRepoCheck === undefined ? {} : { skipGitRepoCheck }),
       ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
+      ...(rootSessionMode === undefined ? {} : { rootSessionMode }),
     },
     permission,
     ...(promptProfile === undefined ? {} : { promptProfile }),

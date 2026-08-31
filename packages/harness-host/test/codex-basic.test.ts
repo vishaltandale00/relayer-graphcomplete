@@ -650,6 +650,39 @@ describe("CodexBasicHarness", () => {
     });
   });
 
+  it("can start every human root in a fresh provider thread without persisting hidden context", async () => {
+    const submissions: CodexAppServerTurnOptions[] = [];
+    const configuration = {
+      ...structuredClone(codexBasicConfiguration),
+      settings: {
+        ...structuredClone(codexBasicConfiguration.settings),
+        rootSessionMode: "fresh" as const,
+      },
+    };
+    const harness = new CodexBasicHarness({
+      ...context("auto"),
+      configuration,
+      savedState: {
+        codexThreadId: "stale-provider-thread",
+        codexThreadPersonalPresentationVersionId: null,
+      },
+    }, {
+      codexPathOverride: "/managed/codex",
+      runAppServerTurn: async (options) => {
+        submissions.push(options);
+        const threadId = `fresh-thread-${submissions.length}`;
+        await options.onThreadId(threadId);
+        return { threadId, turnId: `turn-${submissions.length}`, status: "completed" };
+      },
+    });
+
+    await harness.complete(runContext(1, "first-token"));
+    await harness.complete(runContext(2, "second-token"));
+
+    expect(submissions.map(({ savedThreadId }) => savedThreadId)).toEqual([undefined, undefined]);
+    expect(harness.state()).toEqual({});
+  });
+
   it("starts recursive semantic completions in fresh Codex threads without replacing root continuity", async () => {
     const submissions: CodexAppServerTurnOptions[] = [];
     const harness = new CodexBasicHarness({

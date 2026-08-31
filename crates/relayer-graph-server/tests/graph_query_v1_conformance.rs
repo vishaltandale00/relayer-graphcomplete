@@ -1282,6 +1282,7 @@ async fn acknowledged_completion_is_immediately_queryable_through_the_real_publi
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();

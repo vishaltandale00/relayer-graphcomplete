@@ -437,6 +437,7 @@ async fn author_answer(graph: &GraphDatabase, interaction: &CreateInteractionRes
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -732,6 +733,7 @@ async fn a_different_retry_cannot_confirm_an_orphaned_publication() {
             description: None,
             target_layer_id: Some(replacement_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
