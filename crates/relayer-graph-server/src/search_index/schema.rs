@@ -95,6 +95,75 @@ pub fn apply_closure(
     Ok(())
 }
 
+/// Remove the exact records owned by one imported accepted closure.
+///
+/// The caller first executes every canonical deletion inside an uncommitted
+/// SQLite transaction, including rejecting external references to the import.
+/// The stable graph identities are therefore wholly owned by this closure at
+/// this boundary. Relationships are removed explicitly before their endpoints;
+/// `DETACH DELETE` is retained as a final integrity guard for either endpoint
+/// type.
+pub fn remove_closure(
+    connection: &Connection<'_>,
+    closure: &AcceptedGraphPublication,
+) -> Result<()> {
+    let mut relationships = BTreeSet::<(&'static str, String)>::new();
+    let mut layers = BTreeSet::<String>::new();
+    let mut content = BTreeSet::<String>::from([content_id(&closure.interaction)]);
+
+    for layer in &closure.layers {
+        layers.insert(layer_id(&layer.layer));
+        for (position, node_id) in layer.layer.nodes.iter().enumerate() {
+            relationships.insert((
+                "CONTAINS",
+                format!("membership:{}:{position}:{node_id}", layer.layer.id),
+            ));
+        }
+        for node in &layer.nodes {
+            content.insert(content_id(node));
+        }
+        for edge in &layer.edges {
+            relationships.insert(("CONNECTED", format!("edge:{}", edge.id)));
+        }
+        for action in &layer.actions {
+            if let Some(kind) = searchable_action_kind(action) {
+                relationships.insert((kind, format!("action:{}", action.id)));
+            }
+        }
+    }
+    if let Some(action) = &closure.root_action
+        && let Some(kind) = searchable_action_kind(action)
+    {
+        relationships.insert((kind, format!("action:{}", action.id)));
+    }
+
+    for (kind, id) in relationships {
+        let mut statement = connection.prepare(&format!(
+            "MATCH ()-[r:{kind}]->() WHERE r.id = $id DELETE r"
+        ))?;
+        connection.execute(&mut statement, vec![("id", Value::String(id))])?;
+    }
+    for id in layers {
+        let mut statement =
+            connection.prepare("MATCH (n:Layer) WHERE n.id = $id DETACH DELETE n")?;
+        connection.execute(&mut statement, vec![("id", Value::String(id))])?;
+    }
+    for id in content {
+        let mut statement =
+            connection.prepare("MATCH (n:Content) WHERE n.id = $id DETACH DELETE n")?;
+        connection.execute(&mut statement, vec![("id", Value::String(id))])?;
+    }
+    Ok(())
+}
+
+fn searchable_action_kind(action: &GraphAction) -> Option<&'static str> {
+    match (action.kind, action.relation) {
+        (ActionKind::Navigate, Some(NavigateRelation::Expand)) => Some("EXPANDS"),
+        (ActionKind::Navigate, Some(NavigateRelation::Reference)) => Some("REFERENCES"),
+        _ => None,
+    }
+}
+
 /// Record the revision this transaction will carry. Written inside the
 /// transaction so it becomes durable with the closure or not at all.
 pub fn write_revision(

@@ -576,6 +576,10 @@ describe("first runtime evaluation", () => {
         query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer ORDER BY layer ASC",
         budget: undefined,
       },
+      {
+        query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer LIMIT 1;  ",
+        budget: graphMemorySearchBudget,
+      },
     ];
     for (const { query, budget } of admittedNaturalVariants) {
       expect(checkGraphMemorySecondTurn(
@@ -600,6 +604,24 @@ describe("first runtime evaluation", () => {
     expect(graphMemorySearchRequestMode("codex.basic")).toBe("natural");
     expect(graphMemorySearchRequestMode("claude.basic")).toBe("natural");
     expect(graphMemorySearchRequestMode("prime.agent")).toBe("natural");
+    const nonFinalSemicolonChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          queryContractVersion: 1,
+          query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer; LIMIT 1",
+          parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+          budget: graphMemorySearchBudget,
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "natural" },
+    );
+    expect(nonFinalSemicolonChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
     const tautologicalQueryChecks = checkGraphMemorySecondTurn(
       artifact.turns[1]!.output,
       artifact.turns[0]!.output,

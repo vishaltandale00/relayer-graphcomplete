@@ -403,7 +403,7 @@ function isNaturalPriorWorkQueryShape(query, escapedParameterName) {
   const projection = `\\s+RETURN\\s+(?:DISTINCT\\s+)?\\k<layer>(?:\\s+AS\\s+${identifier})?`;
   const orderingExpression = `${identifier}(?:\\s*\\.\\s*${identifier})?`;
   const ordering = `(?:\\s+ORDER\\s+BY\\s+${orderingExpression}(?:\\s+(?:ASC|DESC))?)?`;
-  const limit = "(?:\\s+LIMIT\\s+[1-8])?\\s*$";
+  const limit = "(?:\\s+LIMIT\\s+[1-8])?\\s*;?\\s*$";
   const pathBinding = `(?:${identifier}\\s*=\\s*)?`;
   const forward = new RegExp(`^\\s*MATCH\\s+${pathBinding}${layerNode}${contains}${contentNode}${predicate}${projection}${ordering}${limit}`, "iu");
   const reverse = new RegExp(`^\\s*MATCH\\s+${pathBinding}${contentNode}${containedBy}${layerNode}${predicate}${projection}${ordering}${limit}`, "iu");

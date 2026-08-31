@@ -803,15 +803,65 @@ fn validate_graph_value(
             validate_wire_fields(parameter, tagged.get("properties"), &invalid)?;
         }
         "relationship" => {
-            for field in ["id", "kind", "start", "end"] {
-                require_string(field)?;
-            }
-            if tagged
+            let identity = require_string("id")?;
+            let relationship_kind = require_string("kind")?;
+            let start = require_string("start")?;
+            let end = require_string("end")?;
+            let directed = tagged
                 .get("directed")
                 .and_then(serde_json::Value::as_bool)
-                .is_none()
-            {
-                return Err(invalid("a relationship needs a directed boolean"));
+                .ok_or_else(|| invalid("a relationship needs a directed boolean"))?;
+            match relationship_kind {
+                "CONNECTED" => {
+                    validate_public_identity(identity, "edge", true, &invalid)?;
+                    validate_public_identity(start, "content", true, &invalid)?;
+                    validate_public_identity(end, "content", true, &invalid)?;
+                    if directed || start >= end {
+                        return Err(invalid(
+                            "CONNECTED is undirected with canonically ordered Content endpoints",
+                        ));
+                    }
+                }
+                "CONTAINS" => {
+                    let mut components = identity.split(':');
+                    let (Some("membership"), Some(layer), Some(order), Some(content), None) = (
+                        components.next(),
+                        components.next(),
+                        components.next(),
+                        components.next(),
+                        components.next(),
+                    ) else {
+                        return Err(invalid(
+                            "CONTAINS needs its canonical membership identity and directed Layer-to-Content endpoints",
+                        ));
+                    };
+                    if !canonical_decimal(layer, true)
+                        || !canonical_decimal(order, false)
+                        || !canonical_decimal(content, true)
+                        || !directed
+                        || start != format!("layer:{layer}")
+                        || end != format!("content:{content}")
+                    {
+                        return Err(invalid(
+                            "CONTAINS needs its canonical membership identity and directed Layer-to-Content endpoints",
+                        ));
+                    }
+                }
+                "EXPANDS" | "REFERENCES" => {
+                    validate_public_identity(identity, "action", true, &invalid)?;
+                    validate_public_identity(start, "content", true, &invalid)?;
+                    validate_public_identity(end, "layer", true, &invalid)?;
+                    if !directed {
+                        return Err(invalid(
+                            "navigation relationships are directed Content-to-Layer",
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(invalid(
+                        "a relationship kind is CONNECTED, CONTAINS, EXPANDS, or REFERENCES",
+                    ));
+                }
             }
             validate_wire_fields(parameter, tagged.get("properties"), &invalid)?;
         }
@@ -857,6 +907,35 @@ fn validate_graph_value(
             }
         }
         _ => unreachable!("validated graph kind"),
+    }
+    Ok(())
+}
+
+fn canonical_decimal(value: &str, positive: bool) -> bool {
+    if value == "0" {
+        return !positive;
+    }
+    matches!(value.as_bytes().first(), Some(b'1'..=b'9'))
+        && value.bytes().all(|character| character.is_ascii_digit())
+        && value.parse::<i64>().is_ok()
+}
+
+fn validate_public_identity(
+    identity: &str,
+    expected_prefix: &str,
+    positive: bool,
+    invalid: &impl Fn(&str) -> QueryError,
+) -> Result<(), QueryError> {
+    let Some(value) = identity
+        .strip_prefix(expected_prefix)
+        .and_then(|suffix| suffix.strip_prefix(':'))
+    else {
+        return Err(invalid("a graph identity has the wrong public prefix"));
+    };
+    if !canonical_decimal(value, positive) {
+        return Err(invalid(
+            "a graph identity needs canonical decimal components",
+        ));
     }
     Ok(())
 }

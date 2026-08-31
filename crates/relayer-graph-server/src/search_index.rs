@@ -822,6 +822,19 @@ impl SearchIndexWrite for LadybugWrite {
         })
     }
 
+    fn remove(&mut self, closure: AcceptedGraphPublication) -> SearchIndexFuture<()> {
+        let store = self.store.clone();
+        let deadline = self.deadline;
+        Box::pin(async move {
+            store
+                .run_until(deadline, move |connection| {
+                    schema::remove_closure(connection, &closure)
+                })
+                .await
+                .map_err(internal)
+        })
+    }
+
     fn commit(mut self: Box<Self>) -> SearchIndexFuture<SearchIndexRevision> {
         let (store, target, revision, deadline) = (
             self.store.clone(),

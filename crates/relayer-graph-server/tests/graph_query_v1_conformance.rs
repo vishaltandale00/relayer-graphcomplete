@@ -238,6 +238,18 @@ async fn raw_envelope_and_complete_parameter_planning_precede_authority_and_read
             serde_json::Map::from_iter([("value".into(), json!({"type":"node"}))]),
             Default::default(),
         ),
+        thread_request(
+            "MATCH (n:Content) RETURN $value AS value",
+            serde_json::Map::from_iter([(
+                "value".into(),
+                json!({
+                    "type":"relationship", "id":"edge:201", "kind":"CONNECTED",
+                    "start":"content:2", "end":"content:1", "directed":false,
+                    "properties":[]
+                }),
+            )]),
+            Default::default(),
+        ),
     ] {
         let failure = index
             .query(

@@ -210,6 +210,57 @@ pub(crate) async fn index_and_record(
     Ok(())
 }
 
+/// Remove imported publications from Ladybug and record the derived revision
+/// in the caller's still-open canonical SQLite rollback transaction.
+pub(crate) async fn remove_from_index_and_record(
+    database: &GraphDatabase,
+    transaction: &mut GraphConnection,
+    target: SearchTarget,
+    publications: Vec<AcceptedGraphPublication>,
+    expiry: tokio::time::Instant,
+) -> Result<(), GraphError> {
+    let recorded = SearchIndexTable::new(&mut *transaction)
+        .revision(target)
+        .await?;
+    let stored = deadline(expiry, database.search_index.revision(target)).await?;
+    let revision = recorded
+        .max(stored)
+        .map_or(SearchIndexRevision::FIRST, SearchIndexRevision::next);
+    let publication_identity = format!(
+        "sha256:{:x}",
+        Sha256::digest(
+            serde_json::to_vec(&("remove", &publications)).map_err(|error| {
+                GraphError::Internal(format!("search removal identity failed: {error}"))
+            })?
+        )
+    );
+    let mut write = deadline(
+        expiry,
+        database
+            .search_index
+            .begin_until(target, revision, expiry.into_std()),
+    )
+    .await?;
+    for publication in publications {
+        if let Err(error) = deadline(expiry, write.remove(publication)).await {
+            let _ = deadline(expiry, write.rollback()).await;
+            return Err(error);
+        }
+    }
+    if let Err(error) = database
+        .search_index
+        .canonical_commit_unknown(target, &publication_identity)
+    {
+        let _ = deadline(expiry, write.rollback()).await;
+        return Err(error);
+    }
+    let committed = deadline(expiry, write.commit()).await?;
+    SearchIndexTable::new(&mut *transaction)
+        .record_revision(target, committed)
+        .await?;
+    Ok(())
+}
+
 async fn index_publications(
     database: &GraphDatabase,
     target: SearchTarget,

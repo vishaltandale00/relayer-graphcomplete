@@ -225,4 +225,19 @@ describe("recursive graph-memory Eval evidence", () => {
     expect(grade.turns[1].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(true);
     expect(grade.turns[2].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(true);
   });
+
+  it("accepts only a final optional graph-query semicolon", async () => {
+    const finalSemicolon = await gradeFixture(({ events }) => {
+      events[1][0].query += ";  ";
+      events[2][0].query += ";";
+      events[2][1].query += ";";
+    });
+    expect(finalSemicolon.turns[1].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(true);
+    expect(finalSemicolon.turns[2].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(true);
+
+    const nonFinalSemicolon = await gradeFixture(({ events }) => {
+      events[1][0].query += "; LIMIT 1";
+    });
+    expect(nonFinalSemicolon.turns[1].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(false);
+  });
 });

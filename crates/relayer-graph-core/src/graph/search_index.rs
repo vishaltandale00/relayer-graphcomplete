@@ -202,6 +202,15 @@ pub trait SearchIndexWrite: Send + 'static {
         published_to: Vec<SearchTarget>,
     ) -> SearchIndexFuture<()>;
 
+    /// Remove one canonical publication from the derived store.
+    ///
+    /// This is used only while rolling back a conversation import whose graph
+    /// records are still wholly owned by that import. The removal shares the
+    /// same transaction and revision acknowledgement as ordinary publication,
+    /// so canonical SQLite can never report the rollback while stale derived
+    /// rows remain queryable.
+    fn remove(&mut self, publication: AcceptedGraphPublication) -> SearchIndexFuture<()>;
+
     /// Commit, returning the revision now durable in the store. This is the point
     /// after which a crash leaves an orphan rather than a lost closure.
     fn commit(self: Box<Self>) -> SearchIndexFuture<SearchIndexRevision>;
@@ -246,6 +255,10 @@ impl SearchIndexWrite for NoSearchIndexWrite {
         _publication: AcceptedGraphPublication,
         _published_to: Vec<SearchTarget>,
     ) -> SearchIndexFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn remove(&mut self, _publication: AcceptedGraphPublication) -> SearchIndexFuture<()> {
         Box::pin(async { Ok(()) })
     }
 

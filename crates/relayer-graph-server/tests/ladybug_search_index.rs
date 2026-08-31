@@ -8,9 +8,11 @@
 use std::sync::Arc;
 
 use relayer_graph_core::{
-    AcceptedGraphClosure, ActionDraft, ActionKind, GraphDatabase, LayerDraft, LayerLayout,
-    NavigateRelation, NodeDraft, NodeId, NodePlacement, SearchIndex, SearchIndexRevision,
-    SearchTarget, ThreadId,
+    AcceptedGraphClosure, ActionDraft, ActionKind, GraphDatabase, ImportedAcceptedView,
+    ImportedAction, ImportedConversation, ImportedLayer, ImportedLayerLayout, ImportedNode,
+    ImportedNodePlacement, ImportedResolvedLayer, ImportedTurn, LayerDraft, LayerId, LayerLayout,
+    NavigateRelation, NodeDraft, NodeId, NodePlacement, ProjectId, SearchIndex,
+    SearchIndexRevision, SearchTarget, ThreadId,
 };
 use relayer_graph_server::search_index::LadybugSearchIndex;
 use serde_json::json;
@@ -171,6 +173,66 @@ fn index(directory: &tempfile::TempDir) -> LadybugSearchIndex {
 
 fn target() -> SearchTarget {
     SearchTarget::Thread(ThreadId::new(41).unwrap())
+}
+
+fn imported_conversation(project_id: Option<ProjectId>) -> ImportedConversation {
+    ImportedConversation {
+        import_id: "import-1".into(),
+        source_sha256: "sha256:abc".into(),
+        project_id,
+        thread_id: ThreadId::new(9001).unwrap(),
+        created_at: "2026-08-24T00:00:00Z".into(),
+        turns: vec![ImportedTurn {
+            source_turn_id: "turn-1".into(),
+            text: "Explain the queue".into(),
+            interaction_node_id: None,
+            invoke_origin: None,
+            contexts: vec![],
+            submitted_inputs: vec![],
+            accepted_view: Some(ImportedAcceptedView {
+                interaction_node_id: "interaction-1".into(),
+                root_action: ImportedAction {
+                    id: "action-1".into(),
+                    source_node_id: "interaction-1".into(),
+                    source_layer_id: None,
+                    kind: "navigate".into(),
+                    relation: Some("expand".into()),
+                    label: "Response".into(),
+                    variant: "pill".into(),
+                    icon: None,
+                    description: None,
+                    target_layer_id: Some("layer-1".into()),
+                    interaction_text: None,
+                    input: None,
+                },
+                root_layer_id: "layer-1".into(),
+                layers: vec![ImportedResolvedLayer {
+                    layer: ImportedLayer {
+                        id: "layer-1".into(),
+                        nodes: vec!["node-1".into()],
+                        edges: vec![],
+                        layout: Some(ImportedLayerLayout {
+                            version: 1,
+                            placements: vec![ImportedNodePlacement {
+                                node_id: "node-1".into(),
+                                x: 0.25,
+                                y: 0.75,
+                            }],
+                        }),
+                    },
+                    nodes: vec![ImportedNode {
+                        id: "node-1".into(),
+                        kind: "concept".into(),
+                        icon: "box".into(),
+                        title: "Imported queue".into(),
+                        detail: "A queue".into(),
+                    }],
+                    edges: vec![],
+                    actions: vec![],
+                }],
+            }),
+        }],
+    }
 }
 
 #[tokio::test]
@@ -738,12 +800,6 @@ async fn the_store_reports_the_revision_it_holds_for_reconciliation() {
 
 #[tokio::test]
 async fn an_imported_conversation_is_searchable_against_a_real_store() {
-    use relayer_graph_core::{
-        ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedLayer,
-        ImportedLayerLayout, ImportedNode, ImportedNodePlacement, ImportedResolvedLayer,
-        ImportedTurn,
-    };
-
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("graph.db");
     let search = LadybugSearchIndex::open(&path).unwrap();
@@ -754,63 +810,7 @@ async fn an_imported_conversation_is_searchable_against_a_real_store() {
     // An imported closure is materialized by a different path than an authored
     // one, so the lowering is exercised against its shape too.
     database
-        .import_accepted_conversation(&ImportedConversation {
-            import_id: "import-1".into(),
-            source_sha256: "sha256:abc".into(),
-            project_id: None,
-            thread_id: ThreadId::new(9001).unwrap(),
-            created_at: "2026-08-24T00:00:00Z".into(),
-            turns: vec![ImportedTurn {
-                source_turn_id: "turn-1".into(),
-                text: "Explain the queue".into(),
-                interaction_node_id: None,
-                invoke_origin: None,
-                contexts: vec![],
-                submitted_inputs: vec![],
-                accepted_view: Some(ImportedAcceptedView {
-                    interaction_node_id: "interaction-1".into(),
-                    root_action: ImportedAction {
-                        id: "action-1".into(),
-                        source_node_id: "interaction-1".into(),
-                        source_layer_id: None,
-                        kind: "navigate".into(),
-                        relation: Some("expand".into()),
-                        label: "Response".into(),
-                        variant: "pill".into(),
-                        icon: None,
-                        description: None,
-                        target_layer_id: Some("layer-1".into()),
-                        interaction_text: None,
-                        input: None,
-                    },
-                    root_layer_id: "layer-1".into(),
-                    layers: vec![ImportedResolvedLayer {
-                        layer: ImportedLayer {
-                            id: "layer-1".into(),
-                            nodes: vec!["node-1".into()],
-                            edges: vec![],
-                            layout: Some(ImportedLayerLayout {
-                                version: 1,
-                                placements: vec![ImportedNodePlacement {
-                                    node_id: "node-1".into(),
-                                    x: 0.25,
-                                    y: 0.75,
-                                }],
-                            }),
-                        },
-                        nodes: vec![ImportedNode {
-                            id: "node-1".into(),
-                            kind: "concept".into(),
-                            icon: "box".into(),
-                            title: "Imported queue".into(),
-                            detail: "A queue".into(),
-                        }],
-                        edges: vec![],
-                        actions: vec![],
-                    }],
-                }),
-            }],
-        })
+        .import_accepted_conversation(&imported_conversation(None))
         .await
         .unwrap();
 
@@ -839,5 +839,185 @@ async fn an_imported_conversation_is_searchable_against_a_real_store() {
     assert_eq!(
         database.search_index_revision(target).await.unwrap(),
         Some(SearchIndexRevision::FIRST)
+    );
+
+    database
+        .remove_imported_conversation("import-1")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        search
+            .normalized_rows("MATCH (n:Content) RETURN count(n) AS n")
+            .await
+            .unwrap(),
+        vec![vec![json!({"type": "integer", "value": "0"})]],
+        "removed canonical import remained searchable before restart"
+    );
+    assert_eq!(
+        search
+            .normalized_rows("MATCH ()-[a:EXPANDS]->() RETURN count(a) AS n")
+            .await
+            .unwrap(),
+        vec![vec![json!({"type": "integer", "value": "0"})]],
+        "removed imported relationships remained searchable before restart"
+    );
+    assert_eq!(
+        database.search_index_revision(target).await.unwrap(),
+        Some(SearchIndexRevision::FIRST.next()),
+        "canonical removal did not acknowledge its derived revision"
+    );
+}
+
+#[tokio::test]
+async fn an_import_referenced_by_another_thread_is_not_removed_from_either_store() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("graph.db");
+    let search = LadybugSearchIndex::open(&path).unwrap();
+    let database = GraphDatabase::open_with_index(&path, Arc::new(search.clone()))
+        .await
+        .unwrap();
+    let project = ProjectId::new(7).unwrap();
+    let imported = database
+        .import_accepted_conversation(&imported_conversation(Some(project)))
+        .await
+        .unwrap();
+    let imported_layer = LayerId::new(imported.turns[0].root_layer_id.unwrap()).unwrap();
+    let imported_interaction = NodeId::new(imported.turns[0].graph_node_id.unwrap()).unwrap();
+
+    let interaction = database
+        .create_interaction(
+            Some(project),
+            ThreadId::new(9002).unwrap(),
+            "Use the imported queue",
+        )
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let answer = writer
+        .submit_node(&NodeDraft {
+            client_key: "answer".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Queue decision".into(),
+            detail: "Uses the imported queue evidence".into(),
+        })
+        .await
+        .unwrap();
+    let root = writer
+        .submit_layer(&LayerDraft {
+            client_key: "root".into(),
+            nodes: vec![answer.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(vec![NodePlacement {
+                node_id: answer.id,
+                x: 0.5,
+                y: 0.5,
+            }])),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .add_action(&ActionDraft {
+            client_key: "imported-evidence".into(),
+            source_node_id: answer.id,
+            source_layer_id: Some(root.id),
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Reference),
+            label: "Imported evidence".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(imported_layer),
+            interaction_text: None,
+            input: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .add_action(&ActionDraft {
+            client_key: "response".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(root.id),
+            interaction_text: None,
+            input: None,
+        })
+        .await
+        .unwrap();
+    writer.complete(interaction.id).await.unwrap();
+
+    let target = SearchTarget::Project(project);
+    let revision = SearchIndexRevision::FIRST.next();
+    assert_eq!(
+        database.search_index_revision(target).await.unwrap(),
+        Some(revision)
+    );
+    let inventory_queries = [
+        "MATCH (n:Content) RETURN n.id,n.published_targets ORDER BY n.id",
+        "MATCH (n:Layer) RETURN n.id,n.published_targets ORDER BY n.id",
+        "MATCH ()-[r:CONTAINS]->() RETURN r.id,r.published_targets ORDER BY r.id",
+        "MATCH ()-[r:EXPANDS]->() RETURN r.id,r.published_targets ORDER BY r.id",
+        "MATCH ()-[r:REFERENCES]->() RETURN r.id,r.published_targets ORDER BY r.id",
+    ];
+    let mut before = Vec::new();
+    for query in inventory_queries {
+        before.push(search.normalized_rows(query).await.unwrap());
+    }
+    let references = search
+        .normalized_rows_for(
+            target,
+            "MATCH ()-[r:REFERENCES]->() WHERE list_contains(r.published_targets, 'thread:9002') RETURN count(r) AS n",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        references,
+        vec![vec![json!({"type": "integer", "value": "1"})]]
+    );
+
+    let refused = database
+        .remove_imported_conversation("import-1")
+        .await
+        .unwrap_err();
+    assert!(
+        refused.to_string().contains("referenced by another thread"),
+        "{refused}"
+    );
+    assert!(
+        database
+            .accepted_graph_closure(imported_interaction)
+            .await
+            .unwrap()
+            .is_some(),
+        "canonical imported closure changed after rejected removal"
+    );
+    assert_eq!(
+        database.search_index_revision(target).await.unwrap(),
+        Some(revision)
+    );
+    assert_eq!(search.revision(target).await.unwrap(), Some(revision));
+    let mut after = Vec::new();
+    for query in inventory_queries {
+        after.push(search.normalized_rows(query).await.unwrap());
+    }
+    assert_eq!(after, before, "rejected removal changed derived inventory");
+    assert_eq!(
+        search
+            .normalized_rows_for(
+                target,
+                "MATCH ()-[r:REFERENCES]->() WHERE list_contains(r.published_targets, 'thread:9002') RETURN count(r) AS n",
+            )
+            .await
+            .unwrap(),
+        references,
+        "rejected removal changed reference searchability or readiness"
     );
 }

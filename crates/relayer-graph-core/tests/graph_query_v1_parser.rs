@@ -9,7 +9,7 @@ use relayer_graph_core::query::{
     QueryCode, QueryLimits, QueryRequest, RequestTarget, TargetScope, parse_request_json,
     plan_request,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 fn fixture(name: &str) -> Value {
     let path = format!(
@@ -261,4 +261,98 @@ fn duplicate_parameter_names_are_an_envelope_error() {
     assert_eq!(error.code, QueryCode::InvalidRequest);
     assert_eq!(error.phase.as_str(), "envelope");
     assert_eq!(error.path, "request");
+}
+
+#[test]
+fn relationship_parameters_enforce_the_frozen_wire_algebra() {
+    let valid = [
+        json!({
+            "type":"relationship", "id":"edge:201", "kind":"CONNECTED",
+            "start":"content:1", "end":"content:2", "directed":false, "properties":[]
+        }),
+        json!({
+            "type":"relationship", "id":"membership:101:0:1", "kind":"CONTAINS",
+            "start":"layer:101", "end":"content:1", "directed":true, "properties":[]
+        }),
+        json!({
+            "type":"relationship", "id":"action:301", "kind":"EXPANDS",
+            "start":"content:1", "end":"layer:103", "directed":true, "properties":[]
+        }),
+        json!({
+            "type":"relationship", "id":"action:302", "kind":"REFERENCES",
+            "start":"content:1", "end":"layer:103", "directed":true, "properties":[]
+        }),
+    ];
+    for relationship in valid {
+        let mut envelope = request("MATCH (n:Content) RETURN $value AS value LIMIT 1");
+        envelope.parameters.insert("value".into(), relationship);
+        plan_request(&envelope, &QueryLimits::default()).expect("valid relationship");
+    }
+
+    let malformed = [
+        (
+            "unknown kind",
+            json!({
+                "type":"relationship", "id":"edge:201", "kind":"connected",
+                "start":"content:1", "end":"content:2", "directed":false, "properties":[]
+            }),
+        ),
+        (
+            "wrong relationship identity",
+            json!({
+                "type":"relationship", "id":"action:201", "kind":"CONNECTED",
+                "start":"content:1", "end":"content:2", "directed":false, "properties":[]
+            }),
+        ),
+        (
+            "noncanonical endpoint identity",
+            json!({
+                "type":"relationship", "id":"edge:201", "kind":"CONNECTED",
+                "start":"content:01", "end":"content:2", "directed":false, "properties":[]
+            }),
+        ),
+        (
+            "noncanonical undirected orientation",
+            json!({
+                "type":"relationship", "id":"edge:201", "kind":"CONNECTED",
+                "start":"content:2", "end":"content:1", "directed":false, "properties":[]
+            }),
+        ),
+        (
+            "directed connected edge",
+            json!({
+                "type":"relationship", "id":"edge:201", "kind":"CONNECTED",
+                "start":"content:1", "end":"content:2", "directed":true, "properties":[]
+            }),
+        ),
+        (
+            "membership identity disagrees with endpoints",
+            json!({
+                "type":"relationship", "id":"membership:102:0:1", "kind":"CONTAINS",
+                "start":"layer:101", "end":"content:1", "directed":true, "properties":[]
+            }),
+        ),
+        (
+            "navigation has reversed endpoint types",
+            json!({
+                "type":"relationship", "id":"action:301", "kind":"EXPANDS",
+                "start":"layer:103", "end":"content:1", "directed":true, "properties":[]
+            }),
+        ),
+        (
+            "undirected navigation",
+            json!({
+                "type":"relationship", "id":"action:302", "kind":"REFERENCES",
+                "start":"content:1", "end":"layer:103", "directed":false, "properties":[]
+            }),
+        ),
+    ];
+    for (case, relationship) in malformed {
+        let mut envelope = request("MATCH (n:Content) RETURN $value AS value LIMIT 1");
+        envelope.parameters.insert("value".into(), relationship);
+        let error = plan_request(&envelope, &QueryLimits::default()).expect_err(case);
+        assert_eq!(error.code, QueryCode::InvalidRequest, "{case}");
+        assert_eq!(error.phase.as_str(), "envelope", "{case}");
+        assert_eq!(error.path, "parameters.value", "{case}");
+    }
 }

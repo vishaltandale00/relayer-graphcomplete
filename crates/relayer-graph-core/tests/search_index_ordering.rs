@@ -201,6 +201,24 @@ impl SearchIndexWrite for DoubleWrite {
         })
     }
 
+    fn remove(&mut self, closure: AcceptedGraphPublication) -> SearchIndexFuture<()> {
+        let behaviour = *self.index.behaviour.lock().unwrap();
+        self.layers = closure.layers.len();
+        self.has_root_action = closure.root_action.is_some();
+        Box::pin(async move {
+            match behaviour {
+                Behaviour::FailOnApply => Err(GraphError::Internal(
+                    "the search store rejected the closure removal".into(),
+                )),
+                Behaviour::StallOnApply => {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    Ok(())
+                }
+                Behaviour::Commit | Behaviour::FailOnBegin => Ok(()),
+            }
+        })
+    }
+
     fn commit(self: Box<Self>) -> SearchIndexFuture<SearchIndexRevision> {
         Box::pin(async move {
             let mut recorded = self.index.recorded.lock().unwrap();
@@ -1256,6 +1274,49 @@ async fn an_import_the_store_rejects_leaves_nothing_imported() {
     assert_eq!(index.committed(), vec![]);
     assert_eq!(database.search_index_revision(target).await.unwrap(), None);
     assert!(no_accepted_closure(&database).await);
+}
+
+#[tokio::test]
+async fn imported_conversation_removal_is_acknowledged_only_after_derived_removal() {
+    let index = Double::new(Behaviour::Commit);
+    let database = database(index.clone()).await;
+    let target = SearchTarget::Thread(ThreadId::new(9001).unwrap());
+
+    database
+        .import_accepted_conversation(&imported_conversation())
+        .await
+        .unwrap();
+    index.set_behaviour(Behaviour::FailOnApply);
+
+    let refused = database
+        .remove_imported_conversation("import-1")
+        .await
+        .unwrap_err();
+    assert!(
+        refused.to_string().contains("rejected the closure removal"),
+        "{refused}"
+    );
+    assert!(
+        !no_accepted_closure(&database).await,
+        "canonical import was removed before its derived projection"
+    );
+    assert_eq!(
+        database.search_index_revision(target).await.unwrap(),
+        Some(SearchIndexRevision::FIRST)
+    );
+    assert_eq!(index.committed().len(), 1);
+
+    index.set_behaviour(Behaviour::Commit);
+    database
+        .remove_imported_conversation("import-1")
+        .await
+        .unwrap();
+    assert!(no_accepted_closure(&database).await);
+    assert_eq!(
+        database.search_index_revision(target).await.unwrap(),
+        Some(SearchIndexRevision::FIRST.next())
+    );
+    assert_eq!(index.committed().len(), 2);
 }
 
 #[cfg(feature = "crash-test-support")]
