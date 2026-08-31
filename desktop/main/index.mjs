@@ -79,6 +79,12 @@ const metadataPath = app.isPackaged ? join(app.getAppPath(), "package.json") : j
 const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
 const packagedRelease = packagedDesktopReleaseMetadata(metadata);
 const releaseArtifact = packagedRelease !== null;
+// Electron's app.getVersion() is unreliable for the unsigned development app: with no
+// package.json at the app path it falls back to a value that is not valid semver on
+// Linux ("0.0"), which the managed-runtime and updater code reject. Use the product
+// version declared in package.json for development builds; packaged releases keep the
+// sealed app version.
+const desktopVersion = app.isPackaged ? app.getVersion() : (metadata.version || app.getVersion());
 app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
@@ -286,10 +292,14 @@ if (primaryInstance) {
   });
 
   const updater = createDesktopUpdater({
-    autoUpdater: electronUpdater.autoUpdater,
+    // The platform auto-updater is only used by packaged release artifacts. Reading
+    // electron-updater's lazy `autoUpdater` getter eagerly constructs the per-platform
+    // updater, and the Linux AppImageUpdater rejects the unsigned dev version at
+    // construction. Development builds never touch the updater, so skip constructing it.
+    autoUpdater: app.isPackaged && releaseArtifact ? electronUpdater.autoUpdater : null,
     app: {
       get isPackaged() { return app.isPackaged && releaseArtifact; },
-      getVersion: () => app.getVersion(),
+      getVersion: () => desktopVersion,
     },
     updateBaseUrl,
     prefetchRuntimeUpdate: async (info) => {
@@ -391,7 +401,7 @@ if (primaryInstance) {
     accountService = createAccountService(channel);
     if (channel === "preview") updater.setChannel("preview");
     void accountService.start().catch((error) => console.error("Optional desktop account initialization failed:", error));
-    const activation = await managedRuntimeInstaller.activatePendingAppUpdate(app.getVersion());
+    const activation = await managedRuntimeInstaller.activatePendingAppUpdate(desktopVersion);
     if (activation.failures.length) {
       console.error("Managed runtime update activation failed:", new AggregateError(
         activation.failures.map(({ error }) => error),
@@ -417,7 +427,7 @@ if (primaryInstance) {
       defaultHarnessConfiguration,
       allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-"),
       exportProducer: {
-        desktopVersion: app.getVersion(),
+        desktopVersion,
         buildCommit: metadata.relayerReleaseSourceCommit || "development",
         platform: process.platform,
         architecture: process.arch,
