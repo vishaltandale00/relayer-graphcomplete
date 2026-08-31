@@ -1921,40 +1921,31 @@ describe("evidence capture integrity", () => {
     }
   });
 
-  it("pins every frame independently and rejects changed disk bytes", () => {
+  it("pins, orders, retains, and streams the exact frame-byte lifecycle", async () => {
     const pins = new Map();
-    pinUniqueBytes(pins, "frame-000000.jpg", Buffer.from("first"));
-    pinUniqueBytes(pins, "frame-000001.jpg", Buffer.from("second"));
-    const observed = [...pins.values()].map((pin) => ({ ...pin }));
-    expect(verifyPinnedByteInventory(pins, observed)).toEqual(observed);
-    observed[1] = { file: observed[1].file, ...bytePin(Buffer.from("changed")) };
-    expect(() => verifyPinnedByteInventory(pins, observed)).toThrow("changed after they were pinned");
-  });
-
-  it("rejects a frame path being reused and commits to sequence order", () => {
-    const pins = new Map();
-    pinUniqueBytes(pins, "frame-000001.jpg", Buffer.from("second"));
-    pinUniqueBytes(pins, "frame-000000.jpg", Buffer.from("first"));
-    const digest = pinnedSequenceSha256(pins);
-    expect(digest).toMatch(/^[0-9a-f]{64}$/);
-    expect(() => pinUniqueBytes(pins, "frame-000000.jpg", Buffer.from("replacement"))).toThrow("more than once");
-  });
-
-  it("returns only retained buffers that still match their pins", () => {
-    const pins = new Map();
-    const buffers = new Map();
     const second = Buffer.from("second");
     const first = Buffer.from("first");
     pinUniqueBytes(pins, "frame-000001.jpg", second);
     pinUniqueBytes(pins, "frame-000000.jpg", first);
-    buffers.set("frame-000001.jpg", second);
-    buffers.set("frame-000000.jpg", first);
-    expect(pinnedBuffersInFileOrder(pins, buffers)).toEqual([first, second]);
-    second.fill(0);
-    expect(() => pinnedBuffersInFileOrder(pins, buffers)).toThrow("changed after they were pinned");
-  });
 
-  it("pipes every retained frame with backpressure and surfaces sink errors", async () => {
+    const observed = [...pins.values()].map((pin) => ({ ...pin }));
+    const orderedObserved = [...observed].sort((left, right) => left.file.localeCompare(right.file));
+    expect(verifyPinnedByteInventory(pins, observed), "unchanged frame inventory").toEqual(orderedObserved);
+    const changed = observed.map((pin) => ({ ...pin }));
+    changed[0] = { file: changed[0].file, ...bytePin(Buffer.from("changed")) };
+    expect(() => verifyPinnedByteInventory(pins, changed), "changed frame bytes")
+      .toThrow("changed after they were pinned");
+
+    expect(pinnedSequenceSha256(pins), "ordered sequence digest").toMatch(/^[0-9a-f]{64}$/);
+    expect(() => pinUniqueBytes(pins, "frame-000000.jpg", Buffer.from("replacement")), "duplicate frame path")
+      .toThrow("more than once");
+
+    const buffers = new Map([
+      ["frame-000001.jpg", second],
+      ["frame-000000.jpg", first],
+    ]);
+    expect(pinnedBuffersInFileOrder(pins, buffers), "file-ordered buffers").toEqual([first, second]);
+
     const written = [];
     const sink = new Writable({
       highWaterMark: 1,
@@ -1963,15 +1954,20 @@ describe("evidence capture integrity", () => {
         setImmediate(callback);
       },
     });
-    await pipeByteChunks(sink, [Buffer.from("first"), Buffer.from("second")]);
-    expect(Buffer.concat(written).toString()).toBe("firstsecond");
+    await pipeByteChunks(sink, pinnedBuffersInFileOrder(pins, buffers));
+    expect(Buffer.concat(written).toString(), "streamed frame order").toBe("firstsecond");
 
     const failed = new Writable({
       write(_chunk, _encoding, callback) {
         callback(new Error("encoder input failed"));
       },
     });
-    await expect(pipeByteChunks(failed, [Buffer.from("frame")])).rejects.toThrow("encoder input failed");
+    await expect(pipeByteChunks(failed, [Buffer.from("frame")]), "sink error propagation")
+      .rejects.toThrow("encoder input failed");
+
+    second.fill(0);
+    expect(() => pinnedBuffersInFileOrder(pins, buffers), "retained buffer mutation")
+      .toThrow("changed after they were pinned");
   });
 
   it("structurally requires the pinned graph-authoring Node command", () => {
@@ -2107,17 +2103,22 @@ describe("evidence capture integrity", () => {
     }
   });
 
-  it.each([
-    ["an argument", `${JSON.stringify(GRAPH_AUTHORING_LAUNCHER)} --inspect <<'EOF'\nEOF`],
-    ["a different launcher", '"/private/var/folders/[redacted]/runtime/alternate-launcher" <<\'EOF\'\nEOF'],
-    ["an unquoted heredoc", `${JSON.stringify(GRAPH_AUTHORING_LAUNCHER)} <<EOF\nEOF`],
-    ["a double-quoted heredoc", `${JSON.stringify(GRAPH_AUTHORING_LAUNCHER)} <<"EOF"\nEOF`],
-  ])("rejects a graph-authoring command with %s", (_label, command) => {
-    const event = {
-      type: "provider.event",
-      data: { method: "item/started", params: { item: { type: "commandExecution", command, commandActions: [{ command }] } } },
-    };
-    expect(() => validateEvidenceCommands([event])).toThrow("exact pinned graph-authoring launcher heredoc");
+  it("rejects the complete graph-authoring launcher syntax mutation corpus", () => {
+    const cases = [
+      ["an argument", `${JSON.stringify(GRAPH_AUTHORING_LAUNCHER)} --inspect <<'EOF'\nEOF`],
+      ["a different launcher", '"/private/var/folders/[redacted]/runtime/alternate-launcher" <<\'EOF\'\nEOF'],
+      ["an unquoted heredoc", `${JSON.stringify(GRAPH_AUTHORING_LAUNCHER)} <<EOF\nEOF`],
+      ["a double-quoted heredoc", `${JSON.stringify(GRAPH_AUTHORING_LAUNCHER)} <<"EOF"\nEOF`],
+    ];
+    expect(cases, "launcher mutation inventory").toHaveLength(4);
+    for (const [label, command] of cases) {
+      const event = {
+        type: "provider.event",
+        data: { method: "item/started", params: { item: { type: "commandExecution", command, commandActions: [{ command }] } } },
+      };
+      expect.soft(() => validateEvidenceCommands([event]), label)
+        .toThrow("exact pinned graph-authoring launcher heredoc");
+    }
   });
 
   it("rejects a redaction-colliding graph-authoring launcher without exact raw authority", () => {
@@ -2196,22 +2197,26 @@ describe("evidence capture integrity", () => {
     })).toBe(2);
   });
 
-  it.each([
-    ["bare ripgrep", "rg"],
-    ["different absolute ripgrep", "/usr/bin/rg"],
-    ["prefix-sibling ripgrep", "/private/var/folders/[redacted]/runtime/rg-copy"],
-  ])("rejects %s even for an otherwise valid inspection", (_label, executable) => {
-    const command = `${executable} -n needle /private/var/folders/[redacted]/runtime/graph-client`;
-    const event = {
-      type: "provider.event",
-      data: { method: "item/started", params: { item: { type: "commandExecution", command, commandActions: [{ command }] } } },
-    };
-    expect(() => validateEvidenceCommands([event], {
-      allowedInspectionRoots: ["/private/var/folders/[redacted]/runtime/graph-client"],
-      allowedRipgrepExecutable: PINNED_RG,
-      allowedRipgrepExecutableSha256: PINNED_RG_SHA256,
-      requirePinnedGraph: false,
-    })).toThrow("inspect source read-only");
+  it("rejects the complete unauthorized ripgrep executable corpus", () => {
+    const cases = [
+      ["bare ripgrep", "rg"],
+      ["different absolute ripgrep", "/usr/bin/rg"],
+      ["prefix-sibling ripgrep", "/private/var/folders/[redacted]/runtime/rg-copy"],
+    ];
+    expect(cases, "ripgrep executable inventory").toHaveLength(3);
+    for (const [label, executable] of cases) {
+      const command = `${executable} -n needle /private/var/folders/[redacted]/runtime/graph-client`;
+      const event = {
+        type: "provider.event",
+        data: { method: "item/started", params: { item: { type: "commandExecution", command, commandActions: [{ command }] } } },
+      };
+      expect.soft(() => validateEvidenceCommands([event], {
+        allowedInspectionRoots: ["/private/var/folders/[redacted]/runtime/graph-client"],
+        allowedRipgrepExecutable: PINNED_RG,
+        allowedRipgrepExecutableSha256: PINNED_RG_SHA256,
+        requirePinnedGraph: false,
+      }), label).toThrow("inspect source read-only");
+    }
   });
 
   it("rejects a relative ripgrep authorization configuration", () => {
@@ -2236,23 +2241,30 @@ describe("evidence capture integrity", () => {
     expect(capture).toContain("never resolve sed or rg from PATH");
   });
 
-  it.each([
-    ["outside inventory", "/etc/passwd"],
-    ["root-prefix sibling", "/private/var/folders/[redacted]/runtime/graph-client-escape/index.js"],
-    ["redacted wrong segment", "/private/var/folders/private/runtime/graph-client/index.js"],
-    ["parent traversal", "/private/var/folders/[redacted]/runtime/graph-client/../secret"],
-    ["relative path", "desktop/renderer/index.html"],
-  ])("rejects inspection input %s", (_label, path) => {
-    const event = (command) => ({
+  it("rejects the complete inspection-path escape corpus", () => {
+    const cases = [
+      ["outside inventory", "/etc/passwd"],
+      ["root-prefix sibling", "/private/var/folders/[redacted]/runtime/graph-client-escape/index.js"],
+      ["redacted wrong segment", "/private/var/folders/private/runtime/graph-client/index.js"],
+      ["parent traversal", "/private/var/folders/[redacted]/runtime/graph-client/../secret"],
+      ["relative path", "desktop/renderer/index.html"],
+    ];
+    expect(cases, "inspection-path inventory").toHaveLength(5);
+    const event = (action) => ({
       type: "provider.event",
-      data: { method: "item/started", params: { item: { type: "commandExecution", command, commandActions: [{ command }] } } },
+      data: { method: "item/started", params: { item: {
+        type: "commandExecution",
+        command: action.command,
+        commandActions: [action],
+      } } },
     });
-    expect(() => validateEvidenceCommands([
-      event(`sed -n '1,20p' ${path}`),
-      event(pinnedGraphCommand()),
-    ], {
-      allowedInspectionRoots: ["/private/var/folders/[redacted]/runtime/graph-client"],
-    })).toThrow("inspect source read-only");
+    for (const [label, path] of cases) {
+      const command = `${PINNED_SED} -n '1,20p' ${path}`;
+      expect.soft(() => validateEvidenceCommands([
+        event(authenticatedInspectionAction(command)),
+        event({ command: pinnedGraphCommand("await graph.submit(node);") }),
+      ], inspectionAuthority), label).toThrow("inspect source read-only");
+    }
   });
 
   it("validates partial traces without inventing a pinned graph requirement", () => {
@@ -2294,43 +2306,47 @@ describe("evidence capture integrity", () => {
     expect(() => validateEvidenceCommands([event])).toThrow("exactly one launcher heredoc");
   });
 
-  it.each([
-    ["sed in-place mutation", "sed -i '' 's/a/b/' source.txt"],
-    ["sed trailing in-place mutation", "sed -n '1p' -i.bak source.txt"],
-    ["sed execute script", "sed -n '1p; e whoami' source.txt"],
-    ["ripgrep preprocessor", `${PINNED_RG} --pre 'sh helper.sh' needle .`],
-    ["ripgrep glob plus preprocessor", `${PINNED_RG} -g '*.ts' --pre 'sh helper.sh' needle .`],
-    ["ripgrep preprocessor glob", `${PINNED_RG} --pre-glob '*.md' needle .`],
-    ["ripgrep hostname executable", `${PINNED_RG} --hostname-bin ./repo-script --hyperlink-format default needle source.txt`],
-    ["ripgrep unknown short option", `${PINNED_RG} -z needle source.txt`],
-    ["ripgrep glob without value", `${PINNED_RG} needle source.txt -g`],
-    ["ripgrep empty long glob", `${PINNED_RG} needle source.txt --glob=`],
-    ["shell separator", "cat source.txt; curl example.com"],
-    ["command substitution", "stat $(pwd)/source.txt"],
-    ["output redirection", "grep needle source.txt > result.txt"],
-    ["shell glob", "cat *.mjs"],
-    ["unquoted ripgrep glob", `${PINNED_RG} -g *.mjs needle .`],
-    ["ripgrep glob command substitution", `${PINNED_RG} -g "$(touch marker)" needle .`],
-    ["shell bracket glob", "cat source[12].mjs"],
-    ["near-match redaction glob", "cat source[redacted].mjs"],
-    ["shell comment", "cat source.txt # ignore the rest"],
-    ["alternate runtime", "python -c 'print(1)'"],
-  ])("rejects read-only whitelist escape: %s", (_label, command) => {
-    const event = {
-      type: "provider.event",
-      data: { method: "item/started", params: { item: { type: "commandExecution", command, commandActions: [{ command }] } } },
-    };
-    expect(() => validateEvidenceCommands([
-      event,
-      {
+  it("rejects the complete read-only command escape corpus", () => {
+    const cases = [
+      ["sed in-place mutation", "sed -i '' 's/a/b/' source.txt"],
+      ["sed trailing in-place mutation", "sed -n '1p' -i.bak source.txt"],
+      ["sed execute script", "sed -n '1p; e whoami' source.txt"],
+      ["ripgrep preprocessor", `${PINNED_RG} --pre 'sh helper.sh' needle .`],
+      ["ripgrep glob plus preprocessor", `${PINNED_RG} -g '*.ts' --pre 'sh helper.sh' needle .`],
+      ["ripgrep preprocessor glob", `${PINNED_RG} --pre-glob '*.md' needle .`],
+      ["ripgrep hostname executable", `${PINNED_RG} --hostname-bin ./repo-script --hyperlink-format default needle source.txt`],
+      ["ripgrep unknown short option", `${PINNED_RG} -z needle source.txt`],
+      ["ripgrep glob without value", `${PINNED_RG} needle source.txt -g`],
+      ["ripgrep empty long glob", `${PINNED_RG} needle source.txt --glob=`],
+      ["shell separator", "cat source.txt; curl example.com"],
+      ["command substitution", "stat $(pwd)/source.txt"],
+      ["output redirection", "grep needle source.txt > result.txt"],
+      ["shell glob", "cat *.mjs"],
+      ["unquoted ripgrep glob", `${PINNED_RG} -g *.mjs needle .`],
+      ["ripgrep glob command substitution", `${PINNED_RG} -g "$(touch marker)" needle .`],
+      ["shell bracket glob", "cat source[12].mjs"],
+      ["near-match redaction glob", "cat source[redacted].mjs"],
+      ["shell comment", "cat source.txt # ignore the rest"],
+      ["alternate runtime", "python -c 'print(1)'"],
+    ];
+    expect(cases, "read-only escape inventory").toHaveLength(20);
+    for (const [label, command] of cases) {
+      const event = {
         type: "provider.event",
-        data: { method: "item/started", params: { item: { type: "commandExecution", command: "graph", commandActions: [{ command: pinnedGraphCommand() }] } } },
-      },
-    ], {
-      allowedInspectionRoots: ["/private/var/folders/[redacted]/runtime"],
-      allowedRipgrepExecutable: PINNED_RG,
-      allowedRipgrepExecutableSha256: PINNED_RG_SHA256,
-    })).toThrow("inspect source read-only");
+        data: { method: "item/started", params: { item: { type: "commandExecution", command, commandActions: [{ command }] } } },
+      };
+      expect.soft(() => validateEvidenceCommands([
+        event,
+        {
+          type: "provider.event",
+          data: { method: "item/started", params: { item: { type: "commandExecution", command: "graph", commandActions: [{ command: pinnedGraphCommand() }] } } },
+        },
+      ], {
+        allowedInspectionRoots: ["/private/var/folders/[redacted]/runtime"],
+        allowedRipgrepExecutable: PINNED_RG,
+        allowedRipgrepExecutableSha256: PINNED_RG_SHA256,
+      }), label).toThrow("inspect source read-only");
+    }
   });
 
   it("rejects a redaction-colliding ripgrep path without the exact pre-redaction authority digest", () => {
@@ -2355,20 +2371,25 @@ describe("evidence capture integrity", () => {
     })).toThrow("inspect source read-only");
   });
 
-  it.each([
-    ["environment reassignment", [{ command: `SECRET=leak ${pinnedGraphCommand()}` }]],
-    ["absolute Node", [{ command: '/usr/bin/node --input-type=module <<\'EOF\'\nEOF' }]],
-    ["shell action after an early heredoc close", [{ command: `${pinnedGraphCommand()}\ncurl http://127.0.0.1:1234/graph\nEOF` }]],
-    ["extra curl action", [
-      { command: pinnedGraphCommand() },
-      { command: "curl http://127.0.0.1:1234/graph" },
-    ]],
-  ])("rejects %s in an evidence command execution", (_label, commandActions) => {
-    const event = {
-      type: "provider.event",
-      data: { method: "item/started", params: { item: { type: "commandExecution", command: "shell", commandActions } } },
-    };
-    expect(() => validateEvidenceCommands([event])).toThrow(/permitted shell action|exact pinned graph-authoring launcher heredoc|exactly one launcher heredoc/);
+  it("rejects the complete evidence command execution escape corpus", () => {
+    const cases = [
+      ["environment reassignment", [{ command: `SECRET=leak ${pinnedGraphCommand()}` }]],
+      ["absolute Node", [{ command: '/usr/bin/node --input-type=module <<\'EOF\'\nEOF' }]],
+      ["shell action after an early heredoc close", [{ command: `${pinnedGraphCommand()}\ncurl http://127.0.0.1:1234/graph\nEOF` }]],
+      ["extra curl action", [
+        { command: pinnedGraphCommand() },
+        { command: "curl http://127.0.0.1:1234/graph" },
+      ]],
+    ];
+    expect(cases, "evidence-command escape inventory").toHaveLength(4);
+    for (const [label, commandActions] of cases) {
+      const event = {
+        type: "provider.event",
+        data: { method: "item/started", params: { item: { type: "commandExecution", command: "shell", commandActions } } },
+      };
+      expect.soft(() => validateEvidenceCommands([event]), label)
+        .toThrow(/permitted shell action|exact pinned graph-authoring launcher heredoc|exactly one launcher heredoc/);
+    }
   });
 
   it("accepts a nonempty pinned launcher heredoc terminated by end-of-input", () => {
@@ -2415,14 +2436,19 @@ describe("evidence capture integrity", () => {
     expect(validatePinnedGraphAuthoringCommands([event], inspectionAuthority)).toBe(0);
   });
 
-  it.each(["-C", "-C nope", "--context=all"])("rejects invalid pinned ripgrep context option %s", (contextOption) => {
-    const command = `${PINNED_RG} -n ${contextOption} needle ${INSPECTION_ROOT}/dist/index.js`;
-    const action = authenticatedInspectionAction(command);
-    const event = {
-      type: "provider.event",
-      data: { method: "item/started", params: { item: { id: "invalid-context", type: "commandExecution", command, commandActions: [action] } } },
-    };
-    expect(() => validatePinnedGraphAuthoringCommands([event], inspectionAuthority)).toThrow("inspect source read-only");
+  it("rejects the complete invalid ripgrep context-option corpus", () => {
+    const cases = ["-C", "-C nope", "--context=all"];
+    expect(cases, "ripgrep context-option inventory").toHaveLength(3);
+    for (const contextOption of cases) {
+      const command = `${PINNED_RG} -n ${contextOption} needle ${INSPECTION_ROOT}/dist/index.js`;
+      const action = authenticatedInspectionAction(command);
+      const event = {
+        type: "provider.event",
+        data: { method: "item/started", params: { item: { id: "invalid-context", type: "commandExecution", command, commandActions: [action] } } },
+      };
+      expect.soft(() => validatePinnedGraphAuthoringCommands([event], inspectionAuthority), contextOption)
+        .toThrow("inspect source read-only");
+    }
   });
 
   it("rejects inspection operands from a raw temp root that collides after redaction", () => {
@@ -2441,17 +2467,22 @@ describe("evidence capture integrity", () => {
     ], inspectionAuthority)).toThrow("inspect source read-only");
   });
 
-  it.each([
-    ["missing start", ["item/completed"]],
-    ["duplicate start", ["item/started", "item/started", "item/completed"]],
-    ["duplicate completion", ["item/started", "item/completed", "item/completed"]],
-  ])("rejects command phase correlation with %s", (_label, phases) => {
-    const action = authenticatedInspectionAction(`${PINNED_SED} -n '1,20p' ${INSPECTION_ROOT}/dist/index.js`);
-    const events = phases.map((method) => ({
-      type: "provider.event",
-      data: { method, params: { item: { id: "phase-item", type: "commandExecution", command: action.command, commandActions: [action] } } },
-    }));
-    expect(() => validatePinnedGraphAuthoringCommands(events, inspectionAuthority)).toThrow(/matching validated start|Duplicate command/);
+  it("rejects the complete command phase-correlation mutation corpus", () => {
+    const cases = [
+      ["missing start", ["item/completed"]],
+      ["duplicate start", ["item/started", "item/started", "item/completed"]],
+      ["duplicate completion", ["item/started", "item/completed", "item/completed"]],
+    ];
+    expect(cases, "phase-correlation inventory").toHaveLength(3);
+    for (const [label, phases] of cases) {
+      const action = authenticatedInspectionAction(`${PINNED_SED} -n '1,20p' ${INSPECTION_ROOT}/dist/index.js`);
+      const events = phases.map((method) => ({
+        type: "provider.event",
+        data: { method, params: { item: { id: "phase-item", type: "commandExecution", command: action.command, commandActions: [action] } } },
+      }));
+      expect.soft(() => validatePinnedGraphAuthoringCommands(events, inspectionAuthority), label)
+        .toThrow(/matching validated start|Duplicate command/);
+    }
   });
 
   it("rejects a completed command whose grouped actions differ from its validated start", () => {
