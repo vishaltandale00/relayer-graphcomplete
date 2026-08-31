@@ -1,4 +1,18 @@
-import { SecretApiProviderAdapter, bearerHeaders } from "./api-provider-adapter.mjs";
+import {
+  EXECUTION_ELIGIBLE,
+  MODEL_CAPABILITY_UNKNOWN,
+  MODEL_NOT_EXECUTION_ELIGIBLE,
+  SecretApiProviderAdapter,
+  bearerHeaders,
+} from "./api-provider-adapter.mjs";
+
+function openRouterModelEligibility(model) {
+  const outputs = model?.architecture?.output_modalities;
+  if (!Array.isArray(outputs) || outputs.some((value) => typeof value !== "string")) {
+    return MODEL_CAPABILITY_UNKNOWN;
+  }
+  return outputs.includes("text") ? EXECUTION_ELIGIBLE : MODEL_NOT_EXECUTION_ELIGIBLE;
+}
 
 function tokenCapabilities(model) {
   const contextWindow = model?.top_provider?.context_length;
@@ -8,9 +22,13 @@ function tokenCapabilities(model) {
   return { contextWindow, maxOutputTokens };
 }
 
+function usesCanonicalEndpoint(endpoint) {
+  return endpoint.replace(/\/+$/, "") === "https://openrouter.ai/api/v1";
+}
+
 export const openRouterDescriptor = Object.freeze({
   adapterId: "openrouter",
-  implementationVersion: "1",
+  implementationVersion: "2",
   label: "OpenRouter",
   accessContract: "secret@1",
   definitionRuntimeState: true,
@@ -20,7 +38,10 @@ export const openRouterDescriptor = Object.freeze({
   catalog: { source: "provider-discovery" },
   create: ({ definition, fetch, secrets, managedRuntime, environment }) => new SecretApiProviderAdapter({
     definition, fetch, credentials: { apiKey: secrets?.["api-key"] }, headers: bearerHeaders,
+    connectionProbePath: usesCanonicalEndpoint(definition.endpoint) ? "/key" : null,
+    verifyConnectionBeforeDiscovery: usesCanonicalEndpoint(definition.endpoint),
     modelCapabilities: tokenCapabilities,
+    modelEligibility: openRouterModelEligibility,
     requireCatalogBeforeExecution: true,
     managedRuntime, runtimeId: "codex", environment,
   }),

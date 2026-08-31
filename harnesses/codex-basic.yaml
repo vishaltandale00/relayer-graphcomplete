@@ -25,10 +25,6 @@ modelRules:
       modelIdRegex: ".*"
     - adapterId: openai-api
       modelIdRegex: ".*"
-    - adapterId: openrouter
-      modelIdRegex: ".*"
-    - adapterId: vercel-ai-router
-      modelIdRegex: ".*"
   deny: []
 executionAccessContracts: [managed-runtime@1, secret@1]
 modelDefaults:
