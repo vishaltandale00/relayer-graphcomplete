@@ -1189,7 +1189,7 @@ fn bounded_portable_option_key(base: &str, maximum_bytes: usize) -> String {
     while !base.is_char_boundary(end) {
         end -= 1;
     }
-    base[..end].to_owned()
+    base[..end].trim_end().to_owned()
 }
 
 #[derive(Default)]
@@ -1721,7 +1721,9 @@ mod tests {
     #[test]
     fn expanding_path_redaction_keeps_option_keys_within_the_portable_limit() {
         let authored_key = format!("/a{}", "x".repeat(126));
+        let authored_key_with_internal_space = format!("/a{} {}", "x".repeat(113), "y".repeat(12));
         assert_eq!(authored_key.len(), 128);
+        assert_eq!(authored_key_with_internal_space.len(), 128);
         let action = GraphAction {
             id: ActionId::new(1).unwrap(),
             source_node_id: NodeId::new(2).unwrap(),
@@ -1737,11 +1739,18 @@ mod tests {
             input: Some(InputAction {
                 control: InputControl::SingleSelect,
                 prompt: "Choose".into(),
-                options: vec![InputOption {
-                    key: authored_key,
-                    label: "Expanded path".into(),
-                    unsupported_fields: Default::default(),
-                }],
+                options: vec![
+                    InputOption {
+                        key: authored_key,
+                        label: "Expanded path".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: authored_key_with_internal_space,
+                        label: "Expanded path with internal space".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
                 minimum_selections: None,
                 unsupported_fields: Default::default(),
             }),
@@ -1754,10 +1763,17 @@ mod tests {
             &ProjectPathRedactor::new(Some("/a")),
         )
         .unwrap();
-        let option_key = &exported.input.unwrap().options[0].key;
+        let input = exported.input.unwrap();
+        let option_key = &input.options[0].key;
+        let option_key_with_exposed_space = &input.options[1].key;
 
         assert_eq!(option_key.len(), 128);
         assert!(option_key.starts_with("[project-path]"));
+        assert_eq!(option_key_with_exposed_space.len(), 127);
+        assert_eq!(
+            option_key_with_exposed_space.trim(),
+            option_key_with_exposed_space
+        );
     }
 
     #[test]
