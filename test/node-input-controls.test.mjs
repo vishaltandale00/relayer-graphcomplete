@@ -5,6 +5,7 @@ import {
   committedInputAttachment,
   createInputOccurrence,
   createInputDraftLoadRetryScheduler,
+  createInputMutationTracker,
   createNodeInputDraftController,
   createNodeInputDraftLoadQueue,
   initialInputStageValue,
@@ -71,6 +72,11 @@ describe("node input control state", () => {
     expect(scheduler.has(7)).toBe(false);
 
     const failingTimers = [];
+    let recovered = false;
+    const exhaustedLoad = vi.fn(async () => {
+      if (!recovered) throw new Error("offline");
+      return draft(9);
+    });
     const failing = createInputDraftLoadRetryScheduler({
       setTimeout: (callback, delay) => {
         const timer = { callback, delay };
@@ -78,7 +84,7 @@ describe("node input control state", () => {
         return timer;
       },
       clearTimeout: vi.fn(),
-      load: vi.fn(async () => { throw new Error("offline"); }),
+      load: exhaustedLoad,
       isEligible: () => true,
     });
     failing.schedule(9);
@@ -90,7 +96,12 @@ describe("node input control state", () => {
     expect(failingTimers).toEqual([]);
     expect(failing.has(9)).toBe(false);
     expect(failing.suppressesLoad(9)).toBe(true);
-    failing.reset(9);
+    recovered = true;
+    failing.beginEligibilityCycle(9);
+    expect(failing.suppressesLoad(9)).toBe(false);
+    expect(failing.schedule(9)).toBe(true);
+    await failingTimers.shift().callback();
+    expect(exhaustedLoad).toHaveBeenCalledTimes(6);
     expect(failing.suppressesLoad(9)).toBe(false);
   });
   it("gives every presenting input occurrence a distinct review reference", () => {
@@ -133,16 +144,30 @@ describe("node input control state", () => {
   });
 
   it("scopes pending input mutations to their owning thread", () => {
-    const pending = new Set([
-      threadInputOccurrenceKey("thread-a", occurrence),
-      threadInputOccurrenceKey("thread-c", otherOccurrence),
-    ]);
+    const pending = createInputMutationTracker();
+    pending.begin(threadInputOccurrenceKey("thread-a", occurrence));
+    pending.begin(threadInputOccurrenceKey("thread-c", otherOccurrence));
 
     expect(threadHasPendingInputMutation(pending, "thread-a")).toBe(true);
     expect(threadHasPendingInputMutation(pending, "thread-b")).toBe(false);
-    expect(threadHasPendingInputMutation(new Set(), "thread-a")).toBe(false);
-    expect(threadHasPendingInputMutation(new Set(), undefined)).toBe(false);
+    expect(threadHasPendingInputMutation(createInputMutationTracker(), "thread-a")).toBe(false);
+    expect(threadHasPendingInputMutation(createInputMutationTracker(), undefined)).toBe(false);
     expect(inputKeyBelongsToThread("not-json", "thread-a")).toBe(false);
+  });
+
+  it("retains same-occurrence mutation ownership until every concurrent mutation settles", () => {
+    const pending = createInputMutationTracker();
+    const stageKey = threadInputOccurrenceKey("thread-a", occurrence);
+
+    pending.begin(stageKey);
+    pending.begin(stageKey);
+    expect(pending.count(stageKey)).toBe(2);
+    expect(pending.end(stageKey)).toBe(true);
+    expect(pending.has(stageKey)).toBe(true);
+    expect(threadHasPendingInputMutation(pending, "thread-a")).toBe(true);
+    expect(pending.end(stageKey)).toBe(false);
+    expect(pending.has(stageKey)).toBe(false);
+    expect(threadHasPendingInputMutation(pending, "thread-a")).toBe(false);
   });
 
   it("looks up committed attachments and initializes renderer-local staged values", () => {

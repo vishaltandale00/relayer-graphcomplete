@@ -279,31 +279,49 @@ async function run() {
     (details, callback) => {
       if (details.method !== "GET") return callback({});
       initialDraftLoadRequests += 1;
-      callback(initialDraftLoadRequests === 1 ? { cancel: true } : {});
+      callback(initialDraftLoadRequests <= 6 ? { cancel: true } : {});
     },
   );
   await window.loadURL(`${productSession.origin}/?threadId=${thread.id}`);
   await waitFor("production node-input workspace", () => evaluate(`(() => (
     !document.body.classList.contains('desktop-account-pending')
       && document.querySelectorAll('.graph-node').length === 2
-      && !document.querySelector('#threadPrompt')?.disabled
   ))()`));
   await clickNode("Input grammar");
-  await waitFor("three embedded Node Details inputs", () => evaluate(`(() => (
-    document.querySelectorAll('#nodeInputActions .node-input-editor').length === 3
+  await waitFor("initial input-draft GET and five retries exhaust", () => (
+    initialDraftLoadRequests === 6
+  ));
+  await new Promise((resolve) => setTimeout(resolve, 5_250));
+  if (initialDraftLoadRequests !== 6) {
+    throw new Error(`Exhausted input-draft retry cycle issued another GET: ${initialDraftLoadRequests}`);
+  }
+  await waitFor("exhausted input authority keeps composition locked", () => evaluate(`(() => (
+    document.querySelector('#nodeInputActions .node-input-status')?.textContent === 'Loading committed inputs…'
+      && document.querySelector('#sendInteraction')?.disabled === true
+  ))()`));
+  await click(`[data-thread='${idleThread.id}']`);
+  await waitFor("leaves exhausted input-draft eligibility", () => evaluate(`(
+    document.querySelector("[data-thread='${idleThread.id}']")?.classList.contains('active')
+  )`));
+  await click(`[data-thread='${thread.id}']`);
+  await waitFor("seventh input-draft GET succeeds after re-entering eligibility", () => (
+    initialDraftLoadRequests === 7
+  ));
+  await clickNode("Input grammar");
+  await waitFor("authoritative input draft restores controls", () => evaluate(`(() => (
+    document.querySelector("[data-thread='${thread.id}']")?.classList.contains('active')
+      && document.querySelectorAll('#nodeInputActions .node-input-editor').length === 3
       && document.querySelectorAll('#nodeInputActions .node-input-option-rail').length === 2
       && document.querySelector('#detailActions .action-control')?.textContent.includes('Open navigation destination')
+      && !document.querySelector('#threadPrompt')?.disabled
   ))()`));
-  await waitFor("initial input draft load recovers through the bounded retry", () => (
-    initialDraftLoadRequests >= 2
-  ));
   window.webContents.session.webRequest.onBeforeRequest(initialDraftLoadFilter, null);
   await setValue(".node-input-text", "Recovered after initial draft load retry");
   await click("[aria-label='Commit Name the governing constraint']");
-  await waitFor("recovered input authority accepts a real commit", async () => (
+  await waitFor("recovered input authority accepts a real commit and unlocks Send", async () => (
     (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments?.some(
       (attachment) => attachment.value?.text === "Recovered after initial draft load retry",
-    )
+    ) && await evaluate(`document.querySelector('#sendInteraction')?.disabled === false`)
   ));
   const grammar = await evaluate(`(() => ({
     attachedToDetails: document.querySelector('#inspectorContent')?.contains(document.querySelector('#nodeInputActions')),

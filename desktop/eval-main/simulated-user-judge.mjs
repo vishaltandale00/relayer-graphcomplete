@@ -236,6 +236,36 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
   const committedOccurrences = new Set();
   const operatorEvents = [];
   const inputRatingReceiptRefs = [];
+  let pendingRendererAcknowledgement = null;
+  const acknowledgeOperatorWrite = async (pending) => {
+    pending.event.rendererAcknowledgement = {
+      status: "pending",
+      attempts: pending.attempts + 1,
+    };
+    try {
+      await reviewSession.setInputOperatorCommitted?.(pending.committed);
+      const state = await reviewSession.state();
+      pending.attempts += 1;
+      pending.event.rendererAcknowledgement = {
+        status: "completed",
+        attempts: pending.attempts,
+      };
+      pendingRendererAcknowledgement = null;
+      return { ...pending.result, state: reviewUiStateForOperator(state) };
+    } catch (error) {
+      pending.attempts += 1;
+      pending.event.rendererAcknowledgement = {
+        status: "failed",
+        attempts: pending.attempts,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      pendingRendererAcknowledgement = pending;
+      throw new Error(
+        `The product ${pending.event.operation} succeeded, but renderer acknowledgement failed; retry this exact interaction to acknowledge it without repeating the write: ${pending.event.rendererAcknowledgement.error}`,
+        { cause: error },
+      );
+    }
+  };
   return Object.freeze({
     screenshot: async (input) => {
       const binding = input.target?.kind === "element" ? inputBindings.get(input.target.elementRef) : undefined;
@@ -293,6 +323,13 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
       }
     },
     interact: async (input) => {
+      const interactionKey = canonicalOperatorInteractionKey(input);
+      if (pendingRendererAcknowledgement) {
+        if (pendingRendererAcknowledgement.interactionKey !== interactionKey) {
+          throw new Error("Retry the operator interaction whose renderer acknowledgement is pending.");
+        }
+        return acknowledgeOperatorWrite(pendingRendererAcknowledgement);
+      }
       if (input.value !== undefined) {
         if (!inputOperator) throw new Error("This review has no separately authorized input operator.");
         const binding = inputBindings.get(input.elementRef);
@@ -313,9 +350,7 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
             };
         const inputDraftRevision = await inputOperator.commit({ captureId, value });
         committedOccurrences.add(inputOccurrenceKey(binding.occurrence));
-        await reviewSession.setInputOperatorCommitted?.(true);
-        const state = await reviewSession.state();
-        operatorEvents.push({
+        const event = {
           operation: "input_commit",
           elementRef: input.elementRef,
           occurrence: structuredClone(binding.occurrence),
@@ -323,8 +358,15 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
           action: structuredClone(binding.action),
           value: structuredClone(committedValue),
           inputDraftRevision,
+        };
+        operatorEvents.push(event);
+        return acknowledgeOperatorWrite({
+          interactionKey,
+          committed: true,
+          event,
+          attempts: 0,
+          result: { ok: true, operator: { operation: "input_commit", inputDraftRevision } },
         });
-        return { ok: true, state: reviewUiStateForOperator(state), operator: { operation: "input_commit", inputDraftRevision } };
       }
       if (input.elementRef === "send-interaction" && inputOperator) {
         const before = await reviewSession.state();
@@ -338,10 +380,15 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
         if (control.disabled) throw new Error("The production review operator Send control is disabled.");
         const response = await inputOperator.send({});
         committedOccurrences.clear();
-        await reviewSession.setInputOperatorCommitted?.(false);
-        operatorEvents.push({ operation: "send", response: structuredClone(response) });
-        const state = await reviewSession.state();
-        return { ok: true, state: reviewUiStateForOperator(state), operator: { operation: "send", response } };
+        const event = { operation: "send", response: structuredClone(response) };
+        operatorEvents.push(event);
+        return acknowledgeOperatorWrite({
+          interactionKey,
+          committed: false,
+          event,
+          attempts: 0,
+          result: { ok: true, operator: { operation: "send", response } },
+        });
       }
       return reviewSession.interact(input);
     },
@@ -420,6 +467,19 @@ export function createReviewSessionController(reviewSession, screenshotMetadata,
     operatorTrace: () => structuredClone(operatorEvents),
     inputRatingReceiptRefs: () => [...inputRatingReceiptRefs],
   });
+}
+
+function canonicalOperatorInteractionKey(input) {
+  const canonicalize = (value) => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value === null || typeof value !== "object") return value;
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalize(value[key])]),
+    );
+  };
+  return JSON.stringify(canonicalize(input));
 }
 
 function reviewUiStateForOperator(state) {

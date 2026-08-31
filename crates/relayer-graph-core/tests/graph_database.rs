@@ -62,6 +62,48 @@ async fn personal_presentation_thread_is_reserved_from_ordinary_creation() {
         }
     ));
 
+    let submitted = SubmittedInputDraft {
+        occurrence: PresentingInputOccurrence {
+            presenting_interaction_node_id: NodeId::new(1).unwrap(),
+            presenting_layer_id: LayerId::new(1).unwrap(),
+            action_id: ActionId::new(1).unwrap(),
+        },
+        action: InputAction {
+            control: InputControl::Text,
+            prompt: "Profile input".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        },
+        value: SubmittedInputValue::Text {
+            text: "ordinary".into(),
+        },
+    };
+    let submitted_digest =
+        interaction_input_authority_digest("", std::slice::from_ref(&submitted)).unwrap();
+    let submitted_error = database
+        .create_identified_interaction_with_inputs(
+            None,
+            reserved,
+            "",
+            InteractionInputPreparation {
+                attempt_key: "relayer.personal-presentation:personal-presentation-v0",
+                authority_digest: &submitted_digest,
+                contexts: &[],
+                submitted_inputs: &[submitted],
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        submitted_error,
+        GraphError::Validation {
+            code: "reserved_personal_presentation_thread",
+            path,
+            ..
+        } if path == "threadId"
+    ));
+
     let digest = interaction_input_digest("profile", &[]).unwrap();
     let profile = database
         .create_personal_presentation_interaction(

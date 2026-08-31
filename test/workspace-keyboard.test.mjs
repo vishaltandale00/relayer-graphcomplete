@@ -7,6 +7,7 @@ import {
   applyComposerCapabilities,
   applyContextEditor,
   applyMountedContextEditorInput,
+  beginNodeInputMutation,
   bindComposerKeydown,
   clearSubmittedComposerDraft,
   composerDisabledForState,
@@ -65,6 +66,8 @@ import {
 import {
   createNodeInputDraftController,
   createNodeInputDraftLoadQueue,
+  createInputMutationTracker,
+  threadHasPendingInputMutation,
 } from "../desktop/renderer/src/node-input-controls.js";
 
 describe("product workspace keyboard behavior", () => {
@@ -77,6 +80,8 @@ describe("product workspace keyboard behavior", () => {
     expect(source).toContain("createInputDraftLoadRetryScheduler({");
     expect(source).toContain("inputDraftLoadRetries?.schedule(thread.id);");
     expect(source).toContain("!inputDraftLoadRetries?.suppressesLoad(threadId)");
+    expect(source.indexOf("inputDraftLoadRetries?.beginEligibilityCycle(thread.id);"))
+      .toBeLessThan(source.indexOf("!inputDraftLoadRetries?.suppressesLoad(threadId)"));
     expect(source).toContain("inputDraftLoadRetries?.dispose();");
   });
 
@@ -221,7 +226,8 @@ describe("product workspace keyboard behavior", () => {
     for (const change of changes) {
       let releaseCommit;
       const pendingCommit = new Promise((resolve) => { releaseCommit = resolve; });
-      const inputPending = new Set(["input-stage"]);
+      const inputPending = createInputMutationTracker();
+      inputPending.begin("input-stage");
       const repaintNodeInputs = vi.fn();
       const renderComposer = vi.fn();
       let currentSelection = { ...original };
@@ -245,7 +251,11 @@ describe("product workspace keyboard behavior", () => {
 
     const repaintNodeInputs = vi.fn();
     settleNodeInputCommit({
-      inputPending: new Set(["input-stage"]),
+      inputPending: (() => {
+        const pending = createInputMutationTracker();
+        pending.begin("input-stage");
+        return pending;
+      })(),
       stageKey: "input-stage",
       originalSelection: original,
       currentSelection: () => ({ ...original }),
@@ -253,6 +263,32 @@ describe("product workspace keyboard behavior", () => {
       renderComposer: vi.fn(),
     });
     expect(repaintNodeInputs).toHaveBeenCalledOnce();
+  });
+
+  it("repaints node controls at detach start and keeps Send locked through overlapping commit settlement", () => {
+    const inputPending = createInputMutationTracker();
+    const stageKey = JSON.stringify(["thread-a", "41", "52", "63"]);
+    const renderComposer = vi.fn();
+    const repaintNodeInputs = vi.fn();
+
+    beginNodeInputMutation({ inputPending, stageKey, renderComposer, repaintNodeInputs });
+    expect(repaintNodeInputs).toHaveBeenCalledOnce();
+    expect(renderComposer).toHaveBeenCalledOnce();
+
+    beginNodeInputMutation({ inputPending, stageKey, renderComposer, repaintNodeInputs });
+    settleNodeInputCommit({
+      inputPending,
+      stageKey,
+      originalSelection: { threadId: "thread-a", nodeId: 7, presentingInteractionNodeId: 41, presentingLayerId: 52 },
+      currentSelection: () => ({ threadId: "thread-a", nodeId: 7, presentingInteractionNodeId: 41, presentingLayerId: 52 }),
+      repaintNodeInputs: vi.fn(),
+      renderComposer: vi.fn(),
+    });
+
+    expect(inputPending.has(stageKey)).toBe(true);
+    expect(threadHasPendingInputMutation(inputPending, "thread-a")).toBe(true);
+    expect(inputPending.end(stageKey)).toBe(false);
+    expect(threadHasPendingInputMutation(inputPending, "thread-a")).toBe(false);
   });
 
   it("keeps submitted text history compact while disclosing the exact full value accessibly", async () => {

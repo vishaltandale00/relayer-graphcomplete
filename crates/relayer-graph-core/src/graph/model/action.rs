@@ -91,7 +91,7 @@ struct InputActionWire {
     #[serde(default)]
     options: Option<Vec<InputOption>>,
     #[serde(default)]
-    minimum_selections: Option<usize>,
+    minimum_selections: Option<serde_json::Number>,
     #[serde(default, flatten)]
     unsupported_fields: BTreeMap<String, serde_json::Value>,
 }
@@ -112,7 +112,15 @@ impl<'de> Deserialize<'de> for InputAction {
             control: wire.control,
             prompt: wire.prompt,
             options,
-            minimum_selections: wire.minimum_selections,
+            // Keep signed values inside the semantic validation boundary. Invalid
+            // numbers normalize to the existing invalid lower-bound sentinel so
+            // callers receive the stable code and path instead of a serde rejection.
+            minimum_selections: wire.minimum_selections.map(|minimum| {
+                minimum
+                    .as_u64()
+                    .and_then(|minimum| usize::try_from(minimum).ok())
+                    .unwrap_or(0)
+            }),
             unsupported_fields,
         })
     }

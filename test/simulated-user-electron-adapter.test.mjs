@@ -644,6 +644,80 @@ describe("local Electron simulated-user judge adapter", () => {
     expect(session.interact).not.toHaveBeenCalled();
   });
 
+  it("records a successful input Commit before renderer acknowledgement and retries only the acknowledgement", async () => {
+    const acknowledgement = vi.fn()
+      .mockRejectedValueOnce(new Error("renderer commit acknowledgement timed out"))
+      .mockResolvedValueOnce(undefined);
+    const { controller, input, operator } = await commissionedInputController({ acknowledgement });
+
+    await expect(controller.interact(input)).rejects.toThrow("renderer commit acknowledgement timed out");
+    expect(operator.commit).toHaveBeenCalledTimes(1);
+    expect(controller.operatorTrace()).toMatchObject([{
+      operation: "input_commit",
+      inputDraftRevision: 9,
+      rendererAcknowledgement: {
+        status: "failed",
+        attempts: 1,
+        error: "renderer commit acknowledgement timed out",
+      },
+    }]);
+
+    await expect(controller.interact({
+      value: { text: "Ship Saturday" },
+      elementRef: input.elementRef,
+    })).rejects.toThrow("acknowledgement is pending");
+    expect(operator.commit).toHaveBeenCalledTimes(1);
+    expect(acknowledgement).toHaveBeenCalledTimes(1);
+    await expect(controller.interact({ value: { text: input.value.text }, elementRef: input.elementRef }))
+      .resolves.toMatchObject({ operator: { operation: "input_commit", inputDraftRevision: 9 } });
+    expect(operator.commit).toHaveBeenCalledTimes(1);
+    expect(acknowledgement).toHaveBeenCalledTimes(2);
+    expect(controller.operatorTrace()).toMatchObject([{
+      operation: "input_commit",
+      rendererAcknowledgement: { status: "completed", attempts: 2 },
+    }]);
+  });
+
+  it("records a successful Send before renderer acknowledgement and retries only the acknowledgement", async () => {
+    const acknowledgement = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("renderer Send acknowledgement timed out"))
+      .mockResolvedValueOnce(undefined);
+    const { controller, input, operator } = await commissionedInputController({ acknowledgement });
+    await controller.interact(input);
+    const send = { elementRef: "send-interaction", activate: true };
+
+    await expect(controller.interact(send)).rejects.toThrow("renderer Send acknowledgement timed out");
+    expect(operator.send).toHaveBeenCalledTimes(1);
+    expect(controller.operatorTrace()).toMatchObject([
+      { operation: "input_commit" },
+      {
+        operation: "send",
+        response: { id: 99 },
+        rendererAcknowledgement: {
+          status: "failed",
+          attempts: 1,
+          error: "renderer Send acknowledgement timed out",
+        },
+      },
+    ]);
+
+    await expect(controller.interact({
+      activate: true,
+      elementRef: "another-interaction",
+    })).rejects.toThrow("acknowledgement is pending");
+    expect(operator.send).toHaveBeenCalledTimes(1);
+    expect(acknowledgement).toHaveBeenCalledTimes(2);
+    await expect(controller.interact({ activate: true, elementRef: "send-interaction" }))
+      .resolves.toMatchObject({ operator: { operation: "send", response: { id: 99 } } });
+    expect(operator.send).toHaveBeenCalledTimes(1);
+    expect(acknowledgement).toHaveBeenCalledTimes(3);
+    expect(controller.operatorTrace().at(-1)).toMatchObject({
+      operation: "send",
+      rendererAcknowledgement: { status: "completed", attempts: 2 },
+    });
+  });
+
   it("captures and atomically commissions two input actions on the same node", async () => {
     const directory = await temporaryDirectory();
     const screenshotsByRef = new Map();
@@ -1568,4 +1642,80 @@ async function temporaryDirectory() {
   const directory = await mkdtemp(join(tmpdir(), "relayer-simulated-user-electron-"));
   directories.push(directory);
   return directory;
+}
+
+async function commissionedInputController({ acknowledgement }) {
+  const directory = await temporaryDirectory();
+  const screenshotId = "shot-acknowledgement";
+  const screenshotDirectory = join(directory, screenshotId);
+  await mkdir(screenshotDirectory);
+  await writeFile(join(screenshotDirectory, `${screenshotId}-001.png`), "input");
+  const shot = {
+    ...metadata({
+      screenshotId,
+      layerId: "10",
+      selectedNodeId: "2",
+      tileCount: 1,
+      target: { kind: "element", elementRef: "input-action-13" },
+      mode: "full",
+    }),
+    threadRevision: "thread:7:revision:1",
+  };
+  const session = {
+    state: vi.fn(async () => ({
+      threadRevision: shot.threadRevision,
+      turnId: "41",
+      layerId: "10",
+      selectedNodeId: "2",
+      activatedActionId: null,
+      navigationPath: [{ layerId: "10", viaActionId: null }],
+      controls: [{ elementRef: "send-interaction", kind: "input-operator-send", disabled: false }],
+    })),
+    setInputOperatorCommitted: acknowledgement,
+    screenshot: vi.fn(async () => ({ ok: true, screenshot: shot })),
+    interact: vi.fn(),
+    history: vi.fn(),
+    artifactDirectoryFor: () => screenshotDirectory,
+  };
+  const operator = {
+    beginCapture: vi.fn(() => ({ captureId: "capture-acknowledgement", threadRevision: shot.threadRevision })),
+    failCapture: vi.fn(),
+    rateCaptures: vi.fn(),
+    state: vi.fn(() => ({ captures: [{ captureId: "capture-acknowledgement", status: "capturing" }] })),
+    commit: vi.fn(async () => 9),
+    send: vi.fn(async () => ({ id: 99 })),
+  };
+  const occurrence = { presentingInteractionNodeId: 41, presentingLayerId: 10, actionId: 13 };
+  const controller = createReviewSessionController(session, new Map(), {
+    inputOperator: operator,
+    inputBindings: new Map([["input-action-13", {
+      occurrence,
+      sourceNodeId: 2,
+      action: { control: "text", prompt: "What constraint matters most?" },
+    }]]),
+    persistInputRatingReceipt: vi.fn(async () => "input-rating-receipts/acknowledgement.json"),
+  });
+  await controller.screenshot({
+    target: { kind: "element", elementRef: "input-action-13" },
+    mode: "full",
+    label: "Input action before acknowledgement failure",
+  });
+  await controller.recordInputRatings({
+    revision: 1,
+    review: {
+      layerId: "10",
+      nodeId: "2",
+      actions: [{
+        actionId: "13",
+        kind: "input",
+        evidence: [screenshotId],
+        inputActionJudgments: {},
+      }],
+    },
+  });
+  return {
+    controller,
+    operator,
+    input: { elementRef: "input-action-13", value: { text: "Ship Friday" } },
+  };
 }

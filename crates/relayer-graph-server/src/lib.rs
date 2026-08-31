@@ -3310,6 +3310,7 @@ mod tests {
         assert_eq!(explicit_empty_options["error"]["path"], "options");
 
         let omitted_options = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -3325,6 +3326,55 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(omitted_options.status(), StatusCode::OK);
+
+        let negative_minimum = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"negative-minimum","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Choose","control":"multi_select","prompt":"Choose","options":[{{"key":"one","label":"One"}},{{"key":"two","label":"Two"}}],"minimumSelections":-1}}"#,
+                        source.id.value(), source_layer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(negative_minimum.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let negative_minimum: Value = serde_json::from_slice(
+            &to_bytes(negative_minimum.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            negative_minimum["error"]["code"],
+            "input_action_minimum_invalid"
+        );
+        assert_eq!(negative_minimum["error"]["path"], "minimumSelections");
+
+        for minimum in 1..=2 {
+            let valid_minimum = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/graph/actions")
+                        .header("content-type", "application/json")
+                        .header("authorization", format!("Bearer {graph_token}"))
+                        .body(Body::from(format!(
+                            r#"{{"clientKey":"valid-minimum-{minimum}","sourceNodeId":{},"sourceLayerId":{},"kind":"input","label":"Choose","control":"multi_select","prompt":"Choose","options":[{{"key":"one","label":"One"}},{{"key":"two","label":"Two"}}],"minimumSelections":{minimum}}}"#,
+                            source.id.value(), source_layer.id.value()
+                        )))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(valid_minimum.status(), StatusCode::OK);
+        }
     }
 
     #[tokio::test]

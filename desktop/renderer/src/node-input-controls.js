@@ -90,6 +90,28 @@ export function threadHasPendingInputMutation(pendingKeys, threadId) {
   return false;
 }
 
+export function createInputMutationTracker() {
+  const counts = new Map();
+  return Object.freeze({
+    begin(key) {
+      const mutationKey = String(requiredIdentity(key, "input mutation key"));
+      const count = (counts.get(mutationKey) || 0) + 1;
+      counts.set(mutationKey, count);
+      return count;
+    },
+    end(key) {
+      const mutationKey = String(requiredIdentity(key, "input mutation key"));
+      const count = counts.get(mutationKey) || 0;
+      if (count <= 1) counts.delete(mutationKey);
+      else counts.set(mutationKey, count - 1);
+      return counts.has(mutationKey);
+    },
+    has: (key) => counts.has(String(key)),
+    count: (key) => counts.get(String(key)) || 0,
+    [Symbol.iterator]: () => counts.keys(),
+  });
+}
+
 export function inputDraftLoadRetryDelay(attempt) {
   if (!Number.isSafeInteger(attempt) || attempt < 0) {
     throw new TypeError("input draft retry attempt must be a non-negative safe integer");
@@ -143,6 +165,7 @@ export function createInputDraftLoadRetryScheduler({
   return Object.freeze({
     schedule,
     reset,
+    beginEligibilityCycle: reset,
     has: (threadId) => timers.has(key(threadId)),
     suppressesLoad: (threadId) => {
       const threadKey = key(threadId);

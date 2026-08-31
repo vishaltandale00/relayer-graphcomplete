@@ -29,6 +29,7 @@ import {
   createNodeInputDraftController,
   createNodeInputDraftLoadQueue,
   createInputDraftLoadRetryScheduler,
+  createInputMutationTracker,
   initialInputStageValue,
   inputActionReviewRef,
   inputKeyBelongsToThread,
@@ -1264,10 +1265,21 @@ export function settleNodeInputCommit({
   repaintNodeInputs,
   renderComposer,
 }) {
-  inputPending.delete(stageKey);
+  inputPending.end(stageKey);
   if (inputCommitTargetsCurrentSelection(originalSelection, currentSelection())) {
     repaintNodeInputs();
   }
+  renderComposer();
+}
+
+export function beginNodeInputMutation({
+  inputPending,
+  stageKey,
+  repaintNodeInputs,
+  renderComposer,
+}) {
+  inputPending.begin(stageKey);
+  repaintNodeInputs();
   renderComposer();
 }
 
@@ -1399,7 +1411,7 @@ export function createProductWorkspace({
   const inputStages = new Map();
   const inputErrors = new Map();
   const inputTouched = new Set();
-  const inputPending = new Set();
+  const inputPending = createInputMutationTracker();
   const inputRailScroll = new Map();
   let inputFocusRequest = null;
   const renderedInputDraftStatusKeys = new Map();
@@ -2878,8 +2890,16 @@ export function createProductWorkspace({
         detach.disabled = contextStagingDisabled() || inputPending.has(stageKey);
         detach.onclick = async () => {
           if (detach.disabled) return;
-          inputPending.add(stageKey);
-          renderComposerContexts();
+          beginNodeInputMutation({
+            inputPending,
+            stageKey,
+            repaintNodeInputs: () => {
+              if (selection.selectedNodeId != null) {
+                void selectNode(getState(), selection.selectedNodeId, { notify: false });
+              }
+            },
+            renderComposer: renderComposerContexts,
+          });
           try {
             await inputDraftController.detach(thread.id, attachment.occurrence);
             markInputCompositionChanged(thread.id);
@@ -2891,7 +2911,7 @@ export function createProductWorkspace({
             inputErrors.set(stageKey, error?.message || "Input could not be detached.");
             toast(error?.message || "Input could not be detached.");
           } finally {
-            inputPending.delete(stageKey);
+            inputPending.end(stageKey);
             renderComposerContexts();
             if (selection.selectedNodeId != null) {
               void selectNode(getState(), selection.selectedNodeId, { notify: false });
@@ -3577,9 +3597,14 @@ export function createProductWorkspace({
       return;
     }
     const threadId = String(thread.id);
+    const enteringInputDraftEligibility = renderedWithoutThread
+      || renderedThreadId !== threadId;
     const enteringLoadedThread = renderedWithoutThread
       && loadedContextDraftThreads.has(threadId);
     renderedWithoutThread = false;
+    if (enteringInputDraftEligibility) {
+      inputDraftLoadRetries?.beginEligibilityCycle(thread.id);
+    }
     if (contextDraftController
       && !contextDraftLoads.has(threadId)
       && !contextDraftLoadRetryTimers.has(threadId)) {
@@ -4473,10 +4498,13 @@ export function createProductWorkspace({
           presentingInteractionNodeId: interaction.graphNodeId,
           presentingLayerId: layerId,
         };
-        inputPending.add(stageKey);
         inputErrors.delete(stageKey);
-        renderNodeInputActions(state, node, actions);
-        syncComposer();
+        beginNodeInputMutation({
+          inputPending,
+          stageKey,
+          repaintNodeInputs: () => renderNodeInputActions(state, node, actions),
+          renderComposer: syncComposer,
+        });
         try {
           const next = await inputDraftController.commit(
             thread.id,

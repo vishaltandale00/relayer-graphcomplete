@@ -272,6 +272,7 @@ impl GraphDatabase {
         text: &str,
         input: InteractionInputPreparation<'_>,
     ) -> Result<(GraphNode, Vec<InteractionInputChild>), GraphError> {
+        reject_reserved_profile_thread(thread_id)?;
         let InteractionInputPreparation {
             attempt_key: input_identity,
             authority_digest,
