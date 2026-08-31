@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -158,6 +158,7 @@ function fullPlan(repository, config, changedFiles, reasons) {
     npmWorkspaces,
     npmBuildWorkspaces: npmWorkspaces,
     vitestFiles: [],
+    vitestRustPackages: [...config.vitestRustRuntime.fullPortfolio].sort(),
     rootTypeScript: true,
     chapters: allTrueChapters(),
   };
@@ -176,6 +177,10 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
   let rootTypeScript = false;
 
   for (const path of changedFiles) {
+    if (/^test\/.*\.(test|spec)\.[cm]?[jt]sx?$/.test(path) && !existsSync(join(repository, path))) {
+      reasons.push(`${path}: deleted test path`);
+      continue;
+    }
     if (config.fullPortfolio.exact.includes(path) || config.fullPortfolio.prefixes.some((prefix) => path.startsWith(prefix))) {
       reasons.push(`${path}: full-portfolio input`);
       continue;
@@ -240,6 +245,15 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
   if (chapters.vitest) {
     for (const workspace of config.vitestPrerequisiteWorkspaces) buildRoots.add(workspace);
   }
+  const vitestRustPackages = new Set();
+  if (vitestFiles.has("test")) {
+    for (const packageName of config.vitestRustRuntime.fullPortfolio) vitestRustPackages.add(packageName);
+  }
+  for (const runtime of config.vitestRustRuntime.files) {
+    if (vitestFiles.has(runtime.exact)) {
+      for (const packageName of runtime.packages) vitestRustPackages.add(packageName);
+    }
+  }
 
   return {
     version: config.version,
@@ -250,6 +264,7 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
     npmWorkspaces,
     npmBuildWorkspaces: dependencyClosure(npmGraph, buildRoots),
     vitestFiles: [...vitestFiles].sort(),
+    vitestRustPackages: [...vitestRustPackages].sort(),
     rootTypeScript,
     chapters,
   };

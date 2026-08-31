@@ -6,6 +6,23 @@
     "@relayer/eval-runner"
   ],
   "sourceVitestPortfolio": ["test", "packages"],
+  "vitestRustRuntime": {
+    "fullPortfolio": ["relayer-app-server", "relayer-graph-server"],
+    "files": [
+      {
+        "exact": "test/first-message-composer-integration.test.mjs",
+        "packages": ["relayer-app-server", "relayer-graph-server"]
+      },
+      {
+        "exact": "test/graph-search-client-parity-e2e.test.mjs",
+        "packages": ["relayer-graph-server"]
+      },
+      {
+        "exact": "test/recursive-complete-e2e.test.mjs",
+        "packages": ["relayer-app-server", "relayer-graph-server"]
+      }
+    ]
+  },
   "fullPortfolio": {
     "exact": [
       ".node-version",
@@ -19,6 +36,8 @@
     "prefixes": [
       ".cargo/",
       ".github/",
+      "docs/evidence/",
+      "fixtures/graph-query-v1/",
       "infra/",
       "scripts/ci/"
     ]
@@ -70,10 +89,19 @@
     }
   ],
   "chapterOwners": [
+    {
+      "prefix": "python/relayer-graph/src/",
+      "chapters": ["python", "vitest", "packaging"],
+      "vitestFiles": ["test/icon-vocabulary-parity.test.mjs", "test/prime-agent-packaging.test.mjs"]
+    },
     { "prefix": "python/", "chapters": ["python"] },
-    { "prefix": "docs/prd/", "chapters": ["prd"] },
+    {
+      "prefix": "docs/prd/",
+      "chapters": ["prd", "vitest"],
+      "vitestFiles": ["test/documentation-product-boundary.test.mjs"]
+    },
     { "prefix": "docs/evidence/", "chapters": ["receipts"] },
-    { "prefix": "test/", "chapters": ["vitest"], "changedTestFile": true },
+    { "prefix": "test/", "chapters": ["vitest"], "changedTestFile": true, "rootTypeScript": true },
     { "prefix": "src/", "chapters": ["typescript", "vitest"], "rootTypeScript": true, "fullVitestPortfolio": true },
     { "prefix": "eval-cases/", "chapters": ["vitest"], "vitestFiles": ["packages/eval-runner/test"] },
     { "prefix": "fixtures/", "chapters": ["vitest"], "vitestFiles": ["test", "packages"] },

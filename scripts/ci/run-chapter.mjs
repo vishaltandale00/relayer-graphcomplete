@@ -65,7 +65,7 @@ if (chapter === "quick") {
   for (const workspace of npmBuildOrder.filter((name) => plan.npmBuildWorkspaces.includes(name))) {
     run(`Build Vitest dependency ${workspace}`, "npm", ["run", "build", "-w", workspace]);
   }
-  const servers = plan.rustPackages.filter((name) => name === "relayer-graph-server" || name === "relayer-app-server");
+  const servers = plan.vitestRustPackages;
   if (servers.length > 0) run("Build selected Vitest Rust runtime", "cargo", ["build", ...packageArguments(servers)]);
   if (plan.rootTypeScript) run("Build root Vitest TypeScript runtime", "npx", ["tsc", "-p", "tsconfig.build.json"]);
 } else if (chapter === "vitest") {

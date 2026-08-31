@@ -103,6 +103,14 @@ describe("affected-module plan v1", () => {
     expect(result.chapters.packaging).toBe(true);
     expect(result.chapters.rust).toBe(false);
     expect(result.vitestFiles).toEqual(expect.arrayContaining(["packages", "test"]));
+    expect(result.vitestRustPackages).toEqual(["relayer-app-server", "relayer-graph-server"]);
+  });
+
+  test("builds server binaries required by mapped Vitest integration tests", () => {
+    const result = plan("desktop/renderer/src/product-workspace/workspace.js");
+
+    expect(result.vitestFiles).toContain("test/first-message-composer-integration.test.mjs");
+    expect(result.vitestRustPackages).toEqual(["relayer-app-server", "relayer-graph-server"]);
   });
 
   test("keeps cross-cutting source and authority seams on the complete fresh Vitest portfolio", () => {
@@ -114,7 +122,6 @@ describe("affected-module plan v1", () => {
   test.each([
     ["python/relayer-graph/src/relayer_graph/client.py", "python"],
     ["docs/prd/index.html", "prd"],
-    ["docs/evidence/issue-261-ladybug-probe/src/main.rs", "receipts"],
     ["test/complete.test.ts", "vitest"],
   ])("maps %s to its owning %s chapter", (changedFile, chapter) => {
     const result = plan(changedFile);
@@ -124,7 +131,44 @@ describe("affected-module plan v1", () => {
     if (changedFile.startsWith("test/")) expect(result.vitestFiles).toContain(changedFile);
   });
 
-  test.each(["Cargo.lock", "package-lock.json", ".github/workflows/ci.yml", "unmapped/new-seam.txt"])(
+  test("routes PRD changes through readability and product-boundary checks", () => {
+    const result = plan("docs/prd/index.html");
+
+    expect(result.chapters.prd).toBe(true);
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.vitestFiles).toContain("test/documentation-product-boundary.test.mjs");
+  });
+
+  test("routes bundled Python source through unit, integrity, and packaging gates", () => {
+    const result = plan("python/relayer-graph/src/relayer_graph/client.py");
+
+    expect(result.chapters.python).toBe(true);
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.chapters.packaging).toBe(true);
+    expect(result.vitestFiles).toEqual(
+      expect.arrayContaining(["test/icon-vocabulary-parity.test.mjs", "test/prime-agent-packaging.test.mjs"]),
+    );
+  });
+
+  test("keeps root TypeScript tests in the semantic typecheck", () => {
+    expect(plan("test/complete.test.ts").rootTypeScript).toBe(true);
+  });
+
+  test("fails open when a deleted test would otherwise be the only Vitest filter", () => {
+    const result = plan("test/retired-ci-test.test.mjs");
+
+    expect(result.mode).toBe("full");
+    expect(result.reasons.join(" ")).toContain("deleted test path");
+  });
+
+  test.each([
+    "Cargo.lock",
+    "package-lock.json",
+    ".github/workflows/ci.yml",
+    "docs/evidence/issue-257-browser-harnesses/manifest.json",
+    "fixtures/graph-query-v1/positive.json",
+    "unmapped/new-seam.txt",
+  ])(
     "fails open to the full portfolio for %s",
     (changedFile) => {
       const result = plan(changedFile);

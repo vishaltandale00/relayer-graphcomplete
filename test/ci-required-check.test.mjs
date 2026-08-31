@@ -124,6 +124,9 @@ describe("CI workflow contract", () => {
 
     expect(prerequisiteIndex).toBeGreaterThan(-1);
     expect(testIndex).toBeGreaterThan(prerequisiteIndex);
+    expect(readFileSync(join(repositoryRoot, "scripts", "ci", "run-chapter.mjs"), "utf8")).toContain(
+      "plan.vitestRustPackages",
+    );
   });
 
   test("preserves PR parent history for complete Vitest evidence checks", () => {
