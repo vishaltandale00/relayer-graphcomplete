@@ -4,6 +4,10 @@ import {
   providerDescriptorGroups,
 } from "./provider-ui-model.js";
 import { usableHarnessPresentations } from "./harness-settings-model.js";
+import {
+  providerModelSearchMarkup,
+  providerModelsNewestFirst,
+} from "./provider-model-list.js";
 import { escapeHtmlAttribute } from "./ui.js";
 
 const escapeHtml = escapeHtmlAttribute;
@@ -119,12 +123,17 @@ function familyChoice({ kind, id = "", name, summary, selected }) {
   </button>`;
 }
 
-export function onboardingFamilyOptionsMarkup(harness, intent = {}) {
+export function onboardingFamilyOptionsMarkup(harness, intent = {}, { modelSearch = "" } = {}) {
   const customFamilies = harness?.existingCustomFamilies ?? [];
   const managedFamilies = harness?.existingManagedFamilies ?? [];
   const managed = harness?.managedFamilyCandidate;
   const eligibleModels = harness?.eligibleModels ?? [];
   const selectedMembers = new Set((intent.members ?? []).map(({ providerId, modelId }) => `${providerId}\0${modelId}`));
+  const visibleEligibleModels = providerModelsNewestFirst(eligibleModels, modelSearch);
+  for (const model of providerModelsNewestFirst(eligibleModels)) {
+    const key = `${model.providerId}\0${model.modelId}`;
+    if (selectedMembers.has(key) && !visibleEligibleModels.includes(model)) visibleEligibleModels.push(model);
+  }
   const existingChoice = (family, typeLabel) => familyChoice({
     kind: "existing",
     id: family.id,
@@ -160,10 +169,11 @@ export function onboardingFamilyOptionsMarkup(harness, intent = {}) {
   }).join("");
   const createFields = intent.kind === "create" ? `<div class="onboarding-custom-family" data-onboarding-custom-family>
     <label class="provider-form-field"><span>Family name</span><input id="onboardingFamilyName" value="${escapeHtmlAttribute(intent.name ?? "")}" autocomplete="off" /></label>
-    <fieldset class="onboarding-model-members"><legend>Models in this family</legend>${eligibleModels.map((model) => {
+    <div class="provider-model-browser">${providerModelSearchMarkup({ query: modelSearch, controlsId: "onboarding-model-options", inputAttribute: "data-onboarding-model-search", clearAttribute: "data-onboarding-model-search-clear" })}
+    <fieldset class="onboarding-model-members" id="onboarding-model-options"><legend>Models in this family</legend>${visibleEligibleModels.map((model) => {
       const key = `${model.providerId}\0${model.modelId}`;
       return `<label><input type="checkbox" data-onboarding-member-provider="${escapeHtmlAttribute(model.providerId)}" data-onboarding-member-model="${escapeHtmlAttribute(model.modelId)}" ${selectedMembers.has(key) ? "checked" : ""} /><span><strong>${escapeHtml(model.label)}</strong><small>${escapeHtml(model.modelId)}</small></span></label>`;
-    }).join("")}</fieldset>
+    }).join("") || `<p class="provider-model-search-empty">No matching models.</p>`}</fieldset></div>
   </div>` : "";
   return `<div class="onboarding-choice-group" role="radiogroup" aria-label="Default model family">${groupedChoices}</div>${createFields}${onboardingReason(harness?.blockingReason)}`;
 }
@@ -182,29 +192,61 @@ export function providerConnectionFormMarkup(descriptor, values = {}, definition
     ${descriptor.connection.fields.map((field) => input({ ...field, value: fields[field.id] ?? "" })).join("")}`;
 }
 
-export function providerDefinitionsMarkup(definitions, defaults = {}, descriptors = []) {
+export function providerConnectionActionsMarkup(connectionAttempt = null) {
+  const active = connectionAttempt?.intent === "connect" && connectionAttempt.phase !== "idle";
+  const label = connectionAttempt?.phase === "waiting_for_sign_in"
+    ? "Waiting for sign-in…"
+    : active ? "Connecting…" : "Connect and discover models";
+  const disabled = active ? " disabled" : "";
+  return `<div class="provider-setup-actions"><button type="button" class="secondary" data-provider-dialog-back${disabled}>Back</button><button type="button" class="primary" data-provider-dialog-connect${disabled}>${label}</button></div>`;
+}
+
+export function providerEditConnectionFormMarkup(descriptor, definition, values = {}, errors = {}) {
+  const input = ({ id, label, kind = "text", value = "" }) => `<label class="provider-form-field">
+    <span>${escapeHtml(label)}</span>
+    <input id="providerField-${escapeHtmlAttribute(id)}" data-provider-field="${escapeHtmlAttribute(id)}" type="${kind === "secret" ? "password" : "text"}" value="${escapeHtmlAttribute(value)}" aria-invalid="${Boolean(errors[id])}" ${errors[id] ? `aria-describedby="${escapeHtmlAttribute(id)}Error"` : ""} />
+    ${fieldError(id, errors[id])}
+  </label>`;
+  return `<div class="provider-form-heading">${providerLogoMarkup(descriptor.adapterId)}<div><h2>${escapeHtml(definition.label)}</h2><p>Validate changes before replacing this connection configuration.</p></div></div>
+    ${descriptor.endpointEditableDuringCreation ? input({ id: "endpoint", label: "Endpoint", value: values.endpoint ?? definition.endpoint ?? descriptor.defaultEndpoint ?? "" }) : ""}
+    <p class="provider-saved-credential">A credential is saved. Leave replacement fields blank to keep it.</p>
+    ${descriptor.connection.fields.map((field) => input({ ...field, label: `Replace ${field.label}`, value: values.fields?.[field.id] ?? "" })).join("")}`;
+}
+
+export function providerDefinitionsMarkup(definitions, defaults = {}, descriptors = [], connectionAttempt = null) {
   if (!definitions.length) return `<div class="family-empty">No providers connected.</div>`;
   return definitions.filter((definition) => definition.lifecycleState !== "tombstoned").map((definition) => {
     const status = providerDefinitionStatus(definition);
-    const isDefault = String(defaults.providerId) === String(definition.id);
     const descriptor = descriptors.find((candidate) => candidate.adapterId === definition.adapterId);
     const canLogout = descriptor?.connection?.mode && descriptor.connection.mode !== "secret-fields";
     const canReconnect = canLogout && status.lifecycle === "unavailable";
+    const canRetry = status.lifecycle === "unavailable" || status.lifecycle === "temporarily_unavailable";
+    const canEdit = descriptor?.connection?.mode === "secret-fields";
     const canRecoverFamily = status.recovery === "refresh_models";
-    return `<article class="provider-definition-card ${escapeHtmlAttribute(status.lifecycle)}" data-provider-definition="${escapeHtmlAttribute(definition.id)}">
-      <div class="provider-definition-heading"><div class="provider-definition-identity">${providerLogoMarkup(definition.adapterId)}<div class="provider-definition-copy"><h3>${escapeHtml(definition.label)}</h3><span>${escapeHtml(definition.adapterLabel ?? definition.adapterId)}</span></div></div><span class="provider-status ${status.usable ? "connected" : "unavailable"}">${escapeHtml(status.label)}</span></div>
-      <dl><div><dt>Endpoint</dt><dd>${escapeHtml(definition.endpoint ?? "Managed by subscription")}</dd></div><div><dt>Access</dt><dd>${escapeHtml(definition.accessContract ?? "Managed")}</dd></div></dl>
+    const reconnecting = connectionAttempt?.intent === "reconnect"
+      && connectionAttempt.connectionId === definition.id
+      && connectionAttempt.phase !== "idle";
+    const reconnectLabel = connectionAttempt?.phase === "waiting_for_sign_in"
+      ? "Waiting for sign-in…"
+      : "Reconnecting…";
+    const actionDisabled = reconnecting ? " disabled" : "";
+    if (status.lifecycle === "removal_pending") return `<article class="provider-definition-card removal_pending" tabindex="-1" data-provider-definition="${escapeHtmlAttribute(definition.id)}">
+      <div class="provider-definition-heading"><div class="provider-definition-identity">${providerLogoMarkup(definition.adapterId)}<div class="provider-definition-copy"><h3>${escapeHtml(definition.label)}</h3></div></div><span class="provider-status unavailable">Removing</span></div>
+    </article>`;
+    return `<article class="provider-definition-card ${escapeHtmlAttribute(status.lifecycle)}" tabindex="-1" data-provider-definition="${escapeHtmlAttribute(definition.id)}">
+      <div class="provider-definition-heading"><div class="provider-definition-identity">${providerLogoMarkup(definition.adapterId)}<div class="provider-definition-copy"><h3>${escapeHtml(definition.label)}</h3><span>${escapeHtml(descriptor?.label ?? "Provider connection")}</span></div></div><span class="provider-status ${status.usable ? "connected" : "unavailable"}">${escapeHtml(status.label)}</span></div>
+      ${definition.endpoint ? `<dl><div><dt>Endpoint</dt><dd>${escapeHtml(definition.endpoint)}</dd></div></dl>` : ""}
+      ${status.warning ? `<span class="provider-warning" tabindex="0"><button type="button" class="provider-warning-trigger" aria-label="Connection status details" aria-expanded="false">!</button><span class="provider-warning-popover" role="tooltip">${escapeHtml(status.reason)}</span></span>` : ""}
       <div class="provider-definition-actions">
-        ${isDefault ? `<span class="default-badge">Default provider</span>` : ""}
         <span class="push"></span>
-        ${canReconnect ? `<button type="button" class="secondary" data-provider-reconnect="${escapeHtmlAttribute(definition.id)}">Reconnect</button>` : ""}
-        ${canRecoverFamily ? `<button type="button" class="secondary" data-provider-family-recovery="${escapeHtmlAttribute(definition.id)}">Refresh models and set up defaults</button>` : ""}
-        ${canLogout && !canReconnect ? `<button type="button" class="secondary" data-provider-logout="${escapeHtmlAttribute(definition.id)}" ${!["active", "needs_model_setup"].includes(status.lifecycle) ? "disabled" : ""}>Sign out</button>` : ""}
-        <button type="button" class="secondary" data-provider-rename="${escapeHtmlAttribute(definition.id)}" ${status.lifecycle === "removal_pending" ? "disabled" : ""}>Rename</button>
-        <button type="button" class="secondary danger-action" data-provider-remove="${escapeHtmlAttribute(definition.id)}" ${isDefault || status.lifecycle === "removal_pending" ? "disabled" : ""}>${status.lifecycle === "removal_pending" ? "Removing…" : "Remove"}</button>
+        ${canRetry && !canReconnect ? `<button type="button" class="secondary" data-provider-retry="${escapeHtmlAttribute(definition.id)}"${actionDisabled}>Retry connection</button>` : ""}
+        ${canReconnect ? `<button type="button" class="secondary" data-provider-reconnect="${escapeHtmlAttribute(definition.id)}"${actionDisabled}>${reconnecting ? reconnectLabel : "Reconnect"}</button>` : ""}
+        ${canRecoverFamily ? `<button type="button" class="secondary" data-provider-family-recovery="${escapeHtmlAttribute(definition.id)}"${actionDisabled}>Refresh models and set up defaults</button>` : ""}
+        ${canLogout && !canReconnect ? `<button type="button" class="secondary" data-provider-logout="${escapeHtmlAttribute(definition.id)}" ${status.lifecycle !== "active" || reconnecting ? "disabled" : ""}>Sign out</button>` : ""}
+        ${canEdit ? `<button type="button" class="secondary" data-provider-edit="${escapeHtmlAttribute(definition.id)}"${actionDisabled}>Edit connection</button>` : ""}
+        <button type="button" class="secondary" data-provider-rename="${escapeHtmlAttribute(definition.id)}"${actionDisabled}>Rename</button>
+        <button type="button" class="secondary danger-action" data-provider-remove="${escapeHtmlAttribute(definition.id)}"${actionDisabled}>Remove</button>
       </div>
-      ${canRecoverFamily ? `<p class="provider-removal-help">${escapeHtml(definition.unavailableReason.message)}</p>` : ""}
-      ${isDefault ? `<p class="provider-removal-help">Change the default provider before removing this connection.</p>` : ""}
     </article>`;
   }).join("");
 }

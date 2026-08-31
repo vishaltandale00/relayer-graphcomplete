@@ -135,8 +135,7 @@ impl SqliteProductStore {
                 }
                 if old_state == "active" && definition.lifecycle_state == "removal_pending" {
                     guard_provider_removal(&mut transaction, definition.id.as_str()).await?;
-                    tombstone_managed_provider_families(&mut transaction, definition.id.as_str())
-                        .await?;
+                    reconcile_provider_removal(&mut transaction, definition.id.as_str()).await?;
                 }
                 if old_state == "removal_pending" && definition.lifecycle_state == "tombstoned" {
                     let running: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM interaction_attempts WHERE provider_id=?1 AND outcome='running')")
@@ -218,6 +217,89 @@ impl SqliteProductStore {
                 false,
             )
             .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub(crate) async fn update_provider_with_catalog(
+        &self,
+        definition: &ProviderDefinition,
+        snapshot: &ProviderCatalogSnapshot,
+        managed_policy: Option<&FamilyPolicyReference>,
+        timestamp: &str,
+    ) -> Result<(), StorageError> {
+        validate_provider_lifecycle_shape(definition)?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT adapter_id,access_contract,lifecycle_state FROM model_providers WHERE id=?1",
+        )
+        .bind(definition.id.as_str())
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or_else(|| {
+            StorageError::Catalog(CatalogError::invalid(
+                "provider_unknown",
+                "Unknown provider definition.",
+            ))
+        })?;
+        if current.0 != definition.adapter_id || current.1 != definition.access_contract {
+            return Err(StorageError::Catalog(CatalogError::invalid(
+                "provider_identity_immutable",
+                "Provider adapter and access contract cannot be changed.",
+            )));
+        }
+        if current.2 != "active" || definition.lifecycle_state != "active" {
+            return Err(StorageError::Catalog(CatalogError::invalid(
+                "provider_not_active",
+                "Only active provider definitions can be edited.",
+            )));
+        }
+        sqlx::query("UPDATE model_providers SET label=?2,endpoint=?3,credential_reference=?4,connected=?5,unavailable_reason_code=?6,unavailable_reason_message=?7,refreshed_at=?8 WHERE id=?1 AND lifecycle_state='active'")
+            .bind(definition.id.as_str())
+            .bind(&definition.label)
+            .bind(&definition.endpoint)
+            .bind(&definition.credential_reference)
+            .bind(snapshot.connected)
+            .bind(snapshot.unavailable_reason.as_ref().map(|reason| &reason.code))
+            .bind(snapshot.unavailable_reason.as_ref().map(|reason| &reason.message))
+            .bind(timestamp)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("UPDATE provider_models SET available=0,unavailable_reason_code='model_not_reported',unavailable_reason_message='The provider no longer reports this model.' WHERE provider_id=?1")
+            .bind(definition.id.as_str())
+            .execute(&mut *transaction)
+            .await?;
+        for model in &snapshot.models {
+            sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,unavailable_reason_code,unavailable_reason_message,provider_default,replacement_model_id,metadata_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(provider_id,model_id) DO UPDATE SET label=excluded.label,provider_order=excluded.provider_order,visible=excluded.visible,available=excluded.available,unavailable_reason_code=excluded.unavailable_reason_code,unavailable_reason_message=excluded.unavailable_reason_message,provider_default=excluded.provider_default,replacement_model_id=excluded.replacement_model_id,metadata_json=excluded.metadata_json")
+                .bind(definition.id.as_str()).bind(&model.id).bind(&model.label)
+                .bind(model.order as i64).bind(model.visible).bind(model.available)
+                .bind(model.unavailable_reason.as_ref().map(|reason| &reason.code))
+                .bind(model.unavailable_reason.as_ref().map(|reason| &reason.message))
+                .bind(model.provider_default).bind(&model.replacement_model_id)
+                .bind(serde_json::to_string(&model.metadata).map_err(|error| StorageError::Serialization(error.to_string()))?)
+                .execute(&mut *transaction).await?;
+        }
+        if let Some(system_family) = &snapshot.system_family
+            && !system_family.model_ids.is_empty()
+            && let Some(managed_policy) = managed_policy
+        {
+            replace_system_family(
+                &mut transaction,
+                snapshot,
+                system_family,
+                managed_policy,
+                true,
+            )
+            .await?;
+        } else if managed_policy.is_some()
+            && snapshot
+                .unavailable_reason
+                .as_ref()
+                .is_some_and(|reason| reason.code == "provider_no_eligible_execution_models")
+        {
+            tombstone_managed_provider_families(&mut transaction, snapshot.provider_id.as_str())
+                .await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -1185,6 +1267,12 @@ async fn provider_onboarding_projection_on(
                     provider_id: provider_id.clone(),
                     model_id: model.id.clone(),
                     label: model.label.clone(),
+                    display_order: model
+                        .metadata
+                        .get("displayOrder")
+                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|value| usize::try_from(value).ok())
+                        .unwrap_or(model.order),
                 });
             }
         }
@@ -2067,7 +2155,7 @@ async fn load_providers(connection: &mut SqliteConnection) -> Result<Vec<Provide
     .fetch_all(&mut *connection)
     .await?;
     let model_rows = sqlx::query(
-        "SELECT provider_id,model_id,label,visible,available,unavailable_reason_code,unavailable_reason_message,provider_default,replacement_model_id FROM provider_models ORDER BY provider_id,provider_order,model_id",
+        "SELECT provider_id,model_id,label,provider_order,visible,available,unavailable_reason_code,unavailable_reason_message,provider_default,replacement_model_id,metadata_json FROM provider_models ORDER BY provider_id,provider_order,model_id",
     )
     .fetch_all(&mut *connection)
     .await?;
@@ -2079,11 +2167,19 @@ async fn load_providers(connection: &mut SqliteConnection) -> Result<Vec<Provide
             .push(ProviderModel {
                 id: row.try_get(1)?,
                 label: row.try_get(2)?,
-                visible: row.try_get(3)?,
-                available: row.try_get(4)?,
-                unavailable_reason: reason_from_row(&row, 5, 6)?,
-                provider_default: row.try_get(7)?,
-                replacement_model_id: row.try_get(8)?,
+                display_order: serde_json::from_str::<serde_json::Value>(
+                    &row.try_get::<String, _>(10)?,
+                )
+                .map_err(|error| StorageError::Serialization(error.to_string()))?
+                .get("displayOrder")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(row.try_get::<i64, _>(3)? as usize),
+                visible: row.try_get(4)?,
+                available: row.try_get(5)?,
+                unavailable_reason: reason_from_row(&row, 6, 7)?,
+                provider_default: row.try_get(8)?,
+                replacement_model_id: row.try_get(9)?,
             });
     }
     rows.iter()
@@ -2419,15 +2515,6 @@ async fn guard_provider_removal(
     connection: &mut SqliteConnection,
     provider_id: &str,
 ) -> Result<(), StorageError> {
-    let is_default: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM product_model_preferences WHERE singleton=1 AND default_provider_id=?1)",
-    ).bind(provider_id).fetch_one(&mut *connection).await?;
-    if is_default {
-        return Err(StorageError::Catalog(CatalogError::invalid(
-            "default_provider_removal_blocked",
-            "Change the default provider before removing it.",
-        )));
-    }
     let defaults: (String, Option<i64>) = sqlx::query_as(
         "SELECT default_harness_configuration_name,default_family_id FROM product_model_preferences WHERE singleton=1",
     )
@@ -2465,6 +2552,57 @@ async fn guard_provider_removal(
         )));
     }
     Ok(())
+}
+
+async fn reconcile_provider_removal(
+    connection: &mut SqliteConnection,
+    provider_id: &str,
+) -> Result<(), StorageError> {
+    tombstone_managed_provider_families(connection, provider_id).await?;
+    let family_ids = sqlx::query_scalar::<_, i64>(
+        "SELECT DISTINCT family.id FROM model_families family JOIN model_family_members member ON member.family_id=family.id WHERE family.kind='custom' AND family.lifecycle_state='active' AND member.provider_id=?1 ORDER BY family.position,family.id",
+    )
+    .bind(provider_id)
+    .fetch_all(&mut *connection)
+    .await?;
+    for family_id in family_ids {
+        let remaining = sqlx::query_as::<_, (String, String)>(
+            "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 AND provider_id!=?2 ORDER BY position",
+        )
+        .bind(family_id)
+        .bind(provider_id)
+        .fetch_all(&mut *connection)
+        .await?;
+        if remaining.is_empty() {
+            sqlx::query("UPDATE model_families SET lifecycle_state='tombstoned',enabled=0,revision=revision+1,removed_at=CAST(strftime('%s','now') AS TEXT) WHERE id=?1")
+                .bind(family_id)
+                .execute(&mut *connection)
+                .await?;
+            continue;
+        }
+        let members = remaining
+            .into_iter()
+            .enumerate()
+            .map(
+                |(position, (remaining_provider, model_id))| ModelFamilyMember {
+                    provider_id: ProviderId::from_database(remaining_provider),
+                    model_id,
+                    position,
+                },
+            )
+            .collect::<Vec<_>>();
+        replace_family_members(
+            connection,
+            ModelFamilyId::from_database(family_id),
+            &members,
+        )
+        .await?;
+        sqlx::query("UPDATE model_families SET revision=revision+1 WHERE id=?1")
+            .bind(family_id)
+            .execute(&mut *connection)
+            .await?;
+    }
+    compact_family_positions(connection).await
 }
 
 fn validate_provider_lifecycle_shape(definition: &ProviderDefinition) -> Result<(), StorageError> {
@@ -2839,12 +2977,10 @@ mod provider_definition_tests {
             .find(|value| value.id.as_str() == "codex")
             .unwrap();
         default_codex.lifecycle_state = "removal_pending".into();
-        assert!(
-            store
-                .sync_provider_definitions(&[default_codex])
-                .await
-                .is_err()
-        );
+        store
+            .sync_provider_definitions(&[default_codex])
+            .await
+            .unwrap();
 
         let mut staged = definition("atomic-provider");
         staged.label = "Atomic Provider".into();
@@ -2878,6 +3014,28 @@ mod provider_definition_tests {
             .await
             .unwrap(),
             1
+        );
+        staged.endpoint = Some("https://proxy.example.test/v1".into());
+        store
+            .update_provider_with_catalog(&staged, &snapshot, None, "2")
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT endpoint FROM model_providers WHERE id='atomic-provider'",
+            )
+            .fetch_one(&store.pool)
+            .await
+            .unwrap(),
+            "https://proxy.example.test/v1"
+        );
+        let mut replacement_identity = staged.clone();
+        replacement_identity.adapter_id = "other-adapter".into();
+        assert!(
+            store
+                .update_provider_with_catalog(&replacement_identity, &snapshot, None, "3")
+                .await
+                .is_err()
         );
         staged.label = "Renamed Atomic Provider".into();
         store
@@ -2968,6 +3126,81 @@ mod provider_definition_tests {
                 .to_string()
                 .contains("Change the default model family")
         );
+    }
+
+    #[tokio::test]
+    async fn provider_removal_atomically_reconciles_managed_mixed_and_empty_families() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-provider-family-reconcile-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let mut removed = definition("remove-me");
+        removed.label = "Work connection".into();
+        let mut survivor = definition("keep-me");
+        survivor.label = "Personal connection".into();
+        store
+            .sync_provider_definitions(&[removed.clone(), survivor.clone()])
+            .await
+            .unwrap();
+        sqlx::query("UPDATE product_harnesses SET product_visible=1,available=1,model_rules_present=0,execution_access_contracts_json='[\"secret@1\"]' WHERE configuration_name='codex-basic'")
+            .execute(&store.pool).await.unwrap();
+        for id in [removed.id.as_str(), survivor.id.as_str()] {
+            sqlx::query("UPDATE model_providers SET connected=1 WHERE id=?1")
+                .bind(id)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES (?1,'model-one','Model One',0,1,1,0,'{}')")
+                .bind(id).execute(&store.pool).await.unwrap();
+            sqlx::query("INSERT INTO harness_provider_compatibility(harness_configuration_name,provider_id,all_models) VALUES ('codex-basic',?1,1) ON CONFLICT(harness_configuration_name,provider_id) DO UPDATE SET all_models=1")
+                .bind(id).execute(&store.pool).await.unwrap();
+        }
+        let managed = sqlx::query("INSERT INTO model_families(name,kind,system_key,enabled,position,revision,lifecycle_state,managed_provider_id,policy_id,policy_version) VALUES ('Managed','system','remove-me:policy@1',1,1,1,'active',?1,'policy',1)")
+            .bind(removed.id.as_str()).execute(&store.pool).await.unwrap().last_insert_rowid();
+        let mixed = sqlx::query("INSERT INTO model_families(name,kind,enabled,position,revision,lifecycle_state) VALUES ('Mixed','custom',1,2,1,'active')")
+            .execute(&store.pool).await.unwrap().last_insert_rowid();
+        let empty = sqlx::query("INSERT INTO model_families(name,kind,enabled,position,revision,lifecycle_state) VALUES ('Empty','custom',1,3,1,'active')")
+            .execute(&store.pool).await.unwrap().last_insert_rowid();
+        for (family, position, provider) in [
+            (managed, 0_i64, removed.id.as_str()),
+            (mixed, 0, removed.id.as_str()),
+            (mixed, 1, survivor.id.as_str()),
+            (empty, 0, removed.id.as_str()),
+        ] {
+            sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,?2,?3,'model-one')")
+                .bind(family).bind(position).bind(provider).execute(&store.pool).await.unwrap();
+        }
+        sqlx::query("UPDATE product_model_preferences SET default_provider_id=?1,default_family_id=?2 WHERE singleton=1")
+            .bind(removed.id.as_str()).bind(mixed).execute(&store.pool).await.unwrap();
+
+        removed.lifecycle_state = "removal_pending".into();
+        store.sync_provider_definitions(&[removed]).await.unwrap();
+
+        let family_states: Vec<(i64, String, i64)> = sqlx::query_as("SELECT id,lifecycle_state,revision FROM model_families WHERE id IN (?1,?2,?3) ORDER BY id")
+            .bind(managed).bind(mixed).bind(empty).fetch_all(&store.pool).await.unwrap();
+        assert_eq!(
+            family_states,
+            vec![
+                (managed, "tombstoned".into(), 1),
+                (mixed, "active".into(), 2),
+                (empty, "tombstoned".into(), 2),
+            ]
+        );
+        let mixed_members: Vec<(String, i64)> = sqlx::query_as("SELECT provider_id,position FROM model_family_members WHERE family_id=?1 ORDER BY position")
+            .bind(mixed).fetch_all(&store.pool).await.unwrap();
+        assert_eq!(mixed_members, vec![(survivor.id.as_str().to_owned(), 0)]);
+        let default_family: i64 = sqlx::query_scalar(
+            "SELECT default_family_id FROM product_model_preferences WHERE singleton=1",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(default_family, mixed);
     }
 
     #[tokio::test]
@@ -3241,6 +3474,11 @@ mod provider_definition_tests {
     #[tokio::test]
     async fn onboarding_projection_uses_exact_rules_access_and_app_default_without_fallback() {
         let (store, path, provider_id) = onboarding_store().await;
+        sqlx::query("UPDATE provider_models SET provider_order=7,metadata_json='{\"displayOrder\":2}' WHERE provider_id=?1")
+            .bind(provider_id.as_str())
+            .execute(&store.pool)
+            .await
+            .unwrap();
         let allowed = HashSet::from(["codex-basic".to_owned(), "claude-basic".to_owned()]);
         let projection = store
             .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
@@ -3259,6 +3497,14 @@ mod provider_definition_tests {
         assert!(codex.selected_initially);
         assert_eq!(codex.matching_access_contract.as_deref(), Some("secret@1"));
         assert_eq!(codex.eligible_models.len(), 1);
+        assert_eq!(codex.eligible_models[0].display_order, 2);
+        let settings = store.load_model_settings().await.unwrap();
+        let provider = settings
+            .providers
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .unwrap();
+        assert_eq!(provider.models[0].display_order, 2);
         let claude = projection
             .harnesses
             .iter()

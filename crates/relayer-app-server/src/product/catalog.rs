@@ -250,6 +250,7 @@ pub(crate) struct FamilyPolicyReference {
 pub(crate) struct ProviderModel {
     pub(crate) id: String,
     pub(crate) label: String,
+    pub(crate) display_order: usize,
     pub(crate) visible: bool,
     pub(crate) available: bool,
     pub(crate) unavailable_reason: Option<UnavailableReason>,
@@ -399,6 +400,7 @@ pub(crate) struct ProviderOnboardingModel {
     pub(crate) provider_id: ProviderId,
     pub(crate) model_id: String,
     pub(crate) label: String,
+    pub(crate) display_order: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

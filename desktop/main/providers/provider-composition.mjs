@@ -63,6 +63,14 @@ export function createProviderComposition({
         },
       });
     },
+    publishHealthFailure: (definition, health) => publishCatalog({
+      providerId: definition.id,
+      label: definition.label,
+      connected: false,
+      unavailableReason: health.unavailableReason,
+      models: [],
+      systemFamily: null,
+    }),
   });
   return Object.freeze({
     modelCatalog,
@@ -77,5 +85,6 @@ export function createProviderComposition({
       const failures = results.filter(({ status }) => status === "rejected");
       if (failures.length) throw new AggregateError(failures.map(({ reason }) => reason), "Provider composition did not close cleanly.");
     },
+    connectivityChanged(online) { return modelCatalog.connectivityChanged(online); },
   });
 }

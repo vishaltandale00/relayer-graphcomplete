@@ -93,6 +93,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     this.loginQueue = Promise.resolve();
     this.closing = false;
     this.activeLoginId = null;
+    this.loginSettling = false;
   }
 
   async start() {
@@ -107,6 +108,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
       if (this.process === child) this.process = null;
       this.startPromise = null;
       this.activeLoginId = null;
+      this.loginSettling = false;
       throw new Error("Codex subscription is unavailable.");
     }
   }
@@ -134,6 +136,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
       this.process = null;
       this.startPromise = null;
       this.activeLoginId = null;
+      this.loginSettling = false;
       if (!this.closing) this.onAccountChanged({ status: "unavailable", error: error.message });
     });
     child.once("error", () => {
@@ -164,6 +167,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     if (message.method === "account/login/completed") {
       if (message.params?.loginId !== this.activeLoginId) return;
       this.activeLoginId = null;
+      this.loginSettling = true;
     }
     if (message.method === "account/updated" || message.method === "account/login/completed") {
       this.onAccountChanged({ status: "changed", notification: message });
@@ -213,15 +217,20 @@ export class CodexCredentialAdapter extends CredentialAdapter {
         DEFAULT_TIMEOUT_MS,
         signal,
       );
+      this.loginSettling = false;
       return { status: result.account ? "connected" : "disconnected", account: result.account ?? null };
     } catch (error) {
       if (signal?.aborted) throw abortReason(signal);
+      if ((this.activeLoginId || this.loginSettling) && this.process) {
+        return { status: "pending", account: null };
+      }
       return { status: "unavailable", account: null, error: "Codex subscription is unavailable." };
     }
   }
 
   async #login() {
     await this.start();
+    this.loginSettling = false;
     if (this.activeLoginId) {
       await this.request("account/login/cancel", { loginId: this.activeLoginId }).catch(() => undefined);
       this.activeLoginId = null;
@@ -261,6 +270,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     if (this.process === child) this.process = null;
     this.startPromise = null;
     this.activeLoginId = null;
+    this.loginSettling = false;
   }
 }
 

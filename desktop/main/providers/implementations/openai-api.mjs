@@ -4,6 +4,7 @@ import {
   MODEL_NOT_EXECUTION_ELIGIBLE,
   SecretApiProviderAdapter,
   bearerHeaders,
+  orderModelsByReleaseTimestamp,
 } from "./api-provider-adapter.mjs";
 
 const NON_AGENT_MODEL_ID = /(?:^|[-_.])(audio|batch|embedding|image|moderation|realtime|speech|transcribe|tts|whisper)(?:$|[-_.])/i;
@@ -16,6 +17,12 @@ function isOpenAiAgentModel(model) {
   }
   if (REVIEWED_AGENT_MODEL_ID.test(id)) return EXECUTION_ELIGIBLE;
   return MODEL_CAPABILITY_UNKNOWN;
+}
+
+export function newestOpenAiModelsFirst(models) {
+  return orderModelsByReleaseTimestamp(models, (model) => (
+    typeof model?.created === "number" ? model.created : Number.NaN
+  ));
 }
 
 export const openAiApiDescriptor = Object.freeze({
@@ -31,5 +38,6 @@ export const openAiApiDescriptor = Object.freeze({
   create: ({ definition, fetch, secrets, managedRuntime, environment }) => new SecretApiProviderAdapter({
     definition, fetch, credentials: { apiKey: secrets?.["api-key"] }, headers: bearerHeaders,
     managedRuntime, runtimeId: "codex", environment, modelEligibility: isOpenAiAgentModel,
+    newestModelsFirst: newestOpenAiModelsFirst,
   }),
 });

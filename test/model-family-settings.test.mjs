@@ -10,6 +10,7 @@ import {
   MAX_MODELS_PER_FAMILY,
   modelMember,
   moveItem,
+  nextAvailableModelMember,
   preserveFamilyEditAfterRefresh,
   reconcileSavedFamily,
   validateCustomFamily,
@@ -26,6 +27,10 @@ import {
   updateModelFamily,
   validateModelSelection,
 } from "../desktop/renderer/src/model-settings-api.js";
+import {
+  providerModelComboboxMarkup,
+  providerModelOptionsMarkup,
+} from "../desktop/renderer/src/provider-model-list.js";
 
 const codexProvider = {
   id: "codex",
@@ -40,6 +45,73 @@ const codexProvider = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("model family settings model", () => {
+  it("searches the Settings provider model list and orders matching releases newest first", () => {
+    const markup = providerModelOptionsMarkup([
+      { id: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku", displayOrder: 2, visible: true, available: true },
+      { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4", displayOrder: 1, visible: true, available: true },
+      { id: "claude-opus-4-1-20250805", label: "Claude Opus 4.1", displayOrder: 0, visible: true, available: true },
+    ], { query: "claude", selectedId: "claude-opus-4-1-20250805" });
+
+    expect(markup).toContain('value="claude-opus-4-1-20250805" selected');
+    expect(markup.indexOf('value="claude-opus-4-1-20250805"'))
+      .toBeLessThan(markup.indexOf('value="claude-sonnet-4-20250514"'));
+    expect(markup.indexOf('value="claude-sonnet-4-20250514"'))
+      .toBeLessThan(markup.indexOf('value="claude-3-5-haiku-20241022"'));
+    expect(providerModelOptionsMarkup([
+      { id: "gpt-5.6", label: "Latest flagship", visible: true, available: true },
+      { id: "gpt-4.1", label: "GPT-4.1", visible: true, available: true },
+    ], { query: "5.6" })).not.toContain('value="gpt-4.1"');
+    expect(providerModelOptionsMarkup([
+      { id: "gpt-5.6", label: "Latest flagship", visible: true, available: true },
+      { id: "gpt-4.1", label: "GPT-4.1", visible: true, available: true },
+    ], { query: "flagship" })).toContain('value="gpt-5.6"');
+  });
+
+  it("renders Settings model choice as one searchable combobox instead of stacked controls", () => {
+    const markup = providerModelComboboxMarkup([
+      { id: "gpt-5.2", label: "GPT-5.2", displayOrder: 1, visible: true, available: true },
+      { id: "gpt-5.6", label: "GPT-5.6", displayOrder: 0, visible: true, available: true },
+    ], { index: 0, providerId: "work", providerLabel: "OpenAI Work", selectedId: "gpt-5.2" });
+
+    expect(markup).toContain("<details");
+    expect(markup).toContain("<summary");
+    expect(markup).toContain("GPT-5.2");
+    expect(markup).toContain('role="search"');
+    expect(markup).toContain('role="group"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('data-member-model-option="gpt-5.6"');
+    expect(markup.indexOf('data-member-model-option="gpt-5.6"'))
+      .toBeLessThan(markup.indexOf('data-member-model-option="gpt-5.2"'));
+    expect(markup).not.toContain("<select");
+  });
+
+  it("chooses the newest unused model when adding a row or switching its provider", () => {
+    const work = {
+      id: "work",
+      label: "OpenAI Work",
+      connected: true,
+      models: [
+        { id: "gpt-5.2", label: "GPT-5.2", displayOrder: 2, available: true },
+        { id: "gpt-5.4", label: "GPT-5.4", displayOrder: 1, available: true },
+        { id: "gpt-5.6", label: "GPT-5.6", displayOrder: 0, available: true },
+      ],
+    };
+    const other = {
+      id: "other",
+      label: "Other API",
+      connected: true,
+      models: [
+        { id: "other-old", label: "Other Old", displayOrder: 1, available: true },
+        { id: "other-new", label: "Other New", displayOrder: 0, available: true },
+      ],
+    };
+    const first = modelMember(work, work.models[2]);
+    expect(nextAvailableModelMember([work], [first])).toMatchObject({ modelId: "gpt-5.4" });
+    expect(nextAvailableModelMember([work, other], [first], "other", 0)).toMatchObject({ providerId: "other", modelId: "other-new" });
+    expect(nextAvailableModelMember([work, other], [first, modelMember(other, other.models[1])], "other", 0))
+      .toMatchObject({ providerId: "other", modelId: "other-old" });
+  });
+
   it("reconciles a persisted create before a follow-up refresh", () => {
     const draft = createModelFamilyDraft([codexProvider], 7);
     draft.name = "Coding";
@@ -72,11 +144,18 @@ describe("model family settings model", () => {
   });
 
   it("starts a custom family with the first available model from a connected provider", () => {
-    const draft = createModelFamilyDraft([codexProvider], 7);
+    const provider = {
+      ...codexProvider,
+      models: [
+        { id: "gpt-5.2", label: "GPT-5.2", displayOrder: 1, available: true },
+        { id: "gpt-5.6", label: "GPT-5.6", displayOrder: 0, available: true },
+      ],
+    };
+    const draft = createModelFamilyDraft([provider], 7);
     expect(draft).toMatchObject({ id: "draft-7", kind: "custom", enabled: true, draft: true });
     expect(draft.models).toEqual([expect.objectContaining({
       providerId: "codex",
-      modelId: "gpt-5.6-sol",
+      modelId: "gpt-5.6",
     })]);
   });
 
@@ -318,7 +397,7 @@ describe("model family settings layout", () => {
     expect(html).toContain("Model families");
     expect(html).toContain("<h3>Defaults</h3>");
     expect(html).toContain("<b>Harness</b>");
-    expect(html).toContain("<b>Provider</b>");
+    expect(html).not.toContain('id="defaultProviderSelect"');
     const defaultsIndex = html.indexOf('class="model-defaults"');
     const dividerIndex = html.indexOf('class="model-settings-divider"');
     const familyHeadingIndex = html.indexOf('class="model-families-heading"');
@@ -343,6 +422,9 @@ describe("model family settings layout", () => {
     expect(css).toContain(".model-families-heading .family-carousel-controls{margin:0}");
     expect(html).not.toContain("Families contain up to 5 models");
     const settingsSource = await readFile(new URL("../desktop/renderer/src/model-family-settings.js", import.meta.url), "utf8");
+    expect(settingsSource).toContain("providerModelComboboxMarkup(memberModelChoices(member)");
+    expect(settingsSource).toContain('picker.onkeydown = (event) => closeModelPickerOnEscape(event, picker)');
+    expect(settingsSource).toContain('queueMicrotask(() => picker.querySelector("summary")?.focus())');
     expect(settingsSource).toContain("owner?.connected === false || model.visible === false || model.available === false");
     expect(settingsSource).toContain('data-family-delete="${index}"');
     expect(settingsSource).toContain("await deleteModelFamily(family.id);");
@@ -357,6 +439,8 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("if (!settingsRefreshGate.isCurrent(refreshToken)) return false;");
     expect(settingsSource).toContain("const invalidDefault = defaultHarnessIsSelectable(");
     expect(settingsSource).toContain('$("#defaultHarnessSelect").disabled = savingDefaults');
+    expect(settingsSource).toContain('data-family-default="${index}"');
+    expect(settingsSource).not.toContain('$("#defaultProviderSelect")');
     expect(settingsSource).toContain("await preparePermissionProfiles(candidate)");
     expect(settingsSource).toContain("await saveModelDefaults({ [field]: candidate })");
     expect(settingsSource).toContain("resetNewThreadModelPicker();");

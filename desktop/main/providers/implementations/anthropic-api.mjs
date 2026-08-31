@@ -4,6 +4,7 @@ import {
   MODEL_NOT_EXECUTION_ELIGIBLE,
   SecretApiProviderAdapter,
   anthropicHeaders,
+  orderModelsByReleaseTimestamp,
 } from "./api-provider-adapter.mjs";
 
 function anthropicModelEligibility(model) {
@@ -15,6 +16,10 @@ function anthropicModelEligibility(model) {
     return EXECUTION_ELIGIBLE;
   }
   return MODEL_CAPABILITY_UNKNOWN;
+}
+
+export function newestAnthropicModelsFirst(models) {
+  return orderModelsByReleaseTimestamp(models, (model) => Date.parse(model?.created_at ?? ""));
 }
 
 export const anthropicApiDescriptor = Object.freeze({
@@ -30,5 +35,6 @@ export const anthropicApiDescriptor = Object.freeze({
   create: ({ definition, fetch, secrets, managedRuntime, environment }) => new SecretApiProviderAdapter({
     definition, fetch, credentials: { apiKey: secrets?.["api-key"] }, headers: anthropicHeaders,
     managedRuntime, runtimeId: "claude", environment, modelEligibility: anthropicModelEligibility,
+    newestModelsFirst: newestAnthropicModelsFirst,
   }),
 });

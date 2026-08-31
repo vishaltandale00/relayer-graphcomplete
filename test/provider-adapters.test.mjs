@@ -25,6 +25,10 @@ import { ModelCatalogService } from "../desktop/main/models/model-catalog-servic
 import { toProductCatalogSnapshot } from "../desktop/main/models/model-catalog-adapter.mjs";
 import { withProviderRetry } from "../desktop/main/providers/provider-retry.mjs";
 import { ProviderHttpError } from "../desktop/main/providers/implementations/api-provider-adapter.mjs";
+import { newestOpenAiModelsFirst } from "../desktop/main/providers/implementations/openai-api.mjs";
+import { newestAnthropicModelsFirst } from "../desktop/main/providers/implementations/anthropic-api.mjs";
+import { newestOpenRouterModelsFirst } from "../desktop/main/providers/implementations/openrouter.mjs";
+import { newestVercelModelsFirst } from "../desktop/main/providers/implementations/vercel-ai-router.mjs";
 import {
   CLAUDE_SUBSCRIPTION_MODELS,
   ClaudeCliManagedRuntime,
@@ -223,6 +227,55 @@ describe("authoritative provider adapter registry", () => {
 });
 
 describe("secret-backed API adapters", () => {
+  it("lets each API provider order dated catalog models newest first without inferring missing dates", () => {
+    expect(newestOpenAiModelsFirst([{ id: "old", created: 1 }, { id: "new", created: 2 }]).map(({ id }) => id))
+      .toEqual(["new", "old"]);
+    expect(newestAnthropicModelsFirst([
+      { id: "sonnet", created_at: "2025-05-14T00:00:00Z" },
+      { id: "opus", created_at: "2025-08-05T00:00:00Z" },
+    ]).map(({ id }) => id)).toEqual(["opus", "sonnet"]);
+    expect(newestOpenRouterModelsFirst([{ id: "old", created: 1 }, { id: "new", created: 2 }]).map(({ id }) => id))
+      .toEqual(["new", "old"]);
+    expect(newestVercelModelsFirst([
+      { id: "old", released: 1 },
+      { id: "new", released: 2 },
+    ]).map(({ id }) => id)).toEqual(["new", "old"]);
+    expect(newestOpenAiModelsFirst([{ id: "connector-first" }, { id: "connector-second" }]).map(({ id }) => id))
+      .toEqual(["connector-first", "connector-second"]);
+    expect(newestOpenAiModelsFirst([
+      { id: "old", created: 1 }, { id: "unknown" }, { id: "new", created: 3 },
+    ]).map(({ id }) => id)).toEqual(["old", "unknown", "new"]);
+  });
+
+  it("keeps canonical provider order while projecting a separate newest-first display order", async () => {
+    const descriptor = productionProviderAdapterRegistry.get("openai-api");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("openai-api", descriptor.defaultEndpoint),
+      {
+        fetch: vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [
+            { id: "gpt-5.4", created: 1 },
+            { id: "gpt-5.6", created: 2 },
+          ] }),
+        })),
+        secrets: { "api-key": "secret" },
+        managedRuntime: codexRuntime,
+        environment: {},
+      },
+    );
+
+    const product = toProductCatalogSnapshot(await adapter.connect());
+    expect(product.models.map(({ id, order }) => ({ id, order }))).toEqual([
+      { id: "gpt-5.4", order: 0 },
+      { id: "gpt-5.6", order: 1 },
+    ]);
+    expect(product.models.map(({ id, metadata }) => ({ id, displayOrder: metadata.displayOrder }))).toEqual([
+      { id: "gpt-5.4", displayOrder: 1 },
+      { id: "gpt-5.6", displayOrder: 0 },
+    ]);
+  });
   it.each([
     ["openai-api", [{ id: "gpt-5.4" }, { id: "text-embedding-3-large" }], "gpt-5.4"],
     ["anthropic-api", [{ id: "claude-sonnet-4-20250514" }, { id: "embedding-model" }], "claude-sonnet-4-20250514"],
@@ -1242,7 +1295,14 @@ describe("managed provider runtime cleanup", () => {
 });
 
 describe("provider definition lifecycle", () => {
-  function serviceFixture({ failDiscovery = false, diagnostics = null, removeRuntimeState = async () => false } = {}) {
+  function serviceFixture({
+    failDiscovery = false,
+    failDiscoveryEndpoint = null,
+    diagnostics = null,
+    removeRuntimeState = async () => false,
+    setTimer,
+    clearTimer,
+  } = {}) {
     let stored = [];
     const credentials = new Map();
     const closes = [];
@@ -1252,7 +1312,7 @@ describe("provider definition lifecycle", () => {
       connection: { mode: "secret-fields", fields: [{ id: "api-key", label: "API key", kind: "secret" }] },
       create: ({ definition: created }) => ({
         async discover() {
-          if (failDiscovery) throw new Error("discovery failed");
+          if (failDiscovery || created.endpoint === failDiscoveryEndpoint) throw new Error("discovery failed");
           return { models: [{ visible: true }], provider: { id: created.id } };
         },
         async close() { closes.push(created.id); },
@@ -1273,12 +1333,14 @@ describe("provider definition lifecycle", () => {
       idGenerator: (() => { let id = 0; return () => `provider-${++id}`; })(),
       diagnostics,
       removeRuntimeState,
+      ...(setTimer ? { setTimer } : {}),
+      ...(clearTimer ? { clearTimer } : {}),
     });
     return { service, definitions: () => stored, credentials, closes };
   }
 
   it("persists only after discovery and stores a credential reference instead of secret bytes", async () => {
-    const fixture = serviceFixture();
+    const fixture = serviceFixture({ failDiscoveryEndpoint: "https://broken.example/v1" });
     const created = await fixture.service.connect({
       adapterId: "fake-api", label: "Work", endpoint: "https://example.test/v1", fields: { "api-key": "secret" },
     });
@@ -1327,7 +1389,7 @@ describe("provider definition lifecycle", () => {
   });
 
   it("compensates runtime registration before a failed staged create and leaves no active definition", async () => {
-    const fixture = serviceFixture();
+    const fixture = serviceFixture({ failDiscoveryEndpoint: "https://broken.example/v1" });
     const unregistered = [];
     fixture.service.onRuntimeReady = async () => { throw new Error("runtime registration failed"); };
     fixture.service.onRuntimeRemoved = async ({ id }) => { unregistered.push(id); };
@@ -1354,6 +1416,96 @@ describe("provider definition lifecycle", () => {
       connected: false,
       unavailableReason: { code: "credentials_revoked", message: "Reconnect this provider." },
     })]);
+  });
+
+  it("validates and atomically edits an API connection without replacing its identity or active lease", async () => {
+    let stored = [{
+      id: "stable-api", adapterId: "editable-api", label: "Work", endpoint: "https://old.example/v1",
+      accessContract: "secret@1", credentialReference: "provider:stable-api", lifecycleState: "active", removedAt: null,
+    }];
+    let savedSecrets = { key: "old-key" };
+    const runtimes = [];
+    const store = {
+      async load() { return structuredClone(stored); },
+      async updateWithCatalog(definition, catalog) {
+        expect(catalog.models).toEqual([{ visible: true }]);
+        stored = [structuredClone(definition)];
+      },
+    };
+    const service = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "editable-api", implementationVersion: "1", label: "Editable", accessContract: "secret@1",
+        defaultEndpoint: "https://old.example/v1", endpointEditableDuringCreation: true,
+        connection: { mode: "secret-fields", fields: [{ id: "key", label: "API key", kind: "secret" }] },
+        create: ({ definition, secrets }) => {
+          const runtime = {
+            endpoint: definition.endpoint, secrets: structuredClone(secrets),
+            discover: vi.fn(async () => ({ models: [{ visible: true }] })),
+            close: vi.fn(async () => {}),
+          };
+          runtimes.push(runtime);
+          return runtime;
+        },
+      }]),
+      definitionStore: store,
+      credentialStore: {
+        async get() { return structuredClone(savedSecrets); },
+        async set(_reference, value) { savedSecrets = structuredClone(value); },
+        async delete() {},
+      },
+    });
+
+    const oldLease = await service.acquireExecution("stable-api");
+    await expect(service.edit("stable-api", {
+      endpoint: "https://new.example/v1", fields: {},
+    })).resolves.toMatchObject({ id: "stable-api", endpoint: "https://new.example/v1" });
+    const newLease = await service.acquireExecution("stable-api");
+    expect(oldLease.runtime.endpoint).toBe("https://old.example/v1");
+    expect(newLease.runtime.endpoint).toBe("https://new.example/v1");
+    expect(newLease.runtime.secrets).toEqual({ key: "old-key" });
+    expect(stored[0].id).toBe("stable-api");
+    await oldLease.release();
+    expect(oldLease.runtime.close).toHaveBeenCalledOnce();
+    await newLease.release();
+  });
+
+  it("leaves saved API configuration, credentials, catalog, and runtime unchanged when edit validation fails", async () => {
+    const fixture = serviceFixture({ failDiscoveryEndpoint: "https://broken.example/v1" });
+    const created = await fixture.service.connect({
+      adapterId: "fake-api", label: "Stable", endpoint: "https://example.test/v1", fields: { "api-key": "old" },
+    });
+    await expect(fixture.service.edit(created.providerDefinition.id, {
+      endpoint: "https://broken.example/v1", fields: { "api-key": "replacement" },
+    })).rejects.toThrow("discovery failed");
+    await expect(fixture.service.list()).resolves.toEqual([
+      expect.objectContaining({ id: created.providerDefinition.id, endpoint: "https://example.test/v1" }),
+    ]);
+    expect(fixture.credentials.get(`provider:${created.providerDefinition.id}`)).toEqual({ "api-key": "old" });
+  });
+
+  it("retries the saved connection in place and publishes only a broad outage state", async () => {
+    const fixture = serviceFixture();
+    const created = await fixture.service.connect({
+      adapterId: "fake-api", label: "Stable", endpoint: "https://example.test/v1", fields: { "api-key": "old" },
+    });
+    const runtime = fixture.service.runtimes.get(created.providerDefinition.id);
+    runtime.discover = async () => { throw Object.assign(new Error("raw upstream body"), { status: 503 }); };
+
+    await expect(fixture.service.retryConnection(created.providerDefinition.id)).resolves.toMatchObject({
+      status: "provider_temporarily_unavailable",
+      providerDefinition: { id: created.providerDefinition.id },
+    });
+    await expect(fixture.service.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: created.providerDefinition.id,
+        connected: false,
+        unavailableReason: {
+          code: "provider_temporarily_unavailable",
+          message: "Provider could not be reached",
+        },
+      }),
+    ]);
+    expect(fixture.credentials.get(`provider:${created.providerDefinition.id}`)).toEqual({ "api-key": "old" });
   });
 
   it("logs only sanitized failure metadata and cleans orphaned crash-window credentials", async () => {
@@ -1425,7 +1577,7 @@ describe("provider definition lifecycle", () => {
     expect(removals).toEqual([providerId]);
   });
 
-  it("retains runtime and credentials when authoritative tombstoning fails, then reconciles on restart", async () => {
+  it("keeps removal pending after final tombstone persistence fails and reconciles cleanup on restart", async () => {
     const removals = [];
     const fixture = serviceFixture({ removeRuntimeState: async ({ id }) => { removals.push(id); } });
     const created = await fixture.service.connect({
@@ -1439,13 +1591,16 @@ describe("provider definition lifecycle", () => {
       await originalSave(definitions);
     };
 
-    await expect(fixture.service.remove(created.providerDefinition.id)).rejects.toThrow("durable attempt still running");
+    await expect(fixture.service.remove(created.providerDefinition.id)).resolves.toMatchObject({
+      lifecycleState: "removal_pending",
+    });
     expect(fixture.definitions()[0]).toMatchObject({
       lifecycleState: "removal_pending", credentialReference: `provider:${created.providerDefinition.id}`,
     });
-    expect(fixture.credentials.size).toBe(1);
-    expect(fixture.closes).toEqual([]);
-    expect(removals).toEqual([]);
+    expect(fixture.credentials.size).toBe(0);
+    expect(fixture.closes).toEqual([created.providerDefinition.id]);
+    expect(removals).toEqual([created.providerDefinition.id]);
+    await fixture.service.close();
 
     const restarted = new ProviderDefinitionService({
       registry: fixture.service.registry,
@@ -1463,7 +1618,37 @@ describe("provider definition lifecycle", () => {
     await restarted.reconcileStartup();
     expect(fixture.definitions()[0]).toMatchObject({ lifecycleState: "tombstoned", credentialReference: null });
     expect(fixture.credentials.size).toBe(0);
-    expect(removals).toEqual([created.providerDefinition.id]);
+    expect(removals).toEqual([created.providerDefinition.id, created.providerDefinition.id]);
+  });
+
+  it("keeps cleanup failures removing and retries them automatically", async () => {
+    let retryCleanup;
+    let cleanupAttempts = 0;
+    const fixture = serviceFixture({
+      removeRuntimeState: async () => {
+        cleanupAttempts += 1;
+        if (cleanupAttempts === 1) throw new Error("private cleanup detail");
+      },
+      setTimer(callback, delay) {
+        expect(delay).toBe(5_000);
+        retryCleanup = callback;
+        return { unref() {} };
+      },
+      clearTimer() {},
+    });
+    const created = await fixture.service.connect({
+      adapterId: "fake-api", label: "Cleanup", fields: { "api-key": "opaque" },
+    });
+
+    await expect(fixture.service.remove(created.providerDefinition.id)).resolves.toMatchObject({
+      lifecycleState: "removal_pending",
+    });
+    expect(retryCleanup).toBeTypeOf("function");
+    retryCleanup();
+    await vi.waitFor(() => {
+      expect(fixture.definitions()[0]).toMatchObject({ lifecycleState: "tombstoned", credentialReference: null });
+    });
+    expect(cleanupAttempts).toBe(2);
   });
 
   it("rolls back cached rename and removal state when authoritative persistence rejects", async () => {

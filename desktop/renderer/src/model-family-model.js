@@ -1,4 +1,5 @@
 import { harnessUsesConfigurationModel } from "./model-picker-model.js";
+import { providerModelsNewestFirst } from "./provider-model-order.js";
 
 export const MAX_MODELS_PER_FAMILY = 5;
 
@@ -37,14 +38,14 @@ export function createModelFamilyDraft(providerCatalog, sequence = Date.now(), d
   const provider = providerCatalog.find((item) => (
     item.id === defaultProviderId && item.connected !== false
   )) ?? providerCatalog.find((item) => item.connected !== false);
-  const model = provider?.models?.find((item) => item.visible !== false && item.available !== false);
+  const member = nextAvailableModelMember(providerCatalog, [], provider?.id);
   return {
     id: `draft-${sequence}`,
     name: "",
     kind: "custom",
     enabled: true,
     draft: true,
-    models: model ? [modelMember(provider, model)] : [],
+    models: member ? [member] : [],
   };
 }
 
@@ -111,6 +112,23 @@ export function modelMember(provider, model) {
         ? "This model is hidden by the provider."
         : unavailableReasonMessage(model.unavailableReason),
   };
+}
+
+export function nextAvailableModelMember(providerCatalog, existingMembers, providerId = null, exceptIndex = -1) {
+  const used = new Set((existingMembers ?? [])
+    .filter((_member, index) => index !== exceptIndex)
+    .map((member) => `${member.providerId}\0${member.modelId}`));
+  for (const owner of providerCatalog ?? []) {
+    if (providerId && owner.id !== providerId) continue;
+    if (owner.connected === false) continue;
+    const model = providerModelsNewestFirst(owner.models).find((candidate) => (
+      candidate.visible !== false
+      && candidate.available !== false
+      && !used.has(`${owner.id}\0${candidate.id}`)
+    ));
+    if (model) return modelMember(owner, model);
+  }
+  return null;
 }
 
 export function validateCustomFamily(family, families = []) {

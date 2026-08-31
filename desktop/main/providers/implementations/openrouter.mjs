@@ -4,6 +4,7 @@ import {
   MODEL_NOT_EXECUTION_ELIGIBLE,
   SecretApiProviderAdapter,
   bearerHeaders,
+  orderModelsByReleaseTimestamp,
 } from "./api-provider-adapter.mjs";
 
 function openRouterModelEligibility(model) {
@@ -12,6 +13,12 @@ function openRouterModelEligibility(model) {
     return MODEL_CAPABILITY_UNKNOWN;
   }
   return outputs.includes("text") ? EXECUTION_ELIGIBLE : MODEL_NOT_EXECUTION_ELIGIBLE;
+}
+
+export function newestOpenRouterModelsFirst(models) {
+  return orderModelsByReleaseTimestamp(models, (model) => (
+    typeof model?.created === "number" ? model.created : Number.NaN
+  ));
 }
 
 function tokenCapabilities(model) {
@@ -42,6 +49,7 @@ export const openRouterDescriptor = Object.freeze({
     verifyConnectionBeforeDiscovery: usesCanonicalEndpoint(definition.endpoint),
     modelCapabilities: tokenCapabilities,
     modelEligibility: openRouterModelEligibility,
+    newestModelsFirst: newestOpenRouterModelsFirst,
     requireCatalogBeforeExecution: true,
     managedRuntime, runtimeId: "codex", environment,
   }),

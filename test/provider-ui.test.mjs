@@ -7,7 +7,9 @@ import {
   onboardingFamilyOptionsMarkup,
   onboardingHarnessOptionsMarkup,
   providerConnectionFormMarkup,
+  providerConnectionActionsMarkup,
   providerDefinitionsMarkup,
+  providerEditConnectionFormMarkup,
   providerLogoMarkup,
   providerOptionsMarkup,
   rovingRadioIndex,
@@ -71,6 +73,27 @@ describe("provider and harness renderer markup", () => {
     expect(markup).toContain('aria-invalid="true" aria-describedby="endpointError"');
     expect(markup).toContain('id="endpointError" role="alert"');
     expect(markup).not.toContain('type="text" value="" required  aria-invalid="true" aria-describedby="apiKeyError"');
+  });
+
+  it.each([
+    [null, "Connect and discover models", false],
+    [{ phase: "starting", intent: "connect", connectionId: "request-1" }, "Connecting…", true],
+    [{ phase: "waiting_for_sign_in", intent: "connect", connectionId: "request-1" }, "Waiting for sign-in…", true],
+  ])("renders the fresh connection action from the shared attempt state", (attempt, label, disabled) => {
+    const markup = providerConnectionActionsMarkup(attempt);
+    expect(markup).toContain(`data-provider-dialog-connect${disabled ? " disabled" : ""}>${label}</button>`);
+    expect(markup).toContain(`data-provider-dialog-back${disabled ? " disabled" : ""}>Back</button>`);
+  });
+
+  it("renders API editing without revealing or prefilling the saved credential", () => {
+    const markup = providerEditConnectionFormMarkup(openAi, {
+      id: "work", label: "OpenAI Work", endpoint: "https://api.openai.com/v1",
+    }, { endpoint: "https://api.openai.com/v1", fields: {} });
+    expect(markup).toContain("A credential is saved");
+    expect(markup).toContain("Replace API key");
+    expect(markup).toContain('type="password" value=""');
+    expect(markup).not.toContain("sk-");
+    expect(markup).not.toContain("Connection name");
   });
 
   it("uses native keyboard-reachable controls for every provider choice", () => {
@@ -177,15 +200,70 @@ describe("provider and harness renderer markup", () => {
     expect(creating).not.toContain("checked />");
   });
 
+  it("searches a provider's onboarding models and orders matching releases newest first", () => {
+    const harness = {
+      label: "Universal",
+      existingCustomFamilies: [],
+      existingManagedFamilies: [],
+      eligibleModels: [
+        { providerId: "work", modelId: "gpt-4.1", label: "GPT-4.1", displayOrder: 2 },
+        { providerId: "work", modelId: "gpt-5.4-mini", label: "GPT-5.4 Mini", displayOrder: 1 },
+        { providerId: "work", modelId: "gpt-5.6", label: "GPT-5.6", displayOrder: 0 },
+      ],
+    };
+    const markup = onboardingFamilyOptionsMarkup(
+      harness,
+      { kind: "create", name: "Work", members: [] },
+      { modelSearch: "gpt-5" },
+    );
+
+    expect(markup).toContain('type="search"');
+    expect(markup).toContain('class="provider-model-search-control"');
+    expect(markup).toContain('aria-label="Clear model search"');
+    expect(markup).toContain('role="search"');
+    expect(markup).toContain('value="gpt-5"');
+    expect(markup).not.toContain('data-onboarding-member-model="gpt-4.1"');
+    expect(markup.indexOf('data-onboarding-member-model="gpt-5.6"'))
+      .toBeLessThan(markup.indexOf('data-onboarding-member-model="gpt-5.4-mini"'));
+
+    const selectedIsRetained = onboardingFamilyOptionsMarkup(
+      harness,
+      { kind: "create", name: "Work", members: [{ providerId: "work", modelId: "gpt-4.1" }] },
+      { modelSearch: "no match" },
+    );
+    expect(selectedIsRetained).toContain('data-onboarding-member-model="gpt-4.1" checked');
+  });
+
   it("keeps duplicate model access paths distinguishable by provider definition labels", () => {
     const markup = providerDefinitionsMarkup([
       { id: "work", adapterId: "openai-api", adapterLabel: "OpenAI API", label: "OpenAI Work", endpoint: "https://api.openai.com/v1", accessContract: "secret@1", lifecycleState: "active" },
       { id: "personal", adapterId: "openai-api", adapterLabel: "OpenAI API", label: "OpenAI Personal", endpoint: "https://api.openai.com/v1", accessContract: "secret@1", lifecycleState: "active" },
-    ], { providerId: "work" });
+    ], { providerId: "work" }, [
+      { adapterId: "openai-api", connection: { mode: "secret-fields" } },
+    ]);
     expect(markup).toContain("OpenAI Work");
     expect(markup).toContain("OpenAI Personal");
-    expect(markup).toContain("Change the default provider before removing");
-    expect(markup).toContain('data-provider-remove="work" disabled');
+    expect(markup).toContain('data-provider-edit="work"');
+    expect(markup).not.toContain("Default provider");
+    expect(markup).not.toContain("Change the default provider before removing");
+    expect(markup).toContain('data-provider-remove="work"');
+  });
+
+  it("discloses only broad provider warnings and gives temporary outages a retry action", () => {
+    const markup = providerDefinitionsMarkup([{
+      id: "private-provider-uuid", adapterId: "openai-api", label: "OpenAI Work",
+      lifecycleState: "active", connected: false,
+      unavailableReason: {
+        code: "provider_temporarily_unavailable",
+        message: "raw upstream response with retry count 3",
+      },
+    }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
+    expect(markup).toContain("Temporarily unavailable");
+    expect(markup).toContain("Provider could not be reached");
+    expect(markup).toContain('data-provider-retry="private-provider-uuid"');
+    expect(markup).toContain('data-provider-edit="private-provider-uuid"');
+    expect(markup).not.toContain("raw upstream response");
+    expect(markup).not.toContain("retry count");
   });
 
   it("offers exact-definition sign out only for managed subscriptions", () => {
@@ -210,6 +288,24 @@ describe("provider and harness renderer markup", () => {
     expect(markup).not.toContain('data-provider-logout="claude-work"');
   });
 
+  it.each([
+    ["starting", "Reconnecting…"],
+    ["waiting_for_sign_in", "Waiting for sign-in…"],
+  ])("renders an active reconnect phase as %s and disables conflicting actions", (phase, label) => {
+    const markup = providerDefinitionsMarkup([{
+      id: "claude-work", adapterId: "claude-subscription", label: "Claude Work",
+      lifecycleState: "active", connected: false,
+      unavailableReason: { code: "provider_logged_out", message: "The provider is signed out." },
+    }], {}, [{ adapterId: "claude-subscription", connection: { mode: "managed-login" } }], {
+      phase, intent: "reconnect", connectionId: "claude-work",
+    });
+
+    expect(markup).toContain(`data-provider-reconnect="claude-work" disabled>${label}</button>`);
+    expect(markup).toContain('data-provider-rename="claude-work" disabled');
+    expect(markup).toContain('data-provider-remove="claude-work" disabled');
+    expect(markup).toContain("Connection unavailable");
+  });
+
   it("offers provider-scoped model refresh when a connected provider has no eligible default family", () => {
     const markup = providerDefinitionsMarkup([{
       id: "openai-work", adapterId: "openai-api", label: "OpenAI Work",
@@ -220,10 +316,11 @@ describe("provider and harness renderer markup", () => {
       },
     }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
 
-    expect(markup).toContain("Needs model setup");
-    expect(markup).toContain("No supported text models are available.");
+    expect(markup).toContain("Connected");
+    expect(markup).toContain("No usable models available");
     expect(markup).toContain('data-provider-family-recovery="openai-work"');
     expect(markup).toContain("Refresh models");
+    expect(markup).not.toContain("No supported text models are available.");
     expect(markup).not.toContain('data-provider-reconnect="openai-work"');
   });
 

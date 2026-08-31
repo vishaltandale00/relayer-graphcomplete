@@ -388,6 +388,22 @@ export class RelayerAppServerService {
         try { detail = await response.json(); } catch { /* use status fallback */ }
         throw new Error(detail?.error?.message || detail?.error || `Provider creation failed (${response.status}).`);
       },
+      updateWithCatalog: async (definition, catalog, { signal } = {}) => {
+        const session = await this.start();
+        const response = await fetch(new URL("/api/internal/provider-definitions/staged", session.origin), {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${session.cookie.value}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ definition, catalog: toProductCatalogSnapshot(catalog) }),
+          signal,
+        });
+        if (response.ok) return;
+        let detail = null;
+        try { detail = await response.json(); } catch { /* use status fallback */ }
+        throw new Error(detail?.error?.message || detail?.error || `Provider edit failed (${response.status}).`);
+      },
     });
   }
 

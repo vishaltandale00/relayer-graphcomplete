@@ -8,6 +8,7 @@ import {
   MAX_MODELS_PER_FAMILY,
   modelMember,
   moveItem,
+  nextAvailableModelMember,
   preserveFamilyEditAfterRefresh,
   reconcileSavedFamily,
   replaceMemberProvider,
@@ -31,6 +32,10 @@ import { appState } from "./state.js";
 import { createLatestRequestGate } from "./navigation-history.js";
 import { $, $$, escapeHtml, escapeHtmlAttribute, toast } from "./ui.js";
 import { renderHarnessSettings } from "./harness-settings.js";
+import {
+  providerModelComboboxMarkup,
+  providerModelOptionButtonsMarkup,
+} from "./provider-model-list.js";
 
 let settings = null;
 let selectedFamilyIndex = 0;
@@ -42,6 +47,7 @@ let savingOrder = false;
 let savingDefaults = false;
 const familyVisibilityGate = createFamilyVisibilityGate();
 const settingsRefreshGate = createLatestRequestGate();
+const modelSearchByProvider = new Map();
 
 function provider(providerId) {
   return settings.providers.find((candidate) => candidate.id === providerId);
@@ -52,7 +58,7 @@ function providerModel(providerId, modelId) {
 }
 
 function hydrateMember(member) {
-  const owner = provider(member.providerId) || { id: member.providerId, label: member.providerId };
+  const owner = provider(member.providerId) || { id: member.providerId, label: "Unavailable connection", connected: false };
   const model = providerModel(member.providerId, member.modelId) || {
     id: member.modelId,
     label: member.modelId,
@@ -60,6 +66,33 @@ function hydrateMember(member) {
     unavailableReason: "This model is no longer in the provider catalog.",
   };
   return modelMember(owner, model);
+}
+
+function familyWarning(family) {
+  const affectedProviders = new Map();
+  const missingModels = [];
+  for (const member of family.models) {
+    const owner = provider(member.providerId);
+    if (!owner || owner.connected === false) {
+      affectedProviders.set(member.providerId, {
+        id: member.providerId,
+        label: owner?.label ?? "Unavailable connection",
+        status: owner?.unavailableReason?.code === "provider_temporarily_unavailable"
+          ? "Temporarily unavailable"
+          : "Connection unavailable",
+      });
+    } else {
+      const catalogModel = providerModel(member.providerId, member.modelId);
+      const unavailableCode = typeof catalogModel?.unavailableReason === "object"
+        ? catalogModel.unavailableReason?.code
+        : null;
+      if (!catalogModel || catalogModel.available === false || unavailableCode === "model_not_reported") {
+        missingModels.push(member.modelLabel);
+      }
+    }
+  }
+  if (!affectedProviders.size && !missingModels.length) return "";
+  return `<span class="provider-warning family-warning" tabindex="0"><button type="button" class="provider-warning-trigger" aria-label="Model family status details" aria-expanded="false">!</button><span class="provider-warning-popover" role="tooltip">${[...affectedProviders.values()].map((item) => `<button type="button" data-family-warning-provider="${escapeHtmlAttribute(item.id)}"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.status)}</span></button>`).join("")}${missingModels.length ? `<span>${escapeHtml(missingModels.join(", "))}. This model is no longer in the provider catalog. Edit this family to choose available models.</span>` : ""}</span></span>`;
 }
 
 function normalizeSettings(response) {
@@ -108,20 +141,7 @@ function familyPayload(family) {
 }
 
 function nextAvailableMember(family, providerId = null, exceptIndex = -1) {
-  const used = new Set(family.models
-    .filter((_member, index) => index !== exceptIndex)
-    .map((member) => `${member.providerId}\0${member.modelId}`));
-  for (const owner of settings.providers) {
-    if (providerId && owner.id !== providerId) continue;
-    if (owner.connected === false) continue;
-    const model = owner.models.find((candidate) => (
-      candidate.visible !== false
-      && candidate.available !== false
-      && !used.has(`${owner.id}\0${candidate.id}`)
-    ));
-    if (model) return modelMember(owner, model);
-  }
-  return null;
+  return nextAvailableModelMember(settings.providers, family.models, providerId, exceptIndex);
 }
 
 function setStatus(message = "", kind = "") {
@@ -189,24 +209,18 @@ function providerOptions(selectedProviderId) {
   }).join("");
 }
 
-function defaultProviderOptions() {
-  return providerOptions(settings.defaults.providerId);
-}
-
-function unavailableModelOption(member) {
-  if (providerModel(member.providerId, member.modelId)) return "";
-  return `<option value="${escapeHtmlAttribute(member.modelId)}" selected disabled>${escapeHtml(member.modelLabel)}</option>`;
-}
-
-function modelOptions(member) {
+function memberModelChoices(member) {
   const owner = provider(member.providerId);
-  return `${unavailableModelOption(member)}${availableModels(settings.providers, member.providerId).filter((model) => (
+  const models = availableModels(settings.providers, member.providerId).filter((model) => (
     model.visible !== false || model.id === member.modelId
   )).map((model) => {
-    const selected = model.id === member.modelId;
     const unavailable = owner?.connected === false || model.visible === false || model.available === false;
-    return `<option value="${escapeHtmlAttribute(model.id)}" ${selected ? "selected" : ""} ${unavailable ? "disabled" : ""}>${escapeHtml(model.label)}</option>`;
-  }).join("")}`;
+    return { ...model, available: !unavailable };
+  });
+  if (!models.some((model) => model.id === member.modelId)) {
+    models.push({ id: member.modelId, label: member.modelLabel, visible: true, available: false });
+  }
+  return models;
 }
 
 function familyList() {
@@ -223,7 +237,6 @@ function memberReadOnly(member, index) {
     <span class="member-order">${index + 1}</span>
     <span class="member-provider">${escapeHtml(member.providerLabel)}</span>
     <strong>${escapeHtml(member.modelLabel)}</strong>
-    ${unavailable ? `<span class="member-error">${escapeHtml(member.unavailableReason || "Unavailable")}</span>` : ""}
   </li>`;
 }
 
@@ -232,7 +245,7 @@ function memberEditor(member, index, count) {
   return `<li class="family-member-editor${reason ? " unavailable" : ""}" data-member-index="${index}">
     <span class="member-order">${index + 1}</span>
     <select aria-label="Provider for model ${index + 1}" data-member-provider="${index}" ${savingFamily ? "disabled" : ""}>${providerOptions(member.providerId)}</select>
-    <select aria-label="Model ${index + 1}" data-member-model="${index}" ${savingFamily ? "disabled" : ""}>${modelOptions(member)}</select>
+    <span class="member-model-picker">${providerModelComboboxMarkup(memberModelChoices(member), { query: modelSearchByProvider.get(member.providerId) ?? "", selectedId: member.modelId, selectedLabel: member.modelLabel, index, providerId: member.providerId, providerLabel: member.providerLabel, disabled: savingFamily })}</span>
     <span class="member-actions">
       <button type="button" class="icon-button" data-member-up="${index}" title="Move up" aria-label="Move model ${index + 1} up" ${savingFamily || index === 0 ? "disabled" : ""}>↑</button>
       <button type="button" class="icon-button" data-member-down="${index}" title="Move down" aria-label="Move model ${index + 1} down" ${savingFamily || index === count - 1 ? "disabled" : ""}>↓</button>
@@ -264,20 +277,22 @@ function familyEditor(family) {
 function familySlide(family, index) {
   if (family.draft || family.editing) return `<div class="family-slide" data-family-slide="${index}">${familyEditor(family)}</div>`;
   const system = family.kind === "system";
+  const isDefault = String(settings.defaults.familyId) === String(family.id);
   return `<div class="family-slide" data-family-slide="${index}">
     <article class="family-card">
       <div class="family-card-heading">
-        <div><h3>${escapeHtml(family.name)}</h3><span class="family-kind">${system ? "System" : "Custom"}</span></div>
-        <label class="family-enabled"><input type="checkbox" data-family-enabled="${index}" ${family.enabled ? "checked" : ""} ${familyVisibilityGate.isPending() ? "disabled" : ""} /><span>Enabled</span></label>
+        <div><h3>${escapeHtml(family.name)}</h3><span class="family-kind">${system ? "System" : "Custom"}</span>${familyWarning(family)}</div>
+        <div class="family-heading-actions">${isDefault ? `<span class="default-badge">Default</span>` : ""}<label class="family-enabled"><input type="checkbox" data-family-enabled="${index}" ${family.enabled ? "checked" : ""} ${familyVisibilityGate.isPending() || isDefault ? "disabled" : ""} /><span>Enabled</span></label></div>
       </div>
       <ol class="family-members">${family.models.map(memberReadOnly).join("")}</ol>
       <div class="family-card-actions">
         <button type="button" class="secondary" data-family-left="${index}" ${savingOrder || index === 0 ? "disabled" : ""}>← Move</button>
         <button type="button" class="secondary" data-family-right="${index}" ${savingOrder || index === settings.families.length - 1 ? "disabled" : ""}>Move →</button>
         <span class="push"></span>
+        ${!isDefault && family.enabled && family.models.some((member) => member.available) ? `<button type="button" class="secondary" data-family-default="${index}">Set as default</button>` : ""}
         ${system
           ? `<button type="button" class="secondary" data-family-copy="${index}">Copy</button>`
-          : `<button type="button" class="secondary" data-family-delete="${index}">Delete</button>
+          : `<button type="button" class="secondary" data-family-delete="${index}" ${isDefault ? "disabled" : ""}>Delete</button>
              <button type="button" class="secondary" data-family-edit="${index}">Edit</button>`}
       </div>
     </article>
@@ -287,9 +302,7 @@ function familySlide(family, index) {
 function render() {
   if (!settings) return;
   $("#defaultHarnessSelect").innerHTML = harnessOptions();
-  $("#defaultProviderSelect").innerHTML = defaultProviderOptions();
   $("#defaultHarnessSelect").disabled = savingDefaults;
-  $("#defaultProviderSelect").disabled = savingDefaults;
   const harnessError = defaultHarnessError(settings);
   $("#defaultHarnessError").textContent = harnessError ?? "";
   $("#defaultHarnessError").classList.toggle("hidden", !harnessError);
@@ -470,11 +483,36 @@ function bindEditorEvents(family) {
         ?? replaceMemberProvider(current.models[index], owner, null);
     });
   });
-  $$('[data-member-model]').forEach((select) => {
-    select.onchange = () => updateCurrentFamily((current) => {
-      const index = Number(select.dataset.memberModel);
-      current.models[index] = modelMember(provider(current.models[index].providerId), providerModel(current.models[index].providerId, select.value));
-    });
+  bindModelOptionEvents();
+  $$('[data-member-model-search]').forEach((input) => {
+    input.oninput = () => {
+      modelSearchByProvider.set(input.dataset.memberModelProvider, input.value);
+      $$('[data-member-model-search]').filter((candidate) => (
+        candidate.dataset.memberModelProvider === input.dataset.memberModelProvider
+      )).forEach((candidate) => {
+        candidate.value = input.value;
+        candidate.closest(".provider-model-search-control")?.querySelector("[data-member-model-search-clear]")?.toggleAttribute("hidden", !input.value);
+        const index = Number(candidate.dataset.memberModelSearch);
+        $(`[data-member-model-options="${index}"]`).innerHTML = providerModelOptionButtonsMarkup(memberModelChoices(family.models[index]), {
+          query: input.value,
+          selectedId: family.models[index].modelId,
+          index,
+        });
+      });
+      bindModelOptionEvents();
+    };
+    input.onkeydown = (event) => closeModelPickerOnEscape(event, input.closest(".provider-model-combobox"));
+  });
+  $$('[data-member-model-combobox]').forEach((picker) => {
+    picker.onkeydown = (event) => closeModelPickerOnEscape(event, picker);
+  });
+  $$('[data-member-model-search-clear]').forEach((button) => {
+    button.onclick = () => {
+      const input = $(`[data-member-model-search="${button.dataset.memberModelSearchClear}"]`);
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.focus();
+    };
   });
   $$('[data-member-up]').forEach((button) => {
     button.onclick = () => updateCurrentFamily((current) => {
@@ -490,6 +528,25 @@ function bindEditorEvents(family) {
   });
   $$('[data-member-remove]').forEach((button) => {
     button.onclick = () => updateCurrentFamily((current) => current.models.splice(Number(button.dataset.memberRemove), 1));
+  });
+}
+
+function closeModelPickerOnEscape(event, picker) {
+  if (event.key !== "Escape" || !picker?.open) return;
+  event.preventDefault();
+  picker.open = false;
+  queueMicrotask(() => picker.querySelector("summary")?.focus());
+}
+
+function bindModelOptionEvents() {
+  $$('[data-member-model-option]').forEach((button) => {
+    button.onclick = () => {
+      const index = Number(button.dataset.memberModelIndex);
+      updateCurrentFamily((current) => {
+        current.models[index] = modelMember(provider(current.models[index].providerId), providerModel(current.models[index].providerId, button.dataset.memberModelOption));
+      });
+      queueMicrotask(() => $(`[data-member-model-combobox="${index}"] summary`)?.focus());
+    };
   });
 }
 
@@ -515,6 +572,33 @@ function bindRenderedEvents() {
   $$('[data-family-delete]').forEach((button) => {
     button.onclick = () => void deleteFamily(Number(button.dataset.familyDelete));
   });
+  $$('[data-family-default]').forEach((button) => {
+    button.onclick = () => void persistFamilyDefault(Number(button.dataset.familyDefault));
+  });
+  $$('[data-family-warning-provider]').forEach((button) => {
+    button.onclick = () => {
+      $("[data-settings-tab=\"providers\"]")?.click();
+      requestAnimationFrame(() => {
+        const card = $$('[data-provider-definition]').find((item) => item.dataset.providerDefinition === button.dataset.familyWarningProvider);
+        card?.focus?.();
+        card?.scrollIntoView?.({ block: "center" });
+      });
+    };
+  });
+  $$(".family-warning .provider-warning-trigger").forEach((button) => {
+    button.onclick = () => {
+      const warning = button.closest(".family-warning");
+      const open = !warning.classList.contains("open");
+      $$(".family-warning.open").forEach((item) => item.classList.remove("open"));
+      warning.classList.toggle("open", open);
+      button.setAttribute("aria-expanded", String(open));
+    };
+    button.onkeydown = (event) => {
+      if (event.key !== "Escape") return;
+      button.closest(".family-warning").classList.remove("open");
+      button.setAttribute("aria-expanded", "false");
+    };
+  });
   const current = settings.families[selectedFamilyIndex];
   if (current?.draft || current?.editing) bindEditorEvents(current);
 }
@@ -526,9 +610,7 @@ async function persistDefault(field) {
   }
   savingDefaults = true;
   const previous = { ...settings.defaults };
-  const candidate = field === "harnessId"
-    ? $("#defaultHarnessSelect").value
-    : $("#defaultProviderSelect").value;
+  const candidate = $("#defaultHarnessSelect").value;
   settings.defaults[field] = candidate;
   render();
   try {
@@ -551,9 +633,36 @@ async function persistDefault(field) {
   }
 }
 
+async function persistFamilyDefault(index) {
+  const family = settings.families[index];
+  if (!family || savingDefaults) return;
+  savingDefaults = true;
+  const previous = { ...settings.defaults };
+  settings.defaults.familyId = family.id;
+  render();
+  try {
+    await saveModelDefaults({ familyId: family.id });
+    await refreshModelSettings({ preserveEdit: true });
+    resetNewThreadModelPicker();
+    setStatus("Saved", "success");
+  } catch (error) {
+    settings.defaults = previous;
+    setStatus(error.message, "error");
+  } finally {
+    savingDefaults = false;
+    render();
+  }
+}
+
 function bindStaticEvents() {
+  document.addEventListener("click", (event) => {
+    if (event.target.closest?.(".family-warning")) return;
+    $$(".family-warning.open").forEach((item) => {
+      item.classList.remove("open");
+      item.querySelector(".provider-warning-trigger")?.setAttribute("aria-expanded", "false");
+    });
+  });
   $("#defaultHarnessSelect").onchange = () => persistDefault("harnessId");
-  $("#defaultProviderSelect").onchange = () => persistDefault("providerId");
   $("#previousFamily").onclick = () => chooseFamily(selectedFamilyIndex - 1);
   $("#nextFamily").onclick = () => chooseFamily(selectedFamilyIndex + 1);
   $("#newModelFamily").onclick = () => beginNewFamily();

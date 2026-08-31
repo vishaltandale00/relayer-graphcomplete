@@ -110,6 +110,7 @@ function sanitizeModel(model, providerId, index) {
     supportsPersonality: boolean(model?.supportsPersonality, `${field}.supportsPersonality`),
     serviceTiers: sanitizeServiceTiers(model?.serviceTiers, `${field}.serviceTiers`),
     defaultServiceTier: optionalString(model?.defaultServiceTier, `${field}.defaultServiceTier`),
+    displayOrder: Number.isSafeInteger(model?.displayOrder) && model.displayOrder >= 0 ? model.displayOrder : index,
     catalogSource: optionalString(model?.catalogSource, `${field}.catalogSource`),
   });
 }
@@ -172,6 +173,7 @@ export function sanitizeModelCatalogSnapshot(snapshot) {
       label: nonEmptyString(snapshot.provider?.label, "provider.label"),
       status,
       unavailableReason,
+      unavailableReasonCode: optionalString(snapshot.provider?.unavailableReasonCode, "provider.unavailableReasonCode"),
     }),
     models,
     systemFamily: Object.freeze({
@@ -183,13 +185,14 @@ export function sanitizeModelCatalogSnapshot(snapshot) {
   });
 }
 
-export function unavailableModelCatalogSnapshot(adapter, reason) {
+export function unavailableModelCatalogSnapshot(adapter, reason, code = "provider_unavailable") {
   return sanitizeModelCatalogSnapshot({
     provider: {
       id: adapter.providerId,
       label: adapter.providerLabel,
       status: "unavailable",
       unavailableReason: reason instanceof Error ? reason.message : String(reason || "Provider catalog is unavailable."),
+      unavailableReasonCode: code,
     },
     models: [],
     systemFamily: {
@@ -208,7 +211,7 @@ export function toProductCatalogSnapshot(snapshot) {
     connected: sanitized.provider.status === "available",
     ...(sanitized.provider.status === "unavailable" ? {
       unavailableReason: Object.freeze({
-        code: "provider_unavailable",
+        code: sanitized.provider.unavailableReasonCode ?? "provider_unavailable",
         message: sanitized.provider.unavailableReason,
       }),
     } : {}),
@@ -238,6 +241,7 @@ export function toProductCatalogSnapshot(snapshot) {
         supportsPersonality: model.supportsPersonality,
         serviceTiers: model.serviceTiers,
         defaultServiceTier: model.defaultServiceTier,
+        displayOrder: model.displayOrder,
         catalogSource: model.catalogSource,
       }),
     }))),

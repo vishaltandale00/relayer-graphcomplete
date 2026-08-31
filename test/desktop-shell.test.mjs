@@ -1412,11 +1412,21 @@ describe("desktop skeleton", () => {
     const accountEvents = [];
     let loginNumber = 0;
     let account = null;
+    let failNextAccountRead = false;
     const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), killed: false, kill: vi.fn() });
     child.stdin = new Writable({ write(chunk, _encoding, callback) {
       const request = JSON.parse(String(chunk));
       methods.push(request.method);
       if (request.method === "never-respond") { callback(); return; }
+      if (request.method === "account/read" && failNextAccountRead) {
+        failNextAccountRead = false;
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({
+          id: request.id,
+          error: { message: "temporary account read failure" },
+        })}\n`));
+        callback();
+        return;
+      }
       const result = request.method === "account/login/start"
         ? { loginId: `login-${++loginNumber}`, authUrl: `https://example.test/login-${loginNumber}` }
         : request.method === "account/login/cancel" ? { status: "canceled" }
@@ -1449,6 +1459,9 @@ describe("desktop skeleton", () => {
       "account/login/cancel", "account/login/start",
     ]);
 
+    failNextAccountRead = true;
+    expect(await client.account()).toEqual({ status: "pending", account: null });
+
     child.stdout.write(`${JSON.stringify({ method: "account/login/completed", params: { loginId: "login-1" } })}\n`);
     await new Promise((resolve) => setImmediate(resolve));
     expect(accountEvents).toEqual([]);
@@ -1459,6 +1472,8 @@ describe("desktop skeleton", () => {
     child.stdout.write(`${JSON.stringify({ method: "account/login/completed", params: { loginId: "login-3" } })}\n`);
     await new Promise((resolve) => setImmediate(resolve));
     expect(accountEvents.at(-1)).toMatchObject({ status: "changed" });
+    failNextAccountRead = true;
+    expect(await client.account()).toEqual({ status: "pending", account: null });
     expect(await client.account()).toEqual({ status: "connected", account });
 
     await expect(client.request("never-respond", {}, 5)).rejects.toThrow("Codex request timed out");

@@ -58,6 +58,9 @@ if (scene === "removed") {
   definitions[0].lifecycleState = "removal_pending";
 }
 window.__providerEvidence = { get definitions() { return definitions; } };
+Object.defineProperty(window.__providerEvidence, "providerSettingsStatusFocused", {
+  get: () => document.activeElement === document.querySelector("#providerSettingsStatus"),
+});
 let accountLoginCalls = 0;
 Object.defineProperty(window.__providerEvidence, "accountLoginCalls", { get: () => accountLoginCalls });
 const listeners = new Set();
@@ -105,9 +108,19 @@ window.relayerDesktop = {
       definitions = scene === "flow" ? [...definitions.filter(({ id }) => id !== definition.id), definition] : [definition];
       return { status: "connected", providerDefinition: definition };
     },
-    completeConnection: async () => scene === "authorization"
-      ? { status: "pending", connectionId: "authorization-1", login: { kind: "browser" } }
-      : { status: "connected", providerDefinition: definitions[0] },
+    reconnect: async (id) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      return { status: "pending", connectionId: id, login: { kind: "browser" } };
+    },
+    completeConnection: async (connectionId) => {
+      if (scene === "authorization") {
+        return { status: "pending", connectionId: "authorization-1", login: { kind: "browser" } };
+      }
+      definitions = definitions.map((definition) => definition.id === connectionId
+        ? { ...definition, connected: true, unavailableReason: null }
+        : definition);
+      return { status: "connected", providerDefinition: definitions.find(({ id }) => id === connectionId) ?? definitions[0] };
+    },
     cancelConnection: async () => ({ cancelled: true }),
     rename: async (id, label) => ({ ...definitions.find((item) => item.id === id), label }),
     logout: async (id) => {
@@ -206,7 +219,16 @@ async function prepareScene() {
       if (scene === "family") {
         (await waitFor('[data-onboarding-harness="universal-coding"]')).click();
         (await waitFor('[data-onboarding-family-kind="create"]')).click();
-        await waitFor('[data-onboarding-member-model="gpt-5.2"]');
+        const search = await waitFor("[data-onboarding-model-search]");
+        search.value = "gpt";
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+        await waitForCondition(
+          () => [...document.querySelectorAll("[data-onboarding-member-model]")]
+            .map((input) => input.dataset.onboardingMemberModel)
+            .join(",") === "gpt-5.6,gpt-5.2"
+            && document.activeElement === document.querySelector("[data-onboarding-model-search]"),
+          "ordered onboarding models with retained search focus",
+        );
       }
     }
     if (scene === "loading") {
@@ -248,7 +270,35 @@ async function prepareScene() {
     (await waitFor("#settingsButton")).click();
     const tab = ["families", "stale"].includes(scene) ? "models" : scene === "harnesses" ? "harnesses" : "providers";
     (await waitFor(`[data-settings-tab="${tab}"]`)).click();
-    document.activeElement?.blur();
+    if (scene === "families") {
+      (await waitFor("[data-family-edit]"))?.click();
+      await waitForCondition(
+        () => document.querySelector('[data-member-model-combobox="0"] summary')?.textContent.includes("GPT-5.2"),
+        "existing family model selection preserved",
+      );
+      (await waitFor("#cancelFamilyEdit")).click();
+      (await waitFor("#newModelFamily")).click();
+      await waitForCondition(
+        () => document.querySelector('[data-member-model-combobox="0"] summary')?.textContent.includes("GPT-5.6"),
+        "new family starts with newest provider model",
+      );
+      (await waitFor('[data-member-model-combobox="0"] summary')).click();
+      const search = await waitFor('[data-member-model-search][data-member-model-provider="openai-work"]');
+      search.focus();
+      search.value = "gpt";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const orderedModels = [...document.querySelectorAll('[data-member-model-options="0"] [data-member-model-option]')]
+        .map((option) => option.dataset.memberModelOption);
+      if (orderedModels.join(",") !== "gpt-5.6,gpt-5.2") {
+        throw new Error(`Settings model evidence mismatch: ${JSON.stringify({ orderedModels })}`);
+      }
+      search.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const picker = document.querySelector('[data-member-model-combobox="0"]');
+      if (picker.open) throw new Error("Model picker Escape did not close the disclosure.");
+    }
+    if (scene !== "families") document.activeElement?.blur();
   }
   if (scene === "recovery") {
     await waitFor("#threadPrompt");

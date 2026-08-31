@@ -116,6 +116,7 @@ describe("provider browser evidence", () => {
         captureFps: 6,
         frameWidth: 1280,
         frameHeight: 800,
+        interactions: ["click", "type", "validate", "save", "logout", "reconnect", "refresh", "select", "retry"],
       });
       expect(manifest.recording.frameCount).toBeGreaterThanOrEqual(60);
 

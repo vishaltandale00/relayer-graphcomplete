@@ -28,7 +28,7 @@ function requiredSecret(values, field) {
   return value;
 }
 
-function normalizeModel(value, index, modelEligibility) {
+function normalizeModel(value, index, modelEligibility, displayOrder) {
   const id = typeof value?.id === "string" ? value.id : null;
   if (!id) throw new Error(`Provider catalog model ${index} has no stable id.`);
   const label = typeof value.name === "string" && value.name.trim() !== ""
@@ -63,7 +63,16 @@ function normalizeModel(value, index, modelEligibility) {
     supportsPersonality: false,
     serviceTiers: [],
     defaultServiceTier: null,
+    displayOrder,
   };
+}
+
+export function orderModelsByReleaseTimestamp(models, releaseTimestamp) {
+  const timestamps = models.map(releaseTimestamp);
+  if (!timestamps.every(Number.isFinite)) return models;
+  return models.map((model, index) => ({ model, index }))
+    .sort((left, right) => timestamps[right.index] - timestamps[left.index] || left.index - right.index)
+    .map(({ model }) => model);
 }
 
 function modelArray(payload) {
@@ -87,6 +96,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     runtimeId,
     environment,
     modelEligibility = () => MODEL_CAPABILITY_UNKNOWN,
+    newestModelsFirst = (models) => models,
   }) {
     super({ providerId: definition.id, providerLabel: definition.label });
     if (typeof fetchImplementation !== "function") throw new Error("API provider adapter requires fetch().");
@@ -104,6 +114,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     this.managedRuntime = requireManagedRuntime(managedRuntime, runtimeId);
     this.runtimeExecution = managedRuntimeExecutionDetails(this.managedRuntime, environment);
     this.modelEligibility = modelEligibility;
+    this.newestModelsFirst = newestModelsFirst;
   }
 
   async discover({ signal } = {}) {
@@ -147,7 +158,13 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
       throw new Error("Provider returned a malformed model catalog.");
     }
     const providerModels = modelArray(payload);
-    const models = providerModels.map((model, index) => normalizeModel(model, index, this.modelEligibility));
+    const displayOrder = new Map(this.newestModelsFirst([...providerModels]).map((model, index) => [model.id, index]));
+    const models = providerModels.map((model, index) => normalizeModel(
+      model,
+      index,
+      this.modelEligibility,
+      displayOrder.get(model.id) ?? index,
+    ));
     if (models.length === 0) throw new Error("Provider did not report any visible models.");
     const snapshot = sanitizeModelCatalogSnapshot({
       provider: { id: this.providerId, label: this.providerLabel, status: "available", unavailableReason: null },

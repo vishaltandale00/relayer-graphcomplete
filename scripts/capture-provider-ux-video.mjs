@@ -38,7 +38,7 @@ const variants = [
   { scene: "error", caption: "Authentication error", width: 1280, required: ["Authentication failed", "Check the API key"] },
   { scene: "unavailable", caption: "Unavailable provider", width: 1280, required: ["Connection unavailable", "OpenAI Work"] },
   { scene: "stale", caption: "Stale catalog member", width: 1280, required: ["This model is no longer in the provider catalog", "Work coding"] },
-  { scene: "removed", caption: "Provider removal in progress", width: 1280, required: ["Finishing removal", "Removing"] },
+  { scene: "removed", caption: "Provider removal in progress", width: 1280, required: ["Removing"] },
   { scene: "no-compatible", caption: "No compatible harness recovery", width: 1280, required: ["No compatible harness", "Connect another provider", "OpenAI Work"] },
   { scene: "authorization", caption: "Authorization pending", width: 1280, required: ["Complete sign-in in your browser", "Claude subscription"] },
 ];
@@ -151,6 +151,14 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
         if (readiness === "pending") await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
       }
       if (readiness !== "ready") throw new Error(`Evidence page did not become ready (${readiness}).`);
+      await cdp.call("Runtime.evaluate", {
+        expression: `(() => {
+          const onboarding = document.querySelector("#desktopAccountOnboarding");
+          const dismiss = document.querySelector("#desktopAccountOnboardingNotNow");
+          if (!onboarding?.classList.contains("hidden") && dismiss) dismiss.click();
+        })()`,
+      });
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
       const screenshot = await cdp.call("Page.captureScreenshot", { format: "png", fromSurface: true });
       await writeFile(frame, Buffer.from(screenshot.data, "base64"));
       const dom = await cdp.call("Runtime.evaluate", {
@@ -288,7 +296,7 @@ async function recordBrowserFlow(url, directory, profile) {
       await waitFor("!document.querySelector('#providerFamilyStep').classList.contains('hidden')", "default family step");
       await caption("2 · Confirm a compatible harness and explicitly create a family");
       await click('[data-onboarding-family-kind="create"]');
-      await click('[data-onboarding-member-model="gpt-5.2-mini"]');
+      await click('[data-onboarding-member-model="gpt-5.6"]');
       await click("#finishProviderSetup");
       await waitFor(`(() => {
         const accountStep = document.querySelector('#desktopAccountOnboarding');
@@ -321,7 +329,7 @@ async function recordBrowserFlow(url, directory, profile) {
       await waitFor(`(() => {
         const picker = document.querySelector('[data-model-picker="new"]');
         return picker?.querySelector('[data-model-family]')?.value === '21'
-          && picker.querySelector('[data-model-option][data-provider-id="openai-work"][data-model-id="gpt-5.2-mini"]')?.getAttribute('aria-checked') === 'true';
+          && picker.querySelector('[data-model-option][data-provider-id="openai-work"][data-model-id="gpt-5.6"]')?.getAttribute('aria-checked') === 'true';
       })()`, "onboarded family available in chat before opening Settings");
 
       await caption("5 · Add and sign out a managed subscription");
@@ -337,10 +345,41 @@ async function recordBrowserFlow(url, directory, profile) {
       await waitFor("document.querySelector('[data-provider-definition=\"claude-work\"]')", "managed provider card");
       await click('[data-provider-logout="claude-work"]');
       await waitFor("document.querySelector('[data-provider-definition=\"claude-work\"]')?.textContent.includes('Connection unavailable')", "managed logout status");
+      await caption("6 · Reconnect exposes progress and preserves the provider identity");
+      await click('[data-provider-reconnect="claude-work"]');
+      await waitFor("document.querySelector('[data-provider-reconnect=\"claude-work\"]')?.textContent.includes('Reconnecting')", "managed reconnect starting state");
+      await capture(8);
+      await waitFor(`(() => {
+        const card = document.querySelector('[data-provider-definition="claude-work"]');
+        return card?.textContent.includes('Waiting for sign-in') && document.activeElement === card;
+      })()`, "managed reconnect waiting state with retained focus");
+      await capture(8);
+      await waitFor(`(() => {
+        const status = document.querySelector('#providerSettingsStatus');
+        return status?.textContent.includes('Provider reconnected')
+          && document.querySelector('[data-provider-definition="claude-work"]')?.textContent.includes('Connected')
+          && document.activeElement === status;
+      })()`, "managed reconnect success with focus on the durable status");
+      await capture(5);
       await click("#refreshProviderCatalogs");
       await waitFor("document.querySelector('#providerSettingsStatus')?.textContent.includes('refreshed')", "manual provider refresh");
 
-      await caption("6 · Confirm the currently usable harnesses");
+      await caption("7 · New families start newest-first with integrated model search");
+      await click('[data-settings-tab="models"]');
+      await click("#newModelFamily");
+      await waitFor("document.querySelector('[data-member-model-combobox=\"0\"] summary')?.textContent.includes('GPT-5.6')", "newest provider model selected for new family");
+      await click('[data-member-model-combobox="0"] summary');
+      await type('[data-member-model-search="0"]', ["gpt-", "5.6"]);
+      await waitFor(`(() => {
+        const options = [...document.querySelectorAll('[data-member-model-options="0"] [data-member-model-option]')];
+        return options.length === 1 && options[0].dataset.memberModelOption === 'gpt-5.6';
+      })()`, "searchable newest-first model results");
+      await capture(7);
+      await click('[data-member-model-option="gpt-5.6"]');
+      await waitFor("document.activeElement === document.querySelector('[data-member-model-combobox=\"0\"] summary')", "model selection returns focus to picker");
+      await click("#cancelFamilyEdit");
+
+      await caption("8 · Confirm the currently usable harnesses");
       await click('[data-settings-tab="harnesses"]');
       await waitFor(`(() => {
         const list = document.querySelector('#harnessConfigurationList');
@@ -351,7 +390,7 @@ async function recordBrowserFlow(url, directory, profile) {
       })()`, "read-only usable harness list");
       await capture(8);
 
-      await caption("7 · Edit, reselect, and retry the same unsent turn");
+      await caption("9 · Edit, reselect, and retry the same unsent turn");
       await click("#settingsBackButton");
       await click('[data-thread="1"]');
       await waitFor("document.querySelector('#composerRetryMessage:not(.hidden)') && !document.querySelector('#threadPrompt').disabled", "editable restored draft");
@@ -436,12 +475,13 @@ const modelSettings = (scene) => ({
         {
           id: "gpt-5.2",
           label: "GPT-5.2",
+          displayOrder: 1,
           visible: true,
           available: scene !== "stale",
           unavailableReason: scene === "stale" ? "This model is no longer in the provider catalog." : null,
           providerDefault: true,
         },
-        { id: "gpt-5.2-mini", label: "GPT-5.2 mini", visible: true, available: true },
+        { id: "gpt-5.6", label: "GPT-5.6", displayOrder: 0, visible: true, available: true },
       ],
     },
     {
@@ -472,7 +512,7 @@ const modelSettings = (scene) => ({
       enabled: true,
       position: 1,
       revision: 1,
-      members: [{ providerId: "openai-work", modelId: "gpt-5.2-mini", position: 0 }],
+      members: [{ providerId: "openai-work", modelId: "gpt-5.6", position: 0 }],
     },
     ...(scene === "flow" && flowState.family ? [flowState.family] : []),
   ],
@@ -529,8 +569,8 @@ const onboardingProjection = (scene, providerId = "openai-work") => ({
       existingCustomFamilies: [],
       existingManagedFamilies: [],
       eligibleModels: [
-        { providerId, modelId: "gpt-5.2", label: "GPT-5.2" },
-        { providerId, modelId: "gpt-5.2-mini", label: "GPT-5.2 mini" },
+        { providerId, modelId: "gpt-5.2", label: "GPT-5.2", displayOrder: 1 },
+        { providerId, modelId: "gpt-5.6", label: "GPT-5.6", displayOrder: 0 },
       ],
     },
     ...(scene === "family" ? [{
@@ -543,8 +583,8 @@ const onboardingProjection = (scene, providerId = "openai-work") => ({
       existingCustomFamilies: [],
       existingManagedFamilies: [],
       eligibleModels: [
-        { providerId, modelId: "gpt-5.2", label: "GPT-5.2" },
-        { providerId, modelId: "gpt-5.2-mini", label: "GPT-5.2 mini" },
+        { providerId, modelId: "gpt-5.2", label: "GPT-5.2", displayOrder: 1 },
+        { providerId, modelId: "gpt-5.6", label: "GPT-5.6", displayOrder: 0 },
       ],
     }] : []),
     {
@@ -775,7 +815,7 @@ try {
       endpoint: ["Endpoint", "gateway.example.com/openai/v1"],
       family: ["Choose your default model family", "GPT-5.2"],
       "alternate-harness": ["Choose your default model family", "Claude basic", "Claude Sonnet"],
-      providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Default provider"],
+      providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Edit connection"],
       families: ["Work coding", "Fast review", "GPT-5.6 Sol"],
       harnesses: ["Harnesses", "Codex basic", "Default harness"],
       recovery: ["OpenAI Work is rate limited", "Review the provider adapter architecture"],
@@ -867,7 +907,7 @@ try {
       frameWidth: 1280,
       frameHeight: 800,
       ...recordedFrames,
-      interactions: ["click", "type", "validate", "save", "logout", "refresh", "select", "retry"],
+      interactions: ["click", "type", "validate", "save", "logout", "reconnect", "refresh", "select", "retry"],
       mockedBoundaries: ["provider registry", "provider authentication", "model catalog", "product API", "retry execution"],
     },
     scenes: Object.fromEntries(await Promise.all(scenes.map(async ([scene, caption]) => [

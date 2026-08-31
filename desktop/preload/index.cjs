@@ -117,6 +117,7 @@ if (contextBridge) contextBridge.exposeInMainWorld("relayerDesktop", {
   models: {
     settingsOpened: () => ipcRenderer.invoke("relayer:model-catalog-settings-open"),
     refresh: (providerId) => ipcRenderer.invoke("relayer:model-catalog-refresh", providerId),
+    connectivityChanged: (online) => ipcRenderer.invoke("relayer:provider-connectivity", online === true),
   },
   providers: {
     status: () => ipcRenderer.invoke("relayer:provider-status"),
@@ -126,6 +127,8 @@ if (contextBridge) contextBridge.exposeInMainWorld("relayerDesktop", {
     rename: (id, label) => ipcRenderer.invoke("relayer:provider-rename", { id, label }),
     logout: (id) => ipcRenderer.invoke("relayer:provider-logout", { id }),
     reconnect: (id) => ipcRenderer.invoke("relayer:provider-reconnect", { id }),
+    retry: (id) => ipcRenderer.invoke("relayer:provider-retry", { id }),
+    edit: (id, input) => ipcRenderer.invoke("relayer:provider-edit", { id, ...input }),
     remove: (id) => ipcRenderer.invoke("relayer:provider-remove", { id }),
     completeOnboarding: () => ipcRenderer.invoke("relayer:provider-onboarding-complete"),
     onChanged: (callback) => subscribe("relayer:providers-changed", callback),

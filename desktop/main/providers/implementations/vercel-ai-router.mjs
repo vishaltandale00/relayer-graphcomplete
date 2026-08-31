@@ -4,12 +4,20 @@ import {
   MODEL_NOT_EXECUTION_ELIGIBLE,
   SecretApiProviderAdapter,
   bearerHeaders,
+  orderModelsByReleaseTimestamp,
 } from "./api-provider-adapter.mjs";
 
 function vercelModelEligibility(model) {
   if (model?.type === "language") return EXECUTION_ELIGIBLE;
   if (["embedding", "image", "video"].includes(model?.type)) return MODEL_NOT_EXECUTION_ELIGIBLE;
   return MODEL_CAPABILITY_UNKNOWN;
+}
+
+export function newestVercelModelsFirst(models) {
+  return orderModelsByReleaseTimestamp(models, (model) => {
+    const timestamp = model?.released ?? model?.created;
+    return typeof timestamp === "number" ? timestamp : Number.NaN;
+  });
 }
 
 function tokenCapabilities(model) {
@@ -34,6 +42,7 @@ export const vercelAiRouterDescriptor = Object.freeze({
     definition, fetch, credentials: { apiKey: secrets?.["api-key"] }, headers: bearerHeaders,
     modelCapabilities: tokenCapabilities,
     modelEligibility: vercelModelEligibility,
+    newestModelsFirst: newestVercelModelsFirst,
     requireCatalogBeforeExecution: true,
     managedRuntime, runtimeId: "codex", environment,
   }),

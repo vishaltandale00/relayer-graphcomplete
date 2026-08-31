@@ -4,11 +4,11 @@ import {
   loadProviderOnboardingProjection,
 } from "./model-settings-api.js";
 import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
+import { createProviderConnectionAttemptController } from "./provider-connection-attempt.js";
 import {
   providerOnboardingCompletionIntent,
   providerOnboardingRecoveryAction,
   createProviderOnboardingProjectionGate,
-  createProviderConnectionCancellationState,
   reconcileProviderOnboardingState,
   resolveProviderOnboardingStep,
   resumableProviderDefinitions,
@@ -31,10 +31,24 @@ let connectedDefinition;
 let onboardingHarness;
 let onboardingFamilyIntent;
 let onboardingProjection;
+const onboardingModelSearchByProvider = new Map();
 const onboardingProjectionGate = createProviderOnboardingProjectionGate();
 let bound = false;
-const connectionCancellation = createProviderConnectionCancellationState();
 let refreshProductAfterOnboarding = async () => {};
+
+const providerConnection = desktop?.providers ? createProviderConnectionAttemptController({
+  providers: desktop.providers,
+  onPending: () => setStatus("Complete sign-in in your browser. Relayer will continue automatically."),
+  onStateChange: (attempt) => {
+    if (attempt.phase === "starting") {
+      setBusy(true);
+      setStatus(`Preparing ${selectedDescriptor.label} runtime and connecting…`);
+    }
+    if (attempt.phase === "waiting_for_sign_in") {
+      setStatus("Complete sign-in in your browser. Relayer will continue automatically.");
+    }
+  },
+}) : null;
 
 export function setProviderOnboardingCompletionHandler(handler) {
   if (typeof handler !== "function") throw new TypeError("Provider onboarding completion handler must be a function.");
@@ -190,6 +204,14 @@ function bindOnboardingChoices({ focus } = {}) {
     onboardingFamilyIntent.name = event.target.value;
     $("#finishProviderSetup").disabled = !finishIntentValid();
   });
+  $("[data-onboarding-model-search]")?.addEventListener("input", (event) => {
+    onboardingModelSearchByProvider.set(connectedDefinition.id, event.target.value);
+    renderOnboardingChoices({ focus: "model-search" });
+  });
+  $("[data-onboarding-model-search-clear]")?.addEventListener("click", () => {
+    onboardingModelSearchByProvider.set(connectedDefinition.id, "");
+    renderOnboardingChoices({ focus: "model-search" });
+  });
   $$('[data-onboarding-member-model]', $("#onboardingFamilyOptions")).forEach((input) => {
     input.onchange = () => {
       const member = { providerId: input.dataset.onboardingMemberProvider, modelId: input.dataset.onboardingMemberModel };
@@ -200,14 +222,18 @@ function bindOnboardingChoices({ focus } = {}) {
       $("#finishProviderSetup").disabled = !finishIntentValid();
     };
   });
-  if (focus) requestAnimationFrame(() => $(`#onboarding${focus === "harness" ? "Harness" : "Family"}Options [aria-checked=true]`)?.focus());
+  if (focus === "harness" || focus === "family") {
+    requestAnimationFrame(() => $(`#onboarding${focus === "harness" ? "Harness" : "Family"}Options [aria-checked=true]`)?.focus());
+  }
 }
 
 function renderOnboardingChoices({ focus } = {}) {
   $("#onboardingHarnessOptions").innerHTML = onboardingHarnessOptionsMarkup(onboardingProjection, onboardingHarness);
   const harness = chosenHarness();
   $("#onboardingFamilyOptions").innerHTML = harness
-    ? onboardingFamilyOptionsMarkup(harness, onboardingFamilyIntent ?? {})
+    ? onboardingFamilyOptionsMarkup(harness, onboardingFamilyIntent ?? {}, {
+      modelSearch: onboardingModelSearchByProvider.get(connectedDefinition.id) ?? "",
+    })
     : `<p class="field-error" role="alert">${onboardingProjection.blockingReason?.message ?? "Choose a compatible harness to continue."}</p>`;
   $("#finishProviderSetup").disabled = !finishIntentValid();
   const recovery = providerOnboardingRecoveryAction(onboardingProjection);
@@ -215,6 +241,11 @@ function renderOnboardingChoices({ focus } = {}) {
   recoveryButton.classList.toggle("hidden", recovery === null);
   recoveryButton.textContent = recovery?.label ?? "Refresh models and set up defaults";
   bindOnboardingChoices({ focus });
+  if (focus === "model-search") requestAnimationFrame(() => {
+    const search = $("[data-onboarding-model-search]");
+    search?.focus();
+    search?.setSelectionRange(search.value.length, search.value.length);
+  });
 }
 
 async function prepareFamilyStep(definition, { preserveIntent = false } = {}) {
@@ -249,30 +280,18 @@ async function prepareFamilyStep(definition, { preserveIntent = false } = {}) {
 
 async function connectSelectedProvider(event) {
   event?.preventDefault();
-  if (!selectedDescriptor || !desktop?.providers) return;
+  if (!selectedDescriptor || !providerConnection) return;
   connectionValues = currentFormValues();
   const errors = providerConnectionErrors(selectedDescriptor, connectionValues, providerStatus.definitions);
   if (Object.keys(errors).length) return showProviderForm(selectedDescriptor.adapterId, { showErrors: true });
-  const connectionId = crypto.randomUUID().toLowerCase();
-  if (!connectionCancellation.begin(connectionId)) return;
-  setBusy(true);
-  setStatus(`Preparing ${selectedDescriptor.label} runtime and connecting…`);
   try {
-    let result = await desktop.providers.connect(providerCreationPayload(
+    const outcome = await providerConnection.connect(providerCreationPayload(
       selectedDescriptor,
       connectionValues,
-      { connectionId },
     ));
-    if (!connectionCancellation.matches(connectionId)) return;
-    if (result.status === "pending" && !connectionCancellation.transition(connectionId, result.connectionId)) return;
-    while (result.status === "pending" && connectionCancellation.matches(result.connectionId)) {
-      setStatus("Complete sign-in in your browser. Relayer will continue automatically.");
-      await new Promise((resolve) => setTimeout(resolve, 750));
-      if (!connectionCancellation.matches(result.connectionId)) return;
-      result = await desktop.providers.completeConnection(result.connectionId);
-    }
+    if (outcome.status !== "settled") return;
+    const { result } = outcome;
     if (result.status !== "connected") return;
-    connectionCancellation.complete();
     // Provider state has committed. Cancel no longer has a reversible operation
     // to target, so do not accept it while defaults and product state refresh.
     setConnectionCancellationAvailable(false);
@@ -280,8 +299,7 @@ async function connectSelectedProvider(event) {
     providerStatus = await desktop.providers.status();
     await prepareFamilyStep(connectedDefinition);
   } catch (error) {
-    if (!connectionCancellation.matches(connectionId) && error.message === "Provider connection was cancelled.") return;
-    connectionCancellation.complete();
+    if (!providerConnection.current() && error.message === "Provider connection was cancelled.") return;
     setStatus(error.message, "error");
     showProviderForm(selectedDescriptor.adapterId);
   } finally {
@@ -296,14 +314,12 @@ function bindProviderSetup() {
   $("#providerSetupBack").onclick = showProviderOptions;
   $("#providerFamilyBack").onclick = showProviderOptions;
   $("#cancelProviderConnection").onclick = async () => {
-    if (!connectionCancellation.current()) {
+    if (!providerConnection?.current()) {
       setBusy(false);
       showProviderOptions();
       return;
     }
-    const result = await connectionCancellation.cancel((connectionId) => (
-      desktop.providers.cancelConnection(connectionId)
-    ));
+    const result = await providerConnection.close();
     if (result.error) {
       setStatus("Relayer could not confirm cancellation. The provider connection is still running.", "error");
       return;
