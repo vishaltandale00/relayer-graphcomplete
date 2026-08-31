@@ -354,6 +354,17 @@ run under an X server (for example `DISPLAY=:1`) and make the bundled
 `chrome-sandbox` setuid-root (`sudo chown root:root` and `chmod 4755` on
 `node_modules/electron/dist/chrome-sandbox`).
 
+Connecting a provider stores its credential through Electron `safeStorage`, which
+needs an OS Secret Service. A headless Linux box usually has none, so run the app
+inside a D-Bus session with an unlocked keyring, for example:
+
+```sh
+dbus-run-session -- bash -lc '
+  printf "dev\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
+  DISPLAY=:1 npm run desktop:dev
+'
+```
+
 ## License
 
 Apache-2.0
