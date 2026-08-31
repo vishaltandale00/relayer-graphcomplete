@@ -1145,8 +1145,6 @@ impl ProductService {
                 })?;
             let submitted_input_draft_matches = if command.input_draft_revision.is_some() {
                 durable.submitted_input_draft_revision == command.input_draft_revision
-            } else if durable.submitted_inputs.is_empty() {
-                durable.submitted_input_draft_revision.is_none()
             } else {
                 self.storage
                     .action_input_draft(thread_id)
@@ -2857,6 +2855,66 @@ mod tests {
         assert_eq!(
             service.action_input_draft(empty_thread.id).await.unwrap(),
             replaced_draft
+        );
+
+        let omitted_thread = storage
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Omitted replay input authority",
+                project_id: None,
+                initial_message: "Initial",
+                harness_configuration_name: "fixture-task-system",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "2026-08-31T00:00:00Z",
+            })
+            .await
+            .unwrap();
+        let omitted_send = || CreateIdentifiedInteractionCommand {
+            text: "Prepare without inspecting the input draft",
+            input_identity: "send:omitted-replay",
+            contexts: &[],
+            context_snapshots: &[],
+            context_confirmation_ids: &[],
+            input_draft_revision: None,
+            model_selection: None,
+            allow_unselected_model: true,
+        };
+        service
+            .create_identified_interaction(omitted_thread.id, omitted_send())
+            .await
+            .unwrap();
+        assert!(matches!(
+            service
+                .create_identified_interaction(omitted_thread.id, omitted_send())
+                .await
+                .unwrap(),
+            crate::storage::InteractionInputInsertOutcome::Existing(_)
+        ));
+        let omitted_new_draft = storage
+            .commit_action_input_attachment(
+                omitted_thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &first_value,
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        let omitted_error = service
+            .create_identified_interaction(omitted_thread.id, omitted_send())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            omitted_error,
+            ProductError::Invalid(message)
+                if message == "interaction input identity was reused with different content"
+        ));
+        assert_eq!(
+            service.action_input_draft(omitted_thread.id).await.unwrap(),
+            omitted_new_draft
         );
     }
 
