@@ -8,6 +8,7 @@ import {
   onboardingHarnessOptionsMarkup,
   providerConnectionFormMarkup,
   providerDefinitionsMarkup,
+  providerEditConnectionFormMarkup,
   providerLogoMarkup,
   providerOptionsMarkup,
   rovingRadioIndex,
@@ -71,6 +72,17 @@ describe("provider and harness renderer markup", () => {
     expect(markup).toContain('aria-invalid="true" aria-describedby="endpointError"');
     expect(markup).toContain('id="endpointError" role="alert"');
     expect(markup).not.toContain('type="text" value="" required  aria-invalid="true" aria-describedby="apiKeyError"');
+  });
+
+  it("renders API editing without revealing or prefilling the saved credential", () => {
+    const markup = providerEditConnectionFormMarkup(openAi, {
+      id: "work", label: "OpenAI Work", endpoint: "https://api.openai.com/v1",
+    }, { endpoint: "https://api.openai.com/v1", fields: {} });
+    expect(markup).toContain("A credential is saved");
+    expect(markup).toContain("Replace API key");
+    expect(markup).toContain('type="password" value=""');
+    expect(markup).not.toContain("sk-");
+    expect(markup).not.toContain("Connection name");
   });
 
   it("uses native keyboard-reachable controls for every provider choice", () => {
@@ -181,11 +193,32 @@ describe("provider and harness renderer markup", () => {
     const markup = providerDefinitionsMarkup([
       { id: "work", adapterId: "openai-api", adapterLabel: "OpenAI API", label: "OpenAI Work", endpoint: "https://api.openai.com/v1", accessContract: "secret@1", lifecycleState: "active" },
       { id: "personal", adapterId: "openai-api", adapterLabel: "OpenAI API", label: "OpenAI Personal", endpoint: "https://api.openai.com/v1", accessContract: "secret@1", lifecycleState: "active" },
-    ], { providerId: "work" });
+    ], { providerId: "work" }, [
+      { adapterId: "openai-api", connection: { mode: "secret-fields" } },
+    ]);
     expect(markup).toContain("OpenAI Work");
     expect(markup).toContain("OpenAI Personal");
-    expect(markup).toContain("Change the default provider before removing");
-    expect(markup).toContain('data-provider-remove="work" disabled');
+    expect(markup).toContain('data-provider-edit="work"');
+    expect(markup).not.toContain("Default provider");
+    expect(markup).not.toContain("Change the default provider before removing");
+    expect(markup).toContain('data-provider-remove="work"');
+  });
+
+  it("discloses only broad provider warnings and gives temporary outages a retry action", () => {
+    const markup = providerDefinitionsMarkup([{
+      id: "private-provider-uuid", adapterId: "openai-api", label: "OpenAI Work",
+      lifecycleState: "active", connected: false,
+      unavailableReason: {
+        code: "provider_temporarily_unavailable",
+        message: "raw upstream response with retry count 3",
+      },
+    }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
+    expect(markup).toContain("Temporarily unavailable");
+    expect(markup).toContain("Provider could not be reached");
+    expect(markup).toContain('data-provider-retry="private-provider-uuid"');
+    expect(markup).toContain('data-provider-edit="private-provider-uuid"');
+    expect(markup).not.toContain("raw upstream response");
+    expect(markup).not.toContain("retry count");
   });
 
   it("offers exact-definition sign out only for managed subscriptions", () => {
@@ -220,10 +253,11 @@ describe("provider and harness renderer markup", () => {
       },
     }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
 
-    expect(markup).toContain("Needs model setup");
-    expect(markup).toContain("No supported text models are available.");
+    expect(markup).toContain("Connected");
+    expect(markup).toContain("No usable models available");
     expect(markup).toContain('data-provider-family-recovery="openai-work"');
     expect(markup).toContain("Refresh models");
+    expect(markup).not.toContain("No supported text models are available.");
     expect(markup).not.toContain('data-provider-reconnect="openai-work"');
   });
 

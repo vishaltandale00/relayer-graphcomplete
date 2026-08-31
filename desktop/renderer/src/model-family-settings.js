@@ -52,7 +52,7 @@ function providerModel(providerId, modelId) {
 }
 
 function hydrateMember(member) {
-  const owner = provider(member.providerId) || { id: member.providerId, label: member.providerId };
+  const owner = provider(member.providerId) || { id: member.providerId, label: "Unavailable connection", connected: false };
   const model = providerModel(member.providerId, member.modelId) || {
     id: member.modelId,
     label: member.modelId,
@@ -60,6 +60,33 @@ function hydrateMember(member) {
     unavailableReason: "This model is no longer in the provider catalog.",
   };
   return modelMember(owner, model);
+}
+
+function familyWarning(family) {
+  const affectedProviders = new Map();
+  const missingModels = [];
+  for (const member of family.models) {
+    const owner = provider(member.providerId);
+    if (!owner || owner.connected === false) {
+      affectedProviders.set(member.providerId, {
+        id: member.providerId,
+        label: owner?.label ?? "Unavailable connection",
+        status: owner?.unavailableReason?.code === "provider_temporarily_unavailable"
+          ? "Temporarily unavailable"
+          : "Connection unavailable",
+      });
+    } else {
+      const catalogModel = providerModel(member.providerId, member.modelId);
+      const unavailableCode = typeof catalogModel?.unavailableReason === "object"
+        ? catalogModel.unavailableReason?.code
+        : null;
+      if (!catalogModel || catalogModel.available === false || unavailableCode === "model_not_reported") {
+        missingModels.push(member.modelLabel);
+      }
+    }
+  }
+  if (!affectedProviders.size && !missingModels.length) return "";
+  return `<span class="provider-warning family-warning" tabindex="0"><button type="button" class="provider-warning-trigger" aria-label="Model family status details" aria-expanded="false">!</button><span class="provider-warning-popover" role="tooltip">${[...affectedProviders.values()].map((item) => `<button type="button" data-family-warning-provider="${escapeHtmlAttribute(item.id)}"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.status)}</span></button>`).join("")}${missingModels.length ? `<span>${escapeHtml(missingModels.join(", "))}. This model is no longer in the provider catalog. Edit this family to choose available models.</span>` : ""}</span></span>`;
 }
 
 function normalizeSettings(response) {
@@ -189,10 +216,6 @@ function providerOptions(selectedProviderId) {
   }).join("");
 }
 
-function defaultProviderOptions() {
-  return providerOptions(settings.defaults.providerId);
-}
-
 function unavailableModelOption(member) {
   if (providerModel(member.providerId, member.modelId)) return "";
   return `<option value="${escapeHtmlAttribute(member.modelId)}" selected disabled>${escapeHtml(member.modelLabel)}</option>`;
@@ -223,7 +246,6 @@ function memberReadOnly(member, index) {
     <span class="member-order">${index + 1}</span>
     <span class="member-provider">${escapeHtml(member.providerLabel)}</span>
     <strong>${escapeHtml(member.modelLabel)}</strong>
-    ${unavailable ? `<span class="member-error">${escapeHtml(member.unavailableReason || "Unavailable")}</span>` : ""}
   </li>`;
 }
 
@@ -264,20 +286,22 @@ function familyEditor(family) {
 function familySlide(family, index) {
   if (family.draft || family.editing) return `<div class="family-slide" data-family-slide="${index}">${familyEditor(family)}</div>`;
   const system = family.kind === "system";
+  const isDefault = String(settings.defaults.familyId) === String(family.id);
   return `<div class="family-slide" data-family-slide="${index}">
     <article class="family-card">
       <div class="family-card-heading">
-        <div><h3>${escapeHtml(family.name)}</h3><span class="family-kind">${system ? "System" : "Custom"}</span></div>
-        <label class="family-enabled"><input type="checkbox" data-family-enabled="${index}" ${family.enabled ? "checked" : ""} ${familyVisibilityGate.isPending() ? "disabled" : ""} /><span>Enabled</span></label>
+        <div><h3>${escapeHtml(family.name)}</h3><span class="family-kind">${system ? "System" : "Custom"}</span>${familyWarning(family)}</div>
+        <div class="family-heading-actions">${isDefault ? `<span class="default-badge">Default</span>` : ""}<label class="family-enabled"><input type="checkbox" data-family-enabled="${index}" ${family.enabled ? "checked" : ""} ${familyVisibilityGate.isPending() || isDefault ? "disabled" : ""} /><span>Enabled</span></label></div>
       </div>
       <ol class="family-members">${family.models.map(memberReadOnly).join("")}</ol>
       <div class="family-card-actions">
         <button type="button" class="secondary" data-family-left="${index}" ${savingOrder || index === 0 ? "disabled" : ""}>← Move</button>
         <button type="button" class="secondary" data-family-right="${index}" ${savingOrder || index === settings.families.length - 1 ? "disabled" : ""}>Move →</button>
         <span class="push"></span>
+        ${!isDefault && family.enabled && family.models.some((member) => member.available) ? `<button type="button" class="secondary" data-family-default="${index}">Set as default</button>` : ""}
         ${system
           ? `<button type="button" class="secondary" data-family-copy="${index}">Copy</button>`
-          : `<button type="button" class="secondary" data-family-delete="${index}">Delete</button>
+          : `<button type="button" class="secondary" data-family-delete="${index}" ${isDefault ? "disabled" : ""}>Delete</button>
              <button type="button" class="secondary" data-family-edit="${index}">Edit</button>`}
       </div>
     </article>
@@ -287,9 +311,7 @@ function familySlide(family, index) {
 function render() {
   if (!settings) return;
   $("#defaultHarnessSelect").innerHTML = harnessOptions();
-  $("#defaultProviderSelect").innerHTML = defaultProviderOptions();
   $("#defaultHarnessSelect").disabled = savingDefaults;
-  $("#defaultProviderSelect").disabled = savingDefaults;
   const harnessError = defaultHarnessError(settings);
   $("#defaultHarnessError").textContent = harnessError ?? "";
   $("#defaultHarnessError").classList.toggle("hidden", !harnessError);
@@ -515,6 +537,33 @@ function bindRenderedEvents() {
   $$('[data-family-delete]').forEach((button) => {
     button.onclick = () => void deleteFamily(Number(button.dataset.familyDelete));
   });
+  $$('[data-family-default]').forEach((button) => {
+    button.onclick = () => void persistFamilyDefault(Number(button.dataset.familyDefault));
+  });
+  $$('[data-family-warning-provider]').forEach((button) => {
+    button.onclick = () => {
+      $("[data-settings-tab=\"providers\"]")?.click();
+      requestAnimationFrame(() => {
+        const card = $$('[data-provider-definition]').find((item) => item.dataset.providerDefinition === button.dataset.familyWarningProvider);
+        card?.focus?.();
+        card?.scrollIntoView?.({ block: "center" });
+      });
+    };
+  });
+  $$(".family-warning .provider-warning-trigger").forEach((button) => {
+    button.onclick = () => {
+      const warning = button.closest(".family-warning");
+      const open = !warning.classList.contains("open");
+      $$(".family-warning.open").forEach((item) => item.classList.remove("open"));
+      warning.classList.toggle("open", open);
+      button.setAttribute("aria-expanded", String(open));
+    };
+    button.onkeydown = (event) => {
+      if (event.key !== "Escape") return;
+      button.closest(".family-warning").classList.remove("open");
+      button.setAttribute("aria-expanded", "false");
+    };
+  });
   const current = settings.families[selectedFamilyIndex];
   if (current?.draft || current?.editing) bindEditorEvents(current);
 }
@@ -526,9 +575,7 @@ async function persistDefault(field) {
   }
   savingDefaults = true;
   const previous = { ...settings.defaults };
-  const candidate = field === "harnessId"
-    ? $("#defaultHarnessSelect").value
-    : $("#defaultProviderSelect").value;
+  const candidate = $("#defaultHarnessSelect").value;
   settings.defaults[field] = candidate;
   render();
   try {
@@ -551,9 +598,36 @@ async function persistDefault(field) {
   }
 }
 
+async function persistFamilyDefault(index) {
+  const family = settings.families[index];
+  if (!family || savingDefaults) return;
+  savingDefaults = true;
+  const previous = { ...settings.defaults };
+  settings.defaults.familyId = family.id;
+  render();
+  try {
+    await saveModelDefaults({ familyId: family.id });
+    await refreshModelSettings({ preserveEdit: true });
+    resetNewThreadModelPicker();
+    setStatus("Saved", "success");
+  } catch (error) {
+    settings.defaults = previous;
+    setStatus(error.message, "error");
+  } finally {
+    savingDefaults = false;
+    render();
+  }
+}
+
 function bindStaticEvents() {
+  document.addEventListener("click", (event) => {
+    if (event.target.closest?.(".family-warning")) return;
+    $$(".family-warning.open").forEach((item) => {
+      item.classList.remove("open");
+      item.querySelector(".provider-warning-trigger")?.setAttribute("aria-expanded", "false");
+    });
+  });
   $("#defaultHarnessSelect").onchange = () => persistDefault("harnessId");
-  $("#defaultProviderSelect").onchange = () => persistDefault("providerId");
   $("#previousFamily").onclick = () => chooseFamily(selectedFamilyIndex - 1);
   $("#nextFamily").onclick = () => chooseFamily(selectedFamilyIndex + 1);
   $("#newModelFamily").onclick = () => beginNewFamily();

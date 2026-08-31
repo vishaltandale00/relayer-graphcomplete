@@ -1,6 +1,7 @@
 import {
   sanitizeModelCatalogSnapshot,
   toProductCatalogSnapshot,
+  unavailableModelCatalogSnapshot,
 } from "./model-catalog-adapter.mjs";
 import { withProviderRetry } from "../providers/provider-retry.mjs";
 import { providerDiagnosticDetails } from "../providers/provider-diagnostics-log.mjs";
@@ -55,6 +56,7 @@ export class ModelCatalogService {
     backgroundIntervalMs = 15 * 60 * 1000,
     setTimer = setTimeout,
     clearTimer = clearTimeout,
+    isOnline = () => true,
   }) {
     if (!Array.isArray(adapters)) throw new Error("ModelCatalogService requires an adapter array.");
     if (typeof publishSnapshot !== "function") throw new Error("ModelCatalogService requires a snapshot publisher.");
@@ -71,6 +73,9 @@ export class ModelCatalogService {
     this.backgroundIntervalMs = backgroundIntervalMs;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
+    this.isOnline = isOnline;
+    this.online = true;
+    this.outageProviders = new Set();
     this.backgroundTimer = null;
     this.closed = false;
   }
@@ -86,6 +91,7 @@ export class ModelCatalogService {
 
   async refresh(providerId, reason = "explicit", { signal } = {}) {
     throwIfAborted(signal);
+    if (!this.online || !this.isOnline()) throw new Error("Device is offline.");
     const adapter = this.adapters.get(providerId);
     if (!adapter) throw new Error(`Unknown model provider: ${providerId}`);
     if (!REFRESH_REASONS.has(reason)) throw new Error(`Unknown model-catalog refresh reason: ${reason}`);
@@ -113,6 +119,18 @@ export class ModelCatalogService {
           reason,
           ...providerDiagnosticDetails(error),
         }).catch(() => undefined);
+        const code = String(error?.code ?? "");
+        const status = Number(error?.status);
+        const outage = status >= 500 && status <= 599
+          || ["transport", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN"].includes(code);
+        if (outage && this.online && this.isOnline()) {
+          this.outageProviders.add(providerId);
+          await this.publishSnapshot(toProductCatalogSnapshot(unavailableModelCatalogSnapshot(
+            adapter,
+            "Provider could not be reached",
+            "provider_temporarily_unavailable",
+          )), Object.freeze({ reason, signal: operationSignal }));
+        }
         throw error;
       }
       throwIfAborted(operationSignal);
@@ -120,6 +138,7 @@ export class ModelCatalogService {
         toProductCatalogSnapshot(snapshot),
         Object.freeze({ reason, signal: operationSignal }),
       );
+      this.outageProviders.delete(providerId);
       throwIfAborted(operationSignal);
       return snapshot;
     }).finally(() => {
@@ -176,5 +195,15 @@ export class ModelCatalogService {
   settingsOpened() { return this.refreshAll("settings-open"); }
   explicitRefresh(providerId) {
     return providerId === undefined ? this.refreshAll("explicit") : this.refresh(providerId, "explicit");
+  }
+  connectivityChanged(online) {
+    const wasOnline = this.online;
+    this.online = online === true;
+    if (!wasOnline && this.online) {
+      return Promise.allSettled([...this.outageProviders].map((providerId) => (
+        this.refresh(providerId, "background")
+      )));
+    }
+    return Promise.resolve([]);
   }
 }

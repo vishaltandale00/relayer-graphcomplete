@@ -45,19 +45,28 @@ export function providerDefinitionStatus(definition) {
     && definition?.unavailableReason?.code === "provider_no_eligible_execution_models";
   if (needsModelSetup) {
     return {
-      lifecycle: "needs_model_setup",
-      label: "Needs model setup",
-      usable: false,
+      lifecycle: "active",
+      label: "Connected",
+      reason: "No usable models available",
+      usable: true,
+      warning: true,
       recovery: "refresh_models",
     };
   }
   const lifecycle = PROVIDER_LIFECYCLES.has(persistedLifecycle)
     ? (persistedLifecycle === "active" && definition?.connected === false ? "unavailable" : persistedLifecycle)
     : definition?.connected === false ? "unavailable" : "active";
-  if (lifecycle === "removal_pending") return { lifecycle, label: "Finishing removal", usable: false };
+  if (lifecycle === "removal_pending") return { lifecycle, label: "Removing", reason: "Waiting for active chats to finish", usable: false };
   if (lifecycle === "tombstoned") return { lifecycle, label: "Removed provider", usable: false };
-  if (lifecycle === "unavailable") return { lifecycle, label: "Connection unavailable", usable: false };
-  return { lifecycle, label: "Connected", usable: true };
+  const code = definition?.unavailableReason?.code;
+  if (lifecycle === "unavailable" && code === "provider_temporarily_unavailable") {
+    return { lifecycle: "temporarily_unavailable", label: "Temporarily unavailable", reason: "Provider could not be reached", usable: false, warning: true };
+  }
+  if (lifecycle === "unavailable") {
+    const rejected = /credential|auth|key|token/iu.test(`${code} ${definition?.unavailableReason?.message ?? ""}`);
+    return { lifecycle, label: "Connection unavailable", reason: rejected ? "API key was rejected" : "Connection needs attention", usable: false, warning: true };
+  }
+  return { lifecycle, label: "Connected", usable: true, warning: false };
 }
 
 export function providerFamilyRecoveryResult(providerStatus, providerId) {
@@ -135,4 +144,62 @@ export function providerCreationPayload(descriptor, values, { connectionId } = {
       String(values.fields?.[field.id] ?? ""),
     ])),
   };
+}
+
+export function providerEditErrors(descriptor, values) {
+  const errors = {};
+  if (descriptor.endpointEditableDuringCreation) {
+    try {
+      const endpoint = new URL(String(values.endpoint ?? ""));
+      if (endpoint.protocol !== "https:") errors.endpoint = "Use an HTTPS endpoint.";
+      if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+        errors.endpoint = "The endpoint cannot contain credentials, query parameters, or a fragment.";
+      }
+    } catch {
+      errors.endpoint = "Enter a valid endpoint URL.";
+    }
+  }
+  return errors;
+}
+
+export function providerEditPayload(descriptor, values) {
+  return {
+    endpoint: descriptor.endpointEditableDuringCreation
+      ? new URL(values.endpoint).toString().replace(/\/$/, "")
+      : descriptor.defaultEndpoint,
+    fields: Object.fromEntries(descriptor.connection.fields.map((field) => [
+      field.id,
+      String(values.fields?.[field.id] ?? ""),
+    ])),
+  };
+}
+
+export function providerRemovalConsequences(definition, modelSettings = {}) {
+  const families = modelSettings.families ?? [];
+  const providers = modelSettings.providers ?? [];
+  const affected = families.filter((family) => (
+    family.managedPolicy?.providerId === definition.id
+    || (family.members ?? []).some((member) => member.providerId === definition.id)
+  ));
+  const deleted = [definition.label];
+  const updated = [];
+  for (const family of affected) {
+    const remaining = (family.members ?? []).filter((member) => member.providerId !== definition.id);
+    if (family.kind === "system" || remaining.length === 0) deleted.push(family.name);
+    else updated.push(family.name);
+  }
+  const defaultFamily = families.find((family) => String(family.id) === String(modelSettings.defaults?.familyId));
+  const usableRemaining = (defaultFamily?.members ?? [])
+    .filter((member) => member.providerId !== definition.id)
+    .some((member) => {
+      const owner = providers.find((provider) => provider.id === member.providerId);
+      const model = owner?.models?.find((candidate) => candidate.id === member.modelId);
+      return owner?.connected !== false && model?.visible !== false && model?.available !== false;
+    });
+  const removesDefault = defaultFamily && affected.some((family) => String(family.id) === String(defaultFamily.id));
+  return Object.freeze({
+    blocked: Boolean(removesDefault && !usableRemaining),
+    deleted: Object.freeze(deleted),
+    updated: Object.freeze(updated),
+  });
 }

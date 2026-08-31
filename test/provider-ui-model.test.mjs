@@ -7,8 +7,11 @@ import {
   providerCreationPayload,
   providerDefinitionStatus,
   providerDescriptorGroups,
+  providerEditErrors,
+  providerEditPayload,
   providerFamilyRecoveryResult,
   providerLabelError,
+  providerRemovalConsequences,
 } from "../desktop/renderer/src/provider-ui-model.js";
 
 const descriptors = [
@@ -86,6 +89,38 @@ describe("provider renderer model", () => {
     });
   });
 
+  it("builds an in-place edit that can retain a saved secret", () => {
+    const descriptor = normalizeProviderDescriptor(descriptors[0]);
+    const values = { endpoint: "https://proxy.example/v2/", fields: { apiKey: "" } };
+    expect(providerEditErrors(descriptor, values)).toEqual({});
+    expect(providerEditPayload(descriptor, values)).toEqual({
+      endpoint: "https://proxy.example/v2",
+      fields: { apiKey: "" },
+    });
+  });
+
+  it("previews removal using only user-facing names and guards only an unusable default family", () => {
+    const settings = {
+      defaults: { familyId: 10 },
+      providers: [
+        { id: "remove", label: "Work", connected: true, models: [{ id: "one", visible: true, available: true }] },
+        { id: "keep", label: "Personal", connected: true, models: [{ id: "two", visible: true, available: true }] },
+      ],
+      families: [
+        { id: 10, name: "Mixed", kind: "custom", members: [{ providerId: "remove", modelId: "one" }, { providerId: "keep", modelId: "two" }] },
+        { id: 11, name: "Work only", kind: "custom", members: [{ providerId: "remove", modelId: "one" }] },
+        { id: 12, name: "Work defaults", kind: "system", managedPolicy: { providerId: "remove" }, members: [{ providerId: "remove", modelId: "one" }] },
+      ],
+    };
+    expect(providerRemovalConsequences({ id: "remove", label: "Work" }, settings)).toEqual({
+      blocked: false,
+      deleted: ["Work", "Work only", "Work defaults"],
+      updated: ["Mixed"],
+    });
+    settings.defaults.familyId = 11;
+    expect(providerRemovalConsequences({ id: "remove", label: "Work" }, settings).blocked).toBe(true);
+  });
+
   it("carries a renderer-owned connection attempt id without provider authority", () => {
     expect(providerCreationPayload(normalizeProviderDescriptor(descriptors[0]), {
       label: "OpenAI Work",
@@ -156,7 +191,7 @@ describe("provider renderer model", () => {
   });
 
   it("labels pending and tombstoned definitions as unusable", () => {
-    expect(providerDefinitionStatus({ lifecycleState: "removal_pending" })).toMatchObject({ usable: false, label: "Finishing removal" });
+    expect(providerDefinitionStatus({ lifecycleState: "removal_pending" })).toMatchObject({ usable: false, label: "Removing" });
     expect(providerDefinitionStatus({ lifecycleState: "tombstoned" })).toMatchObject({ usable: false, label: "Removed provider" });
   });
 });

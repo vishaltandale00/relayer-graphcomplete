@@ -1,15 +1,17 @@
 import { refreshNewThreadModelPicker } from "./composer-model-picker.js";
 import { refreshModelFamilySettings } from "./model-family-settings.js";
 import { createProviderSettingsConnectionController } from "./provider-settings-connection.js";
-import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload, providerFamilyRecoveryResult } from "./provider-ui-model.js";
-import { bindRovingRadioGroup, providerConnectionFormMarkup, providerDefinitionsMarkup, providerOptionsMarkup } from "./provider-ui.js";
+import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload, providerEditErrors, providerEditPayload, providerFamilyRecoveryResult, providerRemovalConsequences } from "./provider-ui-model.js";
+import { bindRovingRadioGroup, providerConnectionFormMarkup, providerDefinitionsMarkup, providerEditConnectionFormMarkup, providerOptionsMarkup } from "./provider-ui.js";
 import { appState, desktop } from "./state.js";
-import { $, $$, toast } from "./ui.js";
+import { $, $$, escapeHtml, toast } from "./ui.js";
 
 let status;
 let selectedDescriptor;
 let values;
+let editingDefinition = null;
 let initialized = false;
+const checkingProviders = new Set();
 const providerConnection = desktop?.providers ? createProviderSettingsConnectionController({
   providers: desktop.providers,
   onPending: () => dialogStatus("Complete sign-in in your browser. Relayer will continue automatically."),
@@ -31,6 +33,27 @@ function renderDefinitions() {
     appState.modelSettings?.defaults ?? {},
     status?.adapters ?? [],
   );
+  $$(".provider-warning-trigger", $("#providerDefinitionList")).forEach((button) => {
+    button.onclick = () => {
+      const warning = button.closest(".provider-warning");
+      const open = !warning.classList.contains("open");
+      $$(".provider-warning.open", $("#providerDefinitionList")).forEach((item) => item.classList.remove("open"));
+      warning.classList.toggle("open", open);
+      button.setAttribute("aria-expanded", String(open));
+    };
+    button.onkeydown = (event) => {
+      if (event.key !== "Escape") return;
+      button.closest(".provider-warning").classList.remove("open");
+      button.setAttribute("aria-expanded", "false");
+    };
+  });
+  for (const providerId of checkingProviders) {
+    const card = $$('[data-provider-definition]', $("#providerDefinitionList")).find((item) => item.dataset.providerDefinition === providerId);
+    if (!card) continue;
+    $$("button", card).forEach((item) => { item.disabled = true; });
+    const retry = $("[data-provider-retry]", card);
+    if (retry) retry.textContent = "Checking…";
+  }
   $$("[data-provider-rename]", $("#providerDefinitionList")).forEach((button) => {
     button.onclick = async () => {
       const definition = status.definitions.find((item) => item.id === button.dataset.providerRename);
@@ -41,7 +64,7 @@ function renderDefinitions() {
         await refreshProviderSettings();
         setStatus("Provider renamed.", "success");
       } catch (error) {
-        setStatus(error.message, "error");
+        setStatus("Connection check could not be completed.", "error");
       }
     };
   });
@@ -72,6 +95,28 @@ function renderDefinitions() {
       }
     };
   });
+  $$('[data-provider-retry]', $("#providerDefinitionList")).forEach((button) => {
+    button.onclick = async () => {
+      const id = button.dataset.providerRetry;
+      if (checkingProviders.has(id)) return;
+      checkingProviders.add(id);
+      renderDefinitions();
+      try {
+        await desktop.providers.retry(id);
+        await refreshProviderSettings();
+        await refreshModelFamilySettings();
+        refreshNewThreadModelPicker();
+      } catch (error) {
+        setStatus(error.message, "error");
+      } finally {
+        checkingProviders.delete(id);
+        renderDefinitions();
+      }
+    };
+  });
+  $$('[data-provider-edit]', $("#providerDefinitionList")).forEach((button) => {
+    button.onclick = () => renderEditConnection(button.dataset.providerEdit);
+  });
   $$('[data-provider-family-recovery]', $("#providerDefinitionList")).forEach((button) => {
     button.onclick = async () => {
       const providerId = button.dataset.providerFamilyRecovery;
@@ -90,20 +135,32 @@ function renderDefinitions() {
     };
   });
   $$("[data-provider-remove]", $("#providerDefinitionList")).forEach((button) => {
-    button.onclick = async () => {
+    button.onclick = () => {
       const definition = status.definitions.find((item) => item.id === button.dataset.providerRemove);
-      if (!window.confirm(`Remove “${definition.label}”? This cannot be restored.`)) return;
-      try {
-        await desktop.providers.remove(definition.id);
-        await refreshProviderSettings();
-        await refreshModelFamilySettings();
-        refreshNewThreadModelPicker();
-        setStatus("Provider removal started.", "success");
-      } catch (error) {
-        setStatus(error.message, "error");
-      }
+      renderRemovalConfirmation(definition);
     };
   });
+}
+
+function renderRemovalConfirmation(definition) {
+  const consequences = providerRemovalConsequences(definition, appState.modelSettings);
+  $("#providerDialogTitle").textContent = "Remove connection";
+  const group = (title, names) => names.length ? `<section><h3>${title}</h3><ul>${names.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul></section>` : "";
+  $("#providerDialogContent").innerHTML = `<p>New chats lose access immediately. Active chats may finish. Removal cannot be cancelled or restored.</p><div class="provider-removal-consequences">${group("Will be deleted", consequences.deleted)}${group("Will be updated", consequences.updated)}<section><h3>Will remain active until current chats finish</h3><ul><li>${escapeHtml(definition.label)}</li></ul></section></div>${consequences.blocked ? `<p class="field-error">Choose another default model family first.</p>` : ""}<div class="provider-setup-actions"><button type="button" class="secondary" data-provider-remove-cancel>Cancel</button><button type="button" class="primary danger-action" data-provider-remove-confirm ${consequences.blocked ? "disabled" : ""}>Remove connection</button></div>`;
+  $("[data-provider-remove-cancel]").onclick = () => $("#providerDialog").close();
+  $("[data-provider-remove-confirm]").onclick = async () => {
+    try {
+      await desktop.providers.remove(definition.id);
+      $("#providerDialog").close();
+      await refreshProviderSettings();
+      await refreshModelFamilySettings();
+      refreshNewThreadModelPicker();
+      setStatus("Provider removal started.", "success");
+    } catch (error) {
+      dialogStatus("Removal could not be completed. Try again.", "error");
+    }
+  };
+  $("#providerDialog").showModal();
 }
 
 function dialogStatus(message = "", kind = "") {
@@ -122,6 +179,7 @@ function readValues() {
 }
 
 function renderAdapterOptions() {
+  editingDefinition = null;
   selectedDescriptor = null;
   values = null;
   $("#providerDialogTitle").textContent = "Add provider";
@@ -134,6 +192,37 @@ function renderAdapterOptions() {
     };
   });
   bindRovingRadioGroup($("#providerDialogContent").querySelector('[role="radiogroup"]'));
+}
+
+function renderEditConnection(id, errors = {}) {
+  editingDefinition = status.definitions.find((definition) => definition.id === id);
+  selectedDescriptor = normalizeProviderDescriptor(status.adapters.find((item) => item.adapterId === editingDefinition.adapterId));
+  values = Object.keys(errors).length && values ? values : {
+    endpoint: editingDefinition.endpoint ?? selectedDescriptor.defaultEndpoint,
+    fields: {},
+  };
+  $("#providerDialogTitle").textContent = "Edit connection";
+  $("#providerDialogContent").innerHTML = `${providerEditConnectionFormMarkup(selectedDescriptor, editingDefinition, values, errors)}<div class="provider-setup-actions"><button type="button" class="secondary" data-provider-dialog-cancel>Cancel</button><button type="button" class="primary" data-provider-dialog-save>Validate and save</button></div>`;
+  $("[data-provider-dialog-cancel]").onclick = () => $("#providerDialog").close();
+  $("[data-provider-dialog-save]").onclick = validateAndSaveEdit;
+  if (!$("#providerDialog").open) $("#providerDialog").showModal();
+}
+
+async function validateAndSaveEdit() {
+  readValues();
+  const errors = providerEditErrors(selectedDescriptor, values);
+  if (Object.keys(errors).length) return renderEditConnection(editingDefinition.id, errors);
+  dialogStatus("Validating connection and models…");
+  try {
+    await desktop.providers.edit(editingDefinition.id, providerEditPayload(selectedDescriptor, values));
+    $("#providerDialog").close();
+    await refreshProviderSettings();
+    await refreshModelFamilySettings();
+    refreshNewThreadModelPicker();
+    setStatus("Connection updated.", "success");
+  } catch (error) {
+    dialogStatus("Connection could not be validated. Check the endpoint or replacement credential.", "error");
+  }
 }
 
 function renderConnectionForm(adapterId, showErrors = false) {
@@ -185,6 +274,13 @@ export async function initializeProviderSettings() {
   await refreshProviderSettings();
   if (initialized) return;
   initialized = true;
+  document.addEventListener("click", (event) => {
+    if (event.target.closest?.(".provider-warning")) return;
+    $$(".provider-warning.open", $("#providerDefinitionList")).forEach((item) => {
+      item.classList.remove("open");
+      item.querySelector(".provider-warning-trigger")?.setAttribute("aria-expanded", "false");
+    });
+  });
   $("#refreshProviderCatalogs").onclick = async () => {
     setStatus("Refreshing provider models…");
     try {

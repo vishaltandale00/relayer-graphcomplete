@@ -19,6 +19,29 @@ function publicDefinition(definition) {
   return Object.freeze({ ...definition });
 }
 
+function connectionHealthFailure(error) {
+  const code = String(error?.code ?? "");
+  const status = Number(error?.status);
+  if (status === 429) return null;
+  if (status === 401 || status === 403 || /auth|credential|key|login|token/iu.test(code)) {
+    return Object.freeze({
+      connected: false,
+      unavailableReason: { code: "provider_connection_unavailable", message: "API key was rejected" },
+    });
+  }
+  if ((status >= 500 && status <= 599)
+    || ["transport", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN"].includes(code)) {
+    return Object.freeze({
+      connected: false,
+      unavailableReason: { code: "provider_temporarily_unavailable", message: "Provider could not be reached" },
+    });
+  }
+  return Object.freeze({
+    connected: false,
+    unavailableReason: { code: "provider_connection_unavailable", message: "Connection configuration could not be validated" },
+  });
+}
+
 export class ProviderDefinitionService {
   constructor({
     registry,
@@ -36,8 +59,11 @@ export class ProviderDefinitionService {
     onRuntimeRemoved = () => {},
     onRuntimeChanged = () => {},
     onRuntimeUnavailable = () => {},
+    publishHealthFailure = async () => {},
     removeRuntimeState = async () => false,
     providerStatuses = null,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout,
   }) {
     if (!registry || !definitionStore || !credentialStore) throw new Error("ProviderDefinitionService requires registry and stores.");
     this.registry = registry;
@@ -54,14 +80,20 @@ export class ProviderDefinitionService {
     this.onRuntimeRemoved = onRuntimeRemoved;
     this.onRuntimeChanged = onRuntimeChanged;
     this.onRuntimeUnavailable = onRuntimeUnavailable;
+    this.publishHealthFailure = publishHealthFailure;
     this.removeRuntimeState = removeRuntimeState;
     this.providerStatuses = providerStatuses;
+    this.setTimer = setTimer;
+    this.clearTimer = clearTimer;
     this.definitions = null;
     this.runtimes = new Map(initialRuntimes);
     this.pendingConnections = new Map();
     this.preparingConnections = new Map();
     this.activeExecutions = new Map();
+    this.runtimeExecutions = new Map();
+    this.retiredRuntimes = new Set();
     this.statusOverrides = new Map();
+    this.cleanupRetryTimers = new Map();
     this.queue = Promise.resolve();
     this.nextPreparationOrder = 1;
     this.lifecycleTasks = new Set();
@@ -403,6 +435,127 @@ export class ProviderDefinitionService {
     });
   }
 
+  async edit(id, { endpoint, fields = {} }, { signal } = {}) {
+    return this.#serialized(async () => {
+      await this.#initialize();
+      signal?.throwIfAborted();
+      const definition = this.definitions.find((item) => item.id === id);
+      if (!definition || definition.lifecycleState !== "active") throw new Error("Unknown active provider definition.");
+      const descriptor = this.registry.get(definition.adapterId);
+      if (descriptor.connection.mode !== "secret-fields") throw new Error("Managed provider connections cannot be edited.");
+      const savedSecrets = definition.credentialReference
+        ? await this.credentialStore.get(definition.credentialReference)
+        : {};
+      if (definition.credentialReference && savedSecrets === null) {
+        throw new Error("Replace the saved API key before validating this connection.");
+      }
+      const replacementSecrets = { ...(savedSecrets ?? {}) };
+      for (const [field, value] of Object.entries(fields)) {
+        if (String(value ?? "").trim()) replacementSecrets[field] = value;
+      }
+      for (const field of descriptor.connection.fields ?? []) {
+        if (field.required !== false && !String(replacementSecrets[field.id] ?? "").trim()) {
+          throw new Error(`Replace ${field.label} before validating this connection.`);
+        }
+      }
+      const candidate = Object.freeze({
+        ...definition,
+        endpoint: endpoint ?? definition.endpoint ?? descriptor.defaultEndpoint,
+      });
+      let runtime;
+      let registered = false;
+      let credentialChanged = false;
+      const previousRuntime = this.runtimes.get(id) ?? null;
+      try {
+        runtime = this.registry.create(candidate, {
+          ...await this.runtimeDependencies(candidate),
+          secrets: replacementSecrets,
+        });
+        const catalog = await this.#discover(runtime, signal);
+        signal?.throwIfAborted();
+        if (catalog.provider?.status === "unavailable") {
+          throw new Error(catalog.provider.unavailableReason ?? "Provider is unavailable.");
+        }
+        await this.onRuntimeReady(candidate, runtime);
+        registered = true;
+        if (definition.credentialReference) {
+          await this.credentialStore.set(definition.credentialReference, replacementSecrets);
+          credentialChanged = true;
+        }
+        if (typeof this.definitionStore.updateWithCatalog !== "function") {
+          throw new Error("Atomic provider connection editing is unavailable.");
+        }
+        await this.definitionStore.updateWithCatalog(candidate, catalog, { signal });
+        this.definitions = this.definitions.map((item) => item.id === id ? candidate : item);
+        this.runtimes.set(id, runtime);
+        this.statusOverrides.delete(id);
+        if (previousRuntime && previousRuntime !== runtime) await this.#retireRuntime(previousRuntime);
+        return publicDefinition(candidate);
+      } catch (error) {
+        if (credentialChanged && definition.credentialReference) {
+          try { await this.credentialStore.set(definition.credentialReference, savedSecrets); } catch { /* preserve validation failure */ }
+        }
+        try { await runtime?.close?.(); } catch { /* preserve validation failure */ }
+        if (registered && previousRuntime) {
+          try { await this.onRuntimeReady(definition, previousRuntime); } catch { /* preserve validation failure */ }
+        } else if (registered) {
+          try { await this.onRuntimeRemoved(definition); } catch { /* preserve validation failure */ }
+        }
+        await this.diagnostics?.write({
+          category: "provider_connection_edit_failed",
+          adapterId: definition.adapterId,
+          providerId: id,
+          ...providerDiagnosticDetails(error),
+        }).catch(() => undefined);
+        throw error;
+      }
+    });
+  }
+
+  async retryConnection(id, { signal } = {}) {
+    return this.#serialized(async () => {
+      await this.#initialize();
+      const definition = this.definitions.find((item) => item.id === id);
+      if (!definition || definition.lifecycleState !== "active") throw new Error("Unknown active provider definition.");
+      try {
+        const runtime = await this.#runtimeFor(definition);
+        const catalog = await this.#discover(runtime, signal);
+        if (catalog.provider?.status === "unavailable") {
+          const error = new Error(catalog.provider.unavailableReason ?? "Provider is unavailable.");
+          error.code = "provider_connection_unavailable";
+          throw error;
+        }
+        await this.publishCatalog(catalog, { signal });
+        this.statusOverrides.delete(id);
+        return Object.freeze({ status: "connected", providerDefinition: publicDefinition(definition) });
+      } catch (error) {
+        const health = connectionHealthFailure(error);
+        if (health) {
+          this.statusOverrides.set(id, health);
+          await this.publishHealthFailure(definition, health).catch(() => undefined);
+        }
+        await this.diagnostics?.write({
+          category: "provider_connection_retry_failed",
+          adapterId: definition.adapterId,
+          providerId: id,
+          ...providerDiagnosticDetails(error),
+        }).catch(() => undefined);
+        return Object.freeze({
+          status: health?.unavailableReason.code ?? "check_failed",
+          providerDefinition: publicDefinition(definition),
+        });
+      }
+    });
+  }
+
+  async #retireRuntime(runtime) {
+    if ((this.runtimeExecutions.get(runtime) ?? 0) > 0) {
+      this.retiredRuntimes.add(runtime);
+      return;
+    }
+    await runtime.close?.().catch(() => undefined);
+  }
+
   async logout(id, { signal } = {}) {
     return this.#serialized(async () => {
       await this.#initialize();
@@ -506,6 +659,7 @@ export class ProviderDefinitionService {
       const runtime = await this.#runtimeFor(definition);
       const count = (this.activeExecutions.get(id) ?? 0) + 1;
       this.activeExecutions.set(id, count);
+      this.runtimeExecutions.set(runtime, (this.runtimeExecutions.get(runtime) ?? 0) + 1);
       let released = false;
       return Object.freeze({
         definition: publicDefinition(definition),
@@ -518,6 +672,12 @@ export class ProviderDefinitionService {
             const remaining = (this.activeExecutions.get(id) ?? 1) - 1;
             if (remaining > 0) this.activeExecutions.set(id, remaining);
             else this.activeExecutions.delete(id);
+            const runtimeRemaining = (this.runtimeExecutions.get(runtime) ?? 1) - 1;
+            if (runtimeRemaining > 0) this.runtimeExecutions.set(runtime, runtimeRemaining);
+            else {
+              this.runtimeExecutions.delete(runtime);
+              if (this.retiredRuntimes.delete(runtime)) await runtime.close?.().catch(() => undefined);
+            }
             const current = this.definitions.find((item) => item.id === id);
             if (remaining === 0 && current?.lifecycleState === "removal_pending") await this.#finalizeRemoval(current);
           });
@@ -630,22 +790,43 @@ export class ProviderDefinitionService {
   }
 
   async #finalizeRemoval(definition) {
-    const next = this.definitions.map((item) => item.id === definition.id ? {
-      ...item,
-      credentialReference: null,
-      lifecycleState: "tombstoned",
-      removedAt: new Date().toISOString(),
-    } : item);
-    await this.definitionStore.save(next);
-    this.definitions = next;
-    // The authoritative tombstone must commit before destructive cleanup. If a
-    // durable running attempt still references this provider, the store rejects
-    // above and the runtime and credentials remain usable by that attempt.
-    await this.runtimes.get(definition.id)?.close?.().catch(() => undefined);
-    this.runtimes.delete(definition.id);
-    await this.onRuntimeRemoved(definition);
-    await this.removeRuntimeState(definition);
-    if (definition.credentialReference) await this.credentialStore.delete(definition.credentialReference);
+    try {
+      await this.runtimes.get(definition.id)?.close?.();
+      this.runtimes.delete(definition.id);
+      await this.onRuntimeRemoved(definition);
+      await this.removeRuntimeState(definition);
+      if (definition.credentialReference) await this.credentialStore.delete(definition.credentialReference);
+      const next = this.definitions.map((item) => item.id === definition.id ? {
+        ...item,
+        credentialReference: null,
+        lifecycleState: "tombstoned",
+        removedAt: new Date().toISOString(),
+      } : item);
+      await this.definitionStore.save(next);
+      this.definitions = next;
+      return true;
+    } catch (error) {
+      await this.diagnostics?.write({
+        category: "provider_removal_cleanup_failed",
+        adapterId: definition.adapterId,
+        providerId: definition.id,
+        ...providerDiagnosticDetails(error),
+      }).catch(() => undefined);
+      if (!this.closing && !this.cleanupRetryTimers.has(definition.id)) {
+        const timer = this.setTimer(() => {
+          this.cleanupRetryTimers.delete(definition.id);
+          void this.#serialized(async () => {
+            const current = this.definitions.find((item) => item.id === definition.id);
+            if (current?.lifecycleState === "removal_pending" && !this.activeExecutions.has(definition.id)) {
+              await this.#finalizeRemoval(current);
+            }
+          }).catch(() => undefined);
+        }, 5_000);
+        timer?.unref?.();
+        this.cleanupRetryTimers.set(definition.id, timer);
+      }
+      return false;
+    }
   }
 
   async reconcileStartup() {
@@ -671,16 +852,21 @@ export class ProviderDefinitionService {
   async close() {
     this.closePromise ??= (async () => {
       this.closing = true;
+      for (const timer of this.cleanupRetryTimers.values()) this.clearTimer(timer);
+      this.cleanupRetryTimers.clear();
       for (const preparation of this.preparingConnections.values()) {
         if (preparation.cancellable) preparation.cancelled = true;
       }
       await Promise.allSettled([...this.lifecycleTasks]);
       const runtimes = new Set([
         ...this.runtimes.values(),
+        ...this.retiredRuntimes,
         ...[...this.pendingConnections.values()].map(({ runtime }) => runtime),
       ]);
       await Promise.allSettled([...runtimes].map((runtime) => runtime.close?.()));
       this.runtimes.clear();
+      this.retiredRuntimes.clear();
+      this.runtimeExecutions.clear();
       this.pendingConnections.clear();
       this.preparingConnections.clear();
     })();

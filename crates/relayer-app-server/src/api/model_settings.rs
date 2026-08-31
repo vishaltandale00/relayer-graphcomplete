@@ -404,6 +404,19 @@ pub(super) async fn create_provider_with_catalog(
     Ok(StatusCode::CREATED)
 }
 
+pub(super) async fn update_provider_with_catalog(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(request): Json<StagedProviderRequest>,
+) -> Result<StatusCode, ApiError> {
+    authorize_provider_publish(&state, &headers)?;
+    state
+        .product
+        .update_provider_with_catalog(request.definition, request.catalog)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub(super) async fn update_harness_model_rules(
     State(state): State<ApiState>,
     headers: HeaderMap,
