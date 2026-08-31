@@ -1,0 +1,19 @@
+{
+  "issue": 353,
+  "source": "scripts/test-desktop-project-new-thread.mjs",
+  "video": {
+    "file": "project-new-thread-demo.mp4",
+    "bytes": 62740,
+    "sha256": "8d841b266fc54a5940a3a47e3b3b9fa4478cf409caafe326b2f3f96b4b3109d7",
+    "codec": "h264",
+    "pixelFormat": "yuv420p",
+    "width": 1280,
+    "height": 720,
+    "durationSeconds": 8.6
+  },
+  "poster": {
+    "file": "project-new-thread-poster.png",
+    "bytes": 104613,
+    "sha256": "3ab258c0943d7a38ef9d05005e6c4f02ba9cc6eff8053d26b99c2128f2e66a1b"
+  }
+}

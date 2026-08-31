@@ -3130,16 +3130,19 @@ export function createProductWorkspace({
         outcome: "succeeded",
         current: currentComposer,
       });
-      composerDraftScopeState = clearSubmittedComposerDraft(
+      const clearedDraftScopeState = clearSubmittedComposerDraft(
         composerDraftScopeState,
         settlement.submittedScopeKey,
         submission.prompt.revision,
         composerPromptRevision,
       );
+      if (clearedDraftScopeState !== composerDraftScopeState) {
+        clearThreadFollowupDraft(settlement.submittedScopeKey);
+      }
+      composerDraftScopeState = clearedDraftScopeState;
       if (settlement.current.prompt !== currentComposer.prompt) {
         prompt.value = settlement.current.prompt.value;
         composerPromptRevision = settlement.current.prompt.revision;
-        clearThreadFollowupDraft(settlement.submittedScopeKey);
       }
       if (submittedConfirmationIds.length
         && String(getThread()?.id) === String(submittedThreadId)) {

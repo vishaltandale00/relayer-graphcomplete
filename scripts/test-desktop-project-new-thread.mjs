@@ -442,6 +442,11 @@ async function run() {
   await waitFor("the saved follow-up draft to clear after Send", () => evaluate(`(
     document.querySelector('#threadPrompt')?.value === ''
   )`), 20_000);
+  await waitFor("the saved follow-up draft to clear from the main-process store", async () => {
+    const saved = await desktopSettings.read();
+    return saved.composerDrafts?.pendingNewThread?.text === separatePendingPrompt
+      && Object.keys(saved.composerDrafts?.threadFollowups || {}).length === 0;
+  });
   await clickProjectAction(project.id);
   await waitFor("the pending draft before Send", () => evaluate(`(
     document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(separatePendingPrompt)}
