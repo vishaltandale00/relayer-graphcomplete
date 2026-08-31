@@ -46,6 +46,7 @@ import {
   interactionContextPayload,
   interactionSendIntent,
   interactionContextTargetForEditor,
+  inputCommitTargetsCurrentSelection,
   removeContextAnnotation,
   refreshComposerContextsAfterFailedConfirmationSend,
   resolveInteractionContextNode,
@@ -53,12 +54,77 @@ import {
   sendAttemptBlocksThread,
   releaseInFlightSend,
   settleConfirmationSendReplay,
+  submittedInputHistoryPresentation,
   threadHasInFlightSend,
   settledComposerContextsWithConfirmations,
   transitionComposerDraftScope,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
+  it("reconciles a settled input commit only while its original node selection remains current", () => {
+    const original = {
+      threadId: "thread-a",
+      nodeId: 7,
+      presentingInteractionNodeId: 41,
+      presentingLayerId: 52,
+    };
+
+    expect(inputCommitTargetsCurrentSelection(original, {
+      threadId: "thread-a",
+      nodeId: "7",
+      presentingInteractionNodeId: "41",
+      presentingLayerId: "52",
+    })).toBe(true);
+    expect(inputCommitTargetsCurrentSelection(original, {
+      threadId: "thread-a",
+      nodeId: 8,
+      presentingInteractionNodeId: 41,
+      presentingLayerId: 52,
+    })).toBe(false);
+    expect(inputCommitTargetsCurrentSelection(original, {
+      threadId: "thread-b",
+      nodeId: 7,
+      presentingInteractionNodeId: 41,
+      presentingLayerId: 52,
+    })).toBe(false);
+    expect(inputCommitTargetsCurrentSelection(original, {
+      threadId: "thread-a",
+      nodeId: null,
+      presentingInteractionNodeId: 41,
+      presentingLayerId: 52,
+    })).toBe(false);
+    expect(inputCommitTargetsCurrentSelection(original, {
+      threadId: "thread-a",
+      nodeId: 7,
+      presentingInteractionNodeId: 41,
+      presentingLayerId: 53,
+    })).toBe(false);
+  });
+
+  it("keeps submitted text history compact while disclosing the exact full value accessibly", async () => {
+    const exact = `First line\n${"x".repeat(160)}`;
+    const presentation = submittedInputHistoryPresentation({
+      action: { prompt: "Deployment rationale" },
+      value: { text: exact },
+    });
+
+    expect(presentation).toMatchObject({
+      kind: "disclosure",
+      fullValue: exact,
+      ariaLabel: "Show full submitted value for Deployment rationale",
+    });
+    expect([...presentation.compactValue]).toHaveLength(80);
+    expect(presentation.compactValue.endsWith("…")).toBe(true);
+    expect(submittedInputHistoryPresentation({
+      action: { prompt: "Release channel" },
+      value: { selected: [{ key: "preview", label: "Preview" }] },
+    })).toEqual({ kind: "plain", compactValue: "Preview" });
+
+    const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
+    expect(styles).toContain(".interaction-input-history-disclosure>summary{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
+    expect(styles).toContain(".interaction-input-history-disclosure>p{max-width:240px;max-height:160px;overflow:auto;white-space:pre-wrap");
+  });
+
   it("projects durable confirmations into grouped composer contexts with exact identities", () => {
     const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
     const targetNode = { id: 7, title: "Queue" };

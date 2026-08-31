@@ -1076,6 +1076,7 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
     )
     .await;
     let thread_id = thread["id"].as_i64().unwrap();
+    seed_explicit_test_model_default(&database, thread_id).await;
 
     let observed = Arc::new(Mutex::new(None));
     let observed_request = observed.clone();
@@ -1293,6 +1294,73 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
         assert_eq!(rejected["code"], expected_code);
         assert_eq!(rejected["path"], "attachments[0].value");
     }
+
+    let pool = sqlite_pool(&database).await;
+    let interaction_id: i64 =
+        sqlx::query_scalar("SELECT id FROM interactions WHERE thread_id=?1 ORDER BY sequence")
+            .bind(thread_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (family_id, family_revision): (i64, i64) =
+        sqlx::query_as("SELECT id,revision FROM model_families ORDER BY id LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        "UPDATE interactions SET completion_status='not_started',completion_error='retryable fixture' WHERE id=?1",
+    )
+    .bind(interaction_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let attempt_id = sqlx::query(
+        "INSERT INTO interaction_attempts(
+            interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,
+            harness_configuration_name,harness_configuration_revision,harness_configuration_digest,
+            provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,
+            outcome,failure_category,effect_boundary
+         ) VALUES (?1,1,'1','2',?2,?3,'codex-basic',1,'sha256:test',
+            'codex','test-adapter',1,'test-model','managed-runtime@1',
+            'model_failed','provider_timeout','none')",
+    )
+    .bind(interaction_id)
+    .bind(family_id)
+    .bind(family_revision)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    pool.close().await;
+
+    let retry_with_committed_input = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions/{interaction_id}/retry"),
+            Some(json!({
+                "attemptId": attempt_id,
+                "text": "Retry must not consume this committed input in place",
+                "inputId": "in-place-input-retry",
+                "inputDraftRevision": 4,
+                "modelSelection": {
+                    "familyId": family_id,
+                    "providerId": "codex",
+                    "modelId": "test-model"
+                }
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        retry_with_committed_input.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        response_json(retry_with_committed_input).await["code"],
+        "submitted_input_retry_requires_new_send"
+    );
 
     graph_task.abort();
     harness_task.abort();

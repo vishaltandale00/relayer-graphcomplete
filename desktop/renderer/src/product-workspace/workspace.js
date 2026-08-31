@@ -27,6 +27,7 @@ import {
   committedInputAttachment,
   createInputOccurrence,
   createNodeInputDraftController,
+  createNodeInputDraftLoadQueue,
   initialInputStageValue,
   inputActionReviewRef,
   inspectedInputDraftRevision,
@@ -1194,6 +1195,43 @@ export function contextAnnotationCountLabel(count) {
   return `${count} annotation${count === 1 ? "" : "s"}`;
 }
 
+export function inputCommitTargetsCurrentSelection(original, current) {
+  const fields = [
+    "threadId",
+    "nodeId",
+    "presentingInteractionNodeId",
+    "presentingLayerId",
+  ];
+  return fields.every((field) => original?.[field] != null
+    && current?.[field] != null
+    && String(original[field]) === String(current[field]));
+}
+
+export function submittedInputHistoryPresentation(input) {
+  const prompt = input?.action?.prompt || "Input";
+  if (typeof input?.value?.text === "string") {
+    const fullValue = input.value.text;
+    const compactText = fullValue.replace(/\s+/gu, " ").trim();
+    const characters = [...compactText];
+    const compactValue = characters.length > 80
+      ? `${characters.slice(0, 79).join("")}…`
+      : compactText;
+    if (fullValue !== compactValue) {
+      return Object.freeze({
+        kind: "disclosure",
+        compactValue,
+        fullValue,
+        ariaLabel: `Show full submitted value for ${prompt}`,
+      });
+    }
+    return Object.freeze({ kind: "plain", compactValue });
+  }
+  const compactValue = Array.isArray(input?.value?.selected)
+    ? input.value.selected.map((option) => option.label).join(", ")
+    : (input?.value?.selectedKeys || []).join(", ");
+  return Object.freeze({ kind: "plain", compactValue });
+}
+
 // History state is supplied by the renderer integration so Product and Eval use the same
 // controls. `onSelectTurn(delta)` remains the keyboard/stepper contract; callers can add
 // `onSelectTurnById(id)` for direct popover jumps without changing existing integrations.
@@ -1290,7 +1328,9 @@ export function createProductWorkspace({
   const inputDraftController = inputDraftApi
     ? createNodeInputDraftController({ api: inputDraftApi })
     : null;
-  const inputDraftLoads = new Map();
+  const inputDraftLoads = inputDraftController
+    ? createNodeInputDraftLoadQueue({ load: (threadId) => inputDraftController.load(threadId) })
+    : null;
   const loadedInputDraftThreads = new Set();
   const inputStages = new Map();
   const inputErrors = new Map();
@@ -1337,10 +1377,8 @@ export function createProductWorkspace({
     if (!reload && loadedInputDraftThreads.has(key)) {
       return Promise.resolve(inputDraftController.current(threadId));
     }
-    if (inputDraftLoads.has(key)) return inputDraftLoads.get(key);
-    const load = inputDraftController.load(threadId)
+    const load = inputDraftLoads.load(threadId, { reload })
       .then((draft) => {
-        inputDraftLoads.delete(key);
         if (disposed) return draft;
         loadedInputDraftThreads.add(key);
         if (String(getThread()?.id) === key) {
@@ -1352,11 +1390,9 @@ export function createProductWorkspace({
         return draft;
       })
       .catch((error) => {
-        inputDraftLoads.delete(key);
         loadedInputDraftThreads.delete(key);
         throw error;
       });
-    inputDraftLoads.set(key, load);
     return load;
   };
 
@@ -3402,14 +3438,24 @@ export function createProductWorkspace({
       item.className = "interaction-input-history-item";
       const prompt = graphDocument.createElement("strong");
       prompt.textContent = input.action?.prompt || "Input";
-      const value = graphDocument.createElement("span");
-      if (typeof input.value?.text === "string") {
-        value.textContent = input.value.text;
-      } else if (Array.isArray(input.value?.selected)) {
-        value.textContent = input.value.selected.map((option) => option.label).join(", ");
-      } else {
-        value.textContent = (input.value?.selectedKeys || []).join(", ");
-      }
+      const presentation = submittedInputHistoryPresentation(input);
+      const value = presentation.kind === "disclosure"
+        ? (() => {
+            const disclosure = graphDocument.createElement("details");
+            disclosure.className = "interaction-input-history-disclosure";
+            const summary = graphDocument.createElement("summary");
+            summary.textContent = presentation.compactValue;
+            summary.setAttribute("aria-label", presentation.ariaLabel);
+            const full = graphDocument.createElement("p");
+            full.textContent = presentation.fullValue;
+            disclosure.append(summary, full);
+            return disclosure;
+          })()
+        : (() => {
+            const text = graphDocument.createElement("span");
+            text.textContent = presentation.compactValue;
+            return text;
+          })();
       item.append(prompt, value);
       list.append(item);
     });
@@ -4317,6 +4363,12 @@ export function createProductWorkspace({
       };
       commit.onclick = async () => {
         if (commit.disabled) return;
+        const commitSelection = {
+          threadId: thread.id,
+          nodeId: node.id,
+          presentingInteractionNodeId: interaction.graphNodeId,
+          presentingLayerId: layerId,
+        };
         inputPending.add(stageKey);
         inputErrors.delete(stageKey);
         renderNodeInputActions(state, node, actions);
@@ -4334,7 +4386,16 @@ export function createProductWorkspace({
           inputErrors.set(stageKey, commitError?.message || "Input could not be committed.");
         } finally {
           inputPending.delete(stageKey);
-          renderNodeInputActions(getState(), node, actions);
+          const currentState = getState();
+          const currentThread = getThread();
+          if (inputCommitTargetsCurrentSelection(commitSelection, {
+            threadId: currentThread?.id,
+            nodeId: selection.selectedNodeId,
+            presentingInteractionNodeId: currentInteraction(currentState, currentThread)?.graphNodeId,
+            presentingLayerId: currentLayerId(currentState, currentThread),
+          })) {
+            renderNodeInputActions(currentState, node, actions);
+          }
           renderComposerContexts();
         }
       };

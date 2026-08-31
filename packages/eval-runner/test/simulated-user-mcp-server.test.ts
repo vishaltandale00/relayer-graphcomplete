@@ -122,7 +122,7 @@ describe("simulated-user MCP server", () => {
     await transport.close();
   });
 
-  it("extends interact with text, one-key, and key-set values without adding a write tool", async () => {
+  it("extends interact with text, one-key, and possibly-empty key-set values without adding a write tool", async () => {
     const interact = vi.fn(async (input) => ({
       ok: true as const,
       state: {
@@ -141,6 +141,7 @@ describe("simulated-user MCP server", () => {
       { text: "Friday" },
       { selectedKey: "preview" },
       { selectedKeys: ["unit", "electron"] },
+      { selectedKeys: [] },
     ]) {
       const result = await client.callTool({ name: "interact", arguments: { elementRef: "input-action-41-52-9", value } });
       expect(result.structuredContent).toMatchObject({ ok: true, operator: { operation: "input_commit" } });
@@ -149,6 +150,7 @@ describe("simulated-user MCP server", () => {
       { text: "Friday" },
       { selectedKey: "preview" },
       { selectedKeys: ["unit", "electron"] },
+      { selectedKeys: [] },
     ]);
     expect((await client.listTools()).tools.map(({ name }) => name)).not.toContain("answer");
     await transport.close();

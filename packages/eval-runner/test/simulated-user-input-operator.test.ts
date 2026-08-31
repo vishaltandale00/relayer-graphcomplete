@@ -60,6 +60,41 @@ describe("InputOperatorController", () => {
     expect(requests[2]!.request.body!.value).toEqual({ selectedKeys: ["proof-a", "proof-b"] });
   });
 
+  it("allows an empty optional multi-select and enforces an authored minimum", async () => {
+    const optional: InputActionSnapshot = {
+      control: "multi_select",
+      prompt: "Choose optional evidence",
+      options: [{ key: "proof", label: "Proof" }],
+    };
+    const optionalRequest = vi.fn<InputOperatorTransport["request"]>(async (_path, request) => (
+      draftResponse(optional, request, 1)
+    ));
+    const optionalController = createController(optionalRequest);
+    const optionalCapture = optionalController.beginCapture({ occurrence, action: optional, threadRevision: "optional-r0" });
+    optionalController.rateCapture({ ...optionalCapture, ratingId: "optional-rating" });
+
+    await expect(optionalController.commit({
+      captureId: optionalCapture.captureId,
+      value: { selectedKeys: [] },
+      expectedRevision: 0,
+    })).resolves.toBe(1);
+    expect(optionalRequest).toHaveBeenCalledWith(
+      "/api/threads/thread%20one/input-draft/attachments",
+      expect.objectContaining({ body: expect.objectContaining({ value: { selectedKeys: [] } }) }),
+    );
+
+    const requiredRequest = vi.fn<InputOperatorTransport["request"]>();
+    const requiredController = createController(requiredRequest);
+    const requiredCapture = requiredController.beginCapture({ occurrence, action: actions.multi, threadRevision: "required-r0" });
+    requiredController.rateCapture({ ...requiredCapture, ratingId: "required-rating" });
+    await expect(requiredController.commit({
+      captureId: requiredCapture.captureId,
+      value: { selectedKeys: [] },
+      expectedRevision: 0,
+    })).rejects.toMatchObject({ code: "input_selection_count" });
+    expect(requiredRequest).not.toHaveBeenCalled();
+  });
+
   it("rejects wrong shapes, blank text, duplicate and unknown keys, and insufficient selection counts before transport", async () => {
     const request = vi.fn<InputOperatorTransport["request"]>();
     const invalid = [

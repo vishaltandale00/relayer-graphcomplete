@@ -486,7 +486,7 @@ function createMcpServer(
       value: z.union([
         z.object({ text: z.string().min(1) }).strict(),
         z.object({ selectedKey: z.string().min(1) }).strict(),
-        z.object({ selectedKeys: z.array(z.string().min(1)).min(1) }).strict(),
+        z.object({ selectedKeys: z.array(z.string().min(1)) }).strict(),
       ]).optional(),
     }).strict().refine((input) => input.activate === true || input.value !== undefined, "Interact requires activate or value"),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },

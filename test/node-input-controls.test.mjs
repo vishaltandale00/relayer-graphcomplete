@@ -5,6 +5,7 @@ import {
   committedInputAttachment,
   createInputOccurrence,
   createNodeInputDraftController,
+  createNodeInputDraftLoadQueue,
   initialInputStageValue,
   inspectedInputDraftRevision,
   inputActionReviewRef,
@@ -136,6 +137,36 @@ describe("node input control state", () => {
 });
 
 describe("node input draft controller", () => {
+  it("queues a forced terminal reload behind an in-flight GET and adopts its restored revision", async () => {
+    let releaseInitialLoad;
+    const initialLoad = new Promise((resolve) => { releaseInitialLoad = resolve; });
+    const api = {
+      get: vi.fn()
+        .mockImplementationOnce(() => initialLoad)
+        .mockResolvedValueOnce(draft(8, [{ occurrence, value: { text: "Restored" } }])),
+      commit: vi.fn(),
+      detach: vi.fn(),
+    };
+    const controller = createNodeInputDraftController({ api });
+    const loads = createNodeInputDraftLoadQueue({
+      load: (threadId) => controller.load(threadId),
+    });
+
+    const initial = loads.load(7);
+    const terminalReload = loads.load(7, { reload: true });
+    await vi.waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+
+    releaseInitialLoad(draft(3));
+    await initial;
+    await terminalReload;
+
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(controller.current(7)).toEqual(draft(
+      8,
+      [{ occurrence, value: { text: "Restored" } }],
+    ));
+  });
+
   it("loads and applies commit/detach with the latest authoritative CAS revision", async () => {
     const committed = { occurrence, action: singleAction, value: { selectedKeys: ["b"] } };
     const api = {

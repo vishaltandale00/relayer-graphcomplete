@@ -1920,6 +1920,13 @@ impl ProductService {
             .storage
             .action_input_draft(interaction.thread_id)
             .await?;
+        if !action_input_draft.attachments.is_empty() {
+            return Err(CatalogError::invalid(
+                "submitted_input_retry_requires_new_send",
+                "Send the committed inputs again to create a new immutable root and attempt.",
+            )
+            .into());
+        }
         let submitted_inputs = action_input_draft
             .attachments
             .iter()

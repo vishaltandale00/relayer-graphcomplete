@@ -642,7 +642,7 @@ fn export_submitted_inputs(
     let root_turn_id = turn_id(interaction.sequence);
     let mut evidence = evidence.to_vec();
     evidence.sort_by_key(|input| input.occurrence.clone());
-    evidence
+    let mut exported = evidence
         .into_iter()
         .enumerate()
         .map(|(index, input)| {
@@ -730,7 +730,9 @@ fn export_submitted_inputs(
                 value,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    exported.sort_by_key(submitted_input_sort_key);
+    Ok(exported)
 }
 
 fn redact_submitted_input(input: &mut ExportSubmittedInput, redactor: &ProjectPathRedactor) {
@@ -1316,6 +1318,71 @@ mod tests {
         assert!(!json.contains("workspace"));
         assert!(!json.contains("authority"));
         assert!(!json.contains("digest"));
+    }
+
+    #[test]
+    fn native_submitted_inputs_sort_by_materialized_portable_identity() {
+        let interaction = Interaction {
+            id: InteractionId::from_database(7),
+            thread_id: ThreadId::from_database(1),
+            sequence: 2,
+            text: "".into(),
+            created_at: "2".into(),
+            graph_node_id: None,
+            completion_status: "failed".into(),
+            harness_configuration_name: None,
+            harness_configuration_digest: None,
+            permission_profile_id: "auto".into(),
+            model_selection: None,
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
+            completion_output: None,
+            completion_error: Some("failed".into()),
+            latest_attempt: None,
+        };
+        let evidence = [
+            (40, "second portable action"),
+            (41, "tenth portable action"),
+        ]
+        .into_iter()
+        .map(|(action_id, text)| SubmittedInputEvidence {
+            occurrence: PresentingInputOccurrence {
+                presenting_interaction_node_id: NodeId::new(10).unwrap(),
+                presenting_layer_id: LayerId::new(30).unwrap(),
+                action_id: ActionId::new(action_id).unwrap(),
+            },
+            source_node_id: 20,
+            action: InputAction {
+                control: InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: SubmittedInputValue::Text { text: text.into() },
+            attempt_state: "failed".into(),
+        })
+        .collect::<Vec<_>>();
+        let mut ids = PortableIds::default();
+        ids.bind_action(40, "action:2".into()).unwrap();
+        ids.bind_action(41, "action:10".into()).unwrap();
+
+        let exported = export_submitted_inputs(
+            &interaction,
+            &evidence,
+            None,
+            &mut ids,
+            &ProjectPathRedactor::new(None),
+        )
+        .unwrap();
+
+        assert_eq!(
+            exported
+                .iter()
+                .map(|input| input.source.action_id.as_str())
+                .collect::<Vec<_>>(),
+            ["action:10", "action:2"]
+        );
     }
 
     #[test]

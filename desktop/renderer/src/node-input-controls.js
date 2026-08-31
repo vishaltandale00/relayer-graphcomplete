@@ -196,6 +196,30 @@ function normalizedDraft(threadId, response) {
   });
 }
 
+export function createNodeInputDraftLoadQueue({ load } = {}) {
+  if (typeof load !== "function") throw new TypeError("load is required");
+  const pending = new Map();
+  const key = (threadId) => String(requiredIdentity(threadId, "threadId"));
+  return Object.freeze({
+    has(threadId) {
+      return pending.has(key(threadId));
+    },
+    load(threadId, { reload = false } = {}) {
+      const threadKey = key(threadId);
+      const prior = pending.get(threadKey);
+      if (prior && !reload) return prior;
+      const next = prior
+        ? prior.catch(() => undefined).then(() => load(threadId))
+        : load(threadId);
+      pending.set(threadKey, next);
+      void next.finally(() => {
+        if (pending.get(threadKey) === next) pending.delete(threadKey);
+      }).catch(() => undefined);
+      return next;
+    },
+  });
+}
+
 export function createNodeInputDraftController({ api, onChange = () => {} } = {}) {
   if (!api) throw new TypeError("api is required");
   const drafts = new Map();
