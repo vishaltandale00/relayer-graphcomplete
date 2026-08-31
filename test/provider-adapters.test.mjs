@@ -348,6 +348,43 @@ describe("secret-backed API adapters", () => {
     });
   });
 
+  it("admits only reviewed Claude text-family IDs and rejects unrecognized Claude capabilities", async () => {
+    const descriptor = productionProviderAdapterRegistry.get("anthropic-api");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("anthropic-api", descriptor.defaultEndpoint),
+      {
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [
+          { id: "claude-sonnet-4-20250514" },
+          { id: "claude-3-5-haiku-20241022" },
+          { id: "claude-realtime" },
+          { id: "claude-batch" },
+          { id: "claude-sonnet-realtime" },
+          { id: "claude-opus-batch" },
+          { id: "claude-haiku-audio" },
+          { id: "claude-3-realtime" },
+          { id: "claude-1-batch" },
+        ] }) }),
+        secrets: { "api-key": "secret" },
+        managedRuntime: claudeRuntime,
+        environment: {},
+      },
+    );
+
+    const snapshot = await adapter.connect();
+    expect(snapshot.models.filter(({ availability }) => availability === "available").map(({ id }) => id))
+      .toEqual(["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"]);
+    expect(snapshot.models.filter(({ availability }) => availability === "unavailable").map(({ id, unavailableReasonCode }) => ({ id, unavailableReasonCode })))
+      .toEqual([
+        { id: "claude-realtime", unavailableReasonCode: "provider_model_capability_unknown" },
+        { id: "claude-batch", unavailableReasonCode: "provider_model_capability_unknown" },
+        { id: "claude-sonnet-realtime", unavailableReasonCode: "provider_model_capability_unknown" },
+        { id: "claude-opus-batch", unavailableReasonCode: "provider_model_capability_unknown" },
+        { id: "claude-haiku-audio", unavailableReasonCode: "provider_model_capability_unknown" },
+        { id: "claude-3-realtime", unavailableReasonCode: "provider_model_capability_unknown" },
+        { id: "claude-1-batch", unavailableReasonCode: "provider_model_capability_unknown" },
+      ]);
+  });
+
   it("fails closed for an unknown model that merely uses an OpenAI agent-family prefix", async () => {
     const descriptor = productionProviderAdapterRegistry.get("openai-api");
     const adapter = productionProviderAdapterRegistry.create(

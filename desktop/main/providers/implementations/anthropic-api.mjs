@@ -11,7 +11,9 @@ function anthropicModelEligibility(model) {
   if (/(?:^|[-_.])(embedding|image|moderation|speech|tts)(?:$|[-_.])/i.test(id)) {
     return MODEL_NOT_EXECUTION_ELIGIBLE;
   }
-  if (/^claude-/i.test(id)) return EXECUTION_ELIGIBLE;
+  if (/^claude-(?:(?:opus|sonnet|haiku)-\d+(?:-\d+)*(?:-\d{8}|-latest)?|\d+(?:-\d+)*-(?:opus|sonnet|haiku)(?:-\d{8}|-latest)?)$/i.test(id)) {
+    return EXECUTION_ELIGIBLE;
+  }
   return MODEL_CAPABILITY_UNKNOWN;
 }
 
