@@ -1162,7 +1162,7 @@ fn injective_portable_option_keys<'a>(
     let mut portable = HashMap::new();
     let mut used = std::collections::HashSet::new();
     for key in keys {
-        let base = redactor.text(key);
+        let base = bounded_portable_option_key(&redactor.text(key), 128);
         let mut candidate = base.clone();
         let mut ordinal = 2;
         while !used.insert(candidate.clone()) {
@@ -1177,11 +1177,19 @@ fn injective_portable_option_keys<'a>(
 fn suffixed_portable_option_key(base: &str, ordinal: usize) -> String {
     let suffix = format!("~{ordinal}");
     let maximum_base_bytes = 128_usize.saturating_sub(suffix.len());
-    let mut end = base.len().min(maximum_base_bytes);
+    format!(
+        "{}{}",
+        bounded_portable_option_key(base, maximum_base_bytes),
+        suffix
+    )
+}
+
+fn bounded_portable_option_key(base: &str, maximum_bytes: usize) -> String {
+    let mut end = base.len().min(maximum_bytes);
     while !base.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}{}", &base[..end], suffix)
+    base[..end].to_owned()
 }
 
 #[derive(Default)]
@@ -1341,19 +1349,26 @@ mod tests {
             source_node_id: 20,
             action: InputAction {
                 control: InputControl::SingleSelect,
-                prompt: "Choose /workspace/project/file".into(),
-                options: vec![InputOption {
-                    key: "one".into(),
-                    label: "From /workspace/project".into(),
-                    unsupported_fields: Default::default(),
-                }],
+                prompt: "Choose /private/tmp/project/file".into(),
+                options: vec![
+                    InputOption {
+                        key: "/private/tmp/project/target".into(),
+                        label: "From /private/tmp/project".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                    InputOption {
+                        key: "/tmp/project/target".into(),
+                        label: "From /tmp/project".into(),
+                        unsupported_fields: Default::default(),
+                    },
+                ],
                 minimum_selections: None,
                 unsupported_fields: Default::default(),
             },
             value: SubmittedInputValue::Selected {
                 selected: vec![InputOption {
-                    key: "one".into(),
-                    label: "From /workspace/project".into(),
+                    key: "/tmp/project/target".into(),
+                    label: "From /tmp/project".into(),
                     unsupported_fields: Default::default(),
                 }],
             },
@@ -1365,7 +1380,7 @@ mod tests {
             &evidence,
             None,
             &mut ids,
-            &ProjectPathRedactor::new(Some("/workspace/project")),
+            &ProjectPathRedactor::new(Some("/private/tmp/project")),
         )
         .unwrap();
         assert_eq!(exported[0].root_turn_id, "turn:2");
@@ -1374,14 +1389,44 @@ mod tests {
         assert_eq!(exported[0].source.layer_id, "layer:1");
         assert_eq!(exported[0].source.action_id, "action:1");
         assert_eq!(exported[0].action.prompt, "Choose [project-path]/file");
+        assert_eq!(exported[0].action.options[0].key, "[project-path]/target");
+        assert_eq!(exported[0].action.options[1].key, "[project-path]/target~2");
         assert_eq!(
-            serde_json::to_value(&exported).unwrap()[0]["value"]["selected"][0]["label"],
-            "From [project-path]"
+            serde_json::to_value(&exported).unwrap()[0]["value"]["selected"][0]["key"],
+            "[project-path]/target~2"
         );
         let json = serde_json::to_string(&exported).unwrap();
-        assert!(!json.contains("workspace"));
+        assert!(!json.contains("private/tmp/project"));
+        assert!(!json.contains("/tmp/project"));
         assert!(!json.contains("authority"));
         assert!(!json.contains("digest"));
+
+        let mut raw_ids = PortableIds::default();
+        let raw_imported = export_submitted_inputs(
+            &interaction,
+            &evidence,
+            None,
+            &mut raw_ids,
+            &ProjectPathRedactor::new(None),
+        )
+        .unwrap();
+        let reexported = export_submitted_inputs(
+            &interaction,
+            &[],
+            Some(&raw_imported),
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some("/private/tmp/project")),
+        )
+        .unwrap();
+        assert_eq!(reexported[0].action.options[0].key, "[project-path]/target");
+        assert_eq!(
+            reexported[0].action.options[1].key,
+            "[project-path]/target~2"
+        );
+        assert_eq!(
+            serde_json::to_value(&reexported).unwrap()[0]["value"]["selected"][0]["key"],
+            "[project-path]/target~2"
+        );
     }
 
     #[test]
@@ -1671,6 +1716,48 @@ mod tests {
         assert_eq!(input.options[1].key, "[project-path]/target~2");
         assert_eq!(input.options[0].label, "Use [project-path] target");
         assert_eq!(input.options[1].label, "Use [project-path] target");
+    }
+
+    #[test]
+    fn expanding_path_redaction_keeps_option_keys_within_the_portable_limit() {
+        let authored_key = format!("/a{}", "x".repeat(126));
+        assert_eq!(authored_key.len(), 128);
+        let action = GraphAction {
+            id: ActionId::new(1).unwrap(),
+            source_node_id: NodeId::new(2).unwrap(),
+            source_layer_id: Some(LayerId::new(3).unwrap()),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Choose".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::SingleSelect,
+                prompt: "Choose".into(),
+                options: vec![InputOption {
+                    key: authored_key,
+                    label: "Expanded path".into(),
+                    unsupported_fields: Default::default(),
+                }],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            }),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_action(
+            &action,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some("/a")),
+        )
+        .unwrap();
+        let option_key = &exported.input.unwrap().options[0].key;
+
+        assert_eq!(option_key.len(), 128);
+        assert!(option_key.starts_with("[project-path]"));
     }
 
     #[test]
