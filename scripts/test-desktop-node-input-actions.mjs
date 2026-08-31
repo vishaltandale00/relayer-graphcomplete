@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
+  EdgeObject,
   LayerLayoutObject,
   LayerObject,
   NodeObject,
@@ -25,6 +26,7 @@ import {
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-node-input-actions-"));
 const resultFile = process.env.RELAYER_NODE_INPUT_RESULT_FILE;
+const submittedTextValue = `Preserve occurrence identity: ${"full submitted text remains inspectable. ".repeat(6)}`;
 let runtime;
 let catalogRefreshServer;
 let product;
@@ -82,10 +84,26 @@ function nodeInputFixtureFactory() {
         `input-grammar-${completionCount}`,
       );
       await graph.submitNode(node);
+      const selectionGuardNode = new NodeObject(
+        "shield-check",
+        "Selection guard",
+        "This node has no input actions and exposes stale input repaint after a selection change.",
+        "concept",
+        `selection-guard-${completionCount}`,
+      );
+      await graph.submitNode(selectionGuardNode);
+      const selectionGuardEdge = new EdgeObject(
+        [node, selectionGuardNode],
+        `selection-guard-edge-${completionCount}`,
+      );
+      await graph.createEdge(selectionGuardEdge);
       const layer = new LayerObject(
-        [node],
-        [],
-        new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]),
+        [node, selectionGuardNode],
+        [selectionGuardEdge],
+        new LayerLayoutObject([
+          new NodePlacementObject(node, 0.35, 0.5),
+          new NodePlacementObject(selectionGuardNode, 0.65, 0.5),
+        ]),
         `input-layer-${completionCount}`,
       );
       await graph.submitLayer(layer);
@@ -218,7 +236,7 @@ async function run() {
   await window.loadURL(`${productSession.origin}/?threadId=${thread.id}`);
   await waitFor("production node-input workspace", () => evaluate(`(() => (
     !document.body.classList.contains('desktop-account-pending')
-      && document.querySelectorAll('.graph-node').length === 1
+      && document.querySelectorAll('.graph-node').length === 2
       && !document.querySelector('#threadPrompt')?.disabled
   ))()`));
   await clickNode("Input grammar");
@@ -324,7 +342,36 @@ async function run() {
     return selected?.dataset.optionKey === 'route-2' && document.activeElement === selected;
   })()`));
 
-  await setValue(".node-input-text", "Preserve occurrence identity");
+  let releaseDelayedCommit;
+  let delayedCommitObserved = false;
+  const delayedCommitFilter = { urls: [`${productSession.origin}/api/threads/*/input-draft/attachments`] };
+  window.webContents.session.webRequest.onBeforeRequest(delayedCommitFilter, (details, callback) => {
+    if (!delayedCommitObserved && details.method === "PUT") {
+      delayedCommitObserved = true;
+      releaseDelayedCommit = () => callback({});
+      return;
+    }
+    callback({});
+  });
+  await setValue(".node-input-text", "Commit while selecting another node");
+  await click("[aria-label='Commit Name the governing constraint']");
+  await waitFor("input commit request held in flight", () => delayedCommitObserved);
+  await clickNode("Selection guard");
+  releaseDelayedCommit();
+  await waitFor("settled commit does not repaint the stale input node", async () => (
+    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments?.some(
+      (attachment) => attachment.value?.text === "Commit while selecting another node",
+    )
+    && await evaluate(`(() => (
+      document.querySelector('#detailTitle')?.textContent === 'Selection guard'
+        && document.querySelector('#nodeInputActions')?.classList.contains('hidden')
+        && document.querySelectorAll('#nodeInputActions .node-input-editor').length === 0
+    ))()`)
+  ));
+  window.webContents.session.webRequest.onBeforeRequest(delayedCommitFilter, null);
+  await clickNode("Input grammar");
+
+  await setValue(".node-input-text", submittedTextValue);
   await evaluate(`(() => { const rails = document.querySelectorAll('.node-input-option-rail'); rails[0].scrollLeft = 160; rails[1].querySelectorAll('.node-input-option')[2].click(); })()`);
   await waitForPaint();
   const stacked = await evaluate(`(() => { const rails = document.querySelectorAll('.node-input-option-rail'); return { count: rails.length, firstScroll: rails[0].scrollLeft, secondSelected: rails[1].querySelectorAll('[aria-checked="true"]').length }; })()`);
@@ -373,12 +420,12 @@ async function run() {
   window.webContents.reload();
   await waitFor("committed inputs after renderer reopen", () => evaluate(`(() => (
     !document.body.classList.contains('desktop-account-pending')
-      && document.querySelectorAll('.graph-node').length === 1
+      && document.querySelectorAll('.graph-node').length === 2
       && document.querySelectorAll('.composer-input-pill').length === 3
   ))()`));
   await clickNode("Input grammar");
   await waitFor("Node Details restores committed values", () => evaluate(`(() => (
-    document.querySelector('.node-input-text')?.value === 'Preserve occurrence identity'
+    document.querySelector('.node-input-text')?.value === ${JSON.stringify(submittedTextValue)}
       && document.querySelectorAll('.node-input-option[aria-checked="true"]').length === 3
   ))()`));
   await click(".composer-input-pill");
@@ -387,7 +434,7 @@ async function run() {
   await setValue(".node-input-text", "Local replacement");
   await click("[aria-label='Undo Name the governing constraint']");
   const undone = await evaluate(`document.querySelector('.node-input-text')?.value`);
-  if (undone !== "Preserve occurrence identity") throw new Error(`Undo did not restore committed text: ${JSON.stringify(undone)}`);
+  if (undone !== submittedTextValue) throw new Error(`Undo did not restore committed text: ${JSON.stringify(undone)}`);
 
   let rejectedCommit = false;
   const commitFilter = { urls: [`${productSession.origin}/api/threads/*/input-draft/attachments`] };
@@ -408,7 +455,7 @@ async function run() {
   window.webContents.session.webRequest.onBeforeRequest(commitFilter, null);
   if (!rejectedCommit) throw new Error("The input persistence failure interceptor was not exercised.");
   const afterRejectedCommit = await productRequest(`/api/threads/${thread.id}/input-draft`);
-  if (afterRejectedCommit.attachments.find((item) => item.action.prompt === "Name the governing constraint")?.value?.text !== "Preserve occurrence identity") {
+  if (afterRejectedCommit.attachments.find((item) => item.action.prompt === "Name the governing constraint")?.value?.text !== submittedTextValue) {
     throw new Error("A rejected input commit changed the authoritative attachment.");
   }
   await click("[aria-label='Undo Name the governing constraint']");
@@ -459,12 +506,39 @@ async function run() {
     document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length === 3
       && document.querySelectorAll('.composer-input-pill').length === 0
   ))()`));
+  const historyDisclosure = await evaluate(`(() => {
+    const details = document.querySelector('#interactionInputHistory .interaction-input-history-disclosure');
+    const summary = details?.querySelector('summary');
+    const full = details?.querySelector('p');
+    return {
+      tagName: details?.tagName,
+      open: details?.open,
+      summaryTagName: summary?.tagName,
+      summaryText: summary?.textContent,
+      summaryName: summary?.getAttribute('aria-label'),
+      summaryWidth: summary?.getBoundingClientRect().width,
+      fullValue: full?.textContent,
+    };
+  })()`);
+  if (historyDisclosure.tagName !== "DETAILS"
+    || historyDisclosure.summaryTagName !== "SUMMARY"
+    || historyDisclosure.open !== false
+    || [...historyDisclosure.summaryText].length !== 80
+    || historyDisclosure.summaryWidth > 241
+    || historyDisclosure.summaryName !== "Show full submitted value for Name the governing constraint"
+    || historyDisclosure.fullValue !== submittedTextValue) {
+    throw new Error(`Submitted text history disclosure is invalid: ${JSON.stringify(historyDisclosure)}`);
+  }
+  await evaluate(`document.querySelector('#interactionInputHistory .interaction-input-history-disclosure>summary').click()`);
+  await waitFor("submitted text history opens through native summary activation", () => evaluate(`(
+    document.querySelector('#interactionInputHistory .interaction-input-history-disclosure')?.open === true
+  )`));
 
   const authoredTurnId = acceptedThread.interactions[0].id;
   await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(thread.id)}&interactionId=${encodeURIComponent(authoredTurnId)}&review=1`);
   await waitFor("read-only review workspace", () => evaluate(`(() => (
     !document.body.classList.contains('desktop-account-pending')
-      && document.querySelectorAll('.graph-node').length === 1
+      && document.querySelectorAll('.graph-node').length === 2
   ))()`));
   await clickNode("Input grammar");
   await waitFor("accepted input controls render without mutation authority", () => evaluate(`(() => {
@@ -479,7 +553,7 @@ async function run() {
   await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(thread.id)}&interactionId=${encodeURIComponent(authoredTurnId)}&review=1&inputOperator=1`);
   await waitFor("operator-capable review workspace", () => evaluate(`(() => (
     !document.body.classList.contains('desktop-account-pending')
-      && document.querySelectorAll('.graph-node').length === 1
+      && document.querySelectorAll('.graph-node').length === 2
   ))()`));
   await clickNode("Input grammar");
   await waitFor("operator Send starts disabled while accepted inputs remain read-only", () => evaluate(`(() => {

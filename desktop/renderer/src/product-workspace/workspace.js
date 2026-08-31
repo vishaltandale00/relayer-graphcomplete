@@ -1207,6 +1207,21 @@ export function inputCommitTargetsCurrentSelection(original, current) {
     && String(original[field]) === String(current[field]));
 }
 
+export function settleNodeInputCommit({
+  inputPending,
+  stageKey,
+  originalSelection,
+  currentSelection,
+  repaintNodeInputs,
+  renderComposer,
+}) {
+  inputPending.delete(stageKey);
+  if (inputCommitTargetsCurrentSelection(originalSelection, currentSelection())) {
+    repaintNodeInputs();
+  }
+  renderComposer();
+}
+
 export function submittedInputHistoryPresentation(input) {
   const prompt = input?.action?.prompt || "Input";
   if (typeof input?.value?.text === "string") {
@@ -4385,18 +4400,26 @@ export function createProductWorkspace({
         } catch (commitError) {
           inputErrors.set(stageKey, commitError?.message || "Input could not be committed.");
         } finally {
-          inputPending.delete(stageKey);
-          const currentState = getState();
-          const currentThread = getThread();
-          if (inputCommitTargetsCurrentSelection(commitSelection, {
-            threadId: currentThread?.id,
-            nodeId: selection.selectedNodeId,
-            presentingInteractionNodeId: currentInteraction(currentState, currentThread)?.graphNodeId,
-            presentingLayerId: currentLayerId(currentState, currentThread),
-          })) {
-            renderNodeInputActions(currentState, node, actions);
-          }
-          renderComposerContexts();
+          settleNodeInputCommit({
+            inputPending,
+            stageKey,
+            originalSelection: commitSelection,
+            currentSelection: () => {
+              const currentState = getState();
+              const currentThread = getThread();
+              return {
+                threadId: currentThread?.id,
+                nodeId: selection.selectedNodeId,
+                presentingInteractionNodeId: currentInteraction(
+                  currentState,
+                  currentThread,
+                )?.graphNodeId,
+                presentingLayerId: currentLayerId(currentState, currentThread),
+              };
+            },
+            repaintNodeInputs: () => renderNodeInputActions(getState(), node, actions),
+            renderComposer: renderComposerContexts,
+          });
         }
       };
       actionsHost.append(undo, commit);

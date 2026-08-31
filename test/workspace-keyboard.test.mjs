@@ -46,13 +46,13 @@ import {
   interactionContextPayload,
   interactionSendIntent,
   interactionContextTargetForEditor,
-  inputCommitTargetsCurrentSelection,
   removeContextAnnotation,
   refreshComposerContextsAfterFailedConfirmationSend,
   resolveInteractionContextNode,
   sendIntentIsCurrentThread,
   sendAttemptBlocksThread,
   releaseInFlightSend,
+  settleNodeInputCommit,
   settleConfirmationSendReplay,
   submittedInputHistoryPresentation,
   threadHasInFlightSend,
@@ -61,44 +61,55 @@ import {
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
-  it("reconciles a settled input commit only while its original node selection remains current", () => {
+  it("settles an async input commit without repainting a stale selection occurrence", async () => {
     const original = {
       threadId: "thread-a",
       nodeId: 7,
       presentingInteractionNodeId: 41,
       presentingLayerId: 52,
     };
+    const changes = [
+      { threadId: "thread-b" },
+      { nodeId: 8 },
+      { presentingInteractionNodeId: 42 },
+      { presentingLayerId: 53 },
+    ];
 
-    expect(inputCommitTargetsCurrentSelection(original, {
-      threadId: "thread-a",
-      nodeId: "7",
-      presentingInteractionNodeId: "41",
-      presentingLayerId: "52",
-    })).toBe(true);
-    expect(inputCommitTargetsCurrentSelection(original, {
-      threadId: "thread-a",
-      nodeId: 8,
-      presentingInteractionNodeId: 41,
-      presentingLayerId: 52,
-    })).toBe(false);
-    expect(inputCommitTargetsCurrentSelection(original, {
-      threadId: "thread-b",
-      nodeId: 7,
-      presentingInteractionNodeId: 41,
-      presentingLayerId: 52,
-    })).toBe(false);
-    expect(inputCommitTargetsCurrentSelection(original, {
-      threadId: "thread-a",
-      nodeId: null,
-      presentingInteractionNodeId: 41,
-      presentingLayerId: 52,
-    })).toBe(false);
-    expect(inputCommitTargetsCurrentSelection(original, {
-      threadId: "thread-a",
-      nodeId: 7,
-      presentingInteractionNodeId: 41,
-      presentingLayerId: 53,
-    })).toBe(false);
+    for (const change of changes) {
+      let releaseCommit;
+      const pendingCommit = new Promise((resolve) => { releaseCommit = resolve; });
+      const inputPending = new Set(["input-stage"]);
+      const repaintNodeInputs = vi.fn();
+      const renderComposer = vi.fn();
+      let currentSelection = { ...original };
+      const committing = pendingCommit.finally(() => settleNodeInputCommit({
+        inputPending,
+        stageKey: "input-stage",
+        originalSelection: original,
+        currentSelection: () => currentSelection,
+        repaintNodeInputs,
+        renderComposer,
+      }));
+
+      currentSelection = { ...currentSelection, ...change };
+      releaseCommit();
+      await committing;
+
+      expect(repaintNodeInputs, JSON.stringify(change)).not.toHaveBeenCalled();
+      expect(renderComposer, JSON.stringify(change)).toHaveBeenCalledOnce();
+      expect(inputPending.has("input-stage"), JSON.stringify(change)).toBe(false);
+    }
+
+    const repaintNodeInputs = vi.fn();
+    settleNodeInputCommit({
+      inputPending: new Set(["input-stage"]),
+      stageKey: "input-stage",
+      originalSelection: original,
+      currentSelection: () => ({ ...original }),
+      repaintNodeInputs,
+      renderComposer: vi.fn(),
+    });
+    expect(repaintNodeInputs).toHaveBeenCalledOnce();
   });
 
   it("keeps submitted text history compact while disclosing the exact full value accessibly", async () => {
