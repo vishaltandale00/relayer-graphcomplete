@@ -316,6 +316,38 @@ describe("secret-backed API adapters", () => {
     expect(fetch.mock.calls.map(([url]) => url)).toEqual(["https://openrouter.ai/api/v1/key"]);
   });
 
+  it("uses the catalog contract without the proprietary key probe for a custom OpenRouter endpoint", async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{ id: "z-ai/glm-5.3", architecture: { output_modalities: ["text"] } }] }),
+    }));
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", "https://router.example.test/v1"),
+      { fetch, secrets: { "api-key": "secret" }, managedRuntime: codexRuntime, environment: {} },
+    );
+
+    await expect(adapter.connect()).resolves.toMatchObject({ provider: { status: "available" } });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["https://router.example.test/v1/models"]);
+  });
+
+  it("rejects Anthropic capability models even when their IDs start with claude", async () => {
+    const descriptor = productionProviderAdapterRegistry.get("anthropic-api");
+    const adapter = productionProviderAdapterRegistry.create(
+      definition("anthropic-api", descriptor.defaultEndpoint),
+      {
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "claude-embedding" }] }) }),
+        secrets: { "api-key": "secret" },
+        managedRuntime: claudeRuntime,
+        environment: {},
+      },
+    );
+
+    await expect(adapter.connect()).resolves.toMatchObject({
+      models: [{ id: "claude-embedding", availability: "unavailable", unavailableReasonCode: "provider_model_not_execution_eligible" }],
+    });
+  });
+
   it("fails closed for an unknown model that merely uses an OpenAI agent-family prefix", async () => {
     const descriptor = productionProviderAdapterRegistry.get("openai-api");
     const adapter = productionProviderAdapterRegistry.create(
@@ -486,7 +518,11 @@ describe("secret-backed API adapters", () => {
 
     const access = await adapter.executionAccess();
 
-    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      `${descriptor.defaultEndpoint}/key`,
+      `${descriptor.defaultEndpoint}/models`,
+    ]);
     expect(access.modelCapabilities["z-ai/glm-5.3"]).toEqual({
       contextWindow: 196_608,
       maxOutputTokens: 131_072,
@@ -607,7 +643,7 @@ describe("secret-backed API adapters", () => {
     });
     await expect(setup.connect({
       adapterId: "openai-api", label: "Revoked", fields: { "api-key": "opaque" },
-    })).rejects.toThrow("visible models");
+    })).rejects.toThrow("Provider credentials were rejected");
     expect(definitions).toEqual([]);
     expect(credentialSet).not.toHaveBeenCalled();
     await catalog.close();

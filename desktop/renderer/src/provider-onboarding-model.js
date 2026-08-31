@@ -53,6 +53,37 @@ export function providerOnboardingRecoveryAction(projection) {
   });
 }
 
+export function createProviderOnboardingProjectionGate() {
+  let revision = 0;
+  return Object.freeze({
+    begin(providerId) {
+      return Object.freeze({ revision: ++revision, providerId: String(providerId) });
+    },
+    isCurrent(request, providerId) {
+      return request?.revision === revision && request.providerId === String(providerId);
+    },
+  });
+}
+
+export async function resolveProviderOnboardingStep({
+  gate,
+  request,
+  providerId,
+  activeProviderId,
+  preserveIntent,
+  completeDefault,
+  loadProjection,
+}) {
+  if (!preserveIntent) {
+    const completed = await completeDefault(providerId);
+    if (!gate.isCurrent(request, activeProviderId())) return { kind: "stale" };
+    if (completed) return { kind: "complete" };
+  }
+  const projection = await loadProjection(providerId);
+  if (!gate.isCurrent(request, activeProviderId())) return { kind: "stale" };
+  return { kind: "projection", projection };
+}
+
 export function providerOnboardingCompletionIntent({ providerId, projection, harnessId, family }) {
   if (!providerId || !projection?.projectionRevision || !harnessId || !family) return null;
   if (family.kind === "create" && (!family.name?.trim() || !family.members?.length)) return null;

@@ -199,12 +199,7 @@ describe("composer model picker selection", () => {
     expect(current).toMatchObject({ harnessId: "codex-basic", familyId: 1 });
     expect(availablePickerFamilies(catalog, "prime-agent-basic").map(({ id }) => id)).toEqual([3]);
     expect(selectCandidateHarness(catalog, current, "prime-agent-basic")).toEqual({
-      selection: {
-        harnessId: "prime-agent-basic",
-        familyId: 3,
-        providerId: "router",
-        modelId: "qwen",
-      },
+      selection: { harnessId: "prime-agent-basic", familyId: null, providerId: null, modelId: null },
       error: null,
     });
   });

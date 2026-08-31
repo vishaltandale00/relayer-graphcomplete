@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   createProviderConnectionCancellationState,
+  createProviderOnboardingProjectionGate,
   providerOnboardingCompletionIntent,
   providerOnboardingRecoveryAction,
   reconcileProviderOnboardingState,
+  resolveProviderOnboardingStep,
   resumableProviderDefinitions,
   setProviderOnboardingControlsBusy,
 } from "../desktop/renderer/src/provider-onboarding-model.js";
@@ -29,6 +31,51 @@ describe("provider onboarding renderer state", () => {
     expect(providerOnboardingRecoveryAction({
       blockingReason: { code: "harness_unavailable", message: "Install the harness." },
     })).toBeNull();
+  });
+
+  it("rejects an out-of-order projection and binds recovery to the rendered provider", () => {
+    const gate = createProviderOnboardingProjectionGate();
+    const first = gate.begin("provider-a");
+    const second = gate.begin("provider-b");
+    expect(gate.isCurrent(first, "provider-a")).toBe(false);
+    expect(gate.isCurrent(second, "provider-a")).toBe(false);
+    expect(gate.isCurrent(second, "provider-b")).toBe(true);
+  });
+
+  it("drops stale default-completion and projection responses at the production onboarding seam", async () => {
+    const gate = createProviderOnboardingProjectionGate();
+    let activeProvider = "provider-a";
+    let resolveDefault;
+    const first = gate.begin(activeProvider);
+    const staleDefault = resolveProviderOnboardingStep({
+      gate,
+      request: first,
+      providerId: "provider-a",
+      activeProviderId: () => activeProvider,
+      preserveIntent: false,
+      completeDefault: () => new Promise((resolve) => { resolveDefault = resolve; }),
+      loadProjection: async () => ({ provider: { id: "provider-a" } }),
+    });
+    activeProvider = "provider-b";
+    gate.begin(activeProvider);
+    resolveDefault(true);
+    await expect(staleDefault).resolves.toEqual({ kind: "stale" });
+
+    let resolveProjection;
+    const second = gate.begin(activeProvider);
+    const staleProjection = resolveProviderOnboardingStep({
+      gate,
+      request: second,
+      providerId: "provider-b",
+      activeProviderId: () => activeProvider,
+      preserveIntent: true,
+      completeDefault: async () => false,
+      loadProjection: () => new Promise((resolve) => { resolveProjection = resolve; }),
+    });
+    activeProvider = "provider-a";
+    gate.begin(activeProvider);
+    resolveProjection({ provider: { id: "provider-b" } });
+    await expect(staleProjection).resolves.toEqual({ kind: "stale" });
   });
 
   it("does not silently choose an alternate harness when the app default is incompatible", () => {

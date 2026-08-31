@@ -8,10 +8,10 @@ import {
 
 function anthropicModelEligibility(model) {
   const id = typeof model?.id === "string" ? model.id : "";
-  if (/^claude-/i.test(id)) return EXECUTION_ELIGIBLE;
   if (/(?:^|[-_.])(embedding|image|moderation|speech|tts)(?:$|[-_.])/i.test(id)) {
     return MODEL_NOT_EXECUTION_ELIGIBLE;
   }
+  if (/^claude-/i.test(id)) return EXECUTION_ELIGIBLE;
   return MODEL_CAPABILITY_UNKNOWN;
 }
 

@@ -60,6 +60,15 @@ export function providerDefinitionStatus(definition) {
   return { lifecycle, label: "Connected", usable: true };
 }
 
+export function providerFamilyRecoveryResult(providerStatus, providerId) {
+  const definition = providerStatus?.definitions?.find(({ id }) => String(id) === String(providerId));
+  if (!definition) return { recovered: false, message: "Provider refresh completed, but default family setup could not be confirmed." };
+  if (definition.unavailableReason) {
+    return { recovered: false, message: definition.unavailableReason.message };
+  }
+  return { recovered: true, message: "Provider models and default family refreshed." };
+}
+
 export function providerLabelError(label, definitions, currentId = null) {
   const normalized = String(label ?? "").trim().toLocaleLowerCase();
   if (!normalized) return "Enter a connection name.";

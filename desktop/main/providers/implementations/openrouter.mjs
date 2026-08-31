@@ -22,6 +22,10 @@ function tokenCapabilities(model) {
   return { contextWindow, maxOutputTokens };
 }
 
+function usesCanonicalEndpoint(endpoint) {
+  return endpoint.replace(/\/+$/, "") === "https://openrouter.ai/api/v1";
+}
+
 export const openRouterDescriptor = Object.freeze({
   adapterId: "openrouter",
   implementationVersion: "2",
@@ -34,7 +38,8 @@ export const openRouterDescriptor = Object.freeze({
   catalog: { source: "provider-discovery" },
   create: ({ definition, fetch, secrets, managedRuntime, environment }) => new SecretApiProviderAdapter({
     definition, fetch, credentials: { apiKey: secrets?.["api-key"] }, headers: bearerHeaders,
-    connectionProbePath: "/key",
+    connectionProbePath: usesCanonicalEndpoint(definition.endpoint) ? "/key" : null,
+    verifyConnectionBeforeDiscovery: usesCanonicalEndpoint(definition.endpoint),
     modelCapabilities: tokenCapabilities,
     modelEligibility: openRouterModelEligibility,
     requireCatalogBeforeExecution: true,

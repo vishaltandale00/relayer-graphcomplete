@@ -80,6 +80,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     headers,
     modelsPath = "/models",
     connectionProbePath = null,
+    verifyConnectionBeforeDiscovery = false,
     modelCapabilities = () => null,
     requireCatalogBeforeExecution = false,
     managedRuntime,
@@ -95,6 +96,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     this.headers = headers;
     this.modelsPath = modelsPath;
     this.connectionProbePath = connectionProbePath;
+    this.verifyConnectionBeforeDiscovery = verifyConnectionBeforeDiscovery;
     this.readModelCapabilities = modelCapabilities;
     this.modelCapabilities = Object.freeze({});
     this.requireCatalogBeforeExecution = requireCatalogBeforeExecution;
@@ -106,6 +108,9 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
 
   async discover({ signal } = {}) {
     signal?.throwIfAborted();
+    if (this.verifyConnectionBeforeDiscovery && !await this.verifyConnection({ signal })) {
+      return this.credentialsRejectedSnapshot();
+    }
     const endpoint = `${this.definition.endpoint}${this.modelsPath}`;
     let response;
     try {
@@ -161,7 +166,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
   }
 
   async connect(options) {
-    if (this.connectionProbePath !== null) {
+    if (this.connectionProbePath !== null && !this.verifyConnectionBeforeDiscovery) {
       const connected = await this.verifyConnection(options);
       if (!connected) return this.credentialsRejectedSnapshot();
     }

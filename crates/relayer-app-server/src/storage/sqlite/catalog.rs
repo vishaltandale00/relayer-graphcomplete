@@ -641,6 +641,14 @@ impl SqliteProductStore {
                 true,
             )
             .await?;
+        } else if managed_policy.is_some()
+            && snapshot
+                .unavailable_reason
+                .as_ref()
+                .is_some_and(|reason| reason.code == "provider_no_eligible_execution_models")
+        {
+            tombstone_managed_provider_families(&mut transaction, snapshot.provider_id.as_str())
+                .await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -1323,15 +1331,12 @@ async fn provider_onboarding_projection_on(
             &right.id,
         ))
     });
-    let has_eligible_execution_model = snapshot
-        .models
-        .iter()
-        .any(|model| model.visible && model.available);
-    let blocking_reason = if !has_eligible_execution_model {
-        Some(UnavailableReason {
-            code: "provider_no_eligible_execution_models".into(),
-            message: "This provider is connected but has no models eligible for agent execution. Refresh its catalog or update the provider connection.".into(),
-        })
+    let blocking_reason = if snapshot
+        .unavailable_reason
+        .as_ref()
+        .is_some_and(|reason| reason.code == "provider_no_eligible_execution_models")
+    {
+        snapshot.unavailable_reason.clone()
     } else if !harnesses.iter().any(|harness| harness.selectable) {
         Some(UnavailableReason {
             code: "no_compatible_harness".into(),
@@ -2250,7 +2255,7 @@ async fn replace_system_family(
                         )
                     })
                     .collect::<Vec<_>>();
-            sqlx::query("UPDATE model_families SET name=?1,revision=revision+?2,system_key=?3,lifecycle_state='active',removed_at=NULL WHERE id=?4")
+            sqlx::query("UPDATE model_families SET name=?1,revision=revision+?2,system_key=?3,enabled=1,lifecycle_state='active',removed_at=NULL WHERE id=?4")
                 .bind(&family_name)
                 .bind(i64::from(changed))
                 .bind(&key)
