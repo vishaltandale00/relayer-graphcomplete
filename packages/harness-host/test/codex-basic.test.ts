@@ -847,12 +847,14 @@ describe("CodexBasicHarness", () => {
 
   it("uses the managed Codex runtime attached to secret provider access", async () => {
     let submitted: CodexAppServerTurnOptions | undefined;
+    const writeAuthFile = vi.fn(async () => {});
     const harness = new CodexBasicHarness(context("auto"), {
       runAppServerTurn: async (options) => {
         submitted = options;
         options.onThreadId("api-thread");
         return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
       },
+      writeCodexApiKeyAuthFile: writeAuthFile,
     });
 
     await harness.complete({
@@ -870,6 +872,35 @@ describe("CodexBasicHarness", () => {
 
     expect(submitted?.codexPathOverride).toBe("/managed/codex");
     expect(submitted?.environment.CODEX_HOME).toBe("/isolated/codex-home");
+    expect(writeAuthFile).toHaveBeenCalledWith("/isolated/codex-home", "selected-secret");
+  });
+
+  it("writes an API-key auth.json into the provider CODEX_HOME so Codex can authenticate", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-home-"));
+    try {
+      const harness = new CodexBasicHarness(context("auto"), {
+        runAppServerTurn: async (options) => {
+          options.onThreadId("api-thread");
+          return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
+        },
+      });
+      await harness.complete({
+        ...runContext(1, "token"),
+        model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+        access: {
+          kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
+          adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
+          runtime: {
+            runtimeId: "codex", version: "0.147.0", executable: "/managed/codex",
+            environment: { CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: "/managed/codex" },
+          },
+        },
+      });
+      const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
+      expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "selected-secret" });
+    } finally {
+      await rm(codexHome, { recursive: true, force: true });
+    }
   });
 
   it("allows only Codex runtime keys from managed access and preserves graph authority", async () => {

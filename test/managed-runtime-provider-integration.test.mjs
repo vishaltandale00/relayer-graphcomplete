@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { createProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-contract.mjs";
 import { ProviderDefinitionService } from "../desktop/main/providers/provider-definition-service.mjs";
@@ -66,6 +69,7 @@ function fixture({ prepareRuntime = async () => ({ runtimeId: "codex" }), discov
 describe("managed runtime provider Connect boundary", () => {
   it("keeps API provider access secret-only while the Codex factory supplies its managed runtime", async () => {
     let submitted;
+    const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-int-"));
     const definition = {
       id: "openai-work", adapterId: "openai-api", label: "OpenAI Work",
       endpoint: "https://api.openai.test/v1", accessContract: "secret@1", credentialReference: "provider:openai-work",
@@ -101,7 +105,7 @@ describe("managed runtime provider Connect boundary", () => {
       },
       resolveCodexRuntime: async () => ({
         executable: "/managed/codex",
-        environment: { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: "/managed/codex" },
+        environment: { CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: "/managed/codex" },
       }),
     });
     const inputGraph = { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" };
@@ -117,8 +121,11 @@ describe("managed runtime provider Connect boundary", () => {
 
     expect(acquired.access).not.toHaveProperty("runtime");
     expect(submitted.codexPathOverride).toBe("/managed/codex");
-    expect(submitted.environment.CODEX_HOME).toBe("/isolated/codex");
+    expect(submitted.environment.CODEX_HOME).toBe(codexHome);
+    const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
+    expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "secret" });
     await acquired.release();
+    await rm(codexHome, { recursive: true, force: true });
   });
 
   it("finishes managed runtime preparation before provider authentication or discovery", async () => {

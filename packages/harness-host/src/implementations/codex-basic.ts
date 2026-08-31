@@ -1,6 +1,7 @@
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import { createHash } from "node:crypto";
-import { isAbsolute } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
@@ -44,6 +45,20 @@ const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
 const CODEX_MANAGED_RUNTIME_ENVIRONMENT = new Set([
   ...SAFE_SUBPROCESS_ENVIRONMENT, "HOME", "USERPROFILE", "CODEX_HOME", "RELAYER_CODEX_BINARY",
 ]);
+
+// Codex authenticates an API-key provider from CODEX_HOME/auth.json. The
+// OPENAI_API_KEY environment variable alone is not honored by the managed Codex
+// runtime (requests go out with no bearer), so persist the selected provider's
+// key into its isolated per-provider CODEX_HOME. This lets codex.basic drive the
+// secret-access providers (openai-api, openrouter, vercel-ai-router).
+async function writeCodexApiKeyAuthFile(codexHome: string, apiKey: string): Promise<void> {
+  await mkdir(codexHome, { recursive: true });
+  await writeFile(
+    join(codexHome, "auth.json"),
+    `${JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: apiKey })}\n`,
+    { mode: 0o600 },
+  );
+}
 const UNDERLYING_TASK_GUIDANCE = `Complete the underlying user task in the working directory. Use the harness's ordinary workspace tools and reasoning as needed; the graph is the presentation of the work, not a substitute for doing it. Author graph content from the work you actually performed and the evidence you actually observed. If you reach a genuine blocker that you cannot resolve, present that blocker and its evidence instead of presenting planned work as completed.`;
 
 export interface CodexBasicDependencies {
@@ -62,6 +77,7 @@ export interface CodexBasicDependencies {
     readonly executable: string;
     readonly environment: Readonly<Record<string, string>>;
   }>;
+  readonly writeCodexApiKeyAuthFile?: (codexHome: string, apiKey: string) => Promise<void>;
 }
 
 interface CodexBasicConfiguration {
@@ -183,6 +199,13 @@ export class CodexBasicHarness implements Harness {
     const capability = context.graph.acquireCapability();
     const resolvedRuntime = await this.codexRuntime(context.access);
     const environment = this.graphEnvironment(capability, context.completionBroker, context.access, resolvedRuntime.environment);
+    if (context.access?.kind === "secret") {
+      const apiKey = context.access.fields["api-key"];
+      const codexHome = environment.CODEX_HOME;
+      if (apiKey !== undefined && apiKey !== "" && codexHome !== undefined && codexHome !== "") {
+        await (this.dependencies.writeCodexApiKeyAuthFile ?? writeCodexApiKeyAuthFile)(codexHome, apiKey);
+      }
+    }
     const sandboxPolicy = this.sandboxPolicy();
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
     const prompt = this.prompt(context);
