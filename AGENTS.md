@@ -24,6 +24,10 @@ For every implementation change:
 7. Use adversarial subagents for applicable consequence-bearing dimensions, especially ambiguous mappings, semantic/UX/authority claims, heavy evidence, and test deletion or subsumption. Agent transcripts are not durable evidence. Record a compact assertion in the PR: reviewer, exact commit or workspace digest, reviewed scope, verdict, and unresolved findings. Invalidate it when that source state changes. Without a PR, report the review as non-certifying in the handoff.
 8. Report the required verification plan, what actually ran, and the resulting evidence separately. Claim a pass only for the exact tested source snapshot; a planned test, test name, or outer command exit code is not proof that an inner scenario passed. Preserve failures and unknowns explicitly.
 
+## Desktop releases
+
+Follow `docs/desktop-release-operations.md`. Reuse proof from the exact commit instead of repeating completed release steps. Diagnose a failed release before retrying, and allow at most one unchanged retry for a confirmed flaky or infrastructure failure. Never move or recreate a release tag. Report when validation, notarization, publication, or verification is causing a delay.
+
 ## Agent skills
 
 ### Issue tracker
