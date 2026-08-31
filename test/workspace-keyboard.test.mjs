@@ -12,6 +12,7 @@ import {
   composerDisabledForState,
   confirmationSendFailureMayHaveCommitted,
   confirmationSendReplayIntent,
+  confirmationSendReplayIntentWithoutInputAuthority,
   continueDraftOverrideAfterPersistence,
   composerConfirmationAuthorityChanged,
   composerDraftScopeKey,
@@ -48,6 +49,7 @@ import {
   interactionContextTargetForEditor,
   removeContextAnnotation,
   refreshComposerContextsAfterFailedConfirmationSend,
+  rebuildInteractionSendIntentAfterInputReconciliation,
   resolveInteractionContextNode,
   sendIntentIsCurrentThread,
   sendAttemptBlocksThread,
@@ -120,6 +122,74 @@ describe("product workspace keyboard behavior", () => {
     await expect(selecting).resolves.toEqual({ rebuilt: true, inputDraftRevision: 8 });
     expect(readReplay).toHaveBeenCalledOnce();
     expect(rebuild).toHaveBeenCalledOnce();
+  });
+
+  it("rebuilds a post-commit response-loss retry from the click-time snapshot and current authority", () => {
+    const confirmation = {
+      draftId: "confirmation-a",
+      target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
+      annotation: "Original context",
+    };
+    const clicked = interactionSendIntent({
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptValue: "Original prompt",
+      promptRevision: 4,
+      contexts: [{
+        target: confirmation.target,
+        annotations: [confirmation.annotation],
+        annotationConfirmations: [confirmation],
+      }],
+      contextRevision: 8,
+      modelSelection: { providerId: "fixture", modelId: "deterministic" },
+      inputDraftRevision: 7,
+      inputCompositionRevision: 3,
+    });
+    const current = interactionSendIntent({
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptValue: "Original prompt",
+      promptRevision: 4,
+      contexts: [],
+      contextRevision: 9,
+      modelSelection: clicked.modelSelection,
+      inputDraftRevision: 10,
+      inputCompositionRevision: 4,
+    });
+
+    expect(confirmationSendReplayIntentWithoutInputAuthority({
+      intent: clicked,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 4,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: clicked.modelSelection,
+    })).toBe(clicked);
+    expect(confirmationSendReplayIntentWithoutInputAuthority({
+      intent: clicked,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 5,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: clicked.modelSelection,
+    })).toBeNull();
+
+    expect(rebuildInteractionSendIntentAfterInputReconciliation({
+      clickedIntent: clicked,
+      currentIntent: current,
+      inputDraftRevision: 10,
+    })).toMatchObject({
+      text: "Original prompt",
+      contextPayload: [{
+        target: confirmation.target,
+        annotations: ["Original context"],
+      }],
+      contextConfirmationIds: [],
+      modelSelection: clicked.modelSelection,
+      inputDraftRevision: 10,
+    });
   });
 
   it("settles an async input commit without repainting a stale selection occurrence", async () => {

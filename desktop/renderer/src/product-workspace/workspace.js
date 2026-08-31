@@ -592,6 +592,28 @@ export function confirmationSendReplayIntent({
     : null;
 }
 
+export function confirmationSendReplayIntentWithoutInputAuthority({
+  intent,
+  threadId,
+  draftScopeKey,
+  promptRevision,
+  contextRevision,
+  replayContextRevision,
+  modelSelection,
+}) {
+  return confirmationSendReplayIntent({
+    intent,
+    threadId,
+    draftScopeKey,
+    promptRevision,
+    contextRevision,
+    replayContextRevision,
+    modelSelection,
+    inputDraftRevision: intent?.inputDraftRevision,
+    inputCompositionRevision: intent?.inputCompositionRevision,
+  });
+}
+
 export async function selectInteractionSendIntentAfterInputReconciliation({
   awaitInputDraft,
   selectionIsCurrent,
@@ -601,6 +623,18 @@ export async function selectInteractionSendIntentAfterInputReconciliation({
   await awaitInputDraft();
   if (!selectionIsCurrent()) return null;
   return replayIntent() || rebuildIntent();
+}
+
+export function rebuildInteractionSendIntentAfterInputReconciliation({
+  clickedIntent,
+  currentIntent,
+  inputDraftRevision,
+}) {
+  return Object.freeze({
+    ...(clickedIntent || currentIntent),
+    contextConfirmationIds: currentIntent.contextConfirmationIds,
+    inputDraftRevision,
+  });
 }
 
 export function confirmationSendFailureMayHaveCommitted(error) {
@@ -3163,6 +3197,16 @@ export function createProductWorkspace({
         unconfirmedContextDrafts = contextDraftController.draftsForThread(threadId);
       }
       if (!draftOverride) {
+        const reconciledInputDraftRevision = () => currentInputDraftRevision(threadId);
+        const clickTimeIntentWithoutDraftAuthority = () => confirmationSendReplayIntentWithoutInputAuthority({
+          intent: sendRequest.failedConfirmationSend?.intent,
+          threadId,
+          draftScopeKey: sendRequest.draftScopeKey,
+          promptRevision: sendRequest.promptRevision,
+          contextRevision: sendRequest.contextRevision,
+          replayContextRevision: sendRequest.failedConfirmationSend?.contextRevision,
+          modelSelection: sendRequest.modelSelection,
+        });
         intent = await selectInteractionSendIntentAfterInputReconciliation({
           awaitInputDraft: () => inputDraftController
             ? ensureInputDraftLoaded(threadId)
@@ -3177,12 +3221,13 @@ export function createProductWorkspace({
             contextRevision: sendRequest.contextRevision,
             replayContextRevision: sendRequest.failedConfirmationSend?.contextRevision,
             modelSelection: sendRequest.modelSelection,
-            inputDraftRevision: currentInputDraftRevision(threadId),
+            inputDraftRevision: reconciledInputDraftRevision(),
             inputCompositionRevision: sendRequest.inputCompositionRevision,
           }),
-          rebuildIntent: () => Object.freeze({
-            ...sendRequest.freshIntent,
-            inputDraftRevision: currentInputDraftRevision(threadId),
+          rebuildIntent: () => rebuildInteractionSendIntentAfterInputReconciliation({
+            clickedIntent: clickTimeIntentWithoutDraftAuthority(),
+            currentIntent: sendRequest.freshIntent,
+            inputDraftRevision: reconciledInputDraftRevision(),
           }),
         });
         if (!intent || !sendIntentIsCurrentThread(threadId, intent.threadId)) return;
