@@ -40,29 +40,118 @@ const codexProvider = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("model family settings model", () => {
-  it("reconciles a persisted create before a follow-up refresh", () => {
-    const draft = createModelFamilyDraft([codexProvider], 7);
-    draft.name = "Coding";
-    const saved = reconcileSavedFamily(draft, {
-      id: 42,
-      name: "Coding",
-      kind: "custom",
-      enabled: true,
-      position: 3,
-    });
-    expect(saved).toMatchObject({
-      id: 42,
-      name: "Coding",
-      kind: "custom",
-      enabled: true,
-      position: 3,
-      draft: false,
-      editing: false,
-    });
-    expect(saved.models).toEqual(draft.models);
+    it("preserves draft lifecycle across creation, persistence, and catalog refresh", async () => {
+    const cases = [
+      {
+        label: "reconciles a persisted create before a follow-up refresh",
+        run: async () => {
+          const draft = createModelFamilyDraft([codexProvider], 7);
+          draft.name = "Coding";
+          const saved = reconcileSavedFamily(draft, {
+            id: 42,
+            name: "Coding",
+            kind: "custom",
+            enabled: true,
+            position: 3,
+          });
+          expect(saved).toMatchObject({
+            id: 42,
+            name: "Coding",
+            kind: "custom",
+            enabled: true,
+            position: 3,
+            draft: false,
+            editing: false,
+          });
+          expect(saved.models).toEqual(draft.models);
+        },
+      },
+      {
+        label: "starts a custom family with the first available model from a connected provider",
+        run: async () => {
+          const draft = createModelFamilyDraft([codexProvider], 7);
+          expect(draft).toMatchObject({ id: "draft-7", kind: "custom", enabled: true, draft: true });
+          expect(draft.models).toEqual([expect.objectContaining({
+            providerId: "codex",
+            modelId: "gpt-5.6-sol",
+          })]);
+        },
+      },
+      {
+        label: "starts a new family from the saved default provider without constraining later membership",
+        run: async () => {
+          const other = {
+            id: "other",
+            label: "Other",
+            connected: true,
+            models: [{ id: "other-first", label: "Other first", available: true }],
+          };
+          const draft = createModelFamilyDraft([other, codexProvider], 8, "codex");
+          expect(draft.models[0]).toMatchObject({ providerId: "codex", modelId: "gpt-5.6-sol" });
+        },
+      },
+      {
+        label: "preserves unsaved draft and edit state across provider catalog refreshes",
+        run: async () => {
+          const serverFamilies = [{ id: 1, name: "Server", kind: "custom", position: 0, models: [] }];
+          const edited = preserveFamilyEditAfterRefresh(serverFamilies, {
+            id: 1,
+            name: "Unsaved name",
+            kind: "custom",
+            position: 0,
+            editing: true,
+            models: [{ providerId: "codex", modelId: "gpt-5.6-sol" }],
+          });
+          expect(edited.families[0]).toMatchObject({ name: "Unsaved name", editing: true });
+          expect(edited.editSnapshot).toMatchObject({ name: "Server" });
+
+          const draft = preserveFamilyEditAfterRefresh(serverFamilies, {
+            id: "draft-1",
+            name: "Draft",
+            kind: "custom",
+            draft: true,
+            models: [],
+          });
+          expect(draft.selectedIndex).toBe(1);
+          expect(draft.families[1]).toMatchObject({ name: "Draft", draft: true });
+
+          const offScreen = preserveFamilyEditAfterRefresh(serverFamilies, [
+            {
+              id: 1,
+              name: "Edited off screen",
+              kind: "custom",
+              position: 0,
+              editing: true,
+              models: [{ providerId: "codex", modelId: "gpt-5.6-sol" }],
+            },
+            {
+              id: "draft-2",
+              name: "Draft off screen",
+              kind: "custom",
+              draft: true,
+              models: [],
+            },
+          ]);
+          expect(offScreen.preservedIndexes).toEqual([0, 1]);
+          expect(offScreen.families).toEqual([
+            expect.objectContaining({ id: 1, name: "Edited off screen", editing: true }),
+            expect.objectContaining({ id: "draft-2", name: "Draft off screen", draft: true }),
+          ]);
+        },
+      },
+    ];
+    const outcomes = await Promise.allSettled(cases.map(async ({ label, run }) => {
+      try {
+        await run();
+        return label;
+      } catch (error) {
+        throw new Error(`Case failed: ${label}`, { cause: error });
+      }
+    }));
+    expect(outcomes).toEqual(["reconciles a persisted create before a follow-up refresh", "starts a custom family with the first available model from a connected provider", "starts a new family from the saved default provider without constraining later membership", "preserves unsaved draft and edit state across provider catalog refreshes"].map((value) => ({ status: "fulfilled", value })));
   });
 
-  it("serializes visibility updates across all families", () => {
+it("serializes visibility updates across all families", () => {
     const gate = createFamilyVisibilityGate();
     expect(gate.begin(7)).toBe(true);
     expect(gate.begin(8)).toBe(false);
@@ -71,50 +160,59 @@ describe("model family settings model", () => {
     expect(gate.begin(8)).toBe(true);
   });
 
-  it("starts a custom family with the first available model from a connected provider", () => {
-    const draft = createModelFamilyDraft([codexProvider], 7);
-    expect(draft).toMatchObject({ id: "draft-7", kind: "custom", enabled: true, draft: true });
-    expect(draft.models).toEqual([expect.objectContaining({
-      providerId: "codex",
-      modelId: "gpt-5.6-sol",
-    })]);
+  it("validates custom families with provider-scoped member identity", async () => {
+    const cases = [
+      {
+        label: "rejects empty, duplicate, zero-member, duplicate-member, and oversized custom families",
+        run: async () => {
+          expect(validateCustomFamily({ id: "new", name: " ", models: [] }, []))
+            .toEqual({ name: "Enter a family name.", models: "Add at least one model." });
+
+          const member = { providerId: "codex", modelId: "gpt-5.6-sol" };
+          expect(validateCustomFamily(
+            { id: "new", name: "Coding", models: [member, member] },
+            [{ id: "existing", name: "coding", models: [member] }],
+          )).toEqual({
+            name: "A family with this name already exists.",
+            models: "Each provider model can appear only once.",
+          });
+
+          expect(validateCustomFamily({
+            id: "new",
+            name: "Large",
+            models: Array.from({ length: MAX_MODELS_PER_FAMILY + 1 }, (_, index) => ({
+              providerId: "codex",
+              modelId: `model-${index}`,
+            })),
+          })).toEqual({ models: "Remove 1 model." });
+        },
+      },
+      {
+        label: "treats the same model id from different providers as distinct family members",
+        run: async () => {
+          expect(validateCustomFamily({
+            id: "cross-provider",
+            name: "Coding",
+            models: [
+              { providerId: "codex", modelId: "shared-name" },
+              { providerId: "future-provider", modelId: "shared-name" },
+            ],
+          })).toEqual({});
+        },
+      },
+    ];
+    const outcomes = await Promise.allSettled(cases.map(async ({ label, run }) => {
+      try {
+        await run();
+        return label;
+      } catch (error) {
+        throw new Error(`Case failed: ${label}`, { cause: error });
+      }
+    }));
+    expect(outcomes).toEqual(["rejects empty, duplicate, zero-member, duplicate-member, and oversized custom families", "treats the same model id from different providers as distinct family members"].map((value) => ({ status: "fulfilled", value })));
   });
 
-  it("starts a new family from the saved default provider without constraining later membership", () => {
-    const other = {
-      id: "other",
-      label: "Other",
-      connected: true,
-      models: [{ id: "other-first", label: "Other first", available: true }],
-    };
-    const draft = createModelFamilyDraft([other, codexProvider], 8, "codex");
-    expect(draft.models[0]).toMatchObject({ providerId: "codex", modelId: "gpt-5.6-sol" });
-  });
-
-  it("rejects empty, duplicate, zero-member, duplicate-member, and oversized custom families", () => {
-    expect(validateCustomFamily({ id: "new", name: " ", models: [] }, []))
-      .toEqual({ name: "Enter a family name.", models: "Add at least one model." });
-
-    const member = { providerId: "codex", modelId: "gpt-5.6-sol" };
-    expect(validateCustomFamily(
-      { id: "new", name: "Coding", models: [member, member] },
-      [{ id: "existing", name: "coding", models: [member] }],
-    )).toEqual({
-      name: "A family with this name already exists.",
-      models: "Each provider model can appear only once.",
-    });
-
-    expect(validateCustomFamily({
-      id: "new",
-      name: "Large",
-      models: Array.from({ length: MAX_MODELS_PER_FAMILY + 1 }, (_, index) => ({
-        providerId: "codex",
-        modelId: `model-${index}`,
-      })),
-    })).toEqual({ models: "Remove 1 model." });
-  });
-
-  it("preserves explicit order and copies system membership into an editable custom draft", () => {
+it("preserves explicit order and copies system membership into an editable custom draft", () => {
     expect(moveItem(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
     const source = {
       name: "Codex",
@@ -126,18 +224,7 @@ describe("model family settings model", () => {
     expect(copy.models).toHaveLength(MAX_MODELS_PER_FAMILY);
   });
 
-  it("treats the same model id from different providers as distinct family members", () => {
-    expect(validateCustomFamily({
-      id: "cross-provider",
-      name: "Coding",
-      models: [
-        { providerId: "codex", modelId: "shared-name" },
-        { providerId: "future-provider", modelId: "shared-name" },
-      ],
-    })).toEqual({});
-  });
-
-  it("marks disconnected-provider and hidden-model family members unavailable", () => {
+it("marks disconnected-provider and hidden-model family members unavailable", () => {
     expect(modelMember(
       { id: "offline", label: "Offline", connected: false },
       { id: "model", label: "Model", visible: true, available: true },
@@ -148,123 +235,98 @@ describe("model family settings model", () => {
     )).toMatchObject({ available: false, unavailableReason: "This model is hidden by the provider." });
   });
 
-  it("preserves unsaved draft and edit state across provider catalog refreshes", () => {
-    const serverFamilies = [{ id: 1, name: "Server", kind: "custom", position: 0, models: [] }];
-    const edited = preserveFamilyEditAfterRefresh(serverFamilies, {
-      id: 1,
-      name: "Unsaved name",
-      kind: "custom",
-      position: 0,
-      editing: true,
-      models: [{ providerId: "codex", modelId: "gpt-5.6-sol" }],
-    });
-    expect(edited.families[0]).toMatchObject({ name: "Unsaved name", editing: true });
-    expect(edited.editSnapshot).toMatchObject({ name: "Server" });
-
-    const draft = preserveFamilyEditAfterRefresh(serverFamilies, {
-      id: "draft-1",
-      name: "Draft",
-      kind: "custom",
-      draft: true,
-      models: [],
-    });
-    expect(draft.selectedIndex).toBe(1);
-    expect(draft.families[1]).toMatchObject({ name: "Draft", draft: true });
-
-    const offScreen = preserveFamilyEditAfterRefresh(serverFamilies, [
+  it("preserves saved default authority across every harness route", async () => {
+    const cases = [
       {
-        id: 1,
-        name: "Edited off screen",
-        kind: "custom",
-        position: 0,
-        editing: true,
-        models: [{ providerId: "codex", modelId: "gpt-5.6-sol" }],
+        label: "surfaces an unavailable saved harness instead of selecting another",
+        run: async () => {
+          const settings = {
+            defaults: { harnessId: "codex-basic" },
+            harnesses: [
+              { id: "codex-basic", available: false, unavailableReason: {
+                code: "harness_no_available_models",
+                message: "No available models for this harness.",
+              } },
+              { id: "other", available: true },
+            ],
+          };
+          expect(defaultHarnessError(settings)).toBe("No available models for this harness.");
+          expect(settings.defaults.harnessId).toBe("codex-basic");
+        },
       },
       {
-        id: "draft-2",
-        name: "Draft off screen",
-        kind: "custom",
-        draft: true,
-        models: [],
+        label: "offers only currently usable harnesses as new defaults",
+        run: async () => {
+          const settings = {
+            defaults: { harnessId: "claude-basic" },
+            harnesses: [
+              { id: "codex-basic", usableNow: true },
+              {
+                id: "claude-basic",
+                available: true,
+                usableNow: false,
+                compatibleProviderIds: ["anthropic"],
+                modelCompatibility: [],
+              },
+            ],
+          };
+          expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
+          expect(defaultHarnessError(settings)).toBe(
+            "No currently connected provider and eligible model can use this harness.",
+          );
+          expect(settings.defaults.harnessId).toBe("claude-basic");
+        },
       },
-    ]);
-    expect(offScreen.preservedIndexes).toEqual([0, 1]);
-    expect(offScreen.families).toEqual([
-      expect.objectContaining({ id: 1, name: "Edited off screen", editing: true }),
-      expect.objectContaining({ id: "draft-2", name: "Draft off screen", draft: true }),
-    ]);
-  });
-
-  it("surfaces an unavailable saved harness instead of selecting another", () => {
-    const settings = {
-      defaults: { harnessId: "codex-basic" },
-      harnesses: [
-        { id: "codex-basic", available: false, unavailableReason: {
-          code: "harness_no_available_models",
-          message: "No available models for this harness.",
-        } },
-        { id: "other", available: true },
-      ],
-    };
-    expect(defaultHarnessError(settings)).toBe("No available models for this harness.");
-    expect(settings.defaults.harnessId).toBe("codex-basic");
-  });
-
-  it("offers only currently usable harnesses as new defaults", () => {
-    const settings = {
-      defaults: { harnessId: "claude-basic" },
-      harnesses: [
-        { id: "codex-basic", usableNow: true },
-        {
-          id: "claude-basic",
-          available: true,
-          usableNow: false,
-          compatibleProviderIds: ["anthropic"],
-          modelCompatibility: [],
+      {
+        label: "keeps configuration-owned harnesses selectable without a provider/model route",
+        run: async () => {
+          const settings = {
+            defaults: { harnessId: "codex-layered-navigation-luna" },
+            harnesses: [
+              {
+                id: "codex-layered-navigation-luna",
+                available: true,
+                usableNow: false,
+                compatibleProviderIds: [],
+                modelCompatibility: [],
+              },
+            ],
+          };
+          expect(usableDefaultHarnesses(settings)).toEqual(settings.harnesses);
+          expect(defaultHarnessIsSelectable(settings, settings.defaults.harnessId)).toBe(true);
+          expect(defaultHarnessError(settings)).toBeNull();
         },
-      ],
-    };
-    expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
-    expect(defaultHarnessError(settings)).toBe(
-      "No currently connected provider and eligible model can use this harness.",
-    );
-    expect(settings.defaults.harnessId).toBe("claude-basic");
-  });
-
-  it("keeps configuration-owned harnesses selectable without a provider/model route", () => {
-    const settings = {
-      defaults: { harnessId: "codex-layered-navigation-luna" },
-      harnesses: [
-        {
-          id: "codex-layered-navigation-luna",
-          available: true,
-          usableNow: false,
-          compatibleProviderIds: [],
-          modelCompatibility: [],
+      },
+      {
+        label: "offers ordinary harness defaults only when the saved family can execute them",
+        run: async () => {
+          const settings = {
+            defaults: { harnessId: "codex-basic", familyId: 11 },
+            harnesses: [
+              {
+                id: "codex-basic", usableNow: true, usableFamilyIds: [11],
+                compatibleProviderIds: ["openai"], modelCompatibility: [],
+              },
+              {
+                id: "claude-basic", usableNow: true, usableFamilyIds: [12],
+                compatibleProviderIds: ["anthropic"], modelCompatibility: [],
+              },
+            ],
+          };
+          expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
+          expect(defaultHarnessIsSelectable(settings, "claude-basic")).toBe(false);
         },
-      ],
-    };
-    expect(usableDefaultHarnesses(settings)).toEqual(settings.harnesses);
-    expect(defaultHarnessIsSelectable(settings, settings.defaults.harnessId)).toBe(true);
-    expect(defaultHarnessError(settings)).toBeNull();
-  });
-
-  it("offers ordinary harness defaults only when the saved family can execute them", () => {
-    const settings = {
-      defaults: { harnessId: "codex-basic", familyId: 11 },
-      harnesses: [
-        {
-          id: "codex-basic", usableNow: true, usableFamilyIds: [11],
-          compatibleProviderIds: ["openai"], modelCompatibility: [],
-        },
-        {
-          id: "claude-basic", usableNow: true, usableFamilyIds: [12],
-          compatibleProviderIds: ["anthropic"], modelCompatibility: [],
-        },
-      ],
-    };
-    expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
-    expect(defaultHarnessIsSelectable(settings, "claude-basic")).toBe(false);
+      },
+    ];
+    const outcomes = await Promise.allSettled(cases.map(async ({ label, run }) => {
+      try {
+        await run();
+        return label;
+      } catch (error) {
+        throw new Error(`Case failed: ${label}`, { cause: error });
+      }
+    }));
+    expect(outcomes).toEqual(["surfaces an unavailable saved harness instead of selecting another", "offers only currently usable harnesses as new defaults", "keeps configuration-owned harnesses selectable without a provider/model route", "offers ordinary harness defaults only when the saved family can execute them"].map((value) => ({ status: "fulfilled", value })));
   });
 });
 
