@@ -33,76 +33,124 @@ describe("provider onboarding renderer state", () => {
     })).toBeNull();
   });
 
-  it("rejects an out-of-order projection and binds recovery to the rendered provider", () => {
-    const gate = createProviderOnboardingProjectionGate();
-    const first = gate.begin("provider-a");
-    const second = gate.begin("provider-b");
-    expect(gate.isCurrent(first, "provider-a")).toBe(false);
-    expect(gate.isCurrent(second, "provider-a")).toBe(false);
-    expect(gate.isCurrent(second, "provider-b")).toBe(true);
+  it("commits only the current provider projection across every async stage", async () => {
+    const cases = [
+      {
+        label: "rejects an out-of-order projection and binds recovery to the rendered provider",
+        run: async () => {
+          const gate = createProviderOnboardingProjectionGate();
+          const first = gate.begin("provider-a");
+          const second = gate.begin("provider-b");
+          expect(gate.isCurrent(first, "provider-a")).toBe(false);
+          expect(gate.isCurrent(second, "provider-a")).toBe(false);
+          expect(gate.isCurrent(second, "provider-b")).toBe(true);
+        },
+      },
+      {
+        label: "drops stale default-completion and projection responses at the production onboarding seam",
+        run: async () => {
+          const gate = createProviderOnboardingProjectionGate();
+          let activeProvider = "provider-a";
+          let resolveDefault;
+          const first = gate.begin(activeProvider);
+          const staleDefault = resolveProviderOnboardingStep({
+            gate,
+            request: first,
+            providerId: "provider-a",
+            activeProviderId: () => activeProvider,
+            preserveIntent: false,
+            completeDefault: () => new Promise((resolve) => { resolveDefault = resolve; }),
+            loadProjection: async () => ({ provider: { id: "provider-a" } }),
+          });
+          activeProvider = "provider-b";
+          gate.begin(activeProvider);
+          resolveDefault(true);
+          await expect(staleDefault).resolves.toEqual({ kind: "stale" });
+
+          let resolveProjection;
+          const second = gate.begin(activeProvider);
+          const staleProjection = resolveProviderOnboardingStep({
+            gate,
+            request: second,
+            providerId: "provider-b",
+            activeProviderId: () => activeProvider,
+            preserveIntent: true,
+            completeDefault: async () => false,
+            loadProjection: () => new Promise((resolve) => { resolveProjection = resolve; }),
+          });
+          activeProvider = "provider-a";
+          gate.begin(activeProvider);
+          resolveProjection({ provider: { id: "provider-b" } });
+          await expect(staleProjection).resolves.toEqual({ kind: "stale" });
+        },
+      },
+    ];
+    const outcomes = await Promise.allSettled(cases.map(async ({ label, run }) => {
+      try {
+        await run();
+        return label;
+      } catch (error) {
+        throw new Error(`Case failed: ${label}`, { cause: error });
+      }
+    }));
+    expect(outcomes).toEqual(["rejects an out-of-order projection and binds recovery to the rendered provider", "drops stale default-completion and projection responses at the production onboarding seam"].map((value) => ({ status: "fulfilled", value })));
   });
 
-  it("drops stale default-completion and projection responses at the production onboarding seam", async () => {
-    const gate = createProviderOnboardingProjectionGate();
-    let activeProvider = "provider-a";
-    let resolveDefault;
-    const first = gate.begin(activeProvider);
-    const staleDefault = resolveProviderOnboardingStep({
-      gate,
-      request: first,
-      providerId: "provider-a",
-      activeProviderId: () => activeProvider,
-      preserveIntent: false,
-      completeDefault: () => new Promise((resolve) => { resolveDefault = resolve; }),
-      loadProjection: async () => ({ provider: { id: "provider-a" } }),
-    });
-    activeProvider = "provider-b";
-    gate.begin(activeProvider);
-    resolveDefault(true);
-    await expect(staleDefault).resolves.toEqual({ kind: "stale" });
-
-    let resolveProjection;
-    const second = gate.begin(activeProvider);
-    const staleProjection = resolveProviderOnboardingStep({
-      gate,
-      request: second,
-      providerId: "provider-b",
-      activeProviderId: () => activeProvider,
-      preserveIntent: true,
-      completeDefault: async () => false,
-      loadProjection: () => new Promise((resolve) => { resolveProjection = resolve; }),
-    });
-    activeProvider = "provider-a";
-    gate.begin(activeProvider);
-    resolveProjection({ provider: { id: "provider-b" } });
-    await expect(staleProjection).resolves.toEqual({ kind: "stale" });
+  it("uses authoritative harness selection without silent substitution", async () => {
+    const cases = [
+      {
+        label: "does not silently choose an alternate harness when the app default is incompatible",
+        run: async () => {
+          expect(reconcileProviderOnboardingState(projection)).toEqual({ harnessId: null, family: null });
+        },
+      },
+      {
+        label: "uses only the authoritative initial harness and preserves an explicit compatible choice on refresh",
+        run: async () => {
+          const initiallyCompatible = {
+            ...projection,
+            initialHarnessId: "compatible",
+            harnesses: projection.harnesses.map((harness) => harness.id === "compatible" ? {
+              ...harness,
+              existingCustomFamilies: [{ id: 12 }],
+            } : harness),
+          };
+          expect(reconcileProviderOnboardingState(initiallyCompatible)).toEqual({
+            harnessId: "compatible",
+            family: null,
+          });
+          const family = { kind: "existing", familyId: 12 };
+          expect(reconcileProviderOnboardingState(initiallyCompatible, { harnessId: "compatible", family })).toEqual({
+            harnessId: "compatible",
+            family,
+          });
+        },
+      },
+      {
+        label: "clears family intent when a refreshed projection makes its harness unavailable",
+        run: async () => {
+          expect(reconcileProviderOnboardingState({
+            ...projection,
+            harnesses: projection.harnesses.map((harness) => ({ ...harness, selectable: false })),
+          }, { harnessId: "compatible", family: { kind: "existing", familyId: 12 } })).toEqual({
+            harnessId: null,
+            family: null,
+          });
+        },
+      },
+    ];
+    const outcomes = await Promise.allSettled(cases.map(async ({ label, run }) => {
+      try {
+        await run();
+        return label;
+      } catch (error) {
+        throw new Error(`Case failed: ${label}`, { cause: error });
+      }
+    }));
+    expect(outcomes).toEqual(["does not silently choose an alternate harness when the app default is incompatible", "uses only the authoritative initial harness and preserves an explicit compatible choice on refresh", "clears family intent when a refreshed projection makes its harness unavailable"].map((value) => ({ status: "fulfilled", value })));
   });
 
-  it("does not silently choose an alternate harness when the app default is incompatible", () => {
-    expect(reconcileProviderOnboardingState(projection)).toEqual({ harnessId: null, family: null });
-  });
-
-  it("uses only the authoritative initial harness and preserves an explicit compatible choice on refresh", () => {
-    const initiallyCompatible = {
-      ...projection,
-      initialHarnessId: "compatible",
-      harnesses: projection.harnesses.map((harness) => harness.id === "compatible" ? {
-        ...harness,
-        existingCustomFamilies: [{ id: 12 }],
-      } : harness),
-    };
-    expect(reconcileProviderOnboardingState(initiallyCompatible)).toEqual({
-      harnessId: "compatible",
-      family: null,
-    });
-    const family = { kind: "existing", familyId: 12 };
-    expect(reconcileProviderOnboardingState(initiallyCompatible, { harnessId: "compatible", family })).toEqual({
-      harnessId: "compatible",
-      family,
-    });
-  });
-
-  it("reconciles preserved family intent against the refreshed authoritative choices", () => {
+it("reconciles preserved family intent against the refreshed authoritative choices", () => {
     const withChoices = {
       ...projection,
       harnesses: projection.harnesses.map((harness) => harness.id === "compatible" ? {
@@ -138,7 +186,7 @@ describe("provider onboarding renderer state", () => {
     });
   });
 
-  it("offers every persisted connected definition for interrupted onboarding", () => {
+it("offers every persisted connected definition for interrupted onboarding", () => {
     expect(resumableProviderDefinitions({ definitions: [
       { id: "work", connected: true, lifecycleState: "active" },
       { id: "signed-out", connected: false, lifecycleState: "active" },
@@ -147,17 +195,7 @@ describe("provider onboarding renderer state", () => {
     ] })).toEqual([{ id: "work", connected: true, lifecycleState: "active" }]);
   });
 
-  it("clears family intent when a refreshed projection makes its harness unavailable", () => {
-    expect(reconcileProviderOnboardingState({
-      ...projection,
-      harnesses: projection.harnesses.map((harness) => ({ ...harness, selectable: false })),
-    }, { harnessId: "compatible", family: { kind: "existing", familyId: 12 } })).toEqual({
-      harnessId: null,
-      family: null,
-    });
-  });
-
-  it("requires explicit custom members and preserves the optimistic projection revision", () => {
+it("requires explicit custom members and preserves the optimistic projection revision", () => {
     const base = { providerId: "work", projection, harnessId: "compatible" };
     expect(providerOnboardingCompletionIntent({
       ...base,
@@ -174,7 +212,7 @@ describe("provider onboarding renderer state", () => {
     });
   });
 
-  it("disables every edit control while busy and restores prior disabled states", () => {
+it("disables every edit control while busy and restores prior disabled states", () => {
     const controls = [
       { disabled: false, dataset: {} },
       { disabled: true, dataset: {} },
@@ -187,60 +225,80 @@ describe("provider onboarding renderer state", () => {
     expect(controls.every(({ dataset }) => dataset.onboardingDisabledBeforeBusy === undefined)).toBe(true);
   });
 
-  it("keeps the original connection live when Cancel reaches the provider after commit begins", async () => {
-    let finishConnection;
-    const connection = new Promise((resolve) => { finishConnection = resolve; });
-    const state = createProviderConnectionCancellationState();
-    state.begin("connection-1");
-    let onboardingContinued = false;
-    const connecting = connection.then(() => {
-      if (!state.matches("connection-1")) return;
-      state.complete("connection-1");
-      onboardingContinued = true;
-    });
+  it("keeps one connection owner through cancellation, duplication, and managed-login handoff", async () => {
+    const cases = [
+      {
+        label: "keeps the original connection live when Cancel reaches the provider after commit begins",
+        run: async () => {
+          let finishConnection;
+          const connection = new Promise((resolve) => { finishConnection = resolve; });
+          const state = createProviderConnectionCancellationState();
+          state.begin("connection-1");
+          let onboardingContinued = false;
+          const connecting = connection.then(() => {
+            if (!state.matches("connection-1")) return;
+            state.complete("connection-1");
+            onboardingContinued = true;
+          });
 
-    await expect(state.cancel(async () => ({ cancelled: false }))).resolves.toEqual({
-      cancelled: false,
-      connectionId: "connection-1",
-    });
-    expect(state.current()).toBe("connection-1");
-    finishConnection();
-    await connecting;
+          await expect(state.cancel(async () => ({ cancelled: false }))).resolves.toEqual({
+            cancelled: false,
+            connectionId: "connection-1",
+          });
+          expect(state.current()).toBe("connection-1");
+          finishConnection();
+          await connecting;
 
-    expect(onboardingContinued).toBe(true);
-    expect(state.current()).toBeNull();
-  });
+          expect(onboardingContinued).toBe(true);
+          expect(state.current()).toBeNull();
+        },
+      },
+      {
+        label: "ignores a duplicate Connect submission without replacing the first winner",
+        run: async () => {
+          let resolveFirst;
+          const firstResponse = new Promise((resolve) => { resolveFirst = resolve; });
+          const state = createProviderConnectionCancellationState();
+          const submit = (connectionId) => {
+            if (!state.begin(connectionId)) return Promise.resolve("ignored");
+            return firstResponse.then(() => {
+              if (!state.matches(connectionId)) return "discarded";
+              state.complete(connectionId);
+              return "continued";
+            });
+          };
 
-  it("ignores a duplicate Connect submission without replacing the first winner", async () => {
-    let resolveFirst;
-    const firstResponse = new Promise((resolve) => { resolveFirst = resolve; });
-    const state = createProviderConnectionCancellationState();
-    const submit = (connectionId) => {
-      if (!state.begin(connectionId)) return Promise.resolve("ignored");
-      return firstResponse.then(() => {
-        if (!state.matches(connectionId)) return "discarded";
-        state.complete(connectionId);
-        return "continued";
-      });
-    };
+          const first = submit("connection-1");
+          await expect(submit("connection-2")).resolves.toBe("ignored");
+          expect(state.current()).toBe("connection-1");
+          resolveFirst();
 
-    const first = submit("connection-1");
-    await expect(submit("connection-2")).resolves.toBe("ignored");
-    expect(state.current()).toBe("connection-1");
-    resolveFirst();
+          await expect(first).resolves.toBe("continued");
+          expect(state.current()).toBeNull();
+        },
+      },
+      {
+        label: "hands an owned Connect submission off to its managed-login connection",
+        run: async () => {
+          const state = createProviderConnectionCancellationState();
+          expect(state.begin("request-1")).toBe(true);
 
-    await expect(first).resolves.toBe("continued");
-    expect(state.current()).toBeNull();
-  });
-
-  it("hands an owned Connect submission off to its managed-login connection", () => {
-    const state = createProviderConnectionCancellationState();
-    expect(state.begin("request-1")).toBe(true);
-
-    expect(state.transition("request-2", "authorization-2")).toBe(false);
-    expect(state.current()).toBe("request-1");
-    expect(state.transition("request-1", "authorization-1")).toBe(true);
-    expect(state.current()).toBe("authorization-1");
-    expect(state.matches("authorization-1")).toBe(true);
+          expect(state.transition("request-2", "authorization-2")).toBe(false);
+          expect(state.current()).toBe("request-1");
+          expect(state.transition("request-1", "authorization-1")).toBe(true);
+          expect(state.current()).toBe("authorization-1");
+          expect(state.matches("authorization-1")).toBe(true);
+        },
+      },
+    ];
+    const outcomes = await Promise.allSettled(cases.map(async ({ label, run }) => {
+      try {
+        await run();
+        return label;
+      } catch (error) {
+        throw new Error(`Case failed: ${label}`, { cause: error });
+      }
+    }));
+    expect(outcomes).toEqual(["keeps the original connection live when Cancel reaches the provider after commit begins", "ignores a duplicate Connect submission without replacing the first winner", "hands an owned Connect submission off to its managed-login connection"].map((value) => ({ status: "fulfilled", value })));
   });
 });
