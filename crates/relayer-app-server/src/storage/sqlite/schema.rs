@@ -65,6 +65,7 @@ const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("model_family_id", "INTEGER", false, 0),
     ("input_identity", "TEXT", false, 0),
     ("input_digest", "TEXT", false, 0),
+    ("input_draft_revision", "INTEGER", false, 0),
 ];
 const PERSONAL_PRESENTATION_VERSION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("version_key", "TEXT", true, 1),

@@ -251,10 +251,10 @@ impl SqliteProductStore {
         .bind(thread_id.value())
         .fetch_one(&mut *tx)
         .await?;
-        let result = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id,model_provider_id,provider_model_id,model_family_id,input_identity,input_digest) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)")
+        let result = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id,model_provider_id,provider_model_id,model_family_id,input_identity,input_digest,input_draft_revision) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)")
             .bind(thread_id.value()).bind(sequence).bind(input.text).bind(&timestamp).bind(&permission_profile_id)
             .bind(model_selection.as_ref().map(|s| s.provider_id.as_str())).bind(model_selection.as_ref().map(|s| s.model_id.as_str()))
-            .bind(model_selection.as_ref().map(|s| s.family_id.value())).bind(input.input_identity).bind(input.input_digest)
+            .bind(model_selection.as_ref().map(|s| s.family_id.value())).bind(input.input_identity).bind(input.input_digest).bind(input.submitted_input_draft_revision)
             .execute(&mut *tx).await?;
         let id = result.last_insert_rowid();
         for (context_position, context) in input.contexts.iter().enumerate() {
@@ -356,7 +356,7 @@ impl SqliteProductStore {
     ) -> Result<Option<DurableInteractionInput>, StorageError> {
         type InteractionInputHeader = (Option<String>, Option<String>, Option<i64>, Option<String>);
         let header: Option<InteractionInputHeader> =
-            sqlx::query_as("SELECT interaction.input_identity,interaction.input_digest,attempt.draft_revision,attempt.semantic_digest FROM interactions interaction LEFT JOIN interaction_submitted_input_attempts attempt ON attempt.interaction_id=interaction.id WHERE interaction.id=?1")
+            sqlx::query_as("SELECT interaction.input_identity,interaction.input_digest,COALESCE(interaction.input_draft_revision,attempt.draft_revision),attempt.semantic_digest FROM interactions interaction LEFT JOIN interaction_submitted_input_attempts attempt ON attempt.interaction_id=interaction.id WHERE interaction.id=?1")
                 .bind(interaction_id.value())
                 .fetch_optional(&self.pool)
                 .await?;

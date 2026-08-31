@@ -198,14 +198,14 @@ mod tests {
         );
         pool.close().await;
 
-        // Opening the store runs migrations 24 through 28.
+        // Opening the store runs migrations 24 through 29.
         let store = SqliteProductStore::open(file.path()).await.unwrap();
         let version: i64 =
             sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations WHERE success=1")
                 .fetch_one(&store.pool)
                 .await
                 .unwrap();
-        assert_eq!(version, 28);
+        assert_eq!(version, 29);
 
         let pinned_after: Vec<(i64, String, i64, i64)> = sqlx::query(
             "SELECT interaction_id,version_key,version_interaction_node_id,root_layer_id FROM interaction_personal_presentation_pins ORDER BY interaction_id",
@@ -517,10 +517,17 @@ mod tests {
         pool.execute("ALTER TABLE interactions DROP COLUMN input_identity")
             .await
             .unwrap();
+        pool.execute("ALTER TABLE interactions DROP COLUMN input_draft_revision")
+            .await
+            .unwrap();
         // Replay only the legacy action/context migrations whose schema was removed above.
         // Later provider/model migrations remain physically present and must retain their
         // ledger entries, otherwise reopening would try to add their columns a second time.
         sqlx::query("DELETE FROM _sqlx_migrations WHERE version BETWEEN 8 AND 11")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version=29")
             .execute(&pool)
             .await
             .unwrap();

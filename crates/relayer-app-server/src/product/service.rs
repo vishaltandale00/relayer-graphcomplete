@@ -1143,14 +1143,16 @@ impl ProductService {
                         "existing identified interaction lost its durable input".into(),
                     )
                 })?;
-            let submitted_input_draft_matches = if durable.submitted_inputs.is_empty() {
-                let current_draft = self.storage.action_input_draft(thread_id).await?;
-                current_draft.attachments.is_empty()
-                    || command
-                        .input_draft_revision
-                        .is_some_and(|revision| revision != current_draft.revision)
-            } else {
+            let submitted_input_draft_matches = if command.input_draft_revision.is_some() {
                 durable.submitted_input_draft_revision == command.input_draft_revision
+            } else if durable.submitted_inputs.is_empty() {
+                durable.submitted_input_draft_revision.is_none()
+            } else {
+                self.storage
+                    .action_input_draft(thread_id)
+                    .await?
+                    .attachments
+                    .is_empty()
             };
             if existing.text != command.text
                 || durable.contexts != command.contexts
@@ -2815,6 +2817,34 @@ mod tests {
             ProductError::Invalid(message)
                 if message == "interaction input identity was reused with different content"
         ));
+        let replaced_draft = storage
+            .commit_action_input_attachment(
+                empty_thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 29,
+                    action: &action,
+                    value: &second_value,
+                },
+                new_draft.revision,
+            )
+            .await
+            .unwrap();
+        let stale_error = service
+            .create_identified_interaction(
+                empty_thread.id,
+                CreateIdentifiedInteractionCommand {
+                    input_draft_revision: Some(new_draft.revision),
+                    ..empty_send()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            stale_error,
+            ProductError::Invalid(message)
+                if message == "interaction input identity was reused with different content"
+        ));
         let empty_original_replay = service
             .create_identified_interaction(empty_thread.id, empty_send())
             .await
@@ -2826,7 +2856,7 @@ mod tests {
         ));
         assert_eq!(
             service.action_input_draft(empty_thread.id).await.unwrap(),
-            new_draft
+            replaced_draft
         );
     }
 
