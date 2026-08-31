@@ -3,8 +3,8 @@
   "source": "scripts/test-desktop-project-new-thread.mjs",
   "video": {
     "file": "project-new-thread-demo.mp4",
-    "bytes": 62235,
-    "sha256": "ac0c80ac3b1d0cb1de86f9605b2a196fd37990b5eca75f60e30565331c9a21be",
+    "bytes": 62492,
+    "sha256": "832c823f19054a763e3f2cfc1ab8dc58d9b6ae360b60fd2504fdb52065c5c739",
     "codec": "h264",
     "pixelFormat": "yuv420p",
     "width": 1280,
@@ -13,7 +13,7 @@
   },
   "poster": {
     "file": "project-new-thread-poster.png",
-    "bytes": 135209,
-    "sha256": "2894222e186bdff46cda1b3544f89de16d395327e242107e111fb2c0f05199dd"
+    "bytes": 135353,
+    "sha256": "2017dc846a90477476b1ec2c1539999009895de99cf0610d547dd36bec06df71"
   }
 }

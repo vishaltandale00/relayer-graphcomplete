@@ -159,11 +159,7 @@ async function maybeStartAutomaticTutorial(providerConnected) {
 }
 
 function bindEvents() {
-  document.addEventListener("click", (event) => {
-    if (event.target.closest("#createThread, #sendInteraction, #confirmContextDraftSend")) {
-      projectComposerGate.invalidate();
-    }
-  }, { capture: true });
+  document.addEventListener("click", () => projectComposerGate.invalidate(), { capture: true });
   $("#newThread").onclick = async () => {
     const request = projectComposerGate.begin();
     const guard = () => projectComposerGate.isCurrent(request);
