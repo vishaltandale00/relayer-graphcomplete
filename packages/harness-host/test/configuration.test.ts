@@ -26,37 +26,49 @@ describe("harness configuration", () => {
     await expect(Promise.all(paths.map(loadHarnessConfiguration))).resolves.toHaveLength(paths.length);
   });
 
-  it.each([
+    it("loads both checked-in Codex configurations", async () => {
+    const cases = [
     ["codex-basic", "medium", 4, "layered-navigation-multi-agent-v1"],
     ["codex-basic-high", "high", 3, undefined],
-  ])("loads the checked-in %s configuration", async (name, modelReasoningEffort, revision, promptProfile) => {
-    await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
-      schemaVersion: 1,
-      name,
-      implementation: "codex.basic",
-      implementationVersion: 1,
-      revision,
-      permissionBindings: {
-        ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
-        auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
-        full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
-      },
-      modelCompatibility: [{ providerId: "codex" }],
-      modelRules: {
-        allow: [
-          { adapterId: "codex-subscription", modelIdRegex: ".*" },
-          { adapterId: "openai-api", modelIdRegex: ".*" },
-        ],
-        deny: [],
-      },
-      executionAccessContracts: ["managed-runtime@1", "secret@1"],
-      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 2 } },
-      settings: {
-        modelReasoningEffort,
-        ...(promptProfile === undefined ? {} : { promptProfile }),
-        skipGitRepoCheck: true,
-      },
-    });
+  ] as const;
+    expect(cases).toHaveLength(2);
+    const outcomes = [];
+    for (const [name, modelReasoningEffort, revision, promptProfile] of cases) {
+      const label = JSON.stringify([name, modelReasoningEffort, revision, promptProfile]);
+      try {
+        await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
+          schemaVersion: 1,
+          name,
+          implementation: "codex.basic",
+          implementationVersion: 1,
+          revision,
+          permissionBindings: {
+            ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
+            auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
+            full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
+          },
+          modelCompatibility: [{ providerId: "codex" }],
+          modelRules: {
+            allow: [
+              { adapterId: "codex-subscription", modelIdRegex: ".*" },
+              { adapterId: "openai-api", modelIdRegex: ".*" },
+            ],
+            deny: [],
+          },
+          executionAccessContracts: ["managed-runtime@1", "secret@1"],
+          modelDefaults: { familyPolicy: { id: "codex-default-family", version: 2 } },
+          settings: {
+            modelReasoningEffort,
+            ...(promptProfile === undefined ? {} : { promptProfile }),
+            skipGitRepoCheck: true,
+          },
+        });
+        outcomes.push({ status: "fulfilled", value: label });
+      } catch (error) {
+        outcomes.push({ status: "rejected", reason: new Error(`Case failed: ${label}`, { cause: error }) });
+      }
+    }
+    expect(outcomes).toEqual(cases.map((item) => ({ status: "fulfilled", value: JSON.stringify(item) })));
   });
 
   it("admits every production Claude subscription alias through the checked-in harness", async () => {
