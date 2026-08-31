@@ -547,7 +547,9 @@ impl RuntimeClient {
             Some(Value::String(value))
                 if matches!(
                     value.as_str(),
-                    "personal-presentation-v0" | "personal-presentation-v1"
+                    "personal-presentation-v0"
+                        | "personal-presentation-v1"
+                        | "personal-presentation-v2"
                 ) =>
             {
                 Ok(Some(value))
@@ -1320,12 +1322,12 @@ impl RuntimeClient {
             }
             let placements = nodes
                 .iter()
-                .enumerate()
-                .map(|(index, node_id)| {
+                .zip(definition.placements)
+                .map(|(node_id, [x, y])| {
                     serde_json::json!({
                         "nodeId": node_id,
-                        "x": if nodes.len() == 1 { 0.5 } else { 0.25 + index as f64 * 0.5 },
-                        "y": 0.5,
+                        "x": x,
+                        "y": y,
                     })
                 })
                 .collect::<Vec<_>>();
@@ -1809,6 +1811,7 @@ struct PersonalPresentationDefinition {
     interaction_text: &'static str,
     nodes: &'static [PersonalPresentationNodeDefinition],
     edges: &'static [[usize; 2]],
+    placements: &'static [[f64; 2]],
 }
 
 const PERSONAL_PRESENTATION_V0_NODES: &[PersonalPresentationNodeDefinition] =
@@ -1837,6 +1840,30 @@ const PERSONAL_PRESENTATION_V1_NODES: &[PersonalPresentationNodeDefinition] = &[
     },
 ];
 
+const PERSONAL_PRESENTATION_V2_NODES: &[PersonalPresentationNodeDefinition] = &[
+    PersonalPresentationNodeDefinition {
+        client_key: "decision-useful-center",
+        kind: "presentation-preference",
+        icon: "compass",
+        title: "Decision-useful center",
+        detail: "The user prefers central layers that are immediately decision-useful. Foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations.",
+    },
+    PersonalPresentationNodeDefinition {
+        client_key: "adaptive-progressive-disclosure",
+        kind: "presentation-preference",
+        icon: "layers",
+        title: "Adaptive progressive disclosure",
+        detail: "Reveal additional information according to its value to understanding. Keep information central when it is necessary to understand the response without navigating. Use graph actions when supporting evidence, implementation detail, or secondary context would materially improve understanding or help the user proceed. Do not add branches that merely repeat or decorate the central explanation.",
+    },
+    PersonalPresentationNodeDefinition {
+        client_key: "visible-working-state",
+        kind: "presentation-preference",
+        icon: "workflow",
+        title: "Visible working state",
+        detail: "For work that will not finish immediately, prefer establishing a useful current early and advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress even when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates.",
+    },
+];
+
 fn personal_presentation_definition(
     version_key: &str,
 ) -> Result<PersonalPresentationDefinition, RuntimeError> {
@@ -1845,11 +1872,19 @@ fn personal_presentation_definition(
             interaction_text: "Personal presentation V0",
             nodes: PERSONAL_PRESENTATION_V0_NODES,
             edges: &[],
+            placements: &[[0.5, 0.5]],
         }),
         "personal-presentation-v1" => Ok(PersonalPresentationDefinition {
             interaction_text: "Personal presentation V1",
             nodes: PERSONAL_PRESENTATION_V1_NODES,
             edges: &[[0, 1]],
+            placements: &[[0.25, 0.5], [0.75, 0.5]],
+        }),
+        "personal-presentation-v2" => Ok(PersonalPresentationDefinition {
+            interaction_text: "Personal presentation V2",
+            nodes: PERSONAL_PRESENTATION_V2_NODES,
+            edges: &[[0, 1], [0, 2]],
+            placements: &[[0.5, 0.2], [0.25, 0.75], [0.75, 0.75]],
         }),
         _ => Err(RuntimeError::Configuration(format!(
             "unknown personal presentation version {version_key}"
@@ -3193,6 +3228,59 @@ mod tests {
             vec!["Decision-useful center", "Adaptive progressive disclosure"]
         );
         assert_eq!(v1.closure.layers[0].edges.len(), 1);
+        let v2 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v2")
+            .await
+            .unwrap();
+        assert_eq!(v2.closure.layers.len(), 1);
+        assert_eq!(
+            v2.closure.layers[0]
+                .nodes
+                .iter()
+                .map(|node| node.title.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Decision-useful center",
+                "Adaptive progressive disclosure",
+                "Visible working state",
+            ]
+        );
+        assert_eq!(v2.closure.layers[0].edges.len(), 2);
+        assert_eq!(
+            v2.closure.layers[0]
+                .edges
+                .iter()
+                .map(|edge| edge.endpoints)
+                .collect::<Vec<_>>(),
+            vec![
+                [
+                    v2.closure.layers[0].nodes[0].id,
+                    v2.closure.layers[0].nodes[1].id,
+                ],
+                [
+                    v2.closure.layers[0].nodes[0].id,
+                    v2.closure.layers[0].nodes[2].id,
+                ],
+            ]
+        );
+        assert!(
+            v2.closure.layers[0].nodes[2]
+                .detail
+                .contains("early and advancing it often enough for the user to follow and steer")
+        );
+        let placements = v2.closure.layers[0]
+            .layer
+            .layout
+            .as_ref()
+            .unwrap()
+            .placements();
+        assert_eq!(
+            placements
+                .iter()
+                .map(|placement| (placement.x, placement.y))
+                .collect::<Vec<_>>(),
+            vec![(0.5, 0.2), (0.25, 0.75), (0.75, 0.75)]
+        );
         let replay = runtime
             .ensure_personal_presentation_version("personal-presentation-v1")
             .await

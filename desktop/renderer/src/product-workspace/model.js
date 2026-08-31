@@ -167,8 +167,8 @@ export function workspaceBreadcrumbItems(state, thread, selection) {
 }
 
 export function responseNodesForThread(state, thread) {
-  if (state.status !== "accepted") return [];
   if (state.visibleLayer?.nodes) return state.visibleLayer.nodes;
+  if (state.status !== "accepted") return [];
   const interaction = interactionForThread(state, thread);
   return state.nodes.filter((node) => node.metadata?.relayer?.responseLayerOwnerNodeId === interaction?.id);
 }

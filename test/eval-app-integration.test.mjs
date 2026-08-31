@@ -33,6 +33,27 @@ const repositoryRoot = resolve(import.meta.dirname, "..");
 const services = [];
 const directories = [];
 
+function recursiveComparisonConfiguration(name, agentAuthored, personalPresentationVersion) {
+  return [
+    "schemaVersion: 1",
+    `name: ${name}`,
+    "implementation: fixture.task-system",
+    "implementationVersion: 1",
+    "complete:",
+    `  agentAuthored: ${agentAuthored}`,
+    "permissionBindings:",
+    "  ask: {}",
+    "  auto: {}",
+    "  full: {}",
+    "modelCompatibility:",
+    "  - providerId: codex",
+    "executionAccessContracts: [managed-runtime@1]",
+    "settings:",
+    `  personalPresentationVersion: ${personalPresentationVersion}`,
+    "",
+  ].join("\n");
+}
+
 afterEach(async () => {
   for (const service of services.splice(0).reverse()) await service.close();
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
@@ -128,30 +149,55 @@ describe("Relayer Eval application service", () => {
     expect(evalService.listRuns()).toEqual([]);
   });
 
+  it("rejects a recursive comparison whose exact off cell grants Complete authority", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-authority-drift-test-"));
+    directories.push(dataDirectory);
+    const disabledPath = join(dataDirectory, "codex-eval-complete-disabled.yaml");
+    const enabledPath = join(dataDirectory, "codex-eval-complete-enabled.yaml");
+    await writeFile(disabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-disabled",
+      true,
+      "personal-presentation-v1",
+    ));
+    await writeFile(enabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-enabled",
+      true,
+      "personal-presentation-v2",
+    ));
+    const evalService = await new EvalService({
+      stateFile: join(dataDirectory, "test-runs.json"),
+      productSession: {
+        origin: "http://127.0.0.1:1",
+        cookie: { name: "unused", value: "unused" },
+      },
+      configurationPaths: [disabledPath, enabledPath],
+    }).open();
+
+    await expect(evalService.createRun({
+      testCaseIds: ["empty-project.recursive-complete.comparison"],
+      harnessConfigurationNames: [
+        "codex-eval-complete-disabled",
+        "codex-eval-complete-enabled",
+      ],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("approved V1/off and V2/on experience pair");
+  });
+
   it("runs an authority-isolated agent-authored Complete pair and preserves child evidence outside human turns", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-test-"));
     directories.push(dataDirectory);
     const disabledPath = join(dataDirectory, "codex-eval-complete-disabled.yaml");
     const enabledPath = join(dataDirectory, "codex-eval-complete-enabled.yaml");
-    const configuration = (name, agentAuthored) => [
-      "schemaVersion: 1",
-      `name: ${name}`,
-      "implementation: fixture.task-system",
-      "implementationVersion: 1",
-      "complete:",
-      `  agentAuthored: ${agentAuthored}`,
-      "permissionBindings:",
-      "  ask: {}",
-      "  auto: {}",
-      "  full: {}",
-      "modelCompatibility:",
-      "  - providerId: codex",
-      "executionAccessContracts: [managed-runtime@1]",
-      "settings: {}",
-      "",
-    ].join("\n");
-    await writeFile(disabledPath, configuration("codex-eval-complete-disabled", false));
-    await writeFile(enabledPath, configuration("codex-eval-complete-enabled", true));
+    await writeFile(disabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-disabled",
+      false,
+      "personal-presentation-v1",
+    ));
+    await writeFile(enabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-enabled",
+      true,
+      "personal-presentation-v2",
+    ));
     const observed = { fireAndForget: true, childDelayMs: 100 };
     const recursiveFactory = recursiveCompleteFixtureFactory(observed);
     const runtime = new GraphCompleteRuntimeService({

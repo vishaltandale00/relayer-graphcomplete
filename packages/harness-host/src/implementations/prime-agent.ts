@@ -20,7 +20,7 @@ import type {
   HarnessTraceSupport,
   JsonObject,
 } from "../types.js";
-import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
+import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 import {
   personalPresentationNativeInstructions,
   personalPresentationPrompt,
@@ -706,7 +706,8 @@ export class PrimeAgentHarness implements Harness {
     }
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response.
 
-${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${GRAPH_PRESENTATION_GUIDANCE}
+${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -719,7 +720,7 @@ Use this entry point:
 from relayer_graph import GraphSession
 graph = await GraphSession.current()
 
-For explicit semantic child work, first author and submit the invoke action in its layer. Read current = await graph.get_current(), then publish that layer with await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="a-stable-operation-key"). Only after that succeeds, use input_graph = await graph.prepare_complete(invoke_action) and from relayer_graph import complete; child = complete(input_graph). Complete returns immediately with a completion ID, current snapshot, and awaitable result. Launch independent children before awaiting them. Prime RLM and subagents remain internal to this completion and do not create semantic children by themselves.
+${currentWorkspaceMechanicsPython()}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. Never rely on generated client keys in authored code.
 
@@ -736,7 +737,8 @@ If a graph call fails, edit and rerun the same authoring code with the same clie
     const interaction = context.inputGraph;
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
-${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${GRAPH_PRESENTATION_GUIDANCE}
+${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -749,7 +751,7 @@ Use this entry point:
 from relayer_graph import GraphSession
 graph = await GraphSession.current()
 
-For explicit semantic child work, first author and submit the invoke action in its layer. Read current = await graph.get_current(), then publish that layer with await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="a-stable-operation-key"). Only after that succeeds, use input_graph = await graph.prepare_complete(invoke_action) and from relayer_graph import complete; child = complete(input_graph). Complete returns immediately with a completion ID, current snapshot, and awaitable result. Launch independent children before awaiting them. Prime RLM and subagents remain internal to this completion and do not create semantic children by themselves.
+${currentWorkspaceMechanicsPython()}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. For example, use NodeObject("info", "Summary", "...", client_key="summary-node"), EdgeObject((summary_node, detail_node), client_key="summary-detail-edge"), and LayerObject(nodes, edges, layout, client_key="response-layer"). Never rely on generated client keys in authored code. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interaction.id}); call it only after the full response has been authored.
 
@@ -785,6 +787,10 @@ function primeSessionHandle(session: PrimeAgentSession): PrimeAgentSessionHandle
     disposeCompleted: false,
     guardInstalled: false,
   };
+}
+
+function currentWorkspaceMechanicsPython(): string {
+  return `Read current with current = await graph.get_current(). After submitting a layer, you may update the pointer with await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="a-stable-operation-key").`;
 }
 
 function primeRuntimeProvenance(serialized: string | undefined): JsonObject | undefined {

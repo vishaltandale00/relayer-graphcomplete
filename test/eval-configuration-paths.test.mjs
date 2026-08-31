@@ -138,7 +138,7 @@ describe("Eval harness configuration availability", () => {
     expect(treatment).toEqual(control);
   });
 
-  it("keeps the agent-authored Complete pair identical except for name and capability", async () => {
+  it("keeps the combined visible-work comparison identical except for name, personalization, and Complete", async () => {
     const catalog = await loadHarnessConfigurations([
       resolve(repositoryRoot, "harnesses/codex-eval-complete-disabled.yaml"),
       resolve(repositoryRoot, "harnesses/codex-eval-complete-enabled.yaml"),
@@ -147,9 +147,12 @@ describe("Eval harness configuration availability", () => {
     const treatment = structuredClone(catalog.get("codex-eval-complete-enabled"));
     expect(control?.complete).toEqual({ agentAuthored: false });
     expect(treatment?.complete).toEqual({ agentAuthored: true });
+    expect(control?.settings.personalPresentationVersion).toBe("personal-presentation-v1");
+    expect(treatment?.settings.personalPresentationVersion).toBe("personal-presentation-v2");
     if (control) {
       control.name = "comparison";
       control.complete = { agentAuthored: true };
+      control.settings.personalPresentationVersion = "personal-presentation-v2";
     }
     if (treatment) treatment.name = "comparison";
     expect(treatment).toEqual(control);

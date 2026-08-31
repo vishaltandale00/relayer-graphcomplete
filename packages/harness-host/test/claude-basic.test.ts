@@ -183,6 +183,13 @@ describe("ClaudeBasicHarness", () => {
       expect(prompt).not.toContain("Codex");
       expect(prompt).not.toContain("native delegation");
       expectGraphPresentationGuidance(prompt);
+      expect(prompt).toContain("graph with other live agents");
+      expect(prompt).toContain("live, user-facing workspace");
+      expect(prompt).toContain("await graph.getCurrent()");
+      expect(prompt).toContain("await graph.advanceCurrent(");
+      expect(prompt).toContain("Advancing current does not complete the interaction");
+      expect(prompt).not.toContain("graph.prepareComplete(");
+      expect(prompt).not.toContain("Import complete from");
       expect(options).toMatchObject({
         cwd: "/tmp",
         model: "claude-sonnet-4",
@@ -206,6 +213,32 @@ describe("ClaudeBasicHarness", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("adds semantic Complete mechanics only when the completion broker grants authority", async () => {
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
+      loadSdk: async () => ({
+        ...browserSdk(),
+        query: sdkQuery([
+          { type: "system", subtype: "init", session_id: "session-1" },
+          { type: "result", subtype: "success", result: "done", session_id: "session-1" },
+        ], (input) => calls.push(input)),
+      }),
+      clientModuleUrl: "@relayer/graph-client",
+    });
+    const context = runContext(managedAccess());
+
+    await harness.complete({
+      ...context,
+      completionBroker: {
+        url: "http://127.0.0.1:43125/api/completions",
+        token: "12345678901234567890123456789012",
+      },
+    });
+
+    expect(calls[0]?.prompt).toContain("graph.prepareComplete(invokeAction)");
+    expect(calls[0]?.prompt).toContain("Import complete from");
   });
 
   it("allows injecting query directly through the public factory seam", async () => {

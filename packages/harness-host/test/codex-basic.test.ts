@@ -38,6 +38,13 @@ const codexBasicConfiguration: HarnessConfiguration = {
 describe("CodexBasicHarness", () => {
   it("renders V1 after generic guidance and leaves neutral V0 at baseline", () => {
     const baseline = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
+    const brokerAuthorized = buildLayeredNavigationPrompt({
+      ...runContext(1, "token"),
+      completionBroker: {
+        url: "http://127.0.0.1:43125/api/completions",
+        token: "completion-broker-secret-token-1234567890",
+      },
+    }, "@relayer/graph-client");
     const neutral = buildLayeredNavigationPrompt(personalPresentationRunContext(false), "@relayer/graph-client");
     const treatment = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client");
     const codexProviderPrompt = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client", undefined, false);
@@ -49,10 +56,23 @@ describe("CodexBasicHarness", () => {
     expect(treatment.indexOf("Graph presentation guidance:")).toBeLessThan(
       treatment.indexOf("Personal graph presentation preferences:"),
     );
+    expect(treatment.indexOf("live, user-facing workspace")).toBeLessThan(
+      treatment.indexOf("Personal graph presentation preferences:"),
+    );
     expect(treatment.indexOf("Personal graph presentation preferences:")).toBeLessThan(
       treatment.indexOf("Normalized interaction input:"),
     );
     expect(codexProviderPrompt).toBe(baseline);
+    expect(baseline).toContain("graph with other live agents");
+    expect(baseline).toContain("live, user-facing workspace");
+    expect(baseline).toContain("await graph.getCurrent()");
+    expect(baseline).toContain("await graph.advanceCurrent(");
+    expect(baseline).toContain("Advancing current does not complete the interaction");
+    expect(baseline).not.toContain("graph.prepareComplete(");
+    expect(baseline).not.toContain("Import complete from");
+    expect(baseline).not.toContain("semantic completion is unavailable");
+    expect(brokerAuthorized).toContain("graph.prepareComplete(invokeAction)");
+    expect(brokerAuthorized).toContain("Import complete from");
   });
 
   it("reuses a native Codex thread only while its pinned presentation version is unchanged", async () => {

@@ -33,5 +33,6 @@ modelDefaults:
     version: 2
 settings:
   modelReasoningEffort: medium
+  personalPresentationVersion: personal-presentation-v1
   promptProfile: layered-navigation-multi-agent-v1
   skipGitRepoCheck: true

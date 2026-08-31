@@ -311,6 +311,15 @@ describe("PrimeAgentHarness", () => {
     expect(createAgentRunModelScope).toHaveBeenCalledTimes(2);
     expect(prompts[0]!.text).toContain("graph = await GraphSession.current()");
     expect(prompts[0]!.text).toContain("await graph.submit(11)");
+    expect(prompts[0]!.text).toContain("graph with other live agents");
+    expect(prompts[0]!.text).toContain("live, user-facing workspace");
+    expect(prompts[0]!.text).toContain("await graph.get_current()");
+    expect(prompts[0]!.text).toContain("await graph.advance_current(");
+    expect(prompts[0]!.text).toContain("Advancing current does not complete the interaction");
+    expect(prompts[0]!.text).not.toContain("prepare_complete");
+    expect(prompts[0]!.text).not.toContain("from relayer_graph import complete");
+    expect(prompts[1]!.text).not.toContain("prepare_complete");
+    expect(prompts[1]!.text).not.toContain("from relayer_graph import complete");
     expect(prompts[0]!.text).toContain("exactly one NodePlacementObject(node, x, y) per member node");
     expect(prompts[0]!.text).toContain("Place a one-node layer at (0.5, 0.5)");
     expectGraphPresentationGuidance(prompts[0]!.text);

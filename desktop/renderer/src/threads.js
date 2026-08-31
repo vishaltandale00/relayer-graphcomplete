@@ -625,9 +625,6 @@ export async function refreshState(
     ...(temporalSelectedNodeId === undefined ? {} : { selectedNodeId: temporalSelectedNodeId }),
     temporalCurrent,
   });
-  if (["succeeded", "stopped", "failed"].includes(appState.temporalLifecycle)) {
-    appState.status = appState.temporalLifecycle;
-  }
   recordCurrentNavigation(historyMode);
   renderSidebar();
   renderScopeMenu();

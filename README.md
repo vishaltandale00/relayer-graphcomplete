@@ -33,7 +33,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 - The selected harness owns model execution and any provider-native delegation it uses. Codex may use native subagents and Prime Agent may use its native RLM children; GraphComplete does not add another scheduler.
 - GraphComplete owns graph records, active-interaction write authority, validation, accepted-history integrity, and explicit submission. Accepted records are immutable except for ADR 0005's exact one-shot leased-invoke target transition.
-- Relayer owns a hidden, versioned personal-presentation profile. Each execution atomically pins one accepted profile completion through a control-only attachment; the harness renders it without adding preference records to visible response topology or exports. See [ADR 0009](docs/decisions/0009-personal-presentation-graph-attachments.md).
+- Relayer owns a hidden, versioned personal-presentation profile. Each execution atomically pins one accepted profile completion through a control-only attachment; semantic children inherit that exact pin, and the harness renders it without adding preference records to visible response topology or exports. Published V2 adds a graph-owned Visible working state preference while V1 remains active. See [ADR 0009](docs/decisions/0009-personal-presentation-graph-attachments.md).
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
 - Provider adapters own authentication, model discovery, and provider-specific execution details. Product records use stable provider, model, harness, and permission identifiers.
@@ -258,17 +258,17 @@ npm run eval-app:dev
 
 The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
 
-The dashboard also exposes the non-default **Agent-authored Complete · capability
+The dashboard also exposes the non-default **Visible working state · recursive
 comparison** case and its required Codex pair:
 
 - `codex-eval-complete-disabled`
 - `codex-eval-complete-enabled`
 
-Selecting that case isolates and selects both configurations. They hold the Codex harness
-implementation, model settings, permissions, and task fixed; only the common
-`complete.agentAuthored` capability differs. Eval keeps the recursive temporal
-substrate active for both cells, while the disabled configuration receives no
-completion broker and cannot launch a semantic child. The execution dossier
+Selecting that case isolates and selects both configurations. It is deliberately a
+combined product-experience comparison, not an isolated causal measurement: the off
+cell pins V1 and disables agent-authored Complete, while the on cell pins V2 and enables
+it. They hold the Codex harness implementation, provider/model settings, permissions,
+natural task, and temporal runtime substrate fixed. The execution dossier
 separates semantic children from human turns and exposes each child's source
 action, attached provider execution, successful settlement, terminal projection,
 and candidate trace. The deterministic fixture proves this comparison path without

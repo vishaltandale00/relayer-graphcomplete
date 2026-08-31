@@ -1,7 +1,7 @@
 use super::SqliteProductStore;
 use crate::{product::InteractionId, storage::StorageError};
 use serde_json::Value;
-use sqlx::Row;
+use sqlx::{Row, SqliteConnection};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PersonalPresentationVersion {
@@ -27,6 +27,34 @@ pub(crate) struct PersonalPresentationPin {
     pub(crate) root_layer_id: i64,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct PersonalPresentationAttachmentState {
+    pub(super) pin: Option<(String, i64, i64)>,
+    pub(super) legacy_unpinned: bool,
+}
+
+pub(super) async fn personal_presentation_attachment_state(
+    connection: &mut SqliteConnection,
+    interaction_id: InteractionId,
+) -> Result<PersonalPresentationAttachmentState, StorageError> {
+    let pin = sqlx::query_as(
+        "SELECT version_key,version_interaction_node_id,root_layer_id FROM interaction_personal_presentation_pins WHERE interaction_id=?1",
+    )
+    .bind(interaction_id.value())
+    .fetch_optional(&mut *connection)
+    .await?;
+    let legacy_unpinned = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM legacy_unpinned_personal_presentation_interactions WHERE interaction_id=?1)",
+    )
+    .bind(interaction_id.value())
+    .fetch_one(&mut *connection)
+    .await?;
+    Ok(PersonalPresentationAttachmentState {
+        pin,
+        legacy_unpinned,
+    })
+}
+
 impl SqliteProductStore {
     pub(crate) async fn personal_presentation_profile(
         &self,
@@ -38,7 +66,7 @@ impl SqliteProductStore {
         .fetch_one(&mut *transaction)
         .await?;
         let rows = sqlx::query(
-            "SELECT version_key,profile_interaction_id,graph_node_id,root_layer_id,retired FROM personal_presentation_versions ORDER BY profile_interaction_id",
+            "SELECT version.version_key,version.profile_interaction_id,version.graph_node_id,version.root_layer_id,version.retired FROM personal_presentation_versions version JOIN interactions interaction ON interaction.id=version.profile_interaction_id ORDER BY interaction.sequence",
         )
         .fetch_all(&mut *transaction)
         .await?;
@@ -179,14 +207,9 @@ impl SqliteProductStore {
     ) -> Result<Option<PersonalPresentationPin>, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         validate_personal_presentation_target(&mut transaction, interaction_id).await?;
-        if let Some((version_key, graph_node_id, root_layer_id)) =
-            sqlx::query_as::<_, (String, i64, i64)>(
-                "SELECT version_key,version_interaction_node_id,root_layer_id FROM interaction_personal_presentation_pins WHERE interaction_id=?1",
-            )
-            .bind(interaction_id.value())
-            .fetch_optional(&mut *transaction)
-            .await?
-        {
+        let attachment =
+            personal_presentation_attachment_state(&mut transaction, interaction_id).await?;
+        if let Some((version_key, graph_node_id, root_layer_id)) = attachment.pin {
             if requested_version_key.is_some_and(|requested| requested != version_key.as_str()) {
                 return Err(StorageError::PersonalPresentationConflict(format!(
                     "interaction is pinned to {version_key}, not requested version {}",
@@ -201,17 +224,9 @@ impl SqliteProductStore {
                 root_layer_id,
             }));
         }
-        if requested_version_key.is_none() {
-            let preserves_legacy_behavior: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM legacy_unpinned_personal_presentation_interactions WHERE interaction_id=?1)",
-            )
-            .bind(interaction_id.value())
-            .fetch_one(&mut *transaction)
-            .await?;
-            if preserves_legacy_behavior {
-                transaction.commit().await?;
-                return Ok(None);
-            }
+        if requested_version_key.is_none() && attachment.legacy_unpinned {
+            transaction.commit().await?;
+            return Ok(None);
         }
         let version_key =
             match requested_version_key {
@@ -363,7 +378,18 @@ mod tests {
 
         assert!(store.list_threads().await.unwrap().is_empty());
         let profile = store.personal_presentation_profile().await.unwrap();
-        assert_eq!(profile.versions.len(), 2);
+        assert_eq!(
+            profile
+                .versions
+                .iter()
+                .map(|version| version.version_key.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "personal-presentation-v0",
+                "personal-presentation-v1",
+                "personal-presentation-v2",
+            ]
+        );
         assert_eq!(profile.active_version_key, "personal-presentation-v1");
         assert!(
             profile

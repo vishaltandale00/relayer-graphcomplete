@@ -4,7 +4,7 @@ import { isAbsolute } from "node:path";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
-import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
+import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 import {
   personalPresentationNativeInstructions,
   personalPresentationPrompt,
@@ -429,7 +429,8 @@ Codex native subagents are available when useful. Subagents may directly author,
 
 Answer the current user interaction by authoring and accepting a useful graph layer that truthfully presents the completed work or genuine blocker.
 
-${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${GRAPH_PRESENTATION_GUIDANCE}
+${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -442,6 +443,8 @@ ${this.clientModuleUrl}
 ${pinnedExecutionClause}
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Give every persisted node, edge, layer, and action an explicit descriptive clientKey that is unique within this interaction and stable across edits and reruns. For example, use new NodeObject("info", "Summary", "...", "concept", "summary-node"), new EdgeObject([summaryNode, detailNode], "summary-detail-edge"), and new LayerObject(nodes, edges, layout, "response-layer"). Never rely on the constructors' generated client keys in an authored program.
+
+${currentWorkspaceMechanicsJs()}
 
 The required order is:
 1. create stable-keyed NodeObject values with icon, title, and useful markdown detail;
@@ -535,7 +538,8 @@ export function buildLayeredNavigationPrompt(
 
 After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
-${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
+${GRAPH_PRESENTATION_GUIDANCE}
+${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -547,7 +551,8 @@ Use executable JavaScript and the Relayer graph client. Do not return a JSON gra
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Give every persisted node, edge, layer, and action an explicit descriptive clientKey that is unique within this interaction and stable across edits and reruns. For example, use new NodeObject("info", "Summary", "...", "concept", "summary-node"), new EdgeObject([summaryNode, detailNode], "summary-detail-edge"), and new LayerObject(nodes, edges, layout, "response-layer"). Never rely on the constructors' generated client keys in an authored program. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
 
-For explicit semantic child work, first author and submit the invoke action in its layer. Read const current = await graph.getCurrent(), then publish that layer with await graph.advanceCurrent(layer, current.headRevision, "a-stable-operation-key"). Only after that succeeds, call const inputGraph = await graph.prepareComplete(invokeAction). Import complete from ${completeModuleUrl} and call const child = complete(inputGraph). That returns immediately with completionId, current.snapshot(), and result; launch multiple children before awaiting them when the work is independent. Native ${nativeAgentLabel} subagents remain inside this completion and do not create semantic children by themselves.
+${currentWorkspaceMechanicsJs()}
+${semanticCompletionGuidanceJs(context, completeModuleUrl, nativeAgentLabel)}
 
 The current interaction may carry an invoke lease created by the product. Before authoring, use graph.getNode(${interactionNode.id}) and graph.getNeighbors(${interactionNode.id}) to inspect the current node and any relevant source context exposed by the graph. Treat that context as input to your answer; do not copy, forge, or manage lease metadata. Author the response normally. A successful ordinary graph.submit(${interactionNode.id}) automatically fulfills any lease held by this interaction. There is no separate resolveAction call.
 
@@ -573,6 +578,19 @@ ${RELAYER_ICON_NAMES.join(", ")}
 Action variants are "chip", "pill", "wide", or "card". A card requires description; other variants do not accept one. Do not author HTML, CSS, colors, dimensions, or style fields.
 
 The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, edit the same program and rerun it with the same clientKey values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. A successful graph.submit call is required to complete the GraphComplete response, but it does not by itself complete the underlying user task. Do not submit a plan as though it were completed work. Before final submission, verify that requested workspace effects have actually occurred and represent their real results in the graph.`;
+}
+
+function currentWorkspaceMechanicsJs(): string {
+  return `Read current with const current = await graph.getCurrent(). After submitting a layer, you may update the pointer with await graph.advanceCurrent(layer, current.headRevision, "a-stable-operation-key").`;
+}
+
+function semanticCompletionGuidanceJs(
+  context: HarnessRunContext | undefined,
+  completeModuleUrl: string,
+  nativeAgentLabel: string,
+): string {
+  if (context?.completionBroker === undefined) return "";
+  return `For explicit semantic child work, first author and submit the invoke action in its layer and advance that layer as current. Only after that succeeds, call const inputGraph = await graph.prepareComplete(invokeAction). Import complete from ${completeModuleUrl} and call const child = complete(inputGraph). That returns immediately with completionId, current.snapshot(), and result; launch multiple children before awaiting them when the work is independent. Native ${nativeAgentLabel} subagents remain inside this completion and do not create semantic children by themselves.\n`;
 }
 
 function graphAuthoringCommand(launcher: string | undefined): string {
@@ -1006,7 +1024,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
   const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
-  optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1"] as const, "personalPresentationVersion");
+  optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2"] as const, "personalPresentationVersion");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
   return {

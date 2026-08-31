@@ -179,10 +179,11 @@ function descendantInvocations(detail, rootInteractionIds) {
   return selected;
 }
 
-function comparisonConfigurationIdentity(configuration) {
+function combinedComparisonConfigurationIdentity(configuration) {
   const normalized = copy(configuration);
   delete normalized.name;
   delete normalized.complete;
+  delete normalized.settings?.personalPresentationVersion;
   return canonicalJson(normalized);
 }
 
@@ -944,8 +945,12 @@ export class EvalService {
         this.configurations.get(name)
       ));
       if (pair.some((configuration) => configuration === undefined)
-        || comparisonConfigurationIdentity(pair[0]) !== comparisonConfigurationIdentity(pair[1])) {
-        throw new Error("The agent-authored Complete configurations differ outside their name and capability authority.");
+        || pair[0]?.complete?.agentAuthored !== false
+        || pair[1]?.complete?.agentAuthored !== true
+        || pair[0]?.settings?.personalPresentationVersion !== "personal-presentation-v1"
+        || pair[1]?.settings?.personalPresentationVersion !== "personal-presentation-v2"
+        || combinedComparisonConfigurationIdentity(pair[0]) !== combinedComparisonConfigurationIdentity(pair[1])) {
+        throw new Error("The visible-working-state recursive configurations differ outside their approved V1/off and V2/on experience pair.");
       }
       const liveProviderExecutions = pair.filter(({ implementation }) => implementation !== "fixture.task-system").length;
       if (liveProviderExecutions > 0 && (
@@ -993,12 +998,12 @@ export class EvalService {
         controlledFields: [
           "task",
           "implementation",
-          "settings",
+          "settings except personalPresentationVersion",
           "permissionBindings",
           "providerModelSelection",
           "temporalRuntimeFeatures",
         ],
-        variedField: "complete.agentAuthored",
+        variedField: "combined personalPresentationVersion and complete.agentAuthored experience",
         passed: null,
       } : null,
       executions: plans.map((plan) => {
@@ -1516,8 +1521,8 @@ export class EvalService {
       name: "agent-authored-complete:controlled-pair",
       passed: controlled,
       detail: controlled
-        ? "The exact two cells used one pinned provider/model resolution and identical task and permission inputs."
-        : "The comparison cells drifted outside complete.agentAuthored and cannot support a controlled claim.",
+        ? "The exact V1/off and V2/on cells used one pinned provider/model resolution and identical task and permission inputs."
+        : "The combined-experience cells drifted outside their controlled provider, task, or permission inputs.",
     };
     for (const execution of executions) {
       execution.checks.push(copy(check));
