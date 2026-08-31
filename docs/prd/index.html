@@ -612,7 +612,7 @@ interface CompletionTerminalError extends Error {
 <td>Desktop updater and distributable packaging</td>
 <td><span class="delivery-status partial">Partial — Stable verified</span></td>
 <td>The protected CI workflow signed, notarized, and published immutable Apple Silicon releases. The releases are <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code>. A remote Mac mini completed the visible updates through <code>0.2.4</code>. Workflow <code>32105585844</code> promoted the exact Preview bytes to Stable. The installed app used the live Stable feed and showed <strong>Up to date</strong>.</td>
-<td>The macOS 13-through-current support matrix, corrupt hosted artifact behavior, and update deferral around active Complete commits remain unverified. Automatic application downgrade is prohibited. A failed later-version SQLite migration is a separate persistence-recovery requirement, not an updater rollback mechanism. Section 15C.2 contains the exact proof and remaining boundary.</td>
+<td>The macOS 13.3-through-current support matrix, corrupt hosted artifact behavior, and update deferral around active Complete commits remain unverified. Automatic application downgrade is prohibited. A failed later-version SQLite migration is a separate persistence-recovery requirement, not an updater rollback mechanism. Section 15C.2 contains the exact proof and remaining boundary.</td>
 </tr>
 <tr class="requirement-row status-deferred">
 <td>Relayer login and additional providers</td>
@@ -768,6 +768,8 @@ interface CompletionTerminalError extends Error {
 <p>Relayer uses one implicit local profile. First launch opens Agent setup and, after a valid configuration is saved, opens the normal New thread window. An optional Relayer account offer may appear only after that local workspace is usable. Folder, project, and account choice are not blocking onboarding steps.</p>
 <p>The setup surface is one focused <strong>Agent login</strong> card. Codex and API key are presented as horizontal login-method choices, followed by the credential and model controls for the selected method. The form should not split setup into equal Harness and Agent login columns or stack alternative methods into a long vertical option list.</p>
 <p>Agent setup does not require a harness choice. After connection, the New Thread composer presents Model as the primary execution control. Its Advanced tab contains compatible harness configurations.</p>
+<p>A successful provider connection with at least one execution-eligible model creates one product-managed, provider-scoped model family before setup completes. First launch selects the unique valid provider, family, model, and default harness route atomically; it does not require custom-family construction. Product policy admits only reviewed synchronous text or agent models and fails closed for unknown capabilities. It applies a versioned provider preference before provider order and caps the managed family at five models. OpenRouter policy version 1 is the explicit three-model general-agent roster <code>deepseek/deepseek-v4-pro-0813</code>, <code>qwen/qwen3.8-max</code>, and <code>z-ai/glm-5.3</code>, in that order. Vercel AI Gateway policy version 1 provides the equivalent roster using its catalog identities: <code>deepseek/deepseek-v4-pro-0813</code>, <code>alibaba/qwen3.8-max</code>, and <code>zai/glm-5.3</code>. Both policies omit missing or unavailable entries rather than falling through to arbitrary catalog order.</p>
+<p>Adding a provider through Settings applies the same managed-family policy. It preserves the existing default provider, family, model, harness, open composer draft, and existing thread bindings. Refresh reconciles only the refreshed provider's managed family. Custom families are never rewritten by managed-family reconciliation. A connected provider with zero eligible models remains in the typed <code>provider_no_eligible_execution_models</code> recovery state and cannot silently populate an unsafe family. Its provider card and first-run setup expose an exact-provider <strong>Refresh models and set up defaults</strong> action. Refresh reruns managed-family derivation for that same provider and advances automatically when a valid default route becomes available.</p>
 <p>The packaged application includes <code>codex-basic</code> as its Codex product harness. <code>codex-basic-high</code> remains available only to internal Eval and code workflows. Prime Agent configurations remain development targets until a clean installation can load the upstream package.</p>
 <h3>2.2 Login methods</h3>
 <h4>Codex</h4>
@@ -795,6 +797,7 @@ interface CompletionTerminalError extends Error {
 <li>The thread pins that harness. Follow-up interactions cannot change it.</li>
 <li>A follow-up may select another compatible model. Prior interaction receipts remain unchanged.</li>
 <li>Harnesses Settings lists only harnesses usable now. Provider and model diagnostics remain in their owning Settings surfaces.</li>
+<li>Every connected provider with eligible execution models exposes its product-managed family in both first-run onboarding and Settings without a separate family-construction step.</li>
 <li>Existing UI-authored harness rule overrides reset once to catalog defaults when their editor is removed.</li>
 </ul>
 <h3>2.4 Optional Relayer account</h3>
@@ -808,7 +811,28 @@ interface CompletionTerminalError extends Error {
 <li>Logout disables the current telemetry generation and clears the encrypted local refresh credential before best-effort Auth0 revocation. It does not sign the browser out.</li>
 </ul>
 <p>Electron main owns state and PKCE generation, loopback binding, callback validation, direct token operations, OIDC verification, encrypted refresh-token custody, and account generation. Stable can bind only ports 49152 through 49154. Preview can bind only ports 49155 through 49157. The renderer receives only a closed presentation state, the selected channel, a pseudonymous subject where useful, and safe reason codes.</p>
-<h3>2.5 Configuration schema</h3>
+<h3>2.5 Authenticated error reporting</h3>
+<p>Electron main is the only Sentry authority. Renderer and child processes submit typed records through generation-bound local capabilities.</p>
+<p>Only a verified account generation enables admission. Every other account state creates no request or queue record.</p>
+<p>Main derives one stable identifier with <code>SHA-256("graphcomplete-sentry-user-v1\0" || UTF-8(Auth0 sub))</code>. Callers cannot supply identity or transport configuration.</p>
+<ul>
+<li>V1 reports only unhandled process crashes, supervised-child startup failures, and supervised-child unexpected exits.</li>
+<li>Handled operation failures, validation, denials, cancellations, retries, disconnections, warnings, information, and success never report.</li>
+<li>Accepted JavaScript frames use application-relative module names. Each event keeps at most 32 frames and 256 characters per module name.</li>
+<li>Rust frames name only approved workspace crates and modules. Absolute paths and third-party frames are rejected.</li>
+<li>Every module name must match the exact packaged-module inventory. Valid-looking invented names are rejected.</li>
+<li>Approved fields are stable failure code, code-owned message, frames, component, operation, release, environment, OS, architecture, and pseudonymous identity.</li>
+<li>Prompts, graph or model content, paths, commands, environment data, credentials, requests, URLs, logs, and raw errors are forbidden.</li>
+<li>Breadcrumbs, attachments, replay, tracing, profiling, performance events, default PII, and automatic request context remain disabled.</li>
+</ul>
+<p>The encrypted queue holds at most 32 records and 256 KiB. Records expire after seven days, and overflow evicts the oldest record.</p>
+<p>Any corrupt queue is deleted. Retry requires revalidation of the same Auth0 subject and never creates recursive telemetry.</p>
+<p>Logout or account replacement disables admission and deletes the old queue before account presentation changes.</p>
+<p>Release identity comes only from immutable sealed package metadata. Electron main supplies the Sentry environment from its validated current update channel.</p>
+<p>The versioned shared privacy corpus covers every process seam and forbidden field. <code>npm run evidence:telemetry</code> runs its deterministic portfolio.</p>
+<p>Live Auth0, packaged storage, system-browser, upload, and symbolication proof runs only for Preview or Stable release candidates.</p>
+<p>Each target proves only its native platform: macOS Apple Silicon, macOS Intel, or Windows x64. Missing target evidence remains indeterminate.</p>
+<h3>2.6 Configuration schema</h3>
 <pre><code class="language-ts">type AgentConfiguration = {
   harnessId: string;
   harnessVersion: string;
@@ -833,7 +857,7 @@ type InteractionModelBinding = {
 };
 </code></pre>
 <p>The harness binding is written when the thread&#39;s root interaction is created and is inherited by every interaction in that thread. The model picker remains available in the composer and may change before any interaction. Every submitted interaction records the exact provider, credential reference, and model used for that call.</p>
-<h3>2.6 Product requirements</h3>
+<h3>2.7 Product requirements</h3>
 <ul>
 <li><strong>AGT-001:</strong> Agent-provider login remains independent from the optional Relayer account. No avatar or cloud-sync promise appears in V1.</li>
 <li><strong>AGT-002:</strong> Agent login is the primary setup task. Harness selection does not compete with credential setup.</li>
@@ -853,8 +877,20 @@ type InteractionModelBinding = {
 <li><strong>ACC-006:</strong> Refresh rotation and logout cannot resurrect stale credentials after generation invalidation.</li>
 <li><strong>ACC-007:</strong> Optional account sign-in is a dedicated onboarding step after provider setup and before projects, chats, threads, or the desktop workspace are revealed. Sign in and Continue without an account both resolve the step, and account failure cannot trap local use.</li>
 <li><strong>ACC-008:</strong> The bottom-right control starts sign-in directly while signed out and opens minimal settings for an existing account. Account UX never shows Stable or Preview.</li>
+<li><strong>TEL-001:</strong> Electron main alone owns Sentry admission, identity, queueing, SDK configuration, and transport.</li>
+<li><strong>TEL-002:</strong> Only a verified account generation reports. Main derives the stable domain-separated pseudonym and callers cannot supply identity.</li>
+<li><strong>TEL-003:</strong> The final event contains only approved fields. Forbidden privacy fixtures fail before transport and queue persistence.</li>
+<li><strong>TEL-004:</strong> V1 reports only unhandled crashes and supervised-child startup or unexpected-exit failures.</li>
+<li><strong>TEL-005:</strong> Frames are bounded and application-relative. Rust frames use only approved workspace crate and module names.</li>
+<li><strong>TEL-006:</strong> Every external process capability is generation-bound. Process restart and account-generation change invalidate it.</li>
+<li><strong>TEL-007:</strong> The encrypted queue holds 32 records and 256 KiB for seven days. Overflow evicts oldest, and corruption deletes the queue.</li>
+<li><strong>TEL-008:</strong> Queue retry requires the same revalidated Auth0 subject. Rejection and transport failure never recurse.</li>
+<li><strong>TEL-009:</strong> Logout or account replacement disables admission and deletes the prior queue before public account state changes.</li>
+<li><strong>TEL-010:</strong> Events use immutable sealed release identity. Main alone supplies environment from the validated current update channel.</li>
+<li><strong>TEL-011:</strong> Reporting never changes product behavior, graph acceptance, transactions, retry, supervision, or shutdown.</li>
+<li><strong>TEL-012:</strong> One versioned privacy corpus and deterministic telemetry portfolio cover every process seam.</li>
 </ul>
-<h3>2.7 Verification</h3>
+<h3>2.8 Verification</h3>
 <p>Deterministic UI tests cover each selector transition, conditional field, validation error, and disabled state. They also cover secure storage and secret removal. Credential-adapter integration tests use fake Codex and provider servers.</p>
 <table>
 <thead><tr><th>Optional-account checkpoint</th><th>Deterministic proof</th></tr></thead>
@@ -865,7 +901,20 @@ type InteractionModelBinding = {
 <tr><td><code>ACC-005</code>, <code>ACC-007</code>, and <code>ACC-008</code></td><td><code>test/desktop-account-ui.test.mjs</code> verifies the startup gate, direct account control, minimal settings, action coalescing, and contained failures.</td></tr>
 </tbody>
 </table>
-<p>One optional authentication smoke test runs before a signed release. It is not in the default test suite. It does not make a paid Complete call.</p>
+<table>
+<thead><tr><th>Telemetry checkpoint</th><th>Deterministic proof</th></tr></thead>
+<tbody>
+<tr><td><code>TEL-001</code>, <code>TEL-002</code>, and <code>TEL-006</code></td><td><code>desktop-authenticated-error-startup</code>, <code>desktop-rust-error-capabilities</code>, and account-session fixtures exercise bootstrap, live child refresh, logout, replacement, verified, uncertain, stale, and restarted generations without live Auth0.</td></tr>
+<tr><td><code>TEL-003</code> and <code>TEL-005</code></td><td>The shared privacy corpus, renderer reporting, and stack-sanitizer suites cross every seam. They reject every forbidden field, absolute or third-party frame, oversized frame set, and extra key.</td></tr>
+<tr><td><code>TEL-004</code> and <code>TEL-011</code></td><td><code>desktop-error-domain-adapters</code> drives all five production adapters. Expected states, reporting rejection, and transport failure produce no product behavior change.</td></tr>
+<tr><td><code>TEL-007</code>, <code>TEL-008</code>, and <code>TEL-009</code></td><td>Queue tests cover size, count, age, eviction, corruption, same-subject retry, logout, replacement, and recursion suppression.</td></tr>
+<tr><td><code>TEL-010</code></td><td>Release and telemetry-artifact fixtures reject caller identity, mismatched metadata, source bytes, native debug IDs, targets, and authority outside release CI. Main projects validated Development, Preview, or Stable environment.</td></tr>
+<tr><td><code>TEL-012</code></td><td><code>npm run evidence:telemetry</code> first runs the named adapter, service-protocol, and shared Rust suites. It then runs the versioned zero-inference loopback privacy portfolio and emits reviewable evidence.</td></tr>
+</tbody>
+</table>
+<p>The default portfolio uses no paid inference, production Auth0, Relayer API, or live Sentry.</p>
+<p>The default portfolio does not induce a panic in a spawned production Rust binary. That remains explicit in its evidence limitations.</p>
+<p>Live authentication and packaged symbol proof run only for Preview or Stable release candidates. Each target proves only its own platform.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15.1">15A. Agent connection evidence</h2>
 <p><code>PROV-001</code> is one product requirement with several observable subrequirements, not a collection of independent setup features:</p>
 <ul>
@@ -1196,7 +1245,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td><span class="delivery-status partial">Partial — Stable verified</span></td>
 <td>One updater test covers checks, availability, progress, readiness, installation, retry, channel persistence, and downgrade protection. It does not use network access. Release tests cover identity, version, channel, manifests, ZIP reconstruction, hashes, receipts, tampering, tags, publication, retry, promotion, and replacement rejection. The desktop suite keeps these flows in one file with 10 tests.</td>
 <td><code>UPD-002-E1</code> through <code>UPD-002-E6</code> cover six release events. These include signed launch, empty-feed behavior, the failed canary, corrected updates, Stable promotion, and Stable feed use. The screenshots show the inspected visible states. Machine-readable receipts connect the candidate, canary, manifest, and public artifact hashes.</td>
-<td>The macOS 13-through-current support matrix, active-Complete restart deferral, and corrupt hosted artifact behavior remain undone. A real later-version migration and failed-migration recovery now belong to the app-server persistence track and are not claimed by updater evidence.</td>
+<td>The macOS 13.3-through-current support matrix, active-Complete restart deferral, and corrupt hosted artifact behavior remain undone. A real later-version migration and failed-migration recovery now belong to the app-server persistence track and are not claimed by updater evidence.</td>
 </tr>
 </tbody></table>
 <h4><code>SET-001-E1</code> — full-page Settings</h4>
@@ -1532,7 +1581,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <li><strong>Artifact host:</strong> Each target uses its own path under <code>https://updates.relayerlabs.ai/desktop</code>. Versioned artifacts are immutable. Target channel metadata is written last.</li>
 <li><strong>Signing automation:</strong> Release builds use the existing Developer ID Application identity for Apple team <code>NZ253AL7U6</code>. Notarization credentials come from the local environment or a protected GitHub environment. The repository must not contain these secrets.</li>
 <li><strong>Update prompt timing:</strong> use the existing compact sidebar indicator; downloading is user-triggered, and restart remains explicitly deferrable.</li>
-<li><strong>Minimum supported macOS:</strong> V1 supports Apple Silicon and Intel on macOS 13 or newer. Release evidence validates target identity and architecture.</li>
+<li><strong>Minimum supported macOS:</strong> V1 supports Apple Silicon and Intel on macOS 13.3 or newer. Release evidence validates target identity and architecture.</li>
 <li><strong>Windows status:</strong> <span class="delivery-status deferred">Blocked</span> The Windows pipeline is disabled. The exact publisher variable is missing. Azure signing and the interactive AVD canary are not verified. Windows does not block macOS publication.</li>
 <li><strong>Release recovery:</strong> Remove a bad channel pointer before more installations. Alternatively, publish a newer correction. Do not downgrade application code automatically. An older binary can be incompatible with newer data. SQLite migration recovery is a separate app-server contract. Recognized migrations run in a transaction. Relayer validates the new schema before startup. A future N→N+1 test must prove that the prior database stays recoverable after a forced failure.</li>
 </ol>
@@ -1646,7 +1695,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <p>Protected workflow <code>32535133480</code> promoted the exact Intel Preview bytes after validating the committed canary. Stable and Preview manifests share SHA-256 <code>90f004148a1d045a002c704e91a2cfdf377d728343f76fb0e5ee254567243341</code>.</p>
 <p>Machine-readable receipt: <code>assets/evidence/desktop/macos-x64-0.2.12-to-0.2.13/stable-promotion-macos-x64-0.2.13.json</code>.</p>
 <p>This slice completes Preview distribution, the previous-version update canary, and the first Stable promotion. The full desktop distribution requirement is still partial.</p>
-<p>The macOS 13-through-current test matrix is not complete. Tests for a corrupt hosted artifact and restart deferral are also not complete. The initial SQLite schema and fail-closed validation exist. A later-version migration and a forced-failure recovery test remain open.</p>
+<p>The macOS 13.3-through-current test matrix is not complete. Tests for a corrupt hosted artifact and restart deferral are also not complete. The initial SQLite schema and fail-closed validation exist. A later-version migration and a forced-failure recovery test remain open.</p>
 <h2 data-prd-layer="Contracts" data-prd-order="11">11. Graph engine and local graph API</h2>
 <p>The graph engine is the only component that opens graph storage or validates graph writes. The Rust app server uses the graph server and persistent harness host. It does not introduce another graph implementation.</p>
 <h3>11.1 Runtime components and delivery grouping</h3>
@@ -1827,6 +1876,31 @@ GET  /api/graph/nodes/:id/output
 <li>#56 owns chronological Back and Forward behavior. #36 does not define navigation history.</li>
 <li>Prime Agent owns recursive agent execution. Other harnesses execute directly. GraphComplete owns graph semantics and acceptance.</li>
 </ul>
+<h3>11.9 Graph search v1 contract</h3>
+<p><strong>Goal:</strong> Let authorized agents query accepted graph structure without known record identifiers.</p>
+<p><strong>Primary issue:</strong> <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/52">#52 Add graph search functionality</a>.</p>
+<p><strong>Current status:</strong> The product contract is settled. The Issue #261 feasibility gate rejects the upstream Ladybug artifacts as shipped. The approved product decision raises the minimum supported macOS version to 13.3. At that floor, exact Ladybug 0.18.0 uses pinned static OpenSSL and Relayer-owned link metadata without a fork. The complete positive v1 corpus and graph-server lifecycle pass locally on both macOS targets. Windows native proof and binding-license bytes remain unresolved, so #262 and later delivery nodes stay blocked. The graph-search contract stays unchanged.</p>
+<h4>Product requirements</h4>
+<ul>
+<li>Graph search uses Ladybug from its first enabled product path. SQLite search fallback is forbidden.</li>
+<li>SQLite remains the canonical typed write store initially. Ladybug is one shared derived search store.</li>
+<li>Projection order and readiness are independent for each project or standalone thread.</li>
+<li>A successful submission is acknowledged only after its complete Ladybug projection is searchable.</li>
+<li>This is acknowledgement-level freshness. The product does not claim cross-database physical ACID.</li>
+<li>Queries select a thread or project dataset. Rust intersects that selector with the completion-bound read permit.</li>
+<li>The public language is a bounded read-only GQL/Cypher-shaped profile, not full Cypher or ISO GQL.</li>
+<li>V1 supports whole-target scans plus fixed one-hop and two-hop patterns.</li>
+<li>Content, layers, connections, membership, expansions, and references form one searchable supergraph.</li>
+<li>Drafts, <code>interaction.context</code>, and unresolved invokes never enter the searchable topology.</li>
+<li>Queries return typed scalar, graph, list, record, and path values with deterministic ordering.</li>
+<li>The default result cap is five rows. The hard cap is eight rows and 16 KiB.</li>
+<li>Rows are never partially truncated. A single oversized row returns a typed error.</li>
+<li>Output limits do not replace traversal, expansion, intermediate-row, time, or cancellation budgets.</li>
+<li>Incompatible Ladybug stores rebuild from SQLite before an atomic validated swap.</li>
+<li>V1 uses pinned official Ladybug components and narrow hooks. It does not require a permanent fork.</li>
+<li>Vector retrieval and making Ladybug canonical for writes are deferred.</li>
+</ul>
+<p>The <a href="../graph-query-v1.md">versioned graph-query contract</a> freezes grammar, values, topology, limits, errors, and compatibility.</p>
 <h2 data-prd-layer="Contracts" data-prd-order="12">12. Complete and harness-host contract</h2>
 <h3>12.1 Canonical input and accepted output</h3>
 <pre><code class="language-ts">type CompleteInputGraph = NodeReference;
@@ -2623,7 +2697,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
     Q --&gt; R[&quot;Publish immutable artifacts and checksums&quot;]
     R --&gt; M[&quot;Publish stable update manifest last&quot;]
 </code></pre>
-<p>V1 targets Apple Silicon and Intel on macOS 13 or newer, plus Windows x64. Each target has independent artifacts, Preview and Stable pointers, and target-specific canary evidence.</p>
+<p>V1 targets Apple Silicon and Intel on macOS 13.3 or newer, plus Windows x64. Each target has independent artifacts, Preview and Stable pointers, and target-specific canary evidence.</p>
 <h3>14.5 Distribution and update acceptance</h3>
 <p>macOS distribution uses a notarized DMG for first install and a signed ZIP plus channel metadata for Electron updates. Windows x64 will use a signed NSIS installer once signing is unblocked. Artifacts are content-addressed and immutable. A mutable channel manifest is published only after its target-specific artifact, signature, checksum, platform trust proof, and smoke evidence are available.</p>
 <p>Before promotion, a clean machine must pass these product checks:</p>
@@ -2700,6 +2774,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <li>no-folder and project-backed threads;</li>
 <li>non-Git folders, local Git checkout, new worktree, and fork-to-worktree;</li>
 <li>graph messages, corrective or explanatory annotations through attached context, authored node actions, recursive subthreads, turn navigation, stop, retry, and local persistence;</li>
+<li>bounded read-only graph search over accepted content, layers, relationships, and paths through one shared Ladybug store;</li>
 <li>Rust graph core/API, opaque session-token enforcement, and TypeScript/Python graph clients;</li>
 <li>persistent Node harness host, packaged <code>codex.basic</code> configurations, and explicit compatibility for each supported provider and harness;</li>
 <li>exact empty-project Complete evaluation, followed by multi-turn, interaction, grounding, recursive-work, and hard-task capability suites;</li>
@@ -2723,7 +2798,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <ul>
 <li>engine indexing and compaction implementation behind the stable read/write contract;</li>
 <li>whether loopback HTTP is reachable from every supported Codex sandbox or the packaged product needs HTTP over a Unix-domain socket;</li>
-<li>graph search/retrieval policy and when embeddings are worth adding;</li>
+<li>whether a later vector candidate source provides enough value to extend the structural search contract;</li>
 <li>thresholds and calibration examples beyond the fixed first six-fact LLM-judge rubric;</li>
 <li>when multiple real harness ablations justify a generalized signed configuration manifest;</li>
 <li>default maximum number of Relayer-managed worktrees, whether the limit is global or per project, and the limit-reached cleanup flow;</li>

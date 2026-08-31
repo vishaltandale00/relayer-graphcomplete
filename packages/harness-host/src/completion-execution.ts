@@ -155,7 +155,14 @@ export class CompletionExecutionModule {
     } catch (error) {
       native = nativeExecutionHandle(Promise.reject(error));
     }
-    const result = this.preparation.observe(binding).then(async (terminal) => {
+    let rejectNativeReconciliation!: (reason?: unknown) => void;
+    const nativeReconciliationFailure = new Promise<never>((_resolve, reject) => {
+      rejectNativeReconciliation = reject;
+    });
+    const result = Promise.race([
+      this.preparation.observe(binding),
+      nativeReconciliationFailure,
+    ]).then(async (terminal) => {
       if (terminal.lifecycle === "succeeded") return terminal.finalLayer;
       const retained = await this.preparation.current(binding);
       throw new CompletionTerminalError(
@@ -171,7 +178,7 @@ export class CompletionExecutionModule {
       if (durable.lifecycle === "active") {
         await this.preparation.fail(binding, "provider_exited_without_return");
       }
-    }).catch(() => {});
+    }).catch(rejectNativeReconciliation);
 
     const handle = Object.freeze({ completionId: binding.completionId, current, result });
     this.handles.set(binding.completionId, { bindingDigest, handle });

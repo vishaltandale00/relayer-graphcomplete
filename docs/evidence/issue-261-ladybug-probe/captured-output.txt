@@ -1,0 +1,23 @@
+Summarized successful stdout (verbose path rows reduced to PATH summaries):
+STORAGE_VERSION=43
+READ_ONLY=true Q=MATCH p=(a:Content)-[r:CONNECTED]-(b:Content) RETURN p,r,[a,b] AS nodes,[r] AS rels
+COLTYPES=[RecursiveRel, Rel, List { child_type: Node }, List { child_type: Rel }]
+PATH nodes=2 rels=1
+PATH nodes=2 rels=1
+READ_ONLY=true Q=MATCH (a:Content)-[r:CONNECTED]-(b:Content) RETURN count(r)
+COLTYPES=[Int64]
+ROW=[Int64(2)]
+READ_ONLY=true Q=MATCH (a:Content) RETURN {title:a.title, id:a.id} AS item, [a.title,a.id] AS vals
+COLTYPES=[Struct { fields: [("title", String), ("id", String)] }, List { child_type: String }]
+ROW=[Struct([("title", String("Queue")), ("id", String("content:1"))]), List(String, [String("Queue"), String("content:1")])]
+ROW=[Struct([("title", String("Worker")), ("id", String("content:2"))]), List(String, [String("Worker"), String("content:2")])]
+PREPARE_ERROR=Query execution failed: Parser exception: Invalid input < NULLS>: expected rule iC_Statements
+
+Exact command:
+LBUG_VERSION=0.19.1 RUSTFLAGS='-L native=/opt/homebrew/opt/openssl@3/lib' cargo run --locked --quiet
+
+Cancellation falsifiers (each externally terminated after 30 seconds):
+LBUG_VERSION=0.19.1 RUSTFLAGS='-L native=/opt/homebrew/opt/openssl@3/lib' cargo run --locked --quiet -- --timeout-falsifier
+LBUG_VERSION=0.19.1 RUSTFLAGS='-L native=/opt/homebrew/opt/openssl@3/lib' cargo run --locked --quiet -- --interrupt-falsifier
+Neither the one-millisecond timeout nor cross-thread interrupt produced terminal stdout in 30 seconds.
+The exploratory probes were terminated by Ctrl-C (exit 130).

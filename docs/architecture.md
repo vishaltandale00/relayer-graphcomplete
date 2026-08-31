@@ -49,6 +49,18 @@ Within the app-server crate, each layer has one concrete responsibility:
 
 SQLite migrations are storage implementation details. `SqliteProductStore::open` requires any existing product tables to carry Relayer's SQLx migration history, applies the embedded versioned files under `storage/sqlite/migrations/`, and validates the exact resulting schema and row invariants before the store becomes available. This permits a recognized predecessor to migrate while an unmanaged, incompatible, partially initialized, or corrupt schema fails startup. Electron, the HTTP API, and the product service neither run nor interpret migrations. The storage pool is asynchronous, bounded, configured for foreign keys and WAL, and is not guarded by a process-wide blocking mutex. Composite product-state and thread-detail reads use SQLite snapshot transactions so each API response is internally consistent. Operations that allocate per-thread interaction sequence numbers acquire an immediate SQLite transaction before assigning their timestamp or sequence, so concurrent requests cannot select the same next sequence or move a thread's chronology backward.
 
+## Planned graph-search boundary
+
+Graph search uses one application-owned Ladybug database as a derived search store. SQLite remains the canonical GraphComplete write store for the initial release. Ladybug serves every graph query; production search never falls back to SQLite. One broken logical target cannot stall other targets because publication order and readiness are tracked per project or standalone thread inside the shared store.
+
+An accepted SQLite transition records an idempotent projection event in the same SQLite transaction. The author is not acknowledged until the complete closure is committed and verified in one Ladybug transaction. This is an acknowledgement-level freshness guarantee, not physical ACID across both databases. A concurrent query may observe the prior published revision, but never a partial closure.
+
+The Rust graph core owns query parsing, semantic validation, read-permit intersection, budget enforcement, lowering, and normalized results. The server and TypeScript/Python clients expose that module without reproducing query or authority rules. Callers select a thread or project dataset, but the selector never grants access. Query text cannot name a physical database or broaden the completion-bound read permit.
+
+Ladybug stores only accepted, published graph material. Its searchable supergraph contains content nodes, layers, canonical authored connections, derived layer membership, and accepted `expand` or `reference` action occurrences. `interaction.context`, drafts, and unresolved invokes are excluded. Accepted current or resolved-invoke facts may enter only through future typed contract additions from their owning features.
+
+Engine, storage-format, Relayer-schema, query-contract, and derived-index versions are independent. Incompatible Ladybug bytes are quarantined and rebuilt from SQLite before an atomic active-store swap. The initial release uses official pinned Ladybug bytes plus narrow extensions or upstream hooks, without a permanent core fork. Vector retrieval and a Ladybug canonical-write cutover remain deferred. The exact v1 language, values, limits, and compatibility rules live in [the graph-query contract](graph-query-v1.md).
+
 For every product interaction, the app server durably creates the product interaction and atomically reserves its `submitted` preparation state before graph control. It then creates the canonical user-interaction graph node with product project/thread provenance, stores that node plus the frozen execution identity, claims `running`, and only then supplies the transient graph capability to the matching `complete()` call. Explicit graph submission runs in background work owned by the app-server process, which persists accepted output or explicit failure on the product interaction. This lets every product host display the thread and waiting state while polling the same product record to terminal state. Product and graph writes remain separate SQLite transactions; the stored graph node ID is the durable join between them.
 
 ## Product permission profiles
@@ -276,9 +288,73 @@ settings for an existing account. The Account panel contains only concise status
 and the applicable sign-in or logout action. Stable or Preview is not part of the
 account UX; callback-pool diagnostics remain main-owned.
 
+## Authenticated desktop error-reporting boundary
+
+Electron main is the only Sentry authority. It owns admission, pseudonymous
+identity, event validation, the encrypted retry queue, SDK configuration, release
+metadata, and outbound transport. The renderer, Node harness host, Rust app
+server, and Rust graph server receive only constrained local reporting
+capabilities. Each capability is bound to one account generation and one process
+generation. A child restart or account-generation change invalidates the old
+capability. No child receives Auth0 material, a DSN, upload credentials, or direct
+Sentry network authority. Renderer records cross one private preload IPC channel;
+Rust capabilities cross the existing private startup stdin and are removed when
+the supervised process exits. No reporting capability is placed in argv or the
+environment. The same private stdin carries replacement or null capabilities
+after sign-in, account replacement, logout, or restored-account verification;
+telemetry rotation never restarts the product process.
+
+Admission requires the current verified Auth0 account generation from the account
+service. Electron main derives the stable Sentry user identifier as
+`SHA-256("graphcomplete-sentry-user-v1\0" || UTF-8(Auth0 sub))`. The domain
+separator prevents reuse as another product identity. The result is stable across
+installations for the same Auth0 subject. Renderer presentation state is never an
+authority input.
+
+V1 reports only unhandled process crashes, supervised-child startup failures, and
+supervised-child unexpected exits. Handled operation failures and expected product
+states are excluded. Every adapter emits a closed record with stable component,
+operation, and failure codes plus a code-owned message. JavaScript frames are
+application-relative, limited to 32, and limited to 256 characters per module
+name. Rust frames name only approved workspace crates and modules. Absolute paths,
+third-party frames, arbitrary maps, and raw errors are rejected. Module names must
+also occur in the checked-in packaged-module inventory, so a caller cannot encode
+private data inside a valid-looking application path. The final event is validated
+again immediately before transport.
+
+Authenticated transport failures may enter one `safeStorage`-encrypted queue. The
+queue holds at most 32 records and 256 KiB of encrypted bytes. Records expire after
+seven days. Overflow evicts the oldest record. Any corrupt queue is deleted rather
+than repaired or partially uploaded. Retry requires a fresh verification of the
+same Auth0 subject. Unsigned, uncertain, expired, revoked, or replaced generations
+never create deferred records. Logout or account replacement disables admission
+and deletes the old queue before the new presentation state appears. Rejection,
+queue failure, and transport failure never report themselves.
+
+Runtime events take immutable candidate and release identity only from sealed
+package metadata. Electron main validates the current update channel and supplies
+`development`, `preview`, or `stable` as the Sentry environment. Callers cannot
+supply either identity. Symbol and source-map upload remains a release-authority
+operation and never places upload credentials in application bytes. Preview and
+Stable packaging produces a hash-verified telemetry manifest with JavaScript
+source maps and native Rust debug artifacts; only the target-matched release CI
+step receives the upload token and may publish that manifest. Packaging compares
+each mapped source byte with the packaged ASAR or resource byte and correlates each
+dSYM UUID or PDB identity with its packaged Rust executable before upload.
+
+The versioned shared privacy corpus is the common contract across all five failure
+domains and both repositories. `npm run evidence:telemetry` is the deterministic,
+zero-inference local portfolio for admission, privacy, queueing, restart, and
+release identity. Live Auth0, packaged protected storage, real system-browser,
+artifact upload, and symbolication proof run only for Preview or Stable release
+candidates. macOS Apple Silicon, macOS Intel, and Windows x64 evidence is
+target-specific. Missing native target evidence remains indeterminate and cannot
+be replaced by another platform. See
+[ADR 0009](decisions/0009-authenticated-desktop-error-reporting.md).
+
 ## Desktop release boundary
 
-Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13 or newer plus Windows x64 and begin at version `0.2.0`.
+Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13.3 or newer plus Windows x64 and begin at version `0.2.0`.
 
 Optional packaged harnesses are admitted through an exact runtime contract rather
 than filesystem discovery. Prime Agent is installed from four checked-in,

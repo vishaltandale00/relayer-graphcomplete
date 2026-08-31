@@ -215,6 +215,7 @@ interface PrimeAgentModel {
 
 interface PrimeAdapterMapping {
   readonly api: string;
+  readonly implementationVersion: string;
   readonly compat?: Readonly<Record<string, unknown>>;
 }
 
@@ -286,10 +287,10 @@ class PrimeAgentSessionLifecycle {
 }
 
 const PRIME_ADAPTERS: Readonly<Record<string, PrimeAdapterMapping>> = Object.freeze({
-  "openai-api": Object.freeze({ api: "openai-responses" }),
-  "anthropic-api": Object.freeze({ api: "anthropic-messages" }),
-  openrouter: Object.freeze({ api: "openai-completions", compat: Object.freeze({ thinkingFormat: "openrouter", openRouterRouting: Object.freeze({}) }) }),
-  "vercel-ai-router": Object.freeze({ api: "openai-completions", compat: Object.freeze({ vercelGatewayRouting: Object.freeze({}) }) }),
+  "openai-api": Object.freeze({ api: "openai-responses", implementationVersion: "2" }),
+  "anthropic-api": Object.freeze({ api: "anthropic-messages", implementationVersion: "2" }),
+  openrouter: Object.freeze({ api: "openai-completions", implementationVersion: "2", compat: Object.freeze({ thinkingFormat: "openrouter", openRouterRouting: Object.freeze({}) }) }),
+  "vercel-ai-router": Object.freeze({ api: "openai-completions", implementationVersion: "2", compat: Object.freeze({ vercelGatewayRouting: Object.freeze({}) }) }),
 });
 
 export class PrimeAgentHarness implements Harness {
@@ -1358,13 +1359,14 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
 }
 
 function validatePrimeAgentAccess(route: HarnessAdmittedModelRoute, access: HarnessExecutionAccess): asserts access is Extract<HarnessExecutionAccess, { kind: "secret" }> {
-  if (PRIME_ADAPTERS[route.adapterId] === undefined) {
+  const mapping = PRIME_ADAPTERS[route.adapterId];
+  if (mapping === undefined) {
     throw new Error(`prime.agent does not support provider adapter ${route.adapterId}`);
   }
   if (route.accessContract !== "secret@1" || access.kind !== "secret" || access.contract !== "secret@1") {
     throw new Error(`prime.agent adapter ${route.adapterId} requires secret@1 access`);
   }
-  if (route.adapterImplementationVersion !== "1") {
+  if (route.adapterImplementationVersion !== mapping.implementationVersion) {
     throw new Error(`prime.agent does not support ${route.adapterId} implementation ${route.adapterImplementationVersion}`);
   }
   if (access.providerId !== route.providerId

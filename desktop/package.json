@@ -1,6 +1,6 @@
 {
   "name": "relayer-desktop",
-  "version": "0.2.18",
+  "version": "0.2.24",
   "description": "Local-first Relayer desktop application.",
   "author": "Relayer",
   "license": "Apache-2.0",
@@ -14,6 +14,7 @@
     "@earendil-works/pi-tui": "file:../vendor/prime-agent/earendil-works-pi-tui-0.8.1-sha256-40517b0d5600557a31e395a0c344dbb9af7d3f8c000bea65561ef81b83142507.tgz",
     "@relayer/eval-runner": "*",
     "@relayer/harness-host": "*",
+    "@sentry/node": "^10.72.0",
     "chrome-devtools-mcp": "1.8.0",
     "electron-updater": "6.8.9",
     "lucide": "0.562.0",

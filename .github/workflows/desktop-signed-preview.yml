@@ -27,8 +27,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22.22.0"
+          node-version-file: .node-version
           cache: npm
+
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
 
       - name: Require main or a matching desktop release tag
         shell: bash
@@ -64,12 +67,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Apple Silicon is the only signed Preview target. Intel macOS is
+          # disabled alongside the blocked Windows job; restore this entry and
+          # the macos-x64 publisher target together to resume Intel Previews.
           - target: macos-arm64
             runner: macos-15
             update_base_url: https://updates.relayerlabs.ai/desktop/macos/arm64
-          - target: macos-x64
-            runner: macos-15-intel
-            update_base_url: https://updates.relayerlabs.ai/desktop/macos/x64
     runs-on: ${{ matrix.runner }}
     environment:
       name: desktop-production
@@ -83,8 +86,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22.22.0"
+          node-version-file: .node-version
           cache: npm
+
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
 
       - name: Install locked dependencies
         run: npm ci
@@ -123,6 +129,22 @@ jobs:
           export APPLE_API_KEY="$api_key_path"
           npm run desktop:dist:preview
 
+      - name: Install pinned telemetry upload client without credentials
+        run: npm install --no-save --package-lock=false @sentry/cli@3.7.0
+
+      - name: Upload version-matched telemetry artifacts
+        shell: bash
+        env:
+          RELAYER_DESKTOP_RELEASE: "1"
+          RELAYER_DESKTOP_CHANNEL: preview
+          RELAYER_DESKTOP_TARGET: ${{ matrix.target }}
+          RELAYER_DESKTOP_SOURCE_COMMIT: ${{ github.sha }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_CLI_BINARY: ${{ github.workspace }}/node_modules/.bin/sentry-cli
+          SENTRY_ORG: relayer-labs-llc
+          SENTRY_PROJECT: graphcomplete-desktop
+        run: node desktop/release/telemetry-artifacts.mjs
+
       - name: Upload sealed candidate artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -136,6 +158,7 @@ jobs:
             desktop/dist/beta-mac.yml
             desktop/dist/Relayer-*-SHA256SUMS.txt
             desktop/dist/Relayer-*-RELEASE.json
+            desktop/dist/telemetry/**
 
   package-windows:
     # Enable candidate execution after the exact publisher is configured. Add
@@ -160,8 +183,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22.22.0"
+          node-version-file: .node-version
           cache: npm
+
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
 
       - name: Install locked dependencies
         run: npm ci
@@ -213,6 +239,22 @@ jobs:
           RELAYER_WINDOWS_PUBLISHER_NAME: ${{ vars.RELAYER_WINDOWS_PUBLISHER_NAME }}
         run: npm run desktop:dist:preview
 
+      - name: Install pinned telemetry upload client without credentials
+        run: npm install --no-save --package-lock=false @sentry/cli@3.7.0
+
+      - name: Upload version-matched telemetry artifacts
+        shell: pwsh
+        env:
+          RELAYER_DESKTOP_RELEASE: "1"
+          RELAYER_DESKTOP_CHANNEL: preview
+          RELAYER_DESKTOP_TARGET: windows-x64
+          RELAYER_DESKTOP_SOURCE_COMMIT: ${{ github.sha }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_CLI_BINARY: ${{ github.workspace }}\node_modules\.bin\sentry-cli.cmd
+          SENTRY_ORG: relayer-labs-llc
+          SENTRY_PROJECT: graphcomplete-desktop
+        run: node desktop/release/telemetry-artifacts.mjs
+
       - name: Upload sealed candidate artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -225,6 +267,7 @@ jobs:
             desktop/dist/beta.yml
             desktop/dist/Relayer-*-SHA256SUMS.txt
             desktop/dist/Relayer-*-RELEASE.json
+            desktop/dist/telemetry/**
 
   publish-preview-macos:
     name: Publish ${{ matrix.target }} Preview update
@@ -236,7 +279,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [macos-arm64, macos-x64]
+        target: [macos-arm64]
     environment:
       name: desktop-update-preview
     permissions:
@@ -252,8 +295,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22.22.0"
+          node-version-file: .node-version
           cache: npm
+
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
 
       - name: Install publication dependencies only
         run: npm ci --ignore-scripts

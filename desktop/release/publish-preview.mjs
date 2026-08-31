@@ -88,6 +88,13 @@ export function preparePreviewManifest({ manifestText, version, artifactEvidence
   if (!manifest || !isNumericVersion(manifest.version) || String(manifest.version) !== version) {
     throw new Error("Preview manifest version does not match the desktop version.");
   }
+  if (target.platform === "darwin") {
+    if (manifest.minimumSystemVersion !== target.minimumUpdateSystemVersion) {
+      throw new Error("Preview manifest minimum system version does not match the desktop release target.");
+    }
+  } else if (manifest.minimumSystemVersion != null) {
+    throw new Error("Windows Preview manifest must not declare a macOS minimum system version.");
+  }
   const expectedNames = releaseArtifactNames(target, version).primary;
   const evidenceByName = new Map(artifactEvidence.map((item) => [item.name, item]));
   if (!Array.isArray(manifest.files) || manifest.files.length !== expectedNames.length) {

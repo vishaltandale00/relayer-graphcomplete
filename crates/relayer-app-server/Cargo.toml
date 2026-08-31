@@ -16,6 +16,7 @@ sha2.workspace = true
 reqwest.workspace = true
 regex = "1.11"
 relayer-graph-core = { path = "../relayer-graph-core" }
+relayer-telemetry-capability = { path = "../relayer-telemetry-capability" }
 sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }

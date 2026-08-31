@@ -105,6 +105,7 @@ describe("Codex app-server transport", () => {
       ...(savedThreadId === undefined ? {} : { savedThreadId }),
       onThreadId,
       onTurnId,
+      codexConfigOverrides: ['model_provider="relayer_execution_provider"'],
     }));
 
     expect(result).toEqual({ threadId: savedThreadId ?? "thread-new", turnId: "turn-1", status: "completed" });
@@ -124,7 +125,10 @@ describe("Codex app-server transport", () => {
       threadId: savedThreadId ?? "thread-new",
       input: [{ type: "text", text: "Build the graph" }],
     });
-    expect(fake.spawn).toEqual({ command: process.execPath, args: ["app-server", "--listen", "stdio://"] });
+    expect(fake.spawn).toEqual({
+      command: process.execPath,
+      args: ["-c", 'model_provider="relayer_execution_provider"', "app-server", "--listen", "stdio://"],
+    });
     expect(fake.spawnOptions?.detached).toBe(process.platform !== "win32");
     expect(fake.killed).toBe(true);
   });

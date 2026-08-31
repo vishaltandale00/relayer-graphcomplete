@@ -1,3 +1,24 @@
+import { release as systemRelease } from "node:os";
+
+function numericVersion(value) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(value || ""));
+  return match ? match.slice(1).map(Number) : null;
+}
+
+export function desktopUpdateSupportsSystem(
+  updateInfo,
+  { platform = process.platform, release = systemRelease() } = {},
+) {
+  if (platform !== "darwin") return true;
+  const current = numericVersion(release);
+  const minimum = numericVersion(updateInfo?.minimumSystemVersion);
+  if (!current || !minimum) return false;
+  for (let index = 0; index < current.length; index += 1) {
+    if (current[index] !== minimum[index]) return current[index] > minimum[index];
+  }
+  return true;
+}
+
 export function resolveUpdateChannel(savedChannel) {
   return savedChannel === "preview" ? "preview" : "stable";
 }
@@ -9,6 +30,8 @@ export function createDesktopUpdater({
   updateBaseUrl,
   prefetchRuntimeUpdate = async () => {},
   onRuntimePrefetchFailure = () => {},
+  platform = process.platform,
+  release = systemRelease(),
 }) {
   let channel = "stable";
   let availableInfo = null;
@@ -31,6 +54,10 @@ export function createDesktopUpdater({
   };
 
   if (app.isPackaged) {
+    autoUpdater.isUpdateSupported = (updateInfo) => desktopUpdateSupportsSystem(
+      updateInfo,
+      { platform, release },
+    );
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowDowngrade = false;

@@ -1,0 +1,145 @@
+{
+  "corpus": "relayer.graph-query",
+  "queryContractVersion": 1,
+  "status": "frozen",
+  "normativeDocument": "docs/graph-query-v1.md",
+  "files": {
+    "dataset": "supergraph.json",
+    "positive": "positive.json",
+    "negative": "negative.json",
+    "values": "values.json",
+    "limits": "limits.json"
+  },
+  "publicCandidateSources": ["structural"],
+  "pathMatchMode": "relationship_unique_trail",
+  "futureInternalCandidateSources": ["vector", "late_interaction"],
+  "limits": {
+    "defaultRows": 5,
+    "hardRows": 8,
+    "encodedResultBytes": 16384,
+    "cursorPagination": false,
+    "maxTraversalHops": 2
+  },
+  "budgetDimensions": [
+    "query_bytes",
+    "ast_depth",
+    "variables",
+    "pattern_parts",
+    "traversal_hops",
+    "examined_expansions",
+    "intermediate_rows",
+    "wall_time_ms",
+    "cancellation",
+    "result_rows",
+    "encoded_result_bytes"
+  ],
+  "errorPrecedence": [
+    "envelope",
+    "parse",
+    "plan",
+    "authorize",
+    "execute:cancellation",
+    "execute:wall_time_ms",
+    "execute:examined_expansions",
+    "execute:intermediate_rows",
+    "normalize",
+    "encode"
+  ],
+  "errorCodes": [
+    "invalid_request",
+    "unsupported_query_contract_version",
+    "query_bytes_exceeded",
+    "query_syntax_invalid",
+    "query_construct_forbidden",
+    "query_construct_unsupported",
+    "unknown_label",
+    "unknown_relationship_type",
+    "unknown_property",
+    "dynamic_schema_forbidden",
+    "query_type_mismatch",
+    "duplicate_output_column",
+    "invalid_aggregate",
+    "ast_depth_exceeded",
+    "variable_limit_exceeded",
+    "pattern_part_limit_exceeded",
+    "traversal_limit_exceeded",
+    "row_limit_exceeded",
+    "inaccessible_or_missing",
+    "scope_not_granted",
+    "foreign_draft",
+    "query_cancelled",
+    "wall_time_exceeded",
+    "examined_expansions_exceeded",
+    "intermediate_rows_exceeded",
+    "invalid_engine_value",
+    "heterogeneous_list",
+    "integer_overflow",
+    "duplicate_record_field",
+    "result_row_too_large"
+  ],
+  "requiredRelationshipTypes": ["CONNECTED", "CONTAINS", "EXPANDS", "REFERENCES"],
+  "excludedTopologyTypes": ["interaction.context", "INVOKE", "CURRENT"],
+  "coverage": [
+    {
+      "checkpoint": "grammar-and-typed-plan",
+      "cases": ["whole-target-scan", "one-hop-connected", "two-hop-connected", "distinct-list-record-comparisons-comment-semicolon", "aggregate-allowlist", "reverse-directed-limit-parameter-null-test", "reverse-directed-path", "disconnected-contains-navigation-no-occurrence-constraint", "root-action-query", "reverse-edge-reuse-no-match", "reject-variable-length", "reject-three-hop", "reject-split-three-hop", "reject-dynamic-label", "reject-dynamic-field", "reject-unlabeled-zero-hop", "reject-untyped-empty-list", "reject-mutation", "reject-ddl", "reject-procedure", "reject-extension-load", "reject-duplicate-column", "reject-non-count-star", "reject-count-distinct-star", "reject-nested-aggregate"]
+    },
+    {
+      "checkpoint": "selector-vs-authority",
+      "cases": ["thread-selector", "project-selector", "reject-inaccessible-target", "reject-foreign-draft", "foreign-draft-excluded", "thread41-excludes-unpublished-cross-thread", "same-project-cross-thread", "reused-accepted-record-thread-membership", "standalone-thread-isolation"]
+    },
+    {
+      "checkpoint": "supergraph-and-occurrence",
+      "cases": ["layer-action-path", "reused-content-occurrence", "disconnected-contains-navigation-no-occurrence-constraint", "membership-placement", "connected-is-canonical", "connected-no-double-count", "excluded-topology", "root-action-projected", "root-action-query", "graph-edge-self-loop-rejected", "graph-edge-parallel-rejected", "reverse-directed-path", "reverse-edge-reuse-no-match"]
+    },
+    {
+      "checkpoint": "typed-wire-algebra",
+      "cases": ["all-wire-types", "i64-extrema", "negative-zero", "nested-record-list-path", "typed-empty-list-parameter", "typed-empty-nested-list", "homogeneous-record-list", "reject-heterogeneous-list", "reject-engine-heterogeneous-list", "reject-record-shape-list", "reject-nan", "reject-positive-infinity", "reject-negative-infinity", "reject-duplicate-record-field"]
+    },
+    {
+      "checkpoint": "ordering-null-numeric-absence",
+      "cases": ["explicit-order-null-last", "implicit-canonical-order", "property-absence", "property-absence-null-matrix", "typed-numeric-no-coercion", "canonical-order-ties", "reverse-directed-limit-parameter-null-test"]
+    },
+    {
+      "checkpoint": "result-limits",
+      "cases": ["default-five", "hard-eight", "reject-limit-nine", "reject-query-limit-nine", "exact-byte-cap", "byte-prefix-truncation", "oversized-single-row", "limit-zero", "candidate-beyond-row-cap-not-inspected"]
+    },
+    {
+      "checkpoint": "budgets-and-error-precedence",
+      "cases": ["all-budget-dimensions", "parse-before-authorize", "plan-before-authorize", "cancel-before-time", "time-before-expansions", "limit-does-not-bound-work"]
+    },
+    {
+      "checkpoint": "compatibility-and-future-seam",
+      "cases": ["reject-version-two", "structural-candidate-source", "reject-vector-syntax"]
+    }
+  ],
+  "grammarFeatures": [
+    { "feature": "zero-hop-whole-target-scan", "cases": ["whole-target-scan"] },
+    { "feature": "one-hop-pattern", "cases": ["one-hop-connected", "membership-placement"] },
+    { "feature": "two-hop-pattern", "cases": ["two-hop-connected", "layer-action-path"] },
+    { "feature": "static-node-label", "cases": ["whole-target-scan"] },
+    { "feature": "relationship-inferred-node-label", "cases": ["reverse-directed-limit-parameter-null-test"] },
+    { "feature": "undirected-connected", "cases": ["one-hop-connected", "connected-no-double-count"] },
+    { "feature": "forward-directed-relationship", "cases": ["membership-placement", "layer-action-path"] },
+    { "feature": "reverse-directed-relationship", "cases": ["reverse-directed-limit-parameter-null-test", "reverse-directed-path"] },
+    { "feature": "path-alias", "cases": ["one-hop-connected", "layer-action-path"] },
+    { "feature": "relationship-alias", "cases": ["one-hop-connected", "membership-placement"] },
+    { "feature": "parameterized-predicate", "cases": ["thread-selector"] },
+    { "feature": "all-comparison-operators", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
+    { "feature": "null-test", "cases": ["reverse-directed-limit-parameter-null-test"] },
+    { "feature": "absence-test", "cases": ["property-absence"] },
+    { "feature": "return-alias", "cases": ["whole-target-scan"] },
+    { "feature": "return-distinct", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
+    { "feature": "list-expression", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
+    { "feature": "typed-empty-list-expression", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
+    { "feature": "record-expression", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
+    { "feature": "aggregate-count-star-and-distinct", "cases": ["aggregate-allowlist"] },
+    { "feature": "aggregate-min-max-sum-avg-collect", "cases": ["aggregate-allowlist"] },
+    { "feature": "order-asc-null-last", "cases": ["explicit-order-null-last"] },
+    { "feature": "order-desc-null-first", "cases": ["reverse-directed-limit-parameter-null-test"] },
+    { "feature": "literal-limit", "cases": ["whole-target-scan"] },
+    { "feature": "parameter-limit", "cases": ["reverse-directed-limit-parameter-null-test"] },
+    { "feature": "line-comment", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
+    { "feature": "final-semicolon", "cases": ["distinct-list-record-comparisons-comment-semicolon"] }
+  ]
+}

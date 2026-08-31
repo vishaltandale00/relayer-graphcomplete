@@ -1,0 +1,32 @@
+{
+  "issue": 261,
+  "engine": "lbug",
+  "version": "0.18.0",
+  "extensions": [],
+  "positiveDisposition": "engine-executed-approved-lowering",
+  "negativeDispositionByPhase": {
+    "envelope": "contract-boundary-before-engine",
+    "parse": "contract-boundary-before-engine",
+    "plan": "contract-boundary-before-engine",
+    "authorize": "contract-boundary-before-engine",
+    "execute": "engine-falsifier-or-rust-budget-wrapper"
+  },
+  "valueCaseDisposition": "engine-roundtrip-or-rust-normalization-boundary",
+  "limitCaseDisposition": "rust-plan-or-encoding-boundary",
+  "requiredPositiveCases": [
+    "whole-target-scan", "thread-selector", "project-selector", "one-hop-connected",
+    "two-hop-connected", "layer-action-path", "reused-content-occurrence",
+    "membership-placement", "connected-no-double-count", "explicit-order-null-last",
+    "implicit-canonical-order", "property-absence",
+    "distinct-list-record-comparisons-comment-semicolon", "aggregate-allowlist",
+    "reverse-directed-limit-parameter-null-test", "reverse-directed-path",
+    "disconnected-contains-navigation-no-occurrence-constraint", "root-action-query",
+    "reverse-edge-reuse-no-match", "structural-candidate-source"
+  ],
+  "requiredProofs": [
+    "parsed-read-only", "all-tagged-values-lossless", "transaction-rollback-reopen",
+    "extensions-empty", "zero-one-two-hop-only", "allowed-shape-cancellation-falsifier",
+    "canonical-negative-zero", "reject-nonfinite-floats", "reject-int128-overflow",
+    "derived-cap-plus-one-truncation"
+  ]
+}

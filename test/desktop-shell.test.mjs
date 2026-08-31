@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { parse as parseYaml } from "yaml";
 import {
   CodexCredentialAdapter,
   findCodexExecutable,
@@ -20,7 +21,11 @@ import {
 } from "../desktop/main/services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
 import { createCanaryEvidenceLog } from "../desktop/main/services/canary-evidence-log.mjs";
-import { createDesktopUpdater, resolveUpdateChannel } from "../desktop/main/services/updater.mjs";
+import {
+  createDesktopUpdater,
+  desktopUpdateSupportsSystem,
+  resolveUpdateChannel,
+} from "../desktop/main/services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "../desktop/main/single-instance.mjs";
 import {
   DESKTOP_UPDATE_BASE_URL,
@@ -220,6 +225,11 @@ describe("desktop skeleton", () => {
     expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => {');
     expect(rendererMain).toContain('openNewThreadModelPicker("model")');
     expect(desktopMain).toContain("RelayerAppServerService");
+    expect(desktopMain.match(/issueErrorCapability,/gu)).toHaveLength(2);
+    expect(desktopMain).toContain("authenticatedErrorReporting?.issueCapability({ component, processGeneration }) ?? null");
+    expect(desktopMain).toContain("createDesktopAccountTelemetry");
+    expect(desktopMain).toContain("graphRuntime.refreshErrorCapability()");
+    expect(desktopMain).toContain("productServer?.refreshErrorCapability()");
     expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
@@ -258,7 +268,7 @@ describe("desktop skeleton", () => {
     expect(vitestConfiguration).toContain('"**/.relayer/**"');
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
-    expect(packaging).toContain('target/${serverTarget}/release/relayer-app-server');
+    expect(packaging).toContain('resolve(cargoTargetRoot, `${serverTarget}/release/relayer-app-server');
     expect(packaging).toContain('afterPack: "desktop/packaging/verify-bundled-app-server.mjs"');
     expect(packaging).toContain('win: {\n      icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg")');
     expect(desktopPreload).toContain("platform: process.platform");
@@ -566,8 +576,12 @@ describe("desktop skeleton", () => {
         "--producer-platform", process.platform,
         "--producer-architecture", process.arch,
         "--read-only-control-token-stdin",
+        "--authenticated-error-capability-stdin",
       ]);
-      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n`);
+      expect(suppliedToken).toBe(
+        `${session.cookie.value}\n${session.readOnlyCookie.value}\n`
+        + '{"schema":"relayer.authenticated-error-capability/v1","capability":null}\n',
+      );
       expect(child.stdin.writableEnded).toBe(false);
       expect(invocations[0].args).not.toContain(session.cookie.value);
       expect(invocations[0].args).not.toContain(session.readOnlyCookie.value);
@@ -810,7 +824,11 @@ describe("desktop skeleton", () => {
         reason: expect.objectContaining({ code: "prime_agent_boundary_unsupported" }),
         diagnostics: expect.objectContaining({ sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c" }),
       })]);
-      expect(suppliedToken).toBe(`${session.graphControlToken}\n`);
+      expect(suppliedToken).toBe(
+        `${session.graphControlToken}\n`
+        + '{"schema":"relayer.authenticated-error-capability/v1","capability":null}\n',
+      );
+      expect(invocations[0].args).toContain("--authenticated-error-capability-stdin");
       expect(invocations[0].args).not.toContain("--control-token");
       expect(invocations[0].args).not.toContain(session.graphControlToken);
       expect(invocations[0].args).not.toContain(session.harnessControlToken);
@@ -1663,6 +1681,43 @@ describe("desktop skeleton", () => {
     expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
   });
 
+  it("suppresses macOS updates below the manifest's Darwin kernel floor", async () => {
+    const updateInfo = { version: "0.3.0", minimumSystemVersion: "22.4.0" };
+    const unsupportedHosts = [
+      { macOS: "13.0", release: "22.1.0" },
+      { macOS: "13.1", release: "22.2.0" },
+      { macOS: "13.2", release: "22.3.0" },
+    ];
+    for (const { release } of unsupportedHosts) {
+      expect(desktopUpdateSupportsSystem(updateInfo, { platform: "darwin", release })).toBe(false);
+    }
+    expect(desktopUpdateSupportsSystem(updateInfo, { platform: "darwin", release: "22.4.0" })).toBe(true);
+    expect(desktopUpdateSupportsSystem(updateInfo, { platform: "darwin", release: "23.0.0" })).toBe(true);
+    expect(desktopUpdateSupportsSystem({}, { platform: "darwin", release: "22.3.0" })).toBe(false);
+    expect(desktopUpdateSupportsSystem(updateInfo, { platform: "darwin", release: "unknown" })).toBe(false);
+    expect(desktopUpdateSupportsSystem(updateInfo, { platform: "win32", release: "10.0.0" })).toBe(true);
+
+    const updaterForRelease = (release) => {
+      const autoUpdater = Object.assign(new EventEmitter(), {
+        checkForUpdates: vi.fn(async () => undefined),
+        downloadUpdate: vi.fn(async () => undefined),
+        setFeedURL: vi.fn(),
+        quitAndInstall: vi.fn(),
+      });
+      createDesktopUpdater({
+        autoUpdater,
+        app: { isPackaged: true, getVersion: () => "0.2.0" },
+        emit: vi.fn(),
+        updateBaseUrl: DESKTOP_UPDATE_BASE_URL,
+        platform: "darwin",
+        release,
+      });
+      return autoUpdater;
+    };
+    expect(updaterForRelease("22.3.0").isUpdateSupported(updateInfo)).toBe(false);
+    expect(updaterForRelease("22.4.0").isUpdateSupported(updateInfo)).toBe(true);
+  });
+
   it("records packaged canary updater states as restart-safe JSON lines", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-canary-log-"));
     const outputPath = join(directory, "update.jsonl");
@@ -1959,7 +2014,8 @@ describe("desktop skeleton", () => {
     expect(releaseWorkflow).toContain("Missing required Windows signing variable");
     expect(releaseWorkflow).toContain("if: ${{ false }}");
     expect(releaseWorkflow).toContain("needs: [package-macos]");
-    expect(releaseWorkflow).toContain("target: [macos-arm64, macos-x64]");
+    expect(releaseWorkflow).toContain("target: [macos-arm64]");
+    expect(releaseWorkflow).not.toContain("macos-15-intel");
     expect(releaseWorkflow).not.toContain("needs: [package-macos, package-windows]");
     expect(releaseWorkflow).not.toContain("AZURE_FEDERATED_TOKEN_FILE");
     expect(releaseWorkflow).toContain("environment:\n      name: desktop-update-preview");
@@ -2055,7 +2111,8 @@ describe("desktop skeleton", () => {
       appId: "ai.relayer.desktop",
       version: "0.2.0",
       architecture: "arm64",
-      minimumMacOSVersion: "13.0.0",
+      minimumMacOSVersion: "13.3.0",
+      minimumUpdateSystemVersion: "22.4.0",
       channelName: "preview",
       providerChannel: "beta",
       manifestName: "beta-mac.yml",
@@ -2072,7 +2129,7 @@ describe("desktop skeleton", () => {
       afterSign: "desktop/release/verify-macos-app.mjs",
       mac: {
         identity: "VISHAL TANDALE (NZ253AL7U6)",
-        minimumSystemVersion: "13.0.0",
+        minimumSystemVersion: "13.3.0",
         hardenedRuntime: true,
         notarize: true,
       },
@@ -2100,6 +2157,17 @@ describe("desktop skeleton", () => {
       channelName: "development",
       signingMode: "unsigned",
       sourceCommit: null,
+    });
+    const isolatedTarget = createDesktopBuilderConfig(development, {
+      environment: {
+        RELAYER_DESKTOP_TARGET: "macos-arm64",
+        RELAYER_CARGO_TARGET_DIR: "/tmp/isolated-cargo-target",
+      },
+      argv: ["--dir"],
+    });
+    expect(isolatedTarget.extraResources).toContainEqual({
+      from: "/tmp/isolated-cargo-target/aarch64-apple-darwin/release/relayer-graph-server",
+      to: "bin/relayer-graph-server",
     });
     expect(resolveDesktopReleaseContract({
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },
@@ -2320,6 +2388,8 @@ describe("desktop skeleton", () => {
         },
         createBlockMap: async ({ outputPath }) => writeFile(outputPath, "blockmap-fixture"),
       });
+      const finalizedManifest = await readFile(join(directory, names.manifest), "utf8");
+      expect(finalizedManifest).toContain("minimumSystemVersion: 22.4.0");
       const written = await writeDesktopReleaseEvidence({ distRoot: directory, contract });
       expect(written.receipt).toMatchObject({
         version: "0.2.0",
@@ -2332,11 +2402,64 @@ describe("desktop skeleton", () => {
       await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract })).resolves.toMatchObject({
         names: { receipt: names.receipt, checksums: names.checksums },
       });
+      await writeFile(
+        join(directory, names.manifest),
+        finalizedManifest.replace("minimumSystemVersion: 22.4.0", "minimumSystemVersion: 22.3.0"),
+      );
+      await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract }))
+        .rejects.toThrow("minimum system version");
+      await writeFile(join(directory, names.manifest), finalizedManifest);
       await writeFile(join(directory, names.checksums), "tampered\n");
       await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract })).rejects.toThrow("checksum manifest");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("pins one Node toolchain across CI and release workflows", async () => {
+    // Node was declared in ten places across five workflows: ci.yml floated on
+    // "22" while the release path pinned "22.22.0". Floating "22" is not even
+    // self-consistent — one run resolved 22.23.1 on macOS and 22.23.2 on Linux,
+    // because runner images carry different tool caches. .node-version is now
+    // the only place the version is written; this test keeps it that way.
+    const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+    // GitHub accepts .yaml as well as .yml. Matching only .yml would let a
+    // workflow added under the other spelling skip this guard entirely, which
+    // is precisely the case globbing the directory is meant to cover.
+    const workflowNames = (await readdir(workflowDirectory)).filter((name) => /\.ya?ml$/.test(name));
+    expect(workflowNames.length).toBeGreaterThan(0);
+
+    const pinnedVersion = await readFile(new URL("../.node-version", import.meta.url), "utf8");
+    // An exact patch version, not a floating major: setup-node resolves "22" to
+    // whatever the runner happens to cache, which is how the drift started.
+    expect(pinnedVersion).toMatch(/^\d+\.\d+\.\d+\n$/);
+
+    // Parsed rather than string-matched. A line-anchored regex misses
+    // `with: { node-version: 20 }`, and reports a mismatched step count instead
+    // of naming the offending step — which is the wrong thing to hand someone
+    // who has just reintroduced the bug this test exists to prevent.
+    let setupNodeSteps = 0;
+    for (const name of workflowNames) {
+      const workflow = parseYaml(await readFile(new URL(name, workflowDirectory), "utf8"));
+      for (const [jobName, job] of Object.entries(workflow?.jobs ?? {})) {
+        for (const step of job?.steps ?? []) {
+          if (!String(step?.uses ?? "").startsWith("actions/setup-node@")) continue;
+          setupNodeSteps += 1;
+          const where = `${name} → job "${jobName}" → ${step.uses}`;
+          expect(step.with?.["node-version"], `${where} declares a literal node-version`).toBeUndefined();
+          // Asserting the file is named, rather than only that no literal
+          // exists, is what catches a step declaring no version at all and
+          // silently inheriting whatever Node the runner preinstalled.
+          expect(step.with?.["node-version-file"], `${where} must read .node-version`).toBe(".node-version");
+        }
+      }
+    }
+
+    // Deliberately not asserting a fixed count of ten. Removing a workflow is a
+    // legitimate change — #305 may retire the Intel canary — and it must not
+    // fail a test about Node pinning. Greater-than-zero only guards against the
+    // glob silently matching nothing and the assertions above never running.
+    expect(setupNodeSteps).toBeGreaterThan(0);
   });
 
   it("gates Preview publication on one immutable candidate and one monotonic pointer", () => {
@@ -2413,6 +2536,7 @@ describe("desktop skeleton", () => {
 
     const manifestText = [
       `version: ${version}`,
+      `minimumSystemVersion: ${DESKTOP_RELEASE.minimumUpdateSystemVersion}`,
       "files:",
       `  - url: ${zip.name}`,
       `    sha512: ${zip.sha512}`,
@@ -2427,6 +2551,15 @@ describe("desktop skeleton", () => {
       "",
     ].join("\n");
     const preparedManifest = preparePreviewManifest({ manifestText, version, artifactEvidence: evidence });
+    expect(preparedManifest).toContain(`minimumSystemVersion: ${DESKTOP_RELEASE.minimumUpdateSystemVersion}`);
+    expect(() => preparePreviewManifest({
+      manifestText: manifestText.replace(
+        `minimumSystemVersion: ${DESKTOP_RELEASE.minimumUpdateSystemVersion}\n`,
+        "minimumSystemVersion: 22.3.0\n",
+      ),
+      version,
+      artifactEvidence: evidence,
+    })).toThrow("minimum system version");
     expect(preparedManifest).toContain(`releases/${version}/${zip.name}`);
     expect(preparedManifest).toContain(`releases/${version}/${dmg.name}`);
     expect(preparedManifest).toContain("relayerManagedRuntimes:");
@@ -2650,6 +2783,7 @@ describe("desktop skeleton", () => {
       await Promise.all([...contents].map(([name, content]) => writeFile(join(directory, name), content)));
       await writeFile(join(directory, "beta-mac.yml"), [
         `version: ${version}`,
+        `minimumSystemVersion: ${DESKTOP_RELEASE.minimumUpdateSystemVersion}`,
         "files:",
         `  - url: ${zip.name}`,
         `    sha512: ${zip.sha512}`,

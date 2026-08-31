@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,7 @@ import {
 import {
   asarEntryPath,
   digestAsarDependencyClosure,
+  normalizePackagedBundlePermissions,
   verifyPackagedPrimeAgent,
 } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import { PACKAGED_PROVIDER_MODULES } from "../desktop/main/providers/provider-adapter-registry.mjs";
@@ -446,7 +447,7 @@ describe("Prime Agent packaged runtime", () => {
           const values = {
             CFBundleIdentifier: "ai.relayer.desktop",
             CFBundleName: "Relayer",
-            LSMinimumSystemVersion: "13.0.0",
+            LSMinimumSystemVersion: "13.3.0",
           };
           return { stdout: `${values[args[1]]}\n`, stderr: "" };
         }
@@ -547,5 +548,41 @@ describe("Prime Agent packaged runtime", () => {
     expect(resources).toContain("python/relayer-graph/src/relayer_graph");
     expect(resources).toContain("prime-agent/manifest.json");
     expect(config.files).toContain("!node_modules/@earendil-works/pi-ai/dist/providers/faux.*");
+  });
+});
+
+describe("packaged bundle permissions", () => {
+  // Signed CI builds shipped a 0700 application, so Spotlight and Launch
+  // Services could not index it and it never appeared in search. Local builds
+  // were already 0755, so only a release DMG reproduced it.
+  it("widens group and other to match the owner without following symlinks", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-bundle-permissions-"));
+    try {
+      const appPath = join(directory, "Relayer.app");
+      const macOsDirectory = join(appPath, "Contents", "MacOS");
+      await mkdir(macOsDirectory, { recursive: true });
+      await writeFile(join(appPath, "Contents", "Info.plist"), "plist");
+      await writeFile(join(macOsDirectory, "Relayer"), "binary");
+      await symlink("Info.plist", join(appPath, "Contents", "Current.plist"));
+      await chmod(join(macOsDirectory, "Relayer"), 0o700);
+      await chmod(join(appPath, "Contents", "Info.plist"), 0o600);
+      await chmod(macOsDirectory, 0o700);
+      await chmod(join(appPath, "Contents"), 0o700);
+      await chmod(appPath, 0o700);
+
+      await normalizePackagedBundlePermissions(appPath);
+
+      const modeOf = async (path) => ((await lstat(path)).mode & 0o7777).toString(8);
+      expect(await modeOf(appPath)).toBe("755");
+      expect(await modeOf(join(appPath, "Contents"))).toBe("755");
+      expect(await modeOf(macOsDirectory)).toBe("755");
+      expect(await modeOf(join(macOsDirectory, "Relayer"))).toBe("755");
+      // A plain file stays non-executable; only readability widens.
+      expect(await modeOf(join(appPath, "Contents", "Info.plist"))).toBe("644");
+      // The symlink target keeps the mode it was given through its own path.
+      expect(await modeOf(join(appPath, "Contents", "Info.plist"))).toBe("644");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

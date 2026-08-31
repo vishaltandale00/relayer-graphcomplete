@@ -49,6 +49,13 @@ function validateManifest(manifest, contract, artifacts) {
   if (String(manifest.version) !== contract.version) {
     throw new Error(`${contract.manifestName} version does not match ${contract.version}.`);
   }
+  if (contract.platform === "darwin") {
+    if (manifest.minimumSystemVersion !== contract.minimumUpdateSystemVersion) {
+      throw new Error(`${contract.manifestName} minimum system version does not match the release contract.`);
+    }
+  } else if (manifest.minimumSystemVersion != null) {
+    throw new Error(`${contract.manifestName} must not declare a macOS minimum system version.`);
+  }
   const files = Array.isArray(manifest.files) ? manifest.files : [];
   if (files.length !== artifacts.length) {
     throw new Error(`${contract.manifestName} must contain exactly ${artifacts.length} release artifact(s).`);

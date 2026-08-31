@@ -707,7 +707,9 @@ describe("PrimeAgentHarness", () => {
         adapterId,
         adapterId === "openrouter"
           ? { contextWindow: 196_608, maxOutputTokens: 131_072 }
-          : undefined,
+          : adapterId === "vercel-ai-router"
+            ? { contextWindow: 1_000_000, maxOutputTokens: 384_000 }
+            : undefined,
       ));
     }
     await harness.complete(singleAdapterRunContext(
@@ -735,7 +737,7 @@ describe("PrimeAgentHarness", () => {
       { api: "openai-responses", baseUrl: "https://provider-40.test/v1", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "anthropic-messages", baseUrl: "https://provider-41.test", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "openai-completions", baseUrl: "https://provider-42.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 196_608, maxTokens: 131_072, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", baseUrl: "https://provider-43.test/v1", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-43.test/v1", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 384_000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "openai-completions", baseUrl: "https://provider-44.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 2_048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "anthropic-messages", baseUrl: "https://provider-45.test/proxy/anthropic", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
     ]);
@@ -1711,7 +1713,7 @@ function runContext(nodeId: number, token: string, trace: HarnessTraceSink = cre
     adapterId: "openai-api",
     accessContract: "secret@1",
     modelId: "gpt-test",
-    adapterImplementationVersion: "1",
+    adapterImplementationVersion: "2",
   } as const;
   const access = {
     kind: "secret",
@@ -1948,34 +1950,34 @@ function familyRunContext(
   trace: HarnessTraceSink = createNoopHarnessTraceSink(),
 ): HarnessRunContext {
   const routes = [
-    { providerId: "openai-personal", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "1" },
-    { providerId: "openai-work", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "1" },
-    { providerId: "anthropic-work", adapterId: "anthropic-api", accessContract: "secret@1", modelId: "claude-root", adapterImplementationVersion: "1" },
-    { providerId: "openrouter-work", adapterId: "openrouter", accessContract: "secret@1", modelId: "qwen-root", adapterImplementationVersion: "1" },
-    { providerId: "vercel-work", adapterId: "vercel-ai-router", accessContract: "secret@1", modelId: "gemini-root", adapterImplementationVersion: "1" },
+    { providerId: "openai-personal", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "2" },
+    { providerId: "openai-work", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "2" },
+    { providerId: "anthropic-work", adapterId: "anthropic-api", accessContract: "secret@1", modelId: "claude-root", adapterImplementationVersion: "2" },
+    { providerId: "openrouter-work", adapterId: "openrouter", accessContract: "secret@1", modelId: "qwen-root", adapterImplementationVersion: "2" },
+    { providerId: "vercel-work", adapterId: "vercel-ai-router", accessContract: "secret@1", modelId: "gemini-root", adapterImplementationVersion: "2" },
   ] as const;
   const orchestrator = routes[orchestratorIndex];
   if (orchestrator === undefined) throw new Error("invalid test orchestrator");
   const access = {
     "openai-personal": {
       kind: "secret", contract: "secret@1", providerId: "openai-personal", adapterId: "openai-api",
-      adapterImplementationVersion: "1", endpoint: "https://openai-personal.test/v1", fields: { "api-key": "secret-openai-personal" },
+      adapterImplementationVersion: "2", endpoint: "https://openai-personal.test/v1", fields: { "api-key": "secret-openai-personal" },
     },
     "openai-work": {
       kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
-      adapterImplementationVersion: "1", endpoint: "https://openai-work.test/v1", fields: { "api-key": "secret-openai-work" },
+      adapterImplementationVersion: "2", endpoint: "https://openai-work.test/v1", fields: { "api-key": "secret-openai-work" },
     },
     "anthropic-work": {
       kind: "secret", contract: "secret@1", providerId: "anthropic-work", adapterId: "anthropic-api",
-      adapterImplementationVersion: "1", endpoint: "https://anthropic-work.test/v1", fields: { "api-key": "secret-anthropic-work" },
+      adapterImplementationVersion: "2", endpoint: "https://anthropic-work.test/v1", fields: { "api-key": "secret-anthropic-work" },
     },
     "openrouter-work": {
       kind: "secret", contract: "secret@1", providerId: "openrouter-work", adapterId: "openrouter",
-      adapterImplementationVersion: "1", endpoint: "https://openrouter-work.test/v1", fields: { "api-key": "secret-openrouter-work" },
+      adapterImplementationVersion: "2", endpoint: "https://openrouter-work.test/v1", fields: { "api-key": "secret-openrouter-work" },
     },
     "vercel-work": {
       kind: "secret", contract: "secret@1", providerId: "vercel-work", adapterId: "vercel-ai-router",
-      adapterImplementationVersion: "1", endpoint: "https://vercel-work.test/v1", fields: { "api-key": "secret-vercel-work" },
+      adapterImplementationVersion: "2", endpoint: "https://vercel-work.test/v1", fields: { "api-key": "secret-vercel-work" },
     },
   } as const;
   const base = runContext(nodeId, token, trace);
@@ -2007,14 +2009,14 @@ function singleAdapterRunContext(
     adapterId,
     accessContract: "secret@1",
     modelId: `model-${nodeId}`,
-    adapterImplementationVersion: "1",
+    adapterImplementationVersion: "2",
   } as const;
   const access = {
     kind: "secret",
     contract: "secret@1",
     providerId: route.providerId,
     adapterId,
-    adapterImplementationVersion: "1",
+    adapterImplementationVersion: "2",
     endpoint,
     fields: { "api-key": `secret-${nodeId}` },
     ...(modelCapabilities === undefined ? {} : {

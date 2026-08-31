@@ -9,6 +9,7 @@ import {
   stableFollowupInputId,
 } from "../desktop/renderer/src/interaction-request-model.js";
 import {
+  createModelPickerDismissWatcher,
   createModelPickerRequestGate,
   interactionModelSelection,
   modelPickerClickIsOutside,
@@ -100,6 +101,27 @@ describe("composer model picker UI contract", () => {
     const root = { contains: (target) => target === inside };
     expect(modelPickerClickIsOutside(root, inside)).toBe(false);
     expect(modelPickerClickIsOutside(root, outside)).toBe(true);
+  });
+
+  it("keeps an option click that re-renders the picker from dismissing it as an outside click", () => {
+    const option = {};
+    const root = { contains: (target) => target === option };
+    const watcher = createModelPickerDismissWatcher(root);
+    watcher.observe({ target: option });
+    // Choosing a harness re-renders the Advanced panel, which detaches the clicked option
+    // before the document-level dismissal listener sees the same click.
+    root.contains = () => false;
+    expect(watcher.shouldDismiss()).toBe(false);
+    watcher.observe({ target: {} });
+    expect(watcher.shouldDismiss()).toBe(true);
+  });
+
+  it("decides picker dismissal in the capture phase, before any handler re-renders", async () => {
+    const source = await readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8");
+    expect(source).toContain('addEventListener("click", dismissWatcher.observe, true)');
+    expect(source.indexOf('addEventListener("click", dismissWatcher.observe, true)')).toBeLessThan(
+      source.indexOf('addEventListener("click", outsideClick)'),
+    );
   });
 
   it("escapes connector identities for HTML attribute context", () => {

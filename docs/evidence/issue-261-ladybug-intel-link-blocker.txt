@@ -1,0 +1,39 @@
+Issue #261 pinned source-build observation — macOS Intel under Rosetta
+Captured: 2026-08-28
+Source commit: c0d9bc1b0edba6a284d4fe0858e1000d40084480
+
+Prepared inputs
+  target: x86_64-apple-darwin
+  lbug crate: 0.19.1, SHA-256 a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172
+  embedded Ladybug core: commit 554c1e71158564c37a30c541a92bfc9eddc96430
+  OpenSSL source: 3.5.8, SHA-256 a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2
+  extensions: []
+  binding/core patches: none
+  OpenSSL static archives: prepared successfully
+
+Capture boundary
+  host: macOS arm64 with Rosetta available
+  Rust target: x86_64-apple-darwin installed
+  checkout: clean detached worktree at the source commit
+  dependencies: exact lockfile installed offline
+  Cargo target: empty isolated directory
+  minimum macOS: 13.3
+
+Result
+  fail during final relayer-graph-server link
+  undefined symbol: ___cpu_model
+  referencing archive: liblbug.a
+  referencing object: base_csv_reader.cpp.o
+
+Source cause
+  Ladybug 0.19.1 base_csv_reader.cpp lines 610-615 select
+  __builtin_cpu_supports("avx2") for every Clang/GCC build. Apple Clang's
+  x86_64 object references ___cpu_model, but the macOS final link provides no
+  definition. Xcode's shipped static runtime archives were searched and did
+  not export that symbol.
+
+Decision boundary
+  Resolving this requires an upstream macOS CPU-detection fix, a source patch,
+  or a reviewed equivalent shim. The current v1 contract forbids adopting a
+  permanent Ladybug fork merely to pass qualification. No package was emitted,
+  and no Intel lifecycle claim is made.

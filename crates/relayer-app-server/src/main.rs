@@ -3,6 +3,10 @@ use clap::Parser;
 use relayer_app_server::{
     CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig, RelayerRuntimeConfig,
 };
+use relayer_telemetry_capability::{
+    PanicEventDefinition, PanicReporter, install_panic_reporter, read_capability_bootstrap,
+    read_capability_update,
+};
 use serde_json::json;
 use std::{
     io::{self, BufRead, Read},
@@ -41,6 +45,8 @@ struct Arguments {
     allow_conversation_import: bool,
     #[arg(long, default_value_t = false)]
     read_only_control_token_stdin: bool,
+    #[arg(long, default_value_t = false)]
+    authenticated_error_capability_stdin: bool,
     #[arg(long)]
     producer_desktop_version: String,
     #[arg(long)]
@@ -54,9 +60,52 @@ struct Arguments {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let arguments = Arguments::parse();
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
     let (control_token, read_only_control_token) =
-        read_control_tokens(arguments.read_only_control_token_stdin)?;
-    let parent_disconnected = watch_parent_connection();
+        read_control_tokens(&mut input, arguments.read_only_control_token_stdin)?;
+    let error_capability = arguments
+        .authenticated_error_capability_stdin
+        .then(|| read_capability_bootstrap(&mut input).ok().flatten())
+        .flatten();
+    drop(input);
+    let panic_reporter = arguments.authenticated_error_capability_stdin.then(|| {
+        install_panic_reporter(
+            error_capability,
+            PanicEventDefinition {
+                code: "rust_app_server.unexpected_exit",
+                approved_module_prefix: "crates/relayer-app-server/",
+            },
+        )
+    });
+    let parent_disconnected = watch_parent_connection(panic_reporter.clone());
+    let execution = tokio::spawn(run(
+        arguments,
+        control_token,
+        read_only_control_token,
+        parent_disconnected,
+    ))
+    .await;
+    match execution {
+        Ok(result) => result,
+        Err(error) if error.is_panic() => {
+            panic_reporter
+                .as_ref()
+                .map(PanicReporter::report_terminal_panic);
+            std::panic::resume_unwind(error.into_panic());
+        }
+        Err(error) => Err(anyhow::anyhow!(
+            "Relayer app server task stopped unexpectedly: {error}"
+        )),
+    }
+}
+
+async fn run(
+    arguments: Arguments,
+    control_token: String,
+    read_only_control_token: Option<String>,
+    parent_disconnected: oneshot::Receiver<()>,
+) -> anyhow::Result<()> {
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("Relayer app server only binds to 127.0.0.1");
     }
@@ -133,12 +182,13 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn read_control_tokens(read_only_enabled: bool) -> anyhow::Result<(String, Option<String>)> {
-    let stdin = io::stdin();
-    let mut input = stdin.lock();
-    let control_token = read_token_line(&mut input, "desktop control token")?;
+fn read_control_tokens(
+    input: &mut impl BufRead,
+    read_only_enabled: bool,
+) -> anyhow::Result<(String, Option<String>)> {
+    let control_token = read_token_line(input, "desktop control token")?;
     let read_only_control_token = read_only_enabled
-        .then(|| read_token_line(&mut input, "read-only desktop control token"))
+        .then(|| read_token_line(input, "read-only desktop control token"))
         .transpose()?;
     if read_only_control_token.as_deref() == Some(control_token.as_str()) {
         anyhow::bail!("desktop control tokens must be distinct");
@@ -161,10 +211,14 @@ fn read_token_line(input: &mut impl BufRead, label: &str) -> anyhow::Result<Stri
     Ok(token)
 }
 
-fn watch_parent_connection() -> oneshot::Receiver<()> {
+fn watch_parent_connection(reporter: Option<PanicReporter>) -> oneshot::Receiver<()> {
     let (disconnected, parent_disconnected) = oneshot::channel();
     std::thread::spawn(move || {
         let mut input = io::stdin().lock();
+        if let Some(reporter) = reporter {
+            while read_capability_update(&mut input, &reporter).is_ok() {}
+            reporter.replace_capability(None);
+        }
         let mut buffer = [0_u8; 256];
         loop {
             match input.read(&mut buffer) {

@@ -1,0 +1,122 @@
+{
+  "issue": 261,
+  "decision": "upstream-artifacts-no-go",
+  "qualificationStatus": "complete-decision",
+  "observedAt": "2026-08-28",
+  "core": {
+    "version": "0.19.1",
+    "tag": "v0.19.1",
+    "commit": "554c1e71158564c37a30c541a92bfc9eddc96430"
+  },
+  "rustBinding": {
+    "crate": "lbug",
+    "version": "0.19.1",
+    "crateSha256": "a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172",
+    "sourceBasisCommit": "2e89afb712e6e26f2465f486b153e4aea1176130",
+    "vcsDirty": true
+  },
+  "extensions": [],
+  "pinnedSourceCandidate": {
+    "openssl": {
+      "version": "3.5.8",
+      "series": "3.5-LTS",
+      "source": "openssl-3.5.8.tar.gz",
+      "sha256": "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
+      "license": "Apache-2.0",
+      "endOfLife": "2030-04-08"
+    },
+    "observedTarget": "aarch64-apple-darwin",
+    "inferredTargets": [
+      "x86_64-apple-darwin"
+    ],
+    "bindingHookSha256": "d91ee35aecd6423dfcc43a982facab19597b7b0428e4b5b17cdb379bd7be36e2",
+    "sourceProbeLockSha256": "0b91deadfebe9ea44b26fd0f6e7ea814806f5ada772cad62412d914f9c495b24",
+    "macos13_0": {
+      "opensslStaticBuild": "passed",
+      "ladybugSourceBuild": "failed",
+      "failure": "std-format-requires-macos-13.3"
+    },
+    "macos13_3": {
+      "ladybugSourceBuild": "passed-with-narrow-binding-hook",
+      "binarySha256": "aea4e12adceea09977a9c4bd913f48beae2f68d0f4be16e1863330c29f693b39",
+      "imports": [
+        "/usr/lib/libc++.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    }
+  },
+  "releaseArtifacts": [
+    {
+      "target": "aarch64-apple-darwin",
+      "kind": "static",
+      "name": "liblbug-static-osx-arm64.tar.gz",
+      "sha256": "9d8bf7fd2a2b715e419db1f087f57777fd9413e214abdf32fa60ca3a9e51d883"
+    },
+    {
+      "target": "x86_64-apple-darwin",
+      "kind": "static",
+      "name": "liblbug-static-osx-x86_64.tar.gz",
+      "sha256": "8ae8597da0295b14a06ee89cb632ab44c5f0e834be9576689d706eea16159f79"
+    },
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "kind": "static",
+      "name": "liblbug-static-windows-x86_64.zip",
+      "sha256": "bc05aea71c008067a05fea027fc7113ae8f23e6e6d020394014e915ed0bbfc76"
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "kind": "shared",
+      "name": "liblbug-osx-arm64.tar.gz",
+      "sha256": "276ce32705fb01f3bf27dcffa053dd181f5bc96628760e961bece46cf85b770e"
+    },
+    {
+      "target": "x86_64-apple-darwin",
+      "kind": "shared",
+      "name": "liblbug-osx-x86_64.tar.gz",
+      "sha256": "0f941f9f983f0184a177e938f0816d3aaa71266fe6d87fef2c5023cebe03c20a"
+    },
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "kind": "shared",
+      "name": "liblbug-windows-x86_64.zip",
+      "sha256": "865e2c8765064be76d41e4d786dfb0cd3ad0c258ddaf7b522fa3da7159ecd3ef"
+    }
+  ],
+  "blockingFindings": [
+    {
+      "id": "external-openssl-runtime",
+      "candidate": "upstream-release-artifacts",
+      "targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc"
+      ]
+    },
+    {
+      "id": "incomplete-native-license-receipts",
+      "candidate": "upstream-release-artifacts-and-source-candidate",
+      "targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc"
+      ]
+    },
+    {
+      "id": "macos-minimum-version-mismatch",
+      "candidate": "upstream-release-artifacts",
+      "targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin"
+      ]
+    },
+    {
+      "id": "source-build-macos-13.0-incompatible",
+      "candidate": "pinned-source",
+      "targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin"
+      ]
+    }
+  ]
+}

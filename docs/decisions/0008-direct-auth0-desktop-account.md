@@ -92,7 +92,8 @@ production tenant.
 - Auth0 and the operating-system credential store are external availability
   dependencies only for optional account verification; local work is not one.
 - The Auth0 subject is intentionally pseudonymous and is not a product profile.
-- Later authenticated error reporting must consume only the main-owned verified
-  generation and must not reinterpret renderer presentation state as authority.
+- Authenticated error reporting consumes only the main-owned verified generation
+  and never reinterprets renderer presentation state as authority. See
+  [ADR 0009](0009-authenticated-desktop-error-reporting.md).
 - Browser logout is deliberately out of scope; logging out of Desktop revokes and
   clears only Desktop's local grant.

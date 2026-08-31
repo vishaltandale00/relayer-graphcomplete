@@ -74,7 +74,9 @@ pub(crate) use ids::InteractionId;
 pub(crate) use ids::InvalidProductId;
 pub(crate) use ids::ProjectId;
 pub(crate) use ids::ThreadId;
-pub(crate) use model_policy::{applies_to_adapter, derive_managed_family_members};
+pub(crate) use model_policy::{
+    applies_to_adapter, derive_managed_family_members, fallback_for_adapter,
+};
 pub(crate) use models::ActionInvocation;
 pub(crate) use models::BeginInteractionAttempt;
 pub(crate) use models::DurableInteractionInput;

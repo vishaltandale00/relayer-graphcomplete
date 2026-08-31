@@ -18,8 +18,9 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
+      - run: node scripts/check-node-version.mjs
       - run: npm ci
       - run: npm run check
       - run: npm run build
@@ -41,10 +42,56 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
+      - run: node scripts/check-node-version.mjs
       - run: npm ci
       - name: Build and inspect the actual target ASAR
         run: npm run desktop:pack
         env:
           RELAYER_DESKTOP_TARGET: ${{ matrix.target }}
+
+  ladybug-windows-qualification:
+    # Parked while Windows is not a release target. The pinned-source setup below
+    # is preserved verbatim so re-enabling is a one-line change. This job has never
+    # published a receipt; see docs/evidence/issue-261-ladybug-qualification.md.
+    if: ${{ false }}
+    name: Ladybug packaged qualification (windows-x64) (blocked)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: node scripts/check-node-version.mjs
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: amd64
+      - run: npm ci
+      - name: Seed the locked Cargo dependency closure
+        shell: pwsh
+        run: |
+          $env:CARGO_ENCODED_RUSTFLAGS = "--cfg$([char]0x1f)ladybug_qualification"
+          cargo fetch --locked --target x86_64-pc-windows-msvc
+      - name: Fetch and prepare pinned Ladybug and static OpenSSL sources
+        shell: pwsh
+        run: |
+          npm run ladybug:source -- fetch --cache "$env:RUNNER_TEMP/ladybug-cache"
+          npm run ladybug:source -- prepare --cache "$env:RUNNER_TEMP/ladybug-cache" --output "$env:RUNNER_TEMP/ladybug-prepared" --target x86_64-pc-windows-msvc
+      - name: Build, inspect, and exercise packaged Ladybug
+        shell: pwsh
+        env:
+          RELAYER_DESKTOP_TARGET: windows-x64
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/capture-ladybug-packaged-lifecycle.mjs --source-output "$env:RUNNER_TEMP/ladybug-prepared" --source-commit "$env:SOURCE_COMMIT" --receipt-output "$env:RUNNER_TEMP/ladybug-windows-receipt.json"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ladybug-windows-qualification-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/ladybug-windows-receipt.json
+          if-no-files-found: error
+          retention-days: 30

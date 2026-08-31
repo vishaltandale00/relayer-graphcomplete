@@ -13,8 +13,12 @@ import {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 function nativeHandle(settled: Promise<NativeCompletionExecution>): NativeExecutionHandle {
@@ -308,5 +312,26 @@ describe("CompletionExecutionModule", () => {
       lifecycle: "failed",
       current: { lifecycle: "failed", revision: 1 },
     });
+  });
+
+  test("rejects the result when native-settlement reconciliation cannot read durable state", async () => {
+    const terminal = deferred<CompletionLifecycleObservation>();
+    const native = deferred<NativeCompletionExecution>();
+    const reconciliationError = new Error("durable current unavailable");
+    const preparation: CompletionPreparation = {
+      prepare: vi.fn(() => binding(2)),
+      current: vi.fn(async () => { throw reconciliationError; }),
+      observe: vi.fn(() => terminal.promise),
+      fail: vi.fn(async () => {}),
+    };
+    const module = new CompletionExecutionModule(preparation, {
+      complete: () => nativeHandle(native.promise),
+    });
+
+    const handle = module.complete(inputGraph(2));
+    native.resolve({ status: "failed", effectBoundary: "unknown" });
+
+    await expect(handle.result).rejects.toBe(reconciliationError);
+    expect(preparation.fail).not.toHaveBeenCalled();
   });
 });

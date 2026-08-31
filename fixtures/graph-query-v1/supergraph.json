@@ -1,0 +1,180 @@
+{
+  "queryContractVersion": 1,
+  "datasetId": "canonical-supergraph",
+  "logicalTargets": [
+    { "scope": "thread", "id": 41, "projectId": 7 },
+    { "scope": "thread", "id": 42, "projectId": 7 },
+    { "scope": "project", "id": 7 },
+    { "scope": "thread", "id": 99, "projectId": null }
+  ],
+  "content": [
+    { "id": "content:6", "graphId": 6, "kind": "user-interaction", "icon": "message-square", "title": "Explain queue", "detail": "Explain the queue", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "content:1", "graphId": 1, "kind": "concept", "icon": "list-tree", "title": "Queue", "detail": "Pending work", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41", "thread:42"] },
+    { "id": "content:2", "graphId": 2, "kind": "concept", "icon": "cpu", "title": "Worker", "detail": "Claims work", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "content:3", "graphId": 3, "kind": "result", "icon": "circle-check", "title": "Result", "detail": "Completed work", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "content:4", "graphId": 4, "kind": "evidence", "icon": "book-open", "title": "Evidence", "detail": "Supporting material", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "content:7", "graphId": 7, "kind": "concept", "icon": "cpu", "title": "Cross-thread worker", "detail": "Authored in another thread", "state": "accepted", "projectId": 7, "threadId": 42, "publishedTargets": ["project:7", "thread:42"] },
+    { "id": "content:5", "graphId": 5, "kind": "concept", "icon": "box", "title": "Standalone", "detail": "Isolated thread", "state": "accepted", "projectId": null, "threadId": 99, "publishedTargets": ["thread:99"] }
+  ],
+  "layers": [
+    {
+      "id": "layer:101",
+      "graphId": 101,
+      "state": "accepted",
+      "projectId": 7,
+      "threadId": 41,
+      "publishedTargets": ["project:7", "thread:41"],
+      "layoutVersion": 1,
+      "members": [
+        { "contentId": "content:1", "order": 0, "x": 0.2, "y": 0.5 },
+        { "contentId": "content:2", "order": 1, "x": 0.8, "y": 0.5 }
+      ]
+    },
+    {
+      "id": "layer:102",
+      "graphId": 102,
+      "state": "accepted",
+      "projectId": 7,
+      "threadId": 41,
+      "publishedTargets": ["project:7", "thread:41"],
+      "layoutVersion": 1,
+      "members": [
+        { "contentId": "content:1", "order": 0, "x": 0.25, "y": 0.25 },
+        { "contentId": "content:4", "order": 1, "x": 0.75, "y": 0.75 }
+      ]
+    },
+    {
+      "id": "layer:103",
+      "graphId": 103,
+      "state": "accepted",
+      "projectId": 7,
+      "threadId": 41,
+      "publishedTargets": ["project:7", "thread:41"],
+      "layoutVersion": 1,
+      "members": [
+        { "contentId": "content:3", "order": 0, "x": 0.5, "y": 0.5 }
+      ]
+    },
+    {
+      "id": "layer:104",
+      "graphId": 104,
+      "state": "accepted",
+      "projectId": 7,
+      "threadId": 41,
+      "publishedTargets": ["project:7", "thread:41"],
+      "members": [
+        { "contentId": "content:2", "order": 0 }
+      ]
+    },
+    {
+      "id": "layer:105",
+      "graphId": 105,
+      "state": "accepted",
+      "projectId": null,
+      "threadId": 99,
+      "publishedTargets": ["thread:99"],
+      "layoutVersion": 1,
+      "members": [
+        { "contentId": "content:5", "order": 0, "x": 0.5, "y": 0.5 }
+      ]
+    },
+    {
+      "id": "layer:106",
+      "graphId": 106,
+      "state": "accepted",
+      "projectId": 7,
+      "threadId": 42,
+      "publishedTargets": ["project:7", "thread:42"],
+      "layoutVersion": 1,
+      "members": [
+        { "contentId": "content:7", "order": 0, "x": 0.2, "y": 0.5 },
+        { "contentId": "content:1", "order": 1, "x": 0.8, "y": 0.5 }
+      ]
+    }
+  ],
+  "edges": [
+    { "id": "edge:201", "graphId": 201, "endpoints": ["content:1", "content:2"], "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "edge:202", "graphId": 202, "endpoints": ["content:2", "content:3"], "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "edge:203", "graphId": 203, "endpoints": ["content:1", "content:7"], "state": "accepted", "projectId": 7, "threadId": 42, "publishedTargets": ["project:7", "thread:42"] }
+  ],
+  "actions": [
+    { "id": "action:301", "graphId": 301, "kind": "navigate", "relation": "expand", "sourceContentId": "content:1", "sourceLayerId": "layer:101", "targetLayerId": "layer:103", "label": "Deep dive", "variant": "card", "icon": "zoom-in", "description": "Develop the queue", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "action:302", "graphId": 302, "kind": "navigate", "relation": "reference", "sourceContentId": "content:1", "sourceLayerId": "layer:102", "targetLayerId": "layer:103", "label": "Supporting result", "variant": "pill", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "action:303", "graphId": 303, "kind": "invoke", "sourceContentId": "content:2", "sourceLayerId": "layer:101", "targetLayerId": null, "label": "Investigate", "variant": "pill", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "action:304", "graphId": 304, "kind": "invoke", "sourceContentId": "content:2", "sourceLayerId": "layer:101", "targetLayerId": "layer:103", "label": "Resolved investigation", "variant": "pill", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "action:305", "graphId": 305, "kind": "interaction.context", "sourceContentId": "content:1", "sourceLayerId": "layer:101", "targetContentId": "content:4", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] },
+    { "id": "action:306", "graphId": 306, "kind": "navigate", "relation": "expand", "sourceContentId": "content:6", "sourceLayerId": null, "targetLayerId": "layer:101", "label": "Response", "variant": "pill", "state": "accepted", "projectId": 7, "threadId": 41, "publishedTargets": ["project:7", "thread:41"] }
+  ],
+  "excludedRecords": [
+    { "id": "content:900", "recordType": "Content", "state": "draft", "reason": "drafts never enter search" },
+    { "id": "layer:901", "recordType": "Layer", "state": "stopped", "reason": "stopped records never enter search" }
+  ],
+  "rejectedGraphFixtures": [
+    { "id": "graph-edge-self-loop-rejected", "edge": { "endpoints": ["content:1", "content:1"] }, "expectedStorageError": "self_edge" },
+    { "id": "graph-edge-parallel-rejected", "existing": { "id": "edge:201", "endpoints": ["content:1", "content:2"] }, "candidate": { "endpoints": ["content:2", "content:1"] }, "expectedStorageError": "duplicate_edge" }
+  ],
+  "expectedProjection": {
+    "contentIds": ["content:1", "content:2", "content:3", "content:4", "content:5", "content:6", "content:7"],
+    "layerIds": ["layer:101", "layer:102", "layer:103", "layer:104", "layer:105", "layer:106"],
+    "relationshipIds": [
+      "action:301",
+      "action:302",
+      "action:306",
+      "edge:201",
+      "edge:202",
+      "edge:203",
+      "membership:101:0:1",
+      "membership:101:1:2",
+      "membership:102:0:1",
+      "membership:102:1:4",
+      "membership:103:0:3",
+      "membership:104:0:2",
+      "membership:105:0:5"
+      ,"membership:106:0:7",
+      "membership:106:1:1"
+    ],
+    "excludedActionIds": ["action:303", "action:304", "action:305"]
+  },
+  "expectedTargets": {
+    "thread:41": {
+      "contentIds": ["content:1", "content:2", "content:3", "content:4", "content:6"],
+      "layerIds": ["layer:101", "layer:102", "layer:103", "layer:104"],
+      "edgeIds": ["edge:201", "edge:202"],
+      "actionIds": ["action:301", "action:302", "action:306"],
+      "membershipIds": ["membership:101:0:1", "membership:101:1:2", "membership:102:0:1", "membership:102:1:4", "membership:103:0:3", "membership:104:0:2"]
+    },
+    "thread:42": {
+      "contentIds": ["content:1", "content:7"],
+      "layerIds": ["layer:106"],
+      "edgeIds": ["edge:203"],
+      "actionIds": [],
+      "membershipIds": ["membership:106:0:7", "membership:106:1:1"]
+    },
+    "project:7": {
+      "contentIds": ["content:1", "content:2", "content:3", "content:4", "content:6", "content:7"],
+      "layerIds": ["layer:101", "layer:102", "layer:103", "layer:104", "layer:106"],
+      "edgeIds": ["edge:201", "edge:202", "edge:203"],
+      "actionIds": ["action:301", "action:302", "action:306"],
+      "membershipIds": ["membership:101:0:1", "membership:101:1:2", "membership:102:0:1", "membership:102:1:4", "membership:103:0:3", "membership:104:0:2", "membership:106:0:7", "membership:106:1:1"]
+    },
+    "thread:99": {
+      "contentIds": ["content:5"],
+      "layerIds": ["layer:105"],
+      "edgeIds": [],
+      "actionIds": [],
+      "membershipIds": ["membership:105:0:5"]
+    }
+  },
+  "targetResultGoldens": [
+    { "id": "thread41-excludes-unpublished-cross-thread", "target": "thread:41", "queryShape": "Content.title canonical order", "titles": ["Evidence", "Explain queue", "Queue", "Result", "Worker"], "truncated": false },
+    { "id": "same-project-cross-thread", "target": "project:7", "queryShape": "Content.title canonical order", "titles": ["Cross-thread worker", "Evidence", "Explain queue", "Queue", "Result"], "matchedRows": 6, "truncated": true },
+    { "id": "reused-accepted-record-thread-membership", "target": "thread:42", "queryShape": "Content.title canonical order", "titles": ["Cross-thread worker", "Queue"], "originThreadByTitle": { "Cross-thread worker": 42, "Queue": 41 }, "truncated": false },
+    { "id": "standalone-thread-isolation", "target": "thread:99", "queryShape": "Content.title canonical order", "titles": ["Standalone"], "truncated": false }
+  ],
+  "contractAssertions": [
+    { "id": "connected-is-canonical", "assertion": "Each GraphEdge projects once with sorted public endpoints." },
+    { "id": "excluded-topology", "assertion": "Invoke, current, and interaction.context relations are absent from v1; accepted interaction-root EXPANDS is included." },
+    { "id": "foreign-draft-excluded", "assertion": "Draft and stopped records do not enter any searchable target." },
+    { "id": "root-action-projected", "assertion": "The accepted interaction-root EXPANDS action is searchable with absent source_layer_id." }
+  ]
+}
