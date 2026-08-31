@@ -5,13 +5,24 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { productHarnessImplementations, type HarnessFactory } from "@relayer/harness-host";
 import type { CompletionOutput } from "@relayer/graph-client";
+import {
+  graphMemoryFixtureConfiguration,
+  graphMemoryFixtureFactory,
+  graphMemorySearchBudget,
+  graphMemorySearchParameters,
+  graphMemorySearchQuery,
+  graphMemorySearchTitle,
+} from "../src/fixtures/graph-memory.js";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkGraphMemoryFirstTurn, checkGraphMemorySecondTurn, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, graphMemoryEvalCaseId, graphMemorySearchRequestMode, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
-const implementations = productHarnessImplementations({ "fixture.task-system": taskSystemFixtureFactory });
+const implementations = productHarnessImplementations({
+  "fixture.task-system": taskSystemFixtureFactory,
+  "fixture.graph-memory": graphMemoryFixtureFactory,
+});
 
 function fixtureExecution() {
   return expandTestRun({
@@ -20,6 +31,15 @@ function fixtureExecution() {
     harnessConfigurationNames: [taskSystemFixtureConfiguration.name],
     judgeConfiguration: { name: "none" as const },
   }, new Map([[taskSystemFixtureConfiguration.name, taskSystemFixtureConfiguration]]))[0]!;
+}
+
+function graphMemoryExecution() {
+  return expandTestRun({
+    testRunId: "fixture-memory-run",
+    testCaseIds: [graphMemoryEvalCaseId],
+    harnessConfigurationNames: [graphMemoryFixtureConfiguration.name],
+    judgeConfiguration: { name: "none" as const },
+  }, new Map([[graphMemoryFixtureConfiguration.name, graphMemoryFixtureConfiguration]]))[0]!;
 }
 
 function navigationOutput(actions: CompletionOutput["rootLayer"]["actions"] = []): CompletionOutput {
@@ -247,8 +267,10 @@ describe("first runtime evaluation", () => {
     temporary.push(outputDirectory);
     let runtimeDirectory: string | undefined;
     let releaseDispose!: () => void;
+    let markDisposeStarted!: () => void;
     let markDisposeFinished!: () => void;
     const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+    const disposeStarted = new Promise<void>((resolveStarted) => { markDisposeStarted = resolveStarted; });
     const disposeFinished = new Promise<void>((resolveFinished) => { markDisposeFinished = resolveFinished; });
     const stalledFactory: HarnessFactory = async (context) => {
       runtimeDirectory = context.workingDirectory;
@@ -257,25 +279,73 @@ describe("first runtime evaluation", () => {
         complete: (runContext, signal) => fixture.complete(runContext, signal),
         state: () => fixture.state(),
         async dispose() {
+          markDisposeStarted();
           await disposeGate;
           markDisposeFinished();
         },
       };
     };
-    const startedAt = Date.now();
 
-    await expect(runBasicRuntimeEval({
+    const evaluation = runBasicRuntimeEval({
       outputDirectory,
       execution: fixtureExecution(),
       implementations: { "fixture.task-system": stalledFactory },
       harnessCloseGraceMs: 25,
-    })).rejects.toThrow("Harness host did not close within 25ms and was forcibly disconnected");
+    });
+    await disposeStarted;
+    const shutdownStartedAt = Date.now();
 
-    expect(Date.now() - startedAt).toBeLessThan(2_000);
-    expect(runtimeDirectory).toBeDefined();
-    await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
-    releaseDispose();
-    await disposeFinished;
+    try {
+      await expect(evaluation).rejects.toThrow("Harness host did not close within 25ms and was forcibly disconnected");
+
+      expect(Date.now() - shutdownStartedAt).toBeLessThan(1_000);
+      expect(runtimeDirectory).toBeDefined();
+      await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
+    } finally {
+      releaseDispose();
+      await disposeFinished;
+    }
+  });
+
+  it("retains runtime state when forced shutdown cannot establish disconnection", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-failed-force-close-"));
+    temporary.push(outputDirectory);
+    let runtimeDirectory: string | undefined;
+    let releaseDispose!: () => void;
+    let markDisposeFinished!: () => void;
+    const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+    const disposeFinished = new Promise<void>((resolveFinished) => { markDisposeFinished = resolveFinished; });
+    const failedForceFactory: HarnessFactory = async (context) => {
+      runtimeDirectory = context.workingDirectory;
+      const fixture = await taskSystemFixtureFactory(context);
+      return {
+        complete: (runContext, signal) => fixture.complete(runContext, signal),
+        state: () => fixture.state(),
+        forceShutdown() { throw new Error("forced provider interruption failed"); },
+        async dispose() {
+          await disposeGate;
+          markDisposeFinished();
+        },
+      };
+    };
+
+    const evaluation = runBasicRuntimeEval({
+      outputDirectory,
+      execution: fixtureExecution(),
+      implementations: { "fixture.task-system": failedForceFactory },
+      harnessCloseGraceMs: 25,
+    });
+    try {
+      await expect(evaluation).rejects.toThrow("Harness host did not force-close cleanly");
+      expect(runtimeDirectory).toBeDefined();
+      await expect(stat(runtimeDirectory!)).resolves.toBeDefined();
+    } finally {
+      releaseDispose();
+      await disposeFinished;
+      if (runtimeDirectory !== undefined) {
+        await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
+      }
+    }
   });
 
   it("allows a slow successful harness disposal to finish within the configured grace period", async () => {
@@ -357,6 +427,255 @@ describe("first runtime evaluation", () => {
     expect(html).toContain("title.textContent=node.title");
     expect(html).toContain("110+placement.x*740");
   }, 15_000);
+
+  it("proves prior accepted graph search and typed reference reuse across two capabilities in one session", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-graph-memory-"));
+    temporary.push(outputDirectory);
+    const execution = graphMemoryExecution();
+    const artifact = await runBasicRuntimeEval({ outputDirectory, execution, implementations });
+
+    expect(artifact.passed).toBe(true);
+    expect(artifact.turns).toHaveLength(2);
+    const searchTarget = artifact.turns[0]!.output.rootLayer.nodes.filter((node) => (
+      node.title === graphMemorySearchTitle
+    ));
+    expect(searchTarget).toHaveLength(1);
+    expect(artifact.turns[0]!.output.rootLayer.nodes.every((node) => (
+      !node.title.includes("GRAPH_MEMORY_ANCHOR:")
+      && !node.detail.includes("GRAPH_MEMORY_ANCHOR:")
+    ))).toBe(true);
+    expect(artifact.turns[1]!.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: true }),
+      expect.objectContaining({ name: "draft-decoy-hidden", passed: true }),
+      expect.objectContaining({ name: "typed-reference-target", passed: true }),
+      expect.objectContaining({ name: "ack-search-submit-order", passed: true }),
+    ]));
+    expect(artifact.sessionChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "single-harness-object", passed: true }),
+      expect.objectContaining({ name: "distinct-interaction-capabilities", passed: true }),
+      expect.objectContaining({ name: "revoked-interaction-capabilities", passed: true }),
+      expect.objectContaining({ name: "same-provider-session", passed: true }),
+    ]));
+    const evidence = artifact.turns[1]!.graphMemoryEvidence!;
+    expect(evidence.searchRequest).toEqual({
+      queryContractVersion: 1,
+      target: undefined,
+      query: graphMemorySearchQuery,
+      parameters: graphMemorySearchParameters,
+      budget: graphMemorySearchBudget,
+    });
+    const firstLayerId = artifact.turns[0]!.output.rootLayer.layer.id;
+    expect(evidence.searchedLayerIds).toEqual([firstLayerId]);
+    const acceptedReference = artifact.turns[1]!.output.rootLayer.actions.find((action) => (
+      action.id === evidence.referenceActionId
+    ));
+    expect(acceptedReference).toMatchObject({
+      kind: "navigate",
+      relation: "reference",
+      state: "accepted",
+      targetLayerId: firstLayerId,
+      sourceLayerId: artifact.turns[1]!.output.rootLayer.layer.id,
+    });
+    const submits = evidence.auditEvents.filter((event) => event.path === "/api/graph/submit" && event.status === 200);
+    const search = evidence.auditEvents.find((event) => (
+      event.path === "/api/graph/search"
+      && event.status === 200
+      && event.sequence > evidence.secondTurnStartSequence
+    ))!;
+    const reference = evidence.auditEvents.find((event) => event.recordId === evidence.referenceActionId && event.recordKind === "action")!;
+    expect(submits).toHaveLength(2);
+    expect(submits[0]!.sequence).toBeLessThan(search.sequence);
+    expect(search.sequence).toBeLessThan(reference.sequence);
+    expect(reference.sequence).toBeLessThan(submits[1]!.sequence);
+    const launderedChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          ...evidence.searchRequest!,
+          query: "MATCH (l:Layer) RETURN l AS layer ORDER BY layer ASC",
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
+    );
+    expect(launderedChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const machineMarkerAsParameterChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          ...evidence.searchRequest!,
+          parameters: {
+            topic: { type: "string", value: "GRAPH_MEMORY_ANCHOR:forbidden" },
+          },
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
+    );
+    expect(machineMarkerAsParameterChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const selectedTargetChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          ...evidence.searchRequest!,
+          target: { scope: "project", id: 41 },
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
+    );
+    expect(selectedTargetChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const naturallyFormulatedChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          queryContractVersion: 1,
+          query: "MATCH (content:Content)<-[:CONTAINS]-(layer:Layer) WHERE content.title = $title RETURN layer AS layer LIMIT 1",
+          parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+          budget: graphMemorySearchBudget,
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "natural" },
+    );
+    expect(naturallyFormulatedChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: true }),
+    ]));
+    const admittedNaturalVariants = [
+      {
+        query: "MATCH (layer:Layer)-[membership:CONTAINS]->(content:Content) WHERE content.title = $title RETURN DISTINCT layer LIMIT 1",
+        budget: graphMemorySearchBudget,
+      },
+      {
+        query: "MATCH path = (layer:Layer)-[:CONTAINS { order: 0 }]->(content:Content) WHERE $title = content.title RETURN layer ORDER BY content.title ASC LIMIT 1",
+        budget: graphMemorySearchBudget,
+      },
+      {
+        query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer ORDER BY layer ASC",
+        budget: {},
+      },
+      {
+        query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer ORDER BY layer ASC",
+        budget: undefined,
+      },
+    ];
+    for (const { query, budget } of admittedNaturalVariants) {
+      expect(checkGraphMemorySecondTurn(
+        artifact.turns[1]!.output,
+        artifact.turns[0]!.output,
+        {
+          ...evidence,
+          searchRequest: {
+            queryContractVersion: 1,
+            query,
+            parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+            budget,
+          },
+        },
+        artifact.turns[1]!.interactionNodeId,
+        { requireDraftDecoy: true, searchRequestMode: "natural" },
+      )).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "search-request-contract", passed: true }),
+      ]));
+    }
+    expect(graphMemorySearchRequestMode("fixture.graph-memory")).toBe("exact");
+    expect(graphMemorySearchRequestMode("codex.basic")).toBe("natural");
+    expect(graphMemorySearchRequestMode("claude.basic")).toBe("natural");
+    expect(graphMemorySearchRequestMode("prime.agent")).toBe("natural");
+    const tautologicalQueryChecks = checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      {
+        ...evidence,
+        searchRequest: {
+          queryContractVersion: 1,
+          query: "MATCH (layer:Layer) WHERE $title = $title RETURN layer AS layer LIMIT 1",
+          parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+          budget: graphMemorySearchBudget,
+        },
+      },
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "natural" },
+    );
+    expect(tautologicalQueryChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const truncatedEvidence = {
+      ...evidence,
+      auditEvents: evidence.auditEvents.map((event) => (
+        event.path === "/api/graph/search" && event.sequence > evidence.secondTurnStartSequence
+          ? { ...event, resultTruncated: true }
+          : event
+      )),
+    };
+    expect(checkGraphMemorySecondTurn(
+      artifact.turns[1]!.output,
+      artifact.turns[0]!.output,
+      truncatedEvidence,
+      artifact.turns[1]!.interactionNodeId,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: false }),
+      expect.objectContaining({ name: "draft-decoy-hidden", passed: false }),
+    ]));
+
+    const firstOutput = artifact.turns[0]!.output;
+    const searchTargetId = searchTarget[0]!.id;
+    const duplicateNaturalTarget = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? node
+          : { ...node, title: graphMemorySearchTitle }),
+      },
+    };
+    const machineMarkerTitle = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? node
+          : { ...node, title: "GRAPH_MEMORY_ANCHOR:forbidden" }),
+      },
+    };
+    const machineMarkerDetail = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? node
+          : { ...node, detail: `${node.detail}\n\nGRAPH_MEMORY_ANCHOR:forbidden` }),
+      },
+    };
+    for (const invalidOutput of [duplicateNaturalTarget, machineMarkerTitle, machineMarkerDetail]) {
+      expect(checkGraphMemoryFirstTurn(
+        invalidOutput,
+        invalidOutput.nodeId,
+      )).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "natural-memory-search-target", passed: false }),
+      ]));
+    }
+  }, 30_000);
 
   it("uses the explicit managed Codex executable for every structured judge turn", async () => {
     const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-managed-judge-")); temporary.push(outputDirectory);

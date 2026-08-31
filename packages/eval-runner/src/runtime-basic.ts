@@ -1,7 +1,7 @@
 import { Codex, type CodexOptions, type ThreadOptions, type TurnOptions } from "@openai/codex-sdk";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,12 +9,19 @@ import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CompletionOutput, GraphCapability, GraphNode, ResolvedLayer } from "@relayer/graph-client";
 import { digestHarnessConfiguration, startHarnessHost, type HarnessConfiguration, type HarnessFactory, type HarnessImplementationMap, type RunningHarnessHost } from "@relayer/harness-host";
+import {
+  graphMemorySearchBudget,
+  graphMemorySearchParameters,
+  graphMemorySearchQuery,
+  graphMemorySearchTitle,
+} from "./fixtures/graph-memory.js";
 import type { TestExecutionPlan } from "./run-plan.js";
 
 export const basicEvalCaseId = "empty-project.task-system.two-turn";
 export const basicEvalPrompt = "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.";
 export const basicEvalFollowUpPrompt = "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.";
 export const replayRepairEvalCaseId = "graph-authoring.replay-repair";
+export const graphMemoryEvalCaseId = "graph-memory.prior-accepted-reference";
 const DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS = 30_000;
 export const replayRepairEvalPrompt = `Explain, as a useful connected graph answer, why stable idempotency keys make retrying a partially persisted graph-authoring program safe.
 
@@ -28,6 +35,19 @@ This is a live graph-recovery evaluation. In one executable program, use explici
 Use the actual returned numeric IDs, not these example values. Preserve the useful explanation around that evidence line, resubmit the stable-keyed root layer and root action if needed, then finish with a successful graph.submit().
 
 Do not create fake navigation to the orphan. Do not delete graph records. The accepted answer should clearly explain stable client keys, retry after partial persistence, and idempotent recovery.`;
+
+const graphMemoryPromptPair: readonly [string, string] = Object.freeze([
+  `Explain when newly saved graph content becomes available to future requests. Include exactly one section titled ${graphMemorySearchTitle}.`,
+  `Find your earlier ${graphMemorySearchTitle} explanation and link the original as supporting context in a concise follow-up. Do not recreate or paraphrase it.`,
+]);
+
+export function graphMemoryEvalPrompts(_testRunId?: string): readonly [string, string] {
+  return graphMemoryPromptPair;
+}
+
+export function graphMemorySearchRequestMode(implementation: string): "exact" | "natural" {
+  return implementation === "fixture.graph-memory" ? "exact" : "natural";
+}
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 
 export function basicEvalPythonPath(existingPythonPath?: string): string {
@@ -58,6 +78,7 @@ export interface RuntimeEvalTurn {
   readonly checks: readonly EvalCheck[];
   readonly judge?: BasicJudge;
   readonly repairEvidence?: ReplayRepairEvidence;
+  readonly graphMemoryEvidence?: GraphMemoryEvidence;
   readonly passed: boolean;
 }
 export interface RuntimeEvalArtifact {
@@ -110,6 +131,37 @@ export interface ReplayRepairAuditEvent {
   readonly recordId?: number;
   readonly recordState?: string;
   readonly errorCodes?: readonly string[];
+  readonly completionNodeId?: number;
+  readonly completionRootLayerId?: number;
+  readonly searchLayerIds?: readonly number[];
+  readonly resultTruncated?: boolean;
+  readonly queryContractVersion?: number;
+  readonly target?: Readonly<Record<string, unknown>>;
+  readonly query?: string;
+  readonly parameters?: Readonly<Record<string, unknown>>;
+  readonly budget?: Readonly<Record<string, unknown>>;
+  readonly actionKind?: string;
+  readonly actionRelation?: string | null;
+  readonly actionSourceNodeId?: number;
+  readonly actionSourceLayerId?: number | null;
+  readonly actionTargetLayerId?: number | null;
+}
+
+export interface GraphMemoryEvidence {
+  readonly secondTurnStartSequence: number;
+  readonly searchedLayerIds: readonly number[];
+  readonly searchSequence?: number;
+  readonly searchRequest?: {
+    readonly queryContractVersion: number | undefined;
+    readonly target?: Readonly<Record<string, unknown>>;
+    readonly query: string | undefined;
+    readonly parameters: Readonly<Record<string, unknown>> | undefined;
+    readonly budget: Readonly<Record<string, unknown>> | undefined;
+  };
+  readonly draftDecoyLayerId?: number;
+  readonly referenceActionId?: number;
+  readonly referenceActionSequence?: number;
+  readonly auditEvents: readonly ReplayRepairAuditEvent[];
 }
 
 export async function runBasicRuntimeEval(options: {
@@ -122,7 +174,7 @@ export async function runBasicRuntimeEval(options: {
   judgeCodexPathOverride?: string;
   judgeThreadFactory?: BasicJudgeThreadFactory;
 }): Promise<RuntimeEvalArtifact> {
-  if (![basicEvalCaseId, replayRepairEvalCaseId].includes(options.execution.testCaseId)) throw new Error(`Unsupported runtime-basic test case: ${options.execution.testCaseId}`);
+  if (![basicEvalCaseId, replayRepairEvalCaseId, graphMemoryEvalCaseId].includes(options.execution.testCaseId)) throw new Error(`Unsupported runtime-basic test case: ${options.execution.testCaseId}`);
   if (options.execution.harnessConfiguration.name !== options.execution.harnessConfigurationName) {
     throw new Error("Execution harness configuration name does not match its resolved snapshot");
   }
@@ -139,7 +191,9 @@ export async function runBasicRuntimeEval(options: {
   let operationError: unknown;
   try {
     graphProcess = await startGraphServer(options.serverBinary, join(stateDirectory, "graph.sqlite"), graphControlToken, options.serverReadyTimeoutMs);
-    if (options.execution.testCaseId === replayRepairEvalCaseId) graphAuditProxy = await startGraphAuditProxy(graphProcess.url);
+    if (options.execution.testCaseId === replayRepairEvalCaseId || options.execution.testCaseId === graphMemoryEvalCaseId) {
+      graphAuditProxy = await startGraphAuditProxy(graphProcess.url);
+    }
     const projectId = 1;
     const threadId = 1;
     let harnessFactoryCalls = 0;
@@ -159,11 +213,21 @@ export async function runBasicRuntimeEval(options: {
 
     const capabilities: GraphCapability[] = [];
     const turns: RuntimeEvalTurn[] = [];
+    const sessionStateSnapshots: unknown[] = [];
+    const turnStartSequences: number[] = [];
     const prompts = options.execution.testCaseId === replayRepairEvalCaseId
       ? [replayRepairEvalPrompt]
-      : [basicEvalPrompt, basicEvalFollowUpPrompt];
+      : options.execution.testCaseId === graphMemoryEvalCaseId
+        ? graphMemoryEvalPrompts(options.execution.testRunId)
+        : [basicEvalPrompt, basicEvalFollowUpPrompt];
     for (const prompt of prompts) {
-      const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, graphControlToken, { projectId, threadId, text: prompt });
+      turnStartSequences.push(graphAuditProxy?.events().at(-1)?.sequence ?? 0);
+      const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, graphControlToken, {
+        projectId,
+        threadId,
+        text: prompt,
+        graphCapabilityProfile: configuration.graphCapabilityProfile ?? { search: "disabled" },
+      });
       const capability = { url: graphAuditProxy?.url ?? graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
       const complete = await completeWithCapabilityCleanup(async () => {
@@ -173,13 +237,36 @@ export async function runBasicRuntimeEval(options: {
           graph: capability,
         });
       }, capability, graphControlToken);
+      sessionStateSnapshots.push(await readPersistedHarnessState(join(stateDirectory, "harness-sessions.json"), threadId));
       const isReplayRepair = options.execution.testCaseId === replayRepairEvalCaseId;
+      const isGraphMemory = options.execution.testCaseId === graphMemoryEvalCaseId;
       const repairEvidence = isReplayRepair
         ? await readReplayRepairEvidence(complete.output, interaction.node.id, graphProcess.url, graphControlToken, graphAuditProxy?.events() ?? [])
         : undefined;
+      const graphMemoryEvidence = isGraphMemory && turns.length === 1
+          ? readGraphMemoryEvidence(
+            turns[0]!.output,
+            complete.output,
+            graphAuditProxy?.events() ?? [],
+            turnStartSequences[1] ?? 0,
+          )
+        : undefined;
       const checks = isReplayRepair
         ? checkReplayRepairOutput(complete.output, repairEvidence, interaction.node.id)
-        : checkBasicOutput(complete.output, interaction.node.id);
+        : isGraphMemory
+          ? turns.length === 0
+            ? checkGraphMemoryFirstTurn(complete.output, interaction.node.id)
+            : checkGraphMemorySecondTurn(
+                complete.output,
+                turns[0]!.output,
+                graphMemoryEvidence,
+                interaction.node.id,
+                {
+                  requireDraftDecoy: configuration.implementation === "fixture.graph-memory",
+                  searchRequestMode: graphMemorySearchRequestMode(configuration.implementation),
+                },
+              )
+          : checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);
       const judge = options.execution.testCaseId === basicEvalCaseId && options.execution.judgeConfiguration.name === "codex-structured" && deterministicPassed
         ? await judgeOutput(complete.output, prompt, workingDirectory, {
@@ -193,6 +280,7 @@ export async function runBasicRuntimeEval(options: {
         output: complete.output,
         checks,
         ...(repairEvidence === undefined ? {} : { repairEvidence }),
+        ...(graphMemoryEvidence === undefined ? {} : { graphMemoryEvidence }),
         ...(judge === undefined ? {} : { judge }),
         passed: deterministicPassed && (judge === undefined || judge.verdict === "pass"),
       });
@@ -209,6 +297,9 @@ export async function runBasicRuntimeEval(options: {
       { name: "single-harness-object", passed: harnessFactoryCalls === 1, detail: `Harness factory called ${harnessFactoryCalls} time${harnessFactoryCalls === 1 ? "" : "s"} for ${prompts.length} interaction${prompts.length === 1 ? "" : "s"}.` },
       { name: "distinct-interaction-capabilities", passed: capabilities.length === prompts.length && uniqueInteractionNodes.size === prompts.length && uniqueCapabilityTokens.size === prompts.length, detail: "Each interaction used a distinct node and opaque capability token." },
       { name: "revoked-interaction-capabilities", passed: revokedCapabilities.every(Boolean), detail: "The eval runtime revoked every graph capability after its Complete call settled." },
+      ...(options.execution.testCaseId === graphMemoryEvalCaseId
+        ? [checkProviderSessionContinuity(sessionStateSnapshots, options.execution.harnessConfiguration.implementation)]
+        : []),
     ];
     const deterministicPassed = sessionChecks.every((check) => check.passed) && turns.every((turn) => turn.checks.every((check) => check.passed));
     const passed = deterministicPassed && turns.every((turn) => turn.passed);
@@ -231,28 +322,33 @@ export async function runBasicRuntimeEval(options: {
     throw error;
   } finally {
     const cleanupErrors: unknown[] = [];
-    let workingDirectoryCleanupDeferred = false;
+    let workingDirectoryCanBeRemoved = harnessHost === undefined;
+    let deferredHarnessClose: Promise<void> | undefined;
+    let graphProcessStopped = graphProcess === undefined;
     for (const cleanup of [
       async () => {
         if (harnessHost !== undefined) {
-          try {
-            await closeHarnessHostForEval(
-              harnessHost,
-              options.harnessCloseGraceMs ?? DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS,
-              workingDirectory,
-            );
-          } catch (error) {
-            if ((error as { code?: unknown }).code === "RELAYER_EVAL_HARNESS_CLOSE_TIMEOUT") {
-              workingDirectoryCleanupDeferred = true;
-            }
-            throw error;
-          }
+          await closeHarnessHostForEval(
+            harnessHost,
+            options.harnessCloseGraceMs ?? DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS,
+            () => { workingDirectoryCanBeRemoved = true; },
+            (closing) => { deferredHarnessClose = closing; },
+          );
         }
       },
       async () => graphAuditProxy?.close(),
-      async () => { if (graphProcess !== undefined) await terminate(graphProcess.process); },
       async () => {
-        if (!workingDirectoryCleanupDeferred) await rm(workingDirectory, { recursive: true, force: true });
+        if (graphProcess !== undefined) await terminate(graphProcess.process);
+        graphProcessStopped = true;
+      },
+      async () => {
+        if (workingDirectoryCanBeRemoved && graphProcessStopped) {
+          await rm(workingDirectory, { recursive: true, force: true });
+        } else if (graphProcessStopped && deferredHarnessClose !== undefined) {
+          void deferredHarnessClose
+            .then(() => rm(workingDirectory, { recursive: true, force: true }))
+            .catch(() => undefined);
+        }
       },
     ]) {
       const result = await settle(cleanup);
@@ -268,18 +364,26 @@ export async function runBasicRuntimeEval(options: {
   }
 }
 
-async function closeHarnessHostForEval(host: RunningHarnessHost, closeGraceMs: number, workingDirectory: string): Promise<void> {
+async function closeHarnessHostForEval(
+  host: RunningHarnessHost,
+  closeGraceMs: number,
+  markDisconnected: () => void,
+  deferUntilClosingSettles: (closing: Promise<void>) => void,
+): Promise<void> {
   const closing = settle(() => host.close());
   if (!(await settlesWithin(closing.then(() => {}), closeGraceMs))) {
-    const forcing = settle(() => host.forceClose());
-    void forcing.then(async (result) => {
-      if (result.ok) await rm(workingDirectory, { recursive: true, force: true });
-    }).catch(() => undefined);
+    const forced = await settle(() => host.forceClose());
+    if (!forced.ok) {
+      deferUntilClosingSettles(closing.then(() => {}));
+      throw forced.error;
+    }
+    markDisconnected();
     const error = new Error(`Harness host did not close within ${closeGraceMs}ms and was forcibly disconnected`);
     (error as Error & { code: string }).code = "RELAYER_EVAL_HARNESS_CLOSE_TIMEOUT";
     throw error;
   }
   const result = await closing;
+  markDisconnected();
   if (!result.ok) throw result.error;
 }
 
@@ -325,6 +429,268 @@ export function checkBasicOutput(
     { name: "exact-edges", passed: layer.edges.every((edge) => edge.endpoints[0] !== edge.endpoints[1] && nodeIds.has(edge.endpoints[0]) && nodeIds.has(edge.endpoints[1])), detail: `${layer.edges.length} visible undirected edges stay inside the layer.` },
     { name: "connected", passed: visited.size === layer.nodes.length, detail: `${visited.size}/${layer.nodes.length} nodes connected.` },
   ];
+}
+
+export function checkGraphMemoryFirstTurn(
+  output: CompletionOutput,
+  expectedInteractionNodeId = output.nodeId,
+): EvalCheck[] {
+  const matching = output.rootLayer.nodes.filter((node) => node.title === graphMemorySearchTitle);
+  const graphHasNoMachineMarker = output.rootLayer.nodes.every((node) => (
+    !node.title.includes("GRAPH_MEMORY_ANCHOR:")
+    && !node.detail.includes("GRAPH_MEMORY_ANCHOR:")
+  ));
+  return [
+    ...checkBasicOutput(output, expectedInteractionNodeId),
+    {
+      name: "natural-memory-search-target",
+      passed: matching.length === 1 && graphHasNoMachineMarker,
+      detail: `The first accepted root contains one human-readable ${graphMemorySearchTitle} search target and no machine marker in visible content.`,
+    },
+  ];
+}
+
+export function readGraphMemoryEvidence(
+  firstOutput: CompletionOutput,
+  secondOutput: CompletionOutput,
+  auditEvents: readonly ReplayRepairAuditEvent[],
+  secondTurnStartSequence: number,
+): GraphMemoryEvidence {
+  const firstSubmit = auditEvents.find((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/submit"
+    && event.status >= 200
+    && event.status < 300
+    && event.completionNodeId === firstOutput.nodeId
+  ));
+  const search = auditEvents.find((event) => (
+    event.method === "POST" && event.path === "/api/graph/search" && event.status >= 200 && event.status < 300
+    && event.sequence > secondTurnStartSequence
+  ));
+  const searchedLayerIds = search?.searchLayerIds ?? [];
+  const reference = auditEvents.find((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/actions"
+    && event.status >= 200
+    && event.status < 300
+    && event.actionKind === "navigate"
+    && event.actionRelation === "reference"
+    && event.actionTargetLayerId === firstOutput.rootLayer.layer.id
+    && event.actionSourceLayerId === secondOutput.rootLayer.layer.id
+  ));
+  const draftDecoy = search === undefined ? undefined : auditEvents.filter((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/layers"
+    && event.status >= 200
+    && event.status < 300
+    && event.recordKind === "layer"
+    && event.recordState === "draft"
+    && event.recordId !== firstOutput.rootLayer.layer.id
+    && (firstSubmit === undefined || event.sequence > firstSubmit.sequence)
+    && event.sequence < search.sequence
+  )).at(-1);
+  return {
+    secondTurnStartSequence,
+    searchedLayerIds,
+    ...(search === undefined ? {} : { searchSequence: search.sequence }),
+    ...(search === undefined ? {} : {
+      searchRequest: {
+        queryContractVersion: search.queryContractVersion,
+        ...(search.target === undefined ? {} : { target: structuredClone(search.target) }),
+        query: search.query,
+        parameters: structuredClone(search.parameters),
+        budget: structuredClone(search.budget),
+      },
+    }),
+    ...(draftDecoy?.recordId === undefined ? {} : { draftDecoyLayerId: draftDecoy.recordId }),
+    ...(reference?.recordId === undefined ? {} : { referenceActionId: reference.recordId }),
+    ...(reference === undefined ? {} : { referenceActionSequence: reference.sequence }),
+    auditEvents: structuredClone(auditEvents),
+  };
+}
+
+export function checkGraphMemorySecondTurn(
+  output: CompletionOutput,
+  firstOutput: CompletionOutput,
+  evidence: GraphMemoryEvidence | undefined,
+  expectedInteractionNodeId = output.nodeId,
+  options: {
+    readonly requireDraftDecoy?: boolean;
+    readonly searchRequestMode?: "exact" | "natural";
+  } = {},
+): EvalCheck[] {
+  const requireDraftDecoy = options.requireDraftDecoy === true;
+  const searchRequestMode = options.searchRequestMode ?? "exact";
+  const base = checkBasicOutput(output, expectedInteractionNodeId);
+  if (evidence === undefined) {
+    return [
+      ...base,
+      { name: "search-returned-prior-root", passed: false, detail: "No authoritative graph-search audit evidence was captured." },
+      ...(requireDraftDecoy
+        ? [{ name: "draft-decoy-hidden", passed: false, detail: "No same-topic draft-isolation evidence was captured." }]
+        : []),
+      { name: "typed-reference-target", passed: false, detail: "No searched prior-layer identity was available for the accepted reference." },
+      { name: "ack-search-submit-order", passed: false, detail: "No audited acknowledgement/search/submission ordering was available." },
+    ];
+  }
+  const priorLayerId = firstOutput.rootLayer.layer.id;
+  const acceptedReference = output.rootLayer.actions.find((action) => (
+    action.id === evidence.referenceActionId
+    && action.state === "accepted"
+    && action.kind === "navigate"
+    && action.relation === "reference"
+    && action.sourceLayerId === output.rootLayer.layer.id
+    && action.targetLayerId === priorLayerId
+    && output.rootLayer.nodes.some((node) => node.id === action.sourceNodeId)
+  ));
+  const firstSubmit = evidence.auditEvents.find((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/submit"
+    && event.status >= 200
+    && event.status < 300
+    && event.completionNodeId === firstOutput.nodeId
+    && event.completionRootLayerId === priorLayerId
+  ));
+  const successfulSearches = evidence.auditEvents.filter((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/search"
+    && event.status >= 200
+    && event.status < 300
+    && event.sequence > evidence.secondTurnStartSequence
+  ));
+  const secondSubmit = evidence.auditEvents.find((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/submit"
+    && event.status >= 200
+    && event.status < 300
+    && event.completionNodeId === output.nodeId
+    && event.completionRootLayerId === output.rootLayer.layer.id
+  ));
+  const search = successfulSearches[0];
+  const draftDecoyDiscard = evidence.draftDecoyLayerId === undefined ? undefined : evidence.auditEvents.find((event) => (
+    event.method === "POST"
+    && event.path === `/api/graph/layers/${evidence.draftDecoyLayerId}/discard`
+    && event.status >= 200
+    && event.status < 300
+    && event.recordKind === "layer"
+    && event.recordId === evidence.draftDecoyLayerId
+    && event.recordState === "stopped"
+  ));
+  const ordered = firstSubmit !== undefined
+    && search !== undefined
+    && evidence.searchSequence === search.sequence
+    && evidence.referenceActionSequence !== undefined
+    && secondSubmit !== undefined
+    && firstSubmit.sequence < search.sequence
+    && search.sequence < evidence.referenceActionSequence
+    && evidence.referenceActionSequence < secondSubmit.sequence;
+  return [
+    ...base,
+    {
+      name: "search-returned-prior-root",
+      passed: successfulSearches.length === 1
+        && evidence.searchedLayerIds.length === 1
+        && evidence.searchedLayerIds[0] === priorLayerId
+        && successfulSearches[0]?.resultTruncated === false,
+      detail: "The one audited graph.search call returned exactly the first accepted root Layer identity.",
+    },
+    {
+      name: "search-request-contract",
+      passed: successfulSearches.length === 1
+        && (searchRequestMode === "exact"
+          ? matchesRequiredGraphMemorySearch(evidence.searchRequest)
+          : matchesNaturalGraphMemorySearch(evidence.searchRequest)),
+      detail: searchRequestMode === "exact"
+        ? "The deterministic fixture used the exact admitted conformance query, natural topic parameter, and bounded budget."
+        : "The provider formulated one bounded parameterized query for the natural topic without a machine marker.",
+    },
+    ...(requireDraftDecoy ? [{
+      name: "draft-decoy-hidden",
+      passed: evidence.draftDecoyLayerId !== undefined
+        && draftDecoyDiscard !== undefined
+        && search !== undefined
+        && search.resultTruncated === false
+        && search.sequence < draftDecoyDiscard.sequence,
+      detail: "A same-topic draft layer existed during search, was absent from its exact result, and was stopped only afterward.",
+    }] : []),
+    {
+      name: "typed-reference-target",
+      passed: acceptedReference !== undefined,
+      detail: "The second accepted root contains the audited typed reference action targeting that exact searched Layer.",
+    },
+    {
+      name: "ack-search-submit-order",
+      passed: ordered,
+      detail: "Server response order proves first submit acknowledgement before second-turn search, the matching reference action, and second submit acknowledgement.",
+    },
+  ];
+}
+
+function matchesRequiredGraphMemorySearch(
+  request: GraphMemoryEvidence["searchRequest"],
+): boolean {
+  if (request?.queryContractVersion !== 1 || request.query !== graphMemorySearchQuery
+    || request.target !== undefined
+    || !isRecord(request.parameters) || !isRecord(request.budget)) return false;
+  const parameterKeys = Object.keys(request.parameters);
+  const topicParameter = request.parameters.topic;
+  return parameterKeys.length === 1
+    && parameterKeys[0] === "topic"
+    && isRecord(topicParameter)
+    && Object.keys(topicParameter).length === 2
+    && topicParameter.type === "string"
+    && topicParameter.value === graphMemorySearchTitle
+    && Object.keys(request.budget).length === 1
+    && request.budget.resultRows === graphMemorySearchBudget.resultRows;
+}
+
+function matchesNaturalGraphMemorySearch(
+  request: GraphMemoryEvidence["searchRequest"],
+): boolean {
+  if (request?.queryContractVersion !== 1 || typeof request.query !== "string"
+    || request.target !== undefined
+    || !isRecord(request.parameters)
+    || (request.budget !== undefined && !isRecord(request.budget))) return false;
+  const parameterKeys = Object.keys(request.parameters);
+  if (parameterKeys.length !== 1
+    || (request.budget !== undefined && !matchesNaturalGraphMemoryBudget(request.budget))) return false;
+  const parameterName = parameterKeys[0]!;
+  const parameter = request.parameters[parameterName];
+  return isRecord(parameter)
+    && Object.keys(parameter).length === 2
+    && parameter.type === "string"
+    && parameter.value === graphMemorySearchTitle
+    && isNaturalGraphMemoryQueryShape(request.query, parameterName)
+    && !JSON.stringify({ query: request.query, parameters: request.parameters }).includes("GRAPH_MEMORY_ANCHOR:");
+}
+
+function matchesNaturalGraphMemoryBudget(budget: Readonly<Record<string, unknown>>): boolean {
+  const resultRows = budget.resultRows;
+  return resultRows === undefined
+    || (Number.isSafeInteger(resultRows) && (resultRows as number) >= 1 && (resultRows as number) <= 8);
+}
+
+function isNaturalGraphMemoryQueryShape(query: string, parameterName: string): boolean {
+  const identifier = "[A-Za-z_][A-Za-z0-9_]*";
+  const layer = `(?<layer>${identifier})`;
+  const content = `(?<content>${identifier})`;
+  const relationship = `\\[\\s*(?:${identifier}\\s*)?:\\s*CONTAINS(?:\\s*\\{[^}]*\\})?\\s*\\]`;
+  const contains = `\\s*-\\s*${relationship}\\s*->\\s*`;
+  const containedBy = `\\s*<-\\s*${relationship}\\s*-\\s*`;
+  const layerNode = `\\(\\s*${layer}\\s*:\\s*Layer\\s*\\)`;
+  const contentNode = `\\(\\s*${content}\\s*:\\s*Content\\s*\\)`;
+  const escapedParameter = parameterName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const titleProperty = "\\k<content>\\s*\\.\\s*title";
+  const parameter = `\\$${escapedParameter}`;
+  const predicate = `\\s+WHERE\\s+(?:${titleProperty}\\s*=\\s*${parameter}|${parameter}\\s*=\\s*${titleProperty})`;
+  const projection = `\\s+RETURN\\s+(?:DISTINCT\\s+)?\\k<layer>(?:\\s+AS\\s+${identifier})?`;
+  const orderingExpression = `${identifier}(?:\\s*\\.\\s*${identifier})?`;
+  const ordering = `(?:\\s+ORDER\\s+BY\\s+${orderingExpression}(?:\\s+(?:ASC|DESC))?)?`;
+  const limit = "(?:\\s+LIMIT\\s+[1-8])?\\s*$";
+  const pathBinding = `(?:${identifier}\\s*=\\s*)?`;
+  const forward = new RegExp(`^\\s*MATCH\\s+${pathBinding}${layerNode}${contains}${contentNode}${predicate}${projection}${ordering}${limit}`, "i");
+  const reverse = new RegExp(`^\\s*MATCH\\s+${pathBinding}${contentNode}${containedBy}${layerNode}${predicate}${projection}${ordering}${limit}`, "i");
+  return forward.test(query) || reverse.test(query);
 }
 
 export function parseReportedReplayRepairEvidence(output: CompletionOutput): ReportedReplayRepairEvidence | undefined {
@@ -574,6 +940,7 @@ async function forwardAuditedGraphRequest(
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const requestBody = Buffer.concat(chunks);
+  const requestValue = parseJsonObject(requestBody);
   const headers = new Headers();
   for (const name of ["accept", "authorization", "content-type"] as const) {
     const value = request.headers[name];
@@ -590,26 +957,105 @@ async function forwardAuditedGraphRequest(
   response.writeHead(upstreamResponse.status, contentType === null ? {} : { "content-type": contentType });
   response.end(responseBytes);
   const responseValue = parseJsonObject(responseBytes);
-  record(sanitizeGraphAuditEvent(method, requestUrl.pathname, upstreamResponse.status, responseValue));
+  record(sanitizeGraphAuditEvent(
+    method,
+    requestUrl.pathname,
+    upstreamResponse.status,
+    requestValue,
+    responseValue,
+  ));
 }
 
 function sanitizeGraphAuditEvent(
   method: string,
   path: string,
   status: number,
+  request: Record<string, unknown> | undefined,
   response: Record<string, unknown> | undefined,
 ): Omit<ReplayRepairAuditEvent, "sequence"> {
   const event: Omit<ReplayRepairAuditEvent, "sequence"> = { method, path, status };
   if (method === "POST" && path === "/api/graph/nodes") return withRecord(event, "node", response?.node);
   if (method === "POST" && path === "/api/graph/edges") return withRecord(event, "edge", response?.edge);
   if (method === "POST" && path === "/api/graph/layers") return withRecord(event, "layer", response?.layer);
-  if (method === "POST" && path === "/api/graph/actions") return withRecord(event, "action", response?.action);
+  if (method === "POST" && path === "/api/graph/actions") return withAction(event, response?.action);
   if (method === "POST" && /^\/api\/graph\/layers\/\d+\/discard$/.test(path)) return withRecord(event, "layer", response?.layer);
+  if (method === "POST" && path === "/api/graph/search" && status >= 200 && status < 300) {
+    return withSearchResult(withSearchRequest(event, request), response);
+  }
+  if (method === "POST" && path === "/api/graph/submit" && status >= 200 && status < 300) return withCompletion(event, response);
   const error = isRecord(response?.error) ? response.error : undefined;
   const issues = Array.isArray(error?.issues) ? error.issues : [];
   const errorCodes = [error?.code, ...issues.map((issue) => isRecord(issue) ? issue.code : undefined)]
     .filter((code): code is string => typeof code === "string");
-  return errorCodes.length === 0 ? event : { ...event, errorCodes: [...new Set(errorCodes)] };
+  const withRequest = method === "POST" && path === "/api/graph/search"
+    ? withSearchRequest(event, request)
+    : event;
+  return errorCodes.length === 0 ? withRequest : { ...withRequest, errorCodes: [...new Set(errorCodes)] };
+}
+
+function withSearchRequest(
+  event: Omit<ReplayRepairAuditEvent, "sequence">,
+  request: Record<string, unknown> | undefined,
+): Omit<ReplayRepairAuditEvent, "sequence"> {
+  if (!isRecord(request)) return event;
+  return {
+    ...event,
+    ...(Number.isSafeInteger(request.queryContractVersion)
+      ? { queryContractVersion: request.queryContractVersion as number }
+      : {}),
+    ...(isRecord(request.target) ? { target: structuredClone(request.target) } : {}),
+    ...(typeof request.query === "string" ? { query: request.query } : {}),
+    ...(isRecord(request.parameters) ? { parameters: structuredClone(request.parameters) } : {}),
+    ...(isRecord(request.budget) ? { budget: structuredClone(request.budget) } : {}),
+  };
+}
+
+function withAction(
+  event: Omit<ReplayRepairAuditEvent, "sequence">,
+  value: unknown,
+): Omit<ReplayRepairAuditEvent, "sequence"> {
+  const recorded = withRecord(event, "action", value);
+  if (!isRecord(value)) return recorded;
+  return {
+    ...recorded,
+    ...(typeof value.kind === "string" ? { actionKind: value.kind } : {}),
+    ...(typeof value.relation === "string" || value.relation === null ? { actionRelation: value.relation } : {}),
+    ...(isPositiveInteger(value.sourceNodeId) ? { actionSourceNodeId: value.sourceNodeId } : {}),
+    ...(isPositiveInteger(value.sourceLayerId) || value.sourceLayerId === null ? { actionSourceLayerId: value.sourceLayerId } : {}),
+    ...(isPositiveInteger(value.targetLayerId) || value.targetLayerId === null ? { actionTargetLayerId: value.targetLayerId } : {}),
+  };
+}
+
+function withSearchResult(
+  event: Omit<ReplayRepairAuditEvent, "sequence">,
+  response: Record<string, unknown> | undefined,
+): Omit<ReplayRepairAuditEvent, "sequence"> {
+  if (!Array.isArray(response?.rows)) return event;
+  const layerIds = response.rows.flatMap((row) => Array.isArray(row) ? row.flatMap((value) => {
+    if (!isRecord(value) || value.type !== "layer" || typeof value.id !== "string") return [];
+    const match = /^layer:([1-9]\d*)$/.exec(value.id);
+    const id = match === null ? Number.NaN : Number(match[1]);
+    return Number.isSafeInteger(id) ? [id] : [];
+  }) : []);
+  return {
+    ...event,
+    searchLayerIds: layerIds,
+    ...(typeof response.truncated === "boolean" ? { resultTruncated: response.truncated } : {}),
+  };
+}
+
+function withCompletion(
+  event: Omit<ReplayRepairAuditEvent, "sequence">,
+  response: Record<string, unknown> | undefined,
+): Omit<ReplayRepairAuditEvent, "sequence"> {
+  const rootLayer = isRecord(response?.rootLayer) && isRecord(response.rootLayer.layer)
+    ? response.rootLayer.layer
+    : undefined;
+  return {
+    ...event,
+    ...(isPositiveInteger(response?.nodeId) ? { completionNodeId: response.nodeId } : {}),
+    ...(isPositiveInteger(rootLayer?.id) ? { completionRootLayerId: rootLayer.id } : {}),
+  };
 }
 
 function withRecord(
@@ -743,6 +1189,38 @@ async function requestControlJson<T>(url: string, token: string): Promise<T> {
   const value: unknown = await response.json();
   if (!response.ok) throw new Error(`Request ${url} failed (${response.status}): ${JSON.stringify(value)}`);
   return value as T;
+}
+
+async function readPersistedHarnessState(stateFile: string, threadId: number): Promise<unknown> {
+  const parsed: unknown = JSON.parse(await readFile(stateFile, "utf8"));
+  if (!isRecord(parsed) || !Array.isArray(parsed.sessions)) return undefined;
+  const session = parsed.sessions.find((value) => isRecord(value) && value.threadId === threadId);
+  return isRecord(session) ? structuredClone(session.state) : undefined;
+}
+
+function checkProviderSessionContinuity(
+  snapshots: readonly unknown[],
+  implementation: string,
+): EvalCheck {
+  const serialized = snapshots.map((snapshot) => JSON.stringify(snapshot));
+  const stable = serialized.length === 2
+    && serialized[0] !== undefined
+    && serialized[0] !== "{}"
+    && serialized[0] === serialized[1];
+  const codexThreadIds = snapshots.map((snapshot) => (
+    isRecord(snapshot) && typeof snapshot.codexThreadId === "string" && snapshot.codexThreadId.trim() !== ""
+      ? snapshot.codexThreadId
+      : undefined
+  ));
+  const codexStable = implementation !== "codex.basic"
+    || (codexThreadIds[0] !== undefined && codexThreadIds[0] === codexThreadIds[1]);
+  return {
+    name: "same-provider-session",
+    passed: stable && codexStable,
+    detail: implementation === "codex.basic"
+      ? "Both interactions persisted the same non-empty Codex thread identity."
+      : "Both interactions persisted the same non-empty deterministic fixture-session identity.",
+  };
 }
 
 async function completeWithCapabilityCleanup<T>(operation: () => Promise<T>, capability: GraphCapability, controlToken: string): Promise<T> {

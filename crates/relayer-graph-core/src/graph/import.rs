@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     ActionId, ActionKind, GraphError, InputAction, LayerId, NodeId,
     PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
-    SubmittedInputValue, ThreadId, graph::InteractionScope, storage::sqlite::actions::ActionTable,
+    SubmittedInputValue, ThreadId, graph::InteractionScope, graph::completion,
+    storage::sqlite::actions::ActionTable, storage::sqlite::imports::ImportTable,
     storage::sqlite::input_children::validate_value,
 };
 
@@ -257,6 +258,14 @@ impl crate::GraphDatabase {
         &self,
         import_id: &str,
     ) -> Result<ImportedConversationReceipt, GraphError> {
+        // Taken before the write transaction, like every other accept path, so
+        // submissions to this target index in the order they commit.
+        let target = {
+            let mut connection = self.storage.acquire().await?;
+            ImportTable::new(&mut connection).target(import_id).await?
+        };
+        let _order = self.order_writes_to(target).await;
+        let _publication = self.enter_search_publication().await;
         let mut tx = self.storage.begin_write().await?;
         let metadata = load_metadata(&mut tx, import_id).await?;
         let turn_count: i64 =
@@ -778,7 +787,50 @@ impl crate::GraphDatabase {
                 ));
             }
         }
-        tx.commit().await?;
+        // An import is an accept path like any other, so its closures reach the
+        // search store before SQLite commits. The whole conversation goes in as
+        // one search transaction carrying one revision: the turns were authored
+        // together and there is no point at which a partial import is meaningful.
+        let mut closures = Vec::new();
+        for receipt in &receipts {
+            let Some(node_id) = receipt.graph_node_id else {
+                continue;
+            };
+            let node_id = crate::NodeId::new(node_id)
+                .ok_or_else(|| GraphError::Internal("invalid imported root node ID".into()))?;
+            let scope = InteractionScope {
+                project_id: metadata.project_id,
+                thread_id: metadata.thread_id,
+                root_node_id: node_id,
+                read_only: false,
+                authority_epoch: None,
+            };
+            if let Some(closure) =
+                completion::read_accepted_closure_on(&mut tx, &scope, node_id).await?
+            {
+                closures.push(closure.into());
+            }
+        }
+        let indexed = !closures.is_empty();
+        if indexed
+            && let Err(error) = completion::index_and_record(
+                self,
+                &mut tx,
+                target,
+                closures,
+                crate::publication_targets(metadata.project_id, metadata.thread_id),
+                self.import_expiry(),
+            )
+            .await
+        {
+            tx.rollback().await?;
+            return Err(error);
+        }
+        if indexed {
+            self.commit_indexed_write(tx, target).await?;
+        } else {
+            tx.commit().await?;
+        }
         for receipt in &mut receipts {
             if let Some(node_id) = receipt.graph_node_id {
                 receipt.output = self

@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     CompletionLifecycle, CurrentProjectionEvent, CurrentProjectionPage, CurrentTransition,
     CurrentTransitionReceipt, GraphDatabase, GraphError, LayerId, NavigateRelation, NodeId,
+    SearchTarget,
     graph::InteractionScope,
     storage::sqlite::{
         currents::{CurrentTable, HeadMove, RevisionInsert},
@@ -12,7 +13,10 @@ use crate::{
     },
 };
 
-use super::{accept, plan::CompletionPlan};
+use super::{
+    accept, canonical_publication_matches, index_and_record, plan::CompletionPlan,
+    read_accepted_publication_on,
+};
 
 pub(crate) async fn transition(
     database: &GraphDatabase,
@@ -30,6 +34,22 @@ pub(crate) async fn transition(
     }
     validate_terminal_reason(intent)?;
     let request_digest = current_transition_request_digest(expected_revision, intent)?;
+    let publishes_graph = matches!(
+        intent,
+        CurrentTransition::Advance { .. } | CurrentTransition::Return { .. }
+    );
+    let target = SearchTarget::new(scope.project_id, scope.thread_id);
+    let _order = if publishes_graph {
+        Some(database.order_writes_to(target).await)
+    } else {
+        None
+    };
+    let _publication = if publishes_graph {
+        Some(database.enter_search_publication().await)
+    } else {
+        None
+    };
+    let expiry = database.expiry();
     let mut transaction = database.storage.begin_write().await?;
     scope.require_active_authority(&mut transaction).await?;
     if let Some(receipt) = CurrentTable::new(&mut transaction)
@@ -37,7 +57,12 @@ pub(crate) async fn transition(
         .await?
     {
         if receipt.request_digest == request_digest {
+            let confirm = publishes_graph
+                && canonical_publication_matches(database, &mut transaction, target).await?;
             transaction.commit().await?;
+            if confirm {
+                database.search_index.canonical_commit_confirmed(target);
+            }
             return Ok(receipt);
         }
         return Err(GraphError::validation(
@@ -46,7 +71,6 @@ pub(crate) async fn transition(
             "This operation key is already committed with different transition input.",
         ));
     }
-
     let persisted = CurrentTable::new(&mut transaction)
         .state(scope.root_node_id)
         .await?;
@@ -70,7 +94,7 @@ pub(crate) async fn transition(
     let revision = expected_revision
         .checked_add(1)
         .ok_or_else(|| GraphError::Internal("completion revision overflow".into()))?;
-    let (current_layer_id, final_layer_id, snapshot_digest) = match intent {
+    let (current_layer_id, final_layer_id, snapshot_digest, search_publication) = match intent {
         CurrentTransition::Advance { layer_id } => {
             if persisted.current_layer_id == Some(*layer_id) {
                 return Err(GraphError::validation(
@@ -89,7 +113,9 @@ pub(crate) async fn transition(
             .await?;
             let digest = snapshot_digest(&plan);
             accept::publish(&mut transaction, scope, &plan, Some(revision)).await?;
-            (Some(*layer_id), None, digest)
+            let publication =
+                read_accepted_publication_on(&mut transaction, scope, *layer_id, None).await?;
+            (Some(*layer_id), None, digest, Some(publication))
         }
         CurrentTransition::Return { layer_id } => {
             let plan = CompletionPlan::build_return(
@@ -108,13 +134,18 @@ pub(crate) async fn transition(
             .await?;
             let digest = snapshot_digest(&plan);
             accept::publish(&mut transaction, scope, &plan, Some(revision)).await?;
+            let root_action = plan.root_action()?.clone();
             accept::finalize(&mut transaction, scope, &plan).await?;
-            (Some(*layer_id), Some(*layer_id), digest)
+            let publication =
+                read_accepted_publication_on(&mut transaction, scope, *layer_id, Some(root_action))
+                    .await?;
+            (Some(*layer_id), Some(*layer_id), digest, Some(publication))
         }
         CurrentTransition::Stop { .. } | CurrentTransition::Fail { .. } => (
             persisted.current_layer_id,
             None,
             format!("sha256:{:x}", Sha256::digest(b"no-publication")),
+            None,
         ),
     };
     CurrentTable::new(&mut transaction)
@@ -161,7 +192,33 @@ pub(crate) async fn transition(
             },
         )
         .await?;
-    transaction.commit().await?;
+    if let Some(publication) = search_publication {
+        #[cfg(feature = "crash-test-support")]
+        super::crash_checkpoint(
+            database,
+            super::CompletionCrashPoint::AfterSqliteClosureWrite,
+        );
+        if let Err(error) = index_and_record(
+            database,
+            &mut transaction,
+            target,
+            vec![publication],
+            crate::publication_targets(scope.project_id, scope.thread_id),
+            expiry,
+        )
+        .await
+        {
+            transaction.rollback().await?;
+            return Err(error);
+        }
+    }
+    if publishes_graph {
+        database.commit_indexed_write(transaction, target).await?;
+    } else {
+        transaction.commit().await?;
+    }
+    #[cfg(feature = "crash-test-support")]
+    super::crash_checkpoint(database, super::CompletionCrashPoint::AfterSqliteCommit);
     Ok(CurrentTransitionReceipt {
         completion_id: scope.root_node_id,
         revision,

@@ -3,11 +3,13 @@ pub(crate) mod completions;
 pub(crate) mod contexts;
 pub(crate) mod currents;
 pub(crate) mod edges;
+pub(crate) mod imports;
 pub(crate) mod input_children;
 pub(crate) mod layers;
 pub(crate) mod migrations;
 pub(crate) mod nodes;
 pub(crate) mod personal_presentation;
+pub(crate) mod search_index;
 
 use std::{path::Path, str::FromStr, time::Duration};
 
@@ -17,6 +19,7 @@ use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction, pool::PoolConnecti
 use crate::GraphError;
 
 pub(crate) type GraphConnection = SqliteConnection;
+pub(crate) type GraphTransaction = Transaction<'static, Sqlite>;
 
 #[derive(Clone)]
 pub(crate) struct SqliteGraphStore {

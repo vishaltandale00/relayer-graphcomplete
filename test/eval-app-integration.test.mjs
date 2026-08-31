@@ -13,12 +13,20 @@ import {
   H3_SEEDED_TREE,
   H3_UPSTREAM_COMMIT,
   H3_UPSTREAM_TREE,
+  graphMemoryEvalCaseId,
+  graphMemoryEvalPrompts,
+  graphMemoryFixtureFactory,
+  graphMemorySearchBudget,
+  graphMemorySearchParameters,
+  graphMemorySearchQuery,
   taskSystemFixtureFactory,
 } from "@relayer/eval-runner";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   EvalService,
+  evalCases,
+  resolveEvalCasePrompts,
   recursiveCompleteChecks,
   validateCandidateTrace,
 } from "../desktop/eval-main/eval-service.mjs";
@@ -353,6 +361,265 @@ describe("Relayer Eval application service", () => {
     expect(childTrace.events.map(({ type }) => type)).toContain("execution.scope");
   }, 20_000);
 
+  it("catalogs graph memory as a harness-neutral natural two-turn case", () => {
+    const definition = evalCases.find((candidate) => candidate.id === graphMemoryEvalCaseId);
+    const firstRun = resolveEvalCasePrompts(definition, "run-alpha");
+    const secondRun = resolveEvalCasePrompts(definition, "run-beta");
+
+    expect(definition).toMatchObject({
+      name: "Graph memory · prior accepted reference",
+      description: expect.stringContaining("prior accepted layer"),
+      defaultSelected: false,
+    });
+    expect(firstRun).toEqual(graphMemoryEvalPrompts("run-alpha"));
+    expect(firstRun).toHaveLength(2);
+    expect(firstRun.join("\n")).not.toContain("GRAPH_MEMORY_ANCHOR:");
+    expect(firstRun[1]).toBe("Find your earlier Freshness acknowledged explanation and link the original as supporting context in a concise follow-up. Do not recreate or paraphrase it.");
+    expect(firstRun[1]).not.toMatch(/graph search|graph\.search|query|parameter|budget|layer|accepted|hard-code|\bID\b/i);
+    expect(secondRun).toEqual(firstRun);
+    expect(JSON.stringify(definition)).not.toContain("fixture.graph-memory");
+    expect(JSON.stringify(definition)).not.toContain("codex.basic");
+  });
+
+  it("retains graph-memory search and reference evidence in one product thread", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-graph-memory-app-test-"));
+    directories.push(dataDirectory);
+    const configurationPath = join(repositoryRoot, "harnesses", "fixture-graph-memory.yaml");
+    const runtime = new GraphCompleteRuntimeService({
+      userDataDirectory: dataDirectory,
+      graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
+      configurationPaths: [configurationPath],
+      additionalImplementations: { "fixture.graph-memory": graphMemoryFixtureFactory },
+      candidateTrace: {
+        directory: join(dataDirectory, "eval-data", "candidate-trace-spool"),
+        policy: {
+          mode: "required",
+          requiredFeatures: { prompt: "full", messages: "full" },
+          includeNativeArtifacts: false,
+          maxBytesPerTurn: 1_000_000,
+          maxEventsPerTurn: 1_000,
+        },
+      },
+    });
+    services.push(runtime);
+    const runtimeSession = await runtime.start();
+    const product = new RelayerAppServerService({
+      userDataDirectory: dataDirectory,
+      binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
+      webDirectory: join(repositoryRoot, "desktop", "renderer"),
+      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
+      runtimeSession,
+      defaultHarnessConfiguration: "fixture-graph-memory",
+      allowHarnessOverride: true,
+    });
+    services.push(product);
+    const productSession = await product.start();
+    const evalService = await new EvalService({
+      stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
+      productSession,
+      configurationPaths: [configurationPath],
+      platform: "darwin",
+      targetKey: "macos-arm64",
+      candidateTraceExporter: (interactionId, targetDirectory, correlation) => runtime.exportCandidateTrace(interactionId, targetDirectory, correlation),
+      candidateTraceRequired: true,
+    }).open();
+
+    expect(evalService.catalog()).toMatchObject({
+      cases: expect.arrayContaining([expect.objectContaining({ id: graphMemoryEvalCaseId })]),
+      harnessConfigurations: expect.arrayContaining([expect.objectContaining({
+        name: "fixture-graph-memory",
+        implementation: "fixture.graph-memory",
+      })]),
+    });
+    const created = await evalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const completed = await waitForCompletedRun(evalService, created.id, 20_000);
+    const execution = completed.executions[0];
+
+    expect(completed.status).toBe("passed");
+    expect(execution.threadIds).toHaveLength(1);
+    expect(execution.turns).toHaveLength(2);
+    expect(execution.turns.every((turn) => !turn.prompt.includes("GRAPH_MEMORY_ANCHOR:"))).toBe(true);
+    expect(execution.turns[1].deterministicChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: expect.stringContaining("search-returned-prior-root"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("draft-decoy-hidden"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("typed-reference-target"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("ack-search-submit-order"), passed: true }),
+    ]));
+    expect(execution.turns[1].caseEvidence).toMatchObject({
+      searchedLayerIds: [execution.turns[0].rootLayerId],
+      referenceActionId: expect.any(Number),
+    });
+    expect(execution.turns[1].caseEvidence).not.toHaveProperty("anchor");
+    const secondTrace = await evalService.candidateTraceContext(
+      execution.id,
+      execution.turns[1].interactionId,
+    );
+    expect(secondTrace.graphOperationsEvidence).toMatchObject({
+      status: "complete",
+      error: null,
+      descriptor: {
+        format: "relayer-graph-operations-v1",
+        truncated: false,
+      },
+    });
+    expect(secondTrace.graphOperations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "/api/graph/search",
+        queryContractVersion: 1,
+        query: graphMemorySearchQuery,
+        parameters: graphMemorySearchParameters,
+        budget: graphMemorySearchBudget,
+        status: 200,
+        searchLayerIds: [execution.turns[0].rootLayerId],
+        resultTruncated: false,
+        sequence: expect.any(Number),
+      }),
+    ]));
+    const firstRoot = execution.turns[0].rootLayerId;
+    const secondRoot = execution.turns[1].rootLayerId;
+    const detail = await productRequest(productSession, `/api/threads/${execution.threadIds[0]}`);
+    expect(detail.interactions).toHaveLength(2);
+    expect(detail.interactions.every((interaction) => interaction.completionStatus === "accepted")).toBe(true);
+    const secondLayer = await productRequest(
+      productSession,
+      `/api/threads/${execution.threadIds[0]}/interactions/${detail.interactions[1].id}/layers/${secondRoot}`,
+    );
+    expect(secondLayer.actions).toEqual(expect.arrayContaining([expect.objectContaining({
+      kind: "navigate",
+      relation: "reference",
+      sourceLayerId: secondRoot,
+      targetLayerId: firstRoot,
+      state: "accepted",
+    })]));
+    expect(evalService.reviewContext(execution.id).cases).toEqual([expect.objectContaining({
+      id: graphMemoryEvalCaseId,
+      threads: [{ id: execution.threadIds[0], name: "Graph memory · prior accepted reference" }],
+    })]);
+
+    const secondCreated = await evalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const secondCompleted = await waitForCompletedRun(evalService, secondCreated.id, 20_000);
+    const secondExecution = secondCompleted.executions[0];
+    expect(secondCompleted.status).toBe("passed");
+    expect(secondExecution.threadIds).toHaveLength(1);
+    expect(secondExecution.threadIds[0]).not.toBe(execution.threadIds[0]);
+    expect(secondExecution.turns[0].rootLayerId).not.toBe(firstRoot);
+    expect(secondExecution.turns[1].caseEvidence).toMatchObject({
+      searchedLayerIds: [secondExecution.turns[0].rootLayerId],
+      referenceActionId: expect.any(Number),
+    });
+    expect(secondExecution.turns[1].caseEvidence.searchedLayerIds).not.toContain(firstRoot);
+
+    let launderedTurns = 0;
+    const launderedEvalService = await new EvalService({
+      stateFile: join(dataDirectory, "eval-data", "laundered-test-runs.json"),
+      productSession,
+      configurationPaths: [configurationPath],
+      platform: "darwin",
+      targetKey: "macos-arm64",
+      candidateTraceExporter: async (interactionId, targetDirectory, correlation) => {
+        const descriptor = await runtime.exportCandidateTrace(interactionId, targetDirectory, correlation);
+        launderedTurns += 1;
+        if (launderedTurns !== 2) return descriptor;
+        const rewritten = await rewriteGraphOperations(targetDirectory, (operations) => {
+          const search = operations.find((event) => event.path === "/api/graph/search");
+          search.query = "MATCH (l:Layer) RETURN l AS layer ORDER BY layer ASC";
+        });
+        return {
+          ...descriptor,
+          graphOperations: { ...descriptor.graphOperations, ...rewritten.descriptor },
+        };
+      },
+      candidateTraceRequired: true,
+    }).open();
+    const launderedRun = await launderedEvalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const launderedCompleted = await waitForCompletedRun(launderedEvalService, launderedRun.id, 20_000);
+    expect(launderedCompleted.status).toBe("failed");
+    expect(launderedCompleted.executions[0].turns[1].deterministicChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: expect.stringContaining("search-request-contract"),
+        passed: false,
+      }),
+    ]));
+
+    let exportedTurns = 0;
+    let tamperedGraphOperationsPath;
+    const corruptedEvalService = await new EvalService({
+      stateFile: join(dataDirectory, "eval-data", "corrupted-test-runs.json"),
+      productSession,
+      configurationPaths: [configurationPath],
+      platform: "darwin",
+      targetKey: "macos-arm64",
+      candidateTraceExporter: async (interactionId, targetDirectory, correlation) => {
+        const descriptor = await runtime.exportCandidateTrace(interactionId, targetDirectory, correlation);
+        exportedTurns += 1;
+        if (exportedTurns !== 2) return descriptor;
+        const rewritten = await rewriteGraphOperations(targetDirectory, (operations) => {
+          operations[0].interactionNodeId += 10_000;
+        });
+        tamperedGraphOperationsPath = rewritten.path;
+        return {
+          ...descriptor,
+          graphOperations: {
+            ...descriptor.graphOperations,
+            ...rewritten.descriptor,
+          },
+        };
+      },
+      candidateTraceRequired: true,
+    }).open();
+    const corruptedRun = await corruptedEvalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const corruptedCompleted = await waitForCompletedRun(corruptedEvalService, corruptedRun.id, 20_000);
+    const corruptedExecution = corruptedCompleted.executions[0];
+    expect(corruptedCompleted.status).toBe("failed");
+    expect(corruptedExecution.promotable).toBe(false);
+    expect(corruptedExecution.turns.flatMap((turn) => turn.deterministicChecks)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: expect.stringContaining("case-evidence"),
+        passed: false,
+        detail: "Candidate trace graph-operation ledger contains an invalid receipt.",
+      }),
+    ]));
+    const corruptedTrace = await corruptedEvalService.candidateTraceContext(
+      corruptedExecution.id,
+      corruptedExecution.turns[1].interactionId,
+    );
+    expect(corruptedTrace.graphOperations).toEqual([]);
+    expect(corruptedTrace.graphOperationsEvidence).toMatchObject({
+      status: "invalid",
+      error: "Candidate trace graph-operation ledger contains an invalid receipt.",
+    });
+
+    await writeFile(tamperedGraphOperationsPath, Buffer.concat([
+      await readFile(tamperedGraphOperationsPath),
+      Buffer.from("tampered\n"),
+    ]));
+    const digestCorruptedTrace = await corruptedEvalService.candidateTraceContext(
+      corruptedExecution.id,
+      corruptedExecution.turns[1].interactionId,
+    );
+    expect(digestCorruptedTrace.graphOperations).toEqual([]);
+    expect(digestCorruptedTrace.graphOperationsEvidence).toMatchObject({
+      status: "invalid",
+      error: "Candidate trace graph-operation ledger failed digest validation.",
+    });
+  }, 30_000);
+
   it("runs case × harness executions through the product server and preserves reviewable threads", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-app-test-"));
     directories.push(dataDirectory);
@@ -617,8 +884,8 @@ describe("Relayer Eval application service", () => {
   }, 20_000);
 });
 
-async function waitForCompletedRun(evalService, runId) {
-  const deadline = Date.now() + 10_000;
+async function waitForCompletedRun(evalService, runId, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const run = evalService.getRun(runId);
     if (!["queued", "running"].includes(run.status)) return run;
@@ -639,4 +906,21 @@ async function productRequest(session, path, init = {}) {
   const value = await response.json();
   if (!response.ok) throw new Error(JSON.stringify(value));
   return value;
+}
+async function rewriteGraphOperations(targetDirectory, mutate) {
+  const path = join(targetDirectory, "graph-operations.jsonl");
+  const operations = (await readFile(path, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  mutate(operations);
+  const bytes = Buffer.from(`${operations.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  await writeFile(path, bytes);
+  return {
+    path,
+    descriptor: {
+      sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+      byteLength: bytes.byteLength,
+    },
+  };
 }

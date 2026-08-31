@@ -494,6 +494,36 @@ describe("CodexBasicHarness", () => {
     expect(prompt).not.toContain("sourceLayerId");
   });
 
+  it("teaches capability-scoped bounded search and typed references through executable JavaScript", () => {
+    const disabledPrompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
+    const prompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client", undefined, true, true);
+    const searchGuidance = prompt.slice(
+      prompt.indexOf("Graph search is available"),
+      prompt.indexOf("Navigation has two meanings:"),
+    );
+
+    expect(disabledPrompt).not.toContain("Graph search is available");
+    expect(disabledPrompt).not.toContain("await graph.search(request, options)");
+    expect(searchGuidance).toContain("await graph.search(request, options)");
+    expect(searchGuidance).toContain("It is not a provider-native tool or MCP function");
+    expect(searchGuidance).toContain("queryContractVersion: 1");
+    expect(searchGuidance).toContain('target: { scope: "project", id: knownProjectId }');
+    expect(searchGuidance).toContain("Never invent, guess, or discover a target ID");
+    expect(searchGuidance).toContain("The selector chooses a dataset; it is not authority");
+    expect(searchGuidance).toContain("whole-target Content or Layer scans");
+    expect(searchGuidance).toContain("one- or two-relationship MATCH patterns");
+    expect(searchGuidance).toContain("parameters: { anchor: { type: \"string\", value: \"Queue\" }, count: { type: \"integer\", value: \"2\" } }");
+    expect(searchGuidance).toContain("at most 5 rows");
+    expect(searchGuidance).toContain("hard maximum of 8");
+    expect(searchGuidance).toContain("bounded to 16 KiB");
+    expect(searchGuidance).toContain("GraphQueryError values with stable status, code, phase, and path fields");
+    expect(searchGuidance).toContain("never on message text");
+    expect(searchGuidance).toContain("priorLayer?.type !== \"layer\"");
+    expect(searchGuidance).toContain("target: priorLayerId");
+    expect(searchGuidance).toContain("let graph.addAction revalidate visibility");
+    expect(searchGuidance).not.toMatch(/graph\.search\(\{[^}]*\b(?:permit|credential|database|token|authority)\s*:/s);
+  });
+
   it("uses the picker-selected root model and native delegation in the product configuration", async () => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"));
     let submitted: CodexAppServerTurnOptions | undefined;

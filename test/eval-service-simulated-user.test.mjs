@@ -566,6 +566,7 @@ describe("EvalService simulated-user result persistence", () => {
       judgeConfigurationName: "simulated-user",
     });
     const completed = await waitForCompletedRun(service, created.id);
+    await waitForPersistedRun(stateFile, created.id);
     const execution = completed.executions[0];
 
     expect(execution.outcomeGrade).toMatchObject({ status: "completed", qualified: false });
@@ -654,6 +655,7 @@ describe("EvalService simulated-user result persistence", () => {
       judgeConfigurationName: "deterministic-graph-contract",
     });
     await waitForCompletedRun(service, created.id);
+    await waitForPersistedRun(stateFile, created.id);
     const createRequest = product.mock.calls.find(([url, options]) => (
       new URL(url).pathname === "/api/threads" && options?.method === "POST"
     ));

@@ -1,8 +1,17 @@
+import { buildGraphOperationsViewModel, renderGraphOperationsMarkup } from "./trace-model.js";
+
 const api = window.relayerEvalTrace;
 const params = new URLSearchParams(location.search);
 const executionId = params.get("executionId");
 let selectedInteractionId = params.get("interactionId");
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]);
+function renderGraphOperations(trace) {
+  const model = buildGraphOperationsViewModel(trace);
+  const status = document.querySelector("#graph-operations-status");
+  status.textContent = `${model.status} · ${model.operationCount} receipt${model.operationCount === 1 ? "" : "s"}`;
+  status.dataset.status = model.status;
+  document.querySelector("#graph-operations").innerHTML = renderGraphOperationsMarkup(model);
+}
 
 async function render(interactionId) {
   const trace = await api.load(executionId, interactionId || undefined);
@@ -16,9 +25,12 @@ async function render(interactionId) {
   const coverage = trace.manifest?.achievedCoverage || trace.turn.candidateTrace.coverage || {};
   document.querySelector("#coverage").innerHTML = Object.entries(coverage).map(([name, value]) => `<span>${escapeHtml(name)}: ${escapeHtml(value)}</span>`).join("");
   document.querySelector("#summary").textContent = trace.manifest ? `${trace.events.length} events · ${trace.turn.candidateTrace.byteLength || 0} bytes · ${trace.turn.candidateTrace.sha256 || "no digest"}` : trace.turn.candidateTrace.error || "No trace artifact was captured.";
+  renderGraphOperations(trace);
   document.querySelector("#events").innerHTML = trace.events.length ? trace.events.map((event) => `<article class="event"><code>#${escapeHtml(event.sequence)}</code><b>${escapeHtml(event.type)}</b><pre>${escapeHtml(JSON.stringify(event.data, null, 2))}</pre></article>`).join("") : '<div class="empty">No events are available for this turn.</div>';
 }
 
 void render(selectedInteractionId).catch((error) => {
+  document.querySelector("#graph-operations-status").textContent = "unavailable";
+  document.querySelector("#graph-operations").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   document.querySelector("#events").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
 });

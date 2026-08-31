@@ -7,6 +7,11 @@ import {
   recursiveCompleteCaseId,
   runPanelCopy,
 } from "./run-model.js";
+import {
+  bindAblationControls,
+  createRunFromControls,
+  selectionFromControls,
+} from "./configuration-model.js";
 
 const api = window.relayerEval;
 const $ = (selector) => document.querySelector(selector);
@@ -42,7 +47,11 @@ function optionMarkup({ id, name, description, detail }, group, checked) {
 
 function configure() {
   $("#caseOptions").innerHTML = catalog.cases.map((item) => optionMarkup(item, "cases", item.defaultSelected !== false)).join("");
-  $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({ id: item.name, name: item.name, detail: item.implementation }, "harnesses", item.name === "fixture-task-system")).join("");
+  $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({
+    id: item.name,
+    name: item.name,
+    detail: `${item.implementation} · graph search ${item.graphCapabilityProfile?.search === "query-v1" ? "query-v1" : "off"}`,
+  }, "harnesses", item.name === "fixture-task-system")).join("");
   $("#judgeOptions").innerHTML = catalog.judges.map((item, index) => optionMarkup(item, "judge", index === 0)).join("");
   const syncJudgeCompatibility = () => {
     const selectedCaseIds = [...document.querySelectorAll('input[name="cases"]:checked')]
@@ -63,6 +72,14 @@ function configure() {
   document.querySelectorAll('input[name="cases"]').forEach((input) => {
     input.addEventListener("change", syncJudgeCompatibility);
   });
+  $("#ablationOptions").innerHTML = (catalog.ablations || []).map((item) => `
+    <button type="button" class="ablation-preset" data-ablation="${escapeHtml(item.id)}">
+      <b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.description)}</small><span>${item.harnessPairs.length} provider pairs</span>
+    </button>`).join("");
+  bindAblationControls(document, catalog, (selection) => {
+    syncJudgeCompatibility();
+    toast(`Selected ${selection.harnessConfigurationNames.length / 2} graph-search provider pairs.`);
+  });
   const recursiveOption = document.querySelector(`input[name="cases"][value="${recursiveCompleteCaseId}"]`);
   if (recursiveOption) recursiveOption.onchange = () => {
     if (!recursiveOption.checked) return;
@@ -80,18 +97,18 @@ function configure() {
 }
 
 async function startRun() {
-  const values = (name) => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map((input) => input.value);
-  let selection = {
-    testCaseIds: values("cases"),
-    harnessConfigurationNames: values("harnesses"),
-    judgeConfigurationName: values("judge")[0],
-  };
+  let selection = selectionFromControls(document);
   if (!selection.testCaseIds.length || !selection.harnessConfigurationNames.length) return toast("Select at least one case and one harness.");
   selection = authorizeRecursiveCompleteSelection(selection, (message) => window.confirm(message));
   if (selection === null) return;
   $("#startRun").disabled = true;
   try {
-    const run = await api.createRun(selection);
+    const run = await createRunFromControls(document, {
+      createRun: (controlSelection) => api.createRun({
+        ...controlSelection,
+        ...(selection.liveAuthorization ? { liveAuthorization: selection.liveAuthorization } : {}),
+      }),
+    });
     selectedRunId = run.id;
     selectedExecutionId = null;
     runs = await api.listRuns();

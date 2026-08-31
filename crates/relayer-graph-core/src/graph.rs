@@ -4,10 +4,16 @@ mod import;
 mod interaction_scope;
 mod model;
 mod personal_presentation;
+mod search_index;
 mod writer;
 
-pub use completion::{AcceptedGraphClosure, CompletionOutput, current_transition_request_digest};
-pub use database::GraphDatabase;
+#[cfg(feature = "crash-test-support")]
+pub use completion::CompletionCrashPoint;
+pub use completion::{
+    AcceptedGraphClosure, AcceptedGraphPublication, CompletionOutput,
+    current_transition_request_digest,
+};
+pub use database::{DEFAULT_IMPORT_INDEX_BUDGET, DEFAULT_SEARCH_INDEX_BUDGET, GraphDatabase};
 pub use import::{
     ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedConversationReceipt,
     ImportedConversationStage, ImportedEdge, ImportedInputSource, ImportedInteractionContext,
@@ -32,6 +38,11 @@ pub use model::{
 pub use personal_presentation::{
     PersonalPresentationAttachment, PublishedPersonalPresentationVersion,
     ResolvedPersonalPresentation,
+};
+pub use search_index::{
+    NoSearchIndex, SearchIndex, SearchIndexComponent, SearchIndexFuture, SearchIndexRebuildClosure,
+    SearchIndexRebuildSnapshot, SearchIndexRevision, SearchIndexWrite, SearchTarget,
+    publication_targets,
 };
 pub use writer::GraphWriter;
 

@@ -36,6 +36,10 @@ export interface HarnessCompleteConfiguration {
   readonly agentAuthored: boolean;
 }
 
+export interface GraphCapabilityProfile {
+  readonly search: "disabled" | "query-v1";
+}
+
 export interface HarnessConfiguration {
   readonly schemaVersion: 1;
   readonly name: string;
@@ -50,6 +54,8 @@ export interface HarnessConfiguration {
   readonly modelDefaults?: HarnessModelDefaults;
   /** Explicit authority to expose agent-authored complete(inputGraph); root Complete is unaffected. */
   readonly complete?: HarnessCompleteConfiguration;
+  /** Product-owned graph authority. Omission is equivalent to search disabled. */
+  readonly graphCapabilityProfile?: GraphCapabilityProfile;
   readonly settings: JsonObject;
 }
 

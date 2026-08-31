@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
+import { GRAPH_QUERY_CONTRACT_VERSION } from "./query-errors.generated.js";
+import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
 import { GraphApiError, type CompletionInputGraph, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation, type StopReason } from "./types.js";
 
 export class RelayerGraphClient {
@@ -189,13 +191,47 @@ export class RelayerGraphClient {
     });
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async search(request: GraphSearchRequest, options: GraphSearchOptions = {}): Promise<GraphSearchResult> {
+    const result = await this.request<unknown>("/api/graph/search", {
+      method: "POST",
+      body: JSON.stringify({
+        queryContractVersion: request.queryContractVersion,
+        ...(request.target === undefined ? {} : {
+          target: { scope: request.target.scope, id: request.target.id },
+        }),
+        query: request.query,
+        parameters: request.parameters ?? {},
+        budget: request.budget ?? {},
+      }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    }, "query");
+    if (!isVersionedGraphSearchResult(result)) {
+      throw new GraphApiError(
+        200,
+        "invalid_search_response",
+        "queryContractVersion",
+        `Graph search response must use query contract version ${GRAPH_QUERY_CONTRACT_VERSION}`,
+      );
+    }
+    return result;
+  }
+
+  private async request<T>(path: string, init: RequestInit = {}, errorKind: "api" | "query" = "api"): Promise<T> {
     const response = await fetch(`${this.capability.url}${path}`, {
       ...init,
       headers: { "content-type": "application/json", authorization: `Bearer ${this.capability.token}`, ...init.headers },
     });
-    const body = await response.json().catch(() => ({})) as T & GraphApiErrorBody;
+    const body = await response.json().catch(() => ({})) as T & GraphApiErrorBody & GraphQueryErrorBody;
     if (!response.ok) {
+      if (errorKind === "query" && isGraphQueryErrorBody(body)) {
+        throw new GraphQueryError(
+          response.status,
+          body.error.code,
+          body.error.phase,
+          body.error.path,
+          body.error.message ?? `Graph search failed with ${response.status}`,
+        );
+      }
       throw new GraphApiError(
         response.status,
         body.error?.code ?? "request_failed",
@@ -211,6 +247,13 @@ export class RelayerGraphClient {
 function requireReference(value: NodeReference | undefined): NodeReference {
   if (value === undefined) throw new Error("createEdge requires two node references");
   return value;
+}
+
+function isVersionedGraphSearchResult(value: unknown): value is GraphSearchResult {
+  return typeof value === "object"
+    && value !== null
+    && "queryContractVersion" in value
+    && value.queryContractVersion === GRAPH_QUERY_CONTRACT_VERSION;
 }
 
 export { EdgeObject, LayerObject, NodeObject };

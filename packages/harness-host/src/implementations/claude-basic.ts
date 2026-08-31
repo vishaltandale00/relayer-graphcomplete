@@ -234,6 +234,7 @@ export class ClaudeBasicHarness implements Harness {
       this.completeModuleUrl,
       "Claude",
       includePersonalPresentation,
+      this.context.configuration.graphCapabilityProfile?.search === "query-v1",
     );
   }
 }

@@ -33,10 +33,10 @@ struct Arguments {
     temporal_invoke_resolution: bool,
     #[arg(long)]
     temporal_provider_recursion: bool,
-    #[cfg(ladybug_qualification)]
+    #[cfg(feature = "ladybug")]
     #[arg(long, hide = true)]
     ladybug_qualification: bool,
-    #[cfg(ladybug_qualification)]
+    #[cfg(feature = "ladybug")]
     #[arg(long, hide = true, requires = "ladybug_qualification")]
     ladybug_qualification_hold: bool,
     #[arg(long, default_value_t = false)]
@@ -46,7 +46,7 @@ struct Arguments {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut arguments = Arguments::parse();
-    #[cfg(ladybug_qualification)]
+    #[cfg(feature = "ladybug")]
     if arguments.ladybug_qualification {
         return run_ladybug_qualification(
             &arguments.database,
@@ -99,9 +99,6 @@ async fn run(
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("the v1 graph server only binds to 127.0.0.1");
     }
-    let graph = GraphDatabase::open(&arguments.database)
-        .await
-        .context("open graph database")?;
     let temporal_features = TemporalFeatureConfig {
         config_version: 1,
         schema_read: arguments.temporal_schema_read,
@@ -110,10 +107,9 @@ async fn run(
         invoke_resolution: arguments.temporal_invoke_resolution,
         provider_recursion: arguments.temporal_provider_recursion,
     };
-    graph
-        .set_temporal_features(temporal_features)
+    let state = open_server_state(&arguments.database, control_token, temporal_features)
         .await
-        .context("persist temporal feature config")?;
+        .context("open graph database")?;
     let listener =
         tokio::net::TcpListener::bind(SocketAddr::new(arguments.host, arguments.port)).await?;
     let address = listener.local_addr()?;
@@ -121,16 +117,49 @@ async fn run(
         "{}",
         serde_json::json!({"ready":true,"url":format!("http://{address}")})
     );
-    axum::serve(
-        listener,
-        router(ServerState::new(graph, control_token).with_temporal_features(temporal_features)),
-    )
-    .with_graceful_shutdown(shutdown_signal(parent_disconnected))
-    .await?;
+    axum::serve(listener, router(state))
+        .with_graceful_shutdown(shutdown_signal(parent_disconnected))
+        .await?;
     Ok(())
 }
 
-#[cfg(ladybug_qualification)]
+/// Open the graph with its search store attached, so an accepted closure is
+/// saved and made searchable as one action.
+#[cfg(feature = "ladybug")]
+async fn open_server_state(
+    path: &str,
+    control_token: String,
+    temporal_features: TemporalFeatureConfig,
+) -> anyhow::Result<ServerState> {
+    use relayer_graph_server::search_index::LadybugSearchIndex;
+    use std::{path::Path, sync::Arc};
+
+    let graph = GraphDatabase::open(path).await?;
+    graph.set_temporal_features(temporal_features).await?;
+    let index = Arc::new(
+        LadybugSearchIndex::open_reconciled(Path::new(path), &graph)
+            .await
+            .context("reconcile the search index")?,
+    );
+    Ok(ServerState::new(graph, control_token)
+        .with_temporal_features(temporal_features)
+        .with_search_index(index))
+}
+
+/// Without the Ladybug feature there is no search store, so closures are saved
+/// to SQLite and indexed nowhere.
+#[cfg(not(feature = "ladybug"))]
+async fn open_server_state(
+    path: &str,
+    control_token: String,
+    temporal_features: TemporalFeatureConfig,
+) -> anyhow::Result<ServerState> {
+    let graph = GraphDatabase::open(path).await?;
+    graph.set_temporal_features(temporal_features).await?;
+    Ok(ServerState::new(graph, control_token).with_temporal_features(temporal_features))
+}
+
+#[cfg(feature = "ladybug")]
 fn run_ladybug_qualification(path: &str, hold: bool) -> anyhow::Result<()> {
     use lbug::{Connection, Database, SystemConfig, Value};
     use std::path::Path;
@@ -178,7 +207,7 @@ fn run_ladybug_qualification(path: &str, hold: bool) -> anyhow::Result<()> {
 /// so each caller decides whether to propagate or ignore it. Only the
 /// qualification path needs this; `watch_parent_connection` drains the handle it
 /// already holds rather than locking stdin a second time.
-#[cfg(ladybug_qualification)]
+#[cfg(feature = "ladybug")]
 fn drain_stdin_until_eof() -> io::Result<()> {
     let mut input = io::stdin().lock();
     let mut buffer = [0_u8; 256];
