@@ -17,6 +17,9 @@ const coverage = JSON.parse(await read(`${evidenceRoot}/coverage.json`));
 const lock = await read(`${evidenceRoot}/Cargo.lock`);
 const output = await read(`${evidenceRoot}/captured-output.txt`);
 const receipt = JSON.parse(await read(`${evidenceRoot}/receipt.json`));
+const manifest = await fixture("manifest.json");
+const hardening = await fixture(manifest.files.hardening);
+const currentConformance = await read(manifest.qualificationEvidence.currentConformance[0].runner);
 
 const client = (
   await Promise.all(
@@ -34,11 +37,24 @@ assert.equal(receipt.issue, 261);
 assert.equal(receipt.engine, "lbug");
 assert.equal(receipt.version, "0.18.0");
 assert.equal(receipt.promotedTo, "crates/relayer-graph-server/src/search_index/");
+assert.deepEqual(manifest.qualificationEvidence.historicalReceipt, {
+  issue: 261,
+  positiveFile: "positive.json",
+  immutable: true,
+});
+assert.equal(manifest.qualificationEvidence.currentConformance[0].issue, 354);
+assert.equal(manifest.qualificationEvidence.currentConformance[0].file, manifest.files.hardening);
+assert.equal(hardening.issue, 354);
+assert.equal(hardening.status, "frozen");
+assert.match(currentConformance, /frozen_issue_354_hardening_corpus_conforms_through_real_ladybug/);
+assert.match(currentConformance, new RegExp(manifest.files.hardening.replace(".", "\\.")));
 for (const [relativePath, expected] of Object.entries(receipt.sha256)) {
   const bytes = await readFile(path.join(root, evidenceRoot, relativePath));
   assert.equal(createHash("sha256").update(bytes).digest("hex"), expected, `${relativePath} changed after evidence capture`);
 }
-const positiveFixtureBytes = await readFile(path.join(root, "fixtures/graph-query-v1/positive.json"));
+const positiveFixtureBytes = await readFile(
+  path.join(root, "fixtures/graph-query-v1", manifest.qualificationEvidence.historicalReceipt.positiveFile),
+);
 assert.equal(
   createHash("sha256").update(positiveFixtureBytes).digest("hex"),
   receipt.frozenPositiveFixtureSha256,
@@ -57,7 +73,7 @@ assert.match(
   "the promoted client drifted off the qualified lbug pin",
 );
 
-const positive = await fixture("positive.json");
+const positive = await fixture(manifest.qualificationEvidence.historicalReceipt.positiveFile);
 assert.deepEqual(coverage.requiredPositiveCases, positive.cases.map(({ id }) => id));
 for (const { id } of positive.cases) {
   assert.match(output, new RegExp(`^CASE=${id} STATUS=passed$`, "m"), `${id} lacks captured passing evidence`);
@@ -66,6 +82,13 @@ for (const { id } of positive.cases) {
 const negative = await fixture("negative.json");
 for (const { id, expectedError } of negative.cases) {
   assert.ok(coverage.negativeDispositionByPhase[expectedError.phase], `${id} has no phase disposition`);
+}
+for (const { id, expectedError } of hardening.negativeCases) {
+  assert.ok(coverage.negativeDispositionByPhase[expectedError.phase], `${id} has no phase disposition`);
+}
+const manifestCoverage = new Set(manifest.coverage.flatMap(({ cases }) => cases));
+for (const { id } of [...hardening.positiveCases, ...hardening.negativeCases]) {
+  assert.ok(manifestCoverage.has(id), `${id} is absent from the normative coverage inventory`);
 }
 const values = await fixture("values.json");
 assert.ok(coverage.valueCaseDisposition);
@@ -116,4 +139,4 @@ for (const line of [
   "EXTENSIONS=[]", "LBUG_STORAGE_VERSION=42",
 ]) assert.ok(output.split("\n").includes(line), `captured output lacks ${line}`);
 
-console.log(`Ladybug contract probe receipt covers ${positive.cases.length} positive, ${negative.cases.length} negative, ${values.cases.length + values.normalizationErrors.length} value, and ${limits.cases.length + 1} limit/budget cases.`);
+console.log(`Ladybug contract probe receipt covers ${positive.cases.length} positive, ${negative.cases.length} negative, ${values.cases.length + values.normalizationErrors.length} value, and ${limits.cases.length + 1} limit/budget cases; current conformance adds ${hardening.positiveCases.length} positive and ${hardening.negativeCases.length} negative Issue #354 cases.`);

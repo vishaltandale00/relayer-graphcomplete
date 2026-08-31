@@ -144,6 +144,11 @@ pub struct Parser {
     limits: QueryLimits,
     bindings: HashMap<String, Option<NodeLabel>>,
     relationship_bindings: HashMap<String, RelationshipType>,
+    path_bindings: HashSet<String>,
+    // #354 semantic checks are recorded while the remaining grammar is consumed,
+    // so a later parse error retains the contract's parse-before-plan precedence.
+    deferred_plan_error: Option<QueryError>,
+    projection_index: Option<usize>,
     occurrence: usize,
 }
 
@@ -163,12 +168,29 @@ pub fn parse(query: &str, limits: &QueryLimits) -> Result<QueryPlan, QueryError>
         limits: limits.clone(),
         bindings: HashMap::new(),
         relationship_bindings: HashMap::new(),
+        path_bindings: HashSet::new(),
+        deferred_plan_error: None,
+        projection_index: None,
         occurrence: 0,
     };
     parser.query()
 }
 
 impl Parser {
+    /// Keep encounter order deterministic: valid syntax reports the first plan
+    /// error, while any later parse error still returns immediately.
+    fn defer_plan_error(&mut self, mut error: QueryError) {
+        debug_assert_eq!(error.phase, super::error::QueryPhase::Plan);
+        if error.path == "query"
+            && let Some(index) = self.projection_index
+        {
+            error.path = format!("query.return[{index}]");
+        }
+        if self.deferred_plan_error.is_none() {
+            self.deferred_plan_error = Some(error);
+        }
+    }
+
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.position)
     }
@@ -220,17 +242,50 @@ impl Parser {
         QueryError::new(QueryCode::QuerySyntaxInvalid, "query", message)
     }
 
-    fn query(&mut self) -> Result<QueryPlan, QueryError> {
-        for token in &self.tokens {
-            if let Token::Word(word) = token
-                && FORBIDDEN_KEYWORDS.contains(&word.to_ascii_lowercase().as_str())
+    fn binding_is_bound(&self, binding: &str) -> bool {
+        self.bindings.contains_key(binding)
+            || self.relationship_bindings.contains_key(binding)
+            || self.path_bindings.contains(binding)
+    }
+
+    fn forbidden_construct_at_clause_position(&self) -> Option<QueryError> {
+        let word = match self.peek() {
+            Some(Token::Word(word))
+                if FORBIDDEN_KEYWORDS.contains(&word.to_ascii_lowercase().as_str()) =>
             {
-                return Err(QueryError::new(
-                    QueryCode::QueryConstructForbidden,
-                    "query",
-                    format!("`{word}` is forbidden by query contract version 1"),
-                ));
+                word
             }
+            _ => return None,
+        };
+        Some(QueryError::new(
+            QueryCode::QueryConstructForbidden,
+            "query",
+            format!("`{word}` is forbidden by query contract version 1"),
+        ))
+    }
+
+    fn unsupported_construct_at_clause_position(&self) -> Option<QueryError> {
+        let word = match self.peek() {
+            Some(Token::Word(word))
+                if UNSUPPORTED_KEYWORDS.contains(&word.to_ascii_lowercase().as_str()) =>
+            {
+                word
+            }
+            _ => return None,
+        };
+        Some(QueryError::new(
+            QueryCode::QueryConstructUnsupported,
+            "query",
+            format!("`{word}` is not admitted by query contract version 1"),
+        ))
+    }
+
+    fn query(&mut self) -> Result<QueryPlan, QueryError> {
+        if let Some(error) = self.forbidden_construct_at_clause_position() {
+            return Err(error);
+        }
+        if let Some(error) = self.unsupported_construct_at_clause_position() {
+            return Err(error);
         }
         if self.tokens.iter().any(|token| matches!(token, Token::Symbol(symbol) if symbol == "*"))
             && !self.tokens.iter().any(|token| matches!(token, Token::Word(word) if word.eq_ignore_ascii_case("count") || word.eq_ignore_ascii_case("min")))
@@ -241,26 +296,6 @@ impl Parser {
                 "variable-length relationships are forbidden",
             ));
         }
-        if self.tokens.iter().any(|token| matches!(token, Token::Word(word) if word.eq_ignore_ascii_case("vector_similarity"))) {
-            return Err(QueryError::new(
-                QueryCode::QueryConstructUnsupported,
-                "query.where",
-                "vector search is deferred from query contract version 1",
-            ));
-        }
-        // A construct outside v1 is named as unsupported rather than reported as
-        // a bare syntax error.
-        for token in &self.tokens {
-            if let Token::Word(word) = token
-                && UNSUPPORTED_KEYWORDS.contains(&word.to_ascii_lowercase().as_str())
-            {
-                return Err(QueryError::new(
-                    QueryCode::QueryConstructUnsupported,
-                    "query",
-                    format!("`{word}` is not admitted by query contract version 1"),
-                ));
-            }
-        }
         if !self.eat_word("match") {
             return Err(self.syntax("a query begins with MATCH"));
         }
@@ -269,7 +304,7 @@ impl Parser {
             patterns.push(self.pattern_part()?);
         }
         if patterns.len() > self.limits.pattern_parts {
-            return Err(QueryError::new(
+            self.defer_plan_error(QueryError::new(
                 QueryCode::PatternPartLimitExceeded,
                 "query",
                 format!("at most {} pattern parts", self.limits.pattern_parts),
@@ -284,7 +319,7 @@ impl Parser {
                     relationship.from == node.binding || relationship.to == node.binding
                 });
                 if node.label.is_none() && !anchored {
-                    return Err(QueryError::new(
+                    self.defer_plan_error(QueryError::new(
                         QueryCode::QueryTypeMismatch,
                         format!("query.match[{pattern_index}].nodes[{node_index}]"),
                         format!("`{}` needs a node label", node.binding),
@@ -294,7 +329,7 @@ impl Parser {
         }
         let hops = joined_traversal_hops(&patterns);
         if hops > self.limits.traversal_hops {
-            return Err(QueryError::new(
+            self.defer_plan_error(QueryError::new(
                 QueryCode::TraversalLimitExceeded,
                 if patterns.len() == 1 {
                     "query.match[0]"
@@ -312,7 +347,7 @@ impl Parser {
         if self.bindings.len() + self.relationship_bindings.len() + path_bindings
             > self.limits.variables
         {
-            return Err(QueryError::new(
+            self.defer_plan_error(QueryError::new(
                 QueryCode::VariableLimitExceeded,
                 "query",
                 format!("at most {} variables", self.limits.variables),
@@ -320,11 +355,26 @@ impl Parser {
         }
 
         let predicates = if self.eat_word("where") {
+            if self.peek_word().as_deref() == Some("vector_similarity")
+                && matches!(self.tokens.get(self.position + 1), Some(Token::Symbol(symbol)) if symbol == "(")
+            {
+                return Err(QueryError::new(
+                    QueryCode::QueryConstructUnsupported,
+                    "query.where",
+                    "vector search is deferred from query contract version 1",
+                ));
+            }
             self.where_clause()?
         } else {
             Vec::new()
         };
         if !self.eat_word("return") {
+            if let Some(error) = self.forbidden_construct_at_clause_position() {
+                return Err(error);
+            }
+            if let Some(error) = self.unsupported_construct_at_clause_position() {
+                return Err(error);
+            }
             return Err(self.syntax("a query needs a RETURN clause"));
         }
         let projection = self.return_clause()?;
@@ -344,7 +394,17 @@ impl Parser {
         // A semicolon is allowed only as the final token.
         self.eat_symbol(";");
         if self.position != self.tokens.len() {
+            if let Some(error) = self.forbidden_construct_at_clause_position() {
+                return Err(error);
+            }
+            if let Some(error) = self.unsupported_construct_at_clause_position() {
+                return Err(error);
+            }
             return Err(self.syntax("unexpected trailing input"));
+        }
+
+        if let Some(error) = self.deferred_plan_error.take() {
+            return Err(error);
         }
 
         let contains = patterns
@@ -421,20 +481,30 @@ impl Parser {
                 }
             };
             let relationship = relationships.last().expect("relationship was pushed");
-            for node in &mut nodes {
-                let inferred = if node.binding == relationship.from {
-                    Some(from_label)
-                } else if node.binding == relationship.to {
-                    Some(to_label)
-                } else {
-                    None
-                };
-                if node.label.is_none()
-                    && let Some(inferred) = inferred
-                {
-                    node.label = Some(inferred);
-                    self.bindings.insert(node.binding.clone(), Some(inferred));
-                }
+            let from = relationship.from.clone();
+            let to = relationship.to.clone();
+            self.constrain_node_label(&mut nodes, &from, from_label);
+            self.constrain_node_label(&mut nodes, &to, to_label);
+        }
+        if let Some(binding) = &path_binding {
+            if relationships.is_empty() {
+                self.defer_plan_error(QueryError::new(
+                    QueryCode::QueryTypeMismatch,
+                    "query.match",
+                    "a path binding requires at least one relationship",
+                ));
+            }
+            let collides = self.bindings.contains_key(binding)
+                || self.relationship_bindings.contains_key(binding)
+                || self.path_bindings.contains(binding);
+            if collides {
+                self.defer_plan_error(QueryError::new(
+                    QueryCode::QueryTypeMismatch,
+                    "query.match",
+                    format!("path binding `{binding}` collides with another MATCH binding"),
+                ));
+            } else {
+                self.path_bindings.insert(binding.clone());
             }
         }
         Ok(PatternPart {
@@ -442,6 +512,39 @@ impl Parser {
             nodes,
             relationships,
         })
+    }
+
+    fn constrain_node_label(&mut self, nodes: &mut [NodePlan], binding: &str, required: NodeLabel) {
+        let binding_contradicts = self
+            .bindings
+            .get(binding)
+            .copied()
+            .flatten()
+            .is_some_and(|existing| existing != required);
+        if binding_contradicts {
+            self.defer_plan_error(QueryError::new(
+                QueryCode::QueryTypeMismatch,
+                "query.match",
+                format!(
+                    "binding `{binding}` contradicts the endpoint type required by its relationship"
+                ),
+            ));
+        } else {
+            self.bindings.insert(binding.to_owned(), Some(required));
+        }
+        for node in nodes.iter_mut().filter(|node| node.binding == binding) {
+            if node.label.is_some_and(|existing| existing != required) {
+                self.defer_plan_error(QueryError::new(
+                    QueryCode::QueryTypeMismatch,
+                    "query.match",
+                    format!(
+                        "binding `{binding}` contradicts the endpoint type required by its relationship"
+                    ),
+                ));
+            } else {
+                node.label = Some(required);
+            }
+        }
     }
 
     fn node_pattern(&mut self) -> Result<NodePlan, QueryError> {
@@ -457,44 +560,63 @@ impl Parser {
                 .with_phase(super::error::QueryPhase::Parse));
             }
             let name = self.identifier()?;
-            Some(NodeLabel::parse(&name).ok_or_else(|| {
-                QueryError::new(
+            let parsed = NodeLabel::parse(&name);
+            if parsed.is_none() {
+                self.defer_plan_error(QueryError::new(
                     QueryCode::UnknownLabel,
                     format!("query.match[0].nodes[{}].label", self.occurrence),
                     format!("`{name}` is not a v1 node label"),
-                )
-            })?)
+                ));
+            }
+            Some(parsed.unwrap_or_else(|| {
+                self.bindings
+                    .get(&binding)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(NodeLabel::Content)
+            }))
         } else {
             None
         };
         self.expect_symbol(")")?;
+        let collides = if self.path_bindings.contains(&binding) {
+            self.defer_plan_error(QueryError::new(
+                QueryCode::QueryTypeMismatch,
+                "query.match",
+                format!("node binding `{binding}` collides with a path binding"),
+            ));
+            true
+        } else if self.relationship_bindings.contains_key(&binding) {
+            self.defer_plan_error(QueryError::new(
+                QueryCode::QueryTypeMismatch,
+                "query.match",
+                format!("node binding `{binding}` collides with a relationship binding"),
+            ));
+            true
+        } else {
+            false
+        };
         // A repeated binding must not contradict its first label.
-        match self.bindings.get(&binding) {
-            Some(existing) if label.is_some() && *existing != label && existing.is_some() => {
-                return Err(QueryError::new(
+        let resolved_label = match self.bindings.get(&binding).copied() {
+            Some(existing) if label.is_some() && existing != label && existing.is_some() => {
+                self.defer_plan_error(QueryError::new(
                     QueryCode::QueryTypeMismatch,
                     "query",
                     format!("binding `{binding}` is used with two different labels"),
                 ));
+                existing
             }
-            Some(Some(existing)) if label.is_none() => {
-                let existing = *existing;
-                let occurrence = self.occurrence;
-                self.occurrence += 1;
-                return Ok(NodePlan {
-                    binding,
-                    label: Some(existing),
-                    occurrence,
-                });
-            }
-            _ => {}
+            Some(Some(existing)) if label.is_none() => Some(existing),
+            _ => label,
+        };
+        if !collides {
+            self.bindings.insert(binding.clone(), resolved_label);
         }
-        self.bindings.insert(binding.clone(), label);
         let occurrence = self.occurrence;
         self.occurrence += 1;
         Ok(NodePlan {
             binding,
-            label,
+            label: resolved_label,
             occurrence,
         })
     }
@@ -520,13 +642,7 @@ impl Parser {
         };
         self.expect_symbol(":")?;
         let name = self.identifier()?;
-        let relationship_type = RelationshipType::parse(&name).ok_or_else(|| {
-            QueryError::new(
-                QueryCode::UnknownRelationshipType,
-                "query",
-                format!("`{name}` is not a v1 relationship type"),
-            )
-        })?;
+        let parsed_relationship_type = RelationshipType::parse(&name);
         self.expect_symbol("]")?;
         let direction = if incoming {
             self.expect_symbol("-")?;
@@ -538,26 +654,51 @@ impl Parser {
         } else {
             return Err(self.syntax("expected `-` or `->` after a relationship"));
         };
-        if relationship_type.is_undirected() && direction != Direction::Undirected {
-            return Err(QueryError::new(
-                QueryCode::QueryConstructForbidden,
+        let relationship_type = if let Some(relationship_type) = parsed_relationship_type {
+            if relationship_type.is_undirected() && direction != Direction::Undirected {
+                return Err(QueryError::new(
+                    QueryCode::QueryConstructForbidden,
+                    "query",
+                    "CONNECTED is undirected and cannot be written with an arrow",
+                ));
+            }
+            if !relationship_type.is_undirected() && direction == Direction::Undirected {
+                return Err(QueryError::new(
+                    QueryCode::QueryConstructForbidden,
+                    "query",
+                    format!(
+                        "{} is directed and needs an arrow",
+                        relationship_type.as_str()
+                    ),
+                ));
+            }
+            relationship_type
+        } else {
+            self.defer_plan_error(QueryError::new(
+                QueryCode::UnknownRelationshipType,
                 "query",
-                "CONNECTED is undirected and cannot be written with an arrow",
+                format!("`{name}` is not a v1 relationship type"),
             ));
-        }
-        if !relationship_type.is_undirected() && direction == Direction::Undirected {
-            return Err(QueryError::new(
-                QueryCode::QueryConstructForbidden,
-                "query",
-                format!(
-                    "{} is directed and needs an arrow",
-                    relationship_type.as_str()
-                ),
-            ));
-        }
+            if direction == Direction::Undirected {
+                RelationshipType::Connected
+            } else {
+                RelationshipType::Contains
+            }
+        };
         if let Some(binding) = &binding {
-            self.relationship_bindings
-                .insert(binding.clone(), relationship_type);
+            if self.bindings.contains_key(binding)
+                || self.relationship_bindings.contains_key(binding)
+                || self.path_bindings.contains(binding)
+            {
+                self.defer_plan_error(QueryError::new(
+                    QueryCode::QueryTypeMismatch,
+                    "query.match",
+                    format!("relationship binding `{binding}` collides with another MATCH binding"),
+                ));
+            } else {
+                self.relationship_bindings
+                    .insert(binding.clone(), relationship_type);
+            }
         }
         Ok(Some((binding, direction, relationship_type)))
     }
@@ -571,6 +712,15 @@ impl Parser {
     }
 
     fn predicate(&mut self) -> Result<Predicate, QueryError> {
+        if self.peek_word().as_deref() == Some("exists")
+            && matches!(self.tokens.get(self.position + 1), Some(Token::Symbol(symbol)) if symbol == "(")
+        {
+            return Err(QueryError::new(
+                QueryCode::QueryConstructUnsupported,
+                "query",
+                "`exists` is not admitted by query contract version 1",
+            ));
+        }
         let property = self.property()?;
         if self.eat_word("is") {
             let negated = self.eat_word("not");
@@ -619,20 +769,24 @@ impl Parser {
         let binding = self.identifier()?;
         self.expect_symbol(".")?;
         let name = self.identifier()?;
-        self.validate_property(&binding, &name)?;
+        self.validate_property(&binding, &name);
         Ok(PropertyRef { binding, name })
     }
 
     /// A property has to exist on whatever the binding was matched as. An unknown
     /// one is a plan error, not a runtime empty result.
-    fn validate_property(&self, binding: &str, name: &str) -> Result<(), QueryError> {
+    fn validate_property(&mut self, binding: &str, name: &str) {
+        let error_path = self.projection_index.map_or_else(
+            || "query".to_owned(),
+            |index| format!("query.return[{index}]"),
+        );
         let allowed: &[&str] = if let Some(label) = self.bindings.get(binding) {
             match label {
                 Some(NodeLabel::Content) => CONTENT_PROPERTIES,
                 Some(NodeLabel::Layer) => LAYER_PROPERTIES,
                 // An unlabelled binding could be either, so accept the union and
                 // let the engine decide.
-                None => return Ok(()),
+                None => return,
             }
         } else if let Some(relationship) = self.relationship_bindings.get(binding) {
             match relationship {
@@ -641,44 +795,47 @@ impl Parser {
                 RelationshipType::Expands | RelationshipType::References => ACTION_PROPERTIES,
             }
         } else {
-            return Err(QueryError::new(
+            self.defer_plan_error(QueryError::new(
                 QueryCode::DynamicSchemaForbidden,
-                "query",
+                &error_path,
                 format!("`{binding}` is not bound by the MATCH clause"),
             ));
+            return;
         };
-        if allowed.contains(&name) {
-            Ok(())
-        } else {
-            Err(QueryError::new(
+        if !allowed.contains(&name) {
+            self.defer_plan_error(QueryError::new(
                 QueryCode::UnknownProperty,
-                "query",
+                error_path,
                 format!("`{name}` is not a visible property of `{binding}`"),
-            ))
+            ));
         }
     }
 
     fn return_clause(&mut self) -> Result<Projection, QueryError> {
         let distinct = self.eat_word("distinct");
+        self.projection_index = Some(0);
         let mut columns = vec![self.return_item().map_err(|mut error| {
             if error.path == "query" {
                 error.path = "query.return[0]".into();
             }
             error
         })?];
+        self.projection_index = None;
         while self.eat_symbol(",") {
             let index = columns.len();
+            self.projection_index = Some(index);
             columns.push(self.return_item().map_err(|mut error| {
                 if error.path == "query" {
                     error.path = format!("query.return[{index}]");
                 }
                 error
             })?);
+            self.projection_index = None;
         }
         let mut seen = HashSet::new();
         for (index, column) in columns.iter().enumerate() {
             if !seen.insert(column.name.clone()) {
-                return Err(QueryError::new(
+                self.defer_plan_error(QueryError::new(
                     QueryCode::DuplicateOutputColumn,
                     format!("query.return[{index}]"),
                     format!("output column `{}` appears twice", column.name),
@@ -693,13 +850,13 @@ impl Parser {
         // A bare empty list has nothing to give it an element type. Nested in
         // another list it is fine, because a sibling types it.
         if matches!(&expression, Expression::List { items } if items.is_empty()) {
-            return Err(QueryError::new(
+            self.defer_plan_error(QueryError::new(
                 QueryCode::QueryTypeMismatch,
                 "query",
                 "an empty list literal has no element type",
             ));
         }
-        self.check_homogeneous(&expression)?;
+        self.check_homogeneous(&expression);
         let name = if self.eat_word("as") {
             self.identifier()?
         } else {
@@ -725,11 +882,15 @@ impl Parser {
     /// Expressions nest, so depth is bounded here rather than by counting tokens.
     fn expression_at(&mut self, depth: usize) -> Result<Expression, QueryError> {
         if depth > self.limits.ast_depth {
-            return Err(QueryError::new(
+            self.defer_plan_error(QueryError::new(
                 QueryCode::AstDepthExceeded,
                 "query",
                 format!("expressions nest at most {} deep", self.limits.ast_depth),
             ));
+            self.recover_expression_syntax()?;
+            return Ok(Expression::Parameter {
+                name: "__ast_depth_exceeded".into(),
+            });
         }
         if self.eat_symbol("[") {
             let mut items = Vec::new();
@@ -749,7 +910,7 @@ impl Parser {
                 self.expect_symbol(":")?;
                 let value = self.expression_at(depth + 1)?;
                 if fields.iter().any(|field: &RecordField| field.name == name) {
-                    return Err(QueryError::new(
+                    self.defer_plan_error(QueryError::new(
                         QueryCode::DuplicateOutputColumn,
                         "query",
                         format!("record field `{name}` appears twice"),
@@ -768,6 +929,18 @@ impl Parser {
             return Ok(Expression::Parameter { name });
         }
         let binding = self.identifier()?;
+        let unsupported = UNSUPPORTED_KEYWORDS.contains(&binding.to_ascii_lowercase().as_str());
+        if unsupported
+            && !self.binding_is_bound(&binding)
+            && (binding.eq_ignore_ascii_case("case")
+                || matches!(self.peek(), Some(Token::Symbol(symbol)) if symbol == "("))
+        {
+            return Err(QueryError::new(
+                QueryCode::QueryConstructUnsupported,
+                "query",
+                format!("`{binding}` is not admitted by query contract version 1"),
+            ));
+        }
         if self.eat_symbol("[") {
             return Err(QueryError::new(
                 QueryCode::DynamicSchemaForbidden,
@@ -781,38 +954,131 @@ impl Parser {
         }
         if self.eat_symbol(".") {
             let name = self.identifier()?;
-            self.validate_property(&binding, &name)?;
+            self.validate_property(&binding, &name);
             return Ok(Expression::Property {
                 property: PropertyRef { binding, name },
             });
         }
-        if !self.bindings.contains_key(&binding)
-            && !self.relationship_bindings.contains_key(&binding)
-        {
-            let bound_path = self
-                .tokens
-                .iter()
-                .any(|token| matches!(token, Token::Word(word) if word == &binding));
-            if !bound_path {
-                return Err(QueryError::new(
-                    QueryCode::DynamicSchemaForbidden,
-                    "query",
-                    format!("`{binding}` is not bound by the MATCH clause"),
-                ));
-            }
+        if !self.binding_is_bound(&binding) {
+            let path = self.projection_index.map_or_else(
+                || "query".to_owned(),
+                |index| format!("query.return[{index}]"),
+            );
+            self.defer_plan_error(QueryError::new(
+                QueryCode::DynamicSchemaForbidden,
+                path,
+                format!("`{binding}` is not bound by the MATCH clause"),
+            ));
         }
         Ok(Expression::Binding { binding })
     }
 
+    /// Consume one expression without recursion after the configured AST depth
+    /// is exceeded. The task stack is heap-bounded by the already byte-bounded
+    /// token stream, and it retains syntax/forbidden-construct validation inside
+    /// the skipped typed subtree before ordinary outer parsing resumes.
+    fn recover_expression_syntax(&mut self) -> Result<(), QueryError> {
+        enum Task {
+            Expression,
+            ListTail,
+            RecordField,
+            RecordTail,
+            Close(&'static str),
+        }
+
+        let mut tasks = vec![Task::Expression];
+        while let Some(task) = tasks.pop() {
+            match task {
+                Task::Expression => {
+                    if self.eat_symbol("[") {
+                        if !self.eat_symbol("]") {
+                            tasks.push(Task::ListTail);
+                            tasks.push(Task::Expression);
+                        }
+                    } else if self.eat_symbol("{") {
+                        tasks.push(Task::RecordField);
+                    } else if matches!(self.peek(), Some(Token::Parameter(_))) {
+                        self.position += 1;
+                    } else {
+                        let binding = self.identifier()?;
+                        let unsupported =
+                            UNSUPPORTED_KEYWORDS.contains(&binding.to_ascii_lowercase().as_str());
+                        if unsupported
+                            && !self.binding_is_bound(&binding)
+                            && (binding.eq_ignore_ascii_case("case")
+                                || matches!(self.peek(), Some(Token::Symbol(symbol)) if symbol == "("))
+                        {
+                            return Err(QueryError::new(
+                                QueryCode::QueryConstructUnsupported,
+                                "query",
+                                format!("`{binding}` is not admitted by query contract version 1"),
+                            ));
+                        }
+                        if self.eat_symbol("[") {
+                            return Err(QueryError::new(
+                                QueryCode::DynamicSchemaForbidden,
+                                "query",
+                                "dynamic property lookup is forbidden",
+                            )
+                            .with_phase(super::error::QueryPhase::Parse));
+                        }
+                        if matches!(self.peek(), Some(Token::Symbol(symbol)) if symbol == "(") {
+                            if AggregateFunction::parse(&binding).is_none() {
+                                return Err(QueryError::new(
+                                    QueryCode::QueryConstructForbidden,
+                                    "query",
+                                    format!("`{binding}` is not an admitted function"),
+                                ));
+                            }
+                            self.expect_symbol("(")?;
+                            self.eat_word("distinct");
+                            if self.eat_symbol("*") {
+                                self.expect_symbol(")")?;
+                            } else {
+                                tasks.push(Task::Close(")"));
+                                tasks.push(Task::Expression);
+                            }
+                        } else if self.eat_symbol(".") {
+                            self.identifier()?;
+                        }
+                    }
+                }
+                Task::ListTail => {
+                    if self.eat_symbol(",") {
+                        tasks.push(Task::ListTail);
+                        tasks.push(Task::Expression);
+                    } else {
+                        self.expect_symbol("]")?;
+                    }
+                }
+                Task::RecordField => {
+                    self.identifier()?;
+                    self.expect_symbol(":")?;
+                    tasks.push(Task::RecordTail);
+                    tasks.push(Task::Expression);
+                }
+                Task::RecordTail => {
+                    if self.eat_symbol(",") {
+                        tasks.push(Task::RecordField);
+                    } else {
+                        self.expect_symbol("}")?;
+                    }
+                }
+                Task::Close(symbol) => self.expect_symbol(symbol)?,
+            }
+        }
+        Ok(())
+    }
+
     /// Lists are homogeneous: every element carries the same type. A list mixing
     /// a string with a node has no element type the wire algebra can name.
-    fn check_homogeneous(&self, expression: &Expression) -> Result<(), QueryError> {
+    fn check_homogeneous(&mut self, expression: &Expression) {
         if let Expression::List { items } = expression {
             let mut kinds = items.iter().filter_map(|item| self.static_type(item));
             if let Some(first) = kinds.next()
                 && let Some(other) = kinds.find(|kind| *kind != first)
             {
-                return Err(QueryError::new(
+                self.defer_plan_error(QueryError::new(
                     QueryCode::QueryTypeMismatch,
                     "query",
                     format!("a list cannot mix {first} and {other} elements"),
@@ -822,17 +1088,16 @@ impl Parser {
         match expression {
             Expression::List { items } => {
                 for item in items {
-                    self.check_homogeneous(item)?;
+                    self.check_homogeneous(item);
                 }
             }
             Expression::Record { fields } => {
                 for field in fields {
-                    self.check_homogeneous(&field.value)?;
+                    self.check_homogeneous(&field.value);
                 }
             }
             _ => {}
         }
-        Ok(())
     }
 
     /// The type an expression carries, where it can be known without running the
@@ -884,7 +1149,7 @@ impl Parser {
         if self.eat_symbol("*") {
             self.expect_symbol(")")?;
             if function != AggregateFunction::Count || distinct {
-                return Err(QueryError::new(
+                self.defer_plan_error(QueryError::new(
                     QueryCode::InvalidAggregate,
                     "query",
                     "only count(*) takes a star, and it does not take DISTINCT",
@@ -899,7 +1164,7 @@ impl Parser {
         let argument = self.expression_at(depth + 1)?;
         self.expect_symbol(")")?;
         if argument.has_aggregate() {
-            return Err(QueryError::new(
+            self.defer_plan_error(QueryError::new(
                 QueryCode::InvalidAggregate,
                 "query",
                 "aggregates do not nest",
@@ -927,7 +1192,7 @@ impl Parser {
             .iter()
             .any(|candidate| candidate.name == column)
         {
-            return Err(QueryError::new(
+            self.defer_plan_error(QueryError::new(
                 QueryCode::DynamicSchemaForbidden,
                 "query",
                 format!("ORDER BY `{column}` is not an output column"),
@@ -966,7 +1231,7 @@ impl Parser {
                 self.position += 1;
                 let value = usize::try_from(value).unwrap_or(usize::MAX);
                 if value > self.limits.hard_rows {
-                    return Err(QueryError::new(
+                    self.defer_plan_error(QueryError::new(
                         QueryCode::RowLimitExceeded,
                         "query.limit",
                         format!("LIMIT may not exceed {}", self.limits.hard_rows),

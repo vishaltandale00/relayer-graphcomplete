@@ -1,0 +1,510 @@
+{
+  "corpus": "relayer.graph-query.hardening",
+  "queryContractVersion": 1,
+  "status": "frozen",
+  "issue": 354,
+  "positiveCases": [
+    {
+      "id": "read-only-keyword-identifiers",
+      "query": "MATCH (create:Content) WHERE create.title = $title RETURN create.title AS set, create.kind AS remove",
+      "parameters": {
+        "title": {
+          "type": "string",
+          "value": "Queue"
+        }
+      },
+      "target": {
+        "scope": "thread",
+        "id": 41
+      },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [
+          {
+            "pathBinding": null,
+            "nodes": [
+              {
+                "binding": "create",
+                "label": "Content",
+                "occurrence": 0
+              }
+            ],
+            "relationships": []
+          }
+        ],
+        "predicates": [
+          {
+            "kind": "propertyComparison",
+            "left": {
+              "binding": "create",
+              "name": "title",
+              "valueType": "string"
+            },
+            "operator": "eq",
+            "right": {
+              "kind": "parameter",
+              "name": "title",
+              "valueType": "string"
+            }
+          }
+        ],
+        "projection": {
+          "distinct": false,
+          "columns": [
+            {
+              "name": "set",
+              "expression": {
+                "kind": "property",
+                "binding": "create",
+                "name": "title",
+                "valueType": "string"
+              }
+            },
+            {
+              "name": "remove",
+              "expression": {
+                "kind": "property",
+                "binding": "create",
+                "name": "kind",
+                "valueType": "string"
+              }
+            }
+          ]
+        },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": {
+        "queryContractVersion": 1,
+        "columns": [
+          "set",
+          "remove"
+        ],
+        "rows": [
+          [
+            {
+              "type": "string",
+              "value": "Queue"
+            },
+            {
+              "type": "string",
+              "value": "concept"
+            }
+          ]
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "id": "read-only-unsupported-keyword-identifiers",
+      "query": "MATCH (union:Content) WHERE union.title = $title RETURN union.title AS optional, union.kind AS with",
+      "parameters": {
+        "title": {
+          "type": "string",
+          "value": "Queue"
+        }
+      },
+      "target": {
+        "scope": "thread",
+        "id": 41
+      },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [
+          {
+            "pathBinding": null,
+            "nodes": [
+              {
+                "binding": "union",
+                "label": "Content",
+                "occurrence": 0
+              }
+            ],
+            "relationships": []
+          }
+        ],
+        "predicates": [
+          {
+            "kind": "propertyComparison",
+            "left": {
+              "binding": "union",
+              "name": "title",
+              "valueType": "string"
+            },
+            "operator": "eq",
+            "right": {
+              "kind": "parameter",
+              "name": "title",
+              "valueType": "string"
+            }
+          }
+        ],
+        "projection": {
+          "distinct": false,
+          "columns": [
+            {
+              "name": "optional",
+              "expression": {
+                "kind": "property",
+                "binding": "union",
+                "name": "title",
+                "valueType": "string"
+              }
+            },
+            {
+              "name": "with",
+              "expression": {
+                "kind": "property",
+                "binding": "union",
+                "name": "kind",
+                "valueType": "string"
+              }
+            }
+          ]
+        },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": {
+        "queryContractVersion": 1,
+        "columns": [
+          "optional",
+          "with"
+        ],
+        "rows": [
+          [
+            {
+              "type": "string",
+              "value": "Queue"
+            },
+            {
+              "type": "string",
+              "value": "concept"
+            }
+          ]
+        ],
+        "truncated": false
+      }
+    }
+  ],
+  "negativeCases": [
+    {
+      "id": "reject-noncanonical-node-identity",
+      "query": "MATCH (n:Content) RETURN $value AS value LIMIT 1",
+      "parameters": {
+        "value": {
+          "type": "node",
+          "id": "garbage",
+          "kind": "Content",
+          "properties": []
+        }
+      },
+      "expectedError": {
+        "code": "invalid_request",
+        "phase": "envelope",
+        "path": "parameters.value"
+      }
+    },
+    {
+      "id": "reject-noncanonical-layer-identity",
+      "query": "MATCH (n:Content) RETURN $value AS value LIMIT 1",
+      "parameters": {
+        "value": {
+          "type": "layer",
+          "id": "layer:01",
+          "kind": "Layer",
+          "properties": []
+        }
+      },
+      "expectedError": {
+        "code": "invalid_request",
+        "phase": "envelope",
+        "path": "parameters.value"
+      }
+    },
+    {
+      "id": "reject-explicit-endpoint-label-contradiction",
+      "query": "MATCH (a:Layer)-[:CONNECTED]-(b:Content) RETURN a",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-inferred-endpoint-label-contradiction",
+      "query": "MATCH (a:Layer)-[:CONTAINS]->(b)-[:CONTAINS]->(c:Content) RETURN b",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-unbound-return-identifier",
+      "query": "MATCH (n:Content) RETURN bogus",
+      "expectedError": {
+        "code": "dynamic_schema_forbidden",
+        "phase": "plan",
+        "path": "query.return[0]"
+      }
+    },
+    {
+      "id": "reject-actual-unsupported-union",
+      "query": "MATCH (n:Content) RETURN n UNION MATCH (m:Content) RETURN m",
+      "expectedError": {
+        "code": "query_construct_unsupported",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-actual-unsupported-case-expression",
+      "query": "MATCH (n:Content) RETURN CASE n.title WHEN $title THEN n.kind ELSE n.state END AS value",
+      "parameters": {
+        "title": {
+          "type": "string",
+          "value": "Queue"
+        }
+      },
+      "expectedError": {
+        "code": "query_construct_unsupported",
+        "phase": "parse",
+        "path": "query.return[0]"
+      }
+    },
+    {
+      "id": "reject-actual-unsupported-exists-function",
+      "query": "MATCH (n:Content) WHERE exists(n.title) RETURN n",
+      "expectedError": {
+        "code": "query_construct_unsupported",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-zero-hop-path-binding",
+      "query": "MATCH p = (n:Content) RETURN p",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-path-node-binding-collision",
+      "query": "MATCH p = (p:Content)-[:CONNECTED]-(b:Content) RETURN p",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-path-relationship-binding-collision",
+      "query": "MATCH p = (a:Content)-[p:CONNECTED]-(b:Content) RETURN p",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-duplicate-path-binding",
+      "query": "MATCH p = (a:Content)-[:CONNECTED]-(b:Content), p = (c:Content)-[:CONNECTED]-(d:Content) RETURN p",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-node-relationship-binding-collision",
+      "query": "MATCH (n:Content)-[n:CONNECTED]-(m:Content) RETURN n",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-duplicate-relationship-binding",
+      "query": "MATCH (a:Content)-[r:CONNECTED]-(b:Content)-[r:CONNECTED]-(c:Content) RETURN r",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-prior-path-relationship-binding-collision",
+      "query": "MATCH p = (a:Content)-[:CONNECTED]-(b:Content), (c:Content)-[p:CONNECTED]-(d:Content) RETURN p",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-malformed-node-before-path-binding-collision",
+      "query": "MATCH p = (a:Content)-[:CONNECTED]-(b:Content), (p:Content RETURN p",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-malformed-relationship-before-node-binding-collision",
+      "query": "MATCH (n:Content)-[n:CONNECTED](m:Content) RETURN n",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-prior-path-node-binding-collision",
+      "query": "MATCH p = (a:Content)-[:CONNECTED]-(b:Content), (p:Content) RETURN p",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-prior-relationship-node-binding-collision",
+      "query": "MATCH (a:Content)-[r:CONNECTED]-(b:Content), (r:Content) RETURN r",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-later-syntax-before-relationship-binding-collision",
+      "query": "MATCH (n:Content)-[n:CONNECTED]-(m:Content) RETURN n ORDER",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-later-syntax-before-node-binding-collision",
+      "query": "MATCH (a:Content)-[r:CONNECTED]-(b:Content), (r:Content) RETURN r ORDER",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-later-syntax-before-zero-hop-path-binding",
+      "query": "MATCH p = (n:Content) RETURN p ORDER",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-later-syntax-before-path-binding-collision",
+      "query": "MATCH p = (p:Content)-[:CONNECTED]-(b:Content) RETURN p ORDER",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-later-syntax-before-endpoint-contradiction",
+      "query": "MATCH (a:Layer)-[:CONNECTED]-(b:Content) RETURN a ORDER",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-later-syntax-before-unbound-return",
+      "query": "MATCH (n:Content) RETURN bogus ORDER",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-first-plan-error-remains-deterministic",
+      "query": "MATCH (n:Content)-[n:CONNECTED]-(m:Content) RETURN bogus",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-later-syntax-before-unknown-label",
+      "query": "MATCH (n:Mystery) RETURN n ORDER",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-later-syntax-before-unknown-relationship-type",
+      "query": "MATCH (a:Content)-[:MYSTERY]-(b:Content) RETURN a ORDER",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-later-syntax-before-ast-depth",
+      "query": "MATCH (n:Content) RETURN [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[n]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] AS deep ORDER",
+      "expectedError": {
+        "code": "query_syntax_invalid",
+        "phase": "parse",
+        "path": "query"
+      }
+    },
+    {
+      "id": "reject-first-plan-error-before-later-unknown-label",
+      "query": "MATCH (n:Content)-[n:CONNECTED]-(m:Content), (x:Mystery) RETURN n",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-first-plan-error-before-later-unknown-relationship-type",
+      "query": "MATCH (n:Content)-[n:CONNECTED]-(m:Content), (x:Content)-[:MYSTERY]-(y:Content) RETURN n",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    },
+    {
+      "id": "reject-first-plan-error-before-later-ast-depth",
+      "query": "MATCH (n:Content)-[n:CONNECTED]-(m:Content) RETURN [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[n]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] AS deep",
+      "expectedError": {
+        "code": "query_type_mismatch",
+        "phase": "plan",
+        "path": "query.match"
+      }
+    }
+  ]
+}
