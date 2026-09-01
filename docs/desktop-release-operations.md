@@ -12,6 +12,17 @@ This runbook covers the operator-controlled steps around the code-owned release 
 
 Enabled targets for a version come from one commit. Preview publication and Stable promotion happen independently per target. Windows is disabled until the exact publisher variable exists, Azure signing succeeds, and the interactive canary passes.
 
+## Prime managed-runtime checkpoint
+
+On macOS Apple Silicon, run `npm run test:prime-managed-runtime` from the exact
+candidate commit before signed candidate work. It builds `prime@0.8.1` in a
+clean temporary root, verifies the exact uv, CPython, and 78-wheel identities,
+performs the offline assembly, copies the reviewed packaged JavaScript and
+first-party Python trees, and runs the provider-free real-kernel probe. This is
+deterministic assembly proof, not signing, notarization, update publication, or
+paid inference. Issue #378 owns update metadata/publication and issue #379 owns
+downloadable JavaScript reconstruction; do not infer either from this pass.
+
 ## One-time Windows signing setup
 
 The intended Azure resources are:

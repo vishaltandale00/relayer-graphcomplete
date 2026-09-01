@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { realpath } from "node:fs/promises";
+import { lstat, mkdir, realpath, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { GraphCapability } from "@relayer/graph-client";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { MAX_HARNESS_APPROVAL_TEXT_LENGTH } from "../approval.js";
@@ -29,6 +30,47 @@ import {
 
 export const PRIME_AGENT_KEY = "prime.agent";
 
+function confinedDescendant(root: string, path: string): boolean {
+  const fromRoot = relative(root, path);
+  return fromRoot !== "" && fromRoot !== ".."
+    && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot);
+}
+
+async function resolvedManagedSessionFile(
+  privateStateRoot: string,
+  managedSessionDir: string,
+  savedSessionFile: unknown,
+): Promise<string | undefined> {
+  const privateStateDetails = await lstat(privateStateRoot).catch(() => null);
+  if (!privateStateDetails?.isDirectory() || privateStateDetails.isSymbolicLink()) {
+    throw new Error("Managed Prime private state is not an owned directory");
+  }
+  const sessionDetails = await lstat(managedSessionDir).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (sessionDetails !== null && (!sessionDetails.isDirectory() || sessionDetails.isSymbolicLink())) {
+    throw new Error("Managed Prime session state is not an owned directory");
+  }
+  if (sessionDetails === null) return undefined;
+  const [resolvedPrivateState, resolvedSessions] = await Promise.all([
+    realpath(privateStateRoot),
+    realpath(managedSessionDir),
+  ]);
+  if (resolvedSessions !== join(resolvedPrivateState, "sessions")) {
+    throw new Error("Managed Prime session state escapes private state");
+  }
+  if (typeof savedSessionFile !== "string" || !confinedDescendant(managedSessionDir, savedSessionFile)) return undefined;
+  try {
+    const resolvedFile = await realpath(savedSessionFile);
+    if (!confinedDescendant(resolvedSessions, resolvedFile)
+      || !(await stat(resolvedFile)).isFile()) return undefined;
+    return resolvedFile;
+  } catch {
+    return undefined;
+  }
+}
+
 interface PrimeAgentSession {
   readonly sessionFile?: string;
   promptAndWait(text: string, options: {
@@ -48,7 +90,7 @@ interface PrimeAgentSession {
 }
 
 interface PrimeAgentSessionManagerFactory {
-  create(cwd: string): unknown;
+  create(cwd: string, sessionDir?: string): unknown;
   open(path: string): unknown;
 }
 
@@ -90,11 +132,52 @@ interface PrimeAgentModule {
 
 export interface PrimeAgentDependencies {
   readonly loadModule?: () => Promise<PrimeAgentModule>;
+  readonly resolvePrimeRuntime?: () => Promise<{
+    readonly runtimeId: "prime";
+    readonly executable: string;
+    readonly moduleUrl: string;
+    readonly installationRoot: string;
+    readonly privateStateRoot: string;
+  }>;
   /** Deterministic test seam; production uses the platform workspace boundary. */
   readonly createKernelBoundary?: (input: {
     readonly workspaceRoot: string;
     readonly workspaceScopeDigest: string;
   }) => PrimeAgentKernelBoundaryFactory;
+}
+
+async function validateManagedPrivateState(runtime: {
+  readonly installationRoot: string;
+  readonly privateStateRoot: string;
+}): Promise<void> {
+  const installation = basename(runtime.installationRoot);
+  const managedTargetRoot = dirname(dirname(runtime.installationRoot));
+  const expectedPrivateState = join(managedTargetRoot, "private-state", installation);
+  const details = await lstat(runtime.privateStateRoot).catch(() => null);
+  if (resolve(runtime.privateStateRoot) !== resolve(expectedPrivateState)
+    || !details?.isDirectory() || details.isSymbolicLink()) {
+    throw new Error("Managed Prime private state is not an owned directory");
+  }
+  const [resolvedManagedTarget, resolvedPrivateState] = await Promise.all([
+    realpath(managedTargetRoot),
+    realpath(runtime.privateStateRoot),
+  ]);
+  if (resolvedPrivateState !== join(resolvedManagedTarget, "private-state", installation)) {
+    throw new Error("Managed Prime private state escapes its managed runtime");
+  }
+  for (const child of ["agent", "sessions"] as const) {
+    const childPath = join(runtime.privateStateRoot, child);
+    try {
+      await mkdir(childPath, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const childDetails = await lstat(childPath).catch(() => null);
+    if (!childDetails?.isDirectory() || childDetails.isSymbolicLink()
+      || await realpath(childPath) !== join(resolvedPrivateState, child)) {
+      throw new Error(`Managed Prime ${child === "sessions" ? "session" : child} state is not an owned directory`);
+    }
+  }
 }
 
 interface PrimeAgentConfiguration {
@@ -325,7 +408,10 @@ export class PrimeAgentHarness implements Harness {
   static async create(context: HarnessFactoryContext, dependencies: PrimeAgentDependencies = {}): Promise<PrimeAgentHarness> {
     const configuration = parsePrimeAgentConfiguration(context);
     const permission = parsePrimeAgentPermission(context);
-    const primeAgent = await (dependencies.loadModule ?? loadPrimeAgentModule)();
+    const managedRuntime = await dependencies.resolvePrimeRuntime?.();
+    if (managedRuntime) await validateManagedPrivateState(managedRuntime);
+    const primeAgent = await (dependencies.loadModule
+      ?? (managedRuntime ? () => import(managedRuntime.moduleUrl) as Promise<PrimeAgentModule> : loadPrimeAgentModule))();
     requirePrimePermissionRuntime(permission, primeAgent);
     const workspaceRoot = permission.profile === "full"
       ? context.workingDirectory
@@ -354,9 +440,15 @@ export class PrimeAgentHarness implements Harness {
       ? savedPresentationVersionId
       : undefined;
     const presentationInstructions = { current: "" };
+    const managedAgentDir = managedRuntime ? join(managedRuntime.privateStateRoot, "agent") : undefined;
+    const managedSessionDir = managedRuntime ? join(managedRuntime.privateStateRoot, "sessions") : undefined;
     const services = await primeAgent.createAgentSessionServices({
       cwd: workspaceRoot,
       telemetryDisabled: true,
+      ...(managedRuntime ? {
+        agentDir: managedAgentDir,
+        managedKernel: { version: 1, pythonExecutable: managedRuntime.executable },
+      } : {}),
       resourceLoaderOptions: {
         appendSystemPromptOverride: (base: string[]) => presentationInstructions.current === ""
           ? [...base]
@@ -386,11 +478,17 @@ export class PrimeAgentHarness implements Harness {
       }
       return session;
     };
-    const restorableSessionFile = typeof savedSessionFile === "string"
-      && parsedSavedPresentationVersionId !== undefined
-      ? savedSessionFile
+    const confinedSavedSessionFile = managedSessionDir === undefined
+      ? (typeof savedSessionFile === "string" ? savedSessionFile : undefined)
+      : (typeof savedSessionFile === "string"
+        ? await resolvedManagedSessionFile(managedRuntime!.privateStateRoot, managedSessionDir, savedSessionFile)
+        : undefined);
+    const restorableSessionFile = parsedSavedPresentationVersionId !== undefined
+      ? confinedSavedSessionFile
       : undefined;
-    const createSessionManager = () => primeAgent.SessionManager.create(workspaceRoot);
+    const createSessionManager = () => managedSessionDir === undefined
+      ? primeAgent.SessionManager.create(workspaceRoot)
+      : primeAgent.SessionManager.create(workspaceRoot, managedSessionDir);
     const initialSessionManager = restorableSessionFile === undefined
       ? createSessionManager()
       : primeAgent.SessionManager.open(restorableSessionFile);

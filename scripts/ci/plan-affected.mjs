@@ -336,7 +336,9 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
     }
   }
 
-  const rustPackages = reverseClosure(localRustGraph(repository), rustRoots);
+  const rustGraph = localRustGraph(repository);
+  const rustReverseClosure = reverseClosure(rustGraph, rustRoots);
+  const rustPackages = dependencyClosure(rustGraph, rustReverseClosure);
   const runtimeRustPackages = new Set(vitestRustPackages);
   for (const packageName of rustPackages) {
     if (config.vitestRustRuntime.fullPortfolio.includes(packageName))
@@ -354,7 +356,11 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
     vitestFiles: [...vitestFiles].sort(),
     vitestRustPackages: [...vitestRustPackages].sort(),
     runtimeRustPackages: [...runtimeRustPackages].sort(),
-    rustCrash: rustPackages.some((name) =>
+    // Crash selection keys on the reverse closure alone: forward build
+    // dependencies enter rustPackages because Clippy lints them, but a
+    // dependent-only change alters no graph source the crash command
+    // exercises.
+    rustCrash: rustReverseClosure.some((name) =>
       config.rustCrashPackages.includes(name),
     ),
     rootTypeScript,

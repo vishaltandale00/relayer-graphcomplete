@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -263,6 +263,11 @@ export class GraphCompleteRuntimeService {
     graphAuthoringLauncherPath,
     codexPathOverride,
     resolveCodexRuntime,
+    resolveClaudeRuntime,
+    resolvePrimeRuntime,
+    validateHarnessRuntime,
+    onHarnessRuntimeValidationFailure = () => {},
+    coordinateHarnessReadiness = false,
     harnessHostModuleUrl,
     candidateTrace,
     acquireProviderExecution,
@@ -284,6 +289,11 @@ export class GraphCompleteRuntimeService {
     this.graphAuthoringLauncherPath = graphAuthoringLauncherPath;
     this.codexPathOverride = codexPathOverride;
     this.resolveCodexRuntime = resolveCodexRuntime;
+    this.resolveClaudeRuntime = resolveClaudeRuntime;
+    this.resolvePrimeRuntime = resolvePrimeRuntime;
+    this.validateHarnessRuntime = validateHarnessRuntime;
+    this.onHarnessRuntimeValidationFailure = onHarnessRuntimeValidationFailure;
+    this.coordinateHarnessReadiness = coordinateHarnessReadiness;
     this.harnessHostModuleUrl = harnessHostModuleUrl;
     this.candidateTrace = candidateTrace;
     this.acquireProviderExecution = acquireProviderExecution;
@@ -334,7 +344,9 @@ export class GraphCompleteRuntimeService {
     try {
       const {
         digestHarnessConfiguration,
+        createClaudeBasicFactory,
         createCodexBasicFactory,
+        createPrimeAgentFactory,
         loadHarnessConfigurations,
         productHarnessImplementations,
         startHarnessHost,
@@ -351,12 +363,42 @@ export class GraphCompleteRuntimeService {
           diagnostics: unavailable.diagnostics,
         }));
       const catalogPath = join(runtimeDirectory, "harness-configurations.json");
+      let previousCatalog = null;
+      try {
+        const parsed = JSON.parse(await this.#awaitStartupOperation(readFile(catalogPath, "utf8")));
+        if (parsed?.schemaVersion === 1 && Array.isArray(parsed.configurations)) previousCatalog = parsed;
+      } catch { /* first startup or corrupt local catalog starts unavailable */ }
+      const configurationEntries = await Promise.all([...configurations.values()].map(async (configuration) => {
+        const digest = digestHarnessConfiguration(configuration);
+        const prior = previousCatalog?.configurations.find((entry) => (
+          entry?.configuration?.name === configuration.name
+          && entry.digest === digest
+          && entry.runtimeAvailable === true
+        ));
+        let runtimeAvailable = false;
+        if (this.coordinateHarnessReadiness && prior && typeof this.validateHarnessRuntime === "function") {
+          try {
+            runtimeAvailable = await this.#awaitStartupOperation(this.validateHarnessRuntime(configuration)) === true;
+          } catch (error) {
+            try { await this.onHarnessRuntimeValidationFailure(configuration, error); } catch { /* diagnostics cannot block startup */ }
+          }
+        }
+        return {
+          configuration,
+          digest,
+          ...(this.coordinateHarnessReadiness ? {
+            runtimeAvailable,
+            unavailableReason: runtimeAvailable ? null : {
+              code: "harness_readiness_pending",
+              message: "This execution configuration is currently unavailable.",
+            },
+            readinessGeneration: 0,
+          } : {}),
+        };
+      }));
       await this.#awaitStartupOperation(writeFile(catalogPath, `${JSON.stringify({
         schemaVersion: 1,
-        configurations: [...configurations.values()].map((configuration) => ({
-          configuration,
-          digest: digestHarnessConfiguration(configuration),
-        })),
+        configurations: configurationEntries,
         unavailableConfigurations,
       }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 }));
 
@@ -413,6 +455,12 @@ export class GraphCompleteRuntimeService {
       try {
         harnessHost = await this.#awaitStartupOperation(startHarnessHost({
         implementations: productHarnessImplementations({
+          ...(this.resolvePrimeRuntime ? {
+            "prime.agent": createPrimeAgentFactory({ resolvePrimeRuntime: this.resolvePrimeRuntime }),
+          } : {}),
+          ...(this.resolveClaudeRuntime ? {
+            "claude.basic": createClaudeBasicFactory({ resolveClaudeRuntime: this.resolveClaudeRuntime }),
+          } : {}),
           ...(this.codexBasicClientModuleUrl || this.codexBrowserMcpRuntime || this.graphAuthoringLauncherPath || this.codexPathOverride || this.resolveCodexRuntime ? {
             "codex.basic": createCodexBasicFactory({
               ...(this.codexBasicClientModuleUrl ? { clientModuleUrl: this.codexBasicClientModuleUrl } : {}),
@@ -442,6 +490,8 @@ export class GraphCompleteRuntimeService {
         harnessControlToken,
         catalogPath,
         configurationNames: Object.freeze([...configurations.keys()]),
+        configurations,
+        digestConfiguration: digestHarnessConfiguration,
       });
       return this.session;
     } catch (error) {
@@ -456,6 +506,30 @@ export class GraphCompleteRuntimeService {
       if (cancellationRequested) throw runtimeClosingError(error);
       throw error;
     }
+  }
+
+  async recordHarnessReadiness(updates) {
+    if (!this.session || !Array.isArray(updates)) throw new Error("GraphComplete runtime is not ready.");
+    const catalog = JSON.parse(await readFile(this.session.catalogPath, "utf8"));
+    if (catalog?.schemaVersion !== 1 || !Array.isArray(catalog.configurations)) {
+      throw new Error("Harness configuration catalog is invalid.");
+    }
+    const byName = new Map(updates.map((update) => [update.harnessId, update]));
+    catalog.configurations = catalog.configurations.map((entry) => {
+      const update = byName.get(entry.configuration?.name);
+      if (!update || update.configurationDigest !== entry.digest
+        || !Number.isSafeInteger(update.generation)
+        || update.generation < (entry.readinessGeneration ?? 0)) return entry;
+      return {
+        ...entry,
+        runtimeAvailable: update.available === true,
+        unavailableReason: update.available === true ? null : update.unavailableReason,
+        readinessGeneration: update.generation,
+      };
+    });
+    const temporaryPath = `${this.session.catalogPath}.${randomBytes(8).toString("hex")}.tmp`;
+    await writeFile(temporaryPath, `${JSON.stringify(catalog, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await rename(temporaryPath, this.session.catalogPath);
   }
 
   async exportCandidateTrace(productInteractionId, targetDirectory, correlation) {

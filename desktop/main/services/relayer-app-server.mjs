@@ -322,6 +322,24 @@ export class RelayerAppServerService {
     throw new Error(detail?.error?.message || detail?.error || `Provider catalog publish failed (${response.status}).`);
   }
 
+  async publishHarnessReadiness(updates, { signal } = {}) {
+    const session = await this.start();
+    signal?.throwIfAborted();
+    const response = await fetch(new URL("/api/internal/harness-readiness", session.origin), {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${session.cookie.value}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(updates),
+      signal,
+    });
+    if (response.ok) return;
+    let detail = null;
+    try { detail = await response.json(); } catch { /* use status fallback */ }
+    throw new Error(detail?.error?.message || detail?.error || `Harness readiness publish failed (${response.status}).`);
+  }
+
   async validateProviderOnboarding({ signal } = {}) {
     const session = await this.start();
     const response = await fetch(new URL("/api/provider-onboarding/status", session.origin), {

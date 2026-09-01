@@ -78,6 +78,7 @@ describe("affected-module plan v1", () => {
       "relayer-app-server",
       "relayer-graph-core",
       "relayer-graph-server",
+      "relayer-telemetry-capability",
     ]);
     expect(result.chapters.rust).toBe(true);
     expect(result.rustCrash).toBe(true);
@@ -115,11 +116,26 @@ describe("affected-module plan v1", () => {
     const result = plan("crates/relayer-app-server/src/main.rs");
 
     expect(result.mode).toBe("affected");
-    expect(result.rustPackages).toEqual(["relayer-app-server"]);
+    expect(result.rustPackages).toEqual(
+      expect.arrayContaining(["relayer-app-server"]),
+    );
     expect(result.chapters.rust).toBe(true);
     // The crash command compiles and runs no app-server code; app-server
     // interrupted-execution recovery stays owned by its ordinary tests.
+    // Build dependencies join rustPackages for Clippy, but crash selection
+    // keys on the reverse closure, so they do not trigger the crash lane.
     expect(result.rustCrash).toBe(false);
+  });
+
+  test("selects local Rust dependencies that Clippy lints through a changed package", () => {
+    const result = plan("crates/relayer-app-server/src/api.rs");
+
+    expect(result.rustPackages).toEqual([
+      "relayer-app-server",
+      "relayer-graph-core",
+      "relayer-graph-server",
+      "relayer-telemetry-capability",
+    ]);
   });
 
   test("derives npm reverse dependents and desktop seams from package dependencies", () => {

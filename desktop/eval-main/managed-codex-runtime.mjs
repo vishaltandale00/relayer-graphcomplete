@@ -30,7 +30,7 @@ export function createEvalManagedCodexRuntime({
       });
     }
     const requirement = managedRuntimeRequirementForHarness("codex.basic");
-    const runtime = await getInstaller().ensure(requirement.runtimeId, requirement.minimumVersion);
+    const runtime = await getInstaller().prepare(requirement.recipeId);
     return Object.freeze({
       ...runtime,
       environment: Object.freeze(withManagedCodexPath(environment, runtime.executable)),

@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   productionProviderAdapterRegistry,
+  productionHarnessRuntimeDescriptor,
   productionProviderRuntimeDependencies,
   resolveLegacyCodexHome,
 } from "./providers/provider-adapter-registry.mjs";
@@ -29,7 +30,17 @@ import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { installElectronMainErrorAdapter } from "./services/electron-main-error-adapter.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService, developerTemporalFeatures } from "./services/graphcomplete-runtime.mjs";
-import { inspectPrimeAgentRuntime, requirePrimeAgentRuntime } from "./services/prime-agent-runtime.mjs";
+import {
+  inspectPrimeAgentRuntime,
+  PRIME_AGENT_ASSET_SHA256,
+  requirePrimeAgentRuntime,
+  selectPrimeAgentDependencyClosureSha256,
+} from "./services/prime-agent-runtime.mjs";
+import {
+  assemblePrimeManagedRuntime,
+  checkPrimeManagedRuntime,
+  createPrimeReviewedTreeCopier,
+} from "./services/prime-managed-runtime.mjs";
 import { resolveDesktopHarnessConfiguration } from "./services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createTutorialLifecycle } from "./services/tutorial-lifecycle.mjs";
@@ -41,6 +52,7 @@ import {
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { createManagedRuntimeInstaller } from "./managed-runtimes/installer.mjs";
 import { createManagedRuntimeResolver } from "./managed-runtimes/resolver.mjs";
+import { createHarnessReadinessCoordinator } from "./services/harness-readiness.mjs";
 import { confirmManagedRuntimeQuit } from "./managed-runtimes/quit-guard.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
 import { createWindowFactory } from "./window.mjs";
@@ -51,6 +63,7 @@ import {
 import { nativeBinaryName } from "../shared/target.mjs";
 import {
   activeProviderRuntimeRequirements,
+  HARNESS_MANAGED_RUNTIME_REQUIREMENTS,
   compatibleHarnessImplementationForAdapter,
   managedRuntimeRequirementForHarness,
   parseUpdateRuntimeRequirements,
@@ -70,8 +83,26 @@ app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
 const providerRuntimeRoot = join(userDataPath, "provider-runtimes");
+const primeAppRoot = app.isPackaged ? app.getAppPath() : repositoryRoot;
+const primePythonClientRoot = app.isPackaged
+  ? join(process.resourcesPath, "python", "relayer-graph", "src")
+  : join(repositoryRoot, "python", "relayer-graph", "src");
 const managedRuntimeInstaller = createManagedRuntimeInstaller({
   root: join(userDataPath, "managed-runtimes"),
+  assembleRecipe: async (context) => {
+    if (context.recipe.runtimeId !== "prime") return;
+    await assemblePrimeManagedRuntime(context, {
+      copyReviewedTrees: createPrimeReviewedTreeCopier({
+        appRoot: primeAppRoot,
+        pythonClientRoot: primePythonClientRoot,
+        expectedClosureSha256: selectPrimeAgentDependencyClosureSha256({
+          isPackaged: app.isPackaged,
+          javascriptContract: context.recipe.runtimeContract.javascript,
+        }),
+        expectedPythonClientSha256: PRIME_AGENT_ASSET_SHA256.pythonPackageTree,
+      }),
+    });
+  },
 });
 const managedRuntimeResolver = createManagedRuntimeResolver(managedRuntimeInstaller);
 const legacyCodexHome = resolveLegacyCodexHome(userDataPath, process.env);
@@ -106,9 +137,6 @@ if (!codexBrowserMcpInspection.available) {
     diagnostics: codexBrowserMcpInspection.diagnostics,
   });
 }
-const primePythonClientRoot = app.isPackaged
-  ? join(process.resourcesPath, "python", "relayer-graph", "src")
-  : join(repositoryRoot, "python", "relayer-graph", "src");
 process.env.RELAYER_PRIME_PYTHON_CLIENT_ROOT = primePythonClientRoot;
 const primeAgentRuntime = await inspectPrimeAgentRuntime({
   appPath: app.isPackaged ? app.getAppPath() : repositoryRoot,
@@ -188,6 +216,29 @@ if (primaryInstance) {
       );
       requestFatalShutdown();
     },
+    resolveCodexRuntime: async () => managedRuntimeDescriptor(await managedRuntimeResolver.get(
+      managedRuntimeRequirementForHarness("codex.basic").recipeId,
+    )),
+    resolveClaudeRuntime: async () => managedRuntimeDescriptor(await managedRuntimeResolver.get(
+      managedRuntimeRequirementForHarness("claude.basic").recipeId,
+    )),
+    resolvePrimeRuntime: async () => managedRuntimeDescriptor(await managedRuntimeResolver.get(
+      managedRuntimeRequirementForHarness("prime.agent").recipeId,
+    )),
+    validateHarnessRuntime: async (configuration) => {
+      const requirement = managedRuntimeRequirementForHarness(configuration.implementation);
+      await managedRuntimeResolver.validate(requirement.recipeId);
+      return true;
+    },
+    onHarnessRuntimeValidationFailure: async (configuration, error) => {
+      await providerDiagnostics.write({
+        level: "error",
+        category: "harness_startup_validation_failed",
+        harnessId: configuration.name,
+        code: typeof error?.code === "string" ? error.code : "managed_runtime_local_validation_failed",
+      });
+    },
+    coordinateHarnessReadiness: true,
   });
   let productServer;
   let modelCatalog;
@@ -224,12 +275,7 @@ if (primaryInstance) {
     });
   }
 
-  const managedRuntimeDescriptor = (runtime) => Object.freeze({
-    runtimeId: runtime.runtimeId,
-    version: runtime.version,
-    executable: runtime.executable,
-    ...(runtime.modulePath ? { moduleUrl: pathToFileURL(runtime.modulePath).href } : {}),
-  });
+  const managedRuntimeDescriptor = (runtime) => productionHarnessRuntimeDescriptor(runtime);
 
   const canaryEvidenceLog = createCanaryEvidenceLog({
     appIsPackaged: app.isPackaged,
@@ -250,7 +296,7 @@ if (primaryInstance) {
       if (!providerSetup) return;
       const incoming = parseUpdateRuntimeRequirements(info);
       const requirements = activeProviderRuntimeRequirements(await providerSetup.list())
-        .map(({ runtimeId }) => ({ runtimeId, minimumVersion: incoming[runtimeId] }));
+        .map(({ runtimeId }) => ({ runtimeId, recipeId: incoming[runtimeId] }));
       if (requirements.length === 0) return;
       const result = await managedRuntimeInstaller.stageForAppUpdate(info.version, requirements);
       if (result.failures.length) {
@@ -387,6 +433,38 @@ if (primaryInstance) {
       issueErrorCapability,
     });
     const productSession = await productServer.start();
+    const readiness = createHarnessReadinessCoordinator({
+      configurations: runtimeSession.configurations,
+      digestConfiguration: runtimeSession.digestConfiguration,
+      runtimeRequirements: HARNESS_MANAGED_RUNTIME_REQUIREMENTS,
+      prepareRecipe: async (recipeId) => managedRuntimeDescriptor(
+        await managedRuntimeResolver.prepare(recipeId),
+      ),
+      checkers: {
+        "codex.basic": async ({ runtime }) => ({
+          available: runtime?.runtimeId === "codex"
+            && typeof runtime.executable === "string"
+            && runtime.executable.trim() !== ""
+            && runtime.environment !== null
+            && typeof runtime.environment === "object",
+        }),
+        "claude.basic": async ({ runtime }) => ({
+          available: runtime?.runtimeId === "claude"
+            && typeof runtime.executable === "string"
+            && runtime.executable.trim() !== ""
+            && typeof runtime.moduleUrl === "string"
+            && runtime.moduleUrl.trim() !== ""
+            && runtime.environment !== null
+            && typeof runtime.environment === "object",
+        }),
+        "prime.agent": ({ runtime }) => checkPrimeManagedRuntime({ runtime }),
+      },
+      publishAvailability: async (updates) => {
+        await productServer.publishHarnessReadiness(updates);
+        await graphRuntime.recordHarnessReadiness(updates);
+      },
+      diagnostics: providerDiagnostics,
+    });
     const publishCatalog = (snapshot, { signal } = {}) => (
       productServer.publishProviderCatalog(snapshot, { signal })
     );
@@ -405,12 +483,18 @@ if (primaryInstance) {
       }),
       providerStatuses: () => productServer.providerStatuses(),
       runtimeDependencies: async (definition) => {
+        if (definition.accessContract === "secret@1") {
+          return productionProviderRuntimeDependencies(definition, {
+            runtimeRoot: providerRuntimeRoot,
+            legacyCodexHome,
+            environment: process.env,
+          });
+        }
         const requirement = managedRuntimeRequirementForHarness(
           compatibleHarnessImplementationForAdapter(definition.adapterId),
         );
         const managedRuntime = managedRuntimeDescriptor(await managedRuntimeResolver.get(
-          requirement.runtimeId,
-          requirement.minimumVersion,
+          requirement.recipeId,
         ));
         return productionProviderRuntimeDependencies(definition, {
           runtimeRoot: providerRuntimeRoot,
@@ -420,11 +504,14 @@ if (primaryInstance) {
         });
       },
       prepareRuntime: async ({ adapterId }) => {
+        const descriptor = productionProviderAdapterRegistry.get(adapterId);
+        if (descriptor.accessContract === "secret@1") return;
         const requirement = managedRuntimeRequirementForHarness(
           compatibleHarnessImplementationForAdapter(adapterId),
         );
-        await managedRuntimeResolver.prepare(requirement.runtimeId, requirement.minimumVersion);
+        await managedRuntimeResolver.prepare(requirement.recipeId);
       },
+      evaluateReadiness: (request) => readiness.evaluate(request),
       publishCatalog,
     });
     ({ modelCatalog, providerDefinitions: providerSetup } = providerComposition);

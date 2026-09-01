@@ -101,8 +101,9 @@ executes no app-server code, and app-server interrupted-execution recovery
 remains owned by its ordinary Rust tests. See
 `docs/research/crash-verification-cadence.md` for the staged narrowing plan.
 
-The checked-in v1 map is `scripts/ci/affected-modules.v1.json`. Rust and npm
-reverse dependents are derived from their manifests. Lockfile, toolchain,
+The checked-in v1 map is `scripts/ci/affected-modules.v1.json`. Rust selection
+includes reverse dependents and their local build dependencies; npm reverse
+dependents are derived from manifests. Lockfile, toolchain,
 workflow, infrastructure, planner, unknown, and unmapped changes select the
 full portfolio. Each affected owner also names its fresh Vitest checkpoints and
 their build prerequisites. A selected Vitest chapter with no mapped checkpoint

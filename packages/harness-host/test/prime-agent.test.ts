@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -20,6 +20,194 @@ const configuration: HarnessConfiguration = {
 const fullPermission = { permissionProfileId: "full", permissionBinding: {} } as const;
 
 describe("PrimeAgentHarness", () => {
+  it("uses only explicit managed Prime profile and session paths in the production factory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-prime-managed-factory-"));
+    const runtime = managedRuntimePaths(root);
+    const session = primeSession(join(runtime.privateStateRoot, "sessions", "root.jsonl"));
+    const createAgentSessionServices = vi.fn(async () => ({}));
+    const createSessionManager = vi.fn(() => "managed-session");
+    const loadModule = vi.fn(async () => ({
+      ...runScopeApi(),
+      SessionManager: { create: createSessionManager, open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices,
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never);
+
+    try {
+      await mkdir(runtime.privateStateRoot, { recursive: true });
+      await PrimeAgentHarness.create({
+        threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+      }, { loadModule, resolvePrimeRuntime: async () => runtime });
+
+      expect(loadModule).toHaveBeenCalledOnce();
+      expect(createAgentSessionServices).toHaveBeenCalledWith(expect.objectContaining({
+        agentDir: join(runtime.privateStateRoot, "agent"),
+        managedKernel: { version: 1, pythonExecutable: runtime.executable },
+      }));
+      expect(createSessionManager).toHaveBeenCalledWith("/tmp/project", join(runtime.privateStateRoot, "sessions"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not open symlinked managed session state that resolves outside private state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-prime-managed-session-"));
+    const outside = await mkdtemp(join(tmpdir(), "relayer-prime-session-outside-"));
+    const runtime = managedRuntimePaths(root);
+    const { privateStateRoot } = runtime;
+    const sessions = join(privateStateRoot, "sessions");
+    const savedSession = join(sessions, "saved.jsonl");
+    const open = vi.fn(() => "outside-session");
+    const create = vi.fn(() => "fresh-managed-session");
+    try {
+      await mkdir(sessions, { recursive: true });
+      await writeFile(join(outside, "outside.jsonl"), "outside session", { mode: 0o600 });
+      await symlink(join(outside, "outside.jsonl"), savedSession);
+
+      await PrimeAgentHarness.create({
+        threadId: 7,
+        workingDirectory: "/tmp/project",
+        ...fullPermission,
+        configuration,
+        savedState: {
+          primeAgentSessionFile: savedSession,
+          primeAgentSessionPersonalPresentationVersionId: null,
+        },
+      }, {
+        loadModule: async () => ({
+          ...runScopeApi(),
+          SessionManager: { create, open },
+          createHostRequestHandler: (handler: unknown) => handler,
+          createAgentSessionServices: vi.fn(async () => ({})),
+          createAgentSessionFromServices: vi.fn(async () => ({ session: primeSession(join(sessions, "fresh.jsonl")) })),
+        }) as never,
+        resolvePrimeRuntime: async () => runtime,
+      });
+
+      expect(open).not.toHaveBeenCalled();
+      expect(create).toHaveBeenCalledWith("/tmp/project", sessions);
+
+      await rm(sessions, { recursive: true, force: true });
+      const outsideSessions = join(outside, "sessions");
+      await mkdir(outsideSessions);
+      await writeFile(join(outsideSessions, "saved.jsonl"), "outside directory session", { mode: 0o600 });
+      await symlink(outsideSessions, sessions, "dir");
+      await expect(PrimeAgentHarness.create({
+        threadId: 8,
+        workingDirectory: "/tmp/project",
+        ...fullPermission,
+        configuration,
+        savedState: {
+          primeAgentSessionFile: savedSession,
+          primeAgentSessionPersonalPresentationVersionId: null,
+        },
+      }, {
+        loadModule: async () => ({
+          ...runScopeApi(),
+          SessionManager: { create, open },
+          createHostRequestHandler: (handler: unknown) => handler,
+          createAgentSessionServices: vi.fn(async () => ({})),
+          createAgentSessionFromServices: vi.fn(async () => ({ session: primeSession(join(sessions, "fresh.jsonl")) })),
+        }) as never,
+        resolvePrimeRuntime: async () => runtime,
+      })).rejects.toThrow(/session state is not an owned directory/i);
+      expect(open).not.toHaveBeenCalled();
+      expect(create).toHaveBeenCalledOnce();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("restores a regular saved session from the managed sessions directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-prime-managed-session-"));
+    const runtime = managedRuntimePaths(root);
+    const { privateStateRoot } = runtime;
+    const sessions = join(privateStateRoot, "sessions");
+    const savedSession = join(sessions, "saved.jsonl");
+    const open = vi.fn(() => "managed-session");
+    const create = vi.fn();
+    try {
+      await mkdir(sessions, { recursive: true });
+      await writeFile(savedSession, "managed session", { mode: 0o600 });
+      await PrimeAgentHarness.create({
+        threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+        savedState: {
+          primeAgentSessionFile: savedSession,
+          primeAgentSessionPersonalPresentationVersionId: null,
+        },
+      }, {
+        loadModule: async () => ({
+          ...runScopeApi(), SessionManager: { create, open },
+          createHostRequestHandler: (handler: unknown) => handler,
+          createAgentSessionServices: vi.fn(async () => ({})),
+          createAgentSessionFromServices: vi.fn(async () => ({ session: primeSession(savedSession) })),
+        }) as never,
+        resolvePrimeRuntime: async () => runtime,
+      });
+
+      expect(open).toHaveBeenCalledWith(await realpath(savedSession));
+      expect(create).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a symlinked private state root before managed Prime services can write", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-prime-managed-root-"));
+    const outside = await mkdtemp(join(tmpdir(), "relayer-prime-state-outside-"));
+    const runtime = managedRuntimePaths(root);
+    const createAgentSessionServices = vi.fn(async () => ({}));
+    const loadModule = vi.fn(async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices,
+      createAgentSessionFromServices: vi.fn(),
+    }) as never);
+    try {
+      await mkdir(join(root, "prime", "macos-arm64", "private-state"), { recursive: true });
+      await symlink(outside, runtime.privateStateRoot, "dir");
+
+      await expect(PrimeAgentHarness.create({
+        threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+      }, { loadModule, resolvePrimeRuntime: async () => runtime }))
+        .rejects.toThrow(/private state is not an owned directory/i);
+      expect(loadModule).not.toHaveBeenCalled();
+      expect(createAgentSessionServices).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["agent", "sessions"])("rejects symlinked %s state before managed Prime services can write", async (child) => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-prime-managed-child-"));
+    const outside = await mkdtemp(join(tmpdir(), "relayer-prime-child-outside-"));
+    const runtime = managedRuntimePaths(root);
+    const createAgentSessionServices = vi.fn(async () => ({}));
+    const loadModule = vi.fn(async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices,
+      createAgentSessionFromServices: vi.fn(),
+    }) as never);
+    try {
+      await mkdir(runtime.privateStateRoot, { recursive: true });
+      await symlink(outside, join(runtime.privateStateRoot, child), "dir");
+
+      await expect(PrimeAgentHarness.create({
+        threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+      }, { loadModule, resolvePrimeRuntime: async () => runtime }))
+        .rejects.toThrow(new RegExp(`${child === "sessions" ? "session" : child} state is not an owned directory`, "i"));
+      expect(loadModule).not.toHaveBeenCalled();
+      expect(createAgentSessionServices).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("aborts once and uses native synchronous Prime Agent disposal for forced shutdown", async () => {
     const nativeSyncDispose = vi.fn();
     const session = {
@@ -1748,6 +1936,18 @@ describe("PrimeAgentHarness", () => {
     }
   });
 });
+
+function managedRuntimePaths(root: string) {
+  const installation = "11111111-1111-4111-8111-111111111111";
+  const targetRoot = join(root, "prime", "macos-arm64");
+  return {
+    runtimeId: "prime" as const,
+    executable: join(targetRoot, "installations", installation, "python"),
+    moduleUrl: "file:///managed/prime/prime.mjs",
+    installationRoot: join(targetRoot, "installations", installation),
+    privateStateRoot: join(targetRoot, "private-state", installation),
+  };
+}
 
 function runContext(nodeId: number, token: string, trace: HarnessTraceSink = createNoopHarnessTraceSink()): HarnessRunContext {
   const inputGraph = { id: nodeId, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" as const };

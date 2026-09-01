@@ -3,6 +3,7 @@
 import { createProviderAdapterRegistry } from "./provider-adapter-contract.mjs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   withConventionalPathKey,
   withManagedCodexPath,
@@ -99,13 +100,28 @@ const SAFE_MANAGED_RUNTIME_ENVIRONMENT = Object.freeze([
   "HOME", "USERPROFILE",
 ]);
 
-function managedRuntimeEnvironment(environment = {}) {
+export function productionManagedRuntimeEnvironment(environment = {}) {
   return Object.fromEntries(SAFE_MANAGED_RUNTIME_ENVIRONMENT.flatMap((key) => (
     typeof environment[key] === "string" ? [[key, environment[key]]] : []
   )));
 }
 
+const managedRuntimeEnvironment = productionManagedRuntimeEnvironment;
+
+export function productionHarnessRuntimeDescriptor(runtime, { environment = process.env } = {}) {
+  return Object.freeze({
+    runtimeId: runtime.runtimeId,
+    version: runtime.version,
+    ...(typeof runtime.installationRoot === "string" ? { installationRoot: runtime.installationRoot } : {}),
+    ...(typeof runtime.privateStateRoot === "string" ? { privateStateRoot: runtime.privateStateRoot } : {}),
+    executable: runtime.executable,
+    ...(runtime.modulePath ? { moduleUrl: pathToFileURL(runtime.modulePath).href } : {}),
+    environment: Object.freeze(productionManagedRuntimeEnvironment(environment)),
+  });
+}
+
 export async function productionProviderRuntimeDependencies(definition, context) {
+  if (definition.accessContract === "secret@1") return {};
   const runtimeId = CODEX_PROVIDER_ADAPTERS.has(definition.adapterId)
     ? "codex"
     : CLAUDE_PROVIDER_ADAPTERS.has(definition.adapterId)

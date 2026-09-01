@@ -152,7 +152,7 @@ describe("issue 257 browser harness evidence", () => {
     const { delivery } = await sourceSnapshot(manifest);
     if (!delivery) return;
     const {
-      PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
+      PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
       PRIME_AGENT_PACKAGE_SHA256,
       PRIME_AGENT_PACKAGE_TREE_SHA256,
       PRIME_AGENT_SOURCE_COMMIT,
@@ -167,7 +167,7 @@ describe("issue 257 browser harness evidence", () => {
       sourceCommit: PRIME_AGENT_SOURCE_COMMIT,
       archiveSha256: PRIME_AGENT_PACKAGE_SHA256["@earendil-works/pi-coding-agent"],
       runtimeTreeSha256: PRIME_AGENT_PACKAGE_TREE_SHA256["@earendil-works/pi-coding-agent"],
-      targetClosureSha256: PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
+      targetClosureSha256: PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
     });
     expect(codingAgent).toMatchObject({
       sha256: manifest.harnesses.prime.archiveSha256,

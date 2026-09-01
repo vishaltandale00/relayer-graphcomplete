@@ -8,6 +8,7 @@ import {
   ACTIVE_PROVIDER_ADAPTER_IDS,
   ACTIVE_PROVIDER_ADAPTER_MODULES,
   productionProviderAdapterRegistry,
+  productionHarnessRuntimeDescriptor,
   productionProviderRuntimeDependencies,
   resolveLegacyCodexHome,
 } from "../desktop/main/providers/provider-adapter-registry.mjs";
@@ -58,6 +59,27 @@ function runtimeForAdapter(adapterId) {
 }
 
 describe("authoritative provider adapter registry", () => {
+  it("normalizes the installed runtime shape for readiness and harness factories", () => {
+    expect(productionHarnessRuntimeDescriptor({
+      runtimeId: "claude",
+      version: "0.3.250",
+      executable: "/managed/claude",
+      modulePath: "/managed/claude/sdk.mjs",
+    }, {
+      environment: {
+        PATH: "/safe/bin",
+        HOME: "/Users/tester",
+        ANTHROPIC_API_KEY: "ambient-secret",
+      },
+    })).toEqual({
+      runtimeId: "claude",
+      version: "0.3.250",
+      executable: "/managed/claude",
+      moduleUrl: "file:///managed/claude/sdk.mjs",
+      environment: { PATH: "/safe/bin", HOME: "/Users/tester" },
+    });
+  });
+
   it("contains exactly the six initial production adapters with valid contracts", async () => {
     expect(ACTIVE_PROVIDER_ADAPTER_IDS).toEqual(expectedAdapters);
     expect(productionProviderAdapterRegistry.list().map(({ adapterId }) => adapterId)).toEqual(expectedAdapters);
@@ -609,7 +631,7 @@ describe("secret-backed API adapters", () => {
     ["openrouter", codexRuntime],
     ["vercel-ai-router", codexRuntime],
     ["anthropic-api", claudeRuntime],
-  ])("%s carries its provisioned runtime into secret execution access", async (adapterId, managedRuntime) => {
+  ])("%s keeps managed runtime material out of secret execution access", async (adapterId, managedRuntime) => {
     const descriptor = productionProviderAdapterRegistry.get(adapterId);
     const environment = managedRuntime.runtimeId === "codex"
       ? { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: managedRuntime.executable }
@@ -628,12 +650,12 @@ describe("secret-backed API adapters", () => {
       },
     );
 
-    expect(await adapter.executionAccess()).toMatchObject({
+    expect(await adapter.executionAccess()).toEqual(expect.objectContaining({
       kind: "secret",
       endpoint: descriptor.defaultEndpoint,
       fields: { "api-key": "secret" },
-      runtime: { ...managedRuntime, environment },
-    });
+    }));
+    expect(await adapter.executionAccess()).not.toHaveProperty("runtime");
   });
 
   it("rejects malformed or empty discovery without manual model entry", async () => {

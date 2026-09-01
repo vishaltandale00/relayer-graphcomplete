@@ -227,6 +227,33 @@ describe("ClaudeBasicHarness", () => {
     }
   });
 
+  it("executes secret access through the factory-owned managed runtime descriptor", async () => {
+    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
+    const resolveClaudeRuntime = vi.fn(async () => ({
+      executable: "/managed/factory-claude",
+      moduleUrl: "file:///managed/factory-claude/sdk.mjs",
+      environment: { PATH: "/safe/bin" },
+    }));
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
+      resolveClaudeRuntime,
+      loadSdk: async () => ({
+        ...browserSdk(),
+        query: sdkQuery([
+          { type: "result", subtype: "success", result: "done", session_id: "session-1" },
+        ], (input) => { call = input; }),
+      }),
+      clientModuleUrl: "@relayer/graph-client",
+    });
+    const access = secretAccess();
+    delete (access as HarnessExecutionAccess & { runtime?: unknown }).runtime;
+
+    await harness.complete(runContext(access));
+
+    expect(resolveClaudeRuntime).toHaveBeenCalledOnce();
+    expect(call?.options.pathToClaudeCodeExecutable).toBe("/managed/factory-claude");
+    expect(call?.options.env).toMatchObject({ PATH: "/safe/bin", ANTHROPIC_API_KEY: "secret" });
+  });
+
   it("adds semantic Complete mechanics only when the completion broker grants authority", async () => {
     const calls: Parameters<ClaudeSdkQuery>[0][] = [];
     const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {

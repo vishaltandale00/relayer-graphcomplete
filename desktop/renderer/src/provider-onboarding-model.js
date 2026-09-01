@@ -46,6 +46,12 @@ export function resumableProviderDefinitions(providerStatus) {
 }
 
 export function providerOnboardingRecoveryAction(projection) {
+  if (projection?.blockingReason?.code === "provider_no_available_execution_configurations") {
+    return Object.freeze({
+      kind: "repair_execution",
+      label: "Repair execution configurations",
+    });
+  }
   if (projection?.blockingReason?.code !== "provider_no_eligible_execution_models") return null;
   return Object.freeze({
     kind: "refresh_models",

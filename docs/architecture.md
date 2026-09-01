@@ -36,7 +36,9 @@ Electron desktop
 
 Electron owns native windows, provider setup, updates, the Rust child-process lifecycles, and the in-process Node harness host. One Electron main process owns each desktop profile; a later application launch exits after asking the primary process to restore and focus its window. The primary process keeps product and runtime data inside permission-restricted app directories, gives the app server authenticated loopback coordinates for the graph server and harness host, sends product and graph control tokens through each Rust child's standard input, and keeps those pipes open as ownership signals. An unexpected service exit closes the owning application instead of leaving a partially live runtime. The Rust app server owns durable project, thread, and product interaction chronology records and serves the renderer over a random loopback port. The renderer uses only the app server as its product API.
 
-Electron also owns a narrow managed-runtime installer for the code-owned Claude and Codex harness capabilities. Connect resolves vendor latest, verifies SHA-512 npm integrity, extracts and probes in staging, and atomically activates one shared executable per runtime and platform before provider authentication. Provider definitions retain only their isolated authentication, configuration, and session state. App-update metadata carries the incoming minimums so activated-provider runtimes may be staged alongside the app download and activated locally after the exact app version restarts; ordinary startup performs no vendor lookup or automatic retry. Native vendor runtimes are excluded from the application bundle, and ambient `claude` or `codex` commands are never adopted.
+Electron also owns one deep managed-runtime installer for code-owned harness capabilities. Connect requests the exact recipe selected by the Desktop release, verifies every recorded artifact identity, assembles and probes in isolated staging, and atomically activates one immutable installation descriptor per runtime and platform before provider authentication. The current release owns exact Codex 0.147.0 and Claude 0.3.250 recipes for macOS arm64, macOS x64, and Windows x64. External app-update metadata remains version-shaped for predecessor compatibility and maps to those code-owned recipe identities before staging. Ordinary startup performs only local receipt, file, and readiness validation; it performs no vendor lookup or automatic retry. Explicit preparation repairs the same requested recipe and never adopts a mutable latest release. Provider definitions retain only their isolated authentication, configuration, and session state. Native vendor runtimes are excluded from the application bundle, and ambient `claude`, `codex`, uv, Python, npm, Homebrew, shell PATH, and Prime profile state are never adopted.
+
+The recipe schema can describe exact verified executables, archives, CPython artifacts, wheel-only Python closures, and app-owned client bytes without exposing them to harness configuration. Every mutable HOME, temporary, XDG, uv cache, Python, tool, and tool-bin path is redirected beneath the private managed-runtime root. Source distributions and source builds fail closed. Staging passes its code-owned readiness function before the active pointer changes; failed preparation preserves the prior descriptor. Frozen schema-v1 receipts are reusable only when their version and artifact identities exactly match the requested recipe. Cleanup recognizes only managed descendants and preserves unknown or unsafe legacy state rather than widening deletion authority. Production Prime assembly, composite kernel readiness, provider-by-harness visibility, updater gating, and packaged-runtime removal remain separate stacked boundaries.
 
 The app server holds graph control authority because it creates interactions and owns capability revocation. The harness host receives a distinct credential for its own loopback API plus only the per-call graph capability it translates into the selected harness. It never receives the graph control token.
 
@@ -80,6 +82,7 @@ Provider access, model-family organization, and harness execution are separate p
 3. A product-owned model family is an ordered list of exact provider-definition/model pairs. Families contain no credentials or execution behavior and may span providers. Managed read-only families are derived by versioned product policy; custom families remain harness-agnostic.
 4. A named harness configuration declares its versioned execution-access contract and exact or regular-expression model rules over stable adapter ID plus model ID. It never contains a user provider-definition ID or credential.
 5. Product resolution is the only join among the thread-pinned harness configuration, the selected family, current provider/catalog state, and the unsent exact selection. Send atomically pins the resolved provider definition and model to one execution attempt. The harness host defensively revalidates the adapter/model rule and access contract before invoking the selected harness implementation.
+6. Electron owns one credential-free readiness coordinator for loaded production harness configurations. Connect, reconnect, and explicit repair resolve exact access-contract and model-rule candidates, prepare shared recipes once, and publish one digest-guarded availability batch. Rust persists only global configuration availability and derives provider routes through the existing catalog joins; there is no provider-by-harness persistence. Loaded configurations start unavailable, and startup, catalog background work, renderer reads, and Send perform no readiness probes. Secret provider access contains only provider material; Codex and Claude managed runtime descriptors are injected by their harness factories.
 
 Threads pin a harness-configuration identity, not an immutable copy of catalog or family state. Unsent turns resolve lazily against current semantic revisions when the picker opens or Send is pressed. A still-valid exact selection is preserved; an invalid selection may move only within its current family. The product never selects another family implicitly. Once an attempt is sent, its provider/model identity cannot change or fall back mid-flight.
 
@@ -380,6 +383,31 @@ rather than treating runtime installation as current feasibility. The diagnostic
 and execution trace contain only the reviewed source commit and package name/version
 pairs. Current bounded Ask and
 Auto support is macOS-only, so a Windows build never advertises Prime as runnable.
+
+The macOS-arm64 Prime prototype is exact recipe `prime@0.8.1`. A connection,
+reconnect, explicit repair, or recipe-update trigger downloads hash- and
+size-bound uv, CPython, and wheels, then invokes pinned uv by absolute path with
+configuration, index, dependency resolution, network, and source-build paths
+disabled. The recipe seals distinct repository and packaged JavaScript closure
+digests, and each assembly path accepts only its own byte layout. Assembly verifies and copies the packaged JavaScript closure, Prime
+Python runtime, all 12 Python-backed skills, and `relayer_graph`. The ready
+module URL, isolated Python launcher, and receipt-owned private state root enter
+the Prime harness factory. Prime uses explicit agent and session directories
+there and never consults `~/.prime`; user execution never prepares or
+synchronizes. A provider-free real-kernel probe
+imports all 14 first-party modules, evaluates a deterministic expression, and
+shuts down before availability is published. Failure is sanitized and does not
+affect Codex or Claude. `npm run test:prime-managed-runtime` owns the clean-root
+checkpoint. Signed release proof, updater publication (#378), and downloadable
+JavaScript reconstruction (#379) remain separate.
+
+On restart, an unchanged configuration may recover a previously ready route
+only after cheap local validation of its exact managed receipt, owned real
+state directory, installation marker, and entrypoints whose resolved targets
+remain inside that exact installation. A recovered ready boolean starts a new
+process-local readiness ordering epoch. Startup does not download, prepare,
+invoke a readiness probe, or contact a provider. A digest mismatch or corrupt
+local descriptor keeps the harness unavailable and records a sanitized error.
 
 Release configuration resolves through one fail-closed contract. The contract seals the numeric version, source commit, product identity, target, architecture, signing authority, channel manifest, and exact HTTPS update base into both the application package and its release receipt. macOS targets additionally seal the Apple team and minimum OS; Windows seals the Artifact Signing endpoint, account, profile, and publisher. The updater and publisher consume this contract rather than maintaining parallel identity or channel rules. See [ADR 0002](decisions/0002-desktop-release-contract.md).
 

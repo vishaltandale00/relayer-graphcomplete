@@ -373,6 +373,19 @@ pub(super) async fn publish_provider_catalog(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub(super) async fn publish_harness_readiness(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(updates): Json<Vec<crate::product::HarnessRuntimeAvailabilityUpdate>>,
+) -> Result<StatusCode, ApiError> {
+    authorize_provider_publish(&state, &headers)?;
+    state
+        .product
+        .update_harness_runtime_availability(updates)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub(super) async fn provider_definitions(
     State(state): State<ApiState>,
     headers: HeaderMap,

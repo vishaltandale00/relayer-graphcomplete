@@ -26,6 +26,7 @@ export class ProviderDefinitionService {
     credentialStore,
     runtimeDependencies = () => ({}),
     prepareRuntime = async () => null,
+    evaluateReadiness = async () => null,
     publishCatalog = async () => {},
     canRemove = async () => ({ allowed: true }),
     idGenerator = randomUUID,
@@ -45,6 +46,7 @@ export class ProviderDefinitionService {
     this.credentialStore = credentialStore;
     this.runtimeDependencies = runtimeDependencies;
     this.prepareRuntime = prepareRuntime;
+    this.evaluateReadiness = evaluateReadiness;
     this.publishCatalog = publishCatalog;
     this.canRemove = canRemove;
     this.idGenerator = idGenerator;
@@ -70,6 +72,18 @@ export class ProviderDefinitionService {
   }
 
   adapters() { return this.registry.list().map(publicDescriptor); }
+
+  async evaluateCatalogReadiness(id, models, trigger) {
+    const definition = await this.#initialize().then((definitions) => (
+      definitions.find((item) => item.id === id && item.lifecycleState === "active")
+    ));
+    if (!definition) throw new Error("Unknown active provider definition.");
+    return this.evaluateReadiness({
+      trigger,
+      providerDefinition: publicDefinition(definition),
+      models,
+    });
+  }
 
   async #initialize() {
     if (this.definitions === null) this.definitions = await this.definitionStore.load();
@@ -225,6 +239,11 @@ export class ProviderDefinitionService {
         signal?.throwIfAborted();
         if (preparation.cancelled) throw new Error("Provider connection was cancelled.");
         if (catalog.provider?.status === "unavailable") throw new Error(catalog.provider.unavailableReason ?? "Provider is unavailable.");
+        await this.evaluateReadiness({
+          trigger: "connect",
+          providerDefinition: publicDefinition(candidate),
+          models: catalog.models ?? [],
+        });
         runtimeRegistrationAttempted = true;
         await this.onRuntimeReady(candidate, runtime);
         signal?.throwIfAborted();
@@ -315,6 +334,11 @@ export class ProviderDefinitionService {
       try {
         const catalog = await this.#discover(pending.runtime, signal);
         if (catalog.provider?.status === "unavailable") throw new Error(catalog.provider.unavailableReason ?? "Provider is unavailable.");
+        await this.evaluateReadiness({
+          trigger: pending.reconnect === true ? "reconnect" : "connect",
+          providerDefinition: publicDefinition(pending.candidate),
+          models: catalog.models ?? [],
+        });
         runtimeRegistrationAttempted = true;
         await this.onRuntimeReady(pending.candidate, pending.runtime);
         if (pending.reconnect === true) {
