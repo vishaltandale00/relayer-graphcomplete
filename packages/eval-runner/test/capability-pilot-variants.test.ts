@@ -58,14 +58,15 @@ describe("capability-pilot interaction variants", () => {
       openingPrompt: "Fix the pool.",
       simulatedUserBrief: "You saw later requests fail after cancel.",
       remainingHumanTurns: 3,
-      lastTurnSummary: "The graph names the connect-cancel window.",
+      currentSummary: "The graph names the connect-cancel window.",
+      completionStatus: "running",
     });
-    expect(prompt).toContain("simulated-user-steering-prompt-v1");
+    expect(prompt).toContain("simulated-user-steering-prompt-v2");
     expect(prompt).toContain("cannot write graph records");
-    expect(prompt).toContain("second human root");
-    expect(prompt).toContain("Remaining human turns including a possible follow-up: 3");
-    expect(prompt).toContain("This steering step only chooses the next human action from that summary.");
-    expect(prompt).toContain("A full screenshot review still runs independently");
+    expect(prompt).toContain("second human-root");
+    expect(prompt).toContain("Remaining in-flight actions including wait: 3");
+    expect(prompt).toContain("Do not send a composer follow-up");
+    expect(prompt).toContain("Visible working state is the live steering surface");
     expect(prompt).not.toContain("You already explored");
     expect(prompt).not.toContain("review tools");
   });

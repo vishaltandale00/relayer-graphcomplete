@@ -66,6 +66,6 @@ export async function runSimulatedUserSteeringDecision(options: {
       skipGitRepoCheck: true,
     },
   });
-  const turn = await thread.run(`${options.observation.steeringPrompt}\nRespond with one JSON object: {"kind":"follow-up"|"done"|"abandon","text":"...optional follow-up...","reason":"..."}.`);
+  const turn = await thread.run(`${options.observation.steeringPrompt}\nRespond with one JSON object: {"kind":"wait"|"navigate"|"commit-input"|"invoke"|"abandon","target":"...optional...","text":"...optional input value...","reason":"..."}.`);
   return parseSteeringDecision(extractSteeringDecisionJson(turn.finalResponse));
 }

@@ -495,22 +495,19 @@ describe("EvalService simulated-user result persistence", () => {
     );
   });
 
-  it("steers H3 through the production loop and grades only the final workspace", async () => {
+  it("steers H3 on published current during the in-flight complete and grades only the final workspace", async () => {
     const { stateFile, configurationPath } = await testPaths();
-    const followUpTexts = [];
-    const product = fakeSteeredH3Product(followUpTexts);
+    const product = fakeSteeredH3Product();
     globalThis.fetch = product;
     const workspaceGradeCalls = [];
     const steeringDecisions = vi.fn()
       .mockResolvedValueOnce({
-        kind: "follow-up",
-        text: "Please commit the sanitizer fix.",
-        reason: "The graph shows a diagnosis but no committed repair.",
+        kind: "commit-input",
+        target: "node:status-example",
+        text: "200.5 fails in production",
+        reason: "The current asks which statuses fail.",
       })
-      .mockResolvedValueOnce({
-        kind: "done",
-        reason: "The committed repair is enough to stop.",
-      });
+      .mockImplementation(async () => ({ kind: "wait", reason: "Let the current advance." }));
     const service = await new EvalService({
       stateFile,
       productSession: productSession(),
@@ -545,14 +542,11 @@ describe("EvalService simulated-user result persistence", () => {
         };
       },
       workspaceGrader: async ({ grade }) => {
-        workspaceGradeCalls.push({ grade, followUps: followUpTexts.length });
-        const passed = followUpTexts.length > 0;
+        workspaceGradeCalls.push({ grade });
         return [{
           name: "workspace:implementation-clean",
-          passed,
-          detail: passed
-            ? "Final workspace graded after the steered follow-up."
-            : "Incomplete first turn would fail outcome if graded now.",
+          passed: true,
+          detail: "Final workspace graded after the in-flight root settled.",
         }];
       },
       acceptedTopologyBuilder: async ({ turnId }) => ({ turnId, layers: [] }),
@@ -573,32 +567,116 @@ describe("EvalService simulated-user result persistence", () => {
 
     expect(execution.error).toBeNull();
     expect(execution.status).toBe("passed");
-    expect(followUpTexts).toEqual(["Please commit the sanitizer fix."]);
-    expect(workspaceGradeCalls).toEqual([{ grade: "autonomous-implementation", followUps: 1 }]);
-    expect(execution.turns).toHaveLength(2);
-    expect(execution.turns[0].deterministicChecks.filter((check) => check.name.includes(":workspace:"))).toEqual([]);
-    expect(execution.turns[1].deterministicChecks).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        name: "implementation:turn-2:workspace:implementation-clean",
-        passed: true,
-      }),
-    ]));
+    expect(workspaceGradeCalls).toEqual([{ grade: "autonomous-implementation" }]);
+    expect(execution.turns).toHaveLength(1);
     expect(execution.checks.filter((check) => check.name.includes(":workspace:"))).toEqual([
       expect.objectContaining({
-        name: "implementation:turn-2:workspace:implementation-clean",
+        name: "implementation:turn-1:workspace:implementation-clean",
         passed: true,
       }),
     ]);
     expect(execution.steeredLoop).toMatchObject({
-      terminal: "done",
-      humanTurnCount: 2,
-      followUpCount: 1,
+      terminal: "accepted",
+      inFlightActionCount: 1,
     });
-    expect(execution.steeringDecisions.map((decision) => decision.kind)).toEqual(["follow-up", "done"]);
-    expect(steeringDecisions.mock.calls[0][0].lastTurnSummary).toContain("Diagnose sanitize.ts");
+    expect(execution.steeringDecisions[0]).toMatchObject({
+      kind: "commit-input",
+      target: "node:status-example",
+    });
+    expect(execution.steeringActions[0]).toMatchObject({
+      completionStatus: "running",
+      status: "applied",
+      decision: { kind: "commit-input", target: "node:status-example" },
+    });
+    expect(steeringDecisions.mock.calls[0][0].completionStatus).toBe("running");
+    expect(steeringDecisions.mock.calls[0][0].currentSummary).toContain("input status-example");
+    expect(product.inputCommitBodies).toEqual([expect.objectContaining({
+      occurrence: expect.objectContaining({ actionId: 301 }),
+      value: { text: "200.5 fails in production" },
+    })]);
     expect(product.mock.calls.some(([url, options]) => (
       new URL(url).pathname === "/api/threads/thread-1/interactions" && options?.method === "POST"
-    ))).toBe(true);
+    ))).toBe(false);
+  });
+
+  it("records in-flight input rejection as evidence and still grades the final workspace", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const product = fakeSteeredH3Product({ rejectInputCommit: true });
+    globalThis.fetch = product;
+    const workspaceGradeCalls = [];
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      platform: "darwin",
+      simulatedUserJudgeRunner: async () => ({
+        status: "completed",
+        rubricRef: "rubric.json",
+        configurationRef: "judge.json",
+        interactionTraceRef: "trace.json",
+        screenshotRefs: ["screenshots/root.json"],
+        reviewRef: "review.json",
+        coverageRef: "coverage.json",
+        review: { turn: { ratings: { answer_quality: 4 } } },
+        coverage: { complete: true, missingSubjects: [] },
+        summary: "Reviewed the accepted graph.",
+      }),
+      steeringDecisionRunner: async () => ({
+        kind: "commit-input",
+        target: "node:status-example",
+        text: "200.5 fails in production",
+        reason: "The current asks which statuses fail.",
+      }),
+      projectFixtureMaterializer: async ({ workspaceDirectory }) => {
+        await mkdir(workspaceDirectory, { recursive: true });
+        return {
+          schemaVersion: 1,
+          fixtureId: H3_PROJECT_CASE_ID,
+          workspaceDirectory,
+          repositoryUrl: H3_REPOSITORY_URL,
+          upstreamCommit: H3_UPSTREAM_COMMIT,
+          upstreamTree: H3_UPSTREAM_TREE,
+          seededCommit: H3_SEEDED_COMMIT,
+          seededTree: H3_SEEDED_TREE,
+          packageManager: H3_PACKAGE_MANAGER,
+          installedWithFrozenLockfile: true,
+        };
+      },
+      workspaceGrader: async ({ grade }) => {
+        workspaceGradeCalls.push({ grade });
+        return [{
+          name: "workspace:implementation-clean",
+          passed: true,
+          detail: "Final workspace graded after the in-flight root settled.",
+        }];
+      },
+      acceptedTopologyBuilder: async ({ turnId }) => ({ turnId, layers: [] }),
+      acceptedTopologyGrader: () => [{
+        name: "graph:accepted-reachable-closure",
+        passed: true,
+        detail: "Accepted topology loaded.",
+      }],
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: [H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "simulated-user",
+    });
+    const completed = await waitForCompletedRun(service, created.id, 15_000);
+    const execution = completed.executions[0];
+
+    expect(execution.error).toBeNull();
+    expect(workspaceGradeCalls).toEqual([{ grade: "autonomous-implementation" }]);
+    expect(execution.steeringActions[0]).toMatchObject({
+      completionStatus: "running",
+      status: "rejected",
+      error: expect.stringMatching(/accepted history/),
+    });
+    expect(product.inputCommitBodies).toHaveLength(0);
+    expect(product.mock.calls.some(([url, options]) => (
+      new URL(url).pathname === "/api/threads/thread-1/interactions" && options?.method === "POST"
+    ))).toBe(false);
   });
 
   it("persists explicit partial and thrown-failure artifacts without losing deterministic evidence", async () => {
@@ -903,9 +981,11 @@ function fakeAcceptedProduct() {
   });
 }
 
-function fakeSteeredH3Product(followUpTexts) {
-  const interactions = [];
-  return vi.fn(async (url, options = {}) => {
+function fakeSteeredH3Product({ rejectInputCommit = false } = {}) {
+  let polls = 0;
+  let interaction = null;
+  const inputCommitBodies = [];
+  const fetch = vi.fn(async (url, options = {}) => {
     const path = new URL(url).pathname;
     if (path === "/api/model-settings" && (options.method === undefined || options.method === "GET")) {
       return jsonResponse({
@@ -934,41 +1014,111 @@ function fakeSteeredH3Product(followUpTexts) {
     }
     if (path === "/api/threads" && options.method === "POST") {
       const body = JSON.parse(options.body);
-      const interaction = h3AcceptedInteraction({
+      interaction = h3Interaction({
         id: "interaction-1",
         sequence: 1,
         text: body.initialMessage,
         title: "Diagnose sanitize.ts",
+        completionStatus: "running",
       });
-      interactions.splice(0, interactions.length, interaction);
       return jsonResponse({ id: "thread-1", rootInteractionId: interaction.id });
     }
-    if (path === "/api/threads/thread-1/interactions" && options.method === "POST") {
-      const body = JSON.parse(options.body);
-      followUpTexts.push(body.text);
-      const interaction = h3AcceptedInteraction({
-        id: "interaction-2",
-        sequence: 2,
-        text: body.text,
-        title: "Repair committed",
-      });
-      interactions.push(interaction);
-      return jsonResponse(interaction);
-    }
     if (path === "/api/threads/thread-1" && (options.method === undefined || options.method === "GET")) {
-      return jsonResponse({ id: "thread-1", interactions: [...interactions] });
+      polls += 1;
+      if (polls >= 3 && interaction) {
+        interaction = h3Interaction({
+          id: interaction.id,
+          sequence: interaction.sequence,
+          text: interaction.text,
+          title: "Diagnose sanitize.ts",
+          completionStatus: "accepted",
+        });
+      }
+      return jsonResponse({ id: "thread-1", interactions: interaction ? [interaction] : [] });
+    }
+    if (path === "/api/state") {
+      return jsonResponse({
+        currentProjection: {
+          cursor: 1,
+          events: interaction ? [{
+            completionId: interaction.graphNodeId,
+            sequence: 1,
+            revision: 1,
+            lifecycle: interaction.completionStatus === "accepted" ? "succeeded" : "active",
+            currentLayerId: 10,
+          }] : [],
+        },
+      });
+    }
+    if (path === "/api/threads/thread-1/interactions/interaction-1/layers/10") {
+      return jsonResponse(inFlightCurrentLayer());
+    }
+    if (path === "/api/threads/thread-1/input-draft") {
+      return jsonResponse({
+        threadId: "thread-1",
+        revision: 1 + inputCommitBodies.length,
+        attachments: [],
+        updatedAt: "2026-08-19T12:00:00.000Z",
+      });
+    }
+    if (path === "/api/threads/thread-1/input-draft/attachments" && options.method === "PUT") {
+      if (rejectInputCommit) {
+        return jsonResponse({ error: "Reopen an action from accepted history." }, 422);
+      }
+      inputCommitBodies.push(JSON.parse(options.body));
+      return jsonResponse({
+        threadId: "thread-1",
+        revision: 1 + inputCommitBodies.length,
+        attachments: inputCommitBodies,
+        updatedAt: "2026-08-19T12:00:00.000Z",
+      });
     }
     return jsonResponse({ error: `Unexpected fake product request: ${options.method || "GET"} ${path}` }, 404);
   });
+  fetch.inputCommitBodies = inputCommitBodies;
+  return fetch;
 }
 
-function h3AcceptedInteraction({ id, sequence, text, title }) {
+function inFlightCurrentLayer() {
+  const node = {
+    id: 2,
+    kind: "concept",
+    icon: "queue",
+    title: "Diagnose sanitize.ts",
+    detail: "Which statuses fail?",
+    state: "draft",
+  };
+  return {
+    layer: {
+      id: 10,
+      nodes: [node.id],
+      edges: [],
+      layout: { version: 1, placements: [{ nodeId: node.id, x: 0.5, y: 0.5 }] },
+      state: "draft",
+    },
+    nodes: [node],
+    edges: [],
+    actions: [{
+      id: 301,
+      sourceNodeId: node.id,
+      sourceLayerId: 10,
+      kind: "input",
+      control: "text",
+      prompt: "Which statuses fail in production?",
+      label: "status-example",
+      state: "draft",
+    }],
+  };
+}
+
+function h3Interaction({ id, sequence, text, title, completionStatus = "accepted" }) {
+  const accepted = completionStatus === "accepted";
   return {
     id,
     sequence,
     graphNodeId: sequence,
-    completionStatus: "accepted",
-    completionOutput: acceptedOutput(sequence, title),
+    completionStatus,
+    completionOutput: accepted ? acceptedOutput(sequence, title) : null,
     completionError: null,
     text,
     permissionProfileId: "auto",

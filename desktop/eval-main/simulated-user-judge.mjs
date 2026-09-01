@@ -1057,26 +1057,28 @@ export function createLocalSimulatedUserSteeringRunner({
   const selectedConfiguration = structuredClone(configuration);
   return async (input) => {
     if (typeof input?.openingPrompt !== "string" || typeof input?.simulatedUserBrief !== "string") {
-      throw new Error("Steered multi-turn follow-ups require the opening prompt and simulated-user brief.");
+      throw new Error("Steered in-turn actions require the opening prompt and simulated-user brief.");
     }
     const runtime = await resolveCodexRuntime();
+    const currentSummary = String(input.currentSummary ?? input.lastTurnSummary ?? "");
+    const completionStatus = String(input.completionStatus ?? "running");
     return runSteering({
       observation: {
         openingPrompt: input.openingPrompt,
         simulatedUserBrief: input.simulatedUserBrief,
-        humanTurnCount: 0,
         remainingHumanTurns: input.remainingHumanTurns,
-        lastTurn: {
-          turnIndex: 0,
+        snapshot: {
           interactionId: String(input.interactionId ?? "unknown"),
-          accepted: true,
-          summary: String(input.lastTurnSummary ?? ""),
+          completionStatus,
+          terminal: !["not_started", "running", "submitted", "preparing", "draft", "waiting_for_approval"].includes(completionStatus),
+          currentSummary,
         },
         steeringPrompt: buildSimulatedUserSteeringPrompt({
           openingPrompt: input.openingPrompt,
           simulatedUserBrief: input.simulatedUserBrief,
           remainingHumanTurns: input.remainingHumanTurns,
-          lastTurnSummary: String(input.lastTurnSummary ?? ""),
+          currentSummary,
+          completionStatus,
         }),
       },
       model: selectedConfiguration.model,

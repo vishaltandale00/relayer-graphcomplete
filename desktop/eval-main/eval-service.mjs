@@ -53,7 +53,9 @@ import {
   steeredMaxHumanTurns,
   parseSteeringDecision,
   requireSingleOpeningPrompt,
+  resolvePublishedCurrentTarget,
   runSteeredInteractionLoop,
+  summarizePublishedCurrent,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
 import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
@@ -2548,36 +2550,75 @@ export class EvalService {
       }
       let thread = null;
       const humanInteractionIds = [];
+      let publishedSurface = null;
+      let lastCurrentSummary = "";
       const steeredLoop = await runSteeredInteractionLoop(steeredPolicy, {
-        runOpening: async (prompt) => {
+        startOpening: async (prompt) => {
           thread = await startThread(prompt);
           humanInteractionIds.push(thread.rootInteractionId);
-          const interaction = await finishTurn(thread.id, thread.rootInteractionId, 0);
-          return steeredTurnRecord(interaction, 0);
+          return { interactionId: String(thread.rootInteractionId) };
         },
-        reviewTurn: async (turn) => ({ summary: turn.summary }),
+        observe: async (interactionId) => {
+          const detail = await this.#productRequest(`/api/threads/${thread.id}`);
+          await this.#observeCurrentProjections(execution, detail);
+          const interaction = detail.interactions.find((candidate) => String(candidate.id) === String(interactionId));
+          if (!interaction) throw new Error(`Product interaction ${interactionId} disappeared.`);
+          publishedSurface = await this.#loadPublishedCurrentSurface(thread.id, interaction);
+          lastCurrentSummary = summarizePublishedCurrent(interaction.completionStatus, publishedSurface);
+          return {
+            interactionId: String(interaction.id),
+            completionStatus: interaction.completionStatus,
+            terminal: !IN_PROGRESS_COMPLETION_STATUSES.has(interaction.completionStatus),
+            currentSummary: lastCurrentSummary,
+          };
+        },
         decide: async (observation) => {
           const decision = parseSteeringDecision(await this.steeringDecisionRunner({
             openingPrompt: observation.openingPrompt,
             simulatedUserBrief: observation.simulatedUserBrief,
             remainingHumanTurns: observation.remainingHumanTurns,
-            lastTurnSummary: observation.lastTurn.summary,
-            interactionId: observation.lastTurn.interactionId,
+            currentSummary: observation.snapshot.currentSummary,
+            completionStatus: observation.snapshot.completionStatus,
+            interactionId: observation.snapshot.interactionId,
           }));
           execution.steeringDecisions = [...(execution.steeringDecisions || []), copy(decision)];
           return decision;
         },
-        runFollowUp: async (text) => {
-          const posted = await postFollowUp(thread.id, text);
-          humanInteractionIds.push(posted.id);
-          const interaction = await finishTurn(thread.id, posted.id, humanInteractionIds.length - 1);
-          return steeredTurnRecord(interaction, humanInteractionIds.length - 1);
+        apply: async (decision, snapshot) => {
+          const attempt = {
+            interactionId: snapshot.interactionId,
+            completionStatus: snapshot.completionStatus,
+            decision,
+            status: "applied",
+            error: null,
+          };
+          try {
+            await this.#applyPublishedCurrentDecision(thread.id, publishedSurface, decision);
+          } catch (error) {
+            if (decision.kind === "abandon") throw error;
+            attempt.status = "rejected";
+            attempt.error = error instanceof Error ? error.message : String(error);
+          }
+          execution.steeringActions = [...(execution.steeringActions || []), copy(attempt)];
+        },
+        waitForChange: async (interactionId) => {
+          const previous = lastCurrentSummary;
+          const deadline = Date.now() + 2_000;
+          while (Date.now() < deadline) {
+            await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+            const detail = await this.#productRequest(`/api/threads/${thread.id}`);
+            const interaction = detail.interactions.find((candidate) => String(candidate.id) === String(interactionId));
+            if (!interaction || !IN_PROGRESS_COMPLETION_STATUSES.has(interaction.completionStatus)) return;
+            const surface = await this.#loadPublishedCurrentSurface(thread.id, interaction);
+            if (summarizePublishedCurrent(interaction.completionStatus, surface) !== previous) return;
+          }
         },
       });
+      await finishTurn(thread.id, thread.rootInteractionId, 0);
       execution.steeredLoop = {
         terminal: steeredLoop.terminal,
-        humanTurnCount: steeredLoop.turns.length,
-        followUpCount: Math.max(0, steeredLoop.turns.length - 1),
+        decisionCount: steeredLoop.decisions.length,
+        inFlightActionCount: (execution.steeringActions || []).length,
       };
       const { detail, semanticChildren } = await this.#waitForSemanticChildren(
         execution,
@@ -2845,6 +2886,103 @@ export class EvalService {
         productStatus: interaction.completionStatus,
         observedPreTerminal: false,
         recoveredAfterDiscovery: true,
+      });
+    }
+  }
+
+  async #loadPublishedCurrentSurface(threadId, interaction) {
+    const accepted = publishedSurfaceFromResolvedLayer(
+      threadId,
+      interaction,
+      interaction?.completionOutput?.rootLayer,
+    );
+    let currentLayerId = accepted.layerId;
+    if (Number.isSafeInteger(interaction?.graphNodeId)) {
+      try {
+        const state = await this.#productRequest(
+          `/api/state?currentProjectionAfter=0&currentProjectionCompletionId=${encodeURIComponent(interaction.graphNodeId)}`,
+        );
+        const events = state.currentProjection?.events || [];
+        for (let index = events.length - 1; index >= 0; index -= 1) {
+          const event = events[index];
+          if (String(event?.completionId) !== String(interaction.graphNodeId)) continue;
+          if (event.currentLayerId != null) {
+            currentLayerId = event.currentLayerId;
+            break;
+          }
+        }
+      } catch {
+        // Projection may be absent in fixture products; accepted or empty current still steers.
+      }
+    }
+    if (currentLayerId == null) return accepted;
+    try {
+      const resolved = await this.#productRequest(
+        `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(interaction.id)}/layers/${encodeURIComponent(currentLayerId)}`,
+      );
+      return publishedSurfaceFromResolvedLayer(threadId, interaction, resolved, currentLayerId);
+    } catch {
+      return accepted.layerId == null ? { ...accepted, layerId: currentLayerId } : accepted;
+    }
+  }
+
+  async #applyPublishedCurrentDecision(threadId, surface, decision) {
+    if (surface == null) {
+      throw new Error("Published current is not available yet.");
+    }
+    if (decision.kind === "navigate") {
+      const resolved = resolvePublishedCurrentTarget(surface, decision.target, "navigate");
+      const layerId = resolved.action?.targetLayerId ?? surface.layerId;
+      if (layerId == null) {
+        throw new Error(`Published current has no navigable layer for ${decision.target}.`);
+      }
+      await this.#productRequest(
+        `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(surface.interactionId)}/layers/${encodeURIComponent(layerId)}`,
+      );
+      return;
+    }
+    if (decision.kind === "commit-input") {
+      const resolved = resolvePublishedCurrentTarget(surface, decision.target, "input");
+      if (resolved.action == null || surface.graphNodeId == null || surface.layerId == null) {
+        throw new Error(`Published current has no input action for ${decision.target}.`);
+      }
+      const draft = await this.#productRequest(`/api/threads/${encodeURIComponent(threadId)}/input-draft`);
+      const control = String(resolved.action.control ?? "text");
+      const value = control === "text" || control === ""
+        ? { text: decision.text }
+        : { selectedKeys: [decision.text] };
+      await this.#productRequest(`/api/threads/${encodeURIComponent(threadId)}/input-draft/attachments`, {
+        method: "PUT",
+        body: {
+          occurrence: {
+            presentingInteractionNodeId: surface.graphNodeId,
+            presentingLayerId: surface.layerId,
+            actionId: resolved.action.id,
+          },
+          value,
+          expectedRevision: draft.revision ?? 1,
+        },
+      });
+      return;
+    }
+    if (decision.kind === "invoke") {
+      const resolved = resolvePublishedCurrentTarget(surface, decision.target, "invoke");
+      if (resolved.action == null) {
+        throw new Error(`Published current has no invoke action for ${decision.target}.`);
+      }
+      await this.#productRequest(
+        `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(surface.interactionId)}/actions/${encodeURIComponent(resolved.action.id)}/invoke`,
+        { method: "POST" },
+      );
+      return;
+    }
+    if (decision.kind === "abandon") {
+      if (surface.graphNodeId == null) {
+        throw new Error("Published current has no completion identity to stop.");
+      }
+      await this.#productRequest(`/api/completions/${encodeURIComponent(surface.graphNodeId)}/stop`, {
+        method: "POST",
+        body: { reason: decision.reason.slice(0, 200) },
       });
     }
   }
@@ -3245,28 +3383,27 @@ async function gradeProjectWorkspace({
   return frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory });
 }
 
-function steeredTurnRecord(interaction, turnIndex) {
+function publishedSurfaceFromResolvedLayer(threadId, interaction, resolved, layerId = resolved?.layer?.id ?? null) {
+  const nodes = [];
+  for (const node of resolved?.nodes || []) {
+    if (node && typeof node === "object" && !Array.isArray(node)) {
+      nodes.push({
+        id: node.id ?? node.node?.id,
+        title: node.title ?? node.node?.title,
+        detail: node.detail ?? node.node?.detail,
+      });
+    } else if (node != null) {
+      nodes.push({ id: node });
+    }
+  }
   return {
-    turnIndex,
-    interactionId: String(interaction.id),
-    accepted: interaction.completionStatus === "accepted" && Boolean(interaction.completionOutput),
-    summary: summarizeAcceptedInteraction(interaction),
+    threadId,
+    interactionId: interaction?.id,
+    graphNodeId: interaction?.graphNodeId ?? null,
+    layerId: layerId ?? resolved?.layer?.id ?? null,
+    nodes,
+    actions: [...(resolved?.actions || resolved?.layer?.actions || [])],
   };
-}
-
-function summarizeAcceptedInteraction(interaction) {
-  const root = interaction?.completionOutput?.rootLayer;
-  const nodes = root?.nodes || root?.layer?.nodes || [];
-  const titles = [];
-  for (const node of nodes) {
-    const title = node?.title || node?.node?.title;
-    if (typeof title === "string" && title.trim() !== "") titles.push(title.trim());
-  }
-  if (titles.length > 0) return titles.join("; ");
-  if (typeof interaction?.completionStatus === "string") {
-    return `Turn ${interaction.completionStatus}.`;
-  }
-  return "Accepted graph.";
 }
 
 function disabledCandidateTrace() {

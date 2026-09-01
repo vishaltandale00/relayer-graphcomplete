@@ -159,16 +159,16 @@ export const H3_AUTONOMOUS_FIX_MULTI_TURN_PROMPT = [
 
 export const H3_AUTONOMOUS_FIX_MULTI_TURN_BRIEF = [
   "You reported the 200.5 production failure. You can confirm that decimal statuses and decimal numeric strings are involved.",
-  "You do not know the exact sanitizer line. After each accepted turn, explore the visible graph.",
-  "If the agent asks a question you can answer from this brief, answer it. If the diagnosis looks incomplete, ask for the responsible path and evidence.",
-  "If the repair looks done, ask them to test and commit if they have not, then stop. Do not paste hidden verifier examples or a reference patch.",
+  "You do not know the exact sanitizer line. While the repair complete() is running, watch the published current.",
+  "Answer input actions on any nodes you can. Use authored invoke actions when they help. Do not start a second human-root complete().",
+  "If the visible current looks finished, wait. Do not paste hidden verifier examples or a reference patch.",
 ].join(" ");
 
 export const h3AutonomousFixMultiTurnEvalCase: ProjectEvalCaseDefinition = Object.freeze({
   schemaVersion: 1,
   id: H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
   name: "h3 · steered status-code repair",
-  description: "Repairs the seeded decimal status-code bug through simulated-user follow-ups on the accepted graph.",
+  description: "Repairs the seeded decimal status-code bug while the simulated user acts on published current during the in-flight complete.",
   localOnly: true,
   supportedPlatform: "darwin",
   autonomous: true,

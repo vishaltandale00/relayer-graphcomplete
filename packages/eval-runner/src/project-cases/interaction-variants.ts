@@ -3,7 +3,7 @@ export const INTERACTION_VARIANTS = Object.freeze(["single-turn", "multi-turn"] 
 export type InteractionVariant = typeof INTERACTION_VARIANTS[number];
 
 export const DEFAULT_STEERED_MAX_HUMAN_TURNS = 6 as const;
-export const SIMULATED_USER_STEERING_PROMPT_VERSION = "simulated-user-steering-prompt-v1" as const;
+export const SIMULATED_USER_STEERING_PROMPT_VERSION = "simulated-user-steering-prompt-v2" as const;
 
 export interface InteractionVariantPolicy {
   readonly variant: InteractionVariant;
@@ -33,7 +33,7 @@ export function requireSingleOpeningPrompt(prompts: readonly string[], variant: 
     return prompts[0]!;
   }
   if (prompts.length !== 1 || prompts[0]!.trim() === "") {
-    throw new Error("Steered multi-turn cases start from exactly one opening prompt; later turns are simulated-user authored.");
+    throw new Error("Steered multi-turn cases start from exactly one opening prompt; later participation is in-flight on the published current.");
   }
   return prompts[0]!;
 }
@@ -42,29 +42,32 @@ export function buildSimulatedUserSteeringPrompt(input: {
   readonly openingPrompt: string;
   readonly simulatedUserBrief: string;
   readonly remainingHumanTurns: number;
-  readonly lastTurnSummary: string;
+  readonly currentSummary: string;
+  readonly completionStatus: string;
 }): string {
   if (input.simulatedUserBrief.trim() === "") {
     throw new Error("Steered multi-turn cases require a simulated-user brief.");
   }
   return [
-    "You are the product user continuing one GraphComplete thread, not an evaluator rewriting the task.",
+    "You are the product user continuing one in-flight GraphComplete turn, not an evaluator rewriting the task.",
     `Steering prompt version: ${SIMULATED_USER_STEERING_PROMPT_VERSION}.`,
-    "The latest accepted turn is summarized below from the production graph after that turn accepted.",
-    "A full screenshot review still runs independently on every accepted turn.",
-    "This steering step only chooses the next human action from that summary.",
+    `The human-root complete() is still ${input.completionStatus}. Visible working state is the live steering surface.`,
+    "You may navigate, answer input actions on many current nodes, and use authored invoke actions.",
+    "Do not start a second human-root complete() while this one is active.",
+    "Do not send a composer follow-up. Composer Send is a later human root.",
+    "You cannot write graph records or mutate the workspace yourself.",
+    "A full screenshot review still runs independently after this root settles.",
+    "This steering step only chooses the next ordinary product action from the current summary.",
     "Do not invent repository, screenshot, or transcript facts that are not present in that summary.",
-    "Choose the next ordinary product action a real user could take now.",
-    "You may send a follow-up message, accept the work as done, or abandon the thread.",
-    "You cannot write graph records, mutate the workspace, or start a second human root while one complete() is still active.",
-    "A new follow-up waits until the current human root has accepted, stopped, or failed.",
-    `Remaining human turns including a possible follow-up: ${input.remainingHumanTurns}.`,
+    `Remaining in-flight actions including wait: ${input.remainingHumanTurns}.`,
     "Original request:",
     input.openingPrompt.trim(),
     "Your role and knowledge:",
     input.simulatedUserBrief.trim(),
-    "Latest accepted-turn summary:",
-    input.lastTurnSummary.trim(),
-    "Return one decision. follow-up requires the exact next user message. done means the visible work is sufficient to stop. abandon means you would stop without accepting the outcome.",
+    "Published current summary:",
+    input.currentSummary.trim(),
+    "Return one decision. kind is wait, navigate, commit-input, invoke, or abandon.",
+    "commit-input and invoke may target different nodes in this same turn.",
+    "wait means let current advance. abandon means stop the in-flight complete.",
   ].join("\n");
 }

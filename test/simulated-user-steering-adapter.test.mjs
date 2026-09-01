@@ -3,12 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { createLocalSimulatedUserSteeringRunner } from "../desktop/eval-main/simulated-user-judge.mjs";
 
 describe("local Electron simulated-user steering adapter", () => {
-  it("turns an accepted-graph summary into a Codex steering decision", async () => {
+  it("turns a published-current summary into a Codex in-flight steering decision", async () => {
     const runSteering = vi.fn(async (input) => {
       expect(input.codexPathOverride).toBe("/managed/codex");
-      expect(input.observation.steeringPrompt).toContain("simulated-user-steering-prompt-v1");
-      expect(input.observation.lastTurn.summary).toContain("sanitize.ts");
-      return { kind: "follow-up", text: "Please add the string case and commit.", reason: "Repair is visible but uncommitted." };
+      expect(input.observation.steeringPrompt).toContain("simulated-user-steering-prompt-v2");
+      expect(input.observation.snapshot.currentSummary).toContain("sanitize.ts");
+      expect(input.observation.snapshot.completionStatus).toBe("running");
+      return {
+        kind: "commit-input",
+        target: "node:status-example",
+        text: "200.5 fails",
+        reason: "The current asks which statuses fail.",
+      };
     });
     const decide = createLocalSimulatedUserSteeringRunner({
       resolveCodexRuntime: async () => ({ executablePath: "/managed/codex" }),
@@ -18,12 +24,14 @@ describe("local Electron simulated-user steering adapter", () => {
       openingPrompt: "Fix the decimal status bug.",
       simulatedUserBrief: "You reported 200.5 failures.",
       remainingHumanTurns: 4,
-      lastTurnSummary: "The graph names sanitize.ts.",
+      currentSummary: "The graph names sanitize.ts.",
+      completionStatus: "running",
       interactionId: "turn-1",
     })).resolves.toEqual({
-      kind: "follow-up",
-      text: "Please add the string case and commit.",
-      reason: "Repair is visible but uncommitted.",
+      kind: "commit-input",
+      target: "node:status-example",
+      text: "200.5 fails",
+      reason: "The current asks which statuses fail.",
     });
     expect(runSteering).toHaveBeenCalledTimes(1);
   });

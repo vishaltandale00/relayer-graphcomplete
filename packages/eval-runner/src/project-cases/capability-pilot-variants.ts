@@ -86,7 +86,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     {
       maxHumanTurns: 8,
       openingPrompt: "I need a booking product for rooms that can be held and then confirmed. Holds should expire, two people must not take the last slot, and the schedule has to respect local time zones. Please start in the graph so I can steer as you go, then make it real in this repo.",
-      simulatedUserBrief: "You operate a small venues business. You know holds must expire, confirmation must be retry-safe, and overlapping bookings are unacceptable. You can answer product questions about time zones, cancellation, and restart. After each accepted graph, check whether the visible plan covers contention and expiry. Ask for missing behavior you care about. Stop when a usable product appears committed, or abandon if the work ignores the public seam.",
+      simulatedUserBrief: "You operate a small venues business. You know holds must expire, confirmation must be retry-safe, and overlapping bookings are unacceptable. You can answer product questions about time zones, cancellation, and restart. As the published current advances, check whether the visible plan covers contention and expiry. Ask for missing behavior you care about. Stop when a usable product appears committed, or abandon if the work ignores the public seam.",
     },
   ),
   family(
@@ -98,7 +98,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     {
       maxHumanTurns: 8,
       openingPrompt: "We are running a regional youth championship this month and need an operations app. Registration, pools, a bracket, venue scheduling, results, withdrawals, and rescheduling all have to work together. Please keep the plan visible in the graph as you build so I can catch schedule conflicts early.",
-      simulatedUserBrief: "You are the tournament director. You care about double-booking, withdrawals, and whether an impossible schedule is shown as a conflict. You can confirm two pools and two qualifiers per pool. After each accepted graph, inspect the visible plan and ask about any missing operator flow. Do not paste verifier matrices. Stop when the director interface and public seam look complete enough to try.",
+      simulatedUserBrief: "You are the tournament director. You care about double-booking, withdrawals, and whether an impossible schedule is shown as a conflict. You can confirm two pools and two qualifiers per pool. As the published current advances, inspect the visible plan and ask about any missing operator flow. Do not paste verifier matrices. Stop when the director interface and public seam look complete enough to try.",
     },
   ),
   family(
@@ -110,7 +110,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     {
       maxHumanTurns: 8,
       openingPrompt: "I want a local lab where I can import an API contract, run a mock, break it on purpose with latency and failures, and compare revisions. Please start with a visible plan and keep me in the loop while you build the public HTTP seam.",
-      simulatedUserBrief: "You are a client-team lead. You need import errors to be directional, mocks to be deterministic, and revision diffs to be trustworthy. After each accepted graph, look for those capabilities. Ask for a missing fault or comparison path. Stop when the laboratory looks usable against the README seam.",
+      simulatedUserBrief: "You are a client-team lead. You need import errors to be directional, mocks to be deterministic, and revision diffs to be trustworthy. As the published current advances, look for those capabilities. Ask for a missing fault or comparison path. Stop when the laboratory looks usable against the README seam.",
     },
   ),
   family(
@@ -122,7 +122,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     {
       maxHumanTurns: 8,
       openingPrompt: "We have a frozen street network and need an evacuation planner that respects closures, capacity, accessibility, pickup order, and deadlines. Please keep alternatives and infeasible cases visible in the graph while you build, because I will challenge unsafe routes.",
-      simulatedUserBrief: "You are an emergency operations officer. You can confirm accessibility needs, deadlines, and that people and vehicles must be conserved. After each accepted graph, inspect whether closures and alternatives are visible. Challenge a plan that drops constraints. Stop when the planner looks like it would survive a tabletop exercise.",
+      simulatedUserBrief: "You are an emergency operations officer. You can confirm accessibility needs, deadlines, and that people and vehicles must be conserved. As the published current advances, inspect whether closures and alternatives are visible. Challenge a plan that drops constraints. Stop when the planner looks like it would survive a tabletop exercise.",
     },
   ),
   family(
@@ -133,7 +133,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     "Fix the cancellation race in this HTTPCore checkout. Cancellation after asynchronous TCP connection setup begins must not poison a one-slot connection pool: the slot must be released, a later request must succeed, repeated cancellation must remain safe, and pool shutdown must clean up loopback connections. Run the relevant focused regression checks and create one meaningful local commit. Keep the change scoped and do not push.",
     {
       openingPrompt: "Cancellation during async connect is poisoning our one-slot HTTPCore pool. Later requests fail even after the cancel. Please inspect this checkout, keep the diagnosis visible, and repair it if you are sure. I will follow along. Commit locally when it is ready, and do not push.",
-      simulatedUserBrief: "You hit this in production as hung later requests after a cancelled connect. You can confirm a one-slot pool and that shutdown should release loopback connections. You do not know the upstream patch. After each accepted graph, check that the visible diagnosis names slot release and later-request success. Ask for missing evidence. Stop after a scoped committed repair, or abandon if the change looks unrelated.",
+      simulatedUserBrief: "You hit this in production as hung later requests after a cancelled connect. You can confirm a one-slot pool and that shutdown should release loopback connections. You do not know the upstream patch. As the published current advances, check that the visible diagnosis names slot release and later-request success. Ask for missing evidence. Stop after a scoped committed repair, or abandon if the change looks unrelated.",
     },
   ),
   family(
@@ -144,7 +144,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     "Fix the historical socket-error interleaving that can poison command/reply association after reconnect. Make the fault deterministic with evaluator-owned injection, verify queue cleanup and reply ordering, and commit a scoped local repair. Do not push.",
     {
       openingPrompt: "After a socket error, Node Redis sometimes mixes up later replies with earlier commands. Please investigate this checkout in the graph, then repair the race if you can prove it. I will stay with you. Commit locally and do not push.",
-      simulatedUserBrief: "You saw misassociated replies after disconnect. You can confirm reconnect, queue cleanup, and repeated failures matter. You do not know the exact interleaving. After each accepted graph, look for a diagnosis that protects reply ordering. Ask for a reproduction. Stop when a scoped repair is committed.",
+      simulatedUserBrief: "You saw misassociated replies after disconnect. You can confirm reconnect, queue cleanup, and repeated failures matter. You do not know the exact interleaving. As the published current advances, look for a diagnosis that protects reply ordering. Ask for a reproduction. Stop when a scoped repair is committed.",
     },
   ),
   family(
@@ -156,7 +156,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     {
       maxHumanTurns: 8,
       openingPrompt: "I need Excalidraw scene history that can branch, merge, and show conflicts without losing bindings or assets. Please keep the design visible while you work in this checkout so I can object to silent merges. Commit locally and do not push.",
-      simulatedUserBrief: "You are a design-tool user who needs named versions and honest conflicts. After each accepted graph, inspect whether branching, merge, and compatibility are present. Challenge a silent overwrite. Stop when the feature looks usable on the frozen repository.",
+      simulatedUserBrief: "You are a design-tool user who needs named versions and honest conflicts. As the published current advances, inspect whether branching, merge, and compatibility are present. Challenge a silent overwrite. Stop when the feature looks usable on the frozen repository.",
     },
   ),
   family(
@@ -168,7 +168,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     {
       maxHumanTurns: 8,
       openingPrompt: "I want JupyterLab notebooks to export a reproducible execution bundle I can import read-only and compare against a rerun. Tampering and missing files should be obvious. Please keep the contract visible as you implement it in this checkout. Commit locally and do not push.",
-      simulatedUserBrief: "You are a scientist who needs integrity hashes and a read-only import. After each accepted graph, check environment identity, ordered evidence, and tamper detection. Ask for any missing comparison path. Stop when the public APIs look complete.",
+      simulatedUserBrief: "You are a scientist who needs integrity hashes and a read-only import. As the published current advances, check environment identity, ordered evidence, and tamper detection. Ask for any missing comparison path. Stop when the public APIs look complete.",
     },
   ),
   family(
@@ -180,7 +180,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     {
       maxHumanTurns: 10,
       openingPrompt: "Finance dumped six messy exports on me. I need a real operating model: reconciled history, churn, a twelve-month forecast with scenarios, runway, and a dashboard leadership can trust. Please keep the model decisions visible while you build so I can challenge hardcoded answers.",
-      simulatedUserBrief: "You are the operator who owns these exports. You can confirm scenario names and that totals must move when inputs change. After each accepted graph, look for reconciliation, scenarios, and a dashboard. Ask when a number looks hardcoded. Stop when the workbook looks auditable.",
+      simulatedUserBrief: "You are the operator who owns these exports. You can confirm scenario names and that totals must move when inputs change. As the published current advances, look for reconciliation, scenarios, and a dashboard. Ask when a number looks hardcoded. Stop when the workbook looks auditable.",
     },
   ),
   family(
@@ -192,7 +192,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
     {
       maxHumanTurns: 10,
       openingPrompt: "I need a twelve-week production and delivery plan from these orders, BOMs, inventory, lead times, capacity, and shipping options. Show exceptions and expedite choices. Keep the planning decisions visible as you build; I will challenge an infeasible week. Commit the workbook locally and do not push.",
-      simulatedUserBrief: "You are the plant planner. You can confirm that short or late demand must be explicit. After each accepted graph, inspect conservation, capacity, and exceptions. Ask for a missing scenario or dashboard. Stop when the plan looks usable by management.",
+      simulatedUserBrief: "You are the plant planner. You can confirm that short or late demand must be explicit. As the published current advances, inspect conservation, capacity, and exceptions. Ask for a missing scenario or dashboard. Stop when the plan looks usable by management.",
     },
   ),
 ]);
