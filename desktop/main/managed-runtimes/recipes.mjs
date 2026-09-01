@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
+import { PRIME_WHEEL_MANIFEST as PRIME_WHEELS } from "./prime-wheels.mjs";
+
 const CLAUDE_SDK = Object.freeze({
   role: "sdk",
   package: "@anthropic-ai/claude-agent-sdk",
@@ -109,11 +111,89 @@ function codexRecipe(target) {
   });
 }
 
+function primeRecipe(target) {
+  if (target !== "macos-arm64") return null;
+  const wheels = PRIME_WHEELS.wheels.map((wheel, index) => ({
+    role: `wheel-${String(index).padStart(2, "0")}`,
+    artifactId: `wheel:${wheel.filename}`,
+    package: wheel.package,
+    version: wheel.version,
+    kind: "wheel",
+    filename: wheel.filename,
+    tarball: wheel.url,
+    sha256: wheel.sha256,
+    size: wheel.size,
+  }));
+  const wheelArtifactIds = wheels.map(({ artifactId }) => artifactId);
+  const requirements = PRIME_WHEELS.wheels.map(({ package: name, version }) => `${name}==${version}`);
+  return seal({
+    schemaVersion: 1,
+    recipeId: "prime@0.8.1",
+    runtimeId: "prime",
+    version: "0.8.1",
+    target,
+    assembler: "prime-managed-kernel-v1",
+    readinessContractVersion: 1,
+    executableRelativePath: join("bin", "python"),
+    moduleRelativePath: join("js", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"),
+    runtimeContract: {
+      primeSourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
+      primeBridgeCommit: "8f33cfc30a3ce5f52f158122f34d523418aeca3e",
+      javascript: {
+        dependencyClosureSha256: "afd4e30957510486bc8ca473a41a616313783a4243000bb32f5f2536797b5af6",
+        packages: [{
+          name: "@earendil-works/pi-agent-core", version: "0.8.1",
+          archiveSha256: "56d1bc00321a310c9e75c0ca33a6241fec0f559c514a046acc1d68d1c7be4f08",
+          treeSha256: "16223dfa60386a61d143c4cbdd4dcfe0316c2962844219e432426151ef4b8954",
+        }, {
+          name: "@earendil-works/pi-ai", version: "0.8.1",
+          archiveSha256: "7560b021e023be9b39f376ba497cf64b9e54b2adb8be3d73b031f0033c4dd700",
+          treeSha256: "2bbbd8b3207c9d5c21bfc274023dab7a9fd2755ac6c05c6a9be6d8c19f635704",
+        }, {
+          name: "@earendil-works/pi-coding-agent", version: "0.8.1",
+          archiveSha256: "a5608c3d617d345a4f1315e9f314c61dfb047c0741d41d0d3eb918ba2c082aaf",
+          treeSha256: "93cf3da2c0777fd7cf88db0e7a524895625c6c2507541eaeb3d6f325ab4ee89f",
+        }, {
+          name: "@earendil-works/pi-tui", version: "0.8.1",
+          archiveSha256: "40517b0d5600557a31e395a0c344dbb9af7d3f8c000bea65561ef81b83142507",
+          treeSha256: "f86a8ab553edaf05e1fc4f4d6cb48c313e5a93f2f3490f74e510661c52d74447",
+        }],
+      },
+      uv: { version: "0.12.0", artifactId: "uv", executableRelativePath: "uv/uv" },
+      python: {
+        version: "3.11.16+20260825",
+        artifactId: "python",
+        executableRelativePath: "python/bin/python3",
+        onlyBinary: true,
+        wheelArtifactIds,
+        requirements,
+        client: {
+          sha256: "4b959d81101a456c1e69ff5ad810944648a438f7934b52847247e34ef2093c75",
+          installRule: "copy-package-v1",
+        },
+      },
+    },
+    artifacts: [{
+      role: "uv", artifactId: "uv", package: "uv", version: "0.12.0", kind: "tar.gz",
+      filename: "uv-aarch64-apple-darwin.tar.gz",
+      tarball: "https://github.com/astral-sh/uv/releases/download/0.12.0/uv-aarch64-apple-darwin.tar.gz",
+      sha256: "2b9e582af54f84fa50c115427451a6c13e80f43b52f8282b8af5791077317bbf", size: 17387877,
+    }, {
+      role: "python", artifactId: "python", package: "cpython", version: "3.11.16+20260825", kind: "tar.gz",
+      filename: "cpython-3.11.16+20260825-aarch64-apple-darwin-install_only.tar.gz",
+      tarball: "https://github.com/astral-sh/python-build-standalone/releases/download/20260825/cpython-3.11.16%2B20260825-aarch64-apple-darwin-install_only.tar.gz",
+      sha256: "2e50ed6ec49d8714a83c093e9ce74e1b8b21a2c64a49c3b603471d9c4caac76b", size: 27239363,
+    }, ...wheels],
+  });
+}
+
 export function resolveManagedRuntimeRecipe(recipeId, target) {
   const recipe = recipeId === "claude@0.3.250"
     ? claudeRecipe(target)
     : recipeId === "codex@0.147.0"
       ? codexRecipe(target)
+      : recipeId === "prime@0.8.1"
+        ? primeRecipe(target)
       : null;
   if (!recipe) throw new Error(`Unknown managed runtime recipe: ${recipeId} for ${target}.`);
   return recipe;

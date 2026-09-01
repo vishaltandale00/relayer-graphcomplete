@@ -94,25 +94,28 @@ export function createHarnessReadinessCoordinator({
         unavailableReason: result.available ? null : (result.reason ?? unavailableReason()),
       });
     }));
-    if (routeResults.some(({ harnessId }) => harnessGenerations.get(harnessId) !== currentGeneration)) {
+    const currentRouteResults = routeResults.filter(({ harnessId }) => (
+      harnessGenerations.get(harnessId) === currentGeneration
+    ));
+    if (currentRouteResults.length === 0) {
       return Object.freeze({ readyHarnessIds: [], routeResults: [] });
     }
     const publish = publication.catch(() => undefined).then(async () => {
-      if (routeResults.some(({ harnessId }) => harnessGenerations.get(harnessId) !== currentGeneration)) {
-        return false;
-      }
-      await publishAvailability(routeResults);
-      return true;
+      const publishable = currentRouteResults.filter(({ harnessId }) => (
+        harnessGenerations.get(harnessId) === currentGeneration
+      ));
+      if (publishable.length === 0) return [];
+      await publishAvailability(publishable);
+      return publishable.filter(({ harnessId }) => harnessGenerations.get(harnessId) === currentGeneration);
     });
     publication = publish;
-    if (!await publish || routeResults.some(({ harnessId }) => (
-      harnessGenerations.get(harnessId) !== currentGeneration
-    ))) {
+    const published = await publish;
+    if (published.length === 0) {
       return Object.freeze({ readyHarnessIds: [], routeResults: [] });
     }
     return Object.freeze({
-      readyHarnessIds: routeResults.filter(({ available }) => available).map(({ harnessId }) => harnessId),
-      routeResults,
+      readyHarnessIds: published.filter(({ available }) => available).map(({ harnessId }) => harnessId),
+      routeResults: published,
     });
   }
 

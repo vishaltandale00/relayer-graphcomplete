@@ -3,8 +3,12 @@ const REQUIREMENTS = Object.freeze({
   codex: "0.147.0",
 });
 
-const RECIPES = Object.freeze(Object.fromEntries(Object.entries(REQUIREMENTS)
+const RELEASE_RECIPES = Object.freeze(Object.fromEntries(Object.entries(REQUIREMENTS)
   .map(([runtimeId, version]) => [runtimeId, `${runtimeId}@${version}`])));
+const HARNESS_RECIPES = Object.freeze({
+  ...RELEASE_RECIPES,
+  prime: "prime@0.8.1",
+});
 
 const ADAPTER_HARNESS_IMPLEMENTATIONS = Object.freeze({
   "anthropic-api": "claude.basic",
@@ -16,10 +20,11 @@ const ADAPTER_HARNESS_IMPLEMENTATIONS = Object.freeze({
 });
 
 export const RELEASE_MANAGED_RUNTIME_REQUIREMENTS = REQUIREMENTS;
-export const RELEASE_MANAGED_RUNTIME_RECIPES = RECIPES;
+export const RELEASE_MANAGED_RUNTIME_RECIPES = RELEASE_RECIPES;
 export const HARNESS_MANAGED_RUNTIME_REQUIREMENTS = Object.freeze({
-  "claude.basic": Object.freeze({ runtimeId: "claude", recipeId: RECIPES.claude }),
-  "codex.basic": Object.freeze({ runtimeId: "codex", recipeId: RECIPES.codex }),
+  "claude.basic": Object.freeze({ runtimeId: "claude", recipeId: HARNESS_RECIPES.claude }),
+  "codex.basic": Object.freeze({ runtimeId: "codex", recipeId: HARNESS_RECIPES.codex }),
+  "prime.agent": Object.freeze({ runtimeId: "prime", recipeId: HARNESS_RECIPES.prime }),
 });
 
 export function managedRuntimeRequirementForHarness(implementation) {
@@ -44,7 +49,7 @@ export function activeProviderRuntimeRequirements(definitions) {
     .map(({ adapterId }) => managedRuntimeRequirementForAdapter(adapterId).runtimeId));
   return Object.freeze([...runtimeIds].sort().map((runtimeId) => Object.freeze({
     runtimeId,
-    recipeId: RECIPES[runtimeId],
+    recipeId: RELEASE_RECIPES[runtimeId],
   })));
 }
 
@@ -61,5 +66,7 @@ export function parseUpdateRuntimeRequirements(info) {
   if (Object.keys(metadata).sort().join(",") !== Object.keys(REQUIREMENTS).sort().join(",")) {
     throw new Error("App update managed runtime metadata is invalid.");
   }
-  return Object.freeze({ claude: `claude@${metadata.claude}`, codex: `codex@${metadata.codex}` });
+  return Object.freeze(Object.fromEntries(Object.entries(metadata).map(([runtimeId, version]) => (
+    [runtimeId, `${runtimeId}@${version}`]
+  ))));
 }

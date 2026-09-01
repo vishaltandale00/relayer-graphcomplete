@@ -34,4 +34,4 @@ export function managedRuntimeTarget({ platform = process.platform, architecture
   return target;
 }
 
-export const MANAGED_RUNTIME_IDS = Object.freeze(["claude", "codex"]);
+export const MANAGED_RUNTIME_IDS = Object.freeze(["claude", "codex", "prime"]);

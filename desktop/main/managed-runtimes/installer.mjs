@@ -2,9 +2,12 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import {
   chmod,
+  copyFile,
+  lstat,
   mkdir,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -23,6 +26,7 @@ import { resolveManagedRuntimeRecipe } from "./recipes.mjs";
 const REGISTRY = "https://registry.npmjs.org";
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 const RUNTIME_IDS = new Set(MANAGED_RUNTIME_IDS);
+const INSTALLATION_OWNERSHIP_RECEIPT = ".relayer-managed-runtime.json";
 
 function packageUrl(packageName, selector) {
   return `${REGISTRY}/${packageName.replace("/", "%2f")}/${selector}`;
@@ -128,6 +132,17 @@ function safeArchivePath(path) {
   return normalized;
 }
 
+function safePrimeArchivePath(path, entry) {
+  if (typeof path !== "string" || path.includes("\\") || path.startsWith("/") || path.includes("\0")) return false;
+  const normalized = posix.normalize(path);
+  if (normalized !== path || normalized.split("/").includes("..")) return false;
+  if (entry?.type === "SymbolicLink") {
+    const target = entry.linkpath;
+    if (typeof target !== "string" || target.startsWith("/") || target.includes("\\") || target.split("/").includes("..")) return false;
+  }
+  return true;
+}
+
 function archiveEntryAllowed(runtimeId, artifact, target, path, entry) {
   const normalized = safeArchivePath(path);
   if (!normalized || !new Set(["File", "OldFile", "Directory"]).has(entry?.type)) return false;
@@ -147,6 +162,27 @@ function archiveEntryAllowed(runtimeId, artifact, target, path, entry) {
 
 async function defaultExtract(tarball, destination, context) {
   await mkdir(destination, { recursive: true });
+  if (context.artifact.kind === "wheel") {
+    await copyFile(tarball, join(destination, context.artifact.filename));
+    return;
+  }
+  if (context.runtimeId === "prime") {
+    let unsafeEntry = null;
+    await extractTar({
+      file: tarball,
+      cwd: destination,
+      strip: 1,
+      strict: true,
+      preservePaths: false,
+      filter: (path, entry) => {
+        const allowed = safePrimeArchivePath(path, entry) && new Set(["File", "OldFile", "Directory", "SymbolicLink"]).has(entry?.type);
+        if (!allowed) unsafeEntry = path;
+        return allowed;
+      },
+    });
+    if (unsafeEntry !== null) throw new Error("Prime artifact contains an unsafe archive entry.");
+    return;
+  }
   let unsafeEntry = null;
   await extractTar({
     file: tarball,
@@ -171,8 +207,9 @@ async function defaultExtract(tarball, destination, context) {
 async function downloadArtifact(fetch, artifact, destination, signal) {
   const response = await fetch(artifact.tarball, { signal });
   if (!response?.ok || !response.body) throw new Error(`Unable to download ${artifact.package}.`);
-  const expected = sha512Integrity(artifact.integrity).digest;
-  const hash = createHash("sha512");
+  const usesSha256 = typeof artifact.sha256 === "string";
+  const expected = usesSha256 ? Buffer.from(artifact.sha256, "hex") : sha512Integrity(artifact.integrity).digest;
+  const hash = createHash(usesSha256 ? "sha256" : "sha512");
   let bytes = 0;
   const verifier = new Transform({
     transform(chunk, _encoding, callback) {
@@ -183,15 +220,48 @@ async function downloadArtifact(fetch, artifact, destination, signal) {
     },
   });
   await pipeline(response.body, verifier, createWriteStream(destination, { flags: "wx", mode: 0o600 }), { signal });
+  if (Number.isSafeInteger(artifact.size) && bytes !== artifact.size) {
+    throw new Error(`Byte length verification failed for ${artifact.package}.`);
+  }
   const actual = hash.digest();
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-    throw new Error(`SHA-512 integrity verification failed for ${artifact.package}.`);
+    throw new Error(`${usesSha256 ? "SHA-256" : "SHA-512"} integrity verification failed for ${artifact.package}.`);
   }
 }
 
 async function regularFile(path, label) {
   const details = await stat(path).catch(() => null);
   if (!details?.isFile()) throw new Error(`${label} is missing from the managed runtime.`);
+}
+
+function pathIsConfined(root, path) {
+  const fromRoot = relative(root, path);
+  return fromRoot !== "" && fromRoot !== ".."
+    && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot);
+}
+
+async function ownedRealDirectory(managedRoot, path, label) {
+  const details = await lstat(path).catch(() => null);
+  if (!details?.isDirectory() || details.isSymbolicLink()) {
+    throw new Error(`${label} is not an owned directory.`);
+  }
+  const [resolvedRoot, resolvedPath] = await Promise.all([realpath(managedRoot), realpath(path)]);
+  const lexicalPath = resolve(path);
+  const fromLexicalRoot = relative(resolve(managedRoot), lexicalPath);
+  if (!pathIsConfined(resolve(managedRoot), lexicalPath)
+    || resolvedPath !== resolve(resolvedRoot, fromLexicalRoot)) {
+    throw new Error(`${label} escapes the managed runtime root.`);
+  }
+  return resolvedPath;
+}
+
+async function confinedRealFile(installationRoot, path, label) {
+  const details = await stat(path).catch(() => null);
+  if (!details?.isFile()) throw new Error(`${label} is missing from the managed runtime.`);
+  const resolvedPath = await realpath(path);
+  if (!pathIsConfined(installationRoot, resolvedPath)) {
+    throw new Error(`${label} entrypoint escapes its managed installation.`);
+  }
 }
 
 async function readActive(base) {
@@ -232,8 +302,13 @@ function validateReceiptArtifacts(receipt, runtimeId, { allowCodeOwnedHttps = fa
   }
   for (const artifact of receipt.artifacts) {
     requiredString(artifact?.package, "Managed runtime receipt package");
-    validateVersion(artifact?.version, "Managed runtime receipt package version");
-    sha512Integrity(artifact?.integrity);
+    if (runtimeId === "prime") requiredString(artifact?.version, "Managed runtime receipt package version");
+    else validateVersion(artifact?.version, "Managed runtime receipt package version");
+    if (typeof artifact?.sha256 === "string") {
+      if (!/^[a-f0-9]{64}$/.test(artifact.sha256) || !Number.isSafeInteger(artifact.size) || artifact.size <= 0) {
+        throw new Error("Managed runtime recipe artifact SHA-256 identity is invalid.");
+      }
+    } else sha512Integrity(artifact?.integrity);
     const tarball = new URL(requiredString(artifact?.tarball, "Managed runtime receipt tarball"));
     if (tarball.protocol !== "https:" || (!allowCodeOwnedHttps && tarball.hostname !== "registry.npmjs.org")) {
       throw new Error("Managed runtime receipt tarball is invalid.");
@@ -261,17 +336,69 @@ function confinedInstallationPath(installationRoot, value, label) {
 
 function installedResult(base, receipt) {
   const installationRoot = join(base, "installations", receipt.installation);
+  const privateStateRoot = join(base, "private-state", receipt.installation);
   return Object.freeze({
     runtimeId: receipt.runtimeId,
     ...(receipt.recipeId ? { recipeId: receipt.recipeId, recipeDigest: receipt.recipeDigest } : {}),
     version: receipt.version,
     target: receipt.target,
+    installationRoot,
+    privateStateRoot,
     executable: confinedInstallationPath(installationRoot, receipt.executableRelativePath, "Managed runtime executable path"),
     ...(receipt.moduleRelativePath ? {
       modulePath: confinedInstallationPath(installationRoot, receipt.moduleRelativePath, "Managed runtime module path"),
     } : {}),
     receipt: Object.freeze({ ...receipt }),
   });
+}
+
+async function writeInstallationOwnershipReceipt(directory, { runtimeId, target, installation }) {
+  await writeFile(join(directory, INSTALLATION_OWNERSHIP_RECEIPT), `${JSON.stringify({
+    schemaVersion: 1,
+    runtimeId,
+    target,
+    installation,
+    ownedPath: posix.join(runtimeId, target, "installations", installation),
+  }, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+}
+
+async function hasInstallationOwnershipReceipt(directory, { runtimeId, target, installation }) {
+  let receipt;
+  try {
+    const receiptPath = join(directory, INSTALLATION_OWNERSHIP_RECEIPT);
+    const details = await lstat(receiptPath);
+    if (!details.isFile() || details.isSymbolicLink()) return false;
+    receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT" || error instanceof SyntaxError) return false;
+    throw error;
+  }
+  return receipt?.schemaVersion === 1
+    && receipt.runtimeId === runtimeId
+    && receipt.target === target
+    && receipt.installation === installation
+    && receipt.ownedPath === posix.join(runtimeId, target, "installations", installation);
+}
+
+async function createPrivateStateRoot(base, installation) {
+  const parent = join(base, "private-state");
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  const parentDetails = await lstat(parent);
+  if (!parentDetails.isDirectory() || parentDetails.isSymbolicLink()) {
+    throw new Error("Managed runtime private-state root is not an owned directory.");
+  }
+  const directory = join(parent, installation);
+  await mkdir(directory, { mode: 0o700 });
+  const details = await lstat(directory);
+  if (!details.isDirectory() || details.isSymbolicLink()) {
+    throw new Error("Managed runtime private state is not an owned directory.");
+  }
+  return directory;
+}
+
+async function removeRecordedGeneration(base, installation) {
+  await rm(join(base, "installations", installation), { recursive: true, force: true });
+  await rm(join(base, "private-state", installation), { recursive: true, force: true });
 }
 
 function publicInstallationDescriptor(result) {
@@ -295,7 +422,10 @@ function sameExactRecipeReceipt(receipt, recipe, { checkOwnership = true } = {})
     return ["codex", "claude"].includes(recipe.runtimeId) && sameArtifacts(receipt, recipe);
   }
   const expectedOwnedPaths = receipt?.installation
-    ? [posix.join(recipe.runtimeId, recipe.target, "installations", receipt.installation)]
+    ? [
+      posix.join(recipe.runtimeId, recipe.target, "installations", receipt.installation),
+      posix.join(recipe.runtimeId, recipe.target, "private-state", receipt.installation),
+    ]
     : [];
   return receipt?.schemaVersion === 2
     && receipt.recipeId === recipe.recipeId
@@ -343,7 +473,11 @@ function validateResolvedRecipe(recipe, recipeId, targetKey) {
     requiredString(artifact?.version, "Managed runtime recipe artifact version");
     const tarball = new URL(requiredString(artifact?.tarball, "Managed runtime recipe artifact URL"));
     if (tarball.protocol !== "https:") throw new Error("Managed runtime recipe artifact URL is invalid.");
-    sha512Integrity(artifact?.integrity);
+    if (typeof artifact?.sha256 === "string") {
+      if (!/^[a-f0-9]{64}$/.test(artifact.sha256) || !Number.isSafeInteger(artifact.size) || artifact.size <= 0) {
+        throw new Error("Managed runtime recipe artifact SHA-256 identity is invalid.");
+      }
+    } else sha512Integrity(artifact?.integrity);
   }
   if (recipe.runtimeId === "prime") {
     const contract = recipe.runtimeContract;
@@ -362,6 +496,8 @@ function validateResolvedRecipe(recipe, recipeId, targetKey) {
         || typeof entry?.treeSha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.treeSha256)
       ))
       || new Set(javascript.packages.map(({ name }) => name)).size !== javascript.packages.length
+      || (contract.primeBridgeCommit !== undefined
+        && (typeof contract.primeBridgeCommit !== "string" || !/^[a-f0-9]{40}$/.test(contract.primeBridgeCommit)))
       || !semver.valid(contract.uv?.version) || !artifactKeys.has(contract.uv?.artifactId)
       || typeof contract.uv?.executableRelativePath !== "string" || contract.uv.executableRelativePath.trim() === ""
       || !semver.valid(python?.version) || !artifactKeys.has(python?.artifactId) || python?.onlyBinary !== true
@@ -369,7 +505,7 @@ function validateResolvedRecipe(recipe, recipeId, targetKey) {
       || !Array.isArray(python?.wheelArtifactIds) || python.wheelArtifactIds.length === 0
       || python.wheelArtifactIds.some((artifactId) => !artifactKeys.has(artifactId))
       || typeof client?.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(client.sha256)
-      || !artifactKeys.has(client?.artifactId)
+      || (client?.artifactId !== undefined && !artifactKeys.has(client.artifactId))
       || typeof client?.installRule !== "string" || client.installRule.trim() === "") {
       throw new Error("Prime managed runtime recipe requires an exact Python runtime contract.");
     }
@@ -535,9 +671,15 @@ export function createManagedRuntimeInstaller({
         throw new Error(`${runtimeId} probe reported an incompatible version.`);
       }
       signal.throwIfAborted();
+      await writeInstallationOwnershipReceipt(stagedInstallation, {
+        runtimeId,
+        target: target.key,
+        installation,
+      });
       await mkdir(join(base, "installations"), { recursive: true });
       await rename(stagedInstallation, finalInstallation);
       moved = true;
+      await createPrivateStateRoot(base, installation);
       const receipt = {
         schemaVersion: operation.recipe ? 2 : 1,
         runtimeId,
@@ -552,7 +694,10 @@ export function createManagedRuntimeInstaller({
         runtimeVersion: probedVersion,
         target: target.key,
         installation,
-        ownedPaths: [posix.join(runtimeId, target.key, "installations", installation)],
+        ownedPaths: [
+          posix.join(runtimeId, target.key, "installations", installation),
+          posix.join(runtimeId, target.key, "private-state", installation),
+        ],
         executableRelativePath: resolved.executableRelativePath,
         moduleRelativePath: resolved.moduleRelativePath,
         artifacts: resolved.artifacts,
@@ -572,7 +717,7 @@ export function createManagedRuntimeInstaller({
       // generation, so all newly created adapters receive this installation.
       return installedResult(base, receipt);
     } finally {
-      if (moved && !activated) await rm(finalInstallation, { recursive: true, force: true });
+      if (moved && !activated) await removeRecordedGeneration(base, installation);
       await rm(staging, { recursive: true, force: true });
     }
   }
@@ -652,7 +797,7 @@ export function createManagedRuntimeInstaller({
           priorPending?.pendingOwnsInstallation === true
           && priorPending.installation !== active.installation
         ) {
-          await rm(join(base, "installations", priorPending.installation), { recursive: true, force: true });
+          await removeRecordedGeneration(base, priorPending.installation);
         }
         return Object.freeze({ ...existing, appVersion });
       } catch {
@@ -699,9 +844,15 @@ export function createManagedRuntimeInstaller({
         throw new Error(`${runtimeId} probe reported an incompatible version.`);
       }
       signal.throwIfAborted();
+      await writeInstallationOwnershipReceipt(stagedInstallation, {
+        runtimeId,
+        target: target.key,
+        installation,
+      });
       await mkdir(join(base, "installations"), { recursive: true });
       await rename(stagedInstallation, finalInstallation);
       moved = true;
+      await createPrivateStateRoot(base, installation);
       const receipt = {
         schemaVersion: operation.recipe ? 2 : 1,
         appVersion,
@@ -719,7 +870,10 @@ export function createManagedRuntimeInstaller({
         runtimeVersion: probedVersion,
         target: target.key,
         installation,
-        ownedPaths: [posix.join(runtimeId, target.key, "installations", installation)],
+        ownedPaths: [
+          posix.join(runtimeId, target.key, "installations", installation),
+          posix.join(runtimeId, target.key, "private-state", installation),
+        ],
         executableRelativePath: resolved.executableRelativePath,
         moduleRelativePath: resolved.moduleRelativePath,
         artifacts: resolved.artifacts,
@@ -731,11 +885,11 @@ export function createManagedRuntimeInstaller({
         && priorPending.installation !== installation
         && priorPending.installation !== active?.installation
       ) {
-        await rm(join(base, "installations", priorPending.installation), { recursive: true, force: true });
+        await removeRecordedGeneration(base, priorPending.installation);
       }
       return Object.freeze({ ...installedResult(base, receipt), appVersion });
     } finally {
-      if (moved && !pendingCommitted) await rm(finalInstallation, { recursive: true, force: true });
+      if (moved && !pendingCommitted) await removeRecordedGeneration(base, installation);
       await rm(staging, { recursive: true, force: true });
     }
   }
@@ -760,7 +914,7 @@ export function createManagedRuntimeInstaller({
       pendingOwnsInstallation: false,
     });
     if (priorPending?.pendingOwnsInstallation === true && priorPending.installation !== active.installation) {
-      await rm(join(base, "installations", priorPending.installation), { recursive: true, force: true });
+      await removeRecordedGeneration(base, priorPending.installation);
     }
     return Object.freeze({ ...result, appVersion });
   }
@@ -885,7 +1039,7 @@ export function createManagedRuntimeInstaller({
     await atomicWriteJson(join(base, "active.json"), activeReceipt);
     await rm(path, { force: true });
     if (!retainPrevious && previous?.installation && previous.installation !== receipt.installation) {
-      await rm(join(base, "installations", previous.installation), { recursive: true, force: true });
+      await removeRecordedGeneration(base, previous.installation);
     }
     return Object.freeze({ ...result, receipt: Object.freeze({ ...activeReceipt }) });
   }
@@ -897,7 +1051,7 @@ export function createManagedRuntimeInstaller({
       const base = join(root, runtimeId, target.key);
       const active = await readActive(base);
       if (receipt.installation !== active?.installation) {
-        await rm(join(base, "installations", receipt.installation), { recursive: true, force: true });
+        await removeRecordedGeneration(base, receipt.installation);
       }
     }
   }
@@ -968,7 +1122,7 @@ export function createManagedRuntimeInstaller({
       failures.push(Object.freeze({ runtimeId: null, installation: null, staging: null, error }));
       return [];
     });
-    const stagingName = /^(claude|codex)(?:-update)?-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
+    const stagingName = /^(claude|codex|prime)(?:-update)?-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
     for (const entry of stagingEntries) {
       const match = entry.isDirectory() ? entry.name.match(stagingName) : null;
       if (!match) continue;
@@ -1028,7 +1182,14 @@ export function createManagedRuntimeInstaller({
       for (const entry of entries) {
         if (!entry.isDirectory() || retained.get(runtimeId).has(entry.name)) continue;
         try {
-          await removeInactiveInstallation(join(installations, entry.name));
+          const installationPath = join(installations, entry.name);
+          if (!await hasInstallationOwnershipReceipt(installationPath, {
+            runtimeId,
+            target: target.key,
+            installation: entry.name,
+          })) continue;
+          await removeInactiveInstallation(installationPath);
+          await removeInactiveInstallation(join(root, runtimeId, target.key, "private-state", entry.name));
           removed.push(Object.freeze({ runtimeId, installation: entry.name }));
         } catch (error) {
           failures.push(Object.freeze({ runtimeId, installation: entry.name, error }));
@@ -1083,7 +1244,7 @@ export function createManagedRuntimeInstaller({
     return operation.promise;
   }
 
-  async function installedRecipe(recipeId) {
+  async function validateInstalledRecipe(recipeId) {
     const recipe = validateResolvedRecipe(resolveRecipe(recipeId, target.key), recipeId, target.key);
     const base = join(root, recipe.runtimeId, target.key);
     const receipt = await readActive(base);
@@ -1098,22 +1259,39 @@ export function createManagedRuntimeInstaller({
     if (!exactLegacy && !exactCurrent) {
       throw new Error(`${recipe.runtimeId} managed runtime does not match requested recipe ${recipe.recipeId}.`);
     }
-    if (exactCurrent) {
-      const expectedOwnedPaths = [posix.join(recipe.runtimeId, target.key, "installations", receipt.installation)];
+    const requiresOwnedLayout = receipt.schemaVersion === 2 && exactCurrent;
+    if (requiresOwnedLayout) {
+      const expectedOwnedPaths = [
+        posix.join(recipe.runtimeId, target.key, "installations", receipt.installation),
+        posix.join(recipe.runtimeId, target.key, "private-state", receipt.installation),
+      ];
       if (JSON.stringify(receipt.ownedPaths) !== JSON.stringify(expectedOwnedPaths)) {
         throw new Error(`${recipe.runtimeId} managed runtime ownership receipt is invalid.`);
       }
     }
     validateReceiptArtifacts(receipt, recipe.runtimeId, { allowCodeOwnedHttps: exactCurrent });
     const result = installedResult(base, receipt);
-    await regularFile(result.executable, "Managed runtime executable");
-    if (result.modulePath) await regularFile(result.modulePath, "Managed runtime module");
+    const installationRoot = await ownedRealDirectory(root, result.installationRoot, "Managed runtime installation");
+    if (requiresOwnedLayout) {
+      if (!await hasInstallationOwnershipReceipt(result.installationRoot, {
+        runtimeId: recipe.runtimeId,
+        target: target.key,
+        installation: receipt.installation,
+      })) {
+        throw new Error(`${recipe.runtimeId} managed runtime installation ownership marker is invalid.`);
+      }
+      await ownedRealDirectory(root, result.privateStateRoot, "Managed runtime private state");
+    }
+    await confinedRealFile(installationRoot, result.executable, "Managed runtime executable");
+    if (result.modulePath) await confinedRealFile(installationRoot, result.modulePath, "Managed runtime module");
     return publicInstallationDescriptor(Object.freeze({
       ...result,
       recipeId: recipe.recipeId,
       recipeDigest: recipe.recipeDigest,
     }));
   }
+
+  const installedRecipe = (recipeId) => validateInstalledRecipe(recipeId);
 
   function prepare(recipeId) {
     let recipe;
@@ -1141,6 +1319,7 @@ export function createManagedRuntimeInstaller({
 
   return Object.freeze({
     prepare,
+    validate: (recipeId) => validateInstalledRecipe(recipeId),
     installed: (runtimeOrRecipeId, minimumVersion) => minimumVersion === undefined
       ? installedRecipe(runtimeOrRecipeId)
       : legacyMinimumVersionResolution

@@ -14,6 +14,7 @@ describe("managed runtime requirements", () => {
     expect(HARNESS_MANAGED_RUNTIME_REQUIREMENTS).toEqual({
       "claude.basic": { runtimeId: "claude", recipeId: RELEASE_MANAGED_RUNTIME_RECIPES.claude },
       "codex.basic": { runtimeId: "codex", recipeId: RELEASE_MANAGED_RUNTIME_RECIPES.codex },
+      "prime.agent": { runtimeId: "prime", recipeId: "prime@0.8.1" },
     });
     expect(managedRuntimeRequirementForAdapter("anthropic-api")).toEqual({ runtimeId: "claude", recipeId: "claude@0.3.250" });
     expect(managedRuntimeRequirementForAdapter("claude-subscription")).toEqual({ runtimeId: "claude", recipeId: "claude@0.3.250" });

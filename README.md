@@ -69,6 +69,15 @@ provider, available model, and enabled family. Prime Ask and Auto currently
 require the macOS boundary; Windows therefore records both packaged Prime
 configurations as unavailable.
 
+On macOS Apple Silicon, connection-triggered readiness assembles the exact
+`prime@0.8.1` managed kernel under Relayer's private runtime root. The recipe
+pins uv 0.12.0, Astral CPython 3.11.16+20260825, 78 reviewed wheels, all 12
+bundled Python skills, the app-owned graph client, and the reviewed local Prime
+bridge. Prime agent and session state stays in a receipt-owned Relayer directory
+and never uses `~/.prime`. `npm run test:prime-managed-runtime` is the named inference-free
+clean-root proof. Updater publication remains issue #378; downloadable
+JavaScript reconstruction and removal of the packaged fallback remain #379.
+
 Prime Agent is one optional recursive harness implementation, not the product runtime. See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), [ADR 0006](docs/decisions/0006-harness-provider-agnostic-product-boundary.md), and the adapter-specific [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
 ## Harness-owned browser use

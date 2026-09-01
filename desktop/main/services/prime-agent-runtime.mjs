@@ -12,23 +12,22 @@ import {
 
 export const PRIME_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
 export const PRIME_AGENT_SOURCE_COMMIT = "f6130839ad3043f1cd3d5294fe03023035bfcd5c";
+export const PRIME_AGENT_BRIDGE_COMMIT = "8f33cfc30a3ce5f52f158122f34d523418aeca3e";
 export const PRIME_AGENT_PACKAGE_VERSION = "0.8.1";
 export const PRIME_AGENT_PACKAGE_SHA256 = Object.freeze({
   "@earendil-works/pi-agent-core": "56d1bc00321a310c9e75c0ca33a6241fec0f559c514a046acc1d68d1c7be4f08",
   "@earendil-works/pi-ai": "7560b021e023be9b39f376ba497cf64b9e54b2adb8be3d73b031f0033c4dd700",
-  "@earendil-works/pi-coding-agent": "ac88dfc53a9c737d214eccd81d77a6cd7f0b12a9e3432281b0a1a2a5cdd82e6a",
+  "@earendil-works/pi-coding-agent": "a5608c3d617d345a4f1315e9f314c61dfb047c0741d41d0d3eb918ba2c082aaf",
   "@earendil-works/pi-tui": "40517b0d5600557a31e395a0c344dbb9af7d3f8c000bea65561ef81b83142507",
 });
 export const PRIME_AGENT_PACKAGE_TREE_SHA256 = Object.freeze({
   "@earendil-works/pi-agent-core": "16223dfa60386a61d143c4cbdd4dcfe0316c2962844219e432426151ef4b8954",
   "@earendil-works/pi-ai": "2bbbd8b3207c9d5c21bfc274023dab7a9fd2755ac6c05c6a9be6d8c19f635704",
-  "@earendil-works/pi-coding-agent": "1633b986dd8809ae6fe1013c9cb284bd7f50340dc12c64853b71872f56ea1156",
+  "@earendil-works/pi-coding-agent": "93cf3da2c0777fd7cf88db0e7a524895625c6c2507541eaeb3d6f325ab4ee89f",
   "@earendil-works/pi-tui": "f86a8ab553edaf05e1fc4f4d6cb48c313e5a93f2f3490f74e510661c52d74447",
 });
 export const PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET = Object.freeze({
-  "darwin-arm64": "da92908f0d08ec84e0481fbb4d5cf9938c6fe9a89fbd8f553defad9c38a14dc7",
-  "darwin-x64": "921f4b0394bebdcf87cc88602b65a98777568c3a6c7df8d650196ca33ec9859c",
-  "win32-x64": "dd0774fa26307495e71cd2e44239d1521734cd6d0f0e4c64a854df1df22605f4",
+  "darwin-arm64": "afd4e30957510486bc8ca473a41a616313783a4243000bb32f5f2536797b5af6",
 });
 export const PRIME_AGENT_HARNESS_CONFIGURATIONS = Object.freeze([
   "prime-agent-basic.yaml",
@@ -46,6 +45,7 @@ export const PRIME_AGENT_RUNTIME_FUNCTIONS = Object.freeze([
   "createHostRequestHandler",
   "createAgentSessionServices",
   "createAgentSessionFromServices",
+  "probeManagedKernel",
 ]);
 export const PRIME_AGENT_SESSION_FUNCTIONS = Object.freeze(["waitForRlmQuiescence"]);
 export const PRIME_AGENT_ASSET_SHA256 = Object.freeze({
@@ -152,6 +152,9 @@ export async function inspectPrimeAgentRuntime({
     for (const name of manifest.runtimeContract.functions) {
       if (typeof runtime[name] !== "function") throw new Error(`${name} is unavailable`);
     }
+    if (runtime.MANAGED_KERNEL_VERSION !== manifest.runtimeContract.managedKernelVersion) {
+      throw new Error("managed kernel bridge version mismatch");
+    }
     for (const name of manifest.runtimeContract.sessionFunctions) {
       if (typeof runtime.AgentSession?.prototype?.[name] !== "function") {
         throw new Error(`AgentSession.${name} is unavailable`);
@@ -197,6 +200,8 @@ function unavailable(code, message, diagnostics) {
 export function validatePrimeAgentManifest(manifest) {
   if (manifest?.schemaVersion !== 1
     || manifest?.source?.commit !== PRIME_AGENT_SOURCE_COMMIT
+    || manifest?.source?.bridgeCommit !== PRIME_AGENT_BRIDGE_COMMIT
+    || manifest?.source?.bridgePublication !== "local-reviewed-commit"
     || !Array.isArray(manifest?.packages)
     || manifest.packages.length !== 4
     || !exactArray(manifest?.harnessConfigurations, PRIME_AGENT_HARNESS_CONFIGURATIONS)
@@ -220,6 +225,7 @@ export function validatePrimeAgentManifest(manifest) {
   }
   if (manifest?.runtimeContract?.package !== PRIME_AGENT_PACKAGE
     || manifest?.runtimeContract?.modelScopeAccess !== "upfront-request-access@1"
+    || manifest?.runtimeContract?.managedKernelVersion !== 1
     || !exactRecord(manifest?.runtimeContract?.constants, PRIME_AGENT_RUNTIME_CONSTANTS)
     || !exactArray(manifest?.runtimeContract?.functions, PRIME_AGENT_RUNTIME_FUNCTIONS)
     || !exactArray(manifest?.runtimeContract?.sessionFunctions, PRIME_AGENT_SESSION_FUNCTIONS)

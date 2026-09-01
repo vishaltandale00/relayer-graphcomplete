@@ -40,6 +40,7 @@
     "check:graph-crash-reconciliation": "cargo test -p relayer-graph-core --features crash-test-support --test search_index_ordering && cargo test -p relayer-graph-server --features crash-test-support",
     "test": "cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && vitest run --maxWorkers=1",
     "test:codex-secret-boundary": "RELAYER_RUN_CODEX_SECRET_BOUNDARY=1 vitest run packages/harness-host/test/codex-secret-provider-process.test.ts",
+    "test:prime-managed-runtime": "node scripts/verify-prime-managed-runtime.mjs",
     "test:desktop:first-message": "npm run build && electron scripts/test-desktop-first-message.mjs",
     "test:desktop:project-new-thread": "npm run build && node scripts/run-project-new-thread-test.mjs",
     "test:desktop:context-draft-warning": "npm run build && node scripts/run-context-draft-warning-test.mjs",

@@ -31,6 +31,19 @@ describe("managed runtime process resolver", () => {
     expect(installed).toHaveBeenCalledOnce();
   });
 
+  it("routes startup receipt validation without invoking preparation or probe lookup", async () => {
+    const descriptor = { runtimeId: "prime", recipeId: "prime@0.8.1", version: "0.8.1" };
+    const validate = vi.fn(async () => descriptor);
+    const installed = vi.fn();
+    const prepare = vi.fn();
+    const resolver = createManagedRuntimeResolver({ validate, installed, prepare });
+
+    await expect(resolver.validate("prime@0.8.1")).resolves.toBe(descriptor);
+    expect(validate).toHaveBeenCalledWith("prime@0.8.1");
+    expect(installed).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
   it("evicts a rejected active-generation probe", async () => {
     const installed = vi.fn()
       .mockRejectedValueOnce(new Error("missing"))

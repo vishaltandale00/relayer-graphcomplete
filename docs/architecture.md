@@ -384,6 +384,30 @@ and execution trace contain only the reviewed source commit and package name/ver
 pairs. Current bounded Ask and
 Auto support is macOS-only, so a Windows build never advertises Prime as runnable.
 
+The macOS-arm64 Prime prototype is exact recipe `prime@0.8.1`. A connection,
+reconnect, explicit repair, or recipe-update trigger downloads hash- and
+size-bound uv, CPython, and wheels, then invokes pinned uv by absolute path with
+configuration, index, dependency resolution, network, and source-build paths
+disabled. Assembly verifies and copies the packaged JavaScript closure, Prime
+Python runtime, all 12 Python-backed skills, and `relayer_graph`. The ready
+module URL, isolated Python launcher, and receipt-owned private state root enter
+the Prime harness factory. Prime uses explicit agent and session directories
+there and never consults `~/.prime`; user execution never prepares or
+synchronizes. A provider-free real-kernel probe
+imports all 14 first-party modules, evaluates a deterministic expression, and
+shuts down before availability is published. Failure is sanitized and does not
+affect Codex or Claude. `npm run test:prime-managed-runtime` owns the clean-root
+checkpoint. Signed release proof, updater publication (#378), and downloadable
+JavaScript reconstruction (#379) remain separate.
+
+On restart, an unchanged configuration may recover a previously ready route
+only after cheap local validation of its exact managed receipt, owned real
+state directory, installation marker, and entrypoints whose resolved targets
+remain inside that exact installation. A recovered ready boolean starts a new
+process-local readiness ordering epoch. Startup does not download, prepare,
+invoke a readiness probe, or contact a provider. A digest mismatch or corrupt
+local descriptor keeps the harness unavailable and records a sanitized error.
+
 Release configuration resolves through one fail-closed contract. The contract seals the numeric version, source commit, product identity, target, architecture, signing authority, channel manifest, and exact HTTPS update base into both the application package and its release receipt. macOS targets additionally seal the Apple team and minimum OS; Windows seals the Artifact Signing endpoint, account, profile, and publisher. The updater and publisher consume this contract rather than maintaining parallel identity or channel rules. See [ADR 0002](decisions/0002-desktop-release-contract.md).
 
 Preview publication is a separate Linux job after the signed target matrix settles. It is reachable only from a version-matching `desktop-vX.Y.Z` tag and a protected GitHub environment using short-lived AWS OIDC credentials. Each successful target publishes through its own job, so a failed or disabled target cannot block another. The publisher revalidates target-specific candidate provenance, checksums, blockmaps, and feed metadata; writes immutable release/history objects; verifies the public CDN bytes; and changes the applicable Preview pointer last with an S3 precondition. Manual candidate builds cannot publish. Windows candidate execution is temporarily disabled until its publisher identity is configured. Windows publication remains excluded until Azure signing succeeds. Stable additionally requires the interactive updater canary.

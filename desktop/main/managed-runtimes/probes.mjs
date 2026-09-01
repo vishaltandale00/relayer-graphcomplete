@@ -177,5 +177,11 @@ export function createDefaultRuntimeProbes({
       await codexInitialize(executable, { signal, spawnProcess, timeoutMs });
       return { version };
     },
+    prime: async (runtime) => {
+      const { checkPrimeManagedRuntime } = await import("../services/prime-managed-runtime.mjs");
+      const result = await checkPrimeManagedRuntime({ runtime });
+      if (result.available !== true) throw new Error("Managed Prime kernel probe failed.");
+      return { version: runtime.version };
+    },
   });
 }
