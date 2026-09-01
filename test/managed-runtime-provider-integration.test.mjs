@@ -79,7 +79,21 @@ describe("managed runtime provider Connect boundary", () => {
       lifecycleState: "active", removedAt: null,
     };
     const adapter = productionProviderAdapterRegistry.create(definition, {
-      fetch: vi.fn(), secrets: { "api-key": "secret" },
+      fetch: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: [{
+            id: "gpt-test",
+            type: "language",
+            architecture: { output_modalities: ["text"] },
+            top_provider: { context_length: 128_000, max_completion_tokens: 8_192 },
+            context_window: 128_000,
+            max_tokens: 8_192,
+          }],
+        }),
+      })),
+      secrets: { "api-key": "secret" },
     });
     const broker = createProviderExecutionAccessBroker(async () => ({
       definition,
