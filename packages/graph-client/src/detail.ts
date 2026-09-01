@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isProxy } from "node:util/types";
 import { generate as generateCss, parse as parseCss, tokenTypes, tokenize as tokenizeCss, walk as walkCss } from "css-tree/dist/csstree.esm";
 import type { CssNode, SyntaxParseError } from "css-tree";
 import { parseFragment, serialize, type DefaultTreeAdapterTypes, type ParserError } from "parse5";
@@ -72,6 +73,12 @@ interface MaterializedSourceLayer {
   readonly containsOwner: boolean;
 }
 
+interface MaterializedLayerTarget {
+  readonly kind: "draft" | "accepted" | "id";
+  readonly clientKey?: string;
+  readonly id?: number;
+}
+
 /** @internal */
 export interface AuthenticatedNodeDetailOwnerSnapshot {
   readonly object: NodeObject;
@@ -103,16 +110,34 @@ interface MaterializedAssetRef {
   readonly logicalId: string;
 }
 
+interface MaterializedDetailBinding {
+  readonly capability: DetailCapabilityMaterialization;
+  readonly asset?: MaterializedAssetRef;
+}
+
+interface MaterializedDetailTemplate {
+  readonly kind: TemplateKind;
+  readonly strings: readonly string[];
+  readonly bindings: readonly MaterializedDetailBinding[];
+}
+
+interface MaterializedAuthoringComponent {
+  readonly id: string;
+  readonly markup: MaterializedDetailTemplate;
+  readonly styles: MaterializedDetailTemplate;
+  readonly order: number;
+}
+
 /** @internal */
-export interface AuthenticatedNodeDetailAssetSnapshot {
+export interface AuthenticatedNodeDetailProgramSnapshot {
   readonly authoring: NodeDetailAuthoring;
+  readonly owner: AuthenticatedNodeDetailOwnerSnapshot | undefined;
+  readonly components: readonly MaterializedAuthoringComponent[];
   readonly logicalIds: readonly string[];
-  readonly references: ReadonlyMap<object, MaterializedAssetRef>;
 }
 
 interface DetailAssetResolver {
   readonly missingAssetCode: "asset_resolution_required" | "asset_unknown";
-  materialize(reference: unknown): MaterializedAssetRef | undefined;
   resolve(reference: MaterializedAssetRef): ResolvedDetailAsset | undefined;
 }
 
@@ -239,8 +264,8 @@ export class NodeDetailAuthoring {
 
   checkpoint(): CompiledNodeDetail {
     const state = authoringState(this);
-    const assets = snapshotAuthoredDetailAssets(this);
-    return compileAuthoring(this, safeMaterializeOwner(state.owner), rejectingAssetResolver(assets));
+    const program = snapshotAuthoredNodeDetailProgram(this, safeMaterializeOwner(state.owner));
+    return compileAuthoring(program, REJECTING_ASSET_RESOLVER);
   }
 }
 
@@ -252,42 +277,36 @@ export function createOwnedNodeDetailAuthoring(owner: NodeObject): NodeDetailAut
 }
 
 /** @internal */
-export function snapshotAuthoredDetailAssets(authoring: NodeDetailAuthoring): AuthenticatedNodeDetailAssetSnapshot {
-  const state = authoringState(authoring);
+export function isNodeDetailAuthoringOwner(authoring: NodeDetailAuthoring, owner: NodeObject): boolean {
+  return AUTHORING_STATE.get(authoring)?.owner === owner;
+}
+
+/** @internal */
+export function snapshotAuthoredNodeDetailProgram(
+  authoring: NodeDetailAuthoring,
+  owner: AuthenticatedNodeDetailOwnerSnapshot | undefined,
+): AuthenticatedNodeDetailProgramSnapshot {
+  let state: AuthoringState;
+  try {
+    state = authoringState(authoring);
+  } catch {
+    return invalidNodeDetailProgram("node_envelope_invalid", "", "node", "Node Detail authoring must be owned by the submitted node");
+  }
+  if (owner !== undefined && state.owner !== owner.object) {
+    return invalidNodeDetailProgram("node_envelope_invalid", "", "node", "Node Detail authoring must be owned by the submitted node");
+  }
   const ids = new Set<string>();
   const referencesByObject = new Map<object, MaterializedAssetRef>();
   const invalidReferences = new Set<object>();
   const issues: DetailCompilationIssue[] = [];
   let references = 0;
-  for (const [componentId, component] of state.components) {
-    for (const [index, value] of component.markup.values.entries()) {
-      if (bindingKind(component.markup, index) !== "asset") continue;
-      references += 1;
-      const materialized = materializeAssetReference(value, referencesByObject, invalidReferences);
-      const location = bindingLocation(component.markup, index);
-      if (materialized === undefined) {
-        issues.push(Object.freeze({
-          code: "asset_reference_invalid",
-          componentId,
-          path: `html:${location.line}:${location.column}`,
-          line: location.line,
-          column: location.column,
-          message: "Asset references must contain ordinary own data properties",
-        }));
-        continue;
-      }
-      if (!isStableIdentity(materialized.logicalId)) {
-        issues.push(Object.freeze({
-          code: "asset_identity_invalid",
-          componentId,
-          path: `html:${location.line}:${location.column}`,
-          line: location.line,
-          column: location.column,
-          message: "Asset identity must be trimmed, NUL-free, and at most 128 UTF-8 bytes",
-        }));
-      } else ids.add(materialized.logicalId);
-    }
-  }
+  const components = Object.freeze([...state.components.entries()].map(([componentId, component]) => {
+    const id = typeof componentId === "string" ? componentId : "";
+    const markup = materializeDetailTemplate(id, component.markup, "html", owner, referencesByObject, invalidReferences, ids, issues);
+    references += markup.bindings.filter((_binding, index) => bindingKind(markup, index) === "asset").length;
+    const styles = materializeDetailTemplate(id, component.styles, "css", owner, referencesByObject, invalidReferences, ids, issues);
+    return Object.freeze({ id, markup, styles, order: component.order });
+  }));
   if (references > DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage) {
     issues.push(Object.freeze({
       code: "asset_reference_limit_exceeded",
@@ -311,9 +330,132 @@ export function snapshotAuthoredDetailAssets(authoring: NodeDetailAuthoring): Au
   if (issues.length !== 0) throw new DetailCompilationError(Object.freeze(issues));
   return Object.freeze({
     authoring,
+    owner,
+    components,
     logicalIds: Object.freeze([...ids]),
-    references: referencesByObject,
   });
+}
+
+function invalidNodeDetailProgram(code: string, componentId: string, path: string, message: string): never {
+  throw new DetailCompilationError(Object.freeze([Object.freeze({
+    code,
+    componentId,
+    path,
+    line: 1,
+    column: 1,
+    message,
+  })]));
+}
+
+function materializeDetailTemplate(
+  componentId: string,
+  value: unknown,
+  expectedKind: TemplateKind,
+  owner: AuthenticatedNodeDetailOwnerSnapshot | undefined,
+  referencesByObject: Map<object, MaterializedAssetRef>,
+  invalidReferences: Set<object>,
+  assetIds: Set<string>,
+  issues: DetailCompilationIssue[],
+): MaterializedDetailTemplate {
+  try {
+    if (typeof value !== "object" || value === null || isProxy(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+      return invalidDetailTemplate(componentId, expectedKind, issues);
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
+    const allowed = new Set<PropertyKey>([DETAIL_TEMPLATE, "strings", "values"]);
+    if (Reflect.ownKeys(descriptors).length !== allowed.size || !hasExactDescriptorFields(descriptors, allowed)) {
+      return invalidDetailTemplate(componentId, expectedKind, issues);
+    }
+    const kind = ownCapabilityData(descriptors, DETAIL_TEMPLATE);
+    const stringsValue = ownCapabilityData(descriptors, "strings");
+    const valuesValue = ownCapabilityData(descriptors, "values");
+    if (kind !== expectedKind) return invalidDetailTemplate(componentId, expectedKind, issues);
+    const stringItems = materializeOrdinaryArray(stringsValue);
+    const valueItems = materializeOrdinaryArray(valuesValue);
+    if (stringItems === undefined
+      || valueItems === undefined
+      || stringItems.length !== valueItems.length + 1
+      || stringItems.some((part) => typeof part !== "string")) {
+      return invalidDetailTemplate(componentId, expectedKind, issues);
+    }
+    const strings = Object.freeze(stringItems as string[]);
+    const shell = { kind: expectedKind, strings, bindings: Object.freeze([]) } satisfies MaterializedDetailTemplate;
+    const bindings = Object.freeze(valueItems.map((bindingValue, index): MaterializedDetailBinding => {
+      const kindAtBinding = bindingKind(shell, index);
+      if (expectedKind !== "html" || kindAtBinding === undefined) {
+        return Object.freeze({ capability: Object.freeze({ matched: false }) });
+      }
+      if (kindAtBinding === "gc") {
+        return Object.freeze({ capability: safeMaterializeDetailCapability(bindingValue, owner?.object) });
+      }
+      const asset = materializeAssetReference(bindingValue, referencesByObject, invalidReferences);
+      const location = bindingLocation(shell, index);
+      if (asset === undefined) {
+        issues.push(Object.freeze({
+          code: "asset_reference_invalid",
+          componentId,
+          path: `html:${location.line}:${location.column}`,
+          line: location.line,
+          column: location.column,
+          message: "Asset references must contain ordinary own data properties",
+        }));
+        return Object.freeze({ capability: Object.freeze({ matched: false }) });
+      }
+      if (!isStableIdentity(asset.logicalId)) {
+        issues.push(Object.freeze({
+          code: "asset_identity_invalid",
+          componentId,
+          path: `html:${location.line}:${location.column}`,
+          line: location.line,
+          column: location.column,
+          message: "Asset identity must be trimmed, NUL-free, and at most 128 UTF-8 bytes",
+        }));
+      } else assetIds.add(asset.logicalId);
+      return Object.freeze({ capability: Object.freeze({ matched: false }), asset });
+    }));
+    return Object.freeze({ kind: expectedKind, strings, bindings });
+  } catch {
+    return invalidDetailTemplate(componentId, expectedKind, issues);
+  }
+}
+
+function invalidDetailTemplate(
+  componentId: string,
+  kind: TemplateKind,
+  issues: DetailCompilationIssue[],
+): MaterializedDetailTemplate {
+  issues.push(Object.freeze({
+    code: "template_invalid",
+    componentId,
+    path: `${kind}:1:1`,
+    line: 1,
+    column: 1,
+    message: `Node Detail ${kind.toUpperCase()} templates must contain exact ordinary own data properties and arrays`,
+  }));
+  return Object.freeze({ kind, strings: Object.freeze([""]), bindings: Object.freeze([]) });
+}
+
+function materializeOrdinaryArray(value: unknown): unknown[] | undefined {
+  if (!Array.isArray(value) || isProxy(value) || Object.getPrototypeOf(value) !== Array.prototype) return undefined;
+  const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
+  const lengthDescriptor = descriptors.length;
+  if (lengthDescriptor === undefined
+    || !("value" in lengthDescriptor)
+    || typeof lengthDescriptor.value !== "number"
+    || !Number.isSafeInteger(lengthDescriptor.value)
+    || lengthDescriptor.value < 0
+    || lengthDescriptor.enumerable !== false) return undefined;
+  const expected = new Set<PropertyKey>(["length"]);
+  const result: unknown[] = [];
+  for (let index = 0; index < lengthDescriptor.value; index += 1) {
+    const field = String(index);
+    expected.add(field);
+    const descriptor = descriptors[field];
+    if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) return undefined;
+    result.push(descriptor.value);
+  }
+  if (Reflect.ownKeys(descriptors).some((field) => !expected.has(field))) return undefined;
+  return result;
 }
 
 function materializeAssetReference(
@@ -322,6 +464,7 @@ function materializeAssetReference(
   invalidReferences: Set<object>,
 ): MaterializedAssetRef | undefined {
   if (typeof value !== "object" || value === null) return undefined;
+  if (isProxy(value)) return undefined;
   const existing = references.get(value);
   if (existing !== undefined) return existing;
   if (invalidReferences.has(value)) return undefined;
@@ -359,21 +502,13 @@ function materializeAssetReference(
 
 /** @internal */
 export function compileAuthenticatedNodeDetail(
-  authoring: NodeDetailAuthoring,
-  owner: AuthenticatedNodeDetailOwnerSnapshot,
-  assetSnapshot: AuthenticatedNodeDetailAssetSnapshot,
+  program: AuthenticatedNodeDetailProgramSnapshot,
   assets: readonly (ResolvedDetailAsset | null)[],
 ): CompiledNodeDetail {
-  if (authoringState(authoring).owner !== owner.object || assetSnapshot.authoring !== authoring) {
-    throw new TypeError("Authenticated Node Detail owner does not own this authoring builder");
-  }
-  const logicalIds = assetSnapshot.logicalIds;
+  const logicalIds = program.logicalIds;
   const resolvedByLogicalId = new Map(logicalIds.map((logicalId, index) => [logicalId, assets[index] ?? undefined]));
-  return compileAuthoring(authoring, owner, {
+  return compileAuthoring(program, {
     missingAssetCode: "asset_unknown",
-    materialize: (reference) => typeof reference === "object" && reference !== null
-      ? assetSnapshot.references.get(reference)
-      : undefined,
     resolve: (reference) => resolvedByLogicalId.get(reference.logicalId),
   });
 }
@@ -390,15 +525,14 @@ function authoringState(authoring: NodeDetailAuthoring): AuthoringState {
 }
 
 function compileAuthoring(
-  authoring: NodeDetailAuthoring,
-  owner: AuthenticatedNodeDetailOwnerSnapshot | undefined,
+  program: AuthenticatedNodeDetailProgramSnapshot,
   assetResolver: DetailAssetResolver,
 ): CompiledNodeDetail {
-  const state = authoringState(authoring);
+  const owner = program.owner;
   const mounts: CompiledDetailMount[] = [];
   const assets = new Map<string, CompiledAsset>();
   const issues: DetailCompilationIssue[] = [];
-  const authoredTemplateBytes = [...state.components.values()].reduce(
+  const authoredTemplateBytes = program.components.reduce(
     (total, component) => total
       + component.markup.strings.reduce((sum, part) => sum + Buffer.byteLength(part, "utf8"), 0)
       + component.styles.strings.reduce((sum, part) => sum + Buffer.byteLength(part, "utf8"), 0),
@@ -407,7 +541,7 @@ function compileAuthoring(
   if (authoredTemplateBytes > DETAIL_AUTHORING_LIMITS.maxCompiledPackageBytes) {
     throw compiledPackageByteLimitError();
   }
-  if (state.components.size > DETAIL_AUTHORING_LIMITS.maxComponents) {
+  if (program.components.length > DETAIL_AUTHORING_LIMITS.maxComponents) {
     issues.push(Object.freeze({
       code: "component_limit_exceeded",
       componentId: "",
@@ -417,10 +551,11 @@ function compileAuthoring(
       message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxComponents} components`,
     }));
   }
-  const domIdentities = collectDomIdentities(state.components, issues);
-  const components = Object.freeze([...state.components.entries()]
-    .sort((left, right) => left[1].order - right[1].order)
-    .map(([id, component]) => {
+  const domIdentities = collectDomIdentities(program.components, issues);
+  const components = Object.freeze([...program.components]
+    .sort((left, right) => left.order - right.order)
+    .map((component) => {
+      const id = component.id;
       if (!isStableIdentity(id)) {
         issues.push(Object.freeze({
           code: "component_identity_invalid",
@@ -490,7 +625,7 @@ function emptyCssTemplate(): DetailTemplate {
 
 function compileHtml(
   componentId: string,
-  template: DetailTemplate,
+  template: MaterializedDetailTemplate,
   mounts: CompiledDetailMount[],
   assets: Map<string, CompiledAsset>,
   issues: DetailCompilationIssue[],
@@ -498,7 +633,7 @@ function compileHtml(
   owner: AuthenticatedNodeDetailOwnerSnapshot | undefined,
   domIdentities: ReadonlyMap<string, DomIdentityRecord>,
 ): string {
-  if (template[DETAIL_TEMPLATE] !== "html") throw new Error("Node Detail component markup must use html``");
+  if (template.kind !== "html") return "";
   const source = bindingSource(componentId, template, issues);
   if (Buffer.byteLength(source, "utf8") > DETAIL_AUTHORING_LIMITS.maxHtmlBytesPerComponent) {
     issues.push(Object.freeze({
@@ -513,7 +648,7 @@ function compileHtml(
   }
   const fragment = parseAuthoredHtml(source, componentId, issues);
   if (!validateHtmlTreeLimits(componentId, fragment, issues)) return "";
-  const bindingUses = new Uint16Array(template.values.length);
+  const bindingUses = new Uint16Array(template.bindings.length);
   const assetOccurrences = new Map<string, number>();
   visitElements(fragment, (element) => {
     validateElementSafety(componentId, element, issues);
@@ -522,12 +657,10 @@ function compileHtml(
     if (binding === undefined) return;
     const index = Number(binding.value);
     if (Number.isSafeInteger(index) && index >= 0 && index < bindingUses.length) bindingUses[index] = (bindingUses[index] ?? 0) + 1;
-    const value = template.values[index];
+    const authoredBinding = template.bindings[index];
     element.attrs = element.attrs.filter((attribute) => attribute !== binding);
-    const asset = assetResolver.materialize(value);
-    const materialization = asset === undefined
-      ? safeMaterializeDetailCapability(value, owner?.object)
-      : Object.freeze({ matched: false });
+    const asset = authoredBinding?.asset;
+    const materialization = authoredBinding?.capability ?? Object.freeze({ matched: false });
     if (materialization.matched) {
       const materializedCapability = materialization.capability;
       if (materializedCapability === undefined) {
@@ -621,12 +754,13 @@ function compileHtml(
 }
 
 function collectDomIdentities(
-  components: ReadonlyMap<string, AuthoringComponent>,
+  components: readonly MaterializedAuthoringComponent[],
   issues: DetailCompilationIssue[],
 ): ReadonlyMap<string, DomIdentityRecord> {
   const identities = new Map<string, DomIdentityRecord>();
   const duplicates = new Set<string>();
-  for (const [componentId, component] of components) {
+  for (const component of components) {
+    const componentId = component.id;
     const scratchIssues: DetailCompilationIssue[] = [];
     const source = bindingSource(componentId, component.markup, scratchIssues);
     const fragment = parseAuthoredHtml(source, componentId, scratchIssues);
@@ -650,20 +784,20 @@ function collectDomIdentities(
   return identities;
 }
 
-function bindingLocation(template: DetailTemplate, bindingIndex: number): { readonly line: number; readonly column: number } {
+function bindingLocation(template: MaterializedDetailTemplate, bindingIndex: number): { readonly line: number; readonly column: number } {
   let source = "";
   for (let index = 0; index <= bindingIndex; index += 1) source += template.strings[index] ?? "";
   return sourceLocationAtEnd(source);
 }
 
-function bindingKind(template: DetailTemplate, bindingIndex: number): "gc" | "asset" | undefined {
+function bindingKind(template: MaterializedDetailTemplate, bindingIndex: number): "gc" | "asset" | undefined {
   const match = (template.strings[bindingIndex] ?? "").match(/(?:^|\s)(gc|asset)\s*=\s*$/);
   return match?.[1] === "gc" || match?.[1] === "asset" ? match[1] : undefined;
 }
 
-function bindingSource(componentId: string, template: DetailTemplate, issues: DetailCompilationIssue[]): string {
+function bindingSource(componentId: string, template: MaterializedDetailTemplate, issues: DetailCompilationIssue[]): string {
   let source = template.strings[0] ?? "";
-  for (let index = 0; index < template.values.length; index += 1) {
+  for (let index = 0; index < template.bindings.length; index += 1) {
     const openTagStart = source.lastIndexOf("<");
     const openTagEnd = source.lastIndexOf(">");
     const openTag = openTagStart > openTagEnd ? source.slice(openTagStart) : "";
@@ -681,8 +815,8 @@ function bindingSource(componentId: string, template: DetailTemplate, issues: De
       source += template.strings[index + 1] ?? "";
       continue;
     }
-    const value = template.values[index];
-    if (match[1] === "gc" && !isPotentialDetailCapability(value)) {
+    const authoredBinding = template.bindings[index];
+    if (match[1] === "gc" && authoredBinding?.capability.matched !== true) {
       const location = sourceLocationAtEnd(source);
       issues.push(Object.freeze({
         code: "binding_type_invalid",
@@ -723,9 +857,19 @@ function isStableIdentity(value: unknown): value is string {
     && Buffer.byteLength(value, "utf8") <= 128;
 }
 
-function compileCss(componentId: string, template: DetailTemplate, issues: DetailCompilationIssue[]): string {
-  if (template[DETAIL_TEMPLATE] !== "css") throw new Error("Node Detail component styles must use css``");
-  if (template.values.length !== 0) throw new Error("Node Detail CSS does not accept interpolated values");
+function compileCss(componentId: string, template: MaterializedDetailTemplate, issues: DetailCompilationIssue[]): string {
+  if (template.kind !== "css") return "";
+  if (template.bindings.length !== 0) {
+    issues.push(Object.freeze({
+      code: "css_interpolation_not_allowed",
+      componentId,
+      path: "css:1:1",
+      line: 1,
+      column: 1,
+      message: "Node Detail CSS does not accept interpolated values",
+    }));
+    return "";
+  }
   const source = template.strings.join("").replace(/\r\n?/g, "\n").trim();
   if (Buffer.byteLength(source, "utf8") > DETAIL_AUTHORING_LIMITS.maxCssBytesPerComponent) {
     issues.push(Object.freeze({
@@ -958,15 +1102,6 @@ function validateHtmlTreeLimits(componentId: string, root: HtmlRoot, issues: Det
   return !reportedElements && !reportedDepth;
 }
 
-function isPotentialDetailCapability(value: unknown): boolean {
-  if (typeof value !== "object" || value === null) return false;
-  try {
-    return DETAIL_CAPABILITY in value;
-  } catch {
-    return true;
-  }
-}
-
 function graphCapability(
   key: string,
   kind: GraphDetailCapability["kind"],
@@ -1137,12 +1272,12 @@ function safeMaterializeDetailCapability(
 ): DetailCapabilityMaterialization {
   if (typeof value !== "object" || value === null) return Object.freeze({ matched: false });
   try {
+    if (isProxy(value)) return Object.freeze({ matched: true });
     if (Object.getPrototypeOf(value) !== Object.prototype) return Object.freeze({ matched: true });
     const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
     const brand = descriptors[DETAIL_CAPABILITY];
     if (brand === undefined) return Object.freeze({ matched: false });
-    if (!(DETAIL_CAPABILITY in value)
-      || !("value" in brand)
+    if (!("value" in brand)
       || brand.value !== true
       || brand.enumerable !== true) return Object.freeze({ matched: true });
     const key = ownCapabilityData(descriptors, "key");
@@ -1182,7 +1317,7 @@ const INVALID_DESCRIPTOR_VALUE = Symbol("invalid-descriptor-value");
 
 function ownCapabilityData(
   descriptors: Record<PropertyKey, PropertyDescriptor>,
-  field: string,
+  field: PropertyKey,
 ): unknown | typeof INVALID_DESCRIPTOR_VALUE {
   const descriptor = descriptors[field];
   return descriptor !== undefined && "value" in descriptor && descriptor.enumerable === true
@@ -1212,15 +1347,18 @@ function materializeAction(value: unknown, owner: NodeObject | undefined): Mater
       ? materializeOptions(descriptor.value)
       : field === "sourceLayer"
         ? materializeSourceLayer(descriptor.value, owner)
+        : field === "target"
+          ? materializeLayerTarget(descriptor.value)
         : descriptor.value;
     if (field === "options" && descriptor.value !== undefined && snapshot[field] === undefined) return undefined;
     if (field === "sourceLayer" && snapshot[field] === undefined) return undefined;
+    if (field === "target" && snapshot[field] === undefined) return undefined;
   }
   return Object.freeze(snapshot);
 }
 
 function materializeOptions(value: unknown): readonly MaterializedAction[] | undefined {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return undefined;
+  if (!Array.isArray(value) || isProxy(value) || Object.getPrototypeOf(value) !== Array.prototype) return undefined;
   const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
   const lengthDescriptor = descriptors.length;
   if (lengthDescriptor === undefined
@@ -1260,6 +1398,7 @@ function materializeOption(value: unknown): MaterializedAction | undefined {
 
 function isOrdinaryRecord(value: unknown): value is Record<PropertyKey, unknown> {
   if (typeof value !== "object" || value === null) return false;
+  if (isProxy(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
@@ -1282,7 +1421,7 @@ function safeMaterializeOwner(owner: NodeObject | undefined): AuthenticatedNodeD
 function materializeSourceLayer(value: unknown, owner: NodeObject | undefined): MaterializedSourceLayer | undefined {
   if (typeof value !== "object"
     || value === null
-    || !(value instanceof LayerObject)
+    || isProxy(value)
     || Object.getPrototypeOf(value) !== LayerObject.prototype) return undefined;
   const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
   const allowedFields = new Set<PropertyKey>(["clientKey", "edges", "layout", "nodes", "ref"]);
@@ -1303,8 +1442,35 @@ function materializeSourceLayer(value: unknown, owner: NodeObject | undefined): 
   return Object.freeze({ clientKey: clientKeyDescriptor.value, containsOwner });
 }
 
+function materializeLayerTarget(value: unknown): MaterializedLayerTarget | undefined {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value > 0 ? Object.freeze({ kind: "id", id: value }) : undefined;
+  }
+  if (typeof value !== "object" || value === null || isProxy(value)) return undefined;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype === LayerObject.prototype) {
+    const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
+    const allowed = new Set<PropertyKey>(["clientKey", "edges", "layout", "nodes", "ref"]);
+    if (!hasExactDescriptorFields(descriptors, allowed)) return undefined;
+    const clientKey = ownCapabilityData(descriptors, "clientKey");
+    return typeof clientKey === "string" ? Object.freeze({ kind: "draft", clientKey }) : undefined;
+  }
+  if (prototype !== Object.prototype && prototype !== null) return undefined;
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
+  const allowed = new Set<PropertyKey>(["edges", "id", "layout", "nodes", "state"]);
+  if (!hasExactDescriptorFields(descriptors, allowed)) return undefined;
+  const id = ownCapabilityData(descriptors, "id");
+  const nodes = ownCapabilityData(descriptors, "nodes");
+  const edges = ownCapabilityData(descriptors, "edges");
+  const state = ownCapabilityData(descriptors, "state");
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0
+    || !Array.isArray(nodes) || !Array.isArray(edges)
+    || (state !== "draft" && state !== "accepted" && state !== "stopped")) return undefined;
+  return Object.freeze({ kind: "accepted", id });
+}
+
 function materializeLayerOwnerMembership(value: unknown, owner: NodeObject | undefined): boolean | undefined {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return undefined;
+  if (!Array.isArray(value) || isProxy(value) || Object.getPrototypeOf(value) !== Array.prototype) return undefined;
   const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
   const lengthDescriptor = descriptors.length;
   if (lengthDescriptor === undefined
@@ -1369,22 +1535,14 @@ function hasValidActionPresentation(action: Record<string, unknown>): boolean {
   return action.description === undefined;
 }
 
-function isStableLayerReference(reference: unknown): reference is LayerReference {
-  if (typeof reference === "number") return Number.isSafeInteger(reference) && reference > 0;
-  if (reference instanceof LayerObject) return isStableIdentity(reference.clientKey);
-  return typeof reference === "object"
-    && reference !== null
-    && !(reference instanceof NodeObject)
-    && "id" in reference
-    && typeof reference.id === "number"
-    && Number.isSafeInteger(reference.id)
-    && reference.id > 0
-    && "nodes" in reference
-    && Array.isArray(reference.nodes)
-    && "edges" in reference
-    && Array.isArray(reference.edges)
-    && "state" in reference
-    && (reference.state === "draft" || reference.state === "accepted" || reference.state === "stopped");
+function isStableLayerReference(reference: unknown): reference is MaterializedLayerTarget {
+  if (typeof reference !== "object" || reference === null) return false;
+  const target = reference as MaterializedLayerTarget;
+  if (target.kind === "draft") return isStableIdentity(target.clientKey);
+  return (target.kind === "accepted" || target.kind === "id")
+    && typeof target.id === "number"
+    && Number.isSafeInteger(target.id)
+    && target.id > 0;
 }
 
 function validateElementSafety(
@@ -1558,15 +1716,10 @@ function validateAsset(
   }
 }
 
-function rejectingAssetResolver(snapshot: AuthenticatedNodeDetailAssetSnapshot): DetailAssetResolver {
-  return Object.freeze({
-    missingAssetCode: "asset_resolution_required" as const,
-    materialize: (reference: unknown) => typeof reference === "object" && reference !== null
-      ? snapshot.references.get(reference)
-      : undefined,
-    resolve: () => undefined,
-  });
-}
+const REJECTING_ASSET_RESOLVER: DetailAssetResolver = Object.freeze({
+  missingAssetCode: "asset_resolution_required",
+  resolve: () => undefined,
+});
 
 function hasAccessibleName(
   element: HtmlElement,

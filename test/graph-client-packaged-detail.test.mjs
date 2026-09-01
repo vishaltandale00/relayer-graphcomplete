@@ -142,6 +142,28 @@ describe("packaged graph-client authored detail boundary", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("rejects a detail builder owned by a different NodeObject as a node envelope error", async () => {
+    const { DetailCompilationError, NodeObject, RelayerGraphClient } = await import(graphClientIndexUrl.href);
+    const owner = new NodeObject("box", "Owner", "Fallback", "concept", "builder-owner");
+    const unrelated = new NodeObject("box", "Unrelated", "Fallback", "concept", "builder-unrelated");
+    Object.defineProperty(owner, "detailAuthoring", {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: unrelated.detailAuthoring,
+    });
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    const submitting = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(owner);
+    await expect(submitting).rejects.toBeInstanceOf(DetailCompilationError);
+    await expect(submitting).rejects.toMatchObject({
+      name: "DetailCompilationError",
+      issues: [expect.objectContaining({ code: "node_envelope_invalid", path: "node" })],
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("snapshots asset references without invoking caller accessors or proxy traps", async () => {
     const {
       DetailCompilationError,
@@ -224,6 +246,249 @@ describe("packaged graph-client authored detail boundary", () => {
     expect(compiled.assets).toEqual([
       expect.objectContaining({ id: "safe-logo", digestSha256: "a".repeat(64) }),
     ]);
+  });
+
+  it("submits one pre-await authored program snapshot and freezes the accepted builder", async () => {
+    const {
+      LayerLayoutObject,
+      LayerObject,
+      NodeObject,
+      RelayerGraphClient,
+      assetRef,
+      detailCapability,
+      html,
+    } = await import(graphClientIndexUrl.href);
+    const owner = new NodeObject("box", "Snapshot", "Fallback", "concept", "snapshot-owner");
+    const sourceLayer = new LayerObject([owner], [], new LayerLayoutObject([]), "original-layer");
+    const action = {
+      kind: "invoke",
+      label: "Original action",
+      interactionText: "Run original action",
+      sourceLayer,
+      clientKey: "original-action",
+    };
+    owner.detailAuthoring.setComponent("original", html`
+      <button gc=${detailCapability.invoke("run", action)}>Original markup</button>
+      <img alt="Original logo" asset=${assetRef("original-logo")}>
+    `);
+
+    let resolverStarted;
+    const started = new Promise((resolveStarted) => { resolverStarted = resolveStarted; });
+    let releaseResolver;
+    const heldResolver = new Promise((resolveResolver) => { releaseResolver = resolveResolver; });
+    let submitted;
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      if (String(url).includes("/detail-assets/resolve")) {
+        resolverStarted();
+        await heldResolver;
+        return new Response(JSON.stringify({ assets: [{
+          logicalId: "original-logo",
+          authority: "current",
+          availability: "available",
+          digestSha256: "a".repeat(64),
+          mediaType: "image/png",
+          representation: { kind: "image", sanitized: true },
+        }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      submitted = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({
+        node: { id: 1, kind: "concept", icon: "box", title: "Snapshot", detail: "Fallback", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const pending = client.submitNode(owner);
+    await started;
+    owner.detailAuthoring.setComponent("late", html`<p>Late mutation</p>`);
+    action.clientKey = "substituted-action";
+    action.label = "Substituted action";
+    sourceLayer.clientKey = "substituted-layer";
+    sourceLayer.nodes = [];
+    releaseResolver();
+    await pending;
+
+    expect(submitted.authoredDetail.components.map((component) => component.id)).toEqual(["original"]);
+    expect(submitted.authoredDetail.components[0].html).toContain("Original markup");
+    expect(submitted.authoredDetail.mounts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "capability",
+        capability: {
+          kind: "invoke",
+          action: {
+            clientKey: "original-action",
+            sourceNode: { clientKey: "snapshot-owner" },
+            sourceLayer: { clientKey: "original-layer" },
+          },
+        },
+      }),
+      expect.objectContaining({ kind: "asset", assetId: "original-logo" }),
+    ]));
+    expect(() => owner.detailAuthoring.setComponent("after-submit", html`<p>Rejected</p>`))
+      .toThrow(/finalized/);
+  });
+
+  it("checkpoints the pre-await program while leaving the live builder repairable", async () => {
+    const {
+      LayerLayoutObject,
+      LayerObject,
+      NodeObject,
+      RelayerGraphClient,
+      assetRef,
+      detailCapability,
+      html,
+    } = await import(graphClientIndexUrl.href);
+    const owner = new NodeObject("box", "Checkpoint", "Fallback", "concept", "checkpoint-owner");
+    const sourceLayer = new LayerObject([owner], [], new LayerLayoutObject([]), "checkpoint-layer");
+    const action = {
+      kind: "invoke",
+      label: "Original",
+      interactionText: "Original",
+      sourceLayer,
+      clientKey: "checkpoint-action",
+    };
+    owner.detailAuthoring.setComponent("card", html`
+      <button gc=${detailCapability.invoke("run", action)}>Original checkpoint</button>
+      <img alt="Logo" asset=${assetRef("checkpoint-logo")}>
+    `);
+    let resolverStarted;
+    const started = new Promise((resolveStarted) => { resolverStarted = resolveStarted; });
+    let releaseResolver;
+    const heldResolver = new Promise((resolveResolver) => { releaseResolver = resolveResolver; });
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      resolverStarted();
+      await heldResolver;
+      return new Response(JSON.stringify({ assets: [{
+        logicalId: "checkpoint-logo",
+        authority: "current",
+        availability: "available",
+        digestSha256: "b".repeat(64),
+        mediaType: "image/png",
+        representation: { kind: "image", sanitized: true },
+      }] }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    const pending = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 })
+      .checkpointNodeDetail(owner);
+    await started;
+    owner.detailAuthoring.setComponent("card", html`<p>Replacement markup</p>`);
+    action.clientKey = "replacement-action";
+    sourceLayer.clientKey = "replacement-layer";
+    sourceLayer.nodes = [];
+    releaseResolver();
+    const compiled = await pending;
+
+    expect(compiled.components).toEqual([
+      expect.objectContaining({ id: "card", html: expect.stringContaining("Original checkpoint") }),
+    ]);
+    expect(compiled.mounts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "capability",
+        capability: expect.objectContaining({
+          action: expect.objectContaining({ clientKey: "checkpoint-action", sourceLayer: { clientKey: "checkpoint-layer" } }),
+        }),
+      }),
+    ]));
+    expect(() => owner.detailAuthoring.setComponent("repair", html`<p>Still repairable</p>`)).not.toThrow();
+  });
+
+  it("rejects forged HTML and CSS template descriptors without invoking caller code", async () => {
+    const { DetailCompilationError, NodeObject, RelayerGraphClient, css, html } = await import(graphClientIndexUrl.href);
+    const templateBrand = Reflect.ownKeys(html`<p>Brand</p>`).find((key) => typeof key === "symbol");
+    let accessorReads = 0;
+    const inherited = Object.create({ [templateBrand]: "html" });
+    inherited.strings = ["<p>Inherited</p>"];
+    inherited.values = [];
+    const symbolTemplate = { [templateBrand]: "html", strings: ["<p>Symbol</p>"], values: [] };
+    symbolTemplate[Symbol("unknown")] = true;
+    const trappedStrings = new Proxy(["<p>Trapped</p>"], {
+      ownKeys: () => { throw new TypeError("caller template array trap escaped"); },
+    });
+    const cases = [
+      ["missing", { [templateBrand]: "html", strings: ["<p>Missing</p>"] }, css``],
+      ["accessor", {
+        [templateBrand]: "html",
+        get strings() {
+          accessorReads += 1;
+          return ["<p>Accessor</p>"];
+        },
+        values: [],
+      }, css``],
+      ["inherited", inherited, css``],
+      ["symbol", symbolTemplate, css``],
+      ["proxy", new Proxy({ [templateBrand]: "html", strings: ["<p>Proxy</p>"], values: [] }, {
+        ownKeys: () => { throw new TypeError("caller template proxy trap escaped"); },
+      }), css``],
+      ["array-proxy", { [templateBrand]: "html", strings: trappedStrings, values: [] }, css``],
+      ["css-accessor", html`<p>CSS</p>`, {
+        [templateBrand]: "css",
+        strings: [".card{display:grid}"],
+        get values() {
+          accessorReads += 1;
+          return [];
+        },
+      }],
+    ];
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    for (const [name, markup, styles] of cases) {
+      const node = new NodeObject("box", "Template", "Fallback", "concept", `template-${name}`);
+      node.detailAuthoring.setComponent(name, markup, styles);
+      await expect(client.checkpointNodeDetail(node)).rejects.toBeInstanceOf(DetailCompilationError);
+      await expect(client.checkpointNodeDetail(node)).rejects.toMatchObject({
+        issues: expect.arrayContaining([expect.objectContaining({ code: "template_invalid", componentId: name })]),
+      });
+    }
+    expect(accessorReads).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects accessor, proxy, and prototype-substituted navigate targets without reading them", async () => {
+    const {
+      DetailCompilationError,
+      LayerLayoutObject,
+      LayerObject,
+      NodeObject,
+      RelayerGraphClient,
+      detailCapability,
+      html,
+    } = await import(graphClientIndexUrl.href);
+    let targetReads = 0;
+    const accessorTarget = new LayerObject([], [], new LayerLayoutObject([]), "accessor-target");
+    Object.defineProperty(accessorTarget, "clientKey", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        targetReads += 1;
+        return "substituted-target";
+      },
+    });
+    const trappedTarget = new Proxy(new LayerObject([], [], new LayerLayoutObject([]), "trapped-target"), {
+      ownKeys: () => { throw new TypeError("caller target proxy trap escaped"); },
+    });
+    const inheritedTarget = Object.create(new LayerObject([], [], new LayerLayoutObject([]), "inherited-target"));
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    for (const [name, target] of [
+      ["accessor-target", accessorTarget],
+      ["trapped-target", trappedTarget],
+      ["inherited-target", inheritedTarget],
+    ]) {
+      const owner = new NodeObject("box", "Navigate", "Fallback", "concept", `${name}-owner`);
+      const sourceLayer = new LayerObject([owner], [], new LayerLayoutObject([]), `${name}-source`);
+      const action = {
+        kind: "navigate", relation: "expand", label: "Open", target, sourceLayer, clientKey: `${name}-action`,
+      };
+      owner.detailAuthoring.setComponent(name, html`<button gc=${detailCapability.expand("open", action)}>Open</button>`);
+      await expect(client.checkpointNodeDetail(owner)).rejects.toBeInstanceOf(DetailCompilationError);
+      await expect(client.checkpointNodeDetail(owner)).rejects.toMatchObject({
+        issues: expect.arrayContaining([expect.objectContaining({ code: "capability_invalid", componentId: name })]),
+      });
+    }
+    expect(targetReads).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("rejects forged action shapes through the packaged public checkpoint seam", async () => {
