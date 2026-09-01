@@ -68,15 +68,6 @@ describe("input round-trip structural gate", () => {
     });
   });
 
-  it("requires the fixed option keys as well as labels", () => {
-    const underscored = requiredControls.map((entry) => ({
-      ...entry,
-      options: entry.options.map((option) => ({ ...option, key: option.key.replaceAll("-", "_") })),
-    }));
-    expect(gradeInputRoundTripControlSet(underscored, underscored).checks[0]!.passed).toBe(false);
-    expect(gradeInputRoundTripControlSet(underscored, requiredControls).checks[1]!.passed).toBe(false);
-  });
-
   it("rejects controls that preserve the option matrix but ask unrelated questions", () => {
     const unrelated = requiredControls.map((entry) => ({
       ...entry,
@@ -89,13 +80,19 @@ describe("input round-trip structural gate", () => {
     expect(gradeInputRoundTripControlSet(unrelated, unrelated).checks[0]!.passed).toBe(false);
   });
 
-  it.each([
+  it("rejects every keyword-bearing prompt that avoids the required decision", () => {
+    const cases = [
     ["text", "Why does the deployment window affect rollback?"],
     ["single_select", "Is the rollout strategy documented?"],
     ["multi_select", "Are the validation signals visible?"],
-  ] as const)("rejects a %s keyword-bearing prompt that does not ask for the required decision", (control, prompt) => {
-    const misleading = requiredControls.map((entry) => entry.control === control ? { ...entry, prompt } : entry);
-    expect(gradeInputRoundTripControlSet(misleading, misleading).checks[0]!.passed).toBe(false);
+    ] as const;
+    expect(cases.map(([control]) => control), "deceptive prompt inventory").toEqual([
+      "text", "single_select", "multi_select",
+    ]);
+    for (const [control, prompt] of cases) {
+      const misleading = requiredControls.map((entry) => entry.control === control ? { ...entry, prompt } : entry);
+      expect.soft(gradeInputRoundTripControlSet(misleading, misleading).checks[0]!.passed, control).toBe(false);
+    }
   });
 
   it("accepts direct imperative phrasing for each required decision", () => {
@@ -110,22 +107,60 @@ describe("input round-trip structural gate", () => {
     expect(gradeInputRoundTripControlSet(imperative, imperative).checks[0]!.passed).toBe(true);
   });
 
-  it.each([
-    ["missing authored control", requiredControls.slice(0, 2), requiredControls.slice(0, 2), 0],
-    ["duplicate authored identity", [requiredControls[0], requiredControls[0], requiredControls[2]], requiredControls, 0],
-    ["distributed nodes", requiredControls.map((entry, index) => ({ ...entry, sourceNodeId: index + 2 })), requiredControls, 0],
-    ["wrong single-select options", requiredControls.map((entry) => entry.control === "single_select"
-      ? { ...entry, options: [{ key: "full-rollout", label: "Full rollout" }] }
-      : entry), requiredControls, 0],
-    ["wrong multi-select minimum", requiredControls.map((entry) => entry.control === "multi_select"
-      ? { ...entry, minimumSelections: 1 }
-      : entry), requiredControls, 0],
-    ["partial commits", requiredControls, requiredControls.slice(0, 2), 1],
-    ["duplicate commits", requiredControls, [requiredControls[0], requiredControls[0], requiredControls[2]], 1],
-  ] as const)("rejects %s", (_name, authored, committed, failedIndex) => {
-    const result = gradeInputRoundTripControlSet(authored, committed);
-    expect(result.passed).toBe(false);
-    expect(result.checks[failedIndex]!.passed).toBe(false);
+  it("rejects missing, duplicate, and distributed authored controls", () => {
+    const cases = [
+      ["missing authored control", requiredControls.slice(0, 2)],
+      ["duplicate authored identity", [requiredControls[0], requiredControls[0], requiredControls[2]]],
+      ["distributed nodes", requiredControls.map((entry, index) => ({ ...entry, sourceNodeId: index + 2 }))],
+    ] as const;
+    expect(cases.map(([label]) => label), "authored identity inventory").toEqual([
+      "missing authored control", "duplicate authored identity", "distributed nodes",
+    ]);
+    for (const [label, authored] of cases) {
+      const result = gradeInputRoundTripControlSet(authored, requiredControls);
+      expect.soft(result.passed, `${label}: aggregate`).toBe(false);
+      expect.soft(result.checks[0]!.passed, `${label}: authored`).toBe(false);
+    }
+  });
+
+  it("rejects option-key, option-set, and selection-minimum drift", () => {
+    const underscored = requiredControls.map((entry) => ({
+      ...entry,
+      options: entry.options.map((option) => ({ ...option, key: option.key.replaceAll("-", "_") })),
+    }));
+    const cases = [
+      ["authored option keys", underscored, underscored, 0],
+      ["committed option keys", underscored, requiredControls, 1],
+      ["single-select options", requiredControls.map((entry) => entry.control === "single_select"
+        ? { ...entry, options: [{ key: "full-rollout", label: "Full rollout" }] }
+        : entry), requiredControls, 0],
+      ["multi-select minimum", requiredControls.map((entry) => entry.control === "multi_select"
+        ? { ...entry, minimumSelections: 1 }
+        : entry), requiredControls, 0],
+    ] as const;
+    expect(cases.map(([label]) => label), "option contract inventory").toEqual([
+      "authored option keys", "committed option keys", "single-select options", "multi-select minimum",
+    ]);
+    for (const [label, authored, committed, failedIndex] of cases) {
+      const result = gradeInputRoundTripControlSet(authored, committed);
+      expect.soft(result.passed, `${label}: aggregate`).toBe(false);
+      expect.soft(result.checks[failedIndex]!.passed, `${label}: checkpoint`).toBe(false);
+    }
+  });
+
+  it("rejects partial and duplicate committed input multisets", () => {
+    const cases = [
+      ["partial commits", requiredControls.slice(0, 2)],
+      ["duplicate commits", [requiredControls[0], requiredControls[0], requiredControls[2]]],
+    ] as const;
+    expect(cases.map(([label]) => label), "committed multiset inventory").toEqual([
+      "partial commits", "duplicate commits",
+    ]);
+    for (const [label, committed] of cases) {
+      const result = gradeInputRoundTripControlSet(requiredControls, committed);
+      expect.soft(result.passed, `${label}: aggregate`).toBe(false);
+      expect.soft(result.checks[1]!.passed, `${label}: committed`).toBe(false);
+    }
   });
 
   it("passes only when accepted authoring, product materialization, exact provenance, and normalized trace agree", () => {
@@ -167,17 +202,23 @@ describe("input round-trip structural gate", () => {
     ]);
   });
 
-  it.each([
+  it("rejects every missing or changed round-trip stage", () => {
+    const cases = [
     ["authored acceptance", (value: ReturnType<typeof evidence>) => { value.authoredAccepted = false; }, 0],
     ["submitted semantic value", (value: ReturnType<typeof evidence>) => { value.interaction.submittedInputs = []; }, 0],
     ["child provenance", (value: ReturnType<typeof evidence>) => { value.inputChildren[0]!.actionId = 14; }, 0],
     ["normalized harness input", (value: ReturnType<typeof evidence>) => { value.harnessTraceEvents = []; }, 1],
-  ])("fails when %s is absent or changed", (_name, mutate, failedIndex) => {
-    const value = evidence();
-    mutate(value);
-    const result = gradeInputRoundTrip(expectation, value);
-    expect(result.passed).toBe(false);
-    expect(result.checks[failedIndex]!.passed).toBe(false);
+    ] as const;
+    expect(cases.map(([label]) => label), "round-trip stage inventory").toEqual([
+      "authored acceptance", "submitted semantic value", "child provenance", "normalized harness input",
+    ]);
+    for (const [label, mutate, failedIndex] of cases) {
+      const value = evidence();
+      mutate(value);
+      const result = gradeInputRoundTrip(expectation, value);
+      expect.soft(result.passed, `${label}: aggregate`).toBe(false);
+      expect.soft(result.checks[failedIndex]!.passed, `${label}: checkpoint`).toBe(false);
+    }
   });
 
   it("parses braces and escapes inside the normalized input JSON without matching unrelated prompt text", () => {
@@ -248,13 +289,16 @@ describe("input round-trip grounding rating", () => {
     });
   });
 
-  it.each(["command_execution", "file_change", "mcp_tool_call", "web_search"] as const)(
-    "rejects a %s capability in the grounding trace",
-    (type) => {
-      expect(() => assertInputGroundingTrace([{ id: "forbidden", type } as never]))
+  it("rejects every mutating or network capability in the grounding trace", () => {
+    const cases = ["command_execution", "file_change", "mcp_tool_call", "web_search"] as const;
+    expect(cases, "forbidden grounding capability inventory").toEqual([
+      "command_execution", "file_change", "mcp_tool_call", "web_search",
+    ]);
+    for (const type of cases) {
+      expect.soft(() => assertInputGroundingTrace([{ id: "forbidden", type } as never]), type)
         .toThrow(`Input grounding judge used forbidden capability: ${type}`);
-    },
-  );
+    }
+  });
 
   it("requires one visible evidence item for every nested selected signal before rating a composite response grounded", async () => {
     await expect(runInputGroundingJudge({

@@ -37,11 +37,15 @@ describe("InputOperatorController", () => {
       return draftResponse(action, request, nextRevision);
     });
 
-    for (const [index, [action, value]] of ([
-      [actions.text, { text: "Preserve occurrence identity" }],
-      [actions.single, { selectedKeys: ["b"] }],
-      [actions.multi, { selectedKeys: ["proof-b", "proof-a"] }],
-    ] as const).entries()) {
+    const matrix = [
+      ["text", actions.text, { text: "Preserve occurrence identity" }],
+      ["single-select", actions.single, { selectedKeys: ["b"] }],
+      ["multi-select canonicalization", actions.multi, { selectedKeys: ["proof-b", "proof-a"] }],
+    ] as const;
+    expect(matrix.map(([label]) => label), "valid input inventory").toEqual([
+      "text", "single-select", "multi-select canonicalization",
+    ]);
+    for (const [index, [, action, value]] of matrix.entries()) {
       const capture = controller.beginCapture({ occurrence: { ...occurrence, actionId: occurrence.actionId + index }, action, threadRevision: `thread-r${index}` });
       controller.rateCapture({ ...capture, ratingId: `rating-${index}` });
       revision = await controller.commit({ captureId: capture.captureId, value, expectedRevision: revision });
@@ -60,7 +64,7 @@ describe("InputOperatorController", () => {
     expect(requests[2]!.request.body!.value).toEqual({ selectedKeys: ["proof-a", "proof-b"] });
   });
 
-  it("allows an empty optional multi-select and enforces an authored minimum", async () => {
+  it("validates optional, required, malformed, duplicate, and unknown input values before transport", async () => {
     const optional: InputActionSnapshot = {
       control: "multi_select",
       prompt: "Choose optional evidence",
@@ -73,6 +77,28 @@ describe("InputOperatorController", () => {
     const optionalCapture = optionalController.beginCapture({ occurrence, action: optional, threadRevision: "optional-r0" });
     optionalController.rateCapture({ ...optionalCapture, ratingId: "optional-rating" });
 
+    const invalid = [
+      ["required multi empty", actions.multi, { selectedKeys: [] }, "input_selection_count"],
+      ["selection value for text", actions.text, { selectedKeys: ["a"] }, "input_text_blank"],
+      ["blank text", actions.text, { text: "  " }, "input_text_blank"],
+      ["multiple single-select values", actions.single, { selectedKeys: ["a", "b"] }, "input_selection_count"],
+      ["unknown single-select option", actions.single, { selectedKeys: ["missing"] }, "input_option_unknown"],
+      ["duplicate multi-select option", actions.multi, { selectedKeys: ["proof-a", "proof-a"] }, "input_option_duplicate"],
+      ["below multi-select minimum", actions.multi, { selectedKeys: ["proof-a"] }, "input_selection_count"],
+    ] as const;
+    const results = await Promise.all(invalid.map(async ([label, action, value, code], index) => {
+      const transport = vi.fn<InputOperatorTransport["request"]>();
+      const controller = createController(transport);
+      const capture = controller.beginCapture({ occurrence, action, threadRevision: `r-${index}` });
+      controller.rateCapture({ ...capture, ratingId: `rating-${index}` });
+      try {
+        await controller.commit({ captureId: capture.captureId, value, expectedRevision: 0 });
+        return { label, code, observed: null, transportCalls: transport.mock.calls.length };
+      } catch (error) {
+        return { label, code, observed: (error as { code?: string }).code ?? null, transportCalls: transport.mock.calls.length };
+      }
+    }));
+
     await expect(optionalController.commit({
       captureId: optionalCapture.captureId,
       value: { selectedKeys: [] },
@@ -82,37 +108,19 @@ describe("InputOperatorController", () => {
       "/api/threads/thread%20one/input-draft/attachments",
       expect.objectContaining({ body: expect.objectContaining({ value: { selectedKeys: [] } }) }),
     );
-
-    const requiredRequest = vi.fn<InputOperatorTransport["request"]>();
-    const requiredController = createController(requiredRequest);
-    const requiredCapture = requiredController.beginCapture({ occurrence, action: actions.multi, threadRevision: "required-r0" });
-    requiredController.rateCapture({ ...requiredCapture, ratingId: "required-rating" });
-    await expect(requiredController.commit({
-      captureId: requiredCapture.captureId,
-      value: { selectedKeys: [] },
-      expectedRevision: 0,
-    })).rejects.toMatchObject({ code: "input_selection_count" });
-    expect(requiredRequest).not.toHaveBeenCalled();
-  });
-
-  it("rejects wrong shapes, blank text, duplicate and unknown keys, and insufficient selection counts before transport", async () => {
-    const request = vi.fn<InputOperatorTransport["request"]>();
-    const invalid = [
-      [actions.text, { selectedKeys: ["a"] }, "input_text_blank"],
-      [actions.text, { text: "  " }, "input_text_blank"],
-      [actions.single, { selectedKeys: ["a", "b"] }, "input_selection_count"],
-      [actions.single, { selectedKeys: ["missing"] }, "input_option_unknown"],
-      [actions.multi, { selectedKeys: ["proof-a", "proof-a"] }, "input_option_duplicate"],
-      [actions.multi, { selectedKeys: ["proof-a"] }, "input_selection_count"],
-    ] as const;
-    for (const [index, [action, value, code]] of invalid.entries()) {
-      const controller = createController(request);
-      const capture = controller.beginCapture({ occurrence, action, threadRevision: `r-${index}` });
-      controller.rateCapture({ ...capture, ratingId: `rating-${index}` });
-      await expect(controller.commit({ captureId: capture.captureId, value, expectedRevision: 0 }))
-        .rejects.toMatchObject({ code });
+    expect(invalid.map(([label]) => label), "invalid input inventory").toEqual([
+      "required multi empty",
+      "selection value for text",
+      "blank text",
+      "multiple single-select values",
+      "unknown single-select option",
+      "duplicate multi-select option",
+      "below multi-select minimum",
+    ]);
+    for (const result of results) {
+      expect.soft(result.observed, result.label).toBe(result.code);
+      expect.soft(result.transportCalls, `${result.label}: pre-transport`).toBe(0);
     }
-    expect(request).not.toHaveBeenCalled();
   });
 
   it("posts Send only after a commissioned commit and carries the returned draft revision", async () => {
@@ -181,17 +189,28 @@ describe("InputOperatorController", () => {
     await expect(send).resolves.toEqual({ id: 99 });
   });
 
-  it("reads the current draft revision before an operator-commissioned optimistic commit", async () => {
+  it("reads the current revision and requires the exact committed attachment before commissioning", async () => {
     const requests: { path: string; method: string; body?: Readonly<Record<string, unknown>> }[] = [];
-    const controller = createController(async (path, request) => {
+    const observedController = createController(async (path, request) => {
       requests.push({ path, method: request.method, ...(request.body === undefined ? {} : { body: request.body }) });
       return path.endsWith("input-draft") ? { revision: 7 } : draftResponse(actions.text, request, 8);
     });
-    const capture = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
-    controller.rateCapture({ ...capture, ratingId: "rating-1" });
+    const observedCapture = observedController.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
+    observedController.rateCapture({ ...observedCapture, ratingId: "rating-1" });
+    const observedCommit = observedController.commit({ captureId: observedCapture.captureId, value: { text: "Exact" } });
 
-    await expect(controller.commit({ captureId: capture.captureId, value: { text: "Exact" } })).resolves.toBe(8);
-    expect(requests).toEqual([
+    const missingController = createController(async () => ({ revision: 8, attachments: [] }));
+    const missingCapture = missingController.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
+    missingController.rateCapture({ ...missingCapture, ratingId: "rating-1" });
+    const missingCommit = missingController.commit({
+      captureId: missingCapture.captureId,
+      value: { text: "Exact" },
+      expectedRevision: 7,
+    });
+
+    const [observed, missing] = await Promise.allSettled([observedCommit, missingCommit]);
+    expect.soft(observed, "current revision acquisition").toEqual({ status: "fulfilled", value: 8 });
+    expect.soft(requests, "current revision request sequence").toEqual([
       { path: "/api/threads/thread%20one/input-draft", method: "GET" },
       {
         path: "/api/threads/thread%20one/input-draft/attachments",
@@ -199,63 +218,114 @@ describe("InputOperatorController", () => {
         body: { occurrence, value: { text: "Exact" }, expectedRevision: 7 },
       },
     ]);
+    expect.soft(missing.status, "exact committed attachment").toBe("rejected");
+    if (missing.status === "rejected") {
+      expect.soft(missing.reason, "exact committed attachment error").toMatchObject({ code: "input_operator_commit_unobserved" });
+    }
+    expect.soft(missingController.state().committedDraftRevision, "unobserved commit state").toBeNull();
   });
 
-  it("refuses commission when the product response omits the exact committed attachment", async () => {
-    const controller = createController(async () => ({ revision: 8, attachments: [] }));
-    const capture = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
-    controller.rateCapture({ ...capture, ratingId: "rating-1" });
+  it("reserves one write fence across active captures, rating settlement, and transport", async () => {
+    const sameTarget = async () => {
+      let releaseWrite!: () => void;
+      const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+      const transport = vi.fn(async (_path, request) => {
+        await writeGate;
+        return draftResponse(actions.text, request, 1);
+      });
+      const controller = createController(transport);
+      const settling = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
+      const commit = controller.commit({ captureId: settling.captureId, value: { text: "Exact" }, expectedRevision: 0 });
+      const commitResult = commit.then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason) => ({ status: "rejected" as const, reason }),
+      );
+      try {
+        await Promise.resolve();
+        const beforeRating = controller.state();
+        const callsBeforeRating = transport.mock.calls.length;
+        controller.rateCapture({ ...settling, ratingId: "rating-1" });
+        await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
+        const captureDuringTransport = settleSync(() => controller.beginCapture({
+          occurrence: { ...occurrence, actionId: 15 },
+          action: actions.text,
+          threadRevision: "thread-r2",
+        }));
+        releaseWrite();
+        return { beforeRating, callsBeforeRating, captureDuringTransport, commit: await commitResult };
+      } finally {
+        releaseWrite();
+      }
+    };
 
-    await expect(controller.commit({
-      captureId: capture.captureId,
-      value: { text: "Exact" },
-      expectedRevision: 7,
-    })).rejects.toMatchObject({ code: "input_operator_commit_unobserved" });
-    expect(controller.state().committedDraftRevision).toBeNull();
-  });
+    const preWaitFence = async () => {
+      let releaseWrite!: () => void;
+      const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+      const transport = vi.fn(async (_path, request) => {
+        await writeGate;
+        return draftResponse(actions.text, request, 1);
+      });
+      const controller = createController(transport);
+      const commissioned = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
+      controller.rateCapture({ ...commissioned, ratingId: "rating-1" });
+      const blocking = controller.beginCapture({
+        occurrence: { ...occurrence, actionId: 14 },
+        action: actions.text,
+        threadRevision: "thread-r1",
+      });
+      const commit = controller.commit({ captureId: commissioned.captureId, value: { text: "Exact" }, expectedRevision: 0 });
+      const commitResult = commit.then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason) => ({ status: "rejected" as const, reason }),
+      );
+      try {
+        await Promise.resolve();
+        const beforeBlockingRating = controller.state();
+        const callsBeforeBlockingRating = transport.mock.calls.length;
+        const captureBeforeBlockingRating = settleSync(() => controller.beginCapture({
+          occurrence: { ...occurrence, actionId: 15 },
+          action: actions.text,
+          threadRevision: "thread-r2",
+        }));
+        controller.rateCapture({ ...blocking, ratingId: "rating-2" });
+        await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
+        releaseWrite();
+        return {
+          beforeBlockingRating,
+          callsBeforeBlockingRating,
+          captureBeforeBlockingRating,
+          commit: await commitResult,
+        };
+      } finally {
+        releaseWrite();
+      }
+    };
 
-  it("holds a commit through capture, releases it after rating, and prevents capture/write interleaving", async () => {
-    let releaseWrite!: () => void;
-    const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
-    const transport = vi.fn(async (_path, request) => {
-      await writeGate;
-      return draftResponse(actions.text, request, 1);
-    });
-    const controller = createController(transport);
-    const capture = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
-    const commit = controller.commit({ captureId: capture.captureId, value: { text: "Exact" }, expectedRevision: 0 });
-    await Promise.resolve();
-    expect(transport).not.toHaveBeenCalled();
-    controller.rateCapture({ ...capture, ratingId: "rating-1" });
-    await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
-    expect(() => controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r2" }))
-      .toThrow(expect.objectContaining({ code: "input_operator_write_active" }));
-    releaseWrite();
-    await commit;
-  });
-
-  it("reserves the write fence before waiting for an already-active capture", async () => {
-    const transport = vi.fn(async (_path, request) => draftResponse(actions.text, request, 1));
-    const controller = createController(transport);
-    const commissioned = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
-    controller.rateCapture({ ...commissioned, ratingId: "rating-1" });
-    const blocking = controller.beginCapture({
-      occurrence: { ...occurrence, actionId: 14 },
-      action: actions.text,
-      threadRevision: "thread-r1",
-    });
-
-    const commit = controller.commit({ captureId: commissioned.captureId, value: { text: "Exact" }, expectedRevision: 0 });
-    await Promise.resolve();
-    expect(() => controller.beginCapture({
-      occurrence: { ...occurrence, actionId: 15 },
-      action: actions.text,
-      threadRevision: "thread-r1",
-    })).toThrow(expect.objectContaining({ code: "input_operator_write_active" }));
-    expect(transport).not.toHaveBeenCalled();
-
-    controller.rateCapture({ ...blocking, ratingId: "rating-2" });
-    await expect(commit).resolves.toBe(1);
+    const [sameTargetResult, preWaitResult] = await Promise.allSettled([sameTarget(), preWaitFence()]);
+    expect.soft(sameTargetResult.status, "same-target settlement").toBe("fulfilled");
+    if (sameTargetResult.status === "fulfilled") {
+      expect.soft(sameTargetResult.value.beforeRating, "same-target waits for rating").toMatchObject({
+        writeInFlight: false,
+        activeCaptureId: "capture-1",
+        captures: [{ captureId: "capture-1", status: "capturing" }],
+      });
+      expect.soft(sameTargetResult.value.callsBeforeRating, "same-target pre-rating transport").toBe(0);
+      expect.soft(sameTargetResult.value.captureDuringTransport, "same-target transport fence").toMatchObject({
+        status: "rejected",
+        reason: { code: "input_operator_write_active" },
+      });
+      expect.soft(sameTargetResult.value.commit, "same-target commit").toEqual({ status: "fulfilled", value: 1 });
+    }
+    expect.soft(preWaitResult.status, "pre-wait fence settlement").toBe("fulfilled");
+    if (preWaitResult.status === "fulfilled") {
+      expect.soft(preWaitResult.value.beforeBlockingRating.writeInFlight, "pre-wait fence reservation").toBe(true);
+      expect.soft(preWaitResult.value.callsBeforeBlockingRating, "pre-wait transport exclusion").toBe(0);
+      expect.soft(preWaitResult.value.captureBeforeBlockingRating, "pre-wait capture exclusion").toMatchObject({
+        status: "rejected",
+        reason: { code: "input_operator_write_active" },
+      });
+      expect.soft(preWaitResult.value.commit, "pre-wait commit").toEqual({ status: "fulfilled", value: 1 });
+    }
   });
 
   it("holds independent capture locks for two input actions on one node and commissions them atomically", async () => {
@@ -285,43 +355,91 @@ describe("InputOperatorController", () => {
     ]));
   });
 
-  it("releases failed and timed-out captures without commissioning writes", async () => {
+  it("rejects stale ratings and releases failed or timed-out captures without writes", async () => {
     vi.useFakeTimers();
     try {
-      const transport = vi.fn<InputOperatorTransport["request"]>();
-      const failedController = createController(transport);
-      const failed = failedController.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
-      const failedCommit = expect(failedController.commit({ captureId: failed.captureId, value: { text: "Exact" }, expectedRevision: 0 }))
-        .rejects.toMatchObject({ code: "input_operator_not_commissioned" });
-      failedController.failCapture(failed.captureId);
-      await failedCommit;
-      expect(failedController.state().captures[0]).toMatchObject({ status: "failed", failure: "capture_failed" });
+      const staleTransport = vi.fn<InputOperatorTransport["request"]>();
+      const staleController = createController(staleTransport);
+      const stale = staleController.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
+      const staleRating = settleSync(() => staleController.rateCapture({
+        captureId: stale.captureId,
+        ratingId: "stale-rating",
+        threadRevision: "thread-r2",
+      }));
+      const staleState = staleController.state();
+      staleController.failCapture(stale.captureId);
 
-      const timedController = createController(transport, 10);
+      const failedTransport = vi.fn<InputOperatorTransport["request"]>();
+      const failedController = createController(failedTransport);
+      const failed = failedController.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
+      const failedCommit = settlePromise(failedController.commit({
+        captureId: failed.captureId,
+        value: { text: "Exact" },
+        expectedRevision: 0,
+      }));
+
+      const timedTransport = vi.fn<InputOperatorTransport["request"]>();
+      const timedController = createController(timedTransport, 10);
       const timed = timedController.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r2" });
-      const timedCommit = expect(timedController.commit({ captureId: timed.captureId, value: { text: "Exact" }, expectedRevision: 0 }))
-        .rejects.toMatchObject({ code: "input_operator_not_commissioned" });
+      const timedCommit = settlePromise(timedController.commit({
+        captureId: timed.captureId,
+        value: { text: "Exact" },
+        expectedRevision: 0,
+      }));
+
+      failedController.failCapture(failed.captureId);
       await vi.advanceTimersByTimeAsync(10);
-      await timedCommit;
-      expect(timedController.state()).toMatchObject({
+      const [failedSettlement, timedSettlement] = await Promise.all([failedCommit, timedCommit]);
+
+      expect.soft(staleRating, "captured revision authority").toMatchObject({
+        status: "rejected",
+        reason: { code: "input_operator_revision_mismatch" },
+      });
+      expect.soft(staleState, "stale rating preserves capture authority").toMatchObject({
+        activeCaptureId: stale.captureId,
+        captures: [{ captureId: stale.captureId, status: "capturing", failure: null }],
+      });
+      expect.soft(failedSettlement, "failed capture commit").toMatchObject({
+        status: "rejected",
+        reason: { code: "input_operator_not_commissioned" },
+      });
+      expect.soft(failedController.state().captures[0], "failed capture release").toMatchObject({ status: "failed", failure: "capture_failed" });
+      expect.soft(timedSettlement, "timed capture commit").toMatchObject({
+        status: "rejected",
+        reason: { code: "input_operator_not_commissioned" },
+      });
+      expect.soft(timedController.state(), "timed capture release").toMatchObject({
         activeCaptureId: null,
         captures: [{ status: "failed", failure: "capture_timeout" }],
       });
-      expect(transport).not.toHaveBeenCalled();
+      expect.soft(staleTransport, "stale rating transport").not.toHaveBeenCalled();
+      expect.soft(failedTransport, "failed capture transport").not.toHaveBeenCalled();
+      expect.soft(timedTransport, "timed capture transport").not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
   });
-
-  it("rejects a rating against any revision other than the captured revision", () => {
-    const controller = createController(async () => ({ revision: 1 }));
-    const capture = controller.beginCapture({ occurrence, action: actions.text, threadRevision: "thread-r1" });
-    expect(() => controller.rateCapture({ captureId: capture.captureId, ratingId: "rating-1", threadRevision: "thread-r2" }))
-      .toThrow(expect.objectContaining({ code: "input_operator_revision_mismatch" }));
-    expect(controller.state().activeCaptureId).toBe(capture.captureId);
-    controller.failCapture(capture.captureId);
-  });
 });
+
+function settleSync<Output>(operation: () => Output):
+  | { readonly status: "fulfilled"; readonly value: Output }
+  | { readonly status: "rejected"; readonly reason: unknown } {
+  try {
+    return { status: "fulfilled", value: operation() };
+  } catch (reason) {
+    return { status: "rejected", reason };
+  }
+}
+
+function settlePromise<Output>(operation: Promise<Output>): Promise<
+  | { readonly status: "fulfilled"; readonly value: Output }
+  | { readonly status: "rejected"; readonly reason: unknown }
+> {
+  return operation.then(
+    (value) => ({ status: "fulfilled", value }),
+    (reason) => ({ status: "rejected", reason }),
+  );
+}
 
 function createController(
   request: InputOperatorTransport["request"],

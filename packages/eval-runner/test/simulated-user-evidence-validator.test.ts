@@ -319,21 +319,29 @@ describe("screenshot evidence validation", () => {
     expect(store.snapshot().layers).toEqual([]);
   });
 
-  it("rejects overall evidence that was not cited by a completed lower-subject review", () => {
-    const store = makeStore();
-    store.reviewLayer(rootLayerReview);
-    store.reviewLayer(childLayerReview);
-    store.reviewNode(rootNodeReview("shot-child"));
-    store.reviewNode(childNodeReview);
+  it("enforces current-turn lower-review evidence while allowing explicit prior-turn comparison", () => {
+    const uncitedStore = makeStore();
+    uncitedStore.reviewLayer(rootLayerReview);
+    uncitedStore.reviewLayer(childLayerReview);
+    uncitedStore.reviewNode(rootNodeReview("shot-child"));
+    uncitedStore.reviewNode(childNodeReview);
 
-    expect(() => store.submitReview({
+    expect.soft(() => uncitedStore.submitReview({
       ...turnReview,
       evidence: { representative: ["shot-bad-path"] },
-    })).toThrow("Turn evidence must include at least one screenshot used by a completed current-turn lower-subject review");
-    expect(store.finalizedResult()).toBeUndefined();
-  });
+    }), "uncited overall evidence").toThrow("Turn evidence must include at least one screenshot used by a completed current-turn lower-subject review");
+    expect.soft(uncitedStore.finalizedResult(), "uncited review remains open").toBeUndefined();
 
-  it("allows explicitly allowlisted prior-turn evidence only for the overall follow-up review", () => {
+    const wrongTurnStore = makeStore();
+    wrongTurnStore.reviewLayer(rootLayerReview);
+    wrongTurnStore.reviewLayer(childLayerReview);
+    wrongTurnStore.reviewNode(rootNodeReview("shot-child"));
+    wrongTurnStore.reviewNode(childNodeReview);
+    expect.soft(() => wrongTurnStore.submitReview({
+      ...turnReview,
+      evidence: { representative: ["shot-other-turn"] },
+    }), "non-allowlisted prior turn").toThrow("at least one screenshot used by a completed current-turn lower-subject review");
+
     const inventory = inventoryReviewSubjects({
       turnId: "turn-1",
       rootLayerId: "layer-root",
@@ -344,7 +352,7 @@ describe("screenshot evidence validation", () => {
       screenshot("shot-root-detail", "layer-root", "node-root", { target: "element", mode: "full" }),
       screenshot("shot-previous-turn", "layer-root", null, { turnId: "turn-0" }),
     ].map((shot) => [shot.screenshotId, shot]));
-    const store = new IncrementalReviewStore({
+    const makeComparisonStore = () => new IncrementalReviewStore({
       inventory,
       validateEvidence: createScreenshotEvidenceValidator({
         executionId: "execution-1",
@@ -355,12 +363,15 @@ describe("screenshot evidence validation", () => {
       }),
     });
 
-    expect(() => store.reviewLayer({
+    const rejectionStore = makeComparisonStore();
+    expect.soft(() => rejectionStore.reviewLayer({
       ...rootLayerReview,
       evidence: { viewport: ["shot-previous-turn"] },
-    })).toThrow("different execution, thread, or turn state");
-    store.reviewLayer(rootLayerReview);
-    store.reviewNode({
+    }), "prior-turn lower-subject evidence").toThrow("different execution, thread, or turn state");
+
+    const comparisonStore = makeComparisonStore();
+    comparisonStore.reviewLayer(rootLayerReview);
+    comparisonStore.reviewNode({
       ...childNodeReview,
       nodeId: "node-root",
       layerId: "layer-root",
@@ -368,7 +379,7 @@ describe("screenshot evidence validation", () => {
       structure: { ...childNodeReview.structure, evidence: ["shot-root-detail"] },
     });
 
-    const result = store.submitReview({
+    const result = comparisonStore.submitReview({
       ...turnReview,
       evidence: { representative: ["shot-root", "shot-previous-turn"] },
       structure: { ...turnReview.structure, evidence: ["shot-root"] },
@@ -380,18 +391,5 @@ describe("screenshot evidence validation", () => {
       }],
     });
     expect(result.finalized).toBe(true);
-  });
-
-  it("requires current-turn lower-review evidence even when comparison turns are allowlisted", () => {
-    const store = makeStore();
-    store.reviewLayer(rootLayerReview);
-    store.reviewLayer(childLayerReview);
-    store.reviewNode(rootNodeReview("shot-child"));
-    store.reviewNode(childNodeReview);
-
-    expect(() => store.submitReview({
-      ...turnReview,
-      evidence: { representative: ["shot-other-turn"] },
-    })).toThrow("at least one screenshot used by a completed current-turn lower-subject review");
   });
 });

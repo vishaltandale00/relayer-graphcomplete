@@ -51,7 +51,7 @@ afterEach(async () => {
 });
 
 describe("EvalService simulated-user result persistence", () => {
-  it("normalizes each selected recursive review by its own schema in a mixed-history projection", () => {
+  it("projects recursive reviews by schema and rejects incompatible contract histories", () => {
     const legacy = {
       status: "completed",
       review: {
@@ -78,10 +78,34 @@ describe("EvalService simulated-user result persistence", () => {
       },
     };
 
-    expect(presentationGradeFromTurns([
-      { status: "accepted", judgeResults: [legacy] },
-      { status: "accepted", judgeResults: [reasoned] },
-    ], true)).toMatchObject({
+    const projections = [
+      ["mixed-schema normalization", () => presentationGradeFromTurns([
+        { status: "accepted", judgeResults: [legacy] },
+        { status: "accepted", judgeResults: [reasoned] },
+      ], true)],
+      ["incompatible-contract rejection", () => presentationGradeFromTurns([
+        {
+          status: "accepted",
+          judgeResults: [{
+            status: "completed",
+            review: { schemaVersion: 5, contractId: "recursive-presentation-judge-v5", turn: { criterionJudgments: {} } },
+          }],
+        },
+        {
+          status: "accepted",
+          judgeResults: [{
+            status: "completed",
+            review: { schemaVersion: 6, contractId: "recursive-presentation-judge-v6", turn: { criterionJudgments: {} } },
+          }],
+        },
+      ], true)],
+    ].map(([label, project]) => ({ label, ...settleSync(project) }));
+
+    expect(projections.map(({ label }) => label), "projection inventory").toEqual([
+      "mixed-schema normalization", "incompatible-contract rejection",
+    ]);
+    expect.soft(projections[0].status, projections[0].label).toBe("fulfilled");
+    expect.soft(projections[0].value, projections[0].label).toMatchObject({
       status: "completed",
       score: 5,
       rawScore: 5,
@@ -89,27 +113,8 @@ describe("EvalService simulated-user result persistence", () => {
       scoreCeiling: 8,
       scoreScaleMaximum: 8,
     });
-  });
-
-  it("surfaces v10 and v11 recursive results as non-comparable instead of aggregating them", () => {
-    const result = presentationGradeFromTurns([
-      {
-        status: "accepted",
-        judgeResults: [{
-          status: "completed",
-          review: { schemaVersion: 5, contractId: "recursive-presentation-judge-v5", turn: { criterionJudgments: {} } },
-        }],
-      },
-      {
-        status: "accepted",
-        judgeResults: [{
-          status: "completed",
-          review: { schemaVersion: 6, contractId: "recursive-presentation-judge-v6", turn: { criterionJudgments: {} } },
-        }],
-      },
-    ], true);
-
-    expect(result).toMatchObject({
+    expect.soft(projections[1].status, projections[1].label).toBe("fulfilled");
+    expect.soft(projections[1].value, projections[1].label).toMatchObject({
       status: "partial",
       score: null,
       comparability: {
@@ -181,39 +186,45 @@ describe("EvalService simulated-user result persistence", () => {
     expect(productBodies[1]).not.toHaveProperty("modelSelection");
   });
 
-  it("bounds the host-authored artifact evidence packet", () => {
-    const evidence = judgeArtifactEvidenceForExecution({
-      checks: Array.from({ length: 70 }, (_, index) => ({
-        passed: true,
-        name: `check-${index}`,
-        detail: "x".repeat(3_000),
-      })),
-      outcomeGrade: {
-        mandatoryGates: [{ passed: false, name: "Critical gate", detail: "Current mandatory failure" }],
-        criteria: [{ criterionId: "quality", rationale: "Semantic review is pending" }],
-      },
-    });
+  it("constructs a bounded evidence packet grounded in the candidate workspace", () => {
+    const constructions = [
+      ["bounded evidence packet", () => judgeArtifactEvidenceForExecution({
+        checks: Array.from({ length: 70 }, (_, index) => ({
+          passed: true,
+          name: `check-${index}`,
+          detail: "x".repeat(3_000),
+        })),
+        outcomeGrade: {
+          mandatoryGates: [{ passed: false, name: "Critical gate", detail: "Current mandatory failure" }],
+          criteria: [{ criterionId: "quality", rationale: "Semantic review is pending" }],
+        },
+      })],
+      ["candidate workspace artifact", () => judgeArtifactForExecution({ fixture: {
+        workspaceDirectory: "/immutable/execution/workspace",
+        upstreamCommit: "upstream",
+        seededCommit: "seeded-task-base",
+      } })],
+      ["absent workspace artifact", () => judgeArtifactForExecution({})],
+    ].map(([label, construct]) => ({ label, ...settleSync(construct) }));
+    const evidence = constructions[0].value;
 
-    expect(evidence.facts).toHaveLength(64);
-    expect(evidence.facts.every((fact) => fact.length <= 2_000)).toBe(true);
-    expect(evidence.summary).toContain("64 of 72");
-    expect(evidence.facts.slice(0, 2)).toEqual([
+    expect(constructions.map(({ label }) => label), "artifact construction inventory").toEqual([
+      "bounded evidence packet", "candidate workspace artifact", "absent workspace artifact",
+    ]);
+    expect.soft(constructions.every(({ status }) => status === "fulfilled"), "artifact construction settlement").toBe(true);
+    expect.soft(evidence?.facts, "bounded evidence count").toHaveLength(64);
+    expect.soft(evidence?.facts.every((fact) => fact.length <= 2_000), "bounded evidence fact size").toBe(true);
+    expect.soft(evidence?.summary, "bounded evidence summary").toContain("64 of 72");
+    expect.soft(evidence?.facts.slice(0, 2), "bounded evidence priority").toEqual([
       "FAIL mandatory gate Critical gate: Current mandatory failure",
       "Outcome criterion quality: Semantic review is pending",
     ]);
-  });
-
-  it("grounds a project judge in the candidate workspace and seeded task base", () => {
-    expect(judgeArtifactForExecution({ fixture: {
-      workspaceDirectory: "/immutable/execution/workspace",
-      upstreamCommit: "upstream",
-      seededCommit: "seeded-task-base",
-    } })).toEqual({
+    expect.soft(constructions[1].value, "candidate workspace grounding").toEqual({
       kind: "git_workspace",
       workingDirectory: "/immutable/execution/workspace",
       baseRevision: "seeded-task-base",
     });
-    expect(judgeArtifactForExecution({})).toBeUndefined();
+    expect.soft(constructions[2].value, "absent workspace grounding").toBeUndefined();
   });
 
   it("pins a connected default model when a Claude matrix cell creates its thread", async () => {
@@ -371,83 +382,97 @@ describe("EvalService simulated-user result persistence", () => {
 
   });
 
-  it("fails the opt-in input round-trip execution when its structural gate was not exercised", async () => {
-    const { stateFile, configurationPath } = await testPaths();
-    globalThis.fetch = fakeAcceptedProduct();
-    const service = await new EvalService({
-      stateFile,
+  it("admits only compatible input round-trip runs and fails an unexercised structural gate", async () => {
+    const incompatiblePaths = await testPaths();
+    const incompatibleRunner = vi.fn();
+    const incompatibleService = await new EvalService({
+      stateFile: incompatiblePaths.stateFile,
       productSession: productSession(),
-      configurationPaths: [configurationPath],
-      simulatedUserJudgeRunner: async () => ({
-        status: "completed",
-        rubricRef: "rubric.json",
-        configurationRef: "judge-configuration.json",
-        interactionTraceRef: "trace.json",
-        screenshotRefs: ["screenshots/shot-root.json"],
-        reviewRef: "reviews.json",
-        coverageRef: "coverage.json",
-        inputRoundTripRef: "input-roundtrip.json",
-        review: { turn: { ratings: { answer_quality: 4 } } },
-        coverage: { complete: true, missingSubjects: [] },
-        summary: "The visible turn was reviewed.",
-        inputRoundTrip: {
-          schemaVersion: 1,
-          status: "not_exercised",
-          passed: false,
-          checks: [],
-          detail: "The judge did not commit and Send.",
-        },
-      }),
+      configurationPaths: [incompatiblePaths.configurationPath],
+      simulatedUserJudgeRunner: incompatibleRunner,
     }).open();
-
-    const created = await service.createRun({
-      testCaseIds: ["empty-project.node-input-roundtrip.single-turn"],
-      harnessConfigurationNames: ["fixture-task-system"],
-      judgeConfigurationName: "simulated-user",
-    });
-    const completed = await waitForCompletedRun(service, created.id);
-
-    expect(completed.status).toBe("failed");
-    expect(completed.executions[0]).toMatchObject({ status: "failed", passed: false });
-    expect(completed.executions[0].checks).toContainEqual(expect.objectContaining({
-      name: "turn-1:input-roundtrip:exercised",
-      passed: false,
-    }));
-    expect(completed.executions[0].turns[0].judgeResults[0].inputRoundTrip)
-      .toMatchObject({ status: "not_exercised", passed: false });
-    expect(completed.executions[0].turns[0].deterministicPassed).toBe(false);
-    expect(completed.executions[0].outcomeGrade).toMatchObject({ qualified: false });
-  });
-
-  it("rejects an input round-trip run with the deterministic judge before execution", async () => {
-    const { stateFile, configurationPath } = await testPaths();
-    const service = await new EvalService({
-      stateFile,
-      productSession: productSession(),
-      configurationPaths: [configurationPath],
-      simulatedUserJudgeRunner: vi.fn(),
-    }).open();
-
-    const inputCase = service.catalog().cases.find(
-      ({ id }) => id === "empty-project.node-input-roundtrip.single-turn",
+    const inputCaseId = "empty-project.node-input-roundtrip.single-turn";
+    const inputCase = incompatibleService.catalog().cases.find(
+      ({ id }) => id === inputCaseId,
     );
-    expect(inputCase.requiredJudgeConfigurationIds).toEqual([
+    expect.soft(inputCase?.requiredJudgeConfigurationIds, "compatible judge inventory").toEqual([
       "simulated-user",
       "simulated-user-sol-high",
     ]);
-    await expect(service.createRun({
-      testCaseIds: [inputCase.id],
-      harnessConfigurationNames: ["fixture-task-system"],
-      judgeConfigurationName: "deterministic-graph-contract",
-    })).rejects.toThrow(
-      "Input round-trip cases require a compatible simulated-user judge configuration.",
-    );
+
+    const exercisedPaths = await testPaths();
+    const runner = vi.fn(async () => ({
+      status: "completed",
+      rubricRef: "rubric.json",
+      configurationRef: "judge-configuration.json",
+      interactionTraceRef: "trace.json",
+      screenshotRefs: ["screenshots/shot-root.json"],
+      reviewRef: "reviews.json",
+      coverageRef: "coverage.json",
+      inputRoundTripRef: "input-roundtrip.json",
+      review: { turn: { ratings: { answer_quality: 4 } } },
+      coverage: { complete: true, missingSubjects: [] },
+      summary: "The visible turn was reviewed.",
+      inputRoundTrip: {
+        schemaVersion: 1,
+        status: "not_exercised",
+        passed: false,
+        checks: [],
+        detail: "The judge did not commit and Send.",
+      },
+    }));
+    const service = await new EvalService({
+      stateFile: exercisedPaths.stateFile,
+      productSession: productSession(),
+      configurationPaths: [exercisedPaths.configurationPath],
+      simulatedUserJudgeRunner: runner,
+    }).open();
+
+    globalThis.fetch = fakeAcceptedProduct();
+    const [incompatible, exercised] = await Promise.allSettled([
+      incompatibleService.createRun({
+        testCaseIds: [inputCaseId],
+        harnessConfigurationNames: ["fixture-task-system"],
+        judgeConfigurationName: "deterministic-graph-contract",
+      }),
+      service.createRun({
+        testCaseIds: [inputCaseId],
+        harnessConfigurationNames: ["fixture-task-system"],
+        judgeConfigurationName: "simulated-user",
+      }),
+    ]);
+    const completed = exercised.status === "fulfilled"
+      ? await waitForCompletedRun(service, exercised.value.id)
+      : null;
+    if (incompatible.status === "fulfilled") {
+      await waitForCompletedRun(incompatibleService, incompatible.value.id);
+    }
+
+    expect.soft(incompatible.status, "incompatible judge pre-execution admission").toBe("rejected");
+    if (incompatible.status === "rejected") {
+      expect.soft(incompatible.reason?.message, "incompatible judge rejection reason")
+        .toContain("Input round-trip cases require a compatible simulated-user judge configuration.");
+    }
+    expect.soft(incompatibleRunner, "incompatible judge runner isolation").not.toHaveBeenCalled();
+    expect.soft(exercised.status, "compatible judge admission").toBe("fulfilled");
+    expect.soft(completed?.status, "unexercised gate run status").toBe("failed");
+    expect.soft(completed?.executions[0], "unexercised gate execution").toMatchObject({ status: "failed", passed: false });
+    expect.soft(completed?.executions[0].checks, "unexercised gate checkpoint").toContainEqual(expect.objectContaining({
+      name: "turn-1:input-roundtrip:exercised",
+      passed: false,
+    }));
+    expect.soft(completed?.executions[0].turns[0].judgeResults[0].inputRoundTrip, "unexercised judge artifact")
+      .toMatchObject({ status: "not_exercised", passed: false });
+    expect.soft(completed?.executions[0].turns[0].deterministicPassed, "turn qualification").toBe(false);
+    expect.soft(completed?.executions[0].outcomeGrade, "outcome qualification").toMatchObject({ qualified: false });
+    expect.soft(runner, "compatible judge invocation").toHaveBeenCalledOnce();
   });
 
   it("persists explicit partial and thrown-failure artifacts without losing deterministic evidence", async () => {
     const partialPaths = await testPaths();
+    const failurePaths = await testPaths();
     globalThis.fetch = fakeAcceptedProduct();
-    const partialService = await new EvalService({
+    const partialService = new EvalService({
       stateFile: partialPaths.stateFile,
       productSession: productSession(),
       configurationPaths: [partialPaths.configurationPath],
@@ -459,13 +484,32 @@ describe("EvalService simulated-user result persistence", () => {
         screenshotRefs: [],
         error: "Node-detail capture failed.",
       }),
-    }).open();
-    const partial = await waitForCompletedRun(
-      partialService,
-      (await partialService.createRun(simulatedUserSelection())).id,
-    );
-    expect(partial.status).toBe("failed");
-    expect(partial.executions[0]).toMatchObject({
+    });
+    const failedService = new EvalService({
+      stateFile: failurePaths.stateFile,
+      productSession: productSession(),
+      configurationPaths: [failurePaths.configurationPath],
+      simulatedUserJudgeRunner: async () => { throw new Error("Judge process exited."); },
+    });
+    const [partialOpen, failedOpen] = await Promise.allSettled([
+      partialService.open(),
+      failedService.open(),
+    ]);
+    const execute = async (opened) => {
+      if (opened.status === "rejected") throw opened.reason;
+      const created = await opened.value.createRun(simulatedUserSelection());
+      return waitForCompletedRun(opened.value, created.id);
+    };
+    const [partialSettlement, failedSettlement] = await Promise.allSettled([
+      execute(partialOpen),
+      execute(failedOpen),
+    ]);
+    const partial = partialSettlement.status === "fulfilled" ? partialSettlement.value : null;
+    const failed = failedSettlement.status === "fulfilled" ? failedSettlement.value : null;
+
+    expect.soft(partialSettlement.status, "partial judge settlement").toBe("fulfilled");
+    expect.soft(partial?.status, "partial run status").toBe("failed");
+    expect.soft(partial?.executions[0], "partial judge artifact").toMatchObject({
       passed: false,
       presentationGrade: { status: "partial", score: null },
       checks: expect.arrayContaining([expect.objectContaining({ passed: true })]),
@@ -486,20 +530,8 @@ describe("EvalService simulated-user result persistence", () => {
         })],
       })],
     });
-
-    const failurePaths = await testPaths();
-    globalThis.fetch = fakeAcceptedProduct();
-    const failedService = await new EvalService({
-      stateFile: failurePaths.stateFile,
-      productSession: productSession(),
-      configurationPaths: [failurePaths.configurationPath],
-      simulatedUserJudgeRunner: async () => { throw new Error("Judge process exited."); },
-    }).open();
-    const failed = await waitForCompletedRun(
-      failedService,
-      (await failedService.createRun(simulatedUserSelection())).id,
-    );
-    expect(failed.executions[0].turns[0].judgeResults[0]).toMatchObject({
+    expect.soft(failedSettlement.status, "thrown judge settlement").toBe("fulfilled");
+    expect.soft(failed?.executions[0].turns[0].judgeResults[0], "thrown judge artifact").toMatchObject({
       status: "failed",
       passed: null,
       error: "Judge process exited.",
@@ -629,7 +661,29 @@ describe("EvalService simulated-user result persistence", () => {
     });
   });
 
-  it("preserves Prime's requested bounded profile while retaining the explicit sole-Full exception", async () => {
+  it("resolves H3 permission profiles without widening ambiguous harness authority", async () => {
+    const soleFullConfiguration = { name: "legacy-full-only", permissionBindings: { full: {} } };
+    const resolutions = [
+      ["ambiguous authority remains confined", () => resolveH3PermissionProfile({
+        name: "ambiguous",
+        permissionBindings: { ask: {}, full: {} },
+      }, "auto")],
+      ["explicit sole-Full exception", () => resolveH3PermissionProfile(soleFullConfiguration, "ask")],
+    ].map(([label, resolve]) => ({ label, ...settleSync(resolve) }));
+    expect(resolutions.map(({ label }) => label), "permission resolution inventory").toEqual([
+      "ambiguous authority remains confined", "explicit sole-Full exception",
+    ]);
+    expect.soft(resolutions[0].status, resolutions[0].label).toBe("rejected");
+    expect.soft(resolutions[0].reason?.message, resolutions[0].label)
+      .toContain("evaluator-owned verifier cases require confined authority");
+    expect.soft(resolutions[1].status, resolutions[1].label).toBe("fulfilled");
+    expect.soft(resolutions[1].value, resolutions[1].label).toEqual({
+      requestedProfileId: "ask",
+      effectiveProfileId: "full",
+      overridden: true,
+      reason: "Harness supports only Full access; the local Eval fixture is disposable and the unrestricted authority is recorded.",
+    });
+
     const { stateFile } = await testPaths();
     const product = fakeAcceptedProduct();
     globalThis.fetch = product;
@@ -639,14 +693,6 @@ describe("EvalService simulated-user result persistence", () => {
       configurationPaths: [join(repositoryRoot, "harnesses", "prime-agent-basic.yaml")],
       platform: "darwin",
     }).open();
-
-    const soleFullConfiguration = { name: "legacy-full-only", permissionBindings: { full: {} } };
-    expect(resolveH3PermissionProfile(soleFullConfiguration, "ask")).toEqual({
-      requestedProfileId: "ask",
-      effectiveProfileId: "full",
-      overridden: true,
-      reason: "Harness supports only Full access; the local Eval fixture is disposable and the unrestricted authority is recorded.",
-    });
 
     const created = await service.createRun({
       testCaseIds: ["empty-project.task-system.single-turn"],
@@ -658,13 +704,7 @@ describe("EvalService simulated-user result persistence", () => {
       new URL(url).pathname === "/api/threads" && options?.method === "POST"
     ));
     expect(JSON.parse(createRequest[1].body).permissionProfileId).toBe("auto");
-  });
 
-  it("does not override an unavailable H3 profile for an ambiguous harness", () => {
-    expect(() => resolveH3PermissionProfile({
-      name: "ambiguous",
-      permissionBindings: { ask: {}, full: {} },
-    }, "auto")).toThrow("evaluator-owned verifier cases require confined authority");
   });
 });
 
@@ -676,6 +716,14 @@ async function testPaths() {
     stateFile: join(directory, "eval-data", "test-runs.json"),
     configurationPath: join(repositoryRoot, "harnesses", "fixture-task-system.yaml"),
   };
+}
+
+function settleSync(operation) {
+  try {
+    return { status: "fulfilled", value: operation(), reason: undefined };
+  } catch (reason) {
+    return { status: "rejected", value: undefined, reason };
+  }
 }
 
 function productSession() {
