@@ -76,60 +76,116 @@ afterEach(async () => {
 });
 
 describe("straightforward discovered-model provider flows", () => {
-  it.each(flows)(
-    "$adapterId creates its default family for $harnessId without typed models or a custom family",
-    async (flow) => {
-      const { product, session } = await productFixture();
+  it("creates managed default families for the complete six-adapter production roster", async () => {
+    const { product, session } = await productFixture();
+    const observed = {};
+    const failures = {};
+
+    for (const flow of flows) {
+      try {
       const onboardingProviderId = `onboarding-${flow.adapterId}`;
       await addDiscoveredProvider(product, flow, onboardingProviderId);
-
       const completion = await productRequest(session, "/api/provider-onboarding/default", {
         method: "POST",
         body: JSON.stringify({ providerId: onboardingProviderId }),
       });
-      expect(completion.defaults).toMatchObject({
-        harnessId: flow.harnessId,
-        providerId: onboardingProviderId,
-        familyId: completion.resolution.familyId,
-      });
-      expect(completion.resolution.resolvableMembers).toEqual(familyMembers(
-        onboardingProviderId,
-        flow.modelIds,
-      ));
-
       const afterOnboarding = await productRequest(session, "/api/model-settings");
       const onboardingFamily = familyForProvider(afterOnboarding, onboardingProviderId);
-      expect(onboardingFamily).toMatchObject({ kind: "system", enabled: true });
-      expect(onboardingFamily.members).toEqual(familyMembers(onboardingProviderId, flow.modelIds));
-      expect(readyComposerRequest(afterOnboarding, flow.harnessId, onboardingFamily.id)).toMatchObject({
-        harnessId: flow.harnessId,
-        modelSelection: {
-          familyId: onboardingFamily.id,
-          providerId: onboardingProviderId,
-          modelId: flow.modelIds[0],
+      observed[flow.adapterId] = {
+        completion: {
+          harnessId: completion.defaults.harnessId,
+          providerId: completion.defaults.providerId,
+          familyMatches: completion.defaults.familyId === completion.resolution.familyId,
+          members: completion.resolution.resolvableMembers,
         },
-      });
+        onboarding: familyCheckpoint(afterOnboarding, flow, onboardingProviderId, onboardingFamily),
+      };
+      } catch (error) {
+        failures[`onboarding:${flow.adapterId}`] = error.message;
+      }
+    }
 
-      const preservedDefaults = structuredClone(afterOnboarding.defaults);
+    const preservedDefaults = structuredClone((await productRequest(session, "/api/model-settings")).defaults);
+    for (const flow of flows) {
       const settingsProviderId = `settings-${flow.adapterId}`;
-      await addDiscoveredProvider(product, flow, settingsProviderId);
-      const afterSettings = await productRequest(session, "/api/model-settings");
-      expect(afterSettings.defaults).toEqual(preservedDefaults);
+      try {
+        await addDiscoveredProvider(product, flow, settingsProviderId);
+      } catch (error) {
+        failures[`settings-create:${flow.adapterId}`] = error.message;
+      }
+    }
+    const afterSettings = await productRequest(session, "/api/model-settings");
+    for (const flow of flows) {
+      try {
+      const settingsProviderId = `settings-${flow.adapterId}`;
       const settingsFamily = familyForProvider(afterSettings, settingsProviderId);
-      expect(settingsFamily).toMatchObject({ kind: "system", enabled: true });
-      expect(readyComposerRequest(afterSettings, flow.harnessId, settingsFamily.id)).toMatchObject({
-        harnessId: flow.harnessId,
-        modelSelection: {
-          familyId: settingsFamily.id,
-          providerId: settingsProviderId,
-          modelId: flow.modelIds[0],
+      observed[flow.adapterId].settings = familyCheckpoint(
+        afterSettings,
+        flow,
+        settingsProviderId,
+        settingsFamily,
+      );
+      } catch (error) {
+        failures[`settings-project:${flow.adapterId}`] = error.message;
+      }
+    }
+
+    expect({ failures, observed }).toEqual({ failures: {}, observed: Object.fromEntries(flows.map((flow) => {
+      const onboardingProviderId = `onboarding-${flow.adapterId}`;
+      const settingsProviderId = `settings-${flow.adapterId}`;
+      return [flow.adapterId, {
+        completion: {
+          harnessId: flow.harnessId,
+          providerId: onboardingProviderId,
+          familyMatches: true,
+          members: familyMembers(onboardingProviderId, flow.modelIds),
         },
-      });
-      expect(afterSettings.families.filter(({ kind }) => kind === "custom")).toEqual([]);
-    },
-    15_000,
-  );
+        onboarding: expectedFamilyCheckpoint(flow, onboardingProviderId),
+        settings: expectedFamilyCheckpoint(flow, settingsProviderId),
+      }];
+    })) });
+    expect(afterSettings.defaults).toEqual(preservedDefaults);
+    expect(afterSettings.families.filter(({ kind }) => kind === "custom")).toEqual([]);
+  }, 15_000);
 });
+
+function familyCheckpoint(settings, flow, providerId, family) {
+  const selection = normalizePickerSelection(settings, { harnessId: flow.harnessId, familyId: family.id });
+  const composer = newThreadRequestBody({
+    title: "Ready composer",
+    initialMessage: "Explain idempotency keys.",
+    permissionProfileId: "ask",
+    projectId: null,
+    pickerPayload: pickerSelectionPayload(selection),
+  });
+  return {
+    kind: family.kind,
+    enabled: family.enabled,
+    members: family.members,
+    selectionAvailable: pickerSelectionIsAvailable(settings, selection),
+    composer: {
+      harnessId: composer.harnessId,
+      providerId: composer.modelSelection.providerId,
+      modelId: composer.modelSelection.modelId,
+      familyMatches: composer.modelSelection.familyId === family.id,
+    },
+  };
+}
+
+function expectedFamilyCheckpoint(flow, providerId) {
+  return {
+    kind: "system",
+    enabled: true,
+    members: familyMembers(providerId, flow.modelIds),
+    selectionAvailable: true,
+    composer: {
+      harnessId: flow.harnessId,
+      providerId,
+      modelId: flow.modelIds[0],
+      familyMatches: true,
+    },
+  };
+}
 
 async function productFixture() {
   const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-provider-straightforward-"));
@@ -217,18 +273,6 @@ function familyForProvider(settings, providerId) {
   ));
   if (!family) throw new Error(`Missing automatic family for ${providerId}.`);
   return family;
-}
-
-function readyComposerRequest(settings, harnessId, familyId) {
-  const selection = normalizePickerSelection(settings, { harnessId, familyId });
-  expect(pickerSelectionIsAvailable(settings, selection)).toBe(true);
-  return newThreadRequestBody({
-    title: "Ready composer",
-    initialMessage: "Explain idempotency keys.",
-    permissionProfileId: "ask",
-    projectId: null,
-    pickerPayload: pickerSelectionPayload(selection),
-  });
 }
 
 async function productRequest(session, path, options = {}) {
