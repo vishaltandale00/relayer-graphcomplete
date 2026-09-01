@@ -456,6 +456,12 @@ describe("CI workflow contract", () => {
     ]) {
       expect(verify.run).toContain(identity);
     }
+    // The seal step must read the binaries from the same target directory
+    // the lanes build into; a drift here fails late (ENOENT) without this pin.
+    const seal = workflow.jobs["rust-runtime"].steps.find(
+      (step) => step.name === "Seal selected Rust runtime",
+    );
+    expect(seal.run).toContain('--target-dir "$RUNNER_TEMP/cargo-target/debug"');
     expect(
       steps.some(
         (step) =>

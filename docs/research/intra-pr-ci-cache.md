@@ -268,6 +268,12 @@ that remain unvalidated: `SCCACHE_BASEDIRS` normalization if other volatile
 paths appear, and whether the reviewed prebuilt-library path from the Issue
 #261 qualification can be reused without weakening its provenance guarantees.
 
+One premise to monitor: the Ladybug CMakeLists prefers `ccache` and only falls
+back to `sccache`. GitHub's Ubuntu images currently ship neither, so CMake
+finds the sccache binary installed by the pinned action. If a future runner
+image adds ccache, the launcher silently switches to a runner-local cache and
+the cross-run Ladybug benefit disappears without changing correctness.
+
 ## Ranked next options
 
 ### 1. Keep sccache admitted in Rust, then verify the trusted-main consumer
