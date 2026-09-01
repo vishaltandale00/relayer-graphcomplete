@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -61,6 +63,71 @@ describe("CI chapter runner", () => {
     expect(run("rust-tests", plan)).toEqual([
       "cargo:test -p relayer-graph-core -p relayer-graph-server",
     ]);
+  });
+
+  test("keeps Cargo invocations timing-free unless a timings directory is set", () => {
+    const plan = { rustPackages: ["relayer-graph-core"] };
+    expect(run("rust-tests", plan)).toEqual([
+      "cargo:test -p relayer-graph-core",
+    ]);
+  });
+
+  test("adds --timings=html and harvests the report when a timings directory is set", () => {
+    const timingsDirectory = join(directory, "timings");
+    writeFileSync(trace, "");
+    writeFileSync(
+      join(directory, "cargo"),
+      '#!/bin/sh\necho "cargo:$*" >> "$TRACE"\ncase " $* " in\n  *--timings=html*) echo "<html></html>" > cargo-timing.html ;;\nesac\n',
+    );
+    chmodSync(join(directory, "cargo"), 0o755);
+    execFileSync(
+      process.execPath,
+      [runner, "rust-tests"],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          CI_PLAN_JSON: JSON.stringify({ rustPackages: ["relayer-graph-core"] }),
+          CI_INVOCATION_TRACE: invocationTrace,
+          PATH: `${directory}:${process.env.PATH}`,
+          RELAYER_CARGO_TIMINGS_DIR: timingsDirectory,
+          TRACE: trace,
+        },
+      },
+    );
+    expect(readFileSync(trace, "utf8").trim()).toBe(
+      "cargo:test -p relayer-graph-core --timings=html",
+    );
+    expect(readdirSync(timingsDirectory)).toEqual(["fresh-rust-tests.html"]);
+    expect(existsSync(join(repositoryRoot, "cargo-timing.html"))).toBe(false);
+  });
+
+  test("keeps --timings=html before the Clippy lint argument separator", () => {
+    const timingsDirectory = join(directory, "timings-clippy");
+    writeFileSync(
+      join(directory, "cargo"),
+      '#!/bin/sh\necho "cargo:$*" >> "$TRACE"\ncase " $* " in\n  *--timings=html*) echo "<html></html>" > cargo-timing.html ;;\nesac\n',
+    );
+    chmodSync(join(directory, "cargo"), 0o755);
+    execFileSync(
+      process.execPath,
+      [runner, "rust-clippy"],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          CI_PLAN_JSON: JSON.stringify({ rustPackages: ["relayer-graph-core"] }),
+          CI_INVOCATION_TRACE: invocationTrace,
+          PATH: `${directory}:${process.env.PATH}`,
+          RELAYER_CARGO_TIMINGS_DIR: timingsDirectory,
+          TRACE: trace,
+        },
+      },
+    );
+    expect(readFileSync(trace, "utf8").trim()).toBe(
+      "cargo:clippy -p relayer-graph-core --all-targets --all-features --timings=html -- -D warnings",
+    );
+    expect(readdirSync(timingsDirectory)).toEqual(["rust-clippy.html"]);
   });
 
   test("builds only the planner-selected runtime and keeps crash tests fresh", () => {

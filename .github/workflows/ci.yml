@@ -87,6 +87,7 @@ jobs:
         run: node scripts/ci/run-chapter.mjs rust-clippy
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-clippy
+          RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-rust-clippy
           CARGO_INCREMENTAL: "0"
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
@@ -138,6 +139,7 @@ jobs:
         env:
           CARGO_INCREMENTAL: "0"
           CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-tests
+          RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-rust-tests
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
@@ -218,6 +220,7 @@ jobs:
         env:
           CARGO_INCREMENTAL: "0"
           CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-runtime
+          RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-rust-runtime
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}

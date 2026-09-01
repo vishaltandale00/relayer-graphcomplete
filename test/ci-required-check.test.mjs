@@ -299,6 +299,18 @@ describe("CI workflow contract", () => {
         "${{ steps.rust-setup.outputs.cache-version }}",
       );
     }
+    for (const cargoLane of ["rust-clippy", "rust-tests", "rust-runtime"]) {
+      const run = workflow.jobs[cargoLane].steps.find((step) =>
+        step.name.startsWith("Run "),
+      );
+      expect(run.env.RELAYER_CARGO_TIMINGS_DIR).toBe(
+        `\${{ runner.temp }}/cargo-timings-${cargoLane}`,
+      );
+    }
+    expect(
+      workflow.jobs["rust-crash"].steps.find((step) => step.name.startsWith("Run ")).env
+        .RELAYER_CARGO_TIMINGS_DIR,
+    ).toBeUndefined();
     expect(workflow.jobs.rust.needs).toEqual(
       expect.arrayContaining([
         "plan",
@@ -364,6 +376,17 @@ describe("CI workflow contract", () => {
     expect(upload["continue-on-error"]).toBe(true);
     expect(upload.with["if-no-files-found"]).toBe("ignore");
     expect(upload.with["retention-days"]).toBe(14);
+    const timingsUpload = rustReport.runs.steps.find(
+      (step) => step.name === "Upload Cargo timing report",
+    );
+    expect(timingsUpload.uses).toBe(upload.uses);
+    expect(timingsUpload.if).toBe("${{ always() }}");
+    expect(timingsUpload["continue-on-error"]).toBe(true);
+    expect(timingsUpload.with["if-no-files-found"]).toBe("ignore");
+    expect(timingsUpload.with["retention-days"]).toBe(14);
+    expect(timingsUpload.with.path).toBe(
+      "${{ runner.temp }}/cargo-timings-${{ inputs.lane }}",
+    );
   });
 
   test("verifies the exact Rust runtime artifact before executing the fresh Vitest portfolio", () => {

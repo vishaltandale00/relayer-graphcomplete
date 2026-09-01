@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +17,27 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const portfolio = JSON.parse(
   readFileSync(join(scriptDirectory, "verification-portfolio.v1.json"), "utf8"),
 );
+const cargoTimingsDirectory = process.env.RELAYER_CARGO_TIMINGS_DIR ?? "";
+
+function cargoTimingArguments(args) {
+  if (!cargoTimingsDirectory) return args;
+  const separatorIndex = args.indexOf("--");
+  if (separatorIndex === -1) return [...args, "--timings=html"];
+  return [
+    ...args.slice(0, separatorIndex),
+    "--timings=html",
+    ...args.slice(separatorIndex),
+  ];
+}
+
+function harvestCargoTimingReport(label) {
+  if (!cargoTimingsDirectory) return;
+  const report = join(process.cwd(), "cargo-timing.html");
+  if (!existsSync(report)) return;
+  mkdirSync(cargoTimingsDirectory, { recursive: true });
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  renameSync(report, join(cargoTimingsDirectory, `${slug}.html`));
+}
 
 function run(label, command, args, environment = {}) {
   const startedAt = Date.now();
@@ -95,31 +122,43 @@ if (chapter === "quick") {
   ]);
 } else if (chapter === "rust-clippy") {
   const packages = packageArguments(plan.rustPackages);
-  runAuthority("rust-clippy", "Rust Clippy", "cargo", [
-    "clippy",
-    ...packages,
-    "--all-targets",
-    "--all-features",
-    "--",
-    "-D",
-    "warnings",
-  ]);
+  runAuthority(
+    "rust-clippy",
+    "Rust Clippy",
+    "cargo",
+    cargoTimingArguments([
+      "clippy",
+      ...packages,
+      "--all-targets",
+      "--all-features",
+      "--",
+      "-D",
+      "warnings",
+    ]),
+  );
+  harvestCargoTimingReport("Rust Clippy");
 } else if (chapter === "rust-tests") {
   const packages = packageArguments(plan.rustPackages);
-  runAuthority("rust-tests", "Fresh Rust tests", "cargo", [
-    "test",
-    ...packages,
-  ]);
+  runAuthority(
+    "rust-tests",
+    "Fresh Rust tests",
+    "cargo",
+    cargoTimingArguments(["test", ...packages]),
+  );
+  harvestCargoTimingReport("Fresh Rust tests");
 } else if (chapter === "rust-crash") {
   runAuthority("rust-crash", "Graph crash reconciliation", "npm", [
     "run",
     "check:graph-crash-reconciliation",
   ]);
 } else if (chapter === "rust-runtime") {
-  runAuthority("rust-runtime", "Selected Rust runtime build", "cargo", [
-    "build",
-    ...packageArguments(plan.runtimeRustPackages),
-  ]);
+  runAuthority(
+    "rust-runtime",
+    "Selected Rust runtime build",
+    "cargo",
+    cargoTimingArguments(["build", ...packageArguments(plan.runtimeRustPackages)]),
+  );
+  harvestCargoTimingReport("Selected Rust runtime build");
 } else if (chapter === "typescript") {
   for (const workspace of npmBuildOrder.filter((name) =>
     plan.npmBuildWorkspaces.includes(name),
