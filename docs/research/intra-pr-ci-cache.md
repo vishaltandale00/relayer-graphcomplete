@@ -210,9 +210,48 @@ One mitigation is now in place: the runtime lane is read-only. Its unique
 outputs are uncachable binary links and its shareable units are identical to
 the default-test lane's, so it no longer races the seeding lanes; the
 default-test, Clippy (rmeta graph), and crash (crash-feature graph) lanes
-remain the writers. The next run shows whether write errors and misses
-converge; if they do not, the remaining candidate is reducing the number of
-lanes that cold-compile the same dependency graph simultaneously.
+remain the writers.
+
+The first run with the read-only runtime lane ([33495979365](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33495979365),
+about 12m20s end to end) shows convergence beginning:
+
+| Lane | Hit rate before / after | Write errors before / after |
+| --- | --- | --- |
+| rust-clippy | 55.0% / 64.0% | 493 / 384 |
+| rust-tests | 50.6% / 69.8% | 535 / 293 |
+| rust-crash | 59.9% / 73.6% | 437 / 258 |
+| rust-runtime | 58.3% / 64.7% | 466 / 451 (stores refused, 0.000s write time) |
+
+The runtime lane's "write errors" are its rejected stores counted by sccache
+in read-only mode; its average cache write is 0.000s, so it performs no cache
+I/O and creates no entries. Lane durations fell to Clippy 7m31s, runtime
+7m55s, tests 9m22s, and crash 10m19s. If write errors keep falling on later
+runs, the remaining candidate is reducing the number of lanes that
+cold-compile the same dependency graph simultaneously.
+
+### What the first hosted timing reports show
+
+The `--timings` artifacts from the warm PR run (33493873593) identify the
+critical unit in every lane: the `lbug` build-script execution (the bundled
+Ladybug source build forced by `LBUG_BUILD_FROM_SOURCE = "1"`).
+
+| Lane | Wall | lbug build-script unit | Share of wall |
+| --- | --- | --- | --- |
+| rust-clippy | 555.6s | 479.6s | 86% |
+| rust-tests | 709.4s | 513.2s | 72% |
+| rust-runtime | 612.2s | 475.7s | 78% |
+
+The next largest units are the workspace crates themselves (about 100–114s
+each for the app-server and graph-server test builds) and their test-binary
+links. Two consequences follow: further feature/profile consolidation of the
+workspace crate invocations can save at most a few minutes per lane, while
+anything that shortens or cache-shares the Ladybug source build attacks the
+majority of every lane's wall time. Candidate directions, not yet validated:
+verifying whether sccache keys for the build script's C compilations survive
+across lanes and runs (absolute output paths and per-lane target directories
+are the prime suspects), path normalization (`SCCACHE_BASEDIRS`), and whether
+the reviewed prebuilt-library path from the Issue #261 qualification can be
+reused without weakening its provenance guarantees.
 
 ## Ranked next options
 

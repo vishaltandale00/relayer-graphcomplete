@@ -351,6 +351,14 @@ describe("CI workflow contract", () => {
         "utf8",
       ),
     );
+    // The writer lanes rely on the composite action defaulting to read-write;
+    // a silent default change would stop seeding without tripping the
+    // per-lane env pins above.
+    expect(rustSetup.inputs["sccache-mode"].default).toBe("READ_WRITE");
+    expect(
+      rustSetup.runs.steps.find((step) => step.id === "sccache-start").env
+        .SCCACHE_GHA_RW_MODE,
+    ).toBe("${{ inputs.sccache-mode }}");
     const sccache = rustSetup.runs.steps.find(
       (step) => step.id === "sccache-setup",
     );
