@@ -31,6 +31,12 @@ describe("provider onboarding renderer state", () => {
     expect(providerOnboardingRecoveryAction({
       blockingReason: { code: "harness_unavailable", message: "Install the harness." },
     })).toBeNull();
+    expect(providerOnboardingRecoveryAction({
+      blockingReason: {
+        code: "provider_no_available_execution_configurations",
+        message: "No execution configuration is ready.",
+      },
+    })).toEqual({ kind: "repair_execution", label: "Repair execution configurations" });
   });
 
   it("rejects an out-of-order projection and binds recovery to the rendered provider", () => {

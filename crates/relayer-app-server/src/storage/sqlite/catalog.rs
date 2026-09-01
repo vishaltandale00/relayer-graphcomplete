@@ -2,14 +2,15 @@ use super::SqliteProductStore;
 use crate::product::{
     CatalogError, CompleteProviderOnboardingCommand, CreateModelFamilyCommand,
     ExecutionHarnessPolicy, ExecutionModelPlan, ExecutionModelRoute, FamilyPolicyReference,
-    HarnessModelCompatibility, HarnessModelRule, HarnessModelRules, ManagedFamilyPolicy,
-    ModelFamily, ModelFamilyId, ModelFamilyKind, ModelFamilyMember, ModelSettings,
-    ModelSettingsDefaults, ProductHarness, Provider, ProviderCatalogSnapshot, ProviderDefinition,
-    ProviderId, ProviderModel, ProviderOnboardingCompletion, ProviderOnboardingFamily,
-    ProviderOnboardingFamilyIntent, ProviderOnboardingHarness, ProviderOnboardingManagedFamily,
-    ProviderOnboardingModel, ProviderOnboardingProjection, ProviderOnboardingProvider,
-    ProviderOnboardingResolution, ProviderOnboardingStatus, ReorderModelFamiliesCommand,
-    RuntimeProductHarness, SystemFamilySnapshot, UnavailableReason, UpdateHarnessModelRulesCommand,
+    HarnessModelCompatibility, HarnessModelRule, HarnessModelRules,
+    HarnessRuntimeAvailabilityUpdate, ManagedFamilyPolicy, ModelFamily, ModelFamilyId,
+    ModelFamilyKind, ModelFamilyMember, ModelSettings, ModelSettingsDefaults, ProductHarness,
+    Provider, ProviderCatalogSnapshot, ProviderDefinition, ProviderId, ProviderModel,
+    ProviderOnboardingCompletion, ProviderOnboardingFamily, ProviderOnboardingFamilyIntent,
+    ProviderOnboardingHarness, ProviderOnboardingManagedFamily, ProviderOnboardingModel,
+    ProviderOnboardingProjection, ProviderOnboardingProvider, ProviderOnboardingResolution,
+    ProviderOnboardingStatus, ReorderModelFamiliesCommand, RuntimeProductHarness,
+    SystemFamilySnapshot, UnavailableReason, UpdateHarnessModelRulesCommand,
     UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
     validate_family,
 };
@@ -19,6 +20,54 @@ use sqlx::{Row, SqliteConnection, SqlitePool, sqlite::SqliteRow};
 use std::collections::{HashMap, HashSet};
 
 impl SqliteProductStore {
+    pub(crate) async fn update_harness_runtime_availability(
+        &self,
+        updates: &[HarnessRuntimeAvailabilityUpdate],
+    ) -> Result<(), StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut seen = HashSet::new();
+        for update in updates {
+            if !seen.insert(&update.harness_id) || update.generation == 0 {
+                return Err(StorageError::Catalog(CatalogError::invalid(
+                    "harness_readiness_invalid",
+                    "Harness readiness updates require unique harnesses and a positive generation.",
+                )));
+            }
+            let reason = match (update.available, update.unavailable_reason.as_ref()) {
+                (true, None) => None,
+                (false, Some(reason))
+                    if !reason.code.trim().is_empty() && !reason.message.trim().is_empty() =>
+                {
+                    Some(reason)
+                }
+                _ => {
+                    return Err(StorageError::Catalog(CatalogError::invalid(
+                        "harness_readiness_invalid",
+                        "Harness readiness availability and unavailable reason do not agree.",
+                    )));
+                }
+            };
+            let result = sqlx::query(
+                "UPDATE product_harnesses SET available=?1,unavailable_reason_code=?2,unavailable_reason_message=?3 WHERE configuration_name=?4 AND product_visible=1 AND runtime_configuration_digest=?5",
+            )
+            .bind(update.available)
+            .bind(reason.map(|value| value.code.as_str()))
+            .bind(reason.map(|value| value.message.as_str()))
+            .bind(&update.harness_id)
+            .bind(&update.configuration_digest)
+            .execute(&mut *transaction)
+            .await?;
+            if result.rows_affected() != 1 {
+                return Err(StorageError::Catalog(CatalogError::invalid(
+                    "harness_readiness_stale",
+                    "Harness readiness was measured for a stale runtime configuration.",
+                )));
+            }
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub(crate) async fn update_harness_model_rules(
         &self,
         command: &UpdateHarnessModelRulesCommand,
@@ -236,10 +285,14 @@ impl SqliteProductStore {
         }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::query(
-            "UPDATE product_harnesses SET available=0,unavailable_reason_code='harness_unavailable',unavailable_reason_message='The harness runtime is unavailable.'",
+            "UPDATE product_harnesses SET available=0,unavailable_reason_code='harness_unavailable',unavailable_reason_message='The harness runtime is unavailable.',runtime_configuration_digest='sha256:not-loaded'",
         )
         .execute(&mut *transaction)
         .await?;
+        let runtime_configuration_ids = runtime_harnesses
+            .iter()
+            .map(|harness| harness.id.as_str())
+            .collect::<HashSet<_>>();
         let mut harnesses = runtime_harnesses.to_vec();
         if !harnesses
             .iter()
@@ -323,7 +376,7 @@ impl SqliteProductStore {
             .bind(&harness.id)
             .fetch_one(&mut *transaction)
             .await?;
-            if available && !model_rules_modified {
+            if runtime_configuration_ids.contains(harness.id.as_str()) && !model_rules_modified {
                 sqlx::query("DELETE FROM harness_model_rules WHERE harness_configuration_name=?1")
                     .bind(&harness.id)
                     .execute(&mut *transaction)
@@ -390,9 +443,53 @@ impl SqliteProductStore {
         let mut transaction = self.pool.begin().await?;
         let defaults = load_defaults(&mut transaction).await?;
         let mut harnesses = load_harnesses(&mut transaction).await?;
-        let providers = load_providers(&mut transaction).await?;
+        let mut providers = load_providers(&mut transaction).await?;
         let families = load_families(&mut transaction).await?;
         project_harness_usability_on(&mut transaction, &mut harnesses).await?;
+        for provider in &mut providers {
+            if !provider.connected
+                || provider.unavailable_reason.as_ref().is_some_and(|reason| {
+                    reason.code != "provider_no_available_execution_configurations"
+                })
+            {
+                continue;
+            }
+            let access_contract: String =
+                sqlx::query_scalar("SELECT access_contract FROM model_providers WHERE id=?1")
+                    .bind(provider.id.as_str())
+                    .fetch_one(&mut *transaction)
+                    .await?;
+            let mut has_route = false;
+            'routes: for harness in harnesses.iter().filter(|harness| harness.available) {
+                for model in provider
+                    .models
+                    .iter()
+                    .filter(|model| model.visible && model.available)
+                {
+                    if harness_route_is_usable(
+                        harness,
+                        &provider.id,
+                        &provider.adapter_id,
+                        &access_contract,
+                        &model.id,
+                    )? {
+                        has_route = true;
+                        break 'routes;
+                    }
+                }
+            }
+            if !has_route {
+                provider.unavailable_reason = Some(UnavailableReason {
+                    code: "provider_no_available_execution_configurations".into(),
+                    message: "This provider currently has no available execution configurations."
+                        .into(),
+                });
+            } else if provider.unavailable_reason.as_ref().is_some_and(|reason| {
+                reason.code == "provider_no_available_execution_configurations"
+            }) {
+                provider.unavailable_reason = None;
+            }
+        }
         transaction.commit().await?;
         Ok(ModelSettings {
             defaults,
@@ -1171,6 +1268,9 @@ async fn provider_onboarding_projection_on(
     let product_harnesses = load_harnesses(connection).await?;
     let mut harnesses = Vec::with_capacity(product_harnesses.len() + 1);
     for harness in product_harnesses {
+        if !harness.available {
+            continue;
+        }
         let matching_access_contract = harness
             .execution_access_contracts
             .contains(&access_contract)
@@ -1251,17 +1351,7 @@ async fn provider_onboarding_projection_on(
                     })
                 })
             });
-        let incompatibility_reason = if !harness.available {
-            Some(
-                harness
-                    .unavailable_reason
-                    .clone()
-                    .unwrap_or(UnavailableReason {
-                        code: "harness_unavailable".into(),
-                        message: "The harness runtime is unavailable.".into(),
-                    }),
-            )
-        } else if !permission_available_harnesses.contains(&harness.id) {
+        let incompatibility_reason = if !permission_available_harnesses.contains(&harness.id) {
             Some(UnavailableReason {
                 code: "harness_permission_unavailable".into(),
                 message: "The harness has no enabled permission profile.".into(),
@@ -1294,36 +1384,24 @@ async fn provider_onboarding_projection_on(
             eligible_models,
         });
     }
-    if !harnesses
-        .iter()
-        .any(|harness| harness.id == app_default_harness_id)
-    {
-        harnesses.push(ProviderOnboardingHarness {
-            id: app_default_harness_id.into(),
-            label: app_default_harness_id.into(),
-            configuration_revision: 0,
-            selectable: false,
-            selected_initially: false,
-            matching_access_contract: None,
-            incompatibility_reason: Some(UnavailableReason {
-                code: "harness_not_product_visible".into(),
-                message: "The app-default harness is not product-visible.".into(),
-            }),
-            existing_custom_families: Vec::new(),
-            existing_managed_families: Vec::new(),
-            managed_family_candidate: None,
-            eligible_models: Vec::new(),
-        });
-    }
     let app_default_index = harnesses
         .iter()
-        .position(|harness| harness.id == app_default_harness_id)
-        .expect("the app-default harness is projected");
-    let initial_harness_id = harnesses[app_default_index]
-        .selectable
-        .then(|| app_default_harness_id.to_owned());
-    harnesses[app_default_index].selected_initially = initial_harness_id.is_some();
-    let app_default_reason = harnesses[app_default_index].incompatibility_reason.clone();
+        .position(|harness| harness.id == app_default_harness_id);
+    let initial_harness_id = app_default_index
+        .filter(|index| harnesses[*index].selectable)
+        .map(|_| app_default_harness_id.to_owned());
+    if let Some(index) = app_default_index {
+        harnesses[index].selected_initially = initial_harness_id.is_some();
+    }
+    let app_default_reason = app_default_index
+        .and_then(|index| harnesses[index].incompatibility_reason.clone())
+        .or_else(|| {
+            Some(UnavailableReason {
+                code: "provider_no_available_execution_configurations".into(),
+                message: "This provider currently has no available execution configurations."
+                    .into(),
+            })
+        });
     harnesses.sort_by(|left, right| {
         (left.id != app_default_harness_id, &left.label, &left.id).cmp(&(
             right.id != app_default_harness_id,
@@ -1339,8 +1417,8 @@ async fn provider_onboarding_projection_on(
         snapshot.unavailable_reason.clone()
     } else if !harnesses.iter().any(|harness| harness.selectable) {
         Some(UnavailableReason {
-            code: "no_compatible_harness".into(),
-            message: "No product-visible harness currently supports this provider.".into(),
+            code: "provider_no_available_execution_configurations".into(),
+            message: "This provider currently has no available execution configurations.".into(),
         })
     } else {
         None
@@ -2652,6 +2730,92 @@ mod provider_definition_tests {
     }
 
     #[tokio::test]
+    async fn harness_readiness_batch_is_digest_guarded_and_atomic() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-harness-readiness-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let harnesses = [
+            runtime_harness("codex-basic"),
+            runtime_harness("claude-basic"),
+        ];
+        store
+            .initialize_model_catalog("codex-basic", &harnesses)
+            .await
+            .unwrap();
+
+        store
+            .update_harness_runtime_availability(&[
+                HarnessRuntimeAvailabilityUpdate {
+                    harness_id: "codex-basic".into(),
+                    configuration_digest: "sha256:codex-basic".into(),
+                    generation: 1,
+                    available: true,
+                    unavailable_reason: None,
+                },
+                HarnessRuntimeAvailabilityUpdate {
+                    harness_id: "claude-basic".into(),
+                    configuration_digest: "sha256:claude-basic".into(),
+                    generation: 1,
+                    available: false,
+                    unavailable_reason: Some(UnavailableReason {
+                        code: "harness_readiness_failed".into(),
+                        message: "This execution configuration is currently unavailable.".into(),
+                    }),
+                },
+            ])
+            .await
+            .unwrap();
+        let states: Vec<(String, bool)> = sqlx::query_as(
+            "SELECT configuration_name,available FROM product_harnesses WHERE configuration_name IN ('codex-basic','claude-basic') ORDER BY configuration_name",
+        ).fetch_all(&store.pool).await.unwrap();
+        assert_eq!(
+            states,
+            vec![("claude-basic".into(), false), ("codex-basic".into(), true)]
+        );
+
+        let stale = store
+            .update_harness_runtime_availability(&[
+                HarnessRuntimeAvailabilityUpdate {
+                    harness_id: "codex-basic".into(),
+                    configuration_digest: "sha256:codex-basic".into(),
+                    generation: 2,
+                    available: false,
+                    unavailable_reason: Some(UnavailableReason {
+                        code: "failed".into(),
+                        message: "Unavailable.".into(),
+                    }),
+                },
+                HarnessRuntimeAvailabilityUpdate {
+                    harness_id: "claude-basic".into(),
+                    configuration_digest: "sha256:stale".into(),
+                    generation: 2,
+                    available: true,
+                    unavailable_reason: None,
+                },
+            ])
+            .await
+            .unwrap_err();
+        assert!(stale.to_string().contains("stale runtime configuration"));
+        let codex_available: bool = sqlx::query_scalar(
+            "SELECT available FROM product_harnesses WHERE configuration_name='codex-basic'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert!(
+            codex_available,
+            "the stale batch must roll back its earlier row"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn desktop_catalog_retires_product_codex_high_without_rewriting_history() {
         let path = std::env::temp_dir().join(format!(
             "relayer-product-codex-retirement-{}-{}.sqlite3",
@@ -3305,6 +3469,41 @@ mod provider_definition_tests {
                 .unwrap()
                 .code,
             "harness_model_incompatible"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn unavailable_execution_configurations_are_hidden_behind_provider_recovery_state() {
+        let (store, path, provider_id) = onboarding_store().await;
+        sqlx::query("UPDATE product_harnesses SET available=0,unavailable_reason_code='harness_readiness_failed',unavailable_reason_message='This execution configuration is currently unavailable.' WHERE configuration_name IN ('codex-basic','codex-alternate')")
+            .execute(&store.pool).await.unwrap();
+        let allowed = HashSet::from(["codex-basic".to_owned(), "codex-alternate".to_owned()]);
+        let projection = store
+            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .await
+            .unwrap();
+        assert!(
+            projection
+                .harnesses
+                .iter()
+                .all(|harness| { harness.id != "codex-basic" && harness.id != "codex-alternate" })
+        );
+        assert_eq!(
+            projection.blocking_reason.unwrap().code,
+            "provider_no_available_execution_configurations"
+        );
+        let settings = store.load_model_settings().await.unwrap();
+        assert_eq!(
+            settings
+                .providers
+                .into_iter()
+                .find(|provider| provider.id == provider_id)
+                .unwrap()
+                .unavailable_reason
+                .unwrap()
+                .code,
+            "provider_no_available_execution_configurations"
         );
         std::fs::remove_file(path).unwrap();
     }

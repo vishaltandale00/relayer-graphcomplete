@@ -40,6 +40,17 @@ export function providerDescriptorGroups(descriptors) {
 
 export function providerDefinitionStatus(definition) {
   const persistedLifecycle = definition?.lifecycleState;
+  const needsExecutionSetup = persistedLifecycle === "active"
+    && definition?.connected === true
+    && definition?.unavailableReason?.code === "provider_no_available_execution_configurations";
+  if (needsExecutionSetup) {
+    return {
+      lifecycle: "needs_execution_setup",
+      label: "Needs execution setup",
+      usable: false,
+      recovery: "repair_execution",
+    };
+  }
   const needsModelSetup = persistedLifecycle === "active"
     && definition?.connected === true
     && definition?.unavailableReason?.code === "provider_no_eligible_execution_models";
@@ -109,6 +120,9 @@ export function firstRunGateState({ hasCompletedOnboarding, providers, defaultRe
   if (hasCompletedOnboarding) return { blocked: false, reason: null };
   if (providers.some((provider) => providerDefinitionStatus(provider).recovery === "refresh_models")) {
     return { blocked: true, reason: "Refresh models and set up defaults for the connected provider." };
+  }
+  if (providers.some((provider) => providerDefinitionStatus(provider).recovery === "repair_execution")) {
+    return { blocked: true, reason: "Repair execution configurations for the connected provider." };
   }
   if (!providers.some((provider) => providerDefinitionStatus(provider).usable)) {
     return { blocked: true, reason: "Connect a working provider to continue." };

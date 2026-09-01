@@ -51,7 +51,6 @@ pub(crate) use catalog::ProviderOnboardingProvider;
 pub(crate) use catalog::ProviderOnboardingResolution;
 pub(crate) use catalog::ProviderOnboardingStatus;
 pub(crate) use catalog::ReorderModelFamiliesCommand;
-pub(crate) use catalog::RuntimeProductHarness;
 pub(crate) use catalog::SystemFamilySnapshot;
 pub(crate) use catalog::UnavailableReason;
 pub(crate) use catalog::UpdateHarnessModelRulesCommand;
@@ -61,6 +60,7 @@ pub(crate) use catalog::ValidateModelSelectionCommand;
 pub(crate) use catalog::validate_family;
 pub(crate) use catalog::validate_harness_model_rules;
 pub(crate) use catalog::validate_stable_id;
+pub(crate) use catalog::{HarnessRuntimeAvailabilityUpdate, RuntimeProductHarness};
 pub(crate) use context_drafts::{
     NodeContextDraftConfirmationError, NodeContextDraftConfirmationService,
 };

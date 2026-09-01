@@ -90,6 +90,14 @@ const fn default_configuration_revision() -> u32 {
 struct CatalogEntry {
     configuration: HarnessConfiguration,
     digest: String,
+    #[serde(default = "catalog_entry_available")]
+    runtime_available: bool,
+    #[serde(default)]
+    unavailable_reason: Option<crate::product::UnavailableReason>,
+}
+
+const fn catalog_entry_available() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -512,8 +520,8 @@ impl RuntimeClient {
                     .model_defaults
                     .as_ref()
                     .map(|defaults| defaults.family_policy.clone()),
-                runtime_available: true,
-                unavailable_reason: None,
+                runtime_available: entry.runtime_available,
+                unavailable_reason: entry.unavailable_reason.clone(),
             })
             .collect::<Vec<_>>();
         harnesses.extend(self.unavailable_configurations.values().map(|entry| {

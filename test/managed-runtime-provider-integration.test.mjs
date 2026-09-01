@@ -64,7 +64,7 @@ function fixture({ prepareRuntime = async () => ({ runtimeId: "codex" }), discov
 }
 
 describe("managed runtime provider Connect boundary", () => {
-  it("carries API provider runtime access through the broker shape into Codex", async () => {
+  it("keeps API provider access secret-only while the Codex factory supplies its managed runtime", async () => {
     let submitted;
     const definition = {
       id: "openai-work", adapterId: "openai-api", label: "OpenAI Work",
@@ -73,8 +73,6 @@ describe("managed runtime provider Connect boundary", () => {
     };
     const adapter = productionProviderAdapterRegistry.create(definition, {
       fetch: vi.fn(), secrets: { "api-key": "secret" },
-      managedRuntime: { runtimeId: "codex", version: "0.150.1", executable: "/managed/codex" },
-      environment: { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: "/managed/codex" },
     });
     const broker = createProviderExecutionAccessBroker(async () => ({
       definition,
@@ -101,6 +99,10 @@ describe("managed runtime provider Connect boundary", () => {
         options.onThreadId("thread-1");
         return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
       },
+      resolveCodexRuntime: async () => ({
+        executable: "/managed/codex",
+        environment: { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: "/managed/codex" },
+      }),
     });
     const inputGraph = { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" };
     await harness.complete({
@@ -113,6 +115,7 @@ describe("managed runtime provider Connect boundary", () => {
       trace: createNoopHarnessTraceSink(),
     });
 
+    expect(acquired.access).not.toHaveProperty("runtime");
     expect(submitted.codexPathOverride).toBe("/managed/codex");
     expect(submitted.environment.CODEX_HOME).toBe("/isolated/codex");
     await acquired.release();

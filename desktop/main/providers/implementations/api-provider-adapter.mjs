@@ -1,5 +1,4 @@
 import { ModelCatalogAdapter, sanitizeModelCatalogSnapshot } from "../../models/model-catalog-adapter.mjs";
-import { managedRuntimeExecutionDetails, requireManagedRuntime } from "./managed-runtime-contract.mjs";
 
 export const EXECUTION_ELIGIBLE = Object.freeze({ eligible: true });
 export const MODEL_NOT_EXECUTION_ELIGIBLE = Object.freeze({
@@ -101,8 +100,6 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     this.modelCapabilities = Object.freeze({});
     this.requireCatalogBeforeExecution = requireCatalogBeforeExecution;
     this.catalogDiscovered = false;
-    this.managedRuntime = requireManagedRuntime(managedRuntime, runtimeId);
-    this.runtimeExecution = managedRuntimeExecutionDetails(this.managedRuntime, environment);
     this.modelEligibility = modelEligibility;
   }
 
@@ -220,7 +217,6 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
       endpoint: this.definition.endpoint,
       fields: Object.freeze({ "api-key": this.credentials.apiKey }),
       ...(Object.keys(this.modelCapabilities).length === 0 ? {} : { modelCapabilities: this.modelCapabilities }),
-      runtime: this.runtimeExecution,
     });
   }
 }

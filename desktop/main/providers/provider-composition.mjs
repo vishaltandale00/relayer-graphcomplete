@@ -13,6 +13,7 @@ export function createProviderComposition({
   providerStatuses = async () => new Map(),
   runtimeDependencies = async () => ({}),
   prepareRuntime = async () => null,
+  evaluateReadiness = async () => null,
   removeRuntimeState = async () => false,
   diagnostics = null,
   modelCatalogOptions = {},
@@ -20,7 +21,16 @@ export function createProviderComposition({
   const modelCatalog = new ModelCatalogService({
     adapters: [],
     diagnostics,
-    publishSnapshot: publishCatalog,
+    publishSnapshot: async (snapshot, options) => {
+      if (options?.reason === "explicit") {
+        await providerDefinitions.evaluateCatalogReadiness(
+          snapshot.providerId,
+          snapshot.models ?? [],
+          "explicit-repair",
+        );
+      }
+      return publishCatalog(snapshot, options);
+    },
     ...modelCatalogOptions,
   });
   let providerDefinitions;
@@ -32,6 +42,7 @@ export function createProviderComposition({
     providerStatuses,
     runtimeDependencies,
     prepareRuntime,
+    evaluateReadiness,
     removeRuntimeState,
     publishCatalog: (snapshot, options) => publishCatalog(toProductCatalogSnapshot(snapshot), options),
     onRuntimeReady: (definition, runtime) => {

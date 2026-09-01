@@ -881,6 +881,7 @@ describe("desktop skeleton", () => {
           packages: [{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }],
         },
       }],
+      coordinateHarnessReadiness: true,
       onUnexpectedStop: (event) => unexpectedStops.push(event),
       spawnProcess: (binary, args, options) => {
         invocations.push({ binary, args, options });
@@ -900,6 +901,12 @@ describe("desktop skeleton", () => {
       expect(service.graphOperationRecorder).toBeNull();
       expect(session.configurationNames).toEqual(["codex-basic"]);
       const catalog = JSON.parse(await readFile(session.catalogPath, "utf8"));
+      expect(catalog.configurations).toEqual([
+        expect.objectContaining({
+          runtimeAvailable: false,
+          unavailableReason: expect.objectContaining({ code: "harness_readiness_pending" }),
+        }),
+      ]);
       expect(catalog.unavailableConfigurations).toEqual([expect.objectContaining({
         name: "prime-agent-basic",
         reason: expect.objectContaining({ code: "prime_agent_boundary_unsupported" }),

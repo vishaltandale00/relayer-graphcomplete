@@ -37,6 +37,7 @@ describe("injectable production provider composition", () => {
     const published = [];
     let runtimeReady = false;
     const prepareRuntime = vi.fn(async () => { runtimeReady = true; });
+    const evaluateReadiness = vi.fn(async () => {});
     const create = vi.fn(({ definition }) => {
       if (!runtimeReady) throw new Error("managed runtime unavailable");
       return {
@@ -68,6 +69,7 @@ describe("injectable production provider composition", () => {
       }]; } },
       credentialStore: { async get() { return { key: "opaque" }; }, async listReferences() { return ["provider:recoverable"]; } },
       prepareRuntime,
+      evaluateReadiness,
       publishCatalog: async (snapshot) => { published.push(snapshot); },
       modelCatalogOptions: { backgroundIntervalMs: 60_000 },
     });
@@ -77,6 +79,11 @@ describe("injectable production provider composition", () => {
     expect(prepareRuntime).not.toHaveBeenCalled();
     await composition.modelCatalog.explicitRefresh("recoverable");
     expect(prepareRuntime).toHaveBeenCalledOnce();
+    expect(evaluateReadiness).toHaveBeenCalledWith(expect.objectContaining({
+      trigger: "explicit-repair",
+      providerDefinition: expect.objectContaining({ id: "recoverable" }),
+      models: [expect.objectContaining({ id: "recovered-model" })],
+    }));
     expect(create).toHaveBeenCalledTimes(2);
     expect(published.at(-1)).toMatchObject({
       providerId: "recoverable",

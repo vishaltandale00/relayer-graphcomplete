@@ -227,6 +227,21 @@ describe("provider and harness renderer markup", () => {
     expect(markup).not.toContain('data-provider-reconnect="openai-work"');
   });
 
+  it("offers provider-scoped execution repair without naming a failed harness", () => {
+    const markup = providerDefinitionsMarkup([{
+      id: "openai-work", adapterId: "openai-api", label: "OpenAI Work",
+      lifecycleState: "active", connected: true,
+      unavailableReason: {
+        code: "provider_no_available_execution_configurations",
+        message: "This provider currently has no available execution configurations.",
+      },
+    }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
+    expect(markup).toContain("Needs execution setup");
+    expect(markup).toContain("Repair execution configurations");
+    expect(markup).not.toContain("codex-basic");
+    expect(markup).not.toContain("prime-agent");
+  });
+
   it("shows only harnesses usable through a currently connected provider and eligible model", () => {
     const markup = harnessConfigurationsMarkup({
       defaults: { harnessId: "codex-basic" },
