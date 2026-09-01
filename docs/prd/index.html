@@ -2328,17 +2328,17 @@ settings:
 <p>Each hard-task family has two catalog members. They share fixture, verifier, and outcome rubric identity.</p>
 <p>They differ only in whether a person can act while Complete is still running.</p>
 <table>
-<thead><tr><th>Variant</th><th>Human participation</th><th>What the simulated-user judge does</th></tr></thead>
+<thead><tr><th>Case type</th><th>Human-root participation</th><th>Simulated user</th></tr></thead>
 <tbody>
-<tr><td>Single-turn</td><td>One opening message. One <code>complete()</code>. No later user text or node actions.</td><td>After the root settles it reviews the workspace. It does not act during the turn.</td></tr>
-<tr><td>In-turn steered</td><td>One opening message. One human-root <code>complete()</code>. The user acts on published current while that complete is in flight.</td><td>It may navigate, answer inputs on many nodes, and use authored invoke actions. It must not start a second human-root <code>complete()</code>. Presentation grades stay independent of the outcome verifier.</td></tr>
+<tr><td>Single-turn</td><td>One opening message. One <code>complete()</code>. No user action until that root settles.</td><td>After the root settles it reviews the accepted graph. It does not act during the complete.</td></tr>
+<tr><td>In-turn steered</td><td>One opening message. One human-root <code>complete()</code>. Many actions on published current while that complete is in flight.</td><td>The same person tries to finish the work and judges that experience during the build.</td></tr>
 </tbody></table>
 <p>This is not a scripted two-prompt thread. Evaluator-authored follow-up text is forbidden on the steered member.</p>
-<p>The opening prompt is a realistic request. Later participation happens on visible working state, not after a later composer Send.</p>
+<p>The opening prompt is a realistic request. Chat turns are UX sugar. The semantic unit is <code>complete()</code>.</p>
 <p>A model turn ending is still not graph completion. Relayer still owns one-active-human-root-completion per thread.</p>
-<p>Advance publishes a durable current without accepting the interaction. The user may fill inputs and take actions on many current nodes during that one turn.</p>
+<p>Advance publishes a durable current without accepting the interaction.</p>
 <p>These cases measure temporal steering. A harness may not solve them yet. Failure is evidence, not a catalog defect.</p>
-<p>The same sealed verifier grades both variants from the final workspace.</p>
+<p>The same sealed verifier grades both variants from the final workspace. Experience scores cannot offset that outcome.</p>
 <p>The catalog type ids are <code>single-turn</code> and <code>in-turn-steered</code>.</p>
 <p>Member IDs still use <code>.single-turn</code> and <code>.multi-turn</code> suffixes.</p>
 <p>Already-published one-shot IDs remain the single-turn member.</p>
@@ -2346,6 +2346,20 @@ settings:
 <p>Relayer Eval currently runs this pair only for the H3 status-code repair.</p>
 <p>Other Issue #278 families remain specified, not admitted.</p>
 <p>The catalog verifies every object digest before use and garbage-collects only unreferenced materializations and runs according to an explicit retention policy. Checked-in case/config/judge JSON stays small enough to review normally in pull requests.</p>
+<h3>13.2.3 In-turn simulated user</h3>
+<p>The in-turn steered member uses one simulated user. There are no parallel users and no real human in the loop.</p>
+<p>That person tries to get the requested work done. They also judge the experience they have while doing it.</p>
+<p>They act while the human-root <code>complete()</code> is still building. They use published current on the ordinary product graph.</p>
+<p>Composer Send starts a human-root <code>complete()</code>. Invoke also starts a <code>complete()</code> from a published action.</p>
+<p>The simulated user must not Send while that human root is in flight.</p>
+<p>Invoke is a child complete, not a second human root. The same user may act on any layer the product interface can open.</p>
+<p>Who published the layer does not matter. Navigation through the ordinary interface is the bound.</p>
+<p>Watching published current grow costs a step. Wait shares the budget with navigate, input, invoke, and abandon.</p>
+<p>This slice is one human-root complete with many actions. Sequential human-root steered cases are not specified here.</p>
+<p>They capture and rate during the session. The accepted graph is only the ending.</p>
+<p>Single-turn members still judge after the root settles. They do not act during the complete.</p>
+<p>A steered run remains valid if an input or invoke cannot land yet. That inability is part of the experience.</p>
+<p>Current judge coverage rules still apply. Trying to solve does not excuse skipped layer or node coverage.</p>
 <h3>13.3 Runner execution</h3>
 <p>Local commands are standardized target interfaces:</p>
 <pre><code class="language-sh">npm run eval -- --case empty-project.task-system.two-turn --configuration codex-basic
@@ -2369,10 +2383,15 @@ npm run eval:web
 <p>Live commands require an explicit confirmation in the web runner or command flag plus an available credential reference and declared cost cap. They never run inside <code>npm run check</code> or the default test suite. CI may run them only in a separately authorized, budget-limited job. Closing the web page does not orphan a run: the local runner service retains status, cancellation, and the immutable partial failure record.</p>
 <h3>13.4 Judge design</h3>
 <p>Deterministic checks always run first. The first empty-project case then uses only the six-fact structured judge defined in Section 15D.4. It does not require an operator agent, pairwise comparison, grounding rubric, repeat policy, or promotion threshold.</p>
-<p>The first project suite adds one <strong>simulated-user judge</strong>. The judge opens the completed turn in the exact read-only production workspace, explores the response through visible controls, and grades what the product actually communicates. It does not substitute raw graph JSON, database records, or hidden node text for the rendered experience. Every qualitative rating is supported by screenshots captured during that review session.</p>
+<p>The first project suite adds one <strong>simulated user</strong>.</p>
+<p>On single-turn members that person reviews after the root settles. They use the read-only production workspace in Section 13.4.1.</p>
+<p>On in-turn steered members they act and judge during the build. That path is Section 13.2.3.</p>
+<p>Neither path substitutes raw graph JSON, database records, or hidden node text for the rendered experience. Every qualitative rating is supported by screenshots captured in that session.</p>
 <p>Configuration comparison and blind pairwise judging are later evaluation-runner capabilities. When added, the judge model/version, prompt version, rubric version, repeat count, thresholds, and tie policy are recorded with the run. Human review in the real graph UX remains required before product promotion.</p>
 <h4>13.4.1 Simulated-user tool contract</h4>
-<p>The simulated-user judge receives the original request, a versioned rubric, and the read-only production review window. It also receives six graph-review tools and read-only shell access to the immutable task artifact. Shell access exists to discover facts needed to apply the rubric; only the rendered graph can prove what the user experience communicates.</p>
+<p>After-settle review receives the original request, a versioned rubric, and the read-only production review window. It also receives six graph-review tools and read-only shell access to the immutable task artifact.</p>
+<p>In-turn steering uses the ordinary product graph instead of that review window. See Section 13.2.3.</p>
+<p>Shell access exists to discover facts needed to apply the rubric. Only the rendered graph can prove what the user experience communicates.</p>
 <table>
 <thead><tr><th>Tool</th><th>Contract</th></tr></thead>
 <tbody>
@@ -2677,8 +2696,12 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <li>the app server rejects writes made with the review session.</li>
 </ul>
 <h3>9.3 Simulated-user review</h3>
-<p>A project evaluation may run several threads and turns against one pinned repository materialization. After each accepted turn, the configured simulated-user judge opens the same read-only production workspace a person reviews. It navigates visible nodes and actions and captures the screenshots it needs. It then fills the literal rubric in Section 13.4 and saves its exploration trace with the immutable run.</p>
-<p>The judge may change only review presentation state: visible selection, navigation history, and screenshot target. It cannot send a message, invoke mutating actions, change project files, alter graph records, or modify the source run. Human reviewers can open the same execution and inspect the exact screenshots cited by each finding.</p>
+<p>A project evaluation may run several threads and turns against one pinned repository materialization.</p>
+<p>After-settle review opens the same read-only production workspace a person reviews. It fills the literal rubric in Section 13.4 and saves its exploration trace with the immutable run.</p>
+<p>In-turn steered members follow Section 13.2.3. That simulated user acts on the ordinary product graph while the human-root complete is building.</p>
+<p>After-settle review may change only review presentation state. It cannot send a message, invoke, change project files, alter graph records, or modify the source run.</p>
+<p>The in-turn user may navigate, answer inputs, and invoke through the ordinary product. They still must not composer-Send while that human root is in flight.</p>
+<p>Human reviewers can open the same execution and inspect the exact screenshots cited by each finding.</p>
 <h3>9.4 Candidate trace contract</h3>
 <p>Each available candidate trace has a versioned manifest, ordered events, achieved coverage, byte length, digest, and artifact reference. The trace excludes graph credentials and secrets.</p>
 <p>Eval records graph HTTP operations at the product runtime boundary for every harness and case. The bounded ledger preserves response order, operation path, status, stable error codes, and sanitized graph result identities. It excludes bearer tokens, control credentials, database paths, and provider-private payloads. It remains a distinct integrity-described artifact beside the provider trace; one cannot substitute for the other.</p>
@@ -2860,6 +2883,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <li>Mac App Store distribution, Windows Arm, and macOS 12 or older;</li>
 <li>canonical user-facing agent-activity or diagnostic-trace views.</li>
 <li>a generalized public harness protocol, arbitrary harness catalog, plug-in installer, or public conformance kit;</li>
+<li>sequential human-root steered eval, each with in-turn multi-action;</li>
 </ul>
 <h3>17.3 Decisions still open</h3>
 <ul>
