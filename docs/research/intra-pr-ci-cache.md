@@ -152,6 +152,51 @@ independently recover the hit/miss/error breakdown from the completed job.
 ([post-merge run](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33465911128),
 [GitHub cache usage and rate limits](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#usage-limits-and-eviction-policy))
 
+## Post-#392 parallel-lane observations
+
+PR #392 replaced the serial Rust chapter with four isolated lanes
+(`rust-clippy`, `rust-tests`, `rust-crash`, `rust-runtime`) sharing one
+toolchain-bound sccache namespace (`relayer-rust-parallel-line-tables-v1`),
+removed the duplicate serial full gate in favor of the versioned verification
+portfolio, and passes runtime binaries to Vitest through a verified workflow
+artifact.
+
+Measured hosted runs (job start to completion, GitHub timestamps):
+
+| Run | Context | Clippy | Tests | Crash | Runtime | Vitest | Whole workflow |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [PR #392 final](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33483636709) (new namespace, effectively cold) | full-mode PR | 12m29s | 13m19s | 14m30s | 12m07s | 3m29s | about 16m46s |
+| [first `main` push after merge](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33485024514) (trusted cold seed) | full portfolio | 18m40s | 20m11s | 21m44s | 20m13s | 3m14s | about 24m26s |
+
+The PR run is the first consumption of the parallel namespace, so its lanes
+seeded and cross-read each other instead of reusing trusted objects; the
+`main` push is the first trusted writer. Both are cold comparisons for the new
+namespace, not the steady-state warm target. The next real changed-head PR
+after the trusted seed is the admission comparison required by
+`docs/agents/ci.md`.
+
+The PR run's lane artifacts recorded the expected cold-namespace consequence:
+47–59% cache-hit rates dominated by C/C++ objects, Rust hit rates of 16–25%,
+and 457–567 cache write errors per lane. The write errors are four lanes
+compiling and storing the same compiler objects concurrently; the losing write
+for an identical key is harmless because the winning lane stored the same
+content-addressed object. Steady-state warm runs only recompile changed units,
+so duplicate writes collapse to the lanes that share each changed unit.
+Average cache write latency was 0.18–0.71s and read hits 0.07–0.23s. No read
+errors were observed. Write errors remain nonfatal by backend contract; they
+are recorded per lane in the 14-day sccache statistics artifacts.
+
+Vitest no longer compiles Rust. Its job downloaded the 255 MB runtime artifact
+(both server binaries with the `line-tables-only` profile), verified its
+identity fields, installed the binaries into `target/debug`, and ran every
+selected test freshly in about 3m15s.
+
+`--timings=html` reports now upload from the Clippy, default-test, and runtime
+lanes. The crash lane executes through the repository npm script and cannot
+inject Cargo flags, so it records step durations only. Use the reports to
+identify repeated compilation units before any further feature/profile
+consolidation.
+
 ## Ranked next options
 
 ### 1. Keep sccache admitted in Rust, then verify the trusted-main consumer

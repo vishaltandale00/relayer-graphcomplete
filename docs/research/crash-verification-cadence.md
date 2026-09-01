@@ -6,7 +6,27 @@ Repository snapshot: [`d861a49d`](https://github.com/vishaltandale00/relayer-gra
 
 Issue: [#360, Make CI fail fast with integration-train caching and affected-module checks](https://github.com/vishaltandale00/relayer-graphcomplete/issues/360)
 
-Status: research and design only. This note does not change CI, tests, branch rules, product behavior, release behavior, or remote state.
+Status: research and staged implementation. This note does not change tests,
+branch rules, product behavior, release behavior, or remote state.
+
+Implementation progress:
+
+- Stage 2, first narrowing step, landed after #392: the affected planner no
+  longer selects the crash-reconciliation lane for `relayer-app-server`-only
+  changes. Selection is the checked-in `rustCrashPackages` list
+  (`relayer-graph-core`, `relayer-graph-server`) intersected with the Rust
+  reverse-dependency closure; telemetry-capability changes still select the
+  lane because the closure contains `relayer-graph-server`. Full-portfolio
+  runs, unknown/unmapped fail-open, and the exact crash command are unchanged.
+  The crash command contains no app-server test, so no checkpoint lost an
+  owner; app-server interrupted-execution recovery remains owned by its
+  ordinary tests in the default-test lane.
+- Stage 0 evidence collection landed as `--timings=html` artifacts on the
+  Clippy, default-test, and runtime lanes (the crash lane runs through its npm
+  script and records step durations only).
+- Stages 1–4 (checkpoint manifest, purpose-split smoke binaries, smoke
+  cadence, nightly depth, release binding) remain unimplemented and still
+  require their deterministic planner tests and hosted observations first.
 
 ## Decision
 

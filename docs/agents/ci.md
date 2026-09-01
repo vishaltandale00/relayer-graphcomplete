@@ -71,8 +71,26 @@ all fields and installs only those authenticated bytes into `target/debug`.
 This removes independent Vitest Rust compilation without caching any test
 result; every mapped Vitest test still runs freshly.
 
+The Clippy, default-test, and runtime lanes append `--timings=html` to their
+direct Cargo invocations when the workflow gives them a
+`RELAYER_CARGO_TIMINGS_DIR`. Each lane uploads its harvested
+`cargo-timing*.html` reports as a non-gating 14-day artifact beside its
+sccache statistics. The crash lane executes its command through the
+repository npm script, which cannot inject Cargo flags, so it records step
+durations but no timing report. Timing reports expose compilation units,
+features, critical path, and concurrency; they are measurement evidence, not
+verification evidence.
+
 Job summaries record Node setup/npm-cache status and elapsed time, Rust-cache
 status and restore time, chapter duration, and the first actionable failure.
+
+The crash-reconciliation lane selects on the checked-in
+`rustCrashPackages` list (`relayer-graph-core` and `relayer-graph-server`)
+intersected with the affected Rust closure, plus every full-portfolio run.
+`relayer-app-server` is deliberately excluded: the crash command compiles and
+executes no app-server code, and app-server interrupted-execution recovery
+remains owned by its ordinary Rust tests. See
+`docs/research/crash-verification-cadence.md` for the staged narrowing plan.
 
 The checked-in v1 map is `scripts/ci/affected-modules.v1.json`. Rust and npm
 reverse dependents are derived from their manifests. Lockfile, toolchain,
@@ -85,3 +103,18 @@ Source-module changes conservatively run the complete fresh Vitest portfolio;
 the planner narrows their compilation, typecheck, packaging, and non-Vitest
 chapters. This keeps product and authority boundaries intact when a new test is
 added outside an older component-specific list.
+
+Explicitly owned paths may select no chapter at all. Repository metadata
+(`LICENSE`, `.gitignore`, `CONTRIBUTING.md`, `ROADMAP.md`, `CONTEXT.md`,
+`live-run.example.json`), process documentation (`docs/research/`,
+`docs/postmortems/`, release-operations and specification notes), and manual
+desktop/evidence driver scripts have no CI consumer, so a change that touches
+only those paths still runs planning, the quick deterministic checks, and the
+stable `check` aggregator, and nothing else. Each such mapping is an explicit
+ownership declaration in the v1 map; unknown and unmapped paths still fail
+open to the full portfolio. Scripts that Vitest imports or reads keep their
+owning test files, and `scripts/prepare-ladybug-source.mjs` additionally
+selects packaging because the pinned Ladybug build consumes it.
+`docs/graph-query-v1.md` and `docs/graph-query-v1-errors.json` are
+compile-time inputs of the graph-core query contract tests, so they select the
+Rust closure of `relayer-graph-core`.
