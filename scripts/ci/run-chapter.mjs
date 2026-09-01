@@ -3,12 +3,13 @@
 import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
+  rmSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const [chapter] = process.argv.slice(2);
@@ -31,27 +32,31 @@ function cargoTimingArguments(args) {
 }
 
 // Cargo writes its report to $CARGO_TARGET_DIR/cargo-timings/cargo-timing.html.
-// Harvesting is measurement evidence only; it must never fail a lane.
-function harvestCargoTimingReport(label) {
+// Harvesting is measurement evidence only; it must never fail a lane, but it
+// must run on failed compilations too: those are exactly the runs the report
+// exists to diagnose.
+function harvestCargoTimingReport() {
   if (!cargoTimingsDirectory) return;
   try {
-    const targetDirectory = process.env.CARGO_TARGET_DIR || "target";
+    const targetDirectory = resolve(scriptDirectory, "..", "..", process.env.CARGO_TARGET_DIR || "target");
     const report = join(targetDirectory, "cargo-timings", "cargo-timing.html");
     if (!existsSync(report)) return;
     mkdirSync(cargoTimingsDirectory, { recursive: true });
-    const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    renameSync(report, join(cargoTimingsDirectory, `${slug}.html`));
-  } catch {
-    // Leave the lane green; timing telemetry is non-gating.
+    const destination = join(cargoTimingsDirectory, `${chapter}.html`);
+    copyFileSync(report, destination);
+    rmSync(report);
+  } catch (error) {
+    console.warn(`warning: could not harvest the Cargo timing report: ${error.message}`);
   }
 }
 
-function run(label, command, args, environment = {}) {
+function run(label, command, args, environment = {}, options = {}) {
   const startedAt = Date.now();
   const result = spawnSync(command, args, {
     stdio: "inherit",
     env: { ...process.env, ...environment },
   });
+  if (options.harvestCargoTiming) harvestCargoTimingReport();
   const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   const outcome = result.status === 0 ? "passed" : "failed";
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -70,7 +75,7 @@ function run(label, command, args, environment = {}) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-function runDeclared(role, id, label, command, args, environment = {}) {
+function runDeclared(role, id, label, command, args, environment = {}, options = {}) {
   const chapterContract = portfolio.chapters?.[chapter];
   const field = role === "authority" ? "authorities" : "prerequisites";
   if (!chapterContract?.[field]?.includes(id)) {
@@ -82,11 +87,11 @@ function runDeclared(role, id, label, command, args, environment = {}) {
       `${JSON.stringify({ chapter, role, id })}\n`,
     );
   }
-  run(label, command, args, environment);
+  run(label, command, args, environment, options);
 }
 
-function runAuthority(id, label, command, args, environment = {}) {
-  runDeclared("authority", id, label, command, args, environment);
+function runAuthority(id, label, command, args, environment = {}, options = {}) {
+  runDeclared("authority", id, label, command, args, environment, options);
 }
 
 function runPrerequisite(id, label, command, args, environment = {}) {
@@ -142,8 +147,9 @@ if (chapter === "quick") {
       "-D",
       "warnings",
     ]),
+    {},
+    { harvestCargoTiming: true },
   );
-  harvestCargoTimingReport("Rust Clippy");
 } else if (chapter === "rust-tests") {
   const packages = packageArguments(plan.rustPackages);
   runAuthority(
@@ -151,8 +157,9 @@ if (chapter === "quick") {
     "Fresh Rust tests",
     "cargo",
     cargoTimingArguments(["test", ...packages]),
+    {},
+    { harvestCargoTiming: true },
   );
-  harvestCargoTimingReport("Fresh Rust tests");
 } else if (chapter === "rust-crash") {
   runAuthority("rust-crash", "Graph crash reconciliation", "npm", [
     "run",
@@ -164,8 +171,9 @@ if (chapter === "quick") {
     "Selected Rust runtime build",
     "cargo",
     cargoTimingArguments(["build", ...packageArguments(plan.runtimeRustPackages)]),
+    {},
+    { harvestCargoTiming: true },
   );
-  harvestCargoTimingReport("Selected Rust runtime build");
 } else if (chapter === "typescript") {
   for (const workspace of npmBuildOrder.filter((name) =>
     plan.npmBuildWorkspaces.includes(name),

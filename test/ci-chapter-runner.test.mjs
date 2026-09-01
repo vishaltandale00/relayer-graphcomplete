@@ -43,6 +43,10 @@ describe("CI chapter runner", () => {
       cwd: repositoryRoot,
       env: {
         ...process.env,
+        // Pin the timing inputs so ambient exports cannot flip these tests
+        // into the --timings branch or move a real report as a side effect.
+        CARGO_TARGET_DIR: join(directory, "cargo-target"),
+        RELAYER_CARGO_TIMINGS_DIR: "",
         CI_PLAN_JSON: JSON.stringify(plan),
         CI_INVOCATION_TRACE: invocationTrace,
         PATH: `${directory}:${process.env.PATH}`,
@@ -100,7 +104,7 @@ describe("CI chapter runner", () => {
     expect(readFileSync(trace, "utf8").trim()).toBe(
       "cargo:test -p relayer-graph-core --timings",
     );
-    expect(readdirSync(timingsDirectory)).toEqual(["fresh-rust-tests.html"]);
+    expect(readdirSync(timingsDirectory)).toEqual(["rust-tests.html"]);
     expect(
       existsSync(join(targetDirectory, "cargo-timings", "cargo-timing.html")),
     ).toBe(false);
@@ -134,6 +138,34 @@ describe("CI chapter runner", () => {
       "cargo:clippy -p relayer-graph-core --all-targets --all-features --timings -- -D warnings",
     );
     expect(readdirSync(timingsDirectory)).toEqual(["rust-clippy.html"]);
+  });
+
+  test("harvests the timing report even when the Cargo invocation fails", () => {
+    const timingsDirectory = join(directory, "timings-failed");
+    const targetDirectory = join(directory, "cargo-target-failed");
+    writeFileSync(trace, "");
+    writeFileSync(
+      join(directory, "cargo"),
+      '#!/bin/sh\necho "cargo:$*" >> "$TRACE"\ncase " $* " in\n  *--timings*) mkdir -p "$CARGO_TARGET_DIR/cargo-timings" && echo "<html></html>" > "$CARGO_TARGET_DIR/cargo-timings/cargo-timing.html" ;;\nesac\nexit 101\n',
+    );
+    chmodSync(join(directory, "cargo"), 0o755);
+    expect(() =>
+      execFileSync(process.execPath, [runner, "rust-tests"], {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: targetDirectory,
+          CI_PLAN_JSON: JSON.stringify({ rustPackages: ["relayer-graph-core"] }),
+          CI_INVOCATION_TRACE: invocationTrace,
+          PATH: `${directory}:${process.env.PATH}`,
+          RELAYER_CARGO_TIMINGS_DIR: timingsDirectory,
+          TRACE: trace,
+        },
+      }),
+    ).toThrow();
+    // The report exists to diagnose exactly the runs that fail; losing it on
+    // the failure path would defeat its purpose.
+    expect(readdirSync(timingsDirectory)).toEqual(["rust-tests.html"]);
   });
 
   test("builds only the planner-selected runtime and keeps crash tests fresh", () => {

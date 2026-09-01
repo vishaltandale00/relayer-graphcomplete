@@ -34,10 +34,11 @@ across lanes, which matters for the Ladybug CMake build whose generated-header
 paths would otherwise fragment the C/C++ object cache per lane. Their isolated
 runners share one toolchain-bound, content-addressed sccache namespace. The Clippy,
 default-test, and crash lanes read and write compiler objects; the runtime
-lane reads only. Its unique outputs are uncachable binary links, and its
-shareable units are identical to the default-test lane's, so reading without
-writing removes duplicate-write collisions with the lanes that seed those
-objects. Same-repository pull requests and repository branch pushes may store
+lane reads only while the writer lanes run. Its unique outputs are uncachable
+binary links, and its shareable units are identical to the default-test
+lane's, so reading without writing removes duplicate-write collisions with the
+lanes that seed those objects. On runtime-only plans no writer lane exists, so
+the runtime lane writes to keep the namespace from going cold. Same-repository pull requests and repository branch pushes may store
 compiler objects through the writing lanes. Fork pull
 requests do not run sccache and receive no compiler-cache credentials; they
 compile directly with `rustc`. GitHub's ref scoping lets pull requests inherit a
@@ -115,10 +116,13 @@ added outside an older component-specific list.
 Explicitly owned paths may select no chapter at all. Repository metadata
 (`LICENSE`, `.gitignore`, `CONTRIBUTING.md`, `ROADMAP.md`, `CONTEXT.md`,
 `live-run.example.json`), process documentation (`docs/research/`,
-`docs/postmortems/`, release-operations and specification notes), and manual
-desktop/evidence driver scripts have no CI consumer, so a change that touches
-only those paths still runs planning, the quick deterministic checks, and the
-stable `check` aggregator, and nothing else. `scripts/clean-dist.mjs` also
+`docs/postmortems/`, specification notes), and manual desktop/evidence driver
+scripts have no CI consumer, so a change that touches only those paths still
+runs planning, the quick deterministic checks, and the stable `check`
+aggregator, and nothing else. Two documentation paths are different:
+`docs/desktop-release-operations.md` is read by the desktop-shell checkpoint,
+and `.gitattributes` is read by the byte-stability and Ladybug receipt-input
+checkpoints, so both select their owning Vitest tests. `scripts/clean-dist.mjs` also
 selects no extra chapter, but the always-running quick chapter executes it as
 the portfolio's `clean-dist` authority, so every plan verifies it. Each such
 mapping is an explicit ownership declaration in the v1 map; unknown and

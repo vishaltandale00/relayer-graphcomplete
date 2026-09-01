@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
@@ -340,14 +340,81 @@ describe("affected-module plan v1", () => {
     expect(result.vitestFiles).toEqual(["test/desktop-shell.test.mjs"]);
   });
 
-  test("maps the provider-UX browser helper to the evidence test that serves it", () => {
-    const result = plan("scripts/provider-ux-evidence-browser.mjs");
+  test("maps the provider-UX evidence scripts to no chapter", () => {
+    // Their only executing consumer is macOS-media-tools gated and skips on
+    // the Ubuntu CI runner, so no checkpoint observes them there; claiming a
+    // Vitest owner would satisfy the mapping guard with a test that cannot
+    // run. The exempted-script guard below polices the declarations.
+    for (const changedFile of [
+      "scripts/provider-ux-evidence-browser.mjs",
+      "scripts/capture-provider-ux-video.mjs",
+    ]) {
+      const result = plan(changedFile);
 
-    expect(result.mode).toBe("affected");
-    expect(result.chapters.vitest).toBe(true);
-    expect(result.vitestFiles).toEqual([
-      "test/provider-electron-evidence.test.mjs",
+      expect(result.mode).toBe("affected");
+      expect(Object.values(result.chapters).some(Boolean)).toBe(false);
+    }
+  });
+
+  test("guards every exempted path declaration against drift", () => {
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    const exempted = [...config.chapterOwners, ...config.scriptOwners].filter(
+      (owner) => owner.exact && (owner.chapters ?? []).length === 0,
+    );
+    expect(exempted.length).toBeGreaterThan(20);
+
+    // CI contract tests necessarily name mapped paths; they are not product
+    // consumers of them.
+    const ciContractTests = new Set([
+      "ci-affected-plan.test.mjs",
+      "ci-chapter-runner.test.mjs",
+      "ci-required-check.test.mjs",
+      "ci-runtime-artifact.test.mjs",
+      "ci-verification-portfolio.test.mjs",
     ]);
+    const testCorpus = readdirSync(join(repositoryRoot, "test"))
+      .filter(
+        (name) =>
+          /\.(test|spec)\.[cm]?[jt]sx?$/.test(name) &&
+          !ciContractTests.has(name),
+      )
+      .map((name) =>
+        readFileSync(join(repositoryRoot, "test", name), "utf8"),
+      )
+      .join("\n");
+
+    // Verified references that do not consume the repository file in CI.
+    // Each one must keep matching, or the guard fails and the exemption
+    // needs a fresh review.
+    const verifiedReferences = {
+      ".gitignore":
+        "evidence-capture-integrity.test.mjs writes a temp-directory .gitignore fixture",
+      LICENSE:
+        "ladybug-native-receipts.test.mjs matches OpenSSL LICENSE.txt fixture names only",
+      "scripts/capture-provider-ux-video.mjs":
+        "provider-electron-evidence.test.mjs consumer is macOS-media gated and skips on CI runners",
+    };
+
+    for (const owner of exempted) {
+      expect(existsSync(join(repositoryRoot, owner.exact))).toBe(true);
+      const referenced = testCorpus.includes(owner.exact);
+      if (owner.exact in verifiedReferences) {
+        expect(
+          referenced,
+          `${owner.exact}: verified reference disappeared, re-review the exemption`,
+        ).toBe(true);
+        continue;
+      }
+      expect(
+        referenced,
+        `${owner.exact}: a test now references this exempted path, give it that checkpoint`,
+      ).toBe(false);
+    }
+    for (const owner of [...config.chapterOwners, ...config.scriptOwners]) {
+      if (!owner.prefix || (owner.chapters ?? []).length > 0) continue;
+      expect(existsSync(join(repositoryRoot, owner.prefix))).toBe(true);
+      expect(testCorpus.includes(owner.prefix)).toBe(false);
+    }
   });
 
   test("maps documentation-only and manual-driver paths to no chapter", () => {
@@ -364,14 +431,25 @@ describe("affected-module plan v1", () => {
     }
   });
 
-  test("keeps .gitattributes on the byte-stability checkpoint that reads it", () => {
+  test("keeps .gitattributes on every checkpoint that reads it", () => {
     const result = plan(".gitattributes");
 
     expect(result.mode).toBe("affected");
     expect(result.chapters.vitest).toBe(true);
+    // prime-agent-packaging checks the harness/python eol pins; the ladybug
+    // lifecycle test runs git check-attr over the receipt-input paths and is
+    // the checkpoint that actually verifies the ladybug LF pins.
     expect(result.vitestFiles).toEqual([
+      "test/ladybug-packaged-lifecycle.test.mjs",
       "test/prime-agent-packaging.test.mjs",
     ]);
+  });
+
+  test("keeps single-file owners exact instead of prefix-matched", () => {
+    const result = plan("docs/graph-query-v1.mdx");
+
+    expect(result.mode).toBe("full");
+    expect(result.reasons.join(" ")).toContain("docs/graph-query-v1.mdx");
   });
 
   test("keeps CI-tooling scripts on the full portfolio", () => {

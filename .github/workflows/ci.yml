@@ -216,10 +216,12 @@ jobs:
         with:
           lane: rust-runtime
           # The runtime lane's unique outputs are uncachable binary links; its
-          # shareable units are identical to the default-test lane's. Reading
-          # without writing removes duplicate-write collisions with the lanes
-          # that seed those objects.
-          sccache-mode: READ_ONLY
+          # shareable units are identical to the default-test lane's. When the
+          # Rust chapter runs, the writer lanes seed those objects and the
+          # runtime lane reads without writing to avoid duplicate-write
+          # collisions. On runtime-only plans no writer lane exists, so the
+          # runtime lane writes to keep the namespace from going cold.
+          sccache-mode: ${{ needs.plan.outputs.rust == 'true' && 'READ_ONLY' || 'READ_WRITE' }}
       - name: Run selected Rust runtime build
         run: node scripts/ci/run-chapter.mjs rust-runtime
         env:
@@ -233,7 +235,7 @@ jobs:
           RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
           SCCACHE_CLIENT_SIDE: "1"
           SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_GHA_RW_MODE: READ_ONLY
+          SCCACHE_GHA_RW_MODE: ${{ needs.plan.outputs.rust == 'true' && 'READ_ONLY' || 'READ_WRITE' }}
           SCCACHE_GHA_VERSION: ${{ steps.rust-setup.outputs.cache-version }}
           SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
       - name: Report runtime-build compiler cache
@@ -261,6 +263,9 @@ jobs:
         with:
           name: rust-runtime-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
           path: ${{ runner.temp }}/relayer-rust-runtime
+          # Artifacts are immutable per run; overwrite lets "re-run all jobs"
+          # replace the first attempt's bytes instead of failing the upload.
+          overwrite: true
           if-no-files-found: error
           retention-days: 1
       - name: Save trusted Rust dependency downloads for runtime-only changes

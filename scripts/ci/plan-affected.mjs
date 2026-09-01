@@ -187,6 +187,10 @@ function matches(path, rule) {
   );
 }
 
+function ownerMatches(owner, path) {
+  return matches(path, owner);
+}
+
 function allTrueChapters() {
   return Object.fromEntries(allChapterNames.map((chapter) => [chapter, true]));
 }
@@ -214,6 +218,11 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
   if (forcedMode === "full") {
     return fullPlan(repository, config, changedFiles, [
       "Full verification required by workflow mode",
+    ]);
+  }
+  if (!Array.isArray(config.rustCrashPackages)) {
+    return fullPlan(repository, config, changedFiles, [
+      "rustCrashPackages missing from the affected-module map",
     ]);
   }
 
@@ -244,7 +253,7 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
 
     let mapped = false;
     for (const owner of config.rustOwners) {
-      if (path.startsWith(owner.prefix)) {
+      if (ownerMatches(owner, path)) {
         rustRoots.add(owner.package);
         chapters.rust = true;
         for (const testPath of owner.vitestFiles ?? [])
@@ -255,7 +264,7 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
       }
     }
     for (const owner of config.npmOwners) {
-      if (path.startsWith(owner.prefix)) {
+      if (ownerMatches(owner, path)) {
         npmRoots.add(owner.package);
         chapters.typescript = true;
         chapters.packaging ||= owner.packaging === true;

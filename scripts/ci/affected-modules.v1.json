@@ -85,7 +85,7 @@
       "package": "relayer-telemetry-capability",
       "vitestFiles": ["test/desktop-telemetry-release.test.mjs", "test/telemetry-evidence.test.mjs"]
     },
-    { "prefix": "docs/graph-query-v1.md", "package": "relayer-graph-core" }
+    { "exact": "docs/graph-query-v1.md", "package": "relayer-graph-core" }
   ],
   "npmOwners": [
     { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test"] },
@@ -94,7 +94,7 @@
       "package": "@relayer/graph-client",
       "vitestFiles": ["packages/graph-client/test", "test/complete.test.ts", "test/graph-export-capability.test.mjs"]
     },
-    { "prefix": "docs/graph-query-v1-errors.json", "package": "@relayer/graph-client" },
+    { "exact": "docs/graph-query-v1-errors.json", "package": "@relayer/graph-client" },
     { "prefix": "packages/harness-host/", "package": "@relayer/harness-host", "vitestFiles": ["packages/harness-host/test"] },
     {
       "prefix": "desktop/",
@@ -137,7 +137,7 @@
     { "prefix": "docs/agents/", "chapters": ["vitest"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
     { "prefix": "docs/decisions/", "chapters": ["vitest", "prd"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
     { "exact": "docs/architecture.md", "chapters": ["vitest", "prd"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
-    { "exact": ".gitattributes", "chapters": ["vitest"], "vitestFiles": ["test/prime-agent-packaging.test.mjs"] },
+    { "exact": ".gitattributes", "chapters": ["vitest"], "vitestFiles": ["test/ladybug-packaged-lifecycle.test.mjs", "test/prime-agent-packaging.test.mjs"] },
     { "exact": ".gitignore", "chapters": [] },
     { "exact": "LICENSE", "chapters": [] },
     { "exact": "CONTRIBUTING.md", "chapters": [] },
@@ -176,7 +176,7 @@
     { "exact": "scripts/capture-packaged-prime-family-evidence.mjs", "chapters": ["vitest"], "vitestFiles": ["test/prime-family-evidence-contract.test.mjs"] },
     { "exact": "scripts/prime-evidence/contract-matrix.mjs", "chapters": ["vitest"], "vitestFiles": ["test/prime-family-evidence-contract.test.mjs"] },
     { "exact": "scripts/prime-evidence/deterministic-openai-server.mjs", "chapters": ["vitest"], "vitestFiles": ["test/prime-deterministic-provider.test.mjs"] },
-    { "exact": "scripts/capture-provider-ux-video.mjs", "chapters": ["vitest"], "vitestFiles": ["test/provider-electron-evidence.test.mjs"] },
+    { "exact": "scripts/capture-provider-ux-video.mjs", "chapters": [] },
     { "exact": "scripts/capture-conversation-eval-evidence.mjs", "chapters": [] },
     { "exact": "scripts/capture-environment-rail-evidence.mjs", "chapters": [] },
     { "exact": "scripts/capture-graph-authoring-repair-evidence.mjs", "chapters": [] },
@@ -188,7 +188,7 @@
     { "exact": "scripts/check-codex-model-catalog.mjs", "chapters": [] },
     { "exact": "scripts/clean-dist.mjs", "chapters": [] },
     { "exact": "scripts/electron-workspace-driver.mjs", "chapters": [] },
-    { "exact": "scripts/provider-ux-evidence-browser.mjs", "chapters": ["vitest"], "vitestFiles": ["test/provider-electron-evidence.test.mjs"] },
+    { "exact": "scripts/provider-ux-evidence-browser.mjs", "chapters": [] },
     { "exact": "scripts/record-onboarding-tutorial.mjs", "chapters": [] },
     { "exact": "scripts/run-context-draft-warning-test.mjs", "chapters": [] },
     { "exact": "scripts/run-interaction-context-lifecycle-test.mjs", "chapters": [] },

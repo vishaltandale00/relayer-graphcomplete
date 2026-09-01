@@ -320,16 +320,19 @@ describe("CI workflow contract", () => {
       expect(workflow.jobs[writerLane].steps.find((step) => step.id === "rust-setup").with["sccache-mode"]).toBeUndefined();
     }
     // The runtime lane only builds uncachable binary links on top of units
-    // seeded by the default-test lane; reading without writing keeps it from
-    // racing those lanes on identical object stores.
+    // seeded by the default-test lane, so it reads without writing while the
+    // writer lanes run. On runtime-only plans no writer lane exists, so it
+    // writes to keep the namespace from going cold.
+    const conditionalRuntimeMode =
+      "${{ needs.plan.outputs.rust == 'true' && 'READ_ONLY' || 'READ_WRITE' }}";
     const runtimeRun = workflow.jobs["rust-runtime"].steps.find((step) =>
       step.name.startsWith("Run "),
     );
-    expect(runtimeRun.env.SCCACHE_GHA_RW_MODE).toBe("READ_ONLY");
+    expect(runtimeRun.env.SCCACHE_GHA_RW_MODE).toBe(conditionalRuntimeMode);
     expect(
       workflow.jobs["rust-runtime"].steps.find((step) => step.id === "rust-setup")
         .with["sccache-mode"],
-    ).toBe("READ_ONLY");
+    ).toBe(conditionalRuntimeMode);
     expect(
       workflow.jobs["rust-crash"].steps.find((step) => step.name.startsWith("Run ")).env
         .RELAYER_CARGO_TIMINGS_DIR,
@@ -448,6 +451,10 @@ describe("CI workflow contract", () => {
     expect(download.uses).toMatch(/^actions\/download-artifact@[0-9a-f]{40}$/);
     expect(upload.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
     expect(download.with.name).toBe(upload.with.name);
+    // Artifacts are immutable per workflow run; overwrite lets "re-run all
+    // jobs" replace the first attempt's bytes while a stable name keeps
+    // partial re-runs able to download the original upload.
+    expect(upload.with.overwrite).toBe(true);
     for (const identity of [
       "--source-commit",
       "--platform",

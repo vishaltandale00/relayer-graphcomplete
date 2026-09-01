@@ -1121,7 +1121,7 @@ describe("desktop skeleton", () => {
           (error) => ({ status: "rejected", error }),
         ),
         new Promise((resolve) => {
-          closeTimeout = setTimeout(() => resolve({ status: "timed out" }), 1000);
+          closeTimeout = setTimeout(() => resolve({ status: "timed out" }), 500);
         }),
       ]);
       clearTimeout(closeTimeout);
