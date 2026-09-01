@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
 import { access, chmod, lstat, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import * as tar from "tar";
@@ -27,16 +27,9 @@ import {
   sha256,
   verifySignedDependencyClosureSnapshot,
 } from "../shared/prime-runtime-integrity.mjs";
+import { LADYBUG_NOTICES_BUNDLE_DIR, LADYBUG_NOTICES_REPO_ROOT } from "./ladybug-notices.mjs";
 
 const execFileAsync = promisify(execFile);
-
-// The Ladybug native receipt is the authority for the notices a packaged build
-// must ship. Its `noticeSha256` keys are repository-relative under
-// `vendor/ladybug/notices`; `extraResources` bundles that directory to
-// `notices/ladybug`, so the bundled path for a notice is its path with the
-// repository-root prefix replaced by the bundle destination.
-const LADYBUG_NOTICES_ROOT = "vendor/ladybug/notices";
-const LADYBUG_NOTICES_BUNDLE = "notices/ladybug";
 
 function normalizeAsarEntry(entry) {
   return String(entry).replaceAll("\\", "/").replace(/^\/+/, "");
@@ -114,26 +107,46 @@ export async function verifyPackagedLadybugNotices(
   const inventory = JSON.parse(await readFile(inventoryPath, "utf8"));
   const notices = Object.entries(inventory.noticeSha256 ?? {});
   if (notices.length === 0) throw new Error("Vendored Ladybug notice inventory is empty.");
+  const expectedRelatives = new Set();
   for (const [noticePath, expectedDigest] of notices) {
-    if (!noticePath.startsWith(`${LADYBUG_NOTICES_ROOT}/`)) {
+    if (!noticePath.startsWith(`${LADYBUG_NOTICES_REPO_ROOT}/`)) {
       throw new Error(`Ladybug notice path is outside the notices root: ${noticePath}`);
     }
-    const relative = noticePath.slice(LADYBUG_NOTICES_ROOT.length + 1);
-    const bundledPath = join(resourcesPath, LADYBUG_NOTICES_BUNDLE, relative);
+    const relativePath = noticePath.slice(LADYBUG_NOTICES_REPO_ROOT.length + 1);
+    expectedRelatives.add(relativePath);
+    const bundledPath = join(resourcesPath, LADYBUG_NOTICES_BUNDLE_DIR, relativePath);
     let bytes;
     try {
       bytes = await readBundledFile(bundledPath);
     } catch (error) {
       if (error.code === "ENOENT") {
-        throw new Error(`Bundled Relayer runtime is missing the Ladybug notice ${relative}.`);
+        throw new Error(`Bundled Relayer runtime is missing the Ladybug notice ${relativePath}.`);
       }
       throw error;
     }
     if (digest(bytes) !== expectedDigest) {
-      throw new Error(`Bundled Relayer Ladybug notice ${relative} differs from the vendored digest.`);
+      throw new Error(`Bundled Relayer Ladybug notice ${relativePath} differs from the vendored digest.`);
     }
   }
+  // An unlisted file in the bundle would ship without a digest or provenance,
+  // so the bundle must contain exactly the inventoried notices.
+  const bundleRoot = join(resourcesPath, LADYBUG_NOTICES_BUNDLE_DIR);
+  const bundledFiles = await collectBundledNoticeFiles(bundleRoot);
+  const unexpected = bundledFiles.filter((path) => !expectedRelatives.has(path));
+  if (unexpected.length !== 0) {
+    throw new Error(`Bundled Relayer runtime ships unlisted Ladybug notices: ${unexpected.join(", ")}.`);
+  }
   return { notices: notices.length };
+}
+
+async function collectBundledNoticeFiles(root, directory = root, output = []) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await collectBundledNoticeFiles(root, path, output);
+    else if (entry.isFile()) output.push(relative(root, path).replaceAll("\\", "/"));
+    else throw new Error(`unsupported bundled Ladybug notice entry: ${relative(root, path)}`);
+  }
+  return output;
 }
 
 export async function verifyPackagedMacOSGraphServer(

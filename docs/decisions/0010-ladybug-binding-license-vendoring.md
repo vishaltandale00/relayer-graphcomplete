@@ -42,7 +42,10 @@ The native receipt verifier must digest-check the binding notice like every othe
 structural hole that let the gate pass with `licensePath: null`. The binding notice path is
 added so a missing or mutated binding notice fails verification.
 
-Packaging bundles `vendor/ladybug/notices/` and asserts the bundle after packing. The PRD
+Packaging bundles `vendor/ladybug/notices/` to `notices/ladybug` and asserts the bundle after
+packing: the main desktop package verifies every inventoried notice is present with its pinned
+digest and that no unlisted file shipped, and the Eval package runs a notices-only afterPack
+hook (it carries the compiled Ladybug graph server but not the Prime Agent runtime). The PRD
 already promises the build "verifies that the .app contains … licenses", so bundling is not a
 new product decision; it needs the `afterPack` check to make the promise true.
 
@@ -52,8 +55,9 @@ new product decision; it needs the `afterPack` check to make the promise true.
   license receipts are release-ready on reviewed upstream license bytes.
 - The binding notice is held to the same digest discipline as the core, OpenSSL, and
   transitive native notices.
-- Every packaged build ships and verifies the complete Ladybug notice set; a release build
-  that drops a notice fails at pack time rather than shipping without required text.
+- The main desktop package and the Eval package each ship the complete Ladybug notice set and
+  verify it at pack time (present + exact digest + no unlisted files); a build that drops a
+  notice fails at pack time rather than shipping without required text.
 - Upstream remains authoritative for the license text; Relayer records the exact commit, blob,
   and content digest so the vendored bytes stay auditable against the rights holder.
 - A future crate release that finally ships the same `LICENSE` can adopt it without changing

@@ -57,15 +57,10 @@ describe("Ladybug native dependency receipts", () => {
     expect(result.stderr).toContain("zstd has no license notice");
   });
 
-  it("fails closed when the binding loses its vendored notice path", () => {
-    const { inventory } = fixtureInventory();
-    const receipt = JSON.parse(readFileSync(inventory, "utf8"));
-    receipt.binding.licensePath = null;
-    writeFileSync(inventory, `${JSON.stringify(receipt, null, 2)}\n`);
-    const result = spawnSync(process.execPath, [verifier, "--inventory", inventory], { encoding: "utf8" });
-    expect(result.status).not.toBe(0);
-  });
-
+  // The `licensePaths` set must include the binding notice so dropping its
+  // digest entry breaks the notice-set/digest-map alignment. This observes the
+  // structural fix directly; a nulled `binding.licensePath` is instead caught
+  // by the frozen binding snapshot above and needs no separate case.
   it("fails closed when the binding notice digest is dropped from the notice map", () => {
     const { inventory } = fixtureInventory();
     const receipt = JSON.parse(readFileSync(inventory, "utf8"));
@@ -73,6 +68,30 @@ describe("Ladybug native dependency receipts", () => {
     writeFileSync(inventory, `${JSON.stringify(receipt, null, 2)}\n`);
     const result = spawnSync(process.execPath, [verifier, "--inventory", inventory], { encoding: "utf8" });
     expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("every license notice path must have exactly one digest entry");
+  });
+
+  it("reports preserved blockers in plain mode instead of a false no-blockers claim", () => {
+    const { inventory } = fixtureInventory();
+    const receipt = JSON.parse(readFileSync(inventory, "utf8"));
+    receipt.releaseBlockers = ["lbug-binding-missing-upstream-license-file"];
+    writeFileSync(inventory, `${JSON.stringify(receipt, null, 2)}\n`);
+    const result = spawnSync(process.execPath, [verifier, "--inventory", inventory], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("release blockers preserved: lbug-binding-missing-upstream-license-file");
+    expect(result.stdout).not.toContain("no release blockers declared");
+  });
+
+  it("fails closed when an unlisted file appears in the notices directory", () => {
+    const stray = join(root, "vendor/ladybug/notices", "stray-editor-backup~");
+    writeFileSync(stray, "stray\n");
+    try {
+      const result = spawnSync(process.execPath, [verifier], { encoding: "utf8" });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("notices directory must contain exactly the inventoried files");
+    } finally {
+      rmSync(stray, { force: true });
+    }
   });
 
   it("fails closed when the exact source contains an unlisted native subtree", () => {

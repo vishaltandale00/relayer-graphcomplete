@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -36,6 +36,7 @@ import {
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
 import { ACTIVE_PROVIDER_ADAPTER_MODULES } from "../desktop/main/providers/provider-adapter-registry.mjs";
 import { verifyBundledAppServer, verifyPackagedLadybugNotices } from "../desktop/packaging/verify-bundled-app-server.mjs";
+import { ladybugNoticesExtraResource } from "../desktop/packaging/ladybug-notices.mjs";
 import { desktopTarget } from "../desktop/shared/target.mjs";
 import {
   DESKTOP_RELEASE,
@@ -90,6 +91,7 @@ import { isSafeMarkdownLink } from "../desktop/renderer/src/product-workspace/ma
 import { evaluateDesktopReleaseAuthority } from "../scripts/audit-desktop-release-authority.mjs";
 
 const WINDOWS_PUBLISHER_DN = "CN=Relayer Labs LLC, O=Relayer Labs LLC";
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
 describe("desktop skeleton", () => {
   it("uses electron-builder's architecture-specific unpacked application directories", () => {
@@ -286,7 +288,7 @@ describe("desktop skeleton", () => {
     expect(desktopMain).not.toContain("bundledCodexBinary");
     expect(desktopMain).toContain("createManagedRuntimeInstaller");
     expect(packaging).toContain('to: "renderer"');
-    expect(packaging).toContain('{ from: resolve(repositoryRoot, "vendor/ladybug/notices"), to: "notices/ladybug" }');
+    expect(packaging).toContain('ladybugNoticesExtraResource(repositoryRoot)');
     expect(threads).not.toContain("/messages");
     expect(threads).not.toContain("EventSource");
     expect(threads).toContain("permissionProfileId");
@@ -404,7 +406,7 @@ describe("desktop skeleton", () => {
     expect(evalPackaging).toContain('target: [{ target: "dir", arch: [target.architecture] }]');
     expect(evalPackaging).toContain('"main/single-instance.mjs"');
     expect(evalPackaging).toContain('{ from: resolve(desktopRoot, "renderer"), to: "renderer" }');
-    expect(evalPackaging).toContain('{ from: resolve(repositoryRoot, "vendor/ladybug/notices"), to: "notices/ladybug" }');
+    expect(evalPackaging).toContain('ladybugNoticesExtraResource(repositoryRoot)');
     expect(evalPackaging).toContain('"packages/graph-client/dist"');
     expect(evalMain).toContain("GraphCompleteRuntimeService");
     expect(evalMain).toContain("RelayerAppServerService");
@@ -2640,6 +2642,7 @@ describe("desktop skeleton", () => {
     expect(builder.extraResources).toContainEqual(expect.objectContaining({
       to: "harnesses/claude-basic.yaml",
     }));
+    expect(builder.extraResources).toContainEqual(ladybugNoticesExtraResource(repositoryRoot));
     expect(builder.files).toEqual(expect.arrayContaining(
       Object.values(ACTIVE_PROVIDER_ADAPTER_MODULES).map((modulePath) => `main/${modulePath}`),
     ));
@@ -2859,6 +2862,30 @@ describe("desktop skeleton", () => {
         verifyPrimeAgent: async () => { throw Object.assign(new Error("missing nested Prime asset"), { code: "ENOENT" }); },
         verifyNotices,
       })).rejects.toThrow("missing nested Prime asset");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
+        verifyPrimeAgent,
+        verifyNotices: async () => { throw new Error("missing Ladybug notice"); },
+      })).rejects.toThrow("missing Ladybug notice");
+
+      // Let the default notice verifier run against the real vendored notices
+      // copied into the fixture's resources layout, so the seam's default
+      // inventory path and directory mapping are exercised rather than stubbed.
+      await cp(
+        join(repositoryRoot, "vendor", "ladybug", "notices"),
+        join(appPath, "Contents", "Resources", "notices", "ladybug"),
+        { recursive: true },
+      );
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
+        verifyPrimeAgent,
+      })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
 
       const windowsPath = join(directory, "win-unpacked");
       await mkdir(join(windowsPath, "resources", "bin"), { recursive: true });
@@ -2912,6 +2939,11 @@ describe("desktop skeleton", () => {
       await expect(verifyPackagedLadybugNotices(noticeFixture, {
         inventoryPath: noticeInventoryPath,
       })).rejects.toThrow("differs from the vendored digest");
+      await writeFile(join(noticeFixture, "notices", "ladybug", "third-party", "alp-LICENSE"), noticeBytes);
+      await writeFile(join(noticeFixture, "notices", "ladybug", "third-party", "stray-LICENSE"), "stray\n");
+      await expect(verifyPackagedLadybugNotices(noticeFixture, {
+        inventoryPath: noticeInventoryPath,
+      })).rejects.toThrow("ships unlisted Ladybug notices");
 
       const names = desktopReleaseArtifactNames(contract);
       const dmg = Buffer.from("signed-notarized-dmg-fixture");

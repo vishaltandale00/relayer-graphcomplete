@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { PACKAGED_PROVIDER_MODULES } from "../main/providers/provider-adapter-registry.mjs";
 
+import { ladybugNoticesExtraResource } from "./ladybug-notices.mjs";
 import {
   electronBuilderSigningIdentity,
   loadDesktopReleaseContract,
@@ -83,7 +84,7 @@ export function createDesktopBuilderConfig(
       { from: resolve(repositoryRoot, "packages/graph-client/dist"), to: "graph-client" },
       { from: resolve(repositoryRoot, "python/relayer-graph/src/relayer_graph"), to: "python/relayer-graph/src/relayer_graph", filter: ["**/*.py"] },
       { from: resolve(repositoryRoot, "vendor/prime-agent/manifest.json"), to: "prime-agent/manifest.json" },
-      { from: resolve(repositoryRoot, "vendor/ladybug/notices"), to: "notices/ladybug" },
+      ladybugNoticesExtraResource(repositoryRoot),
       { from: resolve(desktopRoot, "renderer"), to: "renderer" },
     ],
     artifactName: `${release ? "Relayer" : "Relayer-DEV"}-\${version}-\${os}-\${arch}.\${ext}`,

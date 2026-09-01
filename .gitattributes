@@ -7,3 +7,4 @@ desktop/shared/target.mjs text eol=lf
 scripts/capture-ladybug-packaged-lifecycle.mjs text eol=lf
 scripts/prepare-ladybug-source.mjs text eol=lf
 vendor/ladybug/source-build-manifest.json text eol=lf
+vendor/ladybug/notices/** text eol=lf

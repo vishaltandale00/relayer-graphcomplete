@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { digestLadybugSourceTree, sha256File } from "./prepare-ladybug-source.mjs";
@@ -89,13 +89,29 @@ export async function verifyLadybugNativeReceipts({
     inventory.openssl.noticePath,
     ...inventory.nativeComponents.filter(({ licensePath }) => licensePath).map(({ licensePath }) => licensePath),
   ]);
-  assert.deepEqual([...licensePaths].sort(), Object.keys(inventory.noticeSha256).sort());
+  assert.deepEqual(
+    [...licensePaths].sort(),
+    Object.keys(inventory.noticeSha256).sort(),
+    "every license notice path must have exactly one digest entry",
+  );
   for (const licensePath of licensePaths) {
     const path = resolveRepositoryPath(licensePath, "licensePath");
     assert.ok((await stat(path)).isFile(), `license notice is not a file: ${licensePath}`);
     assert.ok((await readFile(path)).length > 0, `license notice is empty: ${licensePath}`);
     assert.equal(await sha256File(path), inventory.noticeSha256[licensePath], `license notice changed: ${licensePath}`);
   }
+
+  // An unlisted file under `vendor/ladybug/notices/` would ship without a digest
+  // or provenance, so the directory must contain exactly the inventoried notices.
+  const noticesRoot = resolveRepositoryPath("vendor/ladybug/notices", "notices root");
+  const expectedNotices = Object.keys(inventory.noticeSha256)
+    .map((path) => path.slice("vendor/ladybug/notices/".length))
+    .sort();
+  assert.deepEqual(
+    await collectNoticeFiles(noticesRoot),
+    expectedNotices,
+    "notices directory must contain exactly the inventoried files",
+  );
 
   assert.deepEqual(inventory.systemRuntimes, [
     { name: "Apple libc++ and libSystem", targets: ["aarch64-apple-darwin", "x86_64-apple-darwin"], shipped: false, classification: "operating-system-runtime" },
@@ -149,6 +165,16 @@ export async function verifyLadybugNativeReceipts({
   return inventory;
 }
 
+async function collectNoticeFiles(root, directory = root, output = []) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await collectNoticeFiles(root, path, output);
+    else if (entry.isFile()) output.push(relative(root, path).replaceAll("\\", "/"));
+    else throw new Error(`unsupported notice entry: ${relative(root, path)}`);
+  }
+  return output.sort();
+}
+
 async function renderSourceNotice(thirdPartyRoot, component) {
   const sourcePath = resolve(join(thirdPartyRoot, component.name), component.licenseSource.path);
   assert.ok(
@@ -190,5 +216,13 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const options = parseArguments(process.argv.slice(2));
   if (options.generateNotices) await generateNotices(options.inventoryPath ?? defaultInventoryPath, options.sourceRoot);
   const inventory = await verifyLadybugNativeReceipts(options);
-  console.log(`Ladybug native receipt verified: ${inventory.nativeComponents.length} subtrees inventoried; no release blockers declared; blocker gate enforced`);
+  // The blocker phrase must match what this invocation actually verified: plain
+  // mode preserves any recognized blocker it found, while --release-ready
+  // asserted the list is empty.
+  const blockerPhrase = options.requireReleaseReady
+    ? "no release blockers declared; blocker gate enforced"
+    : inventory.releaseBlockers.length === 0
+      ? "no release blockers declared"
+      : `release blockers preserved: ${inventory.releaseBlockers.join(", ")}`;
+  console.log(`Ladybug native receipt verified: ${inventory.nativeComponents.length} subtrees inventoried; ${blockerPhrase}`);
 }
