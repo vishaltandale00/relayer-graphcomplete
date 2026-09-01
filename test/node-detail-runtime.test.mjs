@@ -369,6 +369,43 @@ describe("compiled Node Detail product runtime", () => {
     );
   });
 
+  it("clears a prior activation error after retry success without overriding host-authoritative disabled state", async () => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    const host = window.document.createElement("div");
+    const detail = compiledPackage({
+      version: 1,
+      components: [{ id: "retry", order: 0, html: '<button data-gc-mount="retry">Retry navigation</button>', css: "" }],
+      mounts: [{ id: "retry", componentId: "retry", kind: "capability", host: "button", capability: { kind: "expand", action: { clientKey: "retry", sourceNode: { clientKey: "node" }, sourceLayer: { clientKey: "layer" } } } }],
+      assets: [],
+    });
+    let attempt = 0;
+    let runtime;
+    const onNavigate = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) throw new Error("temporary");
+      runtime.updateCapability("retry", { disabled: true });
+    });
+    runtime = await mountCompiledNodeDetail({
+      host,
+      detail,
+      resolveAction: () => ({ id: 10, kind: "navigate", relation: "expand", targetLayerId: 22 }),
+      onNavigate,
+    });
+    const retry = host.shadowRoot.querySelector("[data-gc-mount='retry']");
+
+    retry.click();
+    await window.happyDOM.waitUntilComplete();
+    expect(retry.getAttribute("aria-invalid")).toBe("true");
+    expect(retry.getAttribute("title")).toBe("temporary");
+
+    retry.click();
+    await window.happyDOM.waitUntilComplete();
+    expect(retry.hasAttribute("aria-invalid")).toBe(false);
+    expect(retry.hasAttribute("title")).toBe(false);
+    expect(retry.disabled).toBe(true);
+    expect(retry.dataset.capabilityState).toBe("disabled");
+  });
+
   it("selects the canonical package in the Product Node Details container while retaining legacy Markdown compatibility", async () => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     const container = window.document.createElement("div");
@@ -440,20 +477,20 @@ describe("compiled Node Detail product runtime", () => {
       version: 1,
       components: [{ id: "product", order: 0, html: '<section class="independent-scroll"><p>Product-authored detail</p><button data-gc-mount="expand">Expand</button><button data-gc-mount="invoke">Invoke</button><select aria-label="Choose one" data-gc-mount="input"></select></section>', css: "p{color:teal}.independent-scroll{max-height:10rem;overflow:auto}" }],
       mounts: [
-        { id: "expand", componentId: "product", kind: "capability", host: "button", capability: { kind: "expand", action: { clientKey: "expand-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "root-layer" } } } },
-        { id: "invoke", componentId: "product", kind: "capability", host: "button", capability: { kind: "invoke", action: { clientKey: "invoke-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "root-layer" } } } },
-        { id: "input", componentId: "product", kind: "capability", host: "select", capability: { kind: "input", action: { clientKey: "input-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "root-layer" } } } },
+        { id: "expand", componentId: "product", kind: "capability", host: "button", capability: { kind: "expand", action: { clientKey: "expand-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "original-layer" } } } },
+        { id: "invoke", componentId: "product", kind: "capability", host: "button", capability: { kind: "invoke", action: { clientKey: "invoke-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "original-layer" } } } },
+        { id: "input", componentId: "product", kind: "capability", host: "select", capability: { kind: "input", action: { clientKey: "input-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "original-layer" } } } },
       ],
       assets: [],
     });
     const node = { id: 7, clientKey: "authored-node", kind: "concept", icon: "box", title: "Authored node", detail: "Legacy fallback", authoredDetail: detail };
     const actions = [
-      { id: 11, clientKey: "expand-action", sourceNodeId: 7, sourceLayerId: 9, kind: "navigate", relation: "expand", targetLayerId: 91 },
-      { id: 12, clientKey: "invoke-action", sourceNodeId: 7, sourceLayerId: 9, kind: "invoke", interactionText: "Investigate" },
-      { id: 13, clientKey: "input-action", sourceNodeId: 7, sourceLayerId: 9, kind: "input", control: "single_select", prompt: "Choose one", options: [{ key: "one", label: "One" }, { key: "two", label: "Two" }] },
+      { id: 11, clientKey: "expand-action", sourceNodeId: 7, sourceLayerId: 10, kind: "navigate", relation: "expand", targetLayerId: 91 },
+      { id: 12, clientKey: "invoke-action", sourceNodeId: 7, sourceLayerId: 10, kind: "invoke", interactionText: "Investigate" },
+      { id: 13, clientKey: "input-action", sourceNodeId: 7, sourceLayerId: 10, kind: "input", control: "single_select", prompt: "Choose one", options: [{ key: "one", label: "One" }, { key: "two", label: "Two" }] },
     ];
     const layer = {
-      layer: { id: 9, clientKey: "root-layer", layout: { version: 1, placements: [{ nodeId: 7, x: 0.5, y: 0.5 }] } },
+      layer: { id: 99, clientKey: "presenting-layer", layout: { version: 1, placements: [{ nodeId: 7, x: 0.5, y: 0.5 }] } },
       nodes: [node],
       edges: [],
       actions,
@@ -540,7 +577,7 @@ describe("compiled Node Detail product runtime", () => {
     await window.happyDOM.waitUntilComplete();
     expect(inputDraftApi.commit).toHaveBeenCalledWith(
       3,
-      { presentingInteractionNodeId: 50, presentingLayerId: 9, actionId: 13 },
+      { presentingInteractionNodeId: 50, presentingLayerId: 99, actionId: 13 },
       { selectedKeys: ["one"] },
       0,
     );
@@ -555,6 +592,7 @@ describe("compiled Node Detail product runtime", () => {
     workspace.render();
     await window.happyDOM.waitUntilComplete();
     expect(window.document.querySelector("#detailContent [role='status']").textContent).toBe("This authored detail does not bind every accepted node action.");
+    expect(window.document.querySelector("#detailContent").textContent).toContain("Legacy fallback");
     expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(false);
     expect(window.document.querySelector("#nodeInputActions").classList.contains("hidden")).toBe(false);
 
@@ -563,6 +601,7 @@ describe("compiled Node Detail product runtime", () => {
     workspace.render();
     await window.happyDOM.waitUntilComplete();
     expect(window.document.querySelector("#detailContent [role='status']").textContent).toBe("Node Detail package integrity check failed.");
+    expect(window.document.querySelector("#detailContent").textContent).toContain("Legacy fallback");
     expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(false);
     expect(window.document.querySelector("#nodeInputActions").classList.contains("hidden")).toBe(false);
     window.document.querySelector("#detailActions [data-action-id='11']").click();

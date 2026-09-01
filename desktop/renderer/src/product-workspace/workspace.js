@@ -79,6 +79,13 @@ export const GRAPH_MAX_ZOOM = 2;
 export const COMPOSER_MIN_HEIGHT = 42;
 export const COMPOSER_MAX_HEIGHT = 126;
 
+function appendCompatibilityNodeDetail(container, node) {
+  const compatibility = container.ownerDocument.createElement("div");
+  compatibility.className = "node-detail-compatibility-content";
+  renderMarkdown(compatibility, node?.detail || node?.summary || node?.content || "No details supplied.");
+  container.append(compatibility);
+}
+
 export async function renderProductNodeDetail({
   container,
   node,
@@ -106,6 +113,7 @@ export async function renderProductNodeDetail({
     fallback.setAttribute("role", "status");
     fallback.textContent = compatibilityIssue;
     container.append(fallback);
+    appendCompatibilityNodeDetail(container, node);
     return Object.freeze({ authored: false, status: "fallback", error: compatibilityIssue });
   }
   const adapters = { resolveAction, onNavigate, onInvoke, onInput };
@@ -137,6 +145,7 @@ export async function renderProductNodeDetail({
     capabilityState,
   });
   if (runtime.status !== "mounted") {
+    appendCompatibilityNodeDetail(container, node);
     return Object.freeze({ authored: false, mountKey, host, ...runtime });
   }
   return Object.freeze({ authored: true, mountKey, host, ...runtime });
@@ -1294,23 +1303,22 @@ export function actionReviewKind(action) {
   ) ? "navigate-action" : "invoke-action";
 }
 
-export function resolveCompiledNodeDetailAction(actions, reference, node, layer) {
+export function resolveCompiledNodeDetailAction(actions, reference, node) {
   if (!reference?.clientKey
     || reference.sourceNode?.clientKey !== node?.clientKey
-    || reference.sourceLayer?.clientKey !== layer?.layer?.clientKey) return undefined;
+    || !reference.sourceLayer?.clientKey) return undefined;
   return (actions || []).find((action) => (
     action.clientKey === reference.clientKey
     && action.sourceNodeId != null
     && String(action.sourceNodeId) === String(node.id)
     && action.sourceLayerId != null
-    && String(action.sourceLayerId) === String(layer.layer.id)
   ));
 }
 
-export function compiledNodeDetailCoversActions(detail, actions, node, layer) {
+export function compiledNodeDetailCoversActions(detail, actions, node) {
   const boundActionIds = new Set((detail?.mounts ?? [])
     .filter((mount) => mount.kind === "capability" && mount.capability.kind !== "link")
-    .map((mount) => resolveCompiledNodeDetailAction(actions, mount.capability.action, node, layer)?.id)
+    .map((mount) => resolveCompiledNodeDetailAction(actions, mount.capability.action, node)?.id)
     .filter((id) => id != null)
     .map(String));
   return (actions ?? []).every((action) => boundActionIds.has(String(action.id)));
@@ -4823,7 +4831,6 @@ export function createProductWorkspace({
       actions,
       reference,
       node,
-      visibleLayer,
     );
     const authoredCapabilityState = {};
     for (const mount of node.authoredDetail?.mounts ?? []) {
@@ -4869,7 +4876,7 @@ export function createProductWorkspace({
       node.authoredDetail?.integritySha256 ?? "legacy",
     ].map(String).join(":");
     const authoredDetailCompatibilityIssue = node.authoredDetail
-      && !compiledNodeDetailCoversActions(node.authoredDetail, actions, node, visibleLayer)
+      && !compiledNodeDetailCoversActions(node.authoredDetail, actions, node)
       ? "This authored detail does not bind every accepted node action."
       : null;
     const authoredDetail = await renderProductNodeDetail({

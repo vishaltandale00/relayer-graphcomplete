@@ -438,12 +438,18 @@ img{max-inline-size:100%}
             assertResolvedAction(capability, currentAction);
             if (capability.kind === "invoke") await adapters.onInvoke(currentAction, context);
             else await adapters.onNavigate(currentAction, Object.freeze({ ...context, relation: capability.kind }));
+            const succeededState = {
+              ...(capabilityStates.get(id) ?? prior),
+              busy: false,
+              error: null,
+            };
             if (capability.kind === "invoke" && currentAction.targetLayerId == null) {
-              capabilityStates.set(id, { ...prior, disabled: true, busy: false });
+              succeededState.disabled = true;
             }
+            capabilityStates.set(id, succeededState);
           } catch (error) {
             capabilityStates.set(id, {
-              ...prior,
+              ...(capabilityStates.get(id) ?? prior),
               busy: false,
               error: error?.message || `Node Detail ${capability.kind} action failed.`,
             });
