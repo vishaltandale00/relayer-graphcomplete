@@ -35,7 +35,7 @@ import {
 } from "../desktop/shared/release-metadata.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
 import { ACTIVE_PROVIDER_ADAPTER_MODULES } from "../desktop/main/providers/provider-adapter-registry.mjs";
-import { verifyBundledAppServer, verifyPackagedLadybugNotices } from "../desktop/packaging/verify-bundled-app-server.mjs";
+import verifyElectronBuilderBundledAppServer, { verifyBundledAppServer, verifyPackagedLadybugNotices } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import { ladybugNoticesExtraResource } from "../desktop/packaging/ladybug-notices.mjs";
 import { desktopTarget } from "../desktop/shared/target.mjs";
 import {
@@ -2874,11 +2874,9 @@ describe("desktop skeleton", () => {
       // Let the default notice verifier run against the real vendored notices
       // copied into the fixture's resources layout, so the seam's default
       // inventory path and directory mapping are exercised rather than stubbed.
-      await cp(
-        join(repositoryRoot, "vendor", "ladybug", "notices"),
-        join(appPath, "Contents", "Resources", "notices", "ladybug"),
-        { recursive: true },
-      );
+      const noticesExtra = ladybugNoticesExtraResource(repositoryRoot);
+      const darwinNoticesDir = join(appPath, "Contents", "Resources", noticesExtra.to);
+      await cp(noticesExtra.from, darwinNoticesDir, { recursive: true });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
@@ -2886,6 +2884,17 @@ describe("desktop skeleton", () => {
         verifyGraphServer,
         verifyPrimeAgent,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
+      // Prove the default is a real check, not a no-op: a stray bundled file
+      // must fail through the default path.
+      await writeFile(join(darwinNoticesDir, "stray-LICENSE"), "stray\n");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: packagedRuntimeEntries,
+        verifyGraphServer,
+        verifyPrimeAgent,
+      })).rejects.toThrow("ships unlisted Ladybug notices");
+      await rm(join(darwinNoticesDir, "stray-LICENSE"));
 
       const windowsPath = join(directory, "win-unpacked");
       await mkdir(join(windowsPath, "resources", "bin"), { recursive: true });
@@ -2901,6 +2910,9 @@ describe("desktop skeleton", () => {
         writeFile(join(windowsCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
         writeFile(join(windowsCodexBrowserRoot, "build", "src", "bin", "chrome-devtools-mcp.js"), "helper-fixture"),
       ]);
+      // The Windows resources layout exercises the same default notice verifier
+      // (not a stub), so the win32 bundle path is covered too.
+      await cp(noticesExtra.from, join(windowsPath, "resources", noticesExtra.to), { recursive: true });
       await expect(verifyBundledAppServer(windowsPath, {
         platform: "win32",
         execute: async () => { throw new Error("lipo must not run for Windows"); },
@@ -2909,7 +2921,6 @@ describe("desktop skeleton", () => {
           expect(packagedEntries).toEqual(new Set(packagedRuntimeEntries()));
           return verifyPrimeAgent();
         },
-        verifyNotices,
       })).resolves.toEqual({
         binaryPath: join(windowsPath, "resources", "bin", "relayer-app-server.exe"),
         architecture: null,
@@ -3003,6 +3014,39 @@ describe("desktop skeleton", () => {
       await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract })).rejects.toThrow("checksum manifest");
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("scopes Prime Agent verification out of the Eval afterPack instead of narrowing the bundle check", async () => {
+    const previousTarget = process.env.RELAYER_DESKTOP_TARGET;
+    process.env.RELAYER_DESKTOP_TARGET = "macos-arm64";
+    const appOutDir = await mkdtemp(join(tmpdir(), "relayer-eval-afterpack-"));
+    await mkdir(join(appOutDir, "Relayer Eval.app", "Contents", "Resources"), { recursive: true });
+    try {
+      const verifyBundled = async (appPath, options) => {
+        expect(appPath).toBe(join(appOutDir, "Relayer Eval.app"));
+        expect(options.platform).toBe("darwin");
+        expect(options.expectedArchitecture).toBe("arm64");
+        expect(options.verifyPrimeAgent).toBeTypeOf("function");
+        return { binaryPath: join(appPath, "Contents/Resources/bin/relayer-app-server"), architecture: "arm64" };
+      };
+      let signingClosureWrites = 0;
+      await expect(verifyElectronBuilderBundledAppServer(
+        { appOutDir, packager: { appInfo: { productFilename: "Relayer Eval" } } },
+        {
+          includePrimeAgent: false,
+          verifyBundled,
+          writeSigningClosure: async () => { signingClosureWrites += 1; },
+        },
+      )).resolves.toEqual({
+        binaryPath: join(appOutDir, "Relayer Eval.app", "Contents/Resources/bin/relayer-app-server"),
+        architecture: "arm64",
+      });
+      expect(signingClosureWrites).toBe(0);
+    } finally {
+      if (previousTarget === undefined) delete process.env.RELAYER_DESKTOP_TARGET;
+      else process.env.RELAYER_DESKTOP_TARGET = previousTarget;
+      await rm(appOutDir, { recursive: true, force: true });
     }
   });
 

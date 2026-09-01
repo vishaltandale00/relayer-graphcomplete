@@ -83,15 +83,23 @@ describe("Ladybug native dependency receipts", () => {
   });
 
   it("fails closed when an unlisted file appears in the notices directory", () => {
-    const stray = join(root, "vendor/ladybug/notices", "stray-editor-backup~");
-    writeFileSync(stray, "stray\n");
-    try {
-      const result = spawnSync(process.execPath, [verifier], { encoding: "utf8" });
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("notices directory must contain exactly the inventoried files");
-    } finally {
-      rmSync(stray, { force: true });
-    }
+    const directory = temporaryDirectory("ladybug-notices-");
+    const notices = join(directory, "notices");
+    cpSync(join(root, "vendor/ladybug/notices"), notices, { recursive: true });
+    writeFileSync(join(notices, "stray-editor-backup~"), "stray\n");
+    const result = spawnSync(process.execPath, [verifier, "--notices-root", notices], { encoding: "utf8" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("notices directory must contain exactly the inventoried files");
+  });
+
+  it("ignores OS metadata files in the notices directory", () => {
+    const directory = temporaryDirectory("ladybug-notices-");
+    const notices = join(directory, "notices");
+    cpSync(join(root, "vendor/ladybug/notices"), notices, { recursive: true });
+    writeFileSync(join(notices, ".DS_Store"), "finder metadata\n");
+    const result = spawnSync(process.execPath, [verifier, "--notices-root", notices], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("no release blockers declared");
   });
 
   it("fails closed when the exact source contains an unlisted native subtree", () => {

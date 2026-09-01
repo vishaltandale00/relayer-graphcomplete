@@ -2,10 +2,12 @@ import { execFile } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
 import { access, chmod, lstat, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import * as tar from "tar";
+
+import { relativeFiles } from "../../scripts/prepare-ladybug-source.mjs";
 
 import { desktopTargetFromEnvironment } from "../shared/target.mjs";
 import { PACKAGED_PROVIDER_MODULES } from "../main/providers/provider-adapter-registry.mjs";
@@ -129,24 +131,18 @@ export async function verifyPackagedLadybugNotices(
     }
   }
   // An unlisted file in the bundle would ship without a digest or provenance,
-  // so the bundle must contain exactly the inventoried notices.
+  // so the bundle must contain exactly the inventoried notices (ignoring OS
+  // metadata that electron-builder skips during copy).
   const bundleRoot = join(resourcesPath, LADYBUG_NOTICES_BUNDLE_DIR);
-  const bundledFiles = await collectBundledNoticeFiles(bundleRoot);
+  const bundledFiles = await relativeFiles(bundleRoot, bundleRoot, [], {
+    strict: true,
+    skipOsMetadata: true,
+  });
   const unexpected = bundledFiles.filter((path) => !expectedRelatives.has(path));
   if (unexpected.length !== 0) {
     throw new Error(`Bundled Relayer runtime ships unlisted Ladybug notices: ${unexpected.join(", ")}.`);
   }
   return { notices: notices.length };
-}
-
-async function collectBundledNoticeFiles(root, directory = root, output = []) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) await collectBundledNoticeFiles(root, path, output);
-    else if (entry.isFile()) output.push(relative(root, path).replaceAll("\\", "/"));
-    else throw new Error(`unsupported bundled Ladybug notice entry: ${relative(root, path)}`);
-  }
-  return output;
 }
 
 export async function verifyPackagedMacOSGraphServer(
@@ -476,7 +472,14 @@ export async function normalizePackagedBundlePermissions(bundlePath) {
   return changed;
 }
 
-export default async function verifyElectronBuilderBundledAppServer(context) {
+export default async function verifyElectronBuilderBundledAppServer(
+  context,
+  {
+    includePrimeAgent = true,
+    verifyBundled = verifyBundledAppServer,
+    writeSigningClosure = writePrimeAgentSigningClosureSnapshot,
+  } = {},
+) {
   const productFilename = String(context?.packager?.appInfo?.productFilename || "").trim();
   const appOutDir = String(context?.appOutDir || "").trim();
   if (!productFilename || !appOutDir) {
@@ -485,10 +488,19 @@ export default async function verifyElectronBuilderBundledAppServer(context) {
   const target = desktopTargetFromEnvironment(process.env);
   const expectedArchitecture = target.architecture === "x64" ? "x86_64" : target.architecture;
   const appPath = target.platform === "darwin" ? join(appOutDir, `${productFilename}.app`) : appOutDir;
-  const result = await verifyBundledAppServer(appPath, { platform: target.platform, expectedArchitecture });
+  const result = await verifyBundled(appPath, {
+    platform: target.platform,
+    expectedArchitecture,
+    // The Eval package bundles the compiled Ladybug graph server but not the
+    // Prime Agent runtime, so its build scopes Prime Agent verification out
+    // instead of narrowing the rest of the bundle check.
+    ...(includePrimeAgent ? {} : { verifyPrimeAgent: async () => ({ sourceCommit: null, packages: 0 }) }),
+  });
   if (target.platform === "darwin") {
     const resourcesPath = join(appPath, "Contents", "Resources");
-    await writePrimeAgentSigningClosureSnapshot(resourcesPath, `${target.platform}-${target.architecture}`);
+    if (includePrimeAgent) {
+      await writeSigningClosure(resourcesPath, `${target.platform}-${target.architecture}`);
+    }
     // Last, so every file this hook wrote is covered, and before
     // electron-builder signs: the signature is then taken over the bundle users
     // actually receive. Windows governs access through ACLs rather than POSIX

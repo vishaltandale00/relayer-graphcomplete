@@ -308,11 +308,36 @@ async function run(command, args, options) {
   await execFileAsync(command, args, { ...options, maxBuffer: 16 * 1024 * 1024 });
 }
 
-async function relativeFiles(root, directory = root, output = []) {
+// Filenames the operating system or editors drop beside the vendored notices
+// that are never shipped (electron-builder skips them during copy). The notice
+// gates list committed, byte-exact inputs, so these must be ignored consistently
+// on both the receipt and pack-time sides.
+const OS_METADATA_FILENAMES = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+
+export function isOsMetadataFilename(name) {
+  return OS_METADATA_FILENAMES.has(name) || String(name).startsWith("._");
+}
+
+// Lists files under `root` as forward-slash paths relative to `root`. `strict`
+// throws on a non-file, non-directory entry (a symlink), so a gate can never
+// silently agree with the other side about a tree that differs; the OpenSSL
+// shared-library scan keeps the lenient default.
+export async function relativeFiles(
+  root,
+  directory = root,
+  output = [],
+  { strict = false, skipOsMetadata = false } = {},
+) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) await relativeFiles(root, path, output);
-    else if (entry.isFile()) output.push(relative(root, path).replaceAll("\\", "/"));
+    if (entry.isDirectory()) {
+      await relativeFiles(root, path, output, { strict, skipOsMetadata });
+    } else if (entry.isFile()) {
+      if (skipOsMetadata && isOsMetadataFilename(entry.name)) continue;
+      output.push(relative(root, path).replaceAll("\\", "/"));
+    } else if (strict) {
+      throw new Error(`unsupported entry: ${relative(root, path).replaceAll("\\", "/")}`);
+    }
   }
   return output;
 }

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { digestLadybugSourceTree, sha256File } from "./prepare-ladybug-source.mjs";
+import { LADYBUG_NOTICES_REPO_ROOT } from "../desktop/packaging/ladybug-notices.mjs";
+import { digestLadybugSourceTree, relativeFiles, sha256File } from "./prepare-ladybug-source.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const defaultInventoryPath = resolve(repositoryRoot, "vendor/ladybug/native-inventory.json");
@@ -26,6 +27,7 @@ export async function verifyLadybugNativeReceipts({
   sourceRoot,
   opensslSourceRoot,
   requireReleaseReady = false,
+  noticesRoot,
 } = {}) {
   const inventory = JSON.parse(await readFile(inventoryPath, "utf8"));
   assert.equal(inventory.schemaVersion, 1);
@@ -101,14 +103,21 @@ export async function verifyLadybugNativeReceipts({
     assert.equal(await sha256File(path), inventory.noticeSha256[licensePath], `license notice changed: ${licensePath}`);
   }
 
-  // An unlisted file under `vendor/ladybug/notices/` would ship without a digest
-  // or provenance, so the directory must contain exactly the inventoried notices.
-  const noticesRoot = resolveRepositoryPath("vendor/ladybug/notices", "notices root");
+  // An unlisted file under the notices root would ship without a digest or
+  // provenance, so the directory must contain exactly the inventoried notices
+  // (ignoring OS metadata that is never shipped).
+  const noticesDirectory = noticesRoot
+    ? resolve(noticesRoot)
+    : resolveRepositoryPath(LADYBUG_NOTICES_REPO_ROOT, "notices root");
+  const noticesPrefix = `${LADYBUG_NOTICES_REPO_ROOT}/`;
   const expectedNotices = Object.keys(inventory.noticeSha256)
-    .map((path) => path.slice("vendor/ladybug/notices/".length))
+    .map((path) => {
+      assert.ok(path.startsWith(noticesPrefix), `notice path is outside the notices root: ${path}`);
+      return path.slice(noticesPrefix.length);
+    })
     .sort();
   assert.deepEqual(
-    await collectNoticeFiles(noticesRoot),
+    (await relativeFiles(noticesDirectory, noticesDirectory, [], { strict: true, skipOsMetadata: true })).sort(),
     expectedNotices,
     "notices directory must contain exactly the inventoried files",
   );
@@ -165,16 +174,6 @@ export async function verifyLadybugNativeReceipts({
   return inventory;
 }
 
-async function collectNoticeFiles(root, directory = root, output = []) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) await collectNoticeFiles(root, path, output);
-    else if (entry.isFile()) output.push(relative(root, path).replaceAll("\\", "/"));
-    else throw new Error(`unsupported notice entry: ${relative(root, path)}`);
-  }
-  return output.sort();
-}
-
 async function renderSourceNotice(thirdPartyRoot, component) {
   const sourcePath = resolve(join(thirdPartyRoot, component.name), component.licenseSource.path);
   assert.ok(
@@ -205,6 +204,7 @@ function parseArguments(argv) {
     if (argument === "--inventory") options.inventoryPath = resolve(argv[++index]);
     else if (argument === "--source-root") options.sourceRoot = resolve(argv[++index]);
     else if (argument === "--openssl-source-root") options.opensslSourceRoot = resolve(argv[++index]);
+    else if (argument === "--notices-root") options.noticesRoot = resolve(argv[++index]);
     else if (argument === "--release-ready") options.requireReleaseReady = true;
     else if (argument === "--generate-notices") options.generateNotices = true;
     else throw new Error(`unknown argument: ${argument}`);
