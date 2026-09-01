@@ -41,6 +41,27 @@ describe("Eval harness configuration availability", () => {
     }).key).toBe("macos-arm64");
   });
 
+  it("resolves linux-x64 as a development-only unpackaged Eval host", () => {
+    expect(evalRuntimeTarget({
+      isPackaged: false,
+      environment: {},
+      platform: "linux",
+      architecture: "x64",
+    })).toMatchObject({ key: "linux-x64", platform: "linux", architecture: "x64" });
+    expect(evalRuntimeTarget({
+      isPackaged: false,
+      environment: { RELAYER_DESKTOP_TARGET: "linux-x64" },
+      platform: "darwin",
+      architecture: "arm64",
+    }).key).toBe("linux-x64");
+    expect(() => evalRuntimeTarget({
+      isPackaged: true,
+      environment: { RELAYER_DESKTOP_TARGET: "linux-x64" },
+      platform: "linux",
+      architecture: "x64",
+    })).toThrow("Unsupported Relayer Desktop target: linux-x64.");
+  });
+
   it("includes Prime configurations when the development package is available", () => {
     const packageAvailable = vi.fn(() => true);
 
@@ -133,7 +154,7 @@ describe("Eval harness configuration availability", () => {
   });
 
   it("keeps baseline harnesses but omits graph-search experiments off Apple Silicon", () => {
-    for (const targetKey of ["macos-x64", "windows-x64"]) {
+    for (const targetKey of ["macos-x64", "windows-x64", "linux-x64"]) {
       const available = names(evalHarnessConfigurationPaths({
         harnessDirectory: "/tmp/harnesses",
         isPackaged: false,
