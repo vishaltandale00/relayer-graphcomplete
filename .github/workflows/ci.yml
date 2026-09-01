@@ -69,7 +69,7 @@ jobs:
   lbug-prebuilt:
     name: Prebuilt Ladybug native library
     needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true') }}
+    if: ${{ needs.quick.result == 'success' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true' || needs.plan.outputs.rust_crash == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -88,7 +88,10 @@ jobs:
       - name: Build Ladybug from the pinned bundled source
         if: ${{ steps.lbug-cache.outputs.cache-hit != 'true' }}
         run: |
-          node scripts/ci/run-timed.mjs "Ladybug source build" cargo build -p lbug
+          node scripts/ci/run-timed.mjs "Ladybug source build" cargo build -p lbug --timings
+          mkdir -p "$RUNNER_TEMP/cargo-timings-lbug-prebuilt"
+          cp "$RUNNER_TEMP/cargo-target/cargo-timings/cargo-timing.html" \
+            "$RUNNER_TEMP/cargo-timings-lbug-prebuilt/lbug-prebuilt.html" 2>/dev/null || true
           node scripts/ci/lbug-artifact.mjs create \
             --repository "$GITHUB_WORKSPACE" \
             --target-dir "$RUNNER_TEMP/cargo-target" \
@@ -100,6 +103,7 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
           CARGO_INCREMENTAL: "0"
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-lbug-prebuilt
           RELAYER_SCCACHE_ENABLED: ${{ steps.rust-setup.outputs.sccache-enabled }}
           RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
           SCCACHE_CLIENT_SIDE: "1"
@@ -121,11 +125,18 @@ jobs:
         with:
           path: ${{ runner.temp }}/lbug-prebuilt
           key: ${{ steps.lbug-cache.outputs.cache-primary-key }}
+      - name: Report Ladybug build compiler cache
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: ./.github/actions/report-rust-compilation
+        with:
+          lane: lbug-prebuilt
+          sccache-enabled: ${{ steps.rust-setup.outputs.sccache-enabled }}
 
   rust-clippy:
     name: Rust Clippy
     needs: [plan, quick, lbug-prebuilt]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -196,7 +207,7 @@ jobs:
   rust-tests:
     name: Fresh Rust tests
     needs: [plan, quick, lbug-prebuilt]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -257,7 +268,7 @@ jobs:
   rust-crash:
     name: Fresh crash reconciliation tests
     needs: [plan, quick, lbug-prebuilt]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -317,7 +328,7 @@ jobs:
   rust-runtime:
     name: Rust runtime build
     needs: [plan, quick, lbug-prebuilt]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust_runtime == 'true' }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_runtime == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source

@@ -487,7 +487,7 @@ describe("CI workflow contract", () => {
   test("builds the Ladybug library once and verifies it before every Rust lane links it", () => {
     const job = workflow.jobs["lbug-prebuilt"];
     expect(job.if).toBe(
-      "${{ needs.quick.result == 'success' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true') }}",
+      "${{ needs.quick.result == 'success' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true' || needs.plan.outputs.rust_crash == 'true') }}",
     );
     expect(
       job.steps.find((step) => step.id === "rust-setup").uses,
@@ -511,6 +511,18 @@ describe("CI workflow contract", () => {
     );
     expect(save.if).toContain("github.event_name == 'push'");
     expect(save.with.key).toBe("${{ steps.lbug-cache.outputs.cache-primary-key }}");
+    // The job that does the steady-state C++ compiling stays visible to the
+    // cache-evidence chain like every other compiling lane.
+    const report = job.steps.find(
+      (step) => step.name === "Report Ladybug build compiler cache",
+    );
+    expect(report.if).toBe("${{ always() }}");
+    expect(report["continue-on-error"]).toBe(true);
+    expect(report.with.lane).toBe("lbug-prebuilt");
+    expect(build.run).toContain("--timings");
+    expect(build.env.RELAYER_CARGO_TIMINGS_DIR).toBe(
+      "${{ runner.temp }}/cargo-timings-lbug-prebuilt",
+    );
 
     for (const lane of [
       "rust-clippy",
@@ -520,6 +532,16 @@ describe("CI workflow contract", () => {
     ]) {
       const laneJob = workflow.jobs[lane];
       expect(laneJob.needs).toContain("lbug-prebuilt");
+      // A failed acceleration job must never skip the lanes into a red
+      // aggregate: the gates re-derive from plan/quick results only, and the
+      // lanes' download/verify steps fail open to the source build.
+      expect(laneJob.if).toBe(
+        lane === "rust-crash"
+          ? "${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}"
+          : lane === "rust-runtime"
+            ? "${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_runtime == 'true' }}"
+            : "${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}",
+      );
       const download = laneJob.steps.find(
         (step) => step.name === "Download prebuilt Ladybug library",
       );

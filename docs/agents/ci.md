@@ -80,11 +80,19 @@ and `Cargo.lock` digest. Each Rust lane downloads the bundle and runs
 `scripts/ci/lbug-artifact.mjs verify`, which re-checks the platform, rustc
 release, `Cargo.lock` digest, pinned lbug version, and the library SHA-256
 before exporting `LBUG_LIBRARY_DIR`/`LBUG_INCLUDE_DIR`. A missing or rejected
-bundle fails open to the in-lane source build. The bundle records the commit
-that built it for provenance, but equality keys on the pinned source and
-toolchain because the bundled source cannot change without a `Cargo.lock`
-change. Tests still compile and run freshly against whichever library they
-link; the bundle is acceleration, never evidence.
+bundle fails open to the in-lane source build, and the lanes keep running on
+their own source builds even if the producing job fails: their gates re-derive
+from the plan and quick results, never from the acceleration job. The bundle
+records the commit that built it for provenance, but equality keys on the
+pinned source, the resolved lbug feature set, and the toolchain, because the
+bundled source cannot change without a `Cargo.lock` change. The manifest also
+carries a digest over every packaged file plus the library size, so a
+truncated include tree or a failed debug strip is rejected before any lane
+links. One accepted cost: while the bundle cache keeps hitting, the lanes no
+longer repopulate the Ladybug objects in sccache, so a later fallback to the
+source build pays a cold CMake compile until it re-stores them. Tests still
+compile and run freshly against whichever library they link; the bundle is
+acceleration, never evidence.
 
 The selected default-feature `relayer-app-server` and
 `relayer-graph-server` binaries are built once in the runtime lane. Its workflow

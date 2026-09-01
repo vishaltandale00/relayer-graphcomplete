@@ -376,6 +376,21 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
     }
   });
 
+  test("crash selection never fires without the Rust chapter", () => {
+    // The lbug-prebuilt job runs when rust, rust_runtime, or rust_crash is
+    // set; the crash lane depends on it. If rust_crash could ever be true
+    // while chapters.rust is false, the crash boundary lane would vanish
+    // from CI with nothing red, so the implication is pinned here.
+    for (const owner of JSON.parse(readFileSync(configPath, "utf8"))
+      .rustOwners) {
+      if (!owner.prefix) continue;
+      const result = plan(`${owner.prefix}src/lib.rs`);
+      if (result.rustCrash) {
+        expect(result.chapters.rust, owner.prefix).toBe(true);
+      }
+    }
+  });
+
   test("maps the live-run template and entry point to their model checkpoint", () => {
     for (const changedFile of [
       "live-run.example.json",
