@@ -5,7 +5,7 @@ import {
   projectDesktopTelemetryRelease,
 } from "../desktop/shared/telemetry-release.mjs";
 import { DESKTOP_UPDATE_BASE_URLS } from "../desktop/shared/release-metadata.mjs";
-import { desktopTarget, desktopTargetFromEnvironment, developmentDesktopHost } from "../desktop/shared/target.mjs";
+import { desktopTarget, desktopTargetFromEnvironment, developmentDesktopHost, targetForElectronBuilder } from "../desktop/shared/target.mjs";
 
 const sourceCommit = "0123456789abcdef0123456789abcdef01234567";
 
@@ -74,6 +74,8 @@ describe("desktop telemetry release projection", () => {
       .toThrow("Unsupported Relayer Desktop target: linux-x64.");
     expect(() => desktopTargetFromEnvironment({ RELAYER_DESKTOP_TARGET: "linux-x64" }))
       .toThrow("Unsupported Relayer Desktop release target: linux-x64.");
+    expect(() => targetForElectronBuilder({ platform: "linux", architecture: "x64" }))
+      .toThrow("Unsupported Relayer Desktop target: linux-x64.");
     expect(projectDesktopTelemetryRelease({
       packageMetadata: developmentTelemetryPackageMetadata("0.2.16"),
       appVersion: "0.2.16",
