@@ -193,6 +193,148 @@
         ],
         "truncated": false
       }
+    },
+    {
+      "id": "engine-safe-relationship-path-and-record-identifiers",
+      "query": "MATCH union = (create:Content)-[with:CONNECTED]-(set:Content) WHERE create.title = $title RETURN {create: create.title, union: with.state, set: set.title} AS item",
+      "parameters": {
+        "title": {
+          "type": "string",
+          "value": "Queue"
+        }
+      },
+      "target": {
+        "scope": "thread",
+        "id": 41
+      },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [
+          {
+            "pathBinding": "union",
+            "nodes": [
+              {
+                "binding": "create",
+                "label": "Content",
+                "occurrence": 0
+              },
+              {
+                "binding": "set",
+                "label": "Content",
+                "occurrence": 1
+              }
+            ],
+            "relationships": [
+              {
+                "binding": "with",
+                "type": "CONNECTED",
+                "direction": "undirected",
+                "from": "create",
+                "to": "set"
+              }
+            ]
+          }
+        ],
+        "predicates": [
+          {
+            "kind": "propertyComparison",
+            "left": {
+              "binding": "create",
+              "name": "title",
+              "valueType": "string"
+            },
+            "operator": "eq",
+            "right": {
+              "kind": "parameter",
+              "name": "title",
+              "valueType": "string"
+            }
+          }
+        ],
+        "projection": {
+          "distinct": false,
+          "columns": [
+            {
+              "name": "item",
+              "expression": {
+                "kind": "record",
+                "fields": [
+                  {
+                    "name": "create",
+                    "expression": {
+                      "kind": "property",
+                      "binding": "create",
+                      "name": "title",
+                      "valueType": "string"
+                    }
+                  },
+                  {
+                    "name": "union",
+                    "expression": {
+                      "kind": "property",
+                      "binding": "with",
+                      "name": "state",
+                      "valueType": "string"
+                    }
+                  },
+                  {
+                    "name": "set",
+                    "expression": {
+                      "kind": "property",
+                      "binding": "set",
+                      "name": "title",
+                      "valueType": "string"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 1,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": {
+        "queryContractVersion": 1,
+        "columns": [
+          "item"
+        ],
+        "rows": [
+          [
+            {
+              "type": "record",
+              "fields": [
+                {
+                  "name": "create",
+                  "value": {
+                    "type": "string",
+                    "value": "Queue"
+                  }
+                },
+                {
+                  "name": "union",
+                  "value": {
+                    "type": "string",
+                    "value": "accepted"
+                  }
+                },
+                {
+                  "name": "set",
+                  "value": {
+                    "type": "string",
+                    "value": "Worker"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "truncated": false
+      }
     }
   ],
   "negativeCases": [
