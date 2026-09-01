@@ -294,6 +294,70 @@ describe("typed Node Detail authoring compiler", () => {
     }));
   });
 
+  it("turns malformed runtime action shapes into source-local compilation errors", async () => {
+    const malformedCases: readonly { readonly key: unknown; readonly action: unknown }[] = [
+      { key: 42, action: { kind: "invoke", label: "Run", interactionText: "Run", clientKey: "run" } },
+      { key: "label", action: { kind: "invoke", label: null, interactionText: "Run", clientKey: "run" } },
+      { key: "control", action: { kind: "input", label: "Choose", control: "toggle", prompt: "Choose", options: [], clientKey: "choose" } },
+      { key: "options-object", action: { kind: "input", label: "Choose", control: "single_select", prompt: "Choose", options: {}, clientKey: "choose" } },
+      { key: "null-option", action: { kind: "input", label: "Choose", control: "single_select", prompt: "Choose", options: [null], clientKey: "choose" } },
+      { key: "typed-option", action: { kind: "input", label: "Choose", control: "single_select", prompt: "Choose", options: [{ key: 7, label: {} }], clientKey: "choose" } },
+    ];
+
+    for (const [index, malformed] of malformedCases.entries()) {
+      const owner = new NodeObject("box", "Owner", "Fallback", "concept", `malformed-owner-${index}`);
+      const layer = new LayerObject([owner], [], new LayerLayoutObject([]), `malformed-layer-${index}`);
+      const action = { ...malformed.action as object, sourceLayer: layer };
+      const capability = malformed.key === 42
+        ? (detailCapability.invoke as unknown as (key: unknown, action: unknown) => ReturnType<typeof detailCapability.invoke>)(malformed.key, action)
+        : (detailCapability.input as unknown as (key: unknown, action: unknown) => ReturnType<typeof detailCapability.input>)(malformed.key, action);
+      owner.detailAuthoring.setComponent(`malformed-${index}`, html`<button gc=${capability}>Malformed</button>`);
+
+      await expect(checkpointWithHostAssets(owner, [])).rejects.toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+        issues: expect.arrayContaining([expect.objectContaining({ code: "capability_invalid", componentId: `malformed-${index}` })]),
+      }));
+    }
+  });
+
+  it("rejects a draft action whose source layer does not contain the owning node", async () => {
+    const owner = new NodeObject("box", "Owner", "Fallback", "concept", "membership-owner");
+    const unrelated = new NodeObject("box", "Unrelated", "Fallback", "concept", "membership-unrelated");
+    const unrelatedLayer = new LayerObject([unrelated], [], new LayerLayoutObject([]), "unrelated-layer");
+    const action = {
+      kind: "invoke",
+      label: "Run",
+      interactionText: "Run",
+      sourceLayer: unrelatedLayer,
+      clientKey: "unrelated-action",
+    } satisfies ActionObject;
+    owner.detailAuthoring.setComponent("unrelated-layer", html`
+      <button gc=${detailCapability.invoke("run", action)}>Run</button>
+    `);
+
+    await expect(checkpointWithHostAssets(owner, [])).rejects.toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: [expect.objectContaining({ code: "capability_source_layer_mismatch", componentId: "unrelated-layer" })],
+    }));
+  });
+
+  it("does not let a standalone authoring constructor mint source-node provenance", () => {
+    const owner = new NodeObject("box", "Owner", "Fallback", "concept", "constructor-owner");
+    const layer = new LayerObject([owner], [], new LayerLayoutObject([]), "constructor-layer");
+    const action = {
+      kind: "invoke",
+      label: "Run",
+      interactionText: "Run",
+      sourceLayer: layer,
+      clientKey: "constructor-action",
+    } satisfies ActionObject;
+    const PublicAuthoring = NodeDetailAuthoring as unknown as new (ownerHint: string) => NodeDetailAuthoring;
+    const forged = new PublicAuthoring(owner.clientKey);
+    forged.setComponent("constructor-spoof", html`<button gc=${detailCapability.invoke("run", action)}>Run</button>`);
+
+    expect(() => forged.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: [expect.objectContaining({ code: "capability_invalid", componentId: "constructor-spoof" })],
+    }));
+  });
+
   it("rejects a legacy graph capability path that tries to spoof an unrelated source node", () => {
     const owner = new NodeObject("box", "Owner", "Fallback", "concept", "owner-node");
     const unrelated = new NodeObject("box", "Unrelated", "Fallback", "concept", "unrelated-node");
@@ -351,7 +415,7 @@ describe("typed Node Detail authoring compiler", () => {
     }));
   });
 
-  it("validates host-owned asset availability and integrity together with authored accessibility", async () => {
+  it("validates host-owned asset availability and representation together with authored accessibility", async () => {
     const unavailable = assetRef("missing-visual");
     const node = new NodeObject("box", "Asset errors", "Fallback", "concept", "asset-errors-node");
     const detail = node.detailAuthoring;
@@ -364,21 +428,20 @@ describe("typed Node Detail authoring compiler", () => {
       logicalId: "missing-visual",
       authority: "current",
       availability: "unavailable",
-      digestSha256: "not-a-sha256",
+      digestSha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
       mediaType: "image/svg+xml",
       representation: { kind: "image", sanitized: false },
     }])).rejects.toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
       issues: expect.arrayContaining([
         expect.objectContaining({ code: "accessibility_name_required", componentId: "asset-errors", line: 2 }),
         expect.objectContaining({ code: "asset_unavailable", componentId: "asset-errors", line: 3 }),
-        expect.objectContaining({ code: "asset_integrity_invalid", componentId: "asset-errors", line: 3 }),
         expect.objectContaining({ code: "asset_representation_unsafe", componentId: "asset-errors", line: 3 }),
         expect.objectContaining({ code: "asset_accessibility_required", componentId: "asset-errors", line: 3 }),
       ]),
     }));
   });
 
-  it("rejects unknown, mismatched, unavailable, revoked, and unsafe host checkpoints", async () => {
+  it("rejects stale, unavailable, revoked, and unsafe authenticated asset checkpoints", async () => {
     const digest = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
     const node = new NodeObject("box", "Resolver errors", "Fallback", "concept", "resolver-errors-node");
     const detail = node.detailAuthoring;
@@ -392,15 +455,15 @@ describe("typed Node Detail authoring compiler", () => {
     `);
 
     await expect(checkpointWithHostAssets(node, [
-      null,
-      { logicalId: "different", authority: "current", availability: "available", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
+      { logicalId: "unknown", authority: "current", availability: "unavailable", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
+      { logicalId: "mismatch", authority: "stale", availability: "available", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
       { logicalId: "stale", authority: "stale", availability: "available", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
       { logicalId: "unavailable", authority: "current", availability: "unavailable", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
       { logicalId: "revoked", authority: "current", availability: "revoked", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
-      { logicalId: "unsafe", authority: "current", availability: "available", digestSha256: digest, mediaType: "image/tiff", representation: { kind: "image", sanitized: false } },
+      { logicalId: "unsafe", authority: "current", availability: "available", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: false } },
     ])).rejects.toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
       issues: expect.arrayContaining([
-        expect.objectContaining({ code: "asset_unknown", line: 2 }),
+        expect.objectContaining({ code: "asset_unavailable", line: 2 }),
         expect.objectContaining({ code: "asset_authority_mismatch", line: 3 }),
         expect.objectContaining({ code: "asset_authority_mismatch", line: 4 }),
         expect.objectContaining({ code: "asset_unavailable", line: 5 }),
@@ -433,17 +496,18 @@ describe("typed Node Detail authoring compiler", () => {
     }));
   });
 
-  it("finalizes one immutable package and rejects later authoring", () => {
+  it("keeps checkpoint incremental and exposes no author-controlled finalization", () => {
     const detail = new NodeDetailAuthoring();
-    detail.setComponent("summary", html`<p>Final detail</p>`);
+    detail.setComponent("summary", html`<p>First checkpoint</p>`);
 
-    const finalized = detail.finalize();
+    const first = detail.checkpoint();
+    detail.setComponent("summary", html`<p>Second checkpoint</p>`);
+    const second = detail.checkpoint();
 
-    expect(detail.finalize()).toBe(finalized);
-    expect(Object.isFrozen(finalized)).toBe(true);
-    expect(Object.isFrozen(finalized.components)).toBe(true);
-    expect(Object.isFrozen(finalized.components[0])).toBe(true);
-    expect(() => detail.setComponent("late", html`<p>Too late</p>`)).toThrow("finalized");
+    expect((detail as unknown as { finalize?: unknown }).finalize).toBeUndefined();
+    expect(first.components[0]?.html).toBe("<p>First checkpoint</p>");
+    expect(second.components[0]?.html).toBe("<p>Second checkpoint</p>");
+    expect(Object.isFrozen(second)).toBe(true);
   });
 
   it("rejects duplicate authored binding identities instead of emitting colliding mounts", () => {
@@ -545,6 +609,42 @@ describe("typed Node Detail authoring compiler", () => {
         expect.objectContaining({ code: "asset_resolution_required", componentId: "second" }),
       ]),
     }));
+  });
+
+  it("gives repeated placements stable occurrence mounts while resolving one logical asset", async () => {
+    const owner = new NodeObject("box", "Repeated logo", "Fallback", "concept", "repeated-logo-owner");
+    const logo = assetRef("logo");
+    owner.detailAuthoring.setComponent("logos", html`
+      <div>
+        <img asset=${logo} alt="Primary logo">
+        <img asset=${logo} alt="Secondary logo">
+      </div>
+    `);
+    const requests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ assets: [{
+        logicalId: "logo",
+        authority: "current",
+        availability: "available",
+        digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        mediaType: "image/png",
+        representation: { kind: "image", sanitized: true },
+      }] }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host", nodeId: 1 });
+
+    const first = await client.checkpointNodeDetail(owner);
+    const second = await client.checkpointNodeDetail(owner);
+
+    expect(requests).toEqual([{ logicalIds: ["logo"] }, { logicalIds: ["logo"] }]);
+    expect(first).toEqual(second);
+    expect(first.assets).toEqual([expect.objectContaining({ id: "logo" })]);
+    expect(first.mounts).toEqual([
+      expect.objectContaining({ id: expect.stringMatching(/^m_[a-f0-9]{16}$/), kind: "asset", assetId: "logo" }),
+      expect.objectContaining({ id: expect.stringMatching(/^m_[a-f0-9]{16}$/), kind: "asset", assetId: "logo" }),
+    ]);
+    expect(first.mounts[0]?.id).not.toBe(first.mounts[1]?.id);
   });
 
   it("rejects literal authoring directives and caller-forged runtime mounts", () => {

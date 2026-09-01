@@ -285,7 +285,7 @@ describe("desktop skeleton", () => {
     expect(packaging).toContain('win: {\n      icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg")');
     expect(desktopPreload).toContain("platform: process.platform");
     expect(rendererMain).toContain('desktop?.platform === "win32"');
-    expect(packaging).toContain('"packages/graph-client/dist"');
+    expect(packaging).toContain('"packages/graph-client/agent-resource"');
     expect(desktopMain).toContain('"graph-client", "index.js"');
     expect(desktopMain).toContain("codexBasicClientModuleUrl: graphClientModuleUrl");
     expect(desktopMain).not.toContain("bundledCodexBinary");
@@ -410,7 +410,7 @@ describe("desktop skeleton", () => {
     expect(evalPackaging).toContain('"main/single-instance.mjs"');
     expect(evalPackaging).toContain('{ from: resolve(desktopRoot, "renderer"), to: "renderer" }');
     expect(evalPackaging).toContain('ladybugNoticesExtraResource(repositoryRoot)');
-    expect(evalPackaging).toContain('"packages/graph-client/dist"');
+    expect(evalPackaging).toContain('"packages/graph-client/agent-resource"');
     expect(evalMain).toContain("GraphCompleteRuntimeService");
     expect(evalMain).toContain("RelayerAppServerService");
     expect(evalMain).toContain("allowHarnessOverride: true");

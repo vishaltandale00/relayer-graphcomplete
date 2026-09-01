@@ -86,6 +86,7 @@
     "app-builder-lib": "26.15.3",
     "electron": "43.0.0",
     "electron-builder": "26.15.3",
+    "rolldown": "1.2.3",
     "tar": "7.5.22",
     "typescript": "^5.9.2",
     "vitest": "^4.1.9",

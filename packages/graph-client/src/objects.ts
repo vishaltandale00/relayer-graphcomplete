@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { NodeDetailAuthoring } from "./detail.js";
+import { createOwnedNodeDetailAuthoring, NodeDetailAuthoring } from "./detail.js";
 import type { GraphAction, GraphEdge, GraphId, GraphLayer, GraphNode, InputControl, InputOption, NavigateRelation } from "./types.js";
 
 export class NodeObject {
@@ -15,7 +15,7 @@ export class NodeObject {
     clientKey: string = randomUUID(),
   ) {
     this.clientKey = clientKey;
-    this.detailAuthoring = new NodeDetailAuthoring(clientKey);
+    this.detailAuthoring = createOwnedNodeDetailAuthoring(clientKey);
   }
 }
 

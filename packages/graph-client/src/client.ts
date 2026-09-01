@@ -7,7 +7,7 @@ import { GraphApiError, type CompletionInputGraph, type CompletionOutput, type C
 
 export class RelayerGraphClient {
   readonly capability: GraphCapability;
-  readonly #submittedDetails = new WeakMap<NodeObject, CompiledNodeDetail>();
+  readonly #submittedDetails = new WeakMap<NodeObject, Promise<CompiledNodeDetail>>();
 
   constructor(capability: GraphCapability) {
     this.capability = { ...capability, url: capability.url.replace(/\/$/, "") };
@@ -60,29 +60,37 @@ export class RelayerGraphClient {
 
   async checkpointNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
     const finalized = this.#submittedDetails.get(node);
-    if (finalized !== undefined) return finalized;
+    if (finalized !== undefined) return await finalized;
     const assets = await this.resolveDetailAssets(node);
     return compileAuthenticatedNodeDetail(node.detailAuthoring, node.clientKey, assets);
   }
 
-  private async finalizeNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
+  private finalizeNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
     const finalized = this.#submittedDetails.get(node);
     if (finalized !== undefined) return finalized;
+    const finalization = this.compileAndFreezeNodeDetail(node);
+    this.#submittedDetails.set(node, finalization);
+    void finalization.catch(() => {
+      if (this.#submittedDetails.get(node) === finalization) this.#submittedDetails.delete(node);
+    });
+    return finalization;
+  }
+
+  private async compileAndFreezeNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
     const assets = await this.resolveDetailAssets(node);
     const compiled = compileAuthenticatedNodeDetail(node.detailAuthoring, node.clientKey, assets);
     freezeNodeDetailAuthoring(node.detailAuthoring);
-    this.#submittedDetails.set(node, compiled);
     return compiled;
   }
 
-  private async resolveDetailAssets(node: NodeObject): Promise<readonly (ResolvedDetailAsset | null)[]> {
+  private async resolveDetailAssets(node: NodeObject): Promise<readonly ResolvedDetailAsset[]> {
     const logicalIds = authoredDetailAssetIds(node.detailAuthoring);
     if (logicalIds.length === 0) return [];
-    const body = await this.request<{ readonly assets: readonly (ResolvedDetailAsset | null)[] }>("/api/graph/detail-assets/resolve", {
+    const body = await this.request<unknown>("/api/graph/detail-assets/resolve", {
       method: "POST",
       body: JSON.stringify({ logicalIds }),
     });
-    return body.assets;
+    return validatedResolvedDetailAssets(body, logicalIds);
   }
 
   async createEdge(left: NodeReference, right: NodeReference, clientKey?: string): Promise<GraphEdge>;
@@ -288,6 +296,81 @@ interface ResolvedDetailAsset {
   readonly digestSha256: string;
   readonly mediaType: string;
   readonly representation: { readonly kind: "image"; readonly sanitized: boolean };
+}
+
+const RESOLVED_ASSET_KEYS = Object.freeze([
+  "authority", "availability", "digestSha256", "logicalId", "mediaType", "representation",
+]);
+const RESOLVED_REPRESENTATION_KEYS = Object.freeze(["kind", "sanitized"]);
+const RESOLVED_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
+
+function validatedResolvedDetailAssets(value: unknown, logicalIds: readonly string[]): readonly ResolvedDetailAsset[] {
+  if (!isRecord(value)) invalidDetailAssetResponse("response", "Response must be an object");
+  if (!("assets" in value)) invalidDetailAssetResponse("assets", "Response must contain assets");
+  if (!hasExactKeys(value, ["assets"])) invalidDetailAssetResponse("response", "Response must contain only assets");
+  const assets = value.assets;
+  if (!Array.isArray(assets)) invalidDetailAssetResponse("assets", "Assets must be an array");
+  if (assets.length !== logicalIds.length) invalidDetailAssetResponse("assets", "Assets must match the requested cardinality");
+  return Object.freeze(assets.map((candidate, index) => {
+    const path = `assets[${index}]`;
+    if (!isRecord(candidate) || !hasExactKeys(candidate, RESOLVED_ASSET_KEYS)) {
+      invalidDetailAssetResponse(path, "Asset records must use the exact authenticated response shape");
+    }
+    if (typeof candidate.logicalId !== "string"
+      || !isBoundedIdentity(candidate.logicalId)
+      || candidate.logicalId !== logicalIds[index]) {
+      invalidDetailAssetResponse(`${path}.logicalId`, "Asset identity must exactly match the requested identity at this position");
+    }
+    if (candidate.authority !== "current" && candidate.authority !== "stale") {
+      invalidDetailAssetResponse(`${path}.authority`, "Asset authority must be current or stale");
+    }
+    if (candidate.availability !== "available"
+      && candidate.availability !== "unavailable"
+      && candidate.availability !== "revoked") {
+      invalidDetailAssetResponse(`${path}.availability`, "Asset availability is invalid");
+    }
+    if (typeof candidate.digestSha256 !== "string" || !/^[a-f0-9]{64}$/.test(candidate.digestSha256)) {
+      invalidDetailAssetResponse(`${path}.digestSha256`, "Asset digest must be one lowercase SHA-256 value");
+    }
+    if (typeof candidate.mediaType !== "string" || !RESOLVED_MEDIA_TYPES.has(candidate.mediaType)) {
+      invalidDetailAssetResponse(`${path}.mediaType`, "Asset media type is unsupported");
+    }
+    if (!isRecord(candidate.representation)
+      || !hasExactKeys(candidate.representation, RESOLVED_REPRESENTATION_KEYS)) {
+      invalidDetailAssetResponse(`${path}.representation`, "Asset representation must use the exact response shape");
+    }
+    if (candidate.representation.kind !== "image") {
+      invalidDetailAssetResponse(`${path}.representation.kind`, "Asset representation kind must be image");
+    }
+    if (typeof candidate.representation.sanitized !== "boolean") {
+      invalidDetailAssetResponse(`${path}.representation.sanitized`, "Asset sanitization must be a boolean");
+    }
+    return Object.freeze({
+      logicalId: candidate.logicalId,
+      authority: candidate.authority,
+      availability: candidate.availability,
+      digestSha256: candidate.digestSha256,
+      mediaType: candidate.mediaType,
+      representation: Object.freeze({ kind: candidate.representation.kind, sanitized: candidate.representation.sanitized }),
+    });
+  }));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value).sort();
+  return keys.length === expected.length && keys.every((key, index) => key === expected[index]);
+}
+
+function isBoundedIdentity(value: string): boolean {
+  return value !== "" && value.trim() === value && !value.includes("\0") && Buffer.byteLength(value, "utf8") <= 128;
+}
+
+function invalidDetailAssetResponse(path: string, message: string): never {
+  throw new GraphApiError(200, "invalid_detail_asset_response", path, message);
 }
 
 function requireReference(value: NodeReference | undefined): NodeReference {

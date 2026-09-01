@@ -47,7 +47,7 @@ export default {
     { from: resolve(cargoTargetRoot, `${rustTarget}/release/relayer-graph-server${binarySuffix}`), to: `bin/relayer-graph-server${binarySuffix}` },
     { from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] },
     { from: resolve(repositoryRoot, "permissions/desktop.json"), to: "permissions/desktop.json" },
-    { from: resolve(repositoryRoot, "packages/graph-client/dist"), to: "graph-client" },
+    { from: resolve(repositoryRoot, "packages/graph-client/agent-resource"), to: "graph-client" },
     ladybugNoticesExtraResource(repositoryRoot),
     { from: resolve(desktopRoot, "renderer"), to: "renderer" },
     { from: resolve(desktopRoot, "eval-renderer"), to: "eval-renderer" },

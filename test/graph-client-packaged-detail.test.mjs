@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -6,15 +6,17 @@ import { pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const graphClientIndexUrl = pathToFileURL(resolve("packages/graph-client/dist/index.js"));
+const graphClientIndexUrl = pathToFileURL(resolve("packages/graph-client/agent-resource/index.js"));
 const execFileAsync = promisify(execFile);
 
 describe("packaged graph-client authored detail boundary", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("has no sibling host bridge and ignores forged public compiler output", async () => {
-    await expect(import(new URL("./detail-host.js", graphClientIndexUrl).href))
-      .rejects.toMatchObject({ code: "ERR_MODULE_NOT_FOUND" });
+  it("has no sibling compiler modules and ignores forged public compiler output", async () => {
+    for (const sibling of ["detail-host.js", "detail.js"]) {
+      await expect(import(new URL(`./${sibling}`, graphClientIndexUrl).href))
+        .rejects.toMatchObject({ code: "ERR_MODULE_NOT_FOUND" });
+    }
 
     const { NodeObject, RelayerGraphClient, html } = await import(graphClientIndexUrl.href);
     const node = new NodeObject("box", "Safe", "Fallback", "concept", "safe-node");
@@ -44,23 +46,38 @@ describe("packaged graph-client authored detail boundary", () => {
     ]);
   });
 
-  it("imports and compiles from the exact isolated packaged resource layout", async () => {
+  it("imports, compiles, and submits from the exact isolated packaged resource layout", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-packaged-graph-client-"));
     try {
       const resourcesPath = join(directory, "resources");
       const packagedRoot = join(resourcesPath, "graph-client");
-      await cp(resolve("packages/graph-client/dist"), packagedRoot, { recursive: true });
+      await cp(resolve("packages/graph-client/agent-resource"), packagedRoot, { recursive: true });
+      expect(await readdir(packagedRoot)).toEqual(["index.js"]);
       const packagedUrl = pathToFileURL(join(resourcesPath, "graph-client", "index.js")).href;
 
       const probe = `
-        const { NodeDetailAuthoring, css, html } = await import(${JSON.stringify(packagedUrl)});
-        const detail = new NodeDetailAuthoring();
-        detail.setComponent(
+        for (const sibling of ["detail-host.js", "detail.js"]) {
+          try {
+            await import(new URL("./" + sibling, ${JSON.stringify(packagedUrl)}).href);
+            process.exit(10);
+          } catch (error) {
+            if (error?.code !== "ERR_MODULE_NOT_FOUND") process.exit(11);
+          }
+        }
+        const { NodeObject, RelayerGraphClient, css, html } = await import(${JSON.stringify(packagedUrl)});
+        const node = new NodeObject("box", "Packaged", "Fallback", "concept", "packaged-node");
+        node.detailAuthoring.setComponent(
           "layout",
           html\`<table><tbody><tr><td>Packaged</td></tr></tbody></table>\`,
           css\`.layout:first-child{display:grid;grid-template-columns:minmax(10rem,1fr) 2fr}\`,
         );
-        const compiled = detail.checkpoint();
+        let submitted;
+        globalThis.fetch = async (_url, init) => {
+          submitted = JSON.parse(String(init.body));
+          return new Response(JSON.stringify({ node: { id: 1, kind: "concept", icon: "box", title: "Packaged", detail: "Fallback", state: "draft" } }), { status: 200, headers: { "content-type": "application/json" } });
+        };
+        await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host", nodeId: 1 }).submitNode(node);
+        const compiled = submitted.authoredDetail;
         if (compiled.components[0]?.html !== "<table><tbody><tr><td>Packaged</td></tr></tbody></table>") process.exit(2);
         if (!compiled.components[0]?.css.includes("grid-template-columns:minmax(10rem,1fr) 2fr")) process.exit(3);
         process.stdout.write("packaged graph-client compile passed\\n");

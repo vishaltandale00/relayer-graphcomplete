@@ -1,6 +1,7 @@
 node_modules/
 target/
 dist/
+packages/graph-client/agent-resource/
 coverage/
 target/
 .playwright-mcp/

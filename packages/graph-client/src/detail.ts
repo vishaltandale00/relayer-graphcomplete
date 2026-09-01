@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { generate as generateCss, parse as parseCss, tokenTypes, tokenize as tokenizeCss, walk as walkCss, type CssNode, type SyntaxParseError } from "css-tree";
+import { generate as generateCss, parse as parseCss, tokenTypes, tokenize as tokenizeCss, walk as walkCss } from "css-tree/dist/csstree.esm";
+import type { CssNode, SyntaxParseError } from "css-tree";
 import { parseFragment, serialize, type DefaultTreeAdapterTypes, type ParserError } from "parse5";
 import { LayerObject, NodeObject, type ActionObject, type InputActionObject, type InvokeActionObject, type LayerReference, type NavigateActionObject, type NodeReference } from "./objects.js";
 
@@ -175,14 +176,13 @@ interface AuthoringState {
   readonly components: Map<string, AuthoringComponent>;
   readonly ownerHint: string | undefined;
   frozen: boolean;
-  publicFinalized?: CompiledNodeDetail;
 }
 
 const AUTHORING_STATE = new WeakMap<NodeDetailAuthoring, AuthoringState>();
 
 export class NodeDetailAuthoring {
-  constructor(ownerHint?: string) {
-    AUTHORING_STATE.set(this, { components: new Map(), ownerHint, frozen: false });
+  constructor() {
+    AUTHORING_STATE.set(this, { components: new Map(), ownerHint: undefined, frozen: false });
   }
 
   setComponent(id: string, markup: DetailTemplate, styles: DetailTemplate = emptyCssTemplate()): this {
@@ -195,15 +195,15 @@ export class NodeDetailAuthoring {
 
   checkpoint(): CompiledNodeDetail {
     const state = authoringState(this);
-    return state.publicFinalized ?? compileAuthoring(this, state.ownerHint, REJECTING_ASSET_RESOLVER);
+    return compileAuthoring(this, state.ownerHint, REJECTING_ASSET_RESOLVER);
   }
+}
 
-  finalize(): CompiledNodeDetail {
-    const state = authoringState(this);
-    state.publicFinalized ??= this.checkpoint();
-    state.frozen = true;
-    return state.publicFinalized;
-  }
+/** @internal */
+export function createOwnedNodeDetailAuthoring(ownerHint: string): NodeDetailAuthoring {
+  const authoring = new NodeDetailAuthoring();
+  AUTHORING_STATE.set(authoring, { components: new Map(), ownerHint, frozen: false });
+  return authoring;
 }
 
 /** @internal */
@@ -403,6 +403,7 @@ function compileHtml(
   const fragment = parseAuthoredHtml(source, componentId, issues);
   if (!validateHtmlTreeLimits(componentId, fragment, issues)) return "";
   const bindingUses = new Uint16Array(template.values.length);
+  const assetOccurrences = new Map<string, number>();
   visitElements(fragment, (element) => {
     validateElementSafety(componentId, element, issues);
     element.attrs.sort(compareAttributes);
@@ -454,13 +455,11 @@ function compileHtml(
     } else if (isAssetRef(value)) {
       const resolved = assetResolver.resolve(value);
       validateAsset(componentId, element, value, resolved, assetResolver.missingAssetCode, issues);
-      const id = mountId("asset", componentId, value.logicalId);
+      const occurrence = assetOccurrences.get(value.logicalId) ?? 0;
+      assetOccurrences.set(value.logicalId, occurrence + 1);
+      const id = mountId("asset", componentId, value.logicalId, occurrence);
       element.attrs.push({ name: "data-asset-mount", value: id });
-      if (mounts.some((mount) => mount.id === id)) {
-        issues.push(sourceIssue("duplicate_mount_identity", componentId, element, `Asset ${value.logicalId} is already bound in this component`));
-      } else {
-        mounts.push(Object.freeze({ id, componentId, kind: "asset", host: element.tagName, assetId: value.logicalId }));
-      }
+      mounts.push(Object.freeze({ id, componentId, kind: "asset", host: element.tagName, assetId: value.logicalId }));
       const compiledAsset = resolved === undefined ? undefined : Object.freeze({
         id: resolved.logicalId,
         digestSha256: resolved.digestSha256,
@@ -558,8 +557,12 @@ function sourceLocationAtEnd(source: string): { readonly line: number; readonly 
   return { line: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 };
 }
 
-function isStableIdentity(value: string): boolean {
-  return value.trim() === value && value !== "" && !value.includes("\0") && Buffer.byteLength(value, "utf8") <= 128;
+function isStableIdentity(value: unknown): value is string {
+  return typeof value === "string"
+    && value.trim() === value
+    && value !== ""
+    && !value.includes("\0")
+    && Buffer.byteLength(value, "utf8") <= 128;
 }
 
 function compileCss(componentId: string, template: DetailTemplate, issues: DetailCompilationIssue[]): string {
@@ -880,14 +883,26 @@ function normalizeCapabilityHost(
 function capabilityValidationCodes(capability: DetailCapability, ownerClientKey: string | undefined): readonly string[] {
   if (!isStableIdentity(capability.key)) return ["capability_invalid"];
   if (capability.kind !== "link") {
-    const action = capability.action;
-    if (ownerClientKey === undefined || !isStableIdentity(ownerClientKey) || typeof action !== "object" || action === null) return ["capability_invalid"];
-    if (action.clientKey === undefined || !isStableIdentity(action.clientKey)) return ["capability_invalid"];
-    if (action.sourceLayer === undefined || !isStableReference(action.sourceLayer)) return ["capability_invalid"];
+    const actionValue: unknown = capability.action;
+    if (ownerClientKey === undefined
+      || !isStableIdentity(ownerClientKey)
+      || typeof actionValue !== "object"
+      || actionValue === null) return ["capability_invalid"];
+    const action = actionValue as Record<string, unknown>;
+    if (!isStableIdentity(action.clientKey)) return ["capability_invalid"];
+    if (!isStableReference(action.sourceLayer)) return ["capability_invalid"];
+    if (!sourceLayerContainsOwner(action.sourceLayer, ownerClientKey)) return ["capability_source_layer_mismatch"];
     if (!(action.kind === capability.kind || (action.kind === "navigate" && action.relation === capability.kind))) return ["capability_invalid"];
-    if (action.label.trim() === "") return ["capability_invalid"];
-    if (action.kind === "invoke") return action.interactionText.trim() === "" ? ["capability_invalid"] : [];
-    if (action.kind === "navigate") return [];
+    if (typeof action.label !== "string" || action.label.trim() === "") return ["capability_invalid"];
+    if (action.kind === "invoke") {
+      return typeof action.interactionText !== "string" || action.interactionText.trim() === ""
+        ? ["capability_invalid"]
+        : [];
+    }
+    if (action.kind === "navigate") return isStableReference(action.target) ? [] : ["capability_invalid"];
+    if (action.kind !== "input"
+      || (action.control !== "text" && action.control !== "single_select" && action.control !== "multi_select")
+      || typeof action.prompt !== "string") return ["capability_invalid"];
     const codes: string[] = [];
     if (action.prompt.trim() === "") codes.push("input_action_prompt_required");
     else if (Buffer.byteLength(action.prompt, "utf8") > 2_000) codes.push("input_action_prompt_too_long");
@@ -896,38 +911,45 @@ function capabilityValidationCodes(capability: DetailCapability, ownerClientKey:
       if (action.minimumSelections !== undefined) codes.push("input_action_minimum_unexpected");
       return codes;
     }
-    if (action.options === undefined || action.options.length === 0) {
+    if (!Array.isArray(action.options)) return ["capability_invalid"];
+    if (action.options.length === 0) {
       codes.push("input_action_options_required");
     } else {
       if (action.options.length > 50) codes.push("input_action_option_count");
       const keys = new Set<string>();
       for (const option of action.options) {
-        if (option.key === ""
-          || option.key.trim() !== option.key
-          || option.key.includes("\0")
-          || Buffer.byteLength(option.key, "utf8") > 128) {
+        if (typeof option !== "object" || option === null) return ["capability_invalid"];
+        const optionRecord = option as Record<string, unknown>;
+        if (typeof optionRecord.key !== "string" || typeof optionRecord.label !== "string") return ["capability_invalid"];
+        const optionKey = optionRecord.key;
+        const optionLabel = optionRecord.label;
+        if (optionKey === ""
+          || optionKey.trim() !== optionKey
+          || optionKey.includes("\0")
+          || Buffer.byteLength(optionKey, "utf8") > 128) {
           codes.push("input_action_option_key_invalid");
-        } else if (keys.has(option.key)) {
+        } else if (keys.has(optionKey)) {
           codes.push("input_action_option_key_duplicate");
         } else {
-          keys.add(option.key);
+          keys.add(optionKey);
         }
-        if (option.label.trim() === "") codes.push("input_action_option_label_required");
-        else if (Buffer.byteLength(option.label, "utf8") > 512) codes.push("input_action_option_label_too_long");
+        if (optionLabel.trim() === "") codes.push("input_action_option_label_required");
+        else if (Buffer.byteLength(optionLabel, "utf8") > 512) codes.push("input_action_option_label_too_long");
       }
     }
     if (action.control === "single_select" && action.minimumSelections !== undefined) {
       codes.push("input_action_minimum_unexpected");
     } else if (action.control === "multi_select"
       && action.minimumSelections !== undefined
-      && (!Number.isInteger(action.minimumSelections)
+      && (typeof action.minimumSelections !== "number"
+        || !Number.isInteger(action.minimumSelections)
         || action.minimumSelections <= 0
-        || action.options === undefined
         || action.minimumSelections > action.options.length)) {
       codes.push("input_action_minimum_invalid");
     }
     return codes;
   }
+  if (typeof capability.href !== "string") return ["capability_invalid"];
   try {
     const url = new URL(capability.href);
     return (url.protocol === "https:" || url.protocol === "http:")
@@ -938,12 +960,22 @@ function capabilityValidationCodes(capability: DetailCapability, ownerClientKey:
   }
 }
 
-function isStableReference(reference: NodeReference | LayerReference): boolean {
+function isStableReference(reference: unknown): reference is NodeReference | LayerReference {
   if (typeof reference === "number") return Number.isSafeInteger(reference) && reference > 0;
   if (reference instanceof NodeObject || reference instanceof LayerObject) {
     return isStableIdentity(reference.clientKey);
   }
-  return Number.isSafeInteger(reference.id) && reference.id > 0;
+  return typeof reference === "object"
+    && reference !== null
+    && "id" in reference
+    && typeof reference.id === "number"
+    && Number.isSafeInteger(reference.id)
+    && reference.id > 0;
+}
+
+function sourceLayerContainsOwner(sourceLayer: NodeReference | LayerReference, ownerClientKey: string): boolean {
+  return sourceLayer instanceof LayerObject
+    && sourceLayer.nodes.some((node) => node instanceof NodeObject && node.clientKey === ownerClientKey);
 }
 
 function validateElementSafety(
@@ -1208,8 +1240,9 @@ function isAssetRef(value: unknown): value is AssetRef {
   return typeof value === "object" && value !== null && DETAIL_ASSET in value;
 }
 
-function mountId(kind: "capability" | "asset", componentId: string, key: string): string {
-  const digest = createHash("sha256").update(`${kind}\0${componentId}\0${key}`).digest("hex").slice(0, 16);
+function mountId(kind: "capability" | "asset", componentId: string, key: string, occurrence = 0): string {
+  const occurrenceIdentity = occurrence === 0 ? "" : `\0${occurrence}`;
+  const digest = createHash("sha256").update(`${kind}\0${componentId}\0${key}${occurrenceIdentity}`).digest("hex").slice(0, 16);
   return `m_${digest}`;
 }
 

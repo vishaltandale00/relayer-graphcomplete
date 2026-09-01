@@ -133,6 +133,60 @@ describe("agent-facing graph objects", () => {
     });
   });
 
+  it("rejects hostile authenticated asset responses as deterministic typed errors", async () => {
+    const valid = (logicalId: string) => ({
+      logicalId,
+      authority: "current",
+      availability: "available",
+      digestSha256: "a".repeat(64),
+      mediaType: "image/png",
+      representation: { kind: "image", sanitized: true },
+    });
+    const cases: readonly {
+      readonly name: string;
+      readonly logicalIds: readonly string[];
+      readonly body: unknown;
+      readonly path: string;
+    }[] = [
+      { name: "null body", logicalIds: ["hero"], body: null, path: "response" },
+      { name: "missing assets", logicalIds: ["hero"], body: {}, path: "assets" },
+      { name: "extra response field", logicalIds: ["hero"], body: { assets: [valid("hero")], extra: true }, path: "response" },
+      { name: "missing record", logicalIds: ["hero"], body: { assets: [] }, path: "assets" },
+      { name: "extra record", logicalIds: ["hero"], body: { assets: [valid("hero"), valid("extra")] }, path: "assets" },
+      { name: "duplicate record", logicalIds: ["hero", "logo"], body: { assets: [valid("hero"), valid("hero")] }, path: "assets[1].logicalId" },
+      { name: "wrong identity", logicalIds: ["hero"], body: { assets: [valid("other")] }, path: "assets[0].logicalId" },
+      { name: "non-object record", logicalIds: ["hero"], body: { assets: [null] }, path: "assets[0]" },
+      { name: "extra record field", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), injected: true }] }, path: "assets[0]" },
+      { name: "invalid authority", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), authority: "root" }] }, path: "assets[0].authority" },
+      { name: "invalid availability", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), availability: "maybe" }] }, path: "assets[0].availability" },
+      { name: "invalid digest", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), digestSha256: "A".repeat(64) }] }, path: "assets[0].digestSha256" },
+      { name: "invalid media", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), mediaType: "text/html" }] }, path: "assets[0].mediaType" },
+      { name: "invalid representation", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), representation: { kind: "video", sanitized: true } }] }, path: "assets[0].representation.kind" },
+      { name: "non-boolean sanitization", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), representation: { kind: "image", sanitized: "true" } }] }, path: "assets[0].representation.sanitized" },
+    ];
+
+    for (const [caseIndex, hostile] of cases.entries()) {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify(hostile.body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      const node = new NodeObject("box", hostile.name, "Fallback", "concept", `hostile-${caseIndex}`);
+      for (const [assetIndex, logicalId] of hostile.logicalIds.entries()) {
+        node.detailAuthoring.setComponent(`visual-${assetIndex}`, html`<img asset=${assetRef(logicalId)} alt="Visual">`);
+      }
+      const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host-token", nodeId: 1 });
+
+      await expect(graph.checkpointNodeDetail(node)).rejects.toMatchObject({
+        name: "GraphApiError",
+        status: 200,
+        code: "invalid_detail_asset_response",
+        path: hostile.path,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it("rejects malformed logical asset IDs before authenticated transport", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -237,6 +291,76 @@ describe("agent-facing graph objects", () => {
     expect(resolverRequests).toBe(1);
     expect(submittedBodies).toHaveLength(2);
     expect(submittedBodies[1]).toBe(submittedBodies[0]);
+  });
+
+  it("single-flights first finalization across concurrent submissions", async () => {
+    let releaseResolution!: () => void;
+    const resolutionGate = new Promise<void>((resolve) => { releaseResolution = resolve; });
+    let resolverRequests = 0;
+    const submittedBodies: string[] = [];
+    const mutationResults: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/api/graph/detail-assets/resolve")) {
+        resolverRequests += 1;
+        const requestNumber = resolverRequests;
+        await resolutionGate;
+        return new Response(JSON.stringify({
+          assets: [{
+            logicalId: "single-flight-logo",
+            authority: "current",
+            availability: "available",
+            digestSha256: requestNumber === 1 ? "a".repeat(64) : "b".repeat(64),
+            mediaType: "image/png",
+            representation: { kind: "image", sanitized: true },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      submittedBodies.push(String(init.body));
+      try {
+        node.detailAuthoring.setComponent("late", html`<p>Drift</p>`);
+        mutationResults.push("mutated");
+      } catch {
+        mutationResults.push("frozen");
+      }
+      return new Response(JSON.stringify({
+        node: { id: 14, kind: "concept", icon: "box", title: "Concurrent", detail: "Fallback", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Concurrent", "Fallback", "concept", "concurrent-node");
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("single-flight-logo")} alt="Logo">`);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    const submissions = [graph.submitNode(node), graph.submitNode(node)];
+    await vi.waitFor(() => expect(resolverRequests).toBeGreaterThan(0));
+    releaseResolution();
+    await expect(Promise.all(submissions)).resolves.toHaveLength(2);
+
+    expect(resolverRequests).toBe(1);
+    expect(submittedBodies).toHaveLength(2);
+    expect(submittedBodies[1]).toBe(submittedBodies[0]);
+    expect(mutationResults).toEqual(["frozen", "frozen"]);
+  });
+
+  it("drops failed compilation finalization so the unfrozen author can repair", async () => {
+    let nodeRequests = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      nodeRequests += 1;
+      return new Response(JSON.stringify({
+        node: { id: 15, kind: "concept", icon: "box", title: "Repair", detail: "Fallback", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Repair", "Fallback", "concept", "repair-node");
+    node.detailAuthoring.setComponent("content", html`<script>unsafe()</script>`);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    await expect(graph.submitNode(node)).rejects.toThrowError(expect.objectContaining({
+      issues: [expect.objectContaining({ code: "unsafe_html_element" })],
+    }));
+    node.detailAuthoring.setComponent("content", html`<p>Repaired</p>`);
+    await expect(graph.submitNode(node)).resolves.toMatchObject({ id: 15 });
+
+    expect(nodeRequests).toBe(1);
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Drift</p>`)).toThrow("finalized");
   });
 
   it("keeps the legacy string-only submit request backward compatible while locking its empty builder", async () => {
