@@ -13,6 +13,7 @@ import {
   detailCapability,
   html,
   type ActionObject,
+  type InputActionObject,
 } from "../src/index.js";
 
 describe("typed Node Detail authoring compiler", () => {
@@ -122,12 +123,12 @@ describe("typed Node Detail authoring compiler", () => {
       input: { kind: "input", label: "Choose", control: "single_select", prompt: "Choose one", options: [{ key: "a", label: "A" }], sourceLayer: layer, clientKey: "input-action" },
     } satisfies Record<string, ActionObject>;
 
-    const detail = new NodeDetailAuthoring();
+    const detail = source.detailAuthoring;
     detail.setComponent("controls", html`
-      <button gc=${detailCapability.expand("expand", source, actions.expand)}>Expand</button>
-      <button gc=${detailCapability.reference("reference", source, actions.reference)}>Reference</button>
-      <button gc=${detailCapability.invoke("invoke", source, actions.invoke)}>Investigate</button>
-      <select gc=${detailCapability.input("input", source, actions.input)} aria-label="Choose one"></select>
+      <button gc=${detailCapability.expand("expand", actions.expand)}>Expand</button>
+      <button gc=${detailCapability.reference("reference", actions.reference)}>Reference</button>
+      <button gc=${detailCapability.invoke("invoke", actions.invoke)}>Investigate</button>
+      <select gc=${detailCapability.input("input", actions.input)} aria-label="Choose one"></select>
     `);
 
     expect(detail.checkpoint().mounts.map((mount) => mount.kind === "capability" ? mount.capability : mount)).toEqual([
@@ -138,6 +139,89 @@ describe("typed Node Detail authoring compiler", () => {
     ]);
   });
 
+  it("derives graph action source provenance only from the NodeObject that owns the detail", () => {
+    const owner = new NodeObject("box", "Owner", "Fallback", "concept", "owner-node");
+    const layer = new LayerObject(
+      [owner],
+      [],
+      new LayerLayoutObject([new NodePlacementObject(owner, 0.5, 0.5)]),
+      "owner-layer",
+    );
+    const action = {
+      kind: "invoke",
+      label: "Investigate",
+      interactionText: "Investigate this",
+      sourceLayer: layer,
+      clientKey: "owned-action",
+    } satisfies ActionObject;
+    owner.detailAuthoring.setComponent("owned-action", html`
+      <button gc=${detailCapability.invoke("investigate", action)}>Investigate</button>
+    `);
+
+    expect(owner.detailAuthoring.checkpoint().mounts).toEqual([
+      expect.objectContaining({
+        capability: {
+          kind: "invoke",
+          action: {
+            clientKey: "owned-action",
+            sourceNode: { clientKey: "owner-node" },
+            sourceLayer: { clientKey: "owner-layer" },
+          },
+        },
+      }),
+    ]);
+  });
+
+  it("mirrors graph-core select option invariants at each input binding source", () => {
+    const owner = new NodeObject("box", "Inputs", "Fallback", "concept", "input-owner");
+    const layer = new LayerObject([owner], [], new LayerLayoutObject([new NodePlacementObject(owner, 0.5, 0.5)]), "input-layer");
+    const input = (clientKey: string, options: readonly { readonly key: string; readonly label: string }[]): InputActionObject => ({
+      kind: "input",
+      label: "Choose",
+      control: "single_select",
+      prompt: "Choose one",
+      options,
+      sourceLayer: layer,
+      clientKey,
+    });
+    owner.detailAuthoring.setComponent("invalid-options", html`
+      <select gc=${detailCapability.input("blank", input("blank", [{ key: " ", label: " " }]))} aria-label="Blank"></select>
+      <select gc=${detailCapability.input("duplicate", input("duplicate", [{ key: "same", label: "One" }, { key: "same", label: "Two" }]))} aria-label="Duplicate"></select>
+      <select gc=${detailCapability.input("count", input("count", Array.from({ length: 51 }, (_, index) => ({ key: `k${index}`, label: `Option ${index}` }))))} aria-label="Count"></select>
+      <select gc=${detailCapability.input("oversize", input("oversize", [{ key: "é".repeat(65), label: "é".repeat(257) }]))} aria-label="Oversize"></select>
+    `);
+
+    expect(() => owner.detailAuthoring.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: "input_action_option_key_invalid", componentId: "invalid-options", line: 2 }),
+        expect.objectContaining({ code: "input_action_option_label_required", componentId: "invalid-options", line: 2 }),
+        expect.objectContaining({ code: "input_action_option_key_duplicate", componentId: "invalid-options", line: 3 }),
+        expect.objectContaining({ code: "input_action_option_count", componentId: "invalid-options", line: 4 }),
+        expect.objectContaining({ code: "input_action_option_key_invalid", componentId: "invalid-options", line: 5 }),
+        expect.objectContaining({ code: "input_action_option_label_too_long", componentId: "invalid-options", line: 5 }),
+      ]),
+    }));
+  });
+
+  it("rejects a legacy graph capability path that tries to spoof an unrelated source node", () => {
+    const owner = new NodeObject("box", "Owner", "Fallback", "concept", "owner-node");
+    const unrelated = new NodeObject("box", "Unrelated", "Fallback", "concept", "unrelated-node");
+    const layer = new LayerObject([owner], [], new LayerLayoutObject([new NodePlacementObject(owner, 0.5, 0.5)]), "layer");
+    const action = { kind: "invoke", label: "Run", interactionText: "Run", sourceLayer: layer, clientKey: "run" } satisfies ActionObject;
+    const legacyInvoke = detailCapability.invoke as unknown as (
+      key: string,
+      sourceNode: NodeObject,
+      action: ActionObject,
+    ) => ReturnType<typeof detailCapability.invoke>;
+    owner.detailAuthoring.setComponent("spoof", html`
+      <button gc=${legacyInvoke("run", unrelated, action)}>Run</button>
+    `);
+
+    expect(() => owner.detailAuthoring.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: [expect.objectContaining({ code: "capability_invalid", componentId: "spoof" })],
+    }));
+  });
+
   it("reports incompatible native hosts at the authored component source", () => {
     const source = new NodeObject("box", "Source", "Fallback", "concept", "source");
     const layer = new LayerObject([source], [], new LayerLayoutObject([new NodePlacementObject(source, 0.5, 0.5)]), "layer");
@@ -145,7 +229,7 @@ describe("typed Node Detail authoring compiler", () => {
     const detail = new NodeDetailAuthoring();
     detail.setComponent("bad-hosts", html`
       <button gc=${detailCapability.externalLink("docs", "https://docs.example.com")}>Docs</button>
-      <textarea gc=${detailCapability.input("choose", source, input)} aria-label="Choose"></textarea>
+      <textarea gc=${detailCapability.input("choose", input)} aria-label="Choose"></textarea>
     `);
 
     expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
@@ -248,9 +332,9 @@ describe("typed Node Detail authoring compiler", () => {
     const source = new NodeObject("box", "Source", "Fallback", "concept", "source");
     const layer = new LayerObject([source], [], new LayerLayoutObject([new NodePlacementObject(source, 0.5, 0.5)]), "layer");
     const action = { kind: "invoke", label: "Investigate", interactionText: "Investigate", sourceLayer: layer } satisfies ActionObject;
-    const detail = new NodeDetailAuthoring();
+    const detail = source.detailAuthoring;
     detail.setComponent("invalid-action", html`
-      <button gc=${detailCapability.invoke("investigate", source, action)}>Investigate</button>
+      <button gc=${detailCapability.invoke("investigate", action)}>Investigate</button>
     `);
 
     expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
@@ -429,6 +513,36 @@ describe("typed Node Detail authoring compiler", () => {
     }));
   });
 
+  it("fail-closes shadow-host and unknown CSS pseudos", () => {
+    const detail = new NodeDetailAuthoring();
+    detail.setComponent("unsafe-pseudos", html`<section class="card"><span>Content</span></section>`, css`
+      :host .card { display: grid; }
+      :host-context(.theme) .card { color: red; }
+      .card::slotted(span) { display: block; }
+      .card:future-host-state { color: blue; }
+    `);
+
+    expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: "unsafe_css_selector", componentId: "unsafe-pseudos", path: "css:1:1" }),
+        expect.objectContaining({ code: "unsafe_css_selector", componentId: "unsafe-pseudos", path: "css:2:7" }),
+        expect.objectContaining({ code: "unsafe_css_selector", componentId: "unsafe-pseudos", path: "css:3:12" }),
+        expect.objectContaining({ code: "unsafe_css_selector", componentId: "unsafe-pseudos", path: "css:4:12" }),
+      ]),
+    }));
+  });
+
+  it("allows documented local selector pseudos inside the isolated detail surface", () => {
+    const detail = new NodeDetailAuthoring();
+    detail.setComponent("safe-pseudos", html`<ul class="list"><li>One</li><li>Two</li></ul>`, css`
+      .list > li:first-child { font-weight: 600; }
+      .list > li:nth-child(2):hover::before { color: rgb(10 20 30); }
+      .list > li:not(:empty):focus-visible { outline: 2px solid blue; }
+    `);
+
+    expect(detail.checkpoint().components[0]?.css).toContain(":first-child");
+  });
+
   it("rejects CSS external-resource and host API tokens at precise multiline locations", () => {
     const detail = new NodeDetailAuthoring();
     detail.setComponent("unsafe-css-ast", html`<section>Unsafe styles</section>`, css`
@@ -474,8 +588,9 @@ describe("typed Node Detail authoring compiler", () => {
       <a gc=${detailCapability.externalLink("missing", "https://example.com/missing")} aria-labelledby="missing-label"><span aria-hidden="true">↗</span></a>
       <span id="empty-label"></span>
       <a gc=${detailCapability.externalLink("empty", "https://example.com/empty")} aria-labelledby="empty-label"><span aria-hidden="true">↗</span></a>
-      <span aria-hidden="true"><span id="hidden-label">Hidden label</span></span>
-      <a gc=${detailCapability.externalLink("hidden", "https://example.com/hidden")} aria-labelledby="hidden-label"><span aria-hidden="true">↗</span></a>
+      <span id="duplicate-label"></span>
+      <span id="duplicate-label">Second duplicate is ignored</span>
+      <a gc=${detailCapability.externalLink("duplicate", "https://example.com/duplicate")} aria-labelledby="duplicate-label"><span aria-hidden="true">↗</span></a>
     `);
 
     expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
@@ -483,7 +598,7 @@ describe("typed Node Detail authoring compiler", () => {
         expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 2 }),
         expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 3 }),
         expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 5 }),
-        expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 7 }),
+        expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 8 }),
       ],
     }));
   });
@@ -498,6 +613,28 @@ describe("typed Node Detail authoring compiler", () => {
     expect(detail.checkpoint().components[0]?.html).toMatch(
       /<a aria-labelledby="docs-label" data-gc-mount="m_[a-f0-9]{16}"><span aria-hidden="true">↗<\/span><\/a>/,
     );
+  });
+
+  it("implements external labels, descendant image alt, and directly referenced hidden names", () => {
+    const owner = new NodeObject("box", "Accessible controls", "Fallback", "concept", "accessible-owner");
+    const layer = new LayerObject([owner], [], new LayerLayoutObject([new NodePlacementObject(owner, 0.5, 0.5)]), "accessible-layer");
+    const input = {
+      kind: "input",
+      label: "Search",
+      control: "text",
+      prompt: "Search documentation",
+      sourceLayer: layer,
+      clientKey: "search-input",
+    } satisfies ActionObject;
+    owner.detailAuthoring.setComponent("accessible-subset", html`
+      <label for="search-field">Search documentation</label>
+      <input id="search-field" gc=${detailCapability.input("search", input)}>
+      <a gc=${detailCapability.externalLink("image-alt", "https://example.com/image-alt")}><img alt="Read image documentation"></a>
+      <span id="hidden-name" aria-hidden="true">Hidden but directly referenced</span>
+      <a gc=${detailCapability.externalLink("hidden-name", "https://example.com/hidden-name")} aria-labelledby="hidden-name"><span aria-hidden="true">↗</span></a>
+    `);
+
+    expect(owner.detailAuthoring.checkpoint().mounts).toHaveLength(3);
   });
 
   it("returns typed limit errors for excessive bytes, elements, and depth without overflowing", () => {
@@ -544,10 +681,10 @@ describe("typed Node Detail authoring compiler", () => {
     const layer = new LayerObject([source], [], new LayerLayoutObject([new NodePlacementObject(source, 0.5, 0.5)]), "layer");
     const text = { kind: "input", label: "Explain", control: "text", prompt: "Explain", sourceLayer: layer, clientKey: "text" } satisfies ActionObject;
     const multi = { kind: "input", label: "Choose", control: "multi_select", prompt: "Choose", options: [{ key: "a", label: "A" }], sourceLayer: layer, clientKey: "multi" } satisfies ActionObject;
-    const detail = new NodeDetailAuthoring();
+    const detail = source.detailAuthoring;
     detail.setComponent("input-hosts", html`
-      <input gc=${detailCapability.input("text", source, text)} type="file" aria-label="Explain">
-      <select gc=${detailCapability.input("multi", source, multi)} aria-label="Choose"></select>
+      <input gc=${detailCapability.input("text", text)} type="file" aria-label="Explain">
+      <select gc=${detailCapability.input("multi", multi)} aria-label="Choose"></select>
     `);
 
     expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
@@ -614,12 +751,12 @@ describe("typed Node Detail authoring compiler", () => {
     const text = { kind: "input", label: "Explain", control: "text", prompt: "Explain", sourceLayer: layer, clientKey: "text" } satisfies ActionObject;
     const single = { kind: "input", label: "Choose", control: "single_select", prompt: "Choose", options: [{ key: "a", label: "A" }], sourceLayer: layer, clientKey: "single" } satisfies ActionObject;
     const invoke = { kind: "invoke", label: "Run", interactionText: "Run", sourceLayer: layer, clientKey: "invoke" } satisfies ActionObject;
-    const detail = new NodeDetailAuthoring();
+    const detail = source.detailAuthoring;
     detail.setComponent("spoofed-state", html`
       <a gc=${detailCapability.externalLink("docs", "https://example.com")} target="_self" download>Docs</a>
-      <button gc=${detailCapability.invoke("run", source, invoke)} disabled value="forged">Run</button>
-      <input gc=${detailCapability.input("text", source, text)} value="forged" disabled aria-label="Explain">
-      <select gc=${detailCapability.input("single", source, single)} aria-label="Choose"><option selected value="forged">Forged</option></select>
+      <button gc=${detailCapability.invoke("run", invoke)} disabled value="forged">Run</button>
+      <input gc=${detailCapability.input("text", text)} value="forged" disabled aria-label="Explain">
+      <select gc=${detailCapability.input("single", single)} aria-label="Choose"><option selected value="forged">Forged</option></select>
     `);
 
     expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
@@ -638,11 +775,11 @@ describe("typed Node Detail authoring compiler", () => {
     const text = { kind: "input", label: "Explain", control: "text", prompt: "Explain", sourceLayer: layer, clientKey: "text-normalized" } satisfies ActionObject;
     const single = { kind: "input", label: "Choose", control: "single_select", prompt: "Choose", options: [{ key: "a", label: "A" }], sourceLayer: layer, clientKey: "single-normalized" } satisfies ActionObject;
     const multi = { kind: "input", label: "Signals", control: "multi_select", prompt: "Signals", options: [{ key: "a", label: "A" }], sourceLayer: layer, clientKey: "multi-normalized" } satisfies ActionObject;
-    const detail = new NodeDetailAuthoring();
+    const detail = source.detailAuthoring;
     detail.setComponent("normalized-inputs", html`
-      <input gc=${detailCapability.input("text", source, text)} aria-label="Explain">
-      <select gc=${detailCapability.input("single", source, single)} multiple aria-label="Choose"></select>
-      <select gc=${detailCapability.input("multi", source, multi)} aria-label="Signals"></select>
+      <input gc=${detailCapability.input("text", text)} aria-label="Explain">
+      <select gc=${detailCapability.input("single", single)} multiple aria-label="Choose"></select>
+      <select gc=${detailCapability.input("multi", multi)} aria-label="Signals"></select>
     `);
 
     const compiled = detail.checkpoint().components[0]?.html ?? "";

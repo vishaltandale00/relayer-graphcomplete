@@ -16,6 +16,8 @@ export const DETAIL_AUTHORING_LIMITS = Object.freeze({
   maxCssBytesPerComponent: 128 * 1024,
   maxElementsPerComponent: 4_096,
   maxElementDepth: 64,
+  maxAssetReferencesPerPackage: 64,
+  maxAssetsPerPackage: 32,
 });
 
 type HtmlRoot = DefaultTreeAdapterTypes.DocumentFragment;
@@ -50,7 +52,6 @@ export interface GraphDetailCapability {
   readonly key: string;
   readonly kind: "expand" | "reference" | "invoke" | "input";
   readonly action: ActionObject;
-  readonly sourceNode: NodeReference;
 }
 
 export type DetailCapability = ExternalLinkCapability | GraphDetailCapability;
@@ -127,17 +128,17 @@ export const detailCapability = Object.freeze({
   externalLink(key: string, href: string): ExternalLinkCapability {
     return Object.freeze({ [DETAIL_CAPABILITY]: true as const, key, kind: "link" as const, href });
   },
-  expand(key: string, sourceNode: NodeReference, action: NavigateActionObject & { readonly relation: "expand" }): GraphDetailCapability {
-    return graphCapability(key, "expand", sourceNode, action);
+  expand(key: string, action: NavigateActionObject & { readonly relation: "expand" }): GraphDetailCapability {
+    return graphCapability(key, "expand", action);
   },
-  reference(key: string, sourceNode: NodeReference, action: NavigateActionObject & { readonly relation: "reference" }): GraphDetailCapability {
-    return graphCapability(key, "reference", sourceNode, action);
+  reference(key: string, action: NavigateActionObject & { readonly relation: "reference" }): GraphDetailCapability {
+    return graphCapability(key, "reference", action);
   },
-  invoke(key: string, sourceNode: NodeReference, action: InvokeActionObject): GraphDetailCapability {
-    return graphCapability(key, "invoke", sourceNode, action);
+  invoke(key: string, action: InvokeActionObject): GraphDetailCapability {
+    return graphCapability(key, "invoke", action);
   },
-  input(key: string, sourceNode: NodeReference, action: InputActionObject): GraphDetailCapability {
-    return graphCapability(key, "input", sourceNode, action);
+  input(key: string, action: InputActionObject): GraphDetailCapability {
+    return graphCapability(key, "input", action);
   },
 });
 
@@ -156,10 +157,17 @@ export function css(strings: TemplateStringsArray, ...values: readonly unknown[]
 
 export class NodeDetailAuthoring {
   readonly #components = new Map<string, { markup: DetailTemplate; styles: DetailTemplate; order: number }>();
+  #ownerClientKey?: string;
   #finalized?: CompiledNodeDetail;
 
   constructor() {
     registerDetailHostAccess(this, {
+      bindOwner: (clientKey) => {
+        if (this.#ownerClientKey !== undefined && this.#ownerClientKey !== clientKey) {
+          throw new TypeError("Node Detail authoring cannot be rebound to another node");
+        }
+        this.#ownerClientKey = clientKey;
+      },
       assetIds: () => this.#assetIds(),
       checkpoint: (assets, finalize) => this.#checkpointWithHostAssets(assets, finalize),
       finalized: () => this.#finalized,
@@ -184,11 +192,48 @@ export class NodeDetailAuthoring {
 
   #assetIds(): readonly string[] {
     const ids = new Set<string>();
-    for (const component of this.#components.values()) {
-      for (const value of component.markup.values) {
-        if (isAssetRef(value)) ids.add(value.logicalId);
+    const issues: DetailCompilationIssue[] = [];
+    let references = 0;
+    for (const [componentId, component] of this.#components) {
+      for (const [index, value] of component.markup.values.entries()) {
+        if (!isAssetRef(value)) continue;
+        references += 1;
+        if (!isStableIdentity(value.logicalId)) {
+          const location = bindingLocation(component.markup, index);
+          issues.push(Object.freeze({
+            code: "asset_identity_invalid",
+            componentId,
+            path: `html:${location.line}:${location.column}`,
+            line: location.line,
+            column: location.column,
+            message: "Asset identity must be trimmed, NUL-free, and at most 128 UTF-8 bytes",
+          }));
+        } else {
+          ids.add(value.logicalId);
+        }
       }
     }
+    if (references > DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage) {
+      issues.push(Object.freeze({
+        code: "asset_reference_limit_exceeded",
+        componentId: "",
+        path: "asset",
+        line: 1,
+        column: 1,
+        message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage} asset references`,
+      }));
+    }
+    if (ids.size > DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage) {
+      issues.push(Object.freeze({
+        code: "asset_package_limit_exceeded",
+        componentId: "",
+        path: "asset",
+        line: 1,
+        column: 1,
+        message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage} logical assets`,
+      }));
+    }
+    if (issues.length !== 0) throw new DetailCompilationError(Object.freeze(issues));
     return Object.freeze([...ids]);
   }
 
@@ -234,7 +279,7 @@ export class NodeDetailAuthoring {
         return Object.freeze({
           id,
           order: component.order,
-          html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver),
+          html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver, this.#ownerClientKey),
           css: compileCss(id, component.styles, issues),
         });
       }));
@@ -272,6 +317,7 @@ function compileHtml(
   assets: Map<string, CompiledAsset>,
   issues: DetailCompilationIssue[],
   assetResolver: DetailAssetResolver,
+  ownerClientKey: string | undefined,
 ): string {
   if (template[DETAIL_TEMPLATE] !== "html") throw new Error("Node Detail component markup must use html``");
   const source = bindingSource(componentId, template, issues);
@@ -299,9 +345,12 @@ function compileHtml(
     const value = template.values[index];
     element.attrs = element.attrs.filter((attribute) => attribute !== binding);
     if (isDetailCapability(value)) {
-      const validCapability = isValidCapability(value);
+      const validationCodes = capabilityValidationCodes(value, ownerClientKey);
+      const validCapability = validationCodes.length === 0;
       if (!validCapability) {
-        issues.push(sourceIssue("capability_invalid", componentId, element, `Invalid ${value.kind} capability declaration`));
+        for (const code of validationCodes) {
+          issues.push(sourceIssue(code, componentId, element, `Invalid ${value.kind} capability declaration: ${code}`));
+        }
       }
       if (!isCompatibleCapabilityHost(value, element)) {
         issues.push(sourceIssue(
@@ -331,7 +380,7 @@ function compileHtml(
           componentId,
           kind: "capability",
           host: element.tagName,
-          capability: compileCapability(value),
+          capability: compileCapability(value, ownerClientKey!),
         }));
       }
     } else if (isAssetRef(value)) {
@@ -509,7 +558,11 @@ function compileCss(componentId: string, template: DetailTemplate, issues: Detai
     }));
   }
   walkCss(ast, (node) => {
-    if (node.type === "Atrule" && !SAFE_CSS_AT_RULES.has(decodeCssIdentifier(node.name).toLowerCase())) {
+    if (node.type === "PseudoClassSelector" && !SAFE_CSS_PSEUDO_CLASSES.has(decodeCssIdentifier(node.name).toLowerCase())) {
+      addCssSelectorIssue(componentId, node, issues, `:${node.name} is not in the authored detail selector allowlist`);
+    } else if (node.type === "PseudoElementSelector" && !SAFE_CSS_PSEUDO_ELEMENTS.has(decodeCssIdentifier(node.name).toLowerCase())) {
+      addCssSelectorIssue(componentId, node, issues, `::${node.name} is not in the authored detail selector allowlist`);
+    } else if (node.type === "Atrule" && !SAFE_CSS_AT_RULES.has(decodeCssIdentifier(node.name).toLowerCase())) {
       addCssIssue(componentId, node, issues, `@${node.name} is not available to authored detail CSS`);
     } else if (node.type === "Url") {
       addCssIssue(componentId, node, issues, "CSS URL resources are not available to authored details");
@@ -525,6 +578,13 @@ function compileCss(componentId: string, template: DetailTemplate, issues: Detai
 }
 
 const SAFE_CSS_AT_RULES = new Set(["container", "keyframes", "layer", "media", "supports"]);
+const SAFE_CSS_PSEUDO_CLASSES = new Set([
+  "active", "checked", "disabled", "empty", "enabled", "first-child", "first-of-type", "focus", "focus-visible",
+  "focus-within", "hover", "in-range", "indeterminate", "invalid", "is", "last-child", "last-of-type", "not",
+  "nth-child", "nth-last-child", "nth-last-of-type", "nth-of-type", "only-child", "only-of-type", "optional",
+  "out-of-range", "placeholder-shown", "read-only", "read-write", "required", "root", "valid", "where",
+]);
+const SAFE_CSS_PSEUDO_ELEMENTS = new Set(["after", "before", "first-letter", "first-line", "marker", "placeholder", "selection"]);
 const SAFE_CSS_FUNCTIONS = new Set([
   "calc", "clamp", "max", "min", "minmax", "repeat", "fit-content", "var",
   "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color",
@@ -610,6 +670,19 @@ function addCssIssue(componentId: string, node: CssNode, issues: DetailCompilati
   }));
 }
 
+function addCssSelectorIssue(componentId: string, node: CssNode, issues: DetailCompilationIssue[], message: string): void {
+  const line = node.loc?.start.line ?? 1;
+  const column = node.loc?.start.column ?? 1;
+  issues.push(Object.freeze({
+    code: "unsafe_css_selector",
+    componentId,
+    path: `css:${line}:${column}`,
+    line,
+    column,
+    message,
+  }));
+}
+
 function visitElements(node: HtmlRoot | HtmlElement, visitor: (element: HtmlElement) => void): void {
   const pending = [...node.childNodes].reverse().map((child) => ({ child, depth: 1 }));
   while (pending.length !== 0) {
@@ -663,13 +736,12 @@ function isDetailCapability(value: unknown): value is DetailCapability {
 function graphCapability(
   key: string,
   kind: GraphDetailCapability["kind"],
-  sourceNode: NodeReference,
   action: ActionObject,
 ): GraphDetailCapability {
-  return Object.freeze({ [DETAIL_CAPABILITY]: true as const, key, kind, sourceNode, action });
+  return Object.freeze({ [DETAIL_CAPABILITY]: true as const, key, kind, action });
 }
 
-function compileCapability(capability: DetailCapability): CompiledCapabilityMount["capability"] {
+function compileCapability(capability: DetailCapability, ownerClientKey: string): CompiledCapabilityMount["capability"] {
   if (capability.kind === "link") return Object.freeze({ kind: capability.kind, href: new URL(capability.href).href });
   const clientKey = capability.action.clientKey;
   const sourceLayer = capability.action.sourceLayer;
@@ -683,7 +755,7 @@ function compileCapability(capability: DetailCapability): CompiledCapabilityMoun
     kind: capability.kind,
     action: Object.freeze({
       clientKey,
-      sourceNode: stableReference(capability.sourceNode),
+      sourceNode: Object.freeze({ clientKey: ownerClientKey }),
       sourceLayer: stableReference(sourceLayer),
     }),
   });
@@ -701,7 +773,7 @@ function isCompatibleCapabilityHost(capability: DetailCapability, element: HtmlE
   const host = element.tagName;
   if (capability.kind === "link") return host === "a";
   if (capability.kind !== "input") return host === "a" || host === "button";
-  if (capability.action.kind !== "input") return false;
+  if (typeof capability.action !== "object" || capability.action === null || capability.action.kind !== "input") return false;
   if (capability.action.control === "text") {
     const inputType = attributeValue(element, "type")?.toLowerCase();
     return host === "textarea" || (host === "input" && (inputType === undefined || inputType === "text"));
@@ -715,7 +787,7 @@ function normalizeCapabilityHost(
   element: HtmlElement,
   issues: DetailCompilationIssue[],
 ): void {
-  if (capability.kind !== "input" || capability.action.kind !== "input") return;
+  if (capability.kind !== "input" || typeof capability.action !== "object" || capability.action === null || capability.action.kind !== "input") return;
   const hasAuthoredValue = element.childNodes.some((child) => !("value" in child) || child.value.trim() !== "");
   if ((element.tagName === "select" || element.tagName === "textarea") && hasAuthoredValue) {
     issues.push(sourceIssue(
@@ -737,31 +809,64 @@ function normalizeCapabilityHost(
   if (element.tagName === "textarea") element.childNodes.splice(0, element.childNodes.length);
 }
 
-function isValidCapability(capability: DetailCapability): boolean {
-  if (capability.key.trim() === "" || capability.key.includes("\0")) return false;
+function capabilityValidationCodes(capability: DetailCapability, ownerClientKey: string | undefined): readonly string[] {
+  if (capability.key.trim() === "" || capability.key.includes("\0")) return ["capability_invalid"];
   if (capability.kind !== "link") {
     const action = capability.action;
-    if (action.clientKey === undefined || action.clientKey.trim() === "" || action.clientKey.includes("\0")) return false;
-    if (action.sourceLayer === undefined || !isStableReference(capability.sourceNode) || !isStableReference(action.sourceLayer)) return false;
-    if (!(action.kind === capability.kind || (action.kind === "navigate" && action.relation === capability.kind))) return false;
-    if (action.label.trim() === "") return false;
-    if (action.kind === "invoke") return action.interactionText.trim() !== "";
-    if (action.kind === "navigate") return true;
-    if (action.control === "text") return action.prompt.trim() !== "" && action.options === undefined && action.minimumSelections === undefined;
-    if (action.prompt.trim() === "" || action.options === undefined || action.options.length === 0) return false;
-    if (action.control === "single_select") return action.minimumSelections === undefined;
-    return action.minimumSelections === undefined
-      || (Number.isInteger(action.minimumSelections)
-        && action.minimumSelections > 0
-        && action.minimumSelections <= action.options.length);
+    if (ownerClientKey === undefined || !isStableIdentity(ownerClientKey) || typeof action !== "object" || action === null) return ["capability_invalid"];
+    if (action.clientKey === undefined || action.clientKey.trim() === "" || action.clientKey.includes("\0")) return ["capability_invalid"];
+    if (action.sourceLayer === undefined || !isStableReference(action.sourceLayer)) return ["capability_invalid"];
+    if (!(action.kind === capability.kind || (action.kind === "navigate" && action.relation === capability.kind))) return ["capability_invalid"];
+    if (action.label.trim() === "") return ["capability_invalid"];
+    if (action.kind === "invoke") return action.interactionText.trim() === "" ? ["capability_invalid"] : [];
+    if (action.kind === "navigate") return [];
+    const codes: string[] = [];
+    if (action.prompt.trim() === "") codes.push("input_action_prompt_required");
+    else if (Buffer.byteLength(action.prompt, "utf8") > 2_000) codes.push("input_action_prompt_too_long");
+    if (action.control === "text") {
+      if (action.options !== undefined) codes.push("input_action_options_unexpected");
+      if (action.minimumSelections !== undefined) codes.push("input_action_minimum_unexpected");
+      return codes;
+    }
+    if (action.options === undefined || action.options.length === 0) {
+      codes.push("input_action_options_required");
+    } else {
+      if (action.options.length > 50) codes.push("input_action_option_count");
+      const keys = new Set<string>();
+      for (const option of action.options) {
+        if (option.key === ""
+          || option.key.trim() !== option.key
+          || option.key.includes("\0")
+          || Buffer.byteLength(option.key, "utf8") > 128) {
+          codes.push("input_action_option_key_invalid");
+        } else if (keys.has(option.key)) {
+          codes.push("input_action_option_key_duplicate");
+        } else {
+          keys.add(option.key);
+        }
+        if (option.label.trim() === "") codes.push("input_action_option_label_required");
+        else if (Buffer.byteLength(option.label, "utf8") > 512) codes.push("input_action_option_label_too_long");
+      }
+    }
+    if (action.control === "single_select" && action.minimumSelections !== undefined) {
+      codes.push("input_action_minimum_unexpected");
+    } else if (action.control === "multi_select"
+      && action.minimumSelections !== undefined
+      && (!Number.isInteger(action.minimumSelections)
+        || action.minimumSelections <= 0
+        || action.options === undefined
+        || action.minimumSelections > action.options.length)) {
+      codes.push("input_action_minimum_invalid");
+    }
+    return codes;
   }
   try {
     const url = new URL(capability.href);
     return (url.protocol === "https:" || url.protocol === "http:")
       && url.username === ""
-      && url.password === "";
+      && url.password === "" ? [] : ["capability_invalid"];
   } catch {
-    return false;
+    return ["capability_invalid"];
   }
 }
 
@@ -938,34 +1043,52 @@ const REJECTING_ASSET_RESOLVER: DetailAssetResolver = Object.freeze({
 
 function hasAccessibleName(element: HtmlElement, root: HtmlRoot): boolean {
   if (isAriaHidden(element)) return false;
-  if (attributeValue(element, "aria-label")?.trim()) return true;
   const labelledBy = attributeValue(element, "aria-labelledby");
   if (labelledBy !== undefined) {
     const ids = labelledBy.trim().split(/\s+/).filter(Boolean);
     return ids.length > 0 && ids.every((id) => {
       const target = findElementById(root, id);
-      return target !== undefined && !isAriaHidden(target) && namingText(target).trim() !== "";
+      return target !== undefined && namingText(target, isAriaHidden(target)).trim() !== "";
     });
   }
+  if (attributeValue(element, "aria-label")?.trim()) return true;
+  if (externalLabelText(element, root).trim() !== "") return true;
+  if (visibleDescendantText(element).trim() !== "") return true;
   if (attributeValue(element, "title")?.trim()) return true;
-  return visibleDescendantText(element).trim() !== "";
+  return false;
 }
 
 function attributeValue(element: HtmlElement, name: string): string | undefined {
   return element.attrs.find((attribute) => attribute.name === name)?.value;
 }
 
-function namingText(element: HtmlElement): string {
+function namingText(element: HtmlElement, includeHidden: boolean): string {
   return attributeValue(element, "aria-label")?.trim()
     || attributeValue(element, "title")?.trim()
-    || visibleDescendantText(element);
+    || visibleDescendantText(element, includeHidden);
 }
 
-function visibleDescendantText(element: HtmlElement): string {
+function visibleDescendantText(element: HtmlElement, includeHidden = false): string {
   return element.childNodes.map((child) => {
     if ("value" in child) return child.value;
-    return "tagName" in child && !isAriaHidden(child) ? visibleDescendantText(child) : "";
+    if (!("tagName" in child) || (!includeHidden && isAriaHidden(child))) return "";
+    if (child.tagName === "img") return attributeValue(child, "alt") ?? "";
+    return visibleDescendantText(child, includeHidden);
   }).join("");
+}
+
+function externalLabelText(element: HtmlElement, root: HtmlRoot): string {
+  if (element.tagName !== "input" && element.tagName !== "select" && element.tagName !== "textarea") return "";
+  const id = attributeValue(element, "id");
+  if (id === undefined || id === "") return "";
+  const names: string[] = [];
+  visitElements(root, (candidate) => {
+    if (candidate.tagName === "label" && attributeValue(candidate, "for") === id && !isAriaHidden(candidate)) {
+      const name = visibleDescendantText(candidate).trim();
+      if (name !== "") names.push(name);
+    }
+  });
+  return names.join(" ");
 }
 
 function isAriaHidden(element: HtmlElement): boolean {

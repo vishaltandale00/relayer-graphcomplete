@@ -2268,14 +2268,29 @@ settings:
 <p>This foundation implements Issue #363’s client contract for #241. It expresses #338 through ordinary link and asset bindings.</p>
 <ul>
 <li>Each draft <code>NodeObject</code> owns one typed detail builder alongside its backward-compatible string detail.</li>
+<li>Graph-action mounts derive source-node provenance from the owning node. Capability calls supply only the action; its exact source layer remains required.</li>
 <li>Authors checkpoint stable HTML and CSS components before submission. Checkpoint errors retain component and source locations.</li>
 <li><code>gc=${capability}</code> binds typed actions to compatible native hosts. <code>asset=${assetRef}</code> carries only a logical visual identity.</li>
 <li>Author code cannot provide asset authority, availability, digest, sanitization, or a resolver.</li>
 <li><code>RelayerGraphClient.checkpointNodeDetail</code> and <code>submitNode</code> resolve logical assets through the authenticated host transport before passing non-public verified records into compilation.</li>
-<li>The compiler uses browser-equivalent HTML construction and accessible-name semantics for the supported subset, fail-closed markup and CSS function/property allowlists, deterministic limits, and canonical output.</li>
+<li>Asset IDs are trimmed, NUL-free, at most 128 UTF-8 bytes, deduplicated, and bounded to 32 assets and 64 references before transport.</li>
+<li>The compiler uses browser-equivalent HTML construction plus a documented accessible-name subset. It supports authored text, title, <code>aria-label</code>, deterministic <code>aria-labelledby</code>, external form labels, and descendant image alt.</li>
+<li>Hidden descendants do not name a host unless their hidden node is directly referenced by <code>aria-labelledby</code>. This foundation does not claim the complete browser AccName algorithm.</li>
+<li>Markup and CSS selectors, pseudos, functions, properties, sizes, and traversal all use deterministic fail-closed rules.</li>
 <li><code>submitNode</code> finalizes and attaches the compiled package once before transport. Later authoring rejects, while a failed request retries the byte-identical frozen package without re-resolution drift.</li>
 <li>This foundation does not claim accepted-package durability or Product rendering. Those remain #365 and #366 work.</li>
 </ul>
+<h4>#363 deterministic checkpoint map</h4>
+<table>
+<thead><tr><th>Checkpoint</th><th>Public deterministic proof</th></tr></thead>
+<tbody>
+<tr><td>Owner provenance and action validity</td><td><code>packages/graph-client/test/detail.test.ts</code> covers owner-derived source nodes, legacy spoof rejection, exact source layers, and graph-core input invariants.</td></tr>
+<tr><td>Markup, CSS, and accessible names</td><td><code>packages/graph-client/test/detail.test.ts</code> covers browser tree construction, safe selectors and pseudos, CSS resource rejection, labels, hidden content, image alt, and duplicate IDs.</td></tr>
+<tr><td>Authenticated logical assets</td><td><code>packages/graph-client/test/objects.test.ts</code> proves malformed and excessive references never reach transport, duplicate IDs resolve once, and author-supplied authority cannot enter compilation.</td></tr>
+<tr><td>Draft lifecycle and retry identity</td><td><code>packages/graph-client/test/objects.test.ts</code> proves checkpoint, finalization, post-submit locking, legacy strings, and byte-identical failed-request retry.</td></tr>
+<tr><td>Canonical package limits</td><td><code>packages/graph-client/test/detail.test.ts</code> covers stable ordering, immutable output, source locations, byte limits, element limits, and depth limits.</td></tr>
+</tbody>
+</table>
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>
 <p>The first evaluation is one fixed two-interaction case. Its name is <code>empty-project.task-system.two-turn</code>. It proves the smallest real conversation path through all runtime components. These components include the graph engine, client, harness host, Codex session, Complete boundary, evaluator, judge, and renderer.</p>
 <p>The second interaction receives a new canonical interaction node and capability token. It reuses the same harness object and provider thread. The case has no existing codebase, grounding requirement, graph search, or subagent dependency.</p>

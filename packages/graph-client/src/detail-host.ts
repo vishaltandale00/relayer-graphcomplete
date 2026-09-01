@@ -10,6 +10,7 @@ export interface HostResolvedDetailAsset {
 }
 
 interface HostDetailAccess {
+  bindOwner(clientKey: string): void;
   assetIds(): readonly string[];
   checkpoint(assets: readonly (HostResolvedDetailAsset | null)[], finalize: boolean): CompiledNodeDetail;
   finalized(): CompiledNodeDetail | undefined;
@@ -19,6 +20,10 @@ const HOST_DETAIL_ACCESS = new WeakMap<NodeDetailAuthoring, HostDetailAccess>();
 
 export function registerDetailHostAccess(authoring: NodeDetailAuthoring, access: HostDetailAccess): void {
   HOST_DETAIL_ACCESS.set(authoring, access);
+}
+
+export function bindDetailOwner(authoring: NodeDetailAuthoring, clientKey: string): void {
+  hostDetail(authoring).bindOwner(clientKey);
 }
 
 function hostDetail(authoring: NodeDetailAuthoring): HostDetailAccess {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, assetRef, html, type ActionObject } from "../src/index.js";
+import { DETAIL_AUTHORING_LIMITS, EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, assetRef, html, type ActionObject } from "../src/index.js";
 import { edgeId, layerId, nodeId } from "../src/objects.js";
 
 describe("agent-facing graph objects", () => {
@@ -131,6 +131,67 @@ describe("agent-facing graph objects", () => {
       authorization: "Bearer host-token",
       body: { authoredDetail: checkpoint },
     });
+  });
+
+  it("rejects malformed logical asset IDs before authenticated transport", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host-token", nodeId: 1 });
+    const invalidIds = [" ", "nul\0asset", "é".repeat(65)];
+
+    for (const [index, logicalId] of invalidIds.entries()) {
+      const node = new NodeObject("box", "Asset", "Fallback", "concept", `invalid-asset-${index}`);
+      node.detailAuthoring.setComponent("visual", html`<span asset=${assetRef(logicalId)} aria-hidden="true"></span>`);
+      await expect(graph.checkpointNodeDetail(node)).rejects.toThrowError(expect.objectContaining({
+        issues: [expect.objectContaining({ code: "asset_identity_invalid", componentId: "visual" })],
+      }));
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("bounds and deduplicates logical asset references before authenticated transport", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { logicalIds: readonly string[] };
+      requests.push(body);
+      return new Response(JSON.stringify({
+        assets: body.logicalIds.map((logicalId) => ({
+          logicalId,
+          authority: "current",
+          availability: "available",
+          digestSha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          mediaType: "image/png",
+          representation: { kind: "image", sanitized: true },
+        })),
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host-token", nodeId: 1 });
+    const deduped = new NodeObject("box", "Assets", "Fallback", "concept", "deduped-assets");
+    deduped.detailAuthoring.setComponent("first", html`<span asset=${assetRef("shared")} aria-hidden="true"></span>`);
+    deduped.detailAuthoring.setComponent("second", html`<span asset=${assetRef("shared")} aria-hidden="true"></span>`);
+
+    await graph.checkpointNodeDetail(deduped);
+
+    expect(requests).toEqual([{ logicalIds: ["shared"] }]);
+
+    const excessive = new NodeObject("box", "Assets", "Fallback", "concept", "excessive-assets");
+    for (let index = 0; index <= DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage; index += 1) {
+      excessive.detailAuthoring.setComponent(`asset-${index}`, html`<span asset=${assetRef(`asset-${index}`)} aria-hidden="true"></span>`);
+    }
+    await expect(graph.checkpointNodeDetail(excessive)).rejects.toThrowError(expect.objectContaining({
+      issues: [expect.objectContaining({ code: "asset_package_limit_exceeded" })],
+    }));
+    expect(requests).toHaveLength(1);
+
+    const excessiveReferences = new NodeObject("box", "Assets", "Fallback", "concept", "excessive-asset-references");
+    for (let index = 0; index <= DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage; index += 1) {
+      excessiveReferences.detailAuthoring.setComponent(`reference-${index}`, html`<span asset=${assetRef("shared")} aria-hidden="true"></span>`);
+    }
+    await expect(graph.checkpointNodeDetail(excessiveReferences)).rejects.toThrowError(expect.objectContaining({
+      issues: [expect.objectContaining({ code: "asset_reference_limit_exceeded" })],
+    }));
+    expect(requests).toHaveLength(1);
   });
 
   it("freezes before a failed submit and retries with byte-identical authored detail", async () => {
