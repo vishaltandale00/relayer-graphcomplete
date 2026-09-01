@@ -147,6 +147,93 @@ describe("packaged graph-client authored detail boundary", () => {
     expect(requests).toBe(2);
   });
 
+  it("snapshots successful node envelopes from ordinary data descriptors without invoking hostile fields", async () => {
+    const { GraphApiError, NodeObject, RelayerGraphClient } = await import(graphClientIndexUrl.href);
+    const validNode = {
+      id: 43,
+      leasedActionId: null,
+      kind: "concept",
+      icon: "box",
+      title: "Descriptor snapshot",
+      detail: "Fallback",
+      state: "draft",
+    };
+    let getterReads = 0;
+    const changingId = { ...validNode };
+    Object.defineProperty(changingId, "id", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        getterReads += 1;
+        return getterReads < 3 ? 43 : 999;
+      },
+    });
+    const throwingState = { ...validNode };
+    Object.defineProperty(throwingState, "state", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        getterReads += 1;
+        throw new TypeError("caller state getter escaped");
+      },
+    });
+    const envelopeAccessor = {};
+    Object.defineProperty(envelopeAccessor, "node", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        getterReads += 1;
+        return validNode;
+      },
+    });
+    const inheritedEnvelope = Object.create({ node: validNode });
+    const symbolEnvelope = { node: validNode, [Symbol("unknown")]: true };
+    const hiddenEnvelopeNode = {};
+    Object.defineProperty(hiddenEnvelopeNode, "node", { enumerable: false, value: validNode });
+    const inheritedState = Object.assign(Object.create({ state: "draft" }), {
+      id: 43, leasedActionId: null, kind: "concept", icon: "box", title: "Inherited", detail: "Fallback",
+    });
+    const symbolField = { ...validNode, [Symbol("unknown")]: true };
+    const hiddenTitle = { ...validNode };
+    Object.defineProperty(hiddenTitle, "title", { enumerable: false, value: "Hidden" });
+    const descriptorTrap = new Proxy({ ...validNode }, {
+      getOwnPropertyDescriptor: () => { throw new TypeError("caller descriptor trap escaped"); },
+    });
+    const ownKeysTrap = new Proxy({ node: validNode }, {
+      ownKeys: () => { throw new TypeError("caller ownKeys trap escaped"); },
+    });
+    const cases = [
+      ["changing-id", { node: changingId }],
+      ["throwing-state", { node: throwingState }],
+      ["envelope-accessor", envelopeAccessor],
+      ["inherited-envelope", inheritedEnvelope],
+      ["symbol-envelope", symbolEnvelope],
+      ["hidden-envelope-node", hiddenEnvelopeNode],
+      ["inherited-state", { node: inheritedState }],
+      ["symbol-field", { node: symbolField }],
+      ["hidden-title", { node: hiddenTitle }],
+      ["descriptor-trap", { node: descriptorTrap }],
+      ["own-keys-trap", ownKeysTrap],
+    ];
+
+    for (const [name, hostileBody] of cases) {
+      const node = new NodeObject("box", "Descriptor snapshot", "Fallback", "concept", `descriptor-${name}`);
+      let requests = 0;
+      vi.stubGlobal("fetch", vi.fn(async () => {
+        requests += 1;
+        return { ok: true, status: 200, json: async () => requests === 1 ? hostileBody : { node: validNode } };
+      }));
+      const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+      const first = client.submitNode(node);
+      await expect(first).rejects.toBeInstanceOf(GraphApiError);
+      await expect(first).rejects.toMatchObject({ status: 200, code: "invalid_node_response" });
+      expect(node.ref).toBeUndefined();
+      await expect(client.submitNode(node)).resolves.toMatchObject({ id: 43 });
+      expect(requests).toBe(2);
+    }
+    expect(getterReads).toBe(0);
+  });
+
   it("reuses one coherent node request envelope across microtasks, concurrency, and retries", async () => {
     const {
       LayerLayoutObject,

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isProxy } from "node:util/types";
 import { DetailCompilationError, NodeDetailAuthoring, compileAuthenticatedNodeDetail, freezeNodeDetailAuthoring, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
 import { isRelayerIconName } from "./icons.js";
 import { applyAcceptedNodeResponse } from "./node-response.js";
@@ -395,29 +396,34 @@ interface ResolvedDetailAsset {
 }
 
 const GRAPH_NODE_KEYS = Object.freeze(["detail", "icon", "id", "kind", "state", "title"]);
-const GRAPH_NODE_LEASED_KEYS = Object.freeze(["detail", "icon", "id", "kind", "leasedActionId", "state", "title"]);
 
 function validatedSubmittedNodeResponse(value: unknown): GraphNode {
   try {
-    if (!isRecord(value) || !hasExactKeys(value, ["node"])) {
-      return invalidNodeResponse("response", "Response must contain exactly one node");
-    }
-    const candidate = value.node;
-    if (!isRecord(candidate)) return invalidNodeResponse("node", "Node must be an object");
-    const hasLease = Object.hasOwn(candidate, "leasedActionId");
-    if (!hasExactKeys(candidate, hasLease ? GRAPH_NODE_LEASED_KEYS : GRAPH_NODE_KEYS)) {
-      return invalidNodeResponse("node", "Node must use the exact GraphNode response shape");
-    }
-    if (!Number.isSafeInteger(candidate.id) || (candidate.id as number) < 1) {
+    const envelope = snapshotNodeResponseRecord(
+      value,
+      ["node"],
+      [],
+      "response",
+      "Response must contain exactly one ordinary node data property",
+    );
+    const candidate = snapshotNodeResponseRecord(
+      envelope.values.node,
+      GRAPH_NODE_KEYS,
+      ["leasedActionId"],
+      "node",
+      "Node must use the exact ordinary GraphNode data shape",
+    );
+    const fields = candidate.values;
+    if (!Number.isSafeInteger(fields.id) || (fields.id as number) < 1) {
       return invalidNodeResponse("node.id", "Node id must be a positive safe integer");
     }
-    if (hasLease && candidate.leasedActionId !== null
-      && (!Number.isSafeInteger(candidate.leasedActionId) || (candidate.leasedActionId as number) < 1)) {
+    if (candidate.optionalFields.has("leasedActionId") && fields.leasedActionId !== null
+      && (!Number.isSafeInteger(fields.leasedActionId) || (fields.leasedActionId as number) < 1)) {
       return invalidNodeResponse("node.leasedActionId", "Node leased action id must be null or a positive safe integer");
     }
-    const kind = candidate.kind;
-    const title = candidate.title;
-    const detail = candidate.detail;
+    const kind = fields.kind;
+    const title = fields.title;
+    const detail = fields.detail;
     if (typeof kind !== "string" || kind.trim() === "") {
       return invalidNodeResponse("node.kind", "Node kind must be a nonblank string");
     }
@@ -427,25 +433,62 @@ function validatedSubmittedNodeResponse(value: unknown): GraphNode {
     if (typeof detail !== "string" || detail.trim() === "") {
       return invalidNodeResponse("node.detail", "Node detail must be a nonblank string");
     }
-    if (typeof candidate.icon !== "string" || !isRelayerIconName(candidate.icon)) {
+    if (typeof fields.icon !== "string" || !isRelayerIconName(fields.icon)) {
       return invalidNodeResponse("node.icon", "Node icon must use the curated Relayer icon vocabulary");
     }
-    if (candidate.state !== "draft" && candidate.state !== "accepted" && candidate.state !== "stopped") {
+    if (fields.state !== "draft" && fields.state !== "accepted" && fields.state !== "stopped") {
       return invalidNodeResponse("node.state", "Node state must be draft, accepted, or stopped");
     }
     return Object.freeze({
-      id: candidate.id as number,
-      ...(hasLease ? { leasedActionId: candidate.leasedActionId as number | null } : {}),
+      id: fields.id as number,
+      ...(candidate.optionalFields.has("leasedActionId") ? { leasedActionId: fields.leasedActionId as number | null } : {}),
       kind,
-      icon: candidate.icon,
+      icon: fields.icon,
       title,
       detail,
-      state: candidate.state,
+      state: fields.state,
     });
   } catch (error) {
     if (error instanceof GraphApiError && error.code === "invalid_node_response") throw error;
     return invalidNodeResponse("response", "Response must be an ordinary valid GraphNode envelope");
   }
+}
+
+function snapshotNodeResponseRecord(
+  value: unknown,
+  requiredFields: readonly string[],
+  optionalFields: readonly string[],
+  path: string,
+  message: string,
+): { readonly values: Readonly<Record<string, unknown>>; readonly optionalFields: ReadonlySet<string> } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)
+    || isProxy(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    return invalidNodeResponse(path, message);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
+  const allowed = new Set([...requiredFields, ...optionalFields]);
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.some((key) => typeof key !== "string" || !allowed.has(key))) {
+    return invalidNodeResponse(path, message);
+  }
+  const stringKeys = keys as string[];
+  if (requiredFields.some((field) => !Object.hasOwn(descriptors, field))) {
+    return invalidNodeResponse(path, message);
+  }
+  const values: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const presentOptionalFields = new Set<string>();
+  for (const key of stringKeys) {
+    const descriptor = descriptors[key]!;
+    if (!("value" in descriptor) || descriptor.enumerable !== true) {
+      return invalidNodeResponse(path, message);
+    }
+    values[key] = descriptor.value;
+    if (optionalFields.includes(key)) presentOptionalFields.add(key);
+  }
+  return Object.freeze({
+    values: Object.freeze(values),
+    optionalFields: Object.freeze(presentOptionalFields),
+  });
 }
 
 const RESOLVED_ASSET_KEYS = Object.freeze([

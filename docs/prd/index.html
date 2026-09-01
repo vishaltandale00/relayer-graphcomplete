@@ -2281,7 +2281,8 @@ settings:
 <li>The first submit is one in-progress promise in a private client map keyed by the exact <code>NodeObject</code>. It is installed before resolution begins.</li>
 <li>Resolution or compilation failure leaves the builder editable. Successful compilation freezes authoring before one shared transport request.</li>
 <li><code>NodeObject.ref</code> is a non-configurable read-only projection of private response state.</li>
-<li>The client validates the exact successful node envelope, creates one frozen copy, and stores it privately.</li>
+<li>The client snapshots the successful node envelope and every node field once from exact ordinary own data descriptors.</li>
+<li>Validation and frozen accepted-value construction read only that snapshot. Accessors, prototypes, symbols, unknown fields, and traps fail closed.</li>
 <li>Concurrent calls and successful retries receive that same cached value.</li>
 <li>Public compiler calls cannot seed retry state or replace the package sent by <code>submitNode</code>.</li>
 <li>Asset IDs are trimmed, NUL-free, at most 128 UTF-8 bytes, deduplicated, and bounded to 32 assets and 64 references before transport. Repeated placements share one resolved asset but retain stable authored occurrence mounts.</li>
