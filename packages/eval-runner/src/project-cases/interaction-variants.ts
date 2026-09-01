@@ -38,11 +38,13 @@ export interface InteractionCaseTypePolicy {
 }
 
 export function interactionCaseType(
-  policy: InteractionCaseTypePolicy | null | undefined,
+  policy: InteractionCaseTypePolicy | object | null | undefined,
 ): EvalInteractionCaseType | undefined {
-  if (policy?.caseType !== undefined) return policy.caseType;
-  if (policy?.interactionVariant === undefined) return undefined;
-  return CASE_TYPE_BY_INTERACTION_VARIANT[policy.interactionVariant];
+  if (policy == null || typeof policy !== "object") return undefined;
+  const record = policy as InteractionCaseTypePolicy;
+  if (record.caseType !== undefined) return record.caseType;
+  if (record.interactionVariant === undefined) return undefined;
+  return CASE_TYPE_BY_INTERACTION_VARIANT[record.interactionVariant];
 }
 
 export function interactionVariantForCaseType(caseType: EvalInteractionCaseType): InteractionVariant {
@@ -83,7 +85,7 @@ export function requireSingleOpeningPrompt(
   return prompts[0]!;
 }
 
-export function decorateEvalCaseCatalogEntry<Definition extends InteractionCaseTypePolicy>(
+export function decorateEvalCaseCatalogEntry<Definition extends object>(
   definition: Definition,
 ): Definition & { readonly caseType?: EvalInteractionCaseType; readonly caseTypeLabel?: string } {
   const caseType = interactionCaseType(definition);
