@@ -70,6 +70,22 @@ their presence is not a verification claim. A cache or telemetry failure must
 not make the stable required `check` fail when the same source compiles and
 tests successfully without acceleration.
 
+The Ladybug native library is built once per run by the `Prebuilt Ladybug
+native library` job whenever any Rust lane runs. It compiles the pinned
+bundled source (`cargo build -p lbug`), strips debug info from the static
+archive, and packages the library with the headers the external-link path
+needs. The bundle is uploaded as a one-day artifact and saved to the Actions
+cache on trusted pushes with a key over the runner platform, rustc release,
+and `Cargo.lock` digest. Each Rust lane downloads the bundle and runs
+`scripts/ci/lbug-artifact.mjs verify`, which re-checks the platform, rustc
+release, `Cargo.lock` digest, pinned lbug version, and the library SHA-256
+before exporting `LBUG_LIBRARY_DIR`/`LBUG_INCLUDE_DIR`. A missing or rejected
+bundle fails open to the in-lane source build. The bundle records the commit
+that built it for provenance, but equality keys on the pinned source and
+toolchain because the bundled source cannot change without a `Cargo.lock`
+change. Tests still compile and run freshly against whichever library they
+link; the bundle is acceleration, never evidence.
+
 The selected default-feature `relayer-app-server` and
 `relayer-graph-server` binaries are built once in the runtime lane. Its workflow
 artifact is retained for one day and binds the exact workflow commit, runner

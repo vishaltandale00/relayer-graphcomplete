@@ -484,6 +484,57 @@ describe("CI workflow contract", () => {
     ).not.toContain('run("Build selected Vitest Rust runtime"');
   });
 
+  test("builds the Ladybug library once and verifies it before every Rust lane links it", () => {
+    const job = workflow.jobs["lbug-prebuilt"];
+    expect(job.if).toBe(
+      "${{ needs.quick.result == 'success' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true') }}",
+    );
+    expect(
+      job.steps.find((step) => step.id === "rust-setup").uses,
+    ).toBe("./.github/actions/setup-rust-compilation");
+    const restore = job.steps.find((step) => step.id === "lbug-cache");
+    expect(restore.uses).toMatch(/^actions\/cache\/restore@/);
+    expect(restore.if).toBeUndefined();
+    const build = job.steps.find(
+      (step) => step.name === "Build Ladybug from the pinned bundled source",
+    );
+    expect(build.if).toBe("${{ steps.lbug-cache.outputs.cache-hit != 'true' }}");
+    expect(build.run).toContain("cargo build -p lbug");
+    expect(build.run).toContain("scripts/ci/lbug-artifact.mjs create");
+    const upload = job.steps.find(
+      (step) => step.name === "Upload prebuilt Ladybug library",
+    );
+    expect(upload.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
+    expect(upload.with.overwrite).toBe(true);
+    const save = job.steps.find(
+      (step) => step.name === "Save trusted prebuilt Ladybug bundle",
+    );
+    expect(save.if).toContain("github.event_name == 'push'");
+    expect(save.with.key).toBe("${{ steps.lbug-cache.outputs.cache-primary-key }}");
+
+    for (const lane of [
+      "rust-clippy",
+      "rust-tests",
+      "rust-crash",
+      "rust-runtime",
+    ]) {
+      const laneJob = workflow.jobs[lane];
+      expect(laneJob.needs).toContain("lbug-prebuilt");
+      const download = laneJob.steps.find(
+        (step) => step.name === "Download prebuilt Ladybug library",
+      );
+      const verify = laneJob.steps.find(
+        (step) => step.name === "Verify and install prebuilt Ladybug library",
+      );
+      // Fail-open: a missing or rejected bundle falls back to the source build.
+      expect(download["continue-on-error"]).toBe(true);
+      expect(verify["continue-on-error"]).toBe(true);
+      expect(download.with.name).toBe(upload.with.name);
+      expect(verify.run).toContain("scripts/ci/lbug-artifact.mjs verify");
+      expect(verify.run).toContain('--github-env "$GITHUB_ENV"');
+    }
+  });
+
   test("preserves PR parent history for complete Vitest evidence checks", () => {
     for (const jobName of ["vitest"]) {
       const checkout = workflow.jobs[jobName].steps.find((step) =>

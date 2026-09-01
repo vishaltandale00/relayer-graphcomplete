@@ -319,6 +319,17 @@ reviewed bundled source as the build input and every test fresh, but it
 changes the "compile from source in every lane" property and needs an explicit
 decision before implementation.
 
+Decision (approved 2026-09-01): implemented as the `Prebuilt Ladybug native
+library` job. It builds `cargo build -p lbug` once per run, strips debug info
+(1.8 GB to ~440 MB in local measurement), and serves the bundle to every Rust
+lane through an identity-verified workflow artifact plus a trusted-push cache
+keyed on platform, rustc release, and `Cargo.lock` digest. Lanes verify the
+bundle before linking and fail open to the source build when it is missing or
+rejected, so the change cannot weaken verification. Local equivalence proof:
+the default, crash-feature, and query-conformance suites all pass against the
+externally linked bundle (one load-induced wall-time-budget flake reproduced
+green in isolation).
+
 ## Ranked next options
 
 ### 1. Keep sccache admitted in Rust, then verify the trusted-main consumer
