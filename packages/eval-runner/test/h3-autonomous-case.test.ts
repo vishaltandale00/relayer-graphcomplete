@@ -24,7 +24,8 @@ describe("h3 autonomous seed cases", () => {
   });
 
   it("keeps the steered H3 repair on the same verifier as the one-shot repair", () => {
-    const [single, steered] = h3AutonomousCases;
+    const single = h3AutonomousCases[0]!;
+    const steered = h3AutonomousCases[1]!;
     expect(steered.definition.id).toBe("autonomous.h3.sanitize-status-code.multi-turn");
     expect(steered.definition.requiredJudgeConfigurationIds).toEqual(["simulated-user", "simulated-user-sol-high"]);
     expect(steered.definition.simulatedUserBrief).toContain("200.5");

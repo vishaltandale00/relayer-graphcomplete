@@ -7,6 +7,13 @@ import {
   H3_AUTONOMOUS_FIX_CASE_ID,
   H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+  H3_PACKAGE_MANAGER,
+  H3_PROJECT_CASE_ID,
+  H3_REPOSITORY_URL,
+  H3_SEEDED_COMMIT,
+  H3_SEEDED_TREE,
+  H3_UPSTREAM_COMMIT,
+  H3_UPSTREAM_TREE,
   HTTPX_PROXY_AUTH_REPORT_CASE_ID,
   OFETCH_RETRY_METHODS_CASE_ID,
   SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
@@ -469,6 +476,131 @@ describe("EvalService simulated-user result persistence", () => {
     );
   });
 
+  it("rejects a steered multi-turn run without a steering decision runner before execution", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      simulatedUserJudgeRunner: vi.fn(),
+      platform: "darwin",
+    }).open();
+
+    await expect(service.createRun({
+      testCaseIds: [H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "simulated-user",
+    })).rejects.toThrow(
+      "Steered multi-turn cases require a simulated-user steering decision runner.",
+    );
+  });
+
+  it("steers H3 through the production loop and grades only the final workspace", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const followUpTexts = [];
+    const product = fakeSteeredH3Product(followUpTexts);
+    globalThis.fetch = product;
+    const workspaceGradeCalls = [];
+    const steeringDecisions = vi.fn()
+      .mockResolvedValueOnce({
+        kind: "follow-up",
+        text: "Please commit the sanitizer fix.",
+        reason: "The graph shows a diagnosis but no committed repair.",
+      })
+      .mockResolvedValueOnce({
+        kind: "done",
+        reason: "The committed repair is enough to stop.",
+      });
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      platform: "darwin",
+      simulatedUserJudgeRunner: async () => ({
+        status: "completed",
+        rubricRef: "rubric.json",
+        configurationRef: "judge.json",
+        interactionTraceRef: "trace.json",
+        screenshotRefs: ["screenshots/root.json"],
+        reviewRef: "review.json",
+        coverageRef: "coverage.json",
+        review: { turn: { ratings: { answer_quality: 4 } } },
+        coverage: { complete: true, missingSubjects: [] },
+        summary: "Reviewed the accepted graph.",
+      }),
+      steeringDecisionRunner: steeringDecisions,
+      projectFixtureMaterializer: async ({ workspaceDirectory }) => {
+        await mkdir(workspaceDirectory, { recursive: true });
+        return {
+          schemaVersion: 1,
+          fixtureId: H3_PROJECT_CASE_ID,
+          workspaceDirectory,
+          repositoryUrl: H3_REPOSITORY_URL,
+          upstreamCommit: H3_UPSTREAM_COMMIT,
+          upstreamTree: H3_UPSTREAM_TREE,
+          seededCommit: H3_SEEDED_COMMIT,
+          seededTree: H3_SEEDED_TREE,
+          packageManager: H3_PACKAGE_MANAGER,
+          installedWithFrozenLockfile: true,
+        };
+      },
+      workspaceGrader: async ({ grade }) => {
+        workspaceGradeCalls.push({ grade, followUps: followUpTexts.length });
+        const passed = followUpTexts.length > 0;
+        return [{
+          name: "workspace:implementation-clean",
+          passed,
+          detail: passed
+            ? "Final workspace graded after the steered follow-up."
+            : "Incomplete first turn would fail outcome if graded now.",
+        }];
+      },
+      acceptedTopologyBuilder: async ({ turnId }) => ({ turnId, layers: [] }),
+      acceptedTopologyGrader: () => [{
+        name: "graph:accepted-reachable-closure",
+        passed: true,
+        detail: "Accepted topology loaded.",
+      }],
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: [H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "simulated-user",
+    });
+    const completed = await waitForCompletedRun(service, created.id, 15_000);
+    const execution = completed.executions[0];
+
+    expect(execution.error).toBeNull();
+    expect(execution.status).toBe("passed");
+    expect(followUpTexts).toEqual(["Please commit the sanitizer fix."]);
+    expect(workspaceGradeCalls).toEqual([{ grade: "autonomous-implementation", followUps: 1 }]);
+    expect(execution.turns).toHaveLength(2);
+    expect(execution.turns[0].deterministicChecks.filter((check) => check.name.includes(":workspace:"))).toEqual([]);
+    expect(execution.turns[1].deterministicChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "implementation:turn-2:workspace:implementation-clean",
+        passed: true,
+      }),
+    ]));
+    expect(execution.checks.filter((check) => check.name.includes(":workspace:"))).toEqual([
+      expect.objectContaining({
+        name: "implementation:turn-2:workspace:implementation-clean",
+        passed: true,
+      }),
+    ]);
+    expect(execution.steeredLoop).toMatchObject({
+      terminal: "done",
+      humanTurnCount: 2,
+      followUpCount: 1,
+    });
+    expect(execution.steeringDecisions.map((decision) => decision.kind)).toEqual(["follow-up", "done"]);
+    expect(steeringDecisions.mock.calls[0][0].lastTurnSummary).toContain("Diagnose sanitize.ts");
+    expect(product.mock.calls.some(([url, options]) => (
+      new URL(url).pathname === "/api/threads/thread-1/interactions" && options?.method === "POST"
+    ))).toBe(true);
+  });
+
   it("persists explicit partial and thrown-failure artifacts without losing deterministic evidence", async () => {
     const partialPaths = await testPaths();
     globalThis.fetch = fakeAcceptedProduct();
@@ -771,20 +903,97 @@ function fakeAcceptedProduct() {
   });
 }
 
-function acceptedOutput() {
-  const node = { id: 2, kind: "concept", icon: "queue", title: "Queue", detail: "Tasks wait here.", state: "accepted" };
+function fakeSteeredH3Product(followUpTexts) {
+  const interactions = [];
+  return vi.fn(async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/model-settings" && (options.method === undefined || options.method === "GET")) {
+      return jsonResponse({
+        defaults: { harnessId: "fixture-task-system", familyId: 1 },
+        harnesses: [{
+          id: "fixture-task-system",
+          available: true,
+          modelCompatibility: [{ providerId: "codex" }],
+        }],
+        providers: [{
+          id: "openai",
+          adapterId: "openai-api",
+          connected: true,
+          models: [{ id: "test-model", visible: true, available: true }],
+        }],
+        families: [{
+          id: 1,
+          enabled: true,
+          position: 0,
+          members: [{ position: 0, providerId: "openai", modelId: "test-model" }],
+        }],
+      });
+    }
+    if (path === "/api/projects" && options.method === "POST") {
+      return jsonResponse({ id: "project-1" });
+    }
+    if (path === "/api/threads" && options.method === "POST") {
+      const body = JSON.parse(options.body);
+      const interaction = h3AcceptedInteraction({
+        id: "interaction-1",
+        sequence: 1,
+        text: body.initialMessage,
+        title: "Diagnose sanitize.ts",
+      });
+      interactions.splice(0, interactions.length, interaction);
+      return jsonResponse({ id: "thread-1", rootInteractionId: interaction.id });
+    }
+    if (path === "/api/threads/thread-1/interactions" && options.method === "POST") {
+      const body = JSON.parse(options.body);
+      followUpTexts.push(body.text);
+      const interaction = h3AcceptedInteraction({
+        id: "interaction-2",
+        sequence: 2,
+        text: body.text,
+        title: "Repair committed",
+      });
+      interactions.push(interaction);
+      return jsonResponse(interaction);
+    }
+    if (path === "/api/threads/thread-1" && (options.method === undefined || options.method === "GET")) {
+      return jsonResponse({ id: "thread-1", interactions: [...interactions] });
+    }
+    return jsonResponse({ error: `Unexpected fake product request: ${options.method || "GET"} ${path}` }, 404);
+  });
+}
+
+function h3AcceptedInteraction({ id, sequence, text, title }) {
+  return {
+    id,
+    sequence,
+    graphNodeId: sequence,
+    completionStatus: "accepted",
+    completionOutput: acceptedOutput(sequence, title),
+    completionError: null,
+    text,
+    permissionProfileId: "auto",
+    effectiveExecutionDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    effectivePermissionReceipt: {
+      permissionProfileId: "auto",
+      unconfinedHostAccess: false,
+    },
+  };
+}
+
+function acceptedOutput(nodeId = 1, title = "Queue") {
+  const node = { id: nodeId + 1, kind: "concept", icon: "queue", title, detail: "Tasks wait here.", state: "accepted" };
   const layer = {
-    id: 10,
+    id: nodeId * 10,
     nodes: [node.id],
     edges: [],
     layout: { version: 1, placements: [{ nodeId: node.id, x: 0.5, y: 0.5 }] },
     state: "accepted",
   };
   return {
-    nodeId: 1,
+    nodeId,
     rootAction: {
-      id: 11,
-      sourceNodeId: 1,
+      id: nodeId * 10 + 1,
+      sourceNodeId: nodeId,
       sourceLayerId: null,
       kind: "navigate",
       relation: "expand",
@@ -803,14 +1012,21 @@ function jsonResponse(value, status = 200) {
   });
 }
 
-async function waitForCompletedRun(evalService, runId) {
-  const deadline = Date.now() + 5_000;
+async function waitForCompletedRun(evalService, runId, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const run = evalService.getRun(runId);
     if (!["queued", "running"].includes(run.status) && typeof run.bundleRef === "string") return run;
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
-  throw new Error("Eval run did not finish in time.");
+  const run = evalService.getRun(runId);
+  throw new Error(`Eval run did not finish in time: ${JSON.stringify({
+    status: run?.status,
+    executions: run?.executions?.map((execution) => ({
+      status: execution.status,
+      error: execution.error,
+    })),
+  })}`);
 }
 
 async function waitForPersistedRun(stateFile, runId) {

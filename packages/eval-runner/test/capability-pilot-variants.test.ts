@@ -64,5 +64,9 @@ describe("capability-pilot interaction variants", () => {
     expect(prompt).toContain("cannot write graph records");
     expect(prompt).toContain("second human root");
     expect(prompt).toContain("Remaining human turns including a possible follow-up: 3");
+    expect(prompt).toContain("This steering step only chooses the next human action from that summary.");
+    expect(prompt).toContain("A full screenshot review still runs independently");
+    expect(prompt).not.toContain("You already explored");
+    expect(prompt).not.toContain("review tools");
   });
 });

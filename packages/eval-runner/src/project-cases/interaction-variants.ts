@@ -50,7 +50,10 @@ export function buildSimulatedUserSteeringPrompt(input: {
   return [
     "You are the product user continuing one GraphComplete thread, not an evaluator rewriting the task.",
     `Steering prompt version: ${SIMULATED_USER_STEERING_PROMPT_VERSION}.`,
-    "You already explored the latest accepted graph through the simulated-user review tools.",
+    "The latest accepted turn is summarized below from the production graph after that turn accepted.",
+    "A full screenshot review still runs independently on every accepted turn.",
+    "This steering step only chooses the next human action from that summary.",
+    "Do not invent repository, screenshot, or transcript facts that are not present in that summary.",
     "Choose the next ordinary product action a real user could take now.",
     "You may send a follow-up message, accept the work as done, or abandon the thread.",
     "You cannot write graph records, mutate the workspace, or start a second human root while one complete() is still active.",

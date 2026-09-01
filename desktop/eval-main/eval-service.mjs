@@ -52,6 +52,8 @@ import {
   isSteeredMultiTurn,
   steeredMaxHumanTurns,
   parseSteeringDecision,
+  requireSingleOpeningPrompt,
+  runSteeredInteractionLoop,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
 import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
@@ -1457,6 +1459,10 @@ export class EvalService {
     if (simulatedUserJudgeIds.has(judgeConfigurationName) && this.simulatedUserJudgeRunner === null) {
       throw new Error("Simulated-user judge is not available in this EvalService.");
     }
+    if (testCaseIds.some((id) => evalCaseIsSteered(evalCases.find((item) => item.id === id)))
+      && typeof this.steeringDecisionRunner !== "function") {
+      throw new Error("Steered multi-turn cases require a simulated-user steering decision runner.");
+    }
     if (!evalJudges.some((judge) => judge.id === judgeConfigurationName)) {
       throw new Error("Unknown judge configuration.");
     }
@@ -2397,7 +2403,7 @@ export class EvalService {
       const workspaceChecks = new Map();
       const workspaceArtifacts = new Map();
       const permissionResolution = execution.permissionProfileResolutions[threadIndex];
-      const steered = isSteeredMultiTurn(definition) || isSteeredMultiTurn(threadDefinition);
+      const steered = evalCaseIsSteered(definition) || isSteeredMultiTurn(threadDefinition);
       if (steered) {
         if (!simulatedUserJudgeIds.has(execution.judgeConfiguration.name)) {
           throw new Error("Steered multi-turn cases require a simulated-user judge configuration.");
@@ -2412,19 +2418,12 @@ export class EvalService {
         prompts: threadDefinition.prompts,
         projectId: project.id,
         permissionProfileId: permissionResolution.effectiveProfileId,
-        nextFollowUp: steered
-          ? async ({ interaction, humanTurnCount }) => {
-            const maxTurns = steeredMaxHumanTurns(definition);
-            if (!interaction.completionOutput || humanTurnCount >= maxTurns) return null;
-            const decision = parseSteeringDecision(await this.steeringDecisionRunner({
-              openingPrompt: threadDefinition.prompts[0],
-              simulatedUserBrief: definition.simulatedUserBrief || threadDefinition.simulatedUserBrief,
-              remainingHumanTurns: maxTurns - humanTurnCount,
-              lastTurnSummary: summarizeAcceptedInteraction(interaction),
-              interactionId: String(interaction.id),
-            }));
-            execution.steeringDecisions = [...(execution.steeringDecisions || []), copy(decision)];
-            return decision.kind === "follow-up" ? decision.text : null;
+        steeredPolicy: steered
+          ? {
+            interactionVariant: "multi-turn",
+            openingPrompt: requireSingleOpeningPrompt(threadDefinition.prompts, "multi-turn"),
+            simulatedUserBrief: definition.simulatedUserBrief || threadDefinition.simulatedUserBrief || "",
+            maxHumanTurns: steeredMaxHumanTurns(definition),
           }
           : null,
         afterTurn: async (interactionId, promptIndex) => {
@@ -2434,24 +2433,54 @@ export class EvalService {
             interactionId,
           ));
           if (
-            threadDefinition.mutationPolicy === "read-only"
-            || steered
-            || promptIndex === threadDefinition.prompts.length - 1
+            !steered
+            && (
+              threadDefinition.mutationPolicy === "read-only"
+              || promptIndex === threadDefinition.prompts.length - 1
+            )
           ) {
-            workspaceChecks.set(String(interactionId), isH3
-              ? await this.workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade })
-              : isCalibration
-                ? await this.calibrationWorkspaceGrader({ caseId: definition.id, workspaceDirectory, baseRevision: fixture.seededCommit })
-                : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory }));
+            workspaceChecks.set(String(interactionId), await gradeProjectWorkspace({
+              isH3,
+              isCalibration,
+              definition,
+              threadDefinition,
+              workspaceDirectory,
+              fixture,
+              workspaceGrader: this.workspaceGrader,
+              calibrationWorkspaceGrader: this.calibrationWorkspaceGrader,
+              frontierWorkspaceGrader: this.frontierWorkspaceGrader,
+            }));
           }
         },
       });
+      if (steered) {
+        const lastInteractionId = executed.humanInteractionIds.at(-1);
+        workspaceChecks.set(String(lastInteractionId), await gradeProjectWorkspace({
+          isH3,
+          isCalibration,
+          definition,
+          threadDefinition,
+          workspaceDirectory,
+          fixture,
+          workspaceGrader: this.workspaceGrader,
+          calibrationWorkspaceGrader: this.calibrationWorkspaceGrader,
+          frontierWorkspaceGrader: this.frontierWorkspaceGrader,
+        }));
+      }
       executedThreads.push({ ...executed, threadDefinition, permissionResolution, workspaceChecks, workspaceArtifacts });
     }
     return executedThreads;
   }
 
-  async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {}, nextFollowUp = null }) {
+  async #createAndRunThread({
+    execution,
+    title,
+    prompts,
+    projectId = null,
+    permissionProfileId = "auto",
+    afterTurn = async () => {},
+    steeredPolicy = null,
+  }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
     let selectedModel = execution.pinnedModelResolution?.selectedModel;
     let productModelSelection = execution.pinnedModelResolution?.productModelSelection;
@@ -2484,59 +2513,87 @@ export class EvalService {
       selectedModel: copy(selectedModel ?? null),
       productModelSelection,
     };
-    const thread = await this.#productRequest("/api/threads", {
+    const startThread = async (initialMessage) => {
+      const thread = await this.#productRequest("/api/threads", {
+        method: "POST",
+        body: {
+          title,
+          initialMessage,
+          harnessConfigurationName: execution.harnessConfigurationName,
+          permissionProfileId,
+          ...evalModelSelectionRequest(selectedModel, productModelSelection),
+          ...(projectId === null ? {} : { projectId }),
+        },
+      });
+      execution.threadIds.push(thread.id);
+      return thread;
+    };
+    const finishTurn = async (threadId, interactionId, promptIndex) => {
+      const interaction = await this.#waitForInteraction(execution, threadId, interactionId);
+      await this.#captureCandidateTrace(execution, interaction);
+      await afterTurn(interactionId, promptIndex);
+      return interaction;
+    };
+    const postFollowUp = async (threadId, text) => this.#productRequest(`/api/threads/${threadId}/interactions`, {
       method: "POST",
       body: {
-        title,
-        initialMessage: prompts[0],
-        harnessConfigurationName: execution.harnessConfigurationName,
-        permissionProfileId,
+        text,
         ...evalModelSelectionRequest(selectedModel, productModelSelection),
-        ...(projectId === null ? {} : { projectId }),
       },
     });
-    execution.threadIds.push(thread.id);
+
+    if (steeredPolicy) {
+      if (typeof this.steeringDecisionRunner !== "function") {
+        throw new Error("Steered multi-turn cases require a simulated-user steering decision runner.");
+      }
+      let thread = null;
+      const humanInteractionIds = [];
+      const steeredLoop = await runSteeredInteractionLoop(steeredPolicy, {
+        runOpening: async (prompt) => {
+          thread = await startThread(prompt);
+          humanInteractionIds.push(thread.rootInteractionId);
+          const interaction = await finishTurn(thread.id, thread.rootInteractionId, 0);
+          return steeredTurnRecord(interaction, 0);
+        },
+        reviewTurn: async (turn) => ({ summary: turn.summary }),
+        decide: async (observation) => {
+          const decision = parseSteeringDecision(await this.steeringDecisionRunner({
+            openingPrompt: observation.openingPrompt,
+            simulatedUserBrief: observation.simulatedUserBrief,
+            remainingHumanTurns: observation.remainingHumanTurns,
+            lastTurnSummary: observation.lastTurn.summary,
+            interactionId: observation.lastTurn.interactionId,
+          }));
+          execution.steeringDecisions = [...(execution.steeringDecisions || []), copy(decision)];
+          return decision;
+        },
+        runFollowUp: async (text) => {
+          const posted = await postFollowUp(thread.id, text);
+          humanInteractionIds.push(posted.id);
+          const interaction = await finishTurn(thread.id, posted.id, humanInteractionIds.length - 1);
+          return steeredTurnRecord(interaction, humanInteractionIds.length - 1);
+        },
+      });
+      execution.steeredLoop = {
+        terminal: steeredLoop.terminal,
+        humanTurnCount: steeredLoop.turns.length,
+        followUpCount: Math.max(0, steeredLoop.turns.length - 1),
+      };
+      const { detail, semanticChildren } = await this.#waitForSemanticChildren(
+        execution,
+        thread.id,
+        humanInteractionIds,
+      );
+      return { thread, humanInteractionIds, detail, semanticChildren };
+    }
+
+    const thread = await startThread(prompts[0]);
     const humanInteractionIds = [thread.rootInteractionId];
-    const rootInteraction = await this.#waitForInteraction(execution, thread.id, thread.rootInteractionId);
-    await this.#captureCandidateTrace(execution, rootInteraction);
-    await afterTurn(thread.rootInteractionId, 0);
-    if (typeof nextFollowUp === "function") {
-      let lastInteraction = rootInteraction;
-      let promptIndex = 0;
-      while (true) {
-        const followUp = await nextFollowUp({
-          interaction: lastInteraction,
-          promptIndex,
-          humanTurnCount: promptIndex + 1,
-        });
-        if (typeof followUp !== "string" || followUp.trim() === "") break;
-        const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
-          method: "POST",
-          body: {
-            text: followUp,
-            ...evalModelSelectionRequest(selectedModel, productModelSelection),
-          },
-        });
-        humanInteractionIds.push(interaction.id);
-        lastInteraction = await this.#waitForInteraction(execution, thread.id, interaction.id);
-        await this.#captureCandidateTrace(execution, lastInteraction);
-        promptIndex += 1;
-        await afterTurn(interaction.id, promptIndex);
-      }
-    } else {
-      for (const [offset, prompt] of prompts.slice(1).entries()) {
-        const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
-          method: "POST",
-          body: {
-            text: prompt,
-            ...evalModelSelectionRequest(selectedModel, productModelSelection),
-          },
-        });
-        humanInteractionIds.push(interaction.id);
-        const completedInteraction = await this.#waitForInteraction(execution, thread.id, interaction.id);
-        await this.#captureCandidateTrace(execution, completedInteraction);
-        await afterTurn(interaction.id, offset + 1);
-      }
+    await finishTurn(thread.id, thread.rootInteractionId, 0);
+    for (const [offset, prompt] of prompts.slice(1).entries()) {
+      const interaction = await postFollowUp(thread.id, prompt);
+      humanInteractionIds.push(interaction.id);
+      await finishTurn(thread.id, interaction.id, offset + 1);
     }
     const { detail, semanticChildren } = await this.#waitForSemanticChildren(
       execution,
@@ -3156,6 +3213,44 @@ function emptyTraceCoverage() {
     usage: "none",
     childStreams: "none",
     nativeArtifacts: "none",
+  };
+}
+
+function evalCaseIsSteered(definition) {
+  if (!definition) return false;
+  if (isSteeredMultiTurn(definition)) return true;
+  return Array.isArray(definition.threads)
+    && definition.threads.some((thread) => isSteeredMultiTurn(thread));
+}
+
+async function gradeProjectWorkspace({
+  isH3,
+  isCalibration,
+  definition,
+  threadDefinition,
+  workspaceDirectory,
+  fixture,
+  workspaceGrader,
+  calibrationWorkspaceGrader,
+  frontierWorkspaceGrader,
+}) {
+  if (isH3) return workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade });
+  if (isCalibration) {
+    return calibrationWorkspaceGrader({
+      caseId: definition.id,
+      workspaceDirectory,
+      baseRevision: fixture.seededCommit,
+    });
+  }
+  return frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory });
+}
+
+function steeredTurnRecord(interaction, turnIndex) {
+  return {
+    turnIndex,
+    interactionId: String(interaction.id),
+    accepted: interaction.completionStatus === "accepted" && Boolean(interaction.completionOutput),
+    summary: summarizeAcceptedInteraction(interaction),
   };
 }
 

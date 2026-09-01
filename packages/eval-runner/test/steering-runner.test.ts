@@ -24,7 +24,7 @@ describe("simulated-user steering runner", () => {
       reason: "The graph shows the repair but no commit.",
     });
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run.mock.calls[0]![0]).toContain("Choose the next ordinary product action.");
+    expect(String(run.mock.calls.at(0)?.at(0))).toContain("Choose the next ordinary product action.");
   });
 
   it("rejects a non-object response", () => {
