@@ -237,6 +237,7 @@ describe("desktop skeleton", () => {
     expect(desktopMain).toContain("createDesktopAccountTelemetry");
     expect(desktopMain).toContain("developmentTelemetryPackageMetadata(desktopVersion)");
     expect(desktopMain).toContain("appVersion: desktopVersion");
+    expect(desktopMain).toContain("removeLeftoverEphemeralCodexAuthFiles(providerRuntimeRoot)");
     expect(desktopMain).toContain("graphRuntime.refreshErrorCapability()");
     expect(desktopMain).toContain("productServer?.refreshErrorCapability()");
     expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');

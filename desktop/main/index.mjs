@@ -13,6 +13,7 @@ import {
 } from "./providers/provider-adapter-registry.mjs";
 import { createProviderComposition } from "./providers/provider-composition.mjs";
 import { createProviderDiagnosticsLog } from "./providers/provider-diagnostics-log.mjs";
+import { removeLeftoverEphemeralCodexAuthFiles } from "./providers/ephemeral-codex-auth.mjs";
 import { createProviderRuntimeStateRemover } from "./providers/provider-runtime-state.mjs";
 import {
   createEncryptedCredentialStore,
@@ -414,6 +415,15 @@ if (primaryInstance) {
       console.error("Retired managed runtime cleanup failed:", new AggregateError(
         pruning.failures.map(({ error }) => error),
         "One or more retired managed runtimes could not be removed.",
+      ));
+    }
+    // SIGKILL during a secret Codex turn skips harness-host finally and can
+    // leave plaintext API-key auth.json under an isolated provider home.
+    const leftoverAuth = await removeLeftoverEphemeralCodexAuthFiles(providerRuntimeRoot);
+    if (leftoverAuth.failures.length) {
+      console.error("Leftover Codex API-key auth cleanup failed:", new AggregateError(
+        leftoverAuth.failures.map(({ error }) => error),
+        "One or more leftover Codex API-key auth files could not be removed.",
       ));
     }
     const runtimeSession = await graphRuntime.start();
