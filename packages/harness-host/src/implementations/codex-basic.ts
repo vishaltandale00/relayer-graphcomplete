@@ -1,6 +1,6 @@
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
@@ -45,12 +45,14 @@ const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
 const CODEX_MANAGED_RUNTIME_ENVIRONMENT = new Set([
   ...SAFE_SUBPROCESS_ENVIRONMENT, "HOME", "USERPROFILE", "CODEX_HOME", "RELAYER_CODEX_BINARY",
 ]);
+const CODEX_BASIC_SECRET_ADAPTERS = new Set(["openai-api", "openrouter", "vercel-ai-router"]);
+const CODEX_BASIC_ADAPTERS = new Set(["codex-subscription", ...CODEX_BASIC_SECRET_ADAPTERS]);
 
 // Codex authenticates an API-key provider from CODEX_HOME/auth.json. The
 // OPENAI_API_KEY environment variable alone is not honored by the managed Codex
-// runtime (requests go out with no bearer), so persist the selected provider's
-// key into its isolated per-provider CODEX_HOME. This lets codex.basic drive the
-// secret-access providers (openai-api, openrouter, vercel-ai-router).
+// runtime (requests go out with no bearer). Write the selected provider's key
+// into its isolated per-provider CODEX_HOME only for the turn, then delete the
+// file so the durable copy stays in the OS credential store (PRD AGT-007).
 async function writeCodexApiKeyAuthFile(codexHome: string, apiKey: string): Promise<void> {
   await mkdir(codexHome, { recursive: true });
   await writeFile(
@@ -58,6 +60,15 @@ async function writeCodexApiKeyAuthFile(codexHome: string, apiKey: string): Prom
     `${JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: apiKey })}\n`,
     { mode: 0o600 },
   );
+}
+
+async function removeCodexApiKeyAuthFile(codexHome: string): Promise<void> {
+  try {
+    await unlink(join(codexHome, "auth.json"));
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return;
+    throw error;
+  }
 }
 const UNDERLYING_TASK_GUIDANCE = `Complete the underlying user task in the working directory. Use the harness's ordinary workspace tools and reasoning as needed; the graph is the presentation of the work, not a substitute for doing it. Author graph content from the work you actually performed and the evidence you actually observed. If you reach a genuine blocker that you cannot resolve, present that blocker and its evidence instead of presenting planned work as completed.`;
 
@@ -78,6 +89,7 @@ export interface CodexBasicDependencies {
     readonly environment: Readonly<Record<string, string>>;
   }>;
   readonly writeCodexApiKeyAuthFile?: (codexHome: string, apiKey: string) => Promise<void>;
+  readonly removeCodexApiKeyAuthFile?: (codexHome: string) => Promise<void>;
 }
 
 interface CodexBasicConfiguration {
@@ -192,22 +204,43 @@ export class CodexBasicHarness implements Harness {
       this.codexThreadId = undefined;
       this.codexThreadPersonalPresentationVersionId = undefined;
     }
-    const model = this.selectedModel(context);
+    this.selectedModel(context);
     if (context.model !== undefined && context.access === undefined) {
       throw new Error("codex.basic requires execution-scoped access for the selected provider");
     }
     const capability = context.graph.acquireCapability();
     const resolvedRuntime = await this.codexRuntime(context.access);
     const environment = this.graphEnvironment(capability, context.completionBroker, context.access, resolvedRuntime.environment);
-    if (context.access?.kind === "secret") {
-      const apiKey = context.access.fields["api-key"];
-      const codexHome = environment.CODEX_HOME;
-      if (apiKey !== undefined && apiKey !== "" && codexHome !== undefined && codexHome !== "") {
-        await (this.dependencies.writeCodexApiKeyAuthFile ?? writeCodexApiKeyAuthFile)(codexHome, apiKey);
+    let authHome: string | undefined;
+    try {
+      if (context.access?.kind === "secret") {
+        const apiKey = context.access.fields["api-key"];
+        const codexHome = environment.CODEX_HOME;
+        if (apiKey !== undefined && apiKey !== "" && codexHome !== undefined && codexHome !== "") {
+          await (this.dependencies.writeCodexApiKeyAuthFile ?? writeCodexApiKeyAuthFile)(codexHome, apiKey);
+          authHome = codexHome;
+        }
+      }
+      await this.runCodexTurn(context, attach, signal, environment, resolvedRuntime.executable, persistentRootSession, personalPresentationVersionId);
+    } finally {
+      if (authHome !== undefined) {
+        await (this.dependencies.removeCodexApiKeyAuthFile ?? removeCodexApiKeyAuthFile)(authHome);
       }
     }
+  }
+
+  private async runCodexTurn(
+    context: HarnessRunContext,
+    attach: (identity: JsonObject) => void,
+    signal: AbortSignal | undefined,
+    environment: Record<string, string>,
+    executable: string,
+    persistentRootSession: boolean,
+    personalPresentationVersionId: number | null,
+  ): Promise<void> {
     const sandboxPolicy = this.sandboxPolicy();
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
+    const model = this.selectedModel(context);
     const prompt = this.prompt(context);
     context.trace.emit({
       type: "prompt",
@@ -223,7 +256,7 @@ export class CodexBasicHarness implements Harness {
     try {
       await run({
         environment,
-        codexPathOverride: resolvedRuntime.executable,
+        codexPathOverride: executable,
         ...this.codexConfigOverrides(context.access),
         ...(persistentRootSession && this.codexThreadId !== undefined
           ? { savedThreadId: this.codexThreadId }
@@ -304,7 +337,7 @@ export class CodexBasicHarness implements Harness {
         CODEX_MANAGED_RUNTIME_ENVIRONMENT.has(key)
       ))));
     } else if (access?.kind === "secret") {
-      if (access.adapterId !== "openai-api") {
+      if (!CODEX_BASIC_SECRET_ADAPTERS.has(access.adapterId)) {
         throw new Error(`codex.basic cannot consume secret provider ${access.adapterId}`);
       }
       const apiKey = access.fields["api-key"];
@@ -366,7 +399,7 @@ export class CodexBasicHarness implements Harness {
     if (context.model === undefined) return this.resolved.settings.model;
     const adapterId = context.model.adapterId ?? (context.model.providerId === "codex" ? "codex-subscription" : undefined);
     if (!adapterId) throw new Error(`codex.basic cannot run provider ${context.model.providerId}`);
-    if (!new Set(["codex-subscription", "openai-api"]).has(adapterId)) {
+    if (!CODEX_BASIC_ADAPTERS.has(adapterId)) {
       throw new Error(`codex.basic cannot run provider adapter ${adapterId}`);
     }
     return context.model.modelId;

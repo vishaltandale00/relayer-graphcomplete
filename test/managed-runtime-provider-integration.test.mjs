@@ -67,12 +67,15 @@ function fixture({ prepareRuntime = async () => ({ runtimeId: "codex" }), discov
 }
 
 describe("managed runtime provider Connect boundary", () => {
-  it("keeps API provider access secret-only while the Codex factory supplies its managed runtime", async () => {
+  it.each(["openai-api", "openrouter", "vercel-ai-router"])(
+    "carries %s runtime access through the broker into Codex with ephemeral auth.json",
+    async (adapterId) => {
     let submitted;
     const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-int-"));
+    const providerId = `${adapterId}-work`;
     const definition = {
-      id: "openai-work", adapterId: "openai-api", label: "OpenAI Work",
-      endpoint: "https://api.openai.test/v1", accessContract: "secret@1", credentialReference: "provider:openai-work",
+      id: providerId, adapterId, label: `${adapterId} Work`,
+      endpoint: "https://api.provider.test/v1", accessContract: "secret@1", credentialReference: `provider:${providerId}`,
       lifecycleState: "active", removedAt: null,
     };
     const adapter = productionProviderAdapterRegistry.create(definition, {
@@ -80,12 +83,12 @@ describe("managed runtime provider Connect boundary", () => {
     });
     const broker = createProviderExecutionAccessBroker(async () => ({
       definition,
-      descriptor: productionProviderAdapterRegistry.get("openai-api"),
+      descriptor: productionProviderAdapterRegistry.get(adapterId),
       runtime: adapter,
       release: async () => {},
     }));
     const acquired = await broker.acquire(
-      { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-test" },
+      { providerId, adapterId, modelId: "gpt-test" },
       ["secret@1"],
       new AbortController().signal,
     );
@@ -100,6 +103,8 @@ describe("managed runtime provider Connect boundary", () => {
     }, {
       runAppServerTurn: async (options) => {
         submitted = options;
+        const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
+        expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "secret" });
         options.onThreadId("thread-1");
         return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
       },
@@ -112,7 +117,7 @@ describe("managed runtime provider Connect boundary", () => {
     await harness.complete({
       origin: { kind: "root" },
       inputGraph, interactionInput: { interaction: inputGraph, contexts: [] },
-      model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-test" },
+      model: { providerId, adapterId, modelId: "gpt-test" },
       access: acquired.access,
       graph: { interactionNodeId: 1, acquireCapability: () => ({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }) },
       approvals: { request: async () => { throw new Error("unused"); } },
@@ -122,8 +127,8 @@ describe("managed runtime provider Connect boundary", () => {
     expect(acquired.access).not.toHaveProperty("runtime");
     expect(submitted.codexPathOverride).toBe("/managed/codex");
     expect(submitted.environment.CODEX_HOME).toBe(codexHome);
-    const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
-    expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "secret" });
+    expect(submitted.environment.OPENAI_API_KEY).toBe("secret");
+    await expect(readFile(join(codexHome, "auth.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await acquired.release();
     await rm(codexHome, { recursive: true, force: true });
   });

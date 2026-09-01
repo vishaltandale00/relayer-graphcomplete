@@ -262,6 +262,12 @@ describe("Eval harness configuration availability", () => {
     expect(codexBasic.get("codex-basic")?.settings).toMatchObject({
       promptProfile: "layered-navigation-multi-agent-v1",
     });
+    expect(codexBasic.get("codex-basic")?.modelRules?.allow.map(({ adapterId }) => adapterId)).toEqual([
+      "codex-subscription",
+      "openai-api",
+      "openrouter",
+      "vercel-ai-router",
+    ]);
     expect(evalPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] }');
     expect(evalPackaging).toContain('"main/managed-runtimes/**/*"');
     expect(evalPackaging).toContain('"main/credentials/**/*"');
