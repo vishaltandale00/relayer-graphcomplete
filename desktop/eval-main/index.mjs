@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { delimiter, join, resolve } from "node:path";
@@ -55,6 +56,11 @@ if (process.env.RELAYER_EVAL_USER_DATA_DIR) {
   app.setPath("userData", resolve(process.env.RELAYER_EVAL_USER_DATA_DIR));
 }
 app.setName("Relayer Eval");
+
+const metadataPath = app.isPackaged ? join(app.getAppPath(), "package.json") : join(repositoryRoot, "package.json");
+const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+// Match Relayer Dev: Electron's unsigned Linux app.getVersion() is "0.0".
+const desktopVersion = app.isPackaged ? app.getVersion() : (metadata.version || app.getVersion());
 
 const userDataDirectory = app.getPath("userData");
 const graphServerBinary = app.isPackaged
@@ -514,7 +520,7 @@ async function start() {
     allowConversationImport: true,
     enableReadOnlySession: true,
     exportProducer: {
-      desktopVersion: app.getVersion(),
+      desktopVersion,
       buildCommit: "development",
       platform: process.platform,
       architecture: process.arch,

@@ -532,6 +532,10 @@ export async function materializeCalibrationFixture(options: {
   await required(runCommand, "git", ["init", "--quiet", "--initial-branch=main"], options.workspaceDirectory);
   await required(runCommand, "git", ["config", "user.name", "Relayer Eval Fixture"], options.workspaceDirectory);
   await required(runCommand, "git", ["config", "user.email", "eval-fixture@relayer.local"], options.workspaceDirectory);
+  // Fixture repos must not inherit a developer host's signing or fsmonitor.
+  // Those settings make later git commits hang once enough temp repos exist.
+  await required(runCommand, "git", ["config", "commit.gpgsign", "false"], options.workspaceDirectory);
+  await required(runCommand, "git", ["config", "core.fsmonitor", "false"], options.workspaceDirectory);
   await required(runCommand, "git", ["add", "--all"], options.workspaceDirectory);
   await required(runCommand, "git", ["commit", "--quiet", "-m", `Seed ${options.caseId}`], options.workspaceDirectory, {
     GIT_AUTHOR_DATE: "2026-08-27T12:00:00Z",

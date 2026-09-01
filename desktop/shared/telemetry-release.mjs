@@ -1,5 +1,5 @@
 import { packagedDesktopReleaseMetadata } from "./release-metadata.mjs";
-import { desktopTarget } from "./target.mjs";
+import { desktopTarget, developmentDesktopHost } from "./target.mjs";
 
 const PRODUCTION_APP_ID = "ai.relayer.desktop";
 const DEVELOPMENT_APP_ID = "ai.relayer.desktop.development";
@@ -29,6 +29,14 @@ function requireVersion(packageMetadata, appVersion) {
   }
 }
 
+export function developmentTelemetryPackageMetadata(version) {
+  return {
+    version,
+    relayerArtifactMode: "development",
+    relayerProductName: "Relayer Dev",
+  };
+}
+
 function developmentProjection({ packageMetadata, appVersion, platform, architecture, currentUpdateChannel }) {
   if (
     packageMetadata.relayerProductName !== "Relayer Dev"
@@ -36,7 +44,7 @@ function developmentProjection({ packageMetadata, appVersion, platform, architec
   ) {
     throw new Error("Desktop telemetry development identity is invalid.");
   }
-  const target = desktopTarget({ platform, architecture });
+  const target = developmentDesktopHost({ platform, architecture });
   return Object.freeze({
     release: `${DEVELOPMENT_APP_ID}@${appVersion}`,
     environment: "development",

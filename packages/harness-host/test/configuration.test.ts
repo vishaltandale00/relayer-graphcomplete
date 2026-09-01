@@ -76,8 +76,8 @@ describe("harness configuration", () => {
   });
 
   it.each([
-    ["codex-basic", "medium", 5, "layered-navigation-multi-agent-v1"],
-    ["codex-basic-high", "high", 3, undefined],
+    ["codex-basic", "medium", 6, "layered-navigation-multi-agent-v1"],
+    ["codex-basic-high", "high", 4, undefined],
   ])("loads the checked-in %s configuration", async (name, modelReasoningEffort, revision, promptProfile) => {
     await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
       schemaVersion: 1,
@@ -95,6 +95,8 @@ describe("harness configuration", () => {
         allow: [
           { adapterId: "codex-subscription", modelIdRegex: ".*" },
           { adapterId: "openai-api", modelIdRegex: ".*" },
+          { adapterId: "openrouter", modelIdRegex: ".*" },
+          { adapterId: "vercel-ai-router", modelIdRegex: ".*" },
         ],
         deny: [],
       },
