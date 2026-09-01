@@ -5,9 +5,11 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
 import type { EvalCheck } from "../runtime-basic.js";
+import type { EvalInteractionCaseType, InteractionVariant } from "./interaction-variants.js";
 
 export const H3_PROJECT_CASE_ID = "project.h3.sanitize-status-code";
 export const H3_AUTONOMOUS_FIX_CASE_ID = "autonomous.h3.sanitize-status-code";
+export const H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID = "autonomous.h3.sanitize-status-code.multi-turn";
 export const H3_AUTONOMOUS_INVESTIGATION_CASE_ID = "autonomous.h3.investigate-status-code";
 export const H3_REPOSITORY_URL = "https://github.com/h3js/h3.git";
 export const H3_UPSTREAM_COMMIT = "abd4d7725b70790481d7fb816eda9650472ca725";
@@ -35,6 +37,10 @@ export interface ProjectEvalThreadDefinition {
   readonly mutationPolicy: "read-only" | "writable";
   readonly prompts: readonly string[];
   readonly workspaceGrade: "question" | "diagnosis" | "implementation" | "autonomous-implementation";
+  readonly caseType?: EvalInteractionCaseType;
+  readonly interactionVariant?: InteractionVariant;
+  readonly simulatedUserBrief?: string;
+  readonly maxHumanTurns?: number;
 }
 
 export interface ProjectEvalCaseDefinition {
@@ -58,6 +64,11 @@ export interface ProjectEvalCaseDefinition {
   readonly autonomous?: true;
   readonly category?: "coding" | "work";
   readonly taskType?: "feature-change" | "debugging" | "investigation";
+  readonly caseType?: EvalInteractionCaseType;
+  readonly interactionVariant?: InteractionVariant;
+  readonly simulatedUserBrief?: string;
+  readonly maxHumanTurns?: number;
+  readonly requiredJudgeConfigurationIds?: readonly string[];
 }
 
 export const h3ProjectEvalCase: ProjectEvalCaseDefinition = Object.freeze({
@@ -126,6 +137,8 @@ export const h3AutonomousFixEvalCase: ProjectEvalCaseDefinition = Object.freeze(
   autonomous: true,
   category: "coding",
   taskType: "debugging",
+  caseType: "single-turn",
+  interactionVariant: "single-turn",
   fixture: H3_FIXTURE,
   threads: Object.freeze([
     Object.freeze({
@@ -134,9 +147,56 @@ export const h3AutonomousFixEvalCase: ProjectEvalCaseDefinition = Object.freeze(
       permissionProfileId: "auto",
       mutationPolicy: "writable",
       workspaceGrade: "autonomous-implementation",
+      caseType: "single-turn",
+      interactionVariant: "single-turn",
       prompts: Object.freeze([
         "Fix the decimal HTTP status validation bug in this checkout. Add focused regression coverage, run the relevant checks, and commit the repair. Keep the change scoped and do not push or publish anything.",
       ]),
+    }),
+  ]),
+});
+
+export const H3_AUTONOMOUS_FIX_MULTI_TURN_PROMPT = [
+  "We're seeing production failures when a handler returns a decimal HTTP status such as 200.5.",
+  "Please inspect this checkout, keep me posted in the graph as you work, and repair it if you are confident.",
+  "I'll follow along and answer questions. When the fix is ready, add focused tests, commit locally, and do not push or publish anything.",
+].join(" ");
+
+export const H3_AUTONOMOUS_FIX_MULTI_TURN_BRIEF = [
+  "You reported the 200.5 production failure. You can confirm that decimal statuses and decimal numeric strings are involved.",
+  "You do not know the exact sanitizer line. While the repair complete() is running, watch the published current.",
+  "Answer input actions on any nodes you can. Use authored invoke actions when they help. Do not start a second human-root complete().",
+  "If the visible current looks finished, wait. Do not paste hidden verifier examples or a reference patch.",
+].join(" ");
+
+export const h3AutonomousFixMultiTurnEvalCase: ProjectEvalCaseDefinition = Object.freeze({
+  schemaVersion: 1,
+  id: H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
+  name: "h3 · steered status-code repair",
+  description: "Repairs the seeded decimal status-code bug while the simulated user acts on published current during the in-flight complete.",
+  localOnly: true,
+  supportedPlatform: "darwin",
+  autonomous: true,
+  category: "coding",
+  taskType: "debugging",
+  caseType: "in-turn-steered",
+  interactionVariant: "multi-turn",
+  simulatedUserBrief: H3_AUTONOMOUS_FIX_MULTI_TURN_BRIEF,
+  maxHumanTurns: 6,
+  requiredJudgeConfigurationIds: Object.freeze(["simulated-user", "simulated-user-sol-high"]),
+  fixture: H3_FIXTURE,
+  threads: Object.freeze([
+    Object.freeze({
+      id: "implementation",
+      name: "Repair decimal status validation",
+      permissionProfileId: "auto",
+      mutationPolicy: "writable",
+      workspaceGrade: "autonomous-implementation",
+      caseType: "in-turn-steered",
+      interactionVariant: "multi-turn",
+      simulatedUserBrief: H3_AUTONOMOUS_FIX_MULTI_TURN_BRIEF,
+      maxHumanTurns: 6,
+      prompts: Object.freeze([H3_AUTONOMOUS_FIX_MULTI_TURN_PROMPT]),
     }),
   ]),
 });

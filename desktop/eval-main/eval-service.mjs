@@ -22,6 +22,7 @@ import {
   gradeH3Workspace,
   gradeFrontierProjectWorkspace,
   H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
   H3_PROJECT_CASE_ID,
   H3_UPSTREAM_COMMIT,
@@ -48,6 +49,17 @@ import {
   RECURSIVE_GRAPH_MEMORY_CASE_ID,
   RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET,
   selectStandalonePermissionProfile,
+  isSteeredMultiTurn,
+  steeredMaxHumanTurns,
+  parseSteeringDecision,
+  requireSingleOpeningPrompt,
+  resolvePublishedCurrentTarget,
+  runSteeredInteractionLoop,
+  summarizePublishedCurrent,
+  decorateEvalCaseCatalogEntry,
+  EVAL_INTERACTION_CASE_TYPES,
+  EVAL_INTERACTION_CASE_TYPE_LABELS,
+  h3SanitizeInteractionFamily,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
 import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
@@ -413,6 +425,7 @@ function isNaturalPriorWorkQueryShape(query, escapedParameterName) {
 const h3CaseIds = new Set([
   H3_PROJECT_CASE_ID,
   H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
 ]);
 const projectCaseIds = new Set([...h3CaseIds, ...frontierAutonomousCaseIds, ...calibrationAutonomousCaseIds]);
@@ -1079,6 +1092,7 @@ export class EvalService {
     configurationPaths,
     onChanged = () => {},
     simulatedUserJudgeRunner = null,
+    steeringDecisionRunner = null,
     projectFixtureMaterializer = materializeH3ProjectFixture,
     workspaceGrader = gradeH3Workspace,
     frontierProjectFixtureMaterializer = materializeFrontierProjectFixture,
@@ -1102,6 +1116,7 @@ export class EvalService {
     this.configurationPaths = configurationPaths;
     this.onChanged = onChanged;
     this.simulatedUserJudgeRunner = simulatedUserJudgeRunner;
+    this.steeringDecisionRunner = steeringDecisionRunner;
     this.projectFixtureMaterializer = projectFixtureMaterializer;
     this.workspaceGrader = workspaceGrader;
     this.frontierProjectFixtureMaterializer = frontierProjectFixtureMaterializer;
@@ -1178,7 +1193,14 @@ export class EvalService {
   catalog() {
     const availableConfigurations = new Set(this.configurations.keys());
     return {
-      cases: copy(evalCases.map(({ promptsForRun: _promptsForRun, gradeExecution: _gradeExecution, ...definition }) => definition)),
+      interactionCaseTypes: copy(EVAL_INTERACTION_CASE_TYPES.map((id) => ({
+        id,
+        label: EVAL_INTERACTION_CASE_TYPE_LABELS[id],
+      }))),
+      executableInteractionFamilies: copy([catalogInteractionFamily(h3SanitizeInteractionFamily)]),
+      cases: copy(evalCases.map(({ promptsForRun: _promptsForRun, gradeExecution: _gradeExecution, ...definition }) => (
+        decorateEvalCaseCatalogEntry(definition)
+      ))),
       harnessConfigurations: [...this.configurations.values()].map((configuration) => ({
         name: configuration.name,
         implementation: configuration.implementation,
@@ -1373,7 +1395,7 @@ export class EvalService {
       && !item.requiredJudgeConfigurationIds.includes(judgeConfigurationName)
     ));
     if (incompatibleJudgeCase) {
-      throw new Error("Input round-trip cases require a compatible simulated-user judge configuration.");
+      throw new Error("Selected cases require a compatible simulated-user judge configuration.");
     }
     const selectsGraphSearch = Array.isArray(harnessConfigurationNames)
       && harnessConfigurationNames.some((name) => (
@@ -1449,6 +1471,10 @@ export class EvalService {
     }
     if (simulatedUserJudgeIds.has(judgeConfigurationName) && this.simulatedUserJudgeRunner === null) {
       throw new Error("Simulated-user judge is not available in this EvalService.");
+    }
+    if (testCaseIds.some((id) => evalCaseIsSteered(evalCases.find((item) => item.id === id)))
+      && typeof this.steeringDecisionRunner !== "function") {
+      throw new Error("In-turn steered cases require a simulated-user steering decision runner.");
     }
     if (!evalJudges.some((judge) => judge.id === judgeConfigurationName)) {
       throw new Error("Unknown judge configuration.");
@@ -2390,33 +2416,85 @@ export class EvalService {
       const workspaceChecks = new Map();
       const workspaceArtifacts = new Map();
       const permissionResolution = execution.permissionProfileResolutions[threadIndex];
+      const steered = evalCaseIsSteered(definition) || isSteeredMultiTurn(threadDefinition);
+      if (steered) {
+        if (!simulatedUserJudgeIds.has(execution.judgeConfiguration.name)) {
+          throw new Error("In-turn steered cases require a simulated-user judge configuration.");
+        }
+        if (typeof this.steeringDecisionRunner !== "function") {
+          throw new Error("In-turn steered cases require a simulated-user steering decision runner.");
+        }
+      }
       const executed = await this.#createAndRunThread({
         execution,
         title: `${definition.name} · ${threadDefinition.name}`,
         prompts: threadDefinition.prompts,
         projectId: project.id,
         permissionProfileId: permissionResolution.effectiveProfileId,
+        steeredPolicy: steered
+          ? {
+            interactionVariant: "multi-turn",
+            caseType: "in-turn-steered",
+            openingPrompt: requireSingleOpeningPrompt(threadDefinition.prompts, "in-turn-steered"),
+            simulatedUserBrief: definition.simulatedUserBrief || threadDefinition.simulatedUserBrief || "",
+            maxHumanTurns: steeredMaxHumanTurns(definition),
+          }
+          : null,
         afterTurn: async (interactionId, promptIndex) => {
           workspaceArtifacts.set(String(interactionId), await captureTurnArtifactSnapshot(
             execution,
             workspaceDirectory,
             interactionId,
           ));
-          if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
-            workspaceChecks.set(String(interactionId), isH3
-              ? await this.workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade })
-              : isCalibration
-                ? await this.calibrationWorkspaceGrader({ caseId: definition.id, workspaceDirectory, baseRevision: fixture.seededCommit })
-                : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory }));
+          if (
+            !steered
+            && (
+              threadDefinition.mutationPolicy === "read-only"
+              || promptIndex === threadDefinition.prompts.length - 1
+            )
+          ) {
+            workspaceChecks.set(String(interactionId), await gradeProjectWorkspace({
+              isH3,
+              isCalibration,
+              definition,
+              threadDefinition,
+              workspaceDirectory,
+              fixture,
+              workspaceGrader: this.workspaceGrader,
+              calibrationWorkspaceGrader: this.calibrationWorkspaceGrader,
+              frontierWorkspaceGrader: this.frontierWorkspaceGrader,
+            }));
           }
         },
       });
+      if (steered) {
+        const lastInteractionId = executed.humanInteractionIds.at(-1);
+        workspaceChecks.set(String(lastInteractionId), await gradeProjectWorkspace({
+          isH3,
+          isCalibration,
+          definition,
+          threadDefinition,
+          workspaceDirectory,
+          fixture,
+          workspaceGrader: this.workspaceGrader,
+          calibrationWorkspaceGrader: this.calibrationWorkspaceGrader,
+          frontierWorkspaceGrader: this.frontierWorkspaceGrader,
+        }));
+      }
       executedThreads.push({ ...executed, threadDefinition, permissionResolution, workspaceChecks, workspaceArtifacts });
     }
     return executedThreads;
   }
 
-  async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {} }) {
+  async #createAndRunThread({
+    execution,
+    title,
+    prompts,
+    projectId = null,
+    permissionProfileId = "auto",
+    afterTurn = async () => {},
+    steeredPolicy = null,
+  }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
     let selectedModel = execution.pinnedModelResolution?.selectedModel;
     let productModelSelection = execution.pinnedModelResolution?.productModelSelection;
@@ -2449,34 +2527,134 @@ export class EvalService {
       selectedModel: copy(selectedModel ?? null),
       productModelSelection,
     };
-    const thread = await this.#productRequest("/api/threads", {
-      method: "POST",
-      body: {
-        title,
-        initialMessage: prompts[0],
-        harnessConfigurationName: execution.harnessConfigurationName,
-        permissionProfileId,
-        ...evalModelSelectionRequest(selectedModel, productModelSelection),
-        ...(projectId === null ? {} : { projectId }),
-      },
-    });
-    execution.threadIds.push(thread.id);
-    const humanInteractionIds = [thread.rootInteractionId];
-    const rootInteraction = await this.#waitForInteraction(execution, thread.id, thread.rootInteractionId);
-    await this.#captureCandidateTrace(execution, rootInteraction);
-    await afterTurn(thread.rootInteractionId, 0);
-    for (const [offset, prompt] of prompts.slice(1).entries()) {
-      const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
+    const startThread = async (initialMessage) => {
+      const thread = await this.#productRequest("/api/threads", {
         method: "POST",
         body: {
-          text: prompt,
+          title,
+          initialMessage,
+          harnessConfigurationName: execution.harnessConfigurationName,
+          permissionProfileId,
           ...evalModelSelectionRequest(selectedModel, productModelSelection),
+          ...(projectId === null ? {} : { projectId }),
         },
       });
+      execution.threadIds.push(thread.id);
+      return thread;
+    };
+    const finishTurn = async (threadId, interactionId, promptIndex) => {
+      const interaction = await this.#waitForInteraction(execution, threadId, interactionId);
+      await this.#captureCandidateTrace(execution, interaction);
+      await afterTurn(interactionId, promptIndex);
+      return interaction;
+    };
+    const postFollowUp = async (threadId, text) => this.#productRequest(`/api/threads/${threadId}/interactions`, {
+      method: "POST",
+      body: {
+        text,
+        ...evalModelSelectionRequest(selectedModel, productModelSelection),
+      },
+    });
+
+    if (steeredPolicy) {
+      if (typeof this.steeringDecisionRunner !== "function") {
+        throw new Error("In-turn steered cases require a simulated-user steering decision runner.");
+      }
+      let thread = null;
+      const humanInteractionIds = [];
+      let publishedSurface = null;
+      let lastCurrentSummary = "";
+      const steeredLoop = await runSteeredInteractionLoop(steeredPolicy, {
+        startOpening: async (prompt) => {
+          thread = await startThread(prompt);
+          humanInteractionIds.push(thread.rootInteractionId);
+          return { interactionId: String(thread.rootInteractionId) };
+        },
+        observe: async (interactionId) => {
+          const detail = await this.#productRequest(`/api/threads/${thread.id}`);
+          await this.#observeCurrentProjections(execution, detail);
+          const interaction = detail.interactions.find((candidate) => String(candidate.id) === String(interactionId));
+          if (!interaction) throw new Error(`Product interaction ${interactionId} disappeared.`);
+          publishedSurface = await this.#loadPublishedCurrentSurface(thread.id, interaction);
+          lastCurrentSummary = summarizePublishedCurrent(interaction.completionStatus, publishedSurface);
+          return {
+            interactionId: String(interaction.id),
+            completionStatus: interaction.completionStatus,
+            terminal: !IN_PROGRESS_COMPLETION_STATUSES.has(interaction.completionStatus),
+            currentSummary: lastCurrentSummary,
+          };
+        },
+        decide: async (observation) => {
+          const decision = parseSteeringDecision(await this.steeringDecisionRunner({
+            openingPrompt: observation.openingPrompt,
+            simulatedUserBrief: observation.simulatedUserBrief,
+            remainingHumanTurns: observation.remainingHumanTurns,
+            currentSummary: observation.snapshot.currentSummary,
+            completionStatus: observation.snapshot.completionStatus,
+            interactionId: observation.snapshot.interactionId,
+          }));
+          execution.steeringDecisions = [...(execution.steeringDecisions || []), copy(decision)];
+          return decision;
+        },
+        apply: async (decision, snapshot) => {
+          const attempt = {
+            interactionId: snapshot.interactionId,
+            completionStatus: snapshot.completionStatus,
+            decision,
+            status: "applied",
+            error: null,
+          };
+          try {
+            const detail = await this.#productRequest(`/api/threads/${thread.id}`);
+            const interaction = detail.interactions.find((candidate) => (
+              String(candidate.id) === String(snapshot.interactionId)
+            ));
+            if (!interaction || !IN_PROGRESS_COMPLETION_STATUSES.has(interaction.completionStatus)) {
+              throw new Error("The in-flight complete settled before this current action could be applied.");
+            }
+            publishedSurface = await this.#loadPublishedCurrentSurface(thread.id, interaction);
+            await this.#applyPublishedCurrentDecision(thread.id, publishedSurface, decision);
+          } catch (error) {
+            if (decision.kind === "abandon") throw error;
+            attempt.status = "rejected";
+            attempt.error = error instanceof Error ? error.message : String(error);
+          }
+          execution.steeringActions = [...(execution.steeringActions || []), copy(attempt)];
+        },
+        waitForChange: async (interactionId) => {
+          const previous = lastCurrentSummary;
+          const deadline = Date.now() + 2_000;
+          while (Date.now() < deadline) {
+            await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+            const detail = await this.#productRequest(`/api/threads/${thread.id}`);
+            const interaction = detail.interactions.find((candidate) => String(candidate.id) === String(interactionId));
+            if (!interaction || !IN_PROGRESS_COMPLETION_STATUSES.has(interaction.completionStatus)) return;
+            const surface = await this.#loadPublishedCurrentSurface(thread.id, interaction);
+            if (summarizePublishedCurrent(interaction.completionStatus, surface) !== previous) return;
+          }
+        },
+      });
+      await finishTurn(thread.id, thread.rootInteractionId, 0);
+      execution.steeredLoop = {
+        terminal: steeredLoop.terminal,
+        decisionCount: steeredLoop.decisions.length,
+        inFlightActionCount: (execution.steeringActions || []).length,
+      };
+      const { detail, semanticChildren } = await this.#waitForSemanticChildren(
+        execution,
+        thread.id,
+        humanInteractionIds,
+      );
+      return { thread, humanInteractionIds, detail, semanticChildren };
+    }
+
+    const thread = await startThread(prompts[0]);
+    const humanInteractionIds = [thread.rootInteractionId];
+    await finishTurn(thread.id, thread.rootInteractionId, 0);
+    for (const [offset, prompt] of prompts.slice(1).entries()) {
+      const interaction = await postFollowUp(thread.id, prompt);
       humanInteractionIds.push(interaction.id);
-      const completedInteraction = await this.#waitForInteraction(execution, thread.id, interaction.id);
-      await this.#captureCandidateTrace(execution, completedInteraction);
-      await afterTurn(interaction.id, offset + 1);
+      await finishTurn(thread.id, interaction.id, offset + 1);
     }
     const { detail, semanticChildren } = await this.#waitForSemanticChildren(
       execution,
@@ -2728,6 +2906,104 @@ export class EvalService {
         productStatus: interaction.completionStatus,
         observedPreTerminal: false,
         recoveredAfterDiscovery: true,
+      });
+    }
+  }
+
+  async #loadPublishedCurrentSurface(threadId, interaction) {
+    const accepted = publishedSurfaceFromResolvedLayer(
+      threadId,
+      interaction,
+      interaction?.completionOutput?.rootLayer,
+    );
+    let currentLayerId = accepted.layerId;
+    if (Number.isSafeInteger(interaction?.graphNodeId)) {
+      try {
+        const state = await this.#productRequest(
+          `/api/state?currentProjectionAfter=0&currentProjectionCompletionId=${encodeURIComponent(interaction.graphNodeId)}`,
+        );
+        const events = state.currentProjection?.events || [];
+        for (let index = events.length - 1; index >= 0; index -= 1) {
+          const event = events[index];
+          if (String(event?.completionId) !== String(interaction.graphNodeId)) continue;
+          if (event.currentLayerId != null) {
+            currentLayerId = event.currentLayerId;
+            break;
+          }
+        }
+      } catch {
+        // Projection may be absent in fixture products; accepted or empty current still steers.
+      }
+    }
+    if (currentLayerId == null) return accepted;
+    try {
+      const resolved = await this.#productRequest(
+        `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(interaction.id)}/layers/${encodeURIComponent(currentLayerId)}`,
+      );
+      return publishedSurfaceFromResolvedLayer(threadId, interaction, resolved, currentLayerId);
+    } catch {
+      return accepted.layerId == null ? { ...accepted, layerId: currentLayerId } : accepted;
+    }
+  }
+
+  async #applyPublishedCurrentDecision(threadId, surface, decision) {
+    if (surface == null) {
+      throw new Error("Published current is not available yet.");
+    }
+    if (decision.kind === "navigate") {
+      const resolved = resolvePublishedCurrentTarget(surface, decision.target, "navigate");
+      const layerId = resolved.action?.targetLayerId ?? surface.layerId;
+      if (layerId == null) {
+        throw new Error(`Published current has no navigable layer for ${decision.target}.`);
+      }
+      // Current navigation is a layer read. Action destinations require an accepted source.
+      await this.#productRequest(
+        `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(surface.interactionId)}/layers/${encodeURIComponent(layerId)}`,
+      );
+      return;
+    }
+    if (decision.kind === "commit-input") {
+      const resolved = resolvePublishedCurrentTarget(surface, decision.target, "input");
+      if (resolved.action == null || surface.graphNodeId == null || surface.layerId == null) {
+        throw new Error(`Published current has no input action for ${decision.target}.`);
+      }
+      const draft = await this.#productRequest(`/api/threads/${encodeURIComponent(threadId)}/input-draft`);
+      const control = String(resolved.action.control ?? "text");
+      const value = control === "text" || control === ""
+        ? { text: decision.text }
+        : { selectedKeys: [decision.text] };
+      await this.#productRequest(`/api/threads/${encodeURIComponent(threadId)}/input-draft/attachments`, {
+        method: "PUT",
+        body: {
+          occurrence: {
+            presentingInteractionNodeId: surface.graphNodeId,
+            presentingLayerId: surface.layerId,
+            actionId: resolved.action.id,
+          },
+          value,
+          expectedRevision: draft.revision ?? 1,
+        },
+      });
+      return;
+    }
+    if (decision.kind === "invoke") {
+      const resolved = resolvePublishedCurrentTarget(surface, decision.target, "invoke");
+      if (resolved.action == null) {
+        throw new Error(`Published current has no invoke action for ${decision.target}.`);
+      }
+      await this.#productRequest(
+        `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(surface.interactionId)}/actions/${encodeURIComponent(resolved.action.id)}/invoke`,
+        { method: "POST" },
+      );
+      return;
+    }
+    if (decision.kind === "abandon") {
+      if (surface.graphNodeId == null) {
+        throw new Error("Published current has no completion identity to stop.");
+      }
+      await this.#productRequest(`/api/completions/${encodeURIComponent(surface.graphNodeId)}/stop`, {
+        method: "POST",
+        body: { reason: decision.reason.slice(0, 200) },
       });
     }
   }
@@ -3096,6 +3372,73 @@ function emptyTraceCoverage() {
     usage: "none",
     childStreams: "none",
     nativeArtifacts: "none",
+  };
+}
+
+function catalogInteractionFamily(family) {
+  return {
+    familyId: family.familyId,
+    name: family.name,
+    executableInRelayerEval: family.executableInRelayerEval,
+    supportedPlatform: family.supportedPlatform,
+    members: Object.fromEntries(Object.entries(family.members).map(([caseType, member]) => [caseType, {
+      caseId: member.caseId,
+      caseType: member.caseType,
+      caseTypeLabel: member.caseTypeLabel,
+      interactionVariant: member.interactionVariant,
+    }])),
+  };
+}
+
+function evalCaseIsSteered(definition) {
+  if (!definition) return false;
+  if (isSteeredMultiTurn(definition)) return true;
+  return Array.isArray(definition.threads)
+    && definition.threads.some((thread) => isSteeredMultiTurn(thread));
+}
+
+async function gradeProjectWorkspace({
+  isH3,
+  isCalibration,
+  definition,
+  threadDefinition,
+  workspaceDirectory,
+  fixture,
+  workspaceGrader,
+  calibrationWorkspaceGrader,
+  frontierWorkspaceGrader,
+}) {
+  if (isH3) return workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade });
+  if (isCalibration) {
+    return calibrationWorkspaceGrader({
+      caseId: definition.id,
+      workspaceDirectory,
+      baseRevision: fixture.seededCommit,
+    });
+  }
+  return frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory });
+}
+
+function publishedSurfaceFromResolvedLayer(threadId, interaction, resolved, layerId = resolved?.layer?.id ?? null) {
+  const nodes = [];
+  for (const node of resolved?.nodes || []) {
+    if (node && typeof node === "object" && !Array.isArray(node)) {
+      nodes.push({
+        id: node.id ?? node.node?.id,
+        title: node.title ?? node.node?.title,
+        detail: node.detail ?? node.node?.detail,
+      });
+    } else if (node != null) {
+      nodes.push({ id: node });
+    }
+  }
+  return {
+    threadId,
+    interactionId: interaction?.id,
+    graphNodeId: interaction?.graphNodeId ?? null,
+    layerId: layerId ?? resolved?.layer?.id ?? null,
+    nodes,
+    actions: [...(resolved?.actions || resolved?.layer?.actions || [])],
   };
 }
 

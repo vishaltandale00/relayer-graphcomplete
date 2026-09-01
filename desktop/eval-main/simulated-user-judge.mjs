@@ -9,6 +9,8 @@ import {
   createRecursiveScreenshotEvidenceValidator,
   inventoryReviewSubjects,
   runSimulatedUserJudge,
+  buildSimulatedUserSteeringPrompt,
+  runSimulatedUserSteeringDecision,
 } from "@relayer/eval-runner";
 import { inputActionReviewRef, inputOccurrenceKey } from "../renderer/src/node-input-controls.js";
 
@@ -1041,5 +1043,47 @@ export async function persistInputRatingReceipt(context, receipt) {
   return {
     ref: `${directoryName}/${filename}`,
     discard: () => rm(path, { force: true }),
+  };
+}
+
+export function createLocalSimulatedUserSteeringRunner({
+  resolveCodexRuntime,
+  runSteering = runSimulatedUserSteeringDecision,
+  configuration = LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION,
+} = {}) {
+  if (typeof resolveCodexRuntime !== "function" || typeof runSteering !== "function") {
+    throw new Error("Local simulated-user steering integration is incomplete.");
+  }
+  const selectedConfiguration = structuredClone(configuration);
+  return async (input) => {
+    if (typeof input?.openingPrompt !== "string" || typeof input?.simulatedUserBrief !== "string") {
+      throw new Error("Steered in-turn actions require the opening prompt and simulated-user brief.");
+    }
+    const runtime = await resolveCodexRuntime();
+    const currentSummary = String(input.currentSummary ?? input.lastTurnSummary ?? "");
+    const completionStatus = String(input.completionStatus ?? "running");
+    return runSteering({
+      observation: {
+        openingPrompt: input.openingPrompt,
+        simulatedUserBrief: input.simulatedUserBrief,
+        remainingHumanTurns: input.remainingHumanTurns,
+        snapshot: {
+          interactionId: String(input.interactionId ?? "unknown"),
+          completionStatus,
+          terminal: !["not_started", "running", "submitted", "preparing", "draft", "waiting_for_approval"].includes(completionStatus),
+          currentSummary,
+        },
+        steeringPrompt: buildSimulatedUserSteeringPrompt({
+          openingPrompt: input.openingPrompt,
+          simulatedUserBrief: input.simulatedUserBrief,
+          remainingHumanTurns: input.remainingHumanTurns,
+          currentSummary,
+          completionStatus,
+        }),
+      },
+      model: selectedConfiguration.model,
+      modelReasoningEffort: selectedConfiguration.modelReasoningEffort,
+      ...(typeof runtime?.executablePath === "string" ? { codexPathOverride: runtime.executablePath } : {}),
+    });
   };
 }

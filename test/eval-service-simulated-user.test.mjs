@@ -5,7 +5,15 @@ import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+  H3_PACKAGE_MANAGER,
+  H3_PROJECT_CASE_ID,
+  H3_REPOSITORY_URL,
+  H3_SEEDED_COMMIT,
+  H3_SEEDED_TREE,
+  H3_UPSTREAM_COMMIT,
+  H3_UPSTREAM_TREE,
   HTTPX_PROXY_AUTH_REPORT_CASE_ID,
   OFETCH_RETRY_METHODS_CASE_ID,
   SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
@@ -277,8 +285,34 @@ describe("EvalService simulated-user result persistence", () => {
       "simulated-user",
       "simulated-user-sol-high",
     ]);
+    expect(service.catalog().interactionCaseTypes).toEqual([
+      { id: "single-turn", label: "Single-turn" },
+      { id: "in-turn-steered", label: "In-turn steered" },
+    ]);
+    expect(service.catalog().executableInteractionFamilies).toEqual([{
+      familyId: "autonomous.h3.sanitize-status-code",
+      name: "h3 status-code sanitization",
+      executableInRelayerEval: true,
+      supportedPlatform: "darwin",
+      members: {
+        "single-turn": {
+          caseId: H3_AUTONOMOUS_FIX_CASE_ID,
+          caseType: "single-turn",
+          caseTypeLabel: "Single-turn",
+          interactionVariant: "single-turn",
+        },
+        "in-turn-steered": {
+          caseId: H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
+          caseType: "in-turn-steered",
+          caseTypeLabel: "In-turn steered",
+          interactionVariant: "multi-turn",
+        },
+      },
+    }]);
+    expect(JSON.stringify(service.catalog().executableInteractionFamilies)).not.toContain("sealedPath");
     expect(service.catalog().cases.filter(({ caseSnapshot }) => caseSnapshot).map(({ id }) => id)).toEqual([
       H3_AUTONOMOUS_FIX_CASE_ID,
+      H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
       H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
       OFETCH_RETRY_METHODS_CASE_ID,
       TRUE_MYTH_INSPECT_BOTH_CASE_ID,
@@ -440,8 +474,247 @@ describe("EvalService simulated-user result persistence", () => {
       harnessConfigurationNames: ["fixture-task-system"],
       judgeConfigurationName: "deterministic-graph-contract",
     })).rejects.toThrow(
-      "Input round-trip cases require a compatible simulated-user judge configuration.",
+      "Selected cases require a compatible simulated-user judge configuration.",
     );
+  });
+
+  it("rejects a steered multi-turn run with the deterministic judge before execution", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      simulatedUserJudgeRunner: vi.fn(),
+    }).open();
+
+    const single = service.catalog().cases.find(({ id }) => id === H3_AUTONOMOUS_FIX_CASE_ID);
+    expect(single).toMatchObject({
+      caseType: "single-turn",
+      caseTypeLabel: "Single-turn",
+      interactionVariant: "single-turn",
+    });
+    const steered = service.catalog().cases.find(({ id }) => id === H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID);
+    expect(steered).toMatchObject({
+      caseType: "in-turn-steered",
+      caseTypeLabel: "In-turn steered",
+      interactionVariant: "multi-turn",
+      requiredJudgeConfigurationIds: ["simulated-user", "simulated-user-sol-high"],
+    });
+    await expect(service.createRun({
+      testCaseIds: ["autonomous.httpcore.cancellation-poisoned-pool.single-turn"],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("Test run contains an unknown test case.");
+    await expect(service.createRun({
+      testCaseIds: [H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow(
+      "Selected cases require a compatible simulated-user judge configuration.",
+    );
+  });
+
+  it("rejects a steered multi-turn run without a steering decision runner before execution", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      simulatedUserJudgeRunner: vi.fn(),
+      platform: "darwin",
+    }).open();
+
+    await expect(service.createRun({
+      testCaseIds: [H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "simulated-user",
+    })).rejects.toThrow(
+      "In-turn steered cases require a simulated-user steering decision runner.",
+    );
+  });
+
+  it("steers H3 on published current during the in-flight complete and grades only the final workspace", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const product = fakeSteeredH3Product();
+    globalThis.fetch = product;
+    const workspaceGradeCalls = [];
+    const steeringDecisions = vi.fn()
+      .mockResolvedValueOnce({
+        kind: "commit-input",
+        target: "node:status-example",
+        text: "200.5 fails in production",
+        reason: "The current asks which statuses fail.",
+      })
+      .mockImplementation(async () => ({ kind: "wait", reason: "Let the current advance." }));
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      platform: "darwin",
+      simulatedUserJudgeRunner: async () => ({
+        status: "completed",
+        rubricRef: "rubric.json",
+        configurationRef: "judge.json",
+        interactionTraceRef: "trace.json",
+        screenshotRefs: ["screenshots/root.json"],
+        reviewRef: "review.json",
+        coverageRef: "coverage.json",
+        review: { turn: { ratings: { answer_quality: 4 } } },
+        coverage: { complete: true, missingSubjects: [] },
+        summary: "Reviewed the accepted graph.",
+      }),
+      steeringDecisionRunner: steeringDecisions,
+      projectFixtureMaterializer: async ({ workspaceDirectory }) => {
+        await mkdir(workspaceDirectory, { recursive: true });
+        return {
+          schemaVersion: 1,
+          fixtureId: H3_PROJECT_CASE_ID,
+          workspaceDirectory,
+          repositoryUrl: H3_REPOSITORY_URL,
+          upstreamCommit: H3_UPSTREAM_COMMIT,
+          upstreamTree: H3_UPSTREAM_TREE,
+          seededCommit: H3_SEEDED_COMMIT,
+          seededTree: H3_SEEDED_TREE,
+          packageManager: H3_PACKAGE_MANAGER,
+          installedWithFrozenLockfile: true,
+        };
+      },
+      workspaceGrader: async ({ grade }) => {
+        workspaceGradeCalls.push({ grade });
+        return [{
+          name: "workspace:implementation-clean",
+          passed: true,
+          detail: "Final workspace graded after the in-flight root settled.",
+        }];
+      },
+      acceptedTopologyBuilder: async ({ turnId }) => ({ turnId, layers: [] }),
+      acceptedTopologyGrader: () => [{
+        name: "graph:accepted-reachable-closure",
+        passed: true,
+        detail: "Accepted topology loaded.",
+      }],
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: [H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "simulated-user",
+    });
+    const completed = await waitForCompletedRun(service, created.id, 15_000);
+    const execution = completed.executions[0];
+
+    expect(execution.error).toBeNull();
+    expect(execution.status).toBe("passed");
+    expect(workspaceGradeCalls).toEqual([{ grade: "autonomous-implementation" }]);
+    expect(execution.turns).toHaveLength(1);
+    expect(execution.checks.filter((check) => check.name.includes(":workspace:"))).toEqual([
+      expect.objectContaining({
+        name: "implementation:turn-1:workspace:implementation-clean",
+        passed: true,
+      }),
+    ]);
+    expect(execution.steeredLoop).toMatchObject({
+      terminal: "accepted",
+      inFlightActionCount: 1,
+    });
+    expect(execution.steeringDecisions[0]).toMatchObject({
+      kind: "commit-input",
+      target: "node:status-example",
+    });
+    expect(execution.steeringActions[0]).toMatchObject({
+      completionStatus: "running",
+      status: "applied",
+      decision: { kind: "commit-input", target: "node:status-example" },
+    });
+    expect(steeringDecisions.mock.calls[0][0].completionStatus).toBe("running");
+    expect(steeringDecisions.mock.calls[0][0].currentSummary).toContain("input status-example");
+    expect(product.inputCommitBodies).toEqual([expect.objectContaining({
+      occurrence: expect.objectContaining({ actionId: 301 }),
+      value: { text: "200.5 fails in production" },
+    })]);
+    expect(product.mock.calls.some(([url, options]) => (
+      new URL(url).pathname === "/api/threads/thread-1/interactions" && options?.method === "POST"
+    ))).toBe(false);
+  });
+
+  it("records in-flight input rejection as evidence and still grades the final workspace", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const product = fakeSteeredH3Product({ rejectInputCommit: true });
+    globalThis.fetch = product;
+    const workspaceGradeCalls = [];
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      platform: "darwin",
+      simulatedUserJudgeRunner: async () => ({
+        status: "completed",
+        rubricRef: "rubric.json",
+        configurationRef: "judge.json",
+        interactionTraceRef: "trace.json",
+        screenshotRefs: ["screenshots/root.json"],
+        reviewRef: "review.json",
+        coverageRef: "coverage.json",
+        review: { turn: { ratings: { answer_quality: 4 } } },
+        coverage: { complete: true, missingSubjects: [] },
+        summary: "Reviewed the accepted graph.",
+      }),
+      steeringDecisionRunner: async () => ({
+        kind: "commit-input",
+        target: "node:status-example",
+        text: "200.5 fails in production",
+        reason: "The current asks which statuses fail.",
+      }),
+      projectFixtureMaterializer: async ({ workspaceDirectory }) => {
+        await mkdir(workspaceDirectory, { recursive: true });
+        return {
+          schemaVersion: 1,
+          fixtureId: H3_PROJECT_CASE_ID,
+          workspaceDirectory,
+          repositoryUrl: H3_REPOSITORY_URL,
+          upstreamCommit: H3_UPSTREAM_COMMIT,
+          upstreamTree: H3_UPSTREAM_TREE,
+          seededCommit: H3_SEEDED_COMMIT,
+          seededTree: H3_SEEDED_TREE,
+          packageManager: H3_PACKAGE_MANAGER,
+          installedWithFrozenLockfile: true,
+        };
+      },
+      workspaceGrader: async ({ grade }) => {
+        workspaceGradeCalls.push({ grade });
+        return [{
+          name: "workspace:implementation-clean",
+          passed: true,
+          detail: "Final workspace graded after the in-flight root settled.",
+        }];
+      },
+      acceptedTopologyBuilder: async ({ turnId }) => ({ turnId, layers: [] }),
+      acceptedTopologyGrader: () => [{
+        name: "graph:accepted-reachable-closure",
+        passed: true,
+        detail: "Accepted topology loaded.",
+      }],
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: [H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "simulated-user",
+    });
+    const completed = await waitForCompletedRun(service, created.id, 15_000);
+    const execution = completed.executions[0];
+
+    expect(execution.error).toBeNull();
+    expect(workspaceGradeCalls).toEqual([{ grade: "autonomous-implementation" }]);
+    expect(execution.steeringActions[0]).toMatchObject({
+      completionStatus: "running",
+      status: "rejected",
+      error: expect.stringMatching(/accepted history/),
+    });
+    expect(product.inputCommitBodies).toHaveLength(0);
+    expect(product.mock.calls.some(([url, options]) => (
+      new URL(url).pathname === "/api/threads/thread-1/interactions" && options?.method === "POST"
+    ))).toBe(false);
   });
 
   it("persists explicit partial and thrown-failure artifacts without losing deterministic evidence", async () => {
@@ -746,20 +1019,169 @@ function fakeAcceptedProduct() {
   });
 }
 
-function acceptedOutput() {
-  const node = { id: 2, kind: "concept", icon: "queue", title: "Queue", detail: "Tasks wait here.", state: "accepted" };
+function fakeSteeredH3Product({ rejectInputCommit = false } = {}) {
+  let polls = 0;
+  let interaction = null;
+  const inputCommitBodies = [];
+  const fetch = vi.fn(async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/model-settings" && (options.method === undefined || options.method === "GET")) {
+      return jsonResponse({
+        defaults: { harnessId: "fixture-task-system", familyId: 1 },
+        harnesses: [{
+          id: "fixture-task-system",
+          available: true,
+          modelCompatibility: [{ providerId: "codex" }],
+        }],
+        providers: [{
+          id: "openai",
+          adapterId: "openai-api",
+          connected: true,
+          models: [{ id: "test-model", visible: true, available: true }],
+        }],
+        families: [{
+          id: 1,
+          enabled: true,
+          position: 0,
+          members: [{ position: 0, providerId: "openai", modelId: "test-model" }],
+        }],
+      });
+    }
+    if (path === "/api/projects" && options.method === "POST") {
+      return jsonResponse({ id: "project-1" });
+    }
+    if (path === "/api/threads" && options.method === "POST") {
+      const body = JSON.parse(options.body);
+      interaction = h3Interaction({
+        id: "interaction-1",
+        sequence: 1,
+        text: body.initialMessage,
+        title: "Diagnose sanitize.ts",
+        completionStatus: "running",
+      });
+      return jsonResponse({ id: "thread-1", rootInteractionId: interaction.id });
+    }
+    if (path === "/api/threads/thread-1" && (options.method === undefined || options.method === "GET")) {
+      polls += 1;
+      if (polls >= 3 && interaction) {
+        interaction = h3Interaction({
+          id: interaction.id,
+          sequence: interaction.sequence,
+          text: interaction.text,
+          title: "Diagnose sanitize.ts",
+          completionStatus: "accepted",
+        });
+      }
+      return jsonResponse({ id: "thread-1", interactions: interaction ? [interaction] : [] });
+    }
+    if (path === "/api/state") {
+      return jsonResponse({
+        currentProjection: {
+          cursor: 1,
+          events: interaction ? [{
+            completionId: interaction.graphNodeId,
+            sequence: 1,
+            revision: 1,
+            lifecycle: interaction.completionStatus === "accepted" ? "succeeded" : "active",
+            currentLayerId: 10,
+          }] : [],
+        },
+      });
+    }
+    if (path === "/api/threads/thread-1/interactions/interaction-1/layers/10") {
+      return jsonResponse(inFlightCurrentLayer());
+    }
+    if (path === "/api/threads/thread-1/input-draft") {
+      return jsonResponse({
+        threadId: "thread-1",
+        revision: 1 + inputCommitBodies.length,
+        attachments: [],
+        updatedAt: "2026-08-19T12:00:00.000Z",
+      });
+    }
+    if (path === "/api/threads/thread-1/input-draft/attachments" && options.method === "PUT") {
+      if (rejectInputCommit) {
+        return jsonResponse({ error: "Reopen an action from accepted history." }, 422);
+      }
+      inputCommitBodies.push(JSON.parse(options.body));
+      return jsonResponse({
+        threadId: "thread-1",
+        revision: 1 + inputCommitBodies.length,
+        attachments: inputCommitBodies,
+        updatedAt: "2026-08-19T12:00:00.000Z",
+      });
+    }
+    return jsonResponse({ error: `Unexpected fake product request: ${options.method || "GET"} ${path}` }, 404);
+  });
+  fetch.inputCommitBodies = inputCommitBodies;
+  return fetch;
+}
+
+function inFlightCurrentLayer() {
+  const node = {
+    id: 2,
+    kind: "concept",
+    icon: "queue",
+    title: "Diagnose sanitize.ts",
+    detail: "Which statuses fail?",
+    state: "draft",
+  };
+  return {
+    layer: {
+      id: 10,
+      nodes: [node.id],
+      edges: [],
+      layout: { version: 1, placements: [{ nodeId: node.id, x: 0.5, y: 0.5 }] },
+      state: "draft",
+    },
+    nodes: [node],
+    edges: [],
+    actions: [{
+      id: 301,
+      sourceNodeId: node.id,
+      sourceLayerId: 10,
+      kind: "input",
+      control: "text",
+      prompt: "Which statuses fail in production?",
+      label: "status-example",
+      state: "draft",
+    }],
+  };
+}
+
+function h3Interaction({ id, sequence, text, title, completionStatus = "accepted" }) {
+  const accepted = completionStatus === "accepted";
+  return {
+    id,
+    sequence,
+    graphNodeId: sequence,
+    completionStatus,
+    completionOutput: accepted ? acceptedOutput(sequence, title) : null,
+    completionError: null,
+    text,
+    permissionProfileId: "auto",
+    effectiveExecutionDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    effectivePermissionReceipt: {
+      permissionProfileId: "auto",
+      unconfinedHostAccess: false,
+    },
+  };
+}
+
+function acceptedOutput(nodeId = 1, title = "Queue") {
+  const node = { id: nodeId + 1, kind: "concept", icon: "queue", title, detail: "Tasks wait here.", state: "accepted" };
   const layer = {
-    id: 10,
+    id: nodeId * 10,
     nodes: [node.id],
     edges: [],
     layout: { version: 1, placements: [{ nodeId: node.id, x: 0.5, y: 0.5 }] },
     state: "accepted",
   };
   return {
-    nodeId: 1,
+    nodeId,
     rootAction: {
-      id: 11,
-      sourceNodeId: 1,
+      id: nodeId * 10 + 1,
+      sourceNodeId: nodeId,
       sourceLayerId: null,
       kind: "navigate",
       relation: "expand",
@@ -778,14 +1200,21 @@ function jsonResponse(value, status = 200) {
   });
 }
 
-async function waitForCompletedRun(evalService, runId) {
-  const deadline = Date.now() + 5_000;
+async function waitForCompletedRun(evalService, runId, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const run = evalService.getRun(runId);
     if (!["queued", "running"].includes(run.status) && typeof run.bundleRef === "string") return run;
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
-  throw new Error("Eval run did not finish in time.");
+  const run = evalService.getRun(runId);
+  throw new Error(`Eval run did not finish in time: ${JSON.stringify({
+    status: run?.status,
+    executions: run?.executions?.map((execution) => ({
+      status: execution.status,
+      error: execution.error,
+    })),
+  })}`);
 }
 
 async function waitForPersistedRun(stateFile, runId) {

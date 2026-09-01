@@ -1,3 +1,13 @@
+export function evalCaseOptionCopy(item) {
+  const typeLabel = item?.caseTypeLabel;
+  const description = item?.description || item?.detail || "";
+  return {
+    id: item.id,
+    name: item.name,
+    description: typeLabel ? `${typeLabel}. ${description}`.trim() : description,
+  };
+}
+
 export function runPanelCopy(run) {
   if (run?.kind === "imported-conversation") {
     return {

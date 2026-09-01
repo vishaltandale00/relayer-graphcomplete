@@ -7,6 +7,7 @@ import {
   recursiveCompleteCaseId,
   recursiveGraphMemoryCaseId,
   runPanelCopy,
+  evalCaseOptionCopy,
 } from "./run-model.js";
 import {
   bindAblationControls,
@@ -47,7 +48,11 @@ function optionMarkup({ id, name, description, detail }, group, checked) {
 }
 
 function configure() {
-  $("#caseOptions").innerHTML = catalog.cases.map((item) => optionMarkup(item, "cases", item.defaultSelected !== false)).join("");
+  $("#caseOptions").innerHTML = catalog.cases.map((item) => optionMarkup(
+    evalCaseOptionCopy(item),
+    "cases",
+    item.defaultSelected !== false,
+  )).join("");
   $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({
     id: item.name,
     name: item.name,

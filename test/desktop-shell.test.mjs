@@ -423,6 +423,7 @@ describe("desktop skeleton", () => {
     expect(evalDashboardMain).toContain("bindAblationControls");
     expect(evalDashboardMain).toContain("selectionFromControls");
     expect(evalDashboardMain).toContain("createRunFromControls");
+    expect(evalDashboardMain).toContain("evalCaseOptionCopy");
     expect(evalDashboardMain).not.toContain("renderJudgeOutput");
     expect(evalPreload).toContain("openJudgeReview");
     expect(evalPreload).toContain("loadJudgeScreenshot");
