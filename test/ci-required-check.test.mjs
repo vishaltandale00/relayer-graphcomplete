@@ -307,6 +307,24 @@ describe("CI workflow contract", () => {
         `\${{ runner.temp }}/cargo-timings-${cargoLane}`,
       );
     }
+    for (const writerLane of ["rust-clippy", "rust-tests", "rust-crash"]) {
+      const run = workflow.jobs[writerLane].steps.find((step) =>
+        step.name.startsWith("Run "),
+      );
+      expect(run.env.SCCACHE_GHA_RW_MODE).toBe("READ_WRITE");
+      expect(workflow.jobs[writerLane].steps.find((step) => step.id === "rust-setup").with["sccache-mode"]).toBeUndefined();
+    }
+    // The runtime lane only builds uncachable binary links on top of units
+    // seeded by the default-test lane; reading without writing keeps it from
+    // racing those lanes on identical object stores.
+    const runtimeRun = workflow.jobs["rust-runtime"].steps.find((step) =>
+      step.name.startsWith("Run "),
+    );
+    expect(runtimeRun.env.SCCACHE_GHA_RW_MODE).toBe("READ_ONLY");
+    expect(
+      workflow.jobs["rust-runtime"].steps.find((step) => step.id === "rust-setup")
+        .with["sccache-mode"],
+    ).toBe("READ_ONLY");
     expect(
       workflow.jobs["rust-crash"].steps.find((step) => step.name.startsWith("Run ")).env
         .RELAYER_CARGO_TIMINGS_DIR,

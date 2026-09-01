@@ -215,6 +215,11 @@ jobs:
         uses: ./.github/actions/setup-rust-compilation
         with:
           lane: rust-runtime
+          # The runtime lane's unique outputs are uncachable binary links; its
+          # shareable units are identical to the default-test lane's. Reading
+          # without writing removes duplicate-write collisions with the lanes
+          # that seed those objects.
+          sccache-mode: READ_ONLY
       - name: Run selected Rust runtime build
         run: node scripts/ci/run-chapter.mjs rust-runtime
         env:
@@ -228,7 +233,7 @@ jobs:
           RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
           SCCACHE_CLIENT_SIDE: "1"
           SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_GHA_RW_MODE: READ_WRITE
+          SCCACHE_GHA_RW_MODE: READ_ONLY
           SCCACHE_GHA_VERSION: ${{ steps.rust-setup.outputs.cache-version }}
           SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
       - name: Report runtime-build compiler cache

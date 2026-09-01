@@ -29,9 +29,13 @@ dependency and compilation artifacts only; they are untrusted acceleration and
 never verification evidence. Rust Clippy, default tests, crash reconciliation,
 and runtime builds use separate `CARGO_TARGET_DIR` values and converge through
 the existing `Rust checks and fresh tests` aggregate. Their isolated runners
-share one toolchain-bound, content-addressed sccache namespace:
-same-repository pull requests and
-repository branch pushes may read and write compiler objects. Fork pull
+share one toolchain-bound, content-addressed sccache namespace. The Clippy,
+default-test, and crash lanes read and write compiler objects; the runtime
+lane reads only. Its unique outputs are uncachable binary links, and its
+shareable units are identical to the default-test lane's, so reading without
+writing removes duplicate-write collisions with the lanes that seed those
+objects. Same-repository pull requests and repository branch pushes may store
+compiler objects through the writing lanes. Fork pull
 requests do not run sccache and receive no compiler-cache credentials; they
 compile directly with `rustc`. GitHub's ref scoping lets pull requests inherit a
 compatible trusted branch baseline without allowing `main`, integration

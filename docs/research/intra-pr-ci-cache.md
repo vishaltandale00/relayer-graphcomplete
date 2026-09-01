@@ -197,6 +197,23 @@ through the repository npm script, which cannot inject Cargo flags, so it
 records step durations only). Use the reports to identify repeated compilation
 units before any further feature/profile consolidation.
 
+The first warm PR run after the trusted seed ([33493873593](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33493873593),
+full mode, about 15m36s end to end; Clippy 9m27s, tests 12m44s, crash 12m17s,
+runtime 10m58s) still recorded 50–60% hit rates and 437–535 write errors per
+lane. The trusted seed itself ([33485024514](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33485024514))
+had 0% Rust hits and 856–1029 write errors per lane, so it stored only a
+fraction of the compiled objects (2,359 main-scoped sccache entries after the
+seed). The self-perpetuating pattern: four lanes cold-miss the same units,
+each stores the winning write for an identical key and fails the other three,
+and every unit that never stored is re-missed and re-raced on the next run.
+One mitigation is now in place: the runtime lane is read-only. Its unique
+outputs are uncachable binary links and its shareable units are identical to
+the default-test lane's, so it no longer races the seeding lanes; the
+default-test, Clippy (rmeta graph), and crash (crash-feature graph) lanes
+remain the writers. The next run shows whether write errors and misses
+converge; if they do not, the remaining candidate is reducing the number of
+lanes that cold-compile the same dependency graph simultaneously.
+
 ## Ranked next options
 
 ### 1. Keep sccache admitted in Rust, then verify the trusted-main consumer
