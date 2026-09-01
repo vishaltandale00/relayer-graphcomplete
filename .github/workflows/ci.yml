@@ -22,6 +22,8 @@ jobs:
       plan: ${{ steps.plan.outputs.plan }}
       mode: ${{ steps.plan.outputs.mode }}
       rust: ${{ steps.plan.outputs.rust }}
+      rust_crash: ${{ steps.plan.outputs.rust_crash }}
+      rust_runtime: ${{ steps.plan.outputs.rust_runtime }}
       typescript: ${{ steps.plan.outputs.typescript }}
       vitest: ${{ steps.plan.outputs.vitest }}
       python: ${{ steps.plan.outputs.python }}
@@ -59,143 +61,229 @@ jobs:
         uses: ./.github/actions/setup-node-dependencies
       - name: Verify Node toolchain
         run: node scripts/check-node-version.mjs
-      - name: Formatting, generated files, and affected typechecks
+      - name: Fast portfolio, formatting, and generated-file checks
         run: node scripts/ci/run-chapter.mjs quick
         env:
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
 
-  rust:
-    name: Rust checks and fresh tests
+  rust-clippy:
+    name: Rust Clippy
     needs: [plan, quick]
     if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
         uses: actions/checkout@v7
-      - name: Set up Node dependencies with evidence
-        uses: ./.github/actions/setup-node-dependencies
-      - name: Identify Rust cache inputs
-        id: rust-toolchain
-        run: |
-          rustc --version --verbose
-          echo "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
-          echo "host=$(rustc --version --verbose | sed -n 's/^host: //p')" >> "$GITHUB_OUTPUT"
-      - name: Start Rust dependency cache timing
-        id: rust-dependency-cache-timing
-        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
-      - name: Restore Rust dependency downloads
-        id: rust-dependency-cache
-        uses: actions/cache/restore@v5
+      - name: Set up pinned Node
+        uses: actions/setup-node@v7
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: rust-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-v1-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            rust-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-v1-
-      - name: Record Rust dependency cache status
-        env:
-          CACHE_HIT: ${{ steps.rust-dependency-cache.outputs.cache-hit }}
-          CACHE_KEY: ${{ steps.rust-dependency-cache.outputs.cache-primary-key }}
-          STARTED: ${{ steps.rust-dependency-cache-timing.outputs.started }}
-        run: |
-          elapsed=$(($(date +%s) - STARTED))
-          echo "### Rust dependency cache" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Primary key: $CACHE_KEY" >> "$GITHUB_STEP_SUMMARY"
-      - name: Set up sccache compiler cache
-        id: sccache-setup
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+          node-version-file: .node-version
+      - name: Set up isolated Rust compilation
+        id: rust-setup
+        uses: ./.github/actions/setup-rust-compilation
         with:
-          version: v0.17.0
-          disable_annotations: true
-      - name: Start sccache service
-        id: sccache-start
-        if: ${{ steps.sccache-setup.outcome == 'success' }}
-        continue-on-error: true
+          lane: rust-clippy
+      - name: Run Rust Clippy
+        run: node scripts/ci/run-chapter.mjs rust-clippy
         env:
-          SCCACHE_CLIENT_SIDE: "1"
-          SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_GHA_RW_MODE: READ_WRITE
-          SCCACHE_GHA_VERSION: relayer-rust-line-tables-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
-          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
-        run: |
-          if "$SCCACHE_PATH" --start-server; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-      - name: Selected Rust compilation, checks, and tests
-        run: node scripts/ci/run-chapter.mjs rust
-        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-clippy
           CARGO_INCREMENTAL: "0"
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
-          RELAYER_SCCACHE_ENABLED: ${{ steps.sccache-start.outputs.enabled }}
+          RELAYER_SCCACHE_ENABLED: ${{ steps.rust-setup.outputs.sccache-enabled }}
           RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
           SCCACHE_CLIENT_SIDE: "1"
           SCCACHE_GHA_ENABLED: "true"
           SCCACHE_GHA_RW_MODE: READ_WRITE
-          SCCACHE_GHA_VERSION: relayer-rust-line-tables-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
+          SCCACHE_GHA_VERSION: ${{ steps.rust-setup.outputs.cache-version }}
           SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
-      - name: Report sccache compiler statistics
+      - name: Report Rust Clippy compiler cache
         if: ${{ always() }}
         continue-on-error: true
-        env:
-          SCCACHE_SETUP_OUTCOME: ${{ steps.sccache-setup.outcome }}
-          SCCACHE_START_OUTCOME: ${{ steps.sccache-start.outcome }}
-        run: |
-          stats_text="$RUNNER_TEMP/sccache-stats.txt"
-          stats_json="$RUNNER_TEMP/sccache-stats.json"
-          append_summary() { printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"; }
-          append_summary "### Rust sccache canary"
-          append_summary "- Setup: $SCCACHE_SETUP_OUTCOME"
-          append_summary "- Service start: $SCCACHE_START_OUTCOME"
-          append_summary "- Cache access: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'disabled (fork)' || 'read-write' }}"
-          if [ "$SCCACHE_SETUP_OUTCOME" = "success" ] &&
-             [ "$SCCACHE_START_OUTCOME" = "success" ] &&
-             [ -n "${SCCACHE_PATH:-}" ]; then
-            set +e
-            "$SCCACHE_PATH" --show-stats 2>&1 | tee "$stats_text"
-            stats_status=${PIPESTATUS[0]}
-            "$SCCACHE_PATH" --show-stats --stats-format json > "$stats_json"
-            json_status=$?
-            set -e
-            append_summary "- Text statistics: exit $stats_status"
-            append_summary "- JSON statistics: exit $json_status"
-            append_summary '```text'
-            cat "$stats_text" >> "$GITHUB_STEP_SUMMARY"
-            append_summary '```'
-          else
-            append_summary "- Statistics: unavailable; compilation fell back to direct rustc"
-          fi
-          append_summary "Compiler objects are untrusted acceleration only; cache reuse never substitutes for fresh test execution."
-      - name: Upload sccache compiler statistics
-        if: ${{ always() }}
-        continue-on-error: true
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: ./.github/actions/report-rust-compilation
         with:
-          name: sccache-stats-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/sccache-stats.txt
-            ${{ runner.temp }}/sccache-stats.json
-          if-no-files-found: ignore
-          retention-days: 14
+          lane: rust-clippy
+          sccache-enabled: ${{ steps.rust-setup.outputs.sccache-enabled }}
       - name: Save trusted Rust dependency downloads
-        if: ${{ github.event_name == 'push' && success() && steps.rust-dependency-cache.outputs.cache-hit != 'true' }}
+        if: ${{ github.event_name == 'push' && success() && steps.rust-setup.outputs.dependency-cache-hit != 'true' }}
+        continue-on-error: true
         uses: actions/cache/save@v5
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ steps.rust-dependency-cache.outputs.cache-primary-key }}
+          key: ${{ steps.rust-setup.outputs.dependency-cache-key }}
+
+  rust-tests:
+    name: Fresh Rust tests
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up pinned Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Set up isolated Rust compilation
+        id: rust-setup
+        uses: ./.github/actions/setup-rust-compilation
+        with:
+          lane: rust-tests
+      - name: Run fresh Rust tests
+        run: node scripts/ci/run-chapter.mjs rust-tests
+        env:
+          CARGO_INCREMENTAL: "0"
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-tests
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          CARGO_PROFILE_TEST_DEBUG: line-tables-only
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          RELAYER_SCCACHE_ENABLED: ${{ steps.rust-setup.outputs.sccache-enabled }}
+          RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
+          SCCACHE_CLIENT_SIDE: "1"
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_GHA_RW_MODE: READ_WRITE
+          SCCACHE_GHA_VERSION: ${{ steps.rust-setup.outputs.cache-version }}
+          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+      - name: Report Rust test compiler cache
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: ./.github/actions/report-rust-compilation
+        with:
+          lane: rust-tests
+          sccache-enabled: ${{ steps.rust-setup.outputs.sccache-enabled }}
+
+  rust-crash:
+    name: Fresh crash reconciliation tests
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up pinned Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Set up isolated Rust compilation
+        id: rust-setup
+        uses: ./.github/actions/setup-rust-compilation
+        with:
+          lane: rust-crash
+      - name: Run fresh crash reconciliation tests
+        run: node scripts/ci/run-chapter.mjs rust-crash
+        env:
+          CARGO_INCREMENTAL: "0"
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-crash
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          CARGO_PROFILE_TEST_DEBUG: line-tables-only
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          RELAYER_SCCACHE_ENABLED: ${{ steps.rust-setup.outputs.sccache-enabled }}
+          RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
+          SCCACHE_CLIENT_SIDE: "1"
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_GHA_RW_MODE: READ_WRITE
+          SCCACHE_GHA_VERSION: ${{ steps.rust-setup.outputs.cache-version }}
+          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+      - name: Report crash-test compiler cache
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: ./.github/actions/report-rust-compilation
+        with:
+          lane: rust-crash
+          sccache-enabled: ${{ steps.rust-setup.outputs.sccache-enabled }}
+
+  rust-runtime:
+    name: Rust runtime build
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust_runtime == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up pinned Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Set up isolated Rust compilation
+        id: rust-setup
+        uses: ./.github/actions/setup-rust-compilation
+        with:
+          lane: rust-runtime
+      - name: Run selected Rust runtime build
+        run: node scripts/ci/run-chapter.mjs rust-runtime
+        env:
+          CARGO_INCREMENTAL: "0"
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-runtime
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          CARGO_PROFILE_TEST_DEBUG: line-tables-only
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          RELAYER_SCCACHE_ENABLED: ${{ steps.rust-setup.outputs.sccache-enabled }}
+          RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
+          SCCACHE_CLIENT_SIDE: "1"
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_GHA_RW_MODE: READ_WRITE
+          SCCACHE_GHA_VERSION: ${{ steps.rust-setup.outputs.cache-version }}
+          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+      - name: Report runtime-build compiler cache
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: ./.github/actions/report-rust-compilation
+        with:
+          lane: rust-runtime
+          sccache-enabled: ${{ steps.rust-setup.outputs.sccache-enabled }}
+      - name: Seal selected Rust runtime
+        run: |
+          node scripts/ci/runtime-artifact.mjs create \
+            --repository "$GITHUB_WORKSPACE" \
+            --target-dir "$RUNNER_TEMP/cargo-target-rust-runtime/debug" \
+            --artifact-dir "$RUNNER_TEMP/relayer-rust-runtime" \
+            --source-commit "$GITHUB_SHA" \
+            --platform "${{ runner.os }}-${{ runner.arch }}" \
+            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
+            --cargo-profile "debug-line-tables-only" \
+            --plan-json "$CI_PLAN_JSON"
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+      - name: Upload selected Rust runtime
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: rust-runtime-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/relayer-rust-runtime
+          if-no-files-found: error
+          retention-days: 1
+      - name: Save trusted Rust dependency downloads for runtime-only changes
+        if: ${{ github.event_name == 'push' && success() && needs.plan.outputs.rust != 'true' && steps.rust-setup.outputs.dependency-cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ steps.rust-setup.outputs.dependency-cache-key }}
+
+  rust:
+    name: Rust checks and fresh tests
+    needs: [plan, quick, rust-clippy, rust-tests, rust-crash, rust-runtime]
+    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up pinned Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Assert every selected Rust lane passed
+        run: node scripts/ci/assert-required-jobs.mjs
+        env:
+          CI_AGGREGATE: rust
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
 
   typescript:
     name: TypeScript builds
@@ -214,8 +302,8 @@ jobs:
 
   vitest:
     name: Fresh deterministic Vitest portfolio
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.vitest == 'true' }}
+    needs: [plan, quick, rust-runtime]
+    if: ${{ always() && needs.quick.result == 'success' && needs.plan.outputs.vitest == 'true' && ((needs.plan.outputs.rust_runtime == 'true' && needs['rust-runtime'].result == 'success') || needs.plan.outputs.rust_runtime != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -224,82 +312,29 @@ jobs:
           fetch-depth: 0
       - name: Set up Node dependencies with evidence
         uses: ./.github/actions/setup-node-dependencies
-      - name: Identify Rust cache inputs
+      - name: Identify Rust artifact inputs
         id: rust-toolchain
         run: |
           rustc --version --verbose
           echo "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
-          echo "host=$(rustc --version --verbose | sed -n 's/^host: //p')" >> "$GITHUB_OUTPUT"
-      - name: Start Rust cache timing
-        id: rust-cache-timing
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
-        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
-      - name: Restore read-only Vitest runtime compilation acceleration
-        id: rust-cache
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: actions/cache/restore@v5
+      - name: Download selected Rust runtime
+        if: ${{ needs.plan.outputs.rust_runtime == 'true' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: rust-affected-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            rust-affected-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-
-      - name: Record Vitest Rust cache status
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
-        env:
-          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
-          STARTED: ${{ steps.rust-cache-timing.outputs.started }}
+          name: rust-runtime-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/relayer-rust-runtime
+      - name: Verify and install selected Rust runtime
+        if: ${{ needs.plan.outputs.rust_runtime == 'true' }}
         run: |
-          elapsed=$(($(date +%s) - STARTED))
-          echo "### Vitest Rust compilation cache" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
-          echo "Cache contents accelerate runtime compilation only; every mapped test runs freshly." >> "$GITHUB_STEP_SUMMARY"
-      - name: Set up read-only Vitest sccache
-        id: vitest-sccache-setup
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.17.0
-          disable_annotations: true
-      - name: Start read-only Vitest sccache service
-        id: vitest-sccache-start
-        if: ${{ steps.vitest-sccache-setup.outcome == 'success' }}
-        continue-on-error: true
-        env:
-          SCCACHE_CLIENT_SIDE: "1"
-          SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_GHA_RW_MODE: READ_ONLY
-          SCCACHE_GHA_VERSION: relayer-rust-line-tables-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
-          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
-        run: |
-          if "$SCCACHE_PATH" --start-server; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-      - name: Build Vitest runtime prerequisites with read-only sccache
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-        run: node scripts/ci/run-chapter.mjs vitest-prerequisites
-        env:
-          CARGO_INCREMENTAL: "0"
-          CARGO_PROFILE_DEV_DEBUG: line-tables-only
-          CARGO_PROFILE_TEST_DEBUG: line-tables-only
-          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
-          RELAYER_SCCACHE_ENABLED: ${{ steps.vitest-sccache-start.outputs.enabled }}
-          RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
-          SCCACHE_CLIENT_SIDE: "1"
-          SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_GHA_RW_MODE: READ_ONLY
-          SCCACHE_GHA_VERSION: relayer-rust-line-tables-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
-          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
-      - name: Build Vitest runtime prerequisites from target cache
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
+          node scripts/ci/runtime-artifact.mjs verify \
+            --repository "$GITHUB_WORKSPACE" \
+            --artifact-dir "$RUNNER_TEMP/relayer-rust-runtime" \
+            --install-dir "$GITHUB_WORKSPACE/target/debug" \
+            --source-commit "$GITHUB_SHA" \
+            --platform "${{ runner.os }}-${{ runner.arch }}" \
+            --rustc-release "${{ steps.rust-toolchain.outputs.release }}" \
+            --cargo-profile "debug-line-tables-only"
+      - name: Build non-Rust Vitest prerequisites
         run: node scripts/ci/run-chapter.mjs vitest-prerequisites
         env:
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
@@ -307,59 +342,6 @@ jobs:
         run: node scripts/ci/run-chapter.mjs vitest
         env:
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
-      - name: Report Vitest sccache compiler statistics
-        if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-        continue-on-error: true
-        env:
-          SCCACHE_SETUP_OUTCOME: ${{ steps.vitest-sccache-setup.outcome }}
-          SCCACHE_START_OUTCOME: ${{ steps.vitest-sccache-start.outcome }}
-        run: |
-          stats_text="$RUNNER_TEMP/vitest-sccache-stats.txt"
-          stats_json="$RUNNER_TEMP/vitest-sccache-stats.json"
-          append_summary() { printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"; }
-          append_summary "### Vitest read-only sccache canary"
-          append_summary "- Setup: $SCCACHE_SETUP_OUTCOME"
-          append_summary "- Service start: $SCCACHE_START_OUTCOME"
-          append_summary "- Cache access: read-only"
-          if [ "$SCCACHE_SETUP_OUTCOME" = "success" ] &&
-             [ "$SCCACHE_START_OUTCOME" = "success" ] &&
-             [ -n "${SCCACHE_PATH:-}" ]; then
-            set +e
-            "$SCCACHE_PATH" --show-stats 2>&1 | tee "$stats_text"
-            stats_status=${PIPESTATUS[0]}
-            "$SCCACHE_PATH" --show-stats --stats-format json > "$stats_json"
-            json_status=$?
-            set -e
-            append_summary "- Text statistics: exit $stats_status"
-            append_summary "- JSON statistics: exit $json_status"
-            append_summary '```text'
-            cat "$stats_text" >> "$GITHUB_STEP_SUMMARY"
-            append_summary '```'
-          else
-            append_summary "- Statistics: unavailable; compilation fell back to direct rustc"
-          fi
-          append_summary "Compiler objects are untrusted acceleration only; cache reuse never substitutes for fresh mapped Vitest execution."
-      - name: Upload Vitest sccache compiler statistics
-        if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-        continue-on-error: true
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: vitest-sccache-stats-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/vitest-sccache-stats.txt
-            ${{ runner.temp }}/vitest-sccache-stats.json
-          if-no-files-found: ignore
-          retention-days: 14
-      - name: Save trusted Vitest runtime compilation acceleration
-        if: ${{ github.event_name == 'push' && success() && steps.rust-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   python:
     name: Fresh Python client tests
@@ -409,64 +391,6 @@ jobs:
         run: node scripts/ci/run-chapter.mjs prd
         env:
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
-
-  full:
-    name: Full repository gates
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.mode == 'full' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Set up Node dependencies with evidence
-        uses: ./.github/actions/setup-node-dependencies
-      - name: Identify Rust cache inputs
-        id: rust-toolchain
-        run: |
-          rustc --version --verbose
-          echo "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
-          echo "host=$(rustc --version --verbose | sed -n 's/^host: //p')" >> "$GITHUB_OUTPUT"
-      - name: Start Rust cache timing
-        id: rust-cache-timing
-        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
-      - name: Restore full-gate Rust compilation acceleration
-        id: rust-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: rust-full-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            rust-full-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-
-      - name: Record full-gate Rust cache status
-        env:
-          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
-          STARTED: ${{ steps.rust-cache-timing.outputs.started }}
-        run: |
-          elapsed=$(($(date +%s) - STARTED))
-          echo "### Full-gate Rust compilation cache" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
-          echo "Cache reuse is acceleration, not verification evidence." >> "$GITHUB_STEP_SUMMARY"
-      - name: Run repository-required check and build
-        run: node scripts/ci/run-chapter.mjs full
-        env:
-          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
-      - name: Save trusted full-gate Rust compilation acceleration
-        if: ${{ github.event_name == 'push' && success() && steps.rust-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   packaging:
     name: Prime runtime package (${{ matrix.target }})
@@ -540,7 +464,8 @@ jobs:
   check:
     name: check
     if: always()
-    needs: [plan, quick, rust, typescript, vitest, python, receipts, prd, packaging, full]
+    needs:
+      [plan, quick, rust, typescript, vitest, python, receipts, prd, packaging]
     runs-on: ubuntu-latest
     steps:
       - name: Check out source

@@ -6,7 +6,15 @@ import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-const allChapterNames = ["rust", "typescript", "vitest", "python", "receipts", "prd", "packaging"];
+const allChapterNames = [
+  "rust",
+  "typescript",
+  "vitest",
+  "python",
+  "receipts",
+  "prd",
+  "packaging",
+];
 
 function parseArguments(argv) {
   const options = { changedFiles: [], mode: "affected" };
@@ -40,7 +48,10 @@ function parseArguments(argv) {
 
 function normalizedRepositoryPath(repository, path) {
   const normalized = path.split(sep).join("/").replace(/^\.\//, "");
-  if (normalized.startsWith("../") || resolve(repository, normalized) === resolve(repository)) {
+  if (
+    normalized.startsWith("../") ||
+    resolve(repository, normalized) === resolve(repository)
+  ) {
     throw new Error(`Changed path is outside the repository: ${path}`);
   }
   return normalized;
@@ -48,16 +59,22 @@ function normalizedRepositoryPath(repository, path) {
 
 function changedFilesFromGit(repository, base, head) {
   if (!base || !head) {
-    throw new Error("Provide --base and --head when --changed-file is not used");
+    throw new Error(
+      "Provide --base and --head when --changed-file is not used",
+    );
   }
-  const fields = execFileSync("git", ["diff", "--name-status", "-z", "--find-renames", `${base}...${head}`], {
-    cwd: repository,
-    encoding: "utf8",
-  })
+  const fields = execFileSync(
+    "git",
+    ["diff", "--name-status", "-z", "--find-renames", `${base}...${head}`],
+    {
+      cwd: repository,
+      encoding: "utf8",
+    },
+  )
     .split("\0")
     .filter(Boolean);
   const paths = [];
-  for (let index = 0; index < fields.length; ) {
+  for (let index = 0; index < fields.length;) {
     const status = fields[index];
     index += 1;
     if (status.startsWith("R") || status.startsWith("C")) {
@@ -73,24 +90,36 @@ function changedFilesFromGit(repository, base, head) {
 
 function localRustGraph(repository) {
   const metadata = JSON.parse(
-    execFileSync("cargo", ["metadata", "--locked", "--format-version", "1", "--no-deps"], {
-      cwd: repository,
-      encoding: "utf8",
-    }),
+    execFileSync(
+      "cargo",
+      ["metadata", "--locked", "--format-version", "1", "--no-deps"],
+      {
+        cwd: repository,
+        encoding: "utf8",
+      },
+    ),
   );
   const workspaceIds = new Set(metadata.workspace_members);
-  const packages = metadata.packages.filter((candidate) => workspaceIds.has(candidate.id));
+  const packages = metadata.packages.filter((candidate) =>
+    workspaceIds.has(candidate.id),
+  );
   const names = new Set(packages.map((candidate) => candidate.name));
   return new Map(
     packages.map((candidate) => [
       candidate.name,
-      new Set(candidate.dependencies.filter((dependency) => dependency.path && names.has(dependency.name)).map((dependency) => dependency.name)),
+      new Set(
+        candidate.dependencies
+          .filter((dependency) => dependency.path && names.has(dependency.name))
+          .map((dependency) => dependency.name),
+      ),
     ]),
   );
 }
 
 function localNpmGraph(repository) {
-  const rootManifest = JSON.parse(readFileSync(join(repository, "package.json"), "utf8"));
+  const rootManifest = JSON.parse(
+    readFileSync(join(repository, "package.json"), "utf8"),
+  );
   const manifestPaths = ["desktop/package.json"];
   for (const workspacePattern of rootManifest.workspaces ?? []) {
     if (workspacePattern === "packages/*") {
@@ -99,12 +128,21 @@ function localNpmGraph(repository) {
       }
     }
   }
-  const manifests = manifestPaths.map((path) => JSON.parse(readFileSync(join(repository, path), "utf8")));
+  const manifests = manifestPaths.map((path) =>
+    JSON.parse(readFileSync(join(repository, path), "utf8")),
+  );
   const names = new Set(manifests.map((manifest) => manifest.name));
   return new Map(
     manifests.map((manifest) => {
-      const dependencies = { ...manifest.dependencies, ...manifest.devDependencies, ...manifest.peerDependencies };
-      return [manifest.name, new Set(Object.keys(dependencies).filter((name) => names.has(name)))];
+      const dependencies = {
+        ...manifest.dependencies,
+        ...manifest.devDependencies,
+        ...manifest.peerDependencies,
+      };
+      return [
+        manifest.name,
+        new Set(Object.keys(dependencies).filter((name) => names.has(name))),
+      ];
     }),
   );
 }
@@ -115,7 +153,10 @@ function reverseClosure(graph, roots) {
   while (changed) {
     changed = false;
     for (const [candidate, dependencies] of graph) {
-      if (!selected.has(candidate) && [...dependencies].some((dependency) => selected.has(dependency))) {
+      if (
+        !selected.has(candidate) &&
+        [...dependencies].some((dependency) => selected.has(dependency))
+      ) {
         selected.add(candidate);
         changed = true;
       }
@@ -140,7 +181,10 @@ function dependencyClosure(graph, roots) {
 }
 
 function matches(path, rule) {
-  return (rule.exact && path === rule.exact) || (rule.prefix && path.startsWith(rule.prefix));
+  return (
+    (rule.exact && path === rule.exact) ||
+    (rule.prefix && path.startsWith(rule.prefix))
+  );
 }
 
 function allTrueChapters() {
@@ -159,6 +203,8 @@ function fullPlan(repository, config, changedFiles, reasons) {
     npmBuildWorkspaces: npmWorkspaces,
     vitestFiles: [],
     vitestRustPackages: [...config.vitestRustRuntime.fullPortfolio].sort(),
+    runtimeRustPackages: [...config.vitestRustRuntime.fullPortfolio].sort(),
+    rustCrash: true,
     rootTypeScript: true,
     chapters: allTrueChapters(),
   };
@@ -166,10 +212,14 @@ function fullPlan(repository, config, changedFiles, reasons) {
 
 function buildPlan(repository, config, changedFiles, forcedMode) {
   if (forcedMode === "full") {
-    return fullPlan(repository, config, changedFiles, ["Full verification required by workflow mode"]);
+    return fullPlan(repository, config, changedFiles, [
+      "Full verification required by workflow mode",
+    ]);
   }
 
-  const chapters = Object.fromEntries(allChapterNames.map((chapter) => [chapter, false]));
+  const chapters = Object.fromEntries(
+    allChapterNames.map((chapter) => [chapter, false]),
+  );
   const rustRoots = new Set();
   const npmRoots = new Set();
   const reasons = [];
@@ -177,11 +227,17 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
   let rootTypeScript = false;
 
   for (const path of changedFiles) {
-    if (/^test\/.*\.(test|spec)\.[cm]?[jt]sx?$/.test(path) && !existsSync(join(repository, path))) {
+    if (
+      /^test\/.*\.(test|spec)\.[cm]?[jt]sx?$/.test(path) &&
+      !existsSync(join(repository, path))
+    ) {
       reasons.push(`${path}: deleted test path`);
       continue;
     }
-    if (config.fullPortfolio.exact.includes(path) || config.fullPortfolio.prefixes.some((prefix) => path.startsWith(prefix))) {
+    if (
+      config.fullPortfolio.exact.includes(path) ||
+      config.fullPortfolio.prefixes.some((prefix) => path.startsWith(prefix))
+    ) {
       reasons.push(`${path}: full-portfolio input`);
       continue;
     }
@@ -191,8 +247,10 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
       if (path.startsWith(owner.prefix)) {
         rustRoots.add(owner.package);
         chapters.rust = true;
-        for (const testPath of owner.vitestFiles ?? []) vitestFiles.add(testPath);
-        for (const testPath of config.sourceVitestPortfolio) vitestFiles.add(testPath);
+        for (const testPath of owner.vitestFiles ?? [])
+          vitestFiles.add(testPath);
+        for (const testPath of config.sourceVitestPortfolio)
+          vitestFiles.add(testPath);
         mapped = true;
       }
     }
@@ -202,8 +260,10 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
         chapters.typescript = true;
         chapters.packaging ||= owner.packaging === true;
         rootTypeScript ||= owner.package === "relayer-desktop";
-        for (const testPath of owner.vitestFiles ?? []) vitestFiles.add(testPath);
-        for (const testPath of config.sourceVitestPortfolio) vitestFiles.add(testPath);
+        for (const testPath of owner.vitestFiles ?? [])
+          vitestFiles.add(testPath);
+        for (const testPath of config.sourceVitestPortfolio)
+          vitestFiles.add(testPath);
         mapped = true;
       }
     }
@@ -211,12 +271,16 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
       if (matches(path, owner)) {
         for (const chapter of owner.chapters) chapters[chapter] = true;
         rootTypeScript ||= owner.rootTypeScript === true;
-        for (const testPath of owner.vitestFiles ?? []) vitestFiles.add(testPath);
+        for (const testPath of owner.vitestFiles ?? [])
+          vitestFiles.add(testPath);
         if (owner.fullVitestPortfolio) {
-          for (const testPath of config.sourceVitestPortfolio) vitestFiles.add(testPath);
+          for (const testPath of config.sourceVitestPortfolio)
+            vitestFiles.add(testPath);
         }
         if (owner.changedTestFile) {
-          vitestFiles.add(/\.(test|spec)\.[cm]?[jt]sx?$/.test(path) ? path : "test");
+          vitestFiles.add(
+            /\.(test|spec)\.[cm]?[jt]sx?$/.test(path) ? path : "test",
+          );
         }
         mapped = true;
       }
@@ -225,34 +289,49 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
   }
 
   if (reasons.length > 0 || changedFiles.length === 0) {
-    if (changedFiles.length === 0) reasons.push("No changed paths were available");
+    if (changedFiles.length === 0)
+      reasons.push("No changed paths were available");
     return fullPlan(repository, config, changedFiles, reasons);
   }
 
   if (rustRoots.size > 0) {
-    for (const chapter of config.crossModuleChapters.rust) chapters[chapter] = true;
+    for (const chapter of config.crossModuleChapters.rust)
+      chapters[chapter] = true;
   }
   if (npmRoots.size > 0) {
-    for (const chapter of config.crossModuleChapters.npm) chapters[chapter] = true;
+    for (const chapter of config.crossModuleChapters.npm)
+      chapters[chapter] = true;
   }
   if (chapters.vitest && vitestFiles.size === 0) {
-    return fullPlan(repository, config, changedFiles, [`${changedFiles.join(", ")}: no mapped Vitest checkpoint`]);
+    return fullPlan(repository, config, changedFiles, [
+      `${changedFiles.join(", ")}: no mapped Vitest checkpoint`,
+    ]);
   }
 
   const npmGraph = localNpmGraph(repository);
   const npmWorkspaces = reverseClosure(npmGraph, npmRoots);
   const buildRoots = new Set(npmWorkspaces);
   if (chapters.vitest) {
-    for (const workspace of config.vitestPrerequisiteWorkspaces) buildRoots.add(workspace);
+    for (const workspace of config.vitestPrerequisiteWorkspaces)
+      buildRoots.add(workspace);
   }
   const vitestRustPackages = new Set();
   if (vitestFiles.has("test")) {
-    for (const packageName of config.vitestRustRuntime.fullPortfolio) vitestRustPackages.add(packageName);
+    for (const packageName of config.vitestRustRuntime.fullPortfolio)
+      vitestRustPackages.add(packageName);
   }
   for (const runtime of config.vitestRustRuntime.files) {
     if (vitestFiles.has(runtime.exact)) {
-      for (const packageName of runtime.packages) vitestRustPackages.add(packageName);
+      for (const packageName of runtime.packages)
+        vitestRustPackages.add(packageName);
     }
+  }
+
+  const rustPackages = reverseClosure(localRustGraph(repository), rustRoots);
+  const runtimeRustPackages = new Set(vitestRustPackages);
+  for (const packageName of rustPackages) {
+    if (config.vitestRustRuntime.fullPortfolio.includes(packageName))
+      runtimeRustPackages.add(packageName);
   }
 
   return {
@@ -260,11 +339,19 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
     mode: "affected",
     reasons: changedFiles.map((path) => `${path}: mapped`),
     changedPaths: changedFiles,
-    rustPackages: reverseClosure(localRustGraph(repository), rustRoots),
+    rustPackages,
     npmWorkspaces,
     npmBuildWorkspaces: dependencyClosure(npmGraph, buildRoots),
     vitestFiles: [...vitestFiles].sort(),
     vitestRustPackages: [...vitestRustPackages].sort(),
+    runtimeRustPackages: [...runtimeRustPackages].sort(),
+    rustCrash: rustPackages.some((name) =>
+      new Set([
+        "relayer-graph-core",
+        "relayer-graph-server",
+        "relayer-app-server",
+      ]).has(name),
+    ),
     rootTypeScript,
     chapters,
   };
@@ -275,7 +362,11 @@ function writeActionsOutputs(plan) {
   const outputs = [
     `plan=${JSON.stringify(plan)}`,
     `mode=${plan.mode}`,
-    ...Object.entries(plan.chapters).map(([chapter, selected]) => `${chapter}=${selected}`),
+    `rust_crash=${plan.rustCrash}`,
+    `rust_runtime=${plan.runtimeRustPackages.length > 0}`,
+    ...Object.entries(plan.chapters).map(
+      ([chapter, selected]) => `${chapter}=${selected}`,
+    ),
   ];
   appendFileSync(process.env.GITHUB_OUTPUT, `${outputs.join("\n")}\n`);
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -287,15 +378,23 @@ function writeActionsOutputs(plan) {
 }
 
 const options = parseArguments(process.argv.slice(2));
-const repository = resolve(options.repository ?? join(scriptDirectory, "..", ".."));
-const config = JSON.parse(readFileSync(join(scriptDirectory, "affected-modules.v1.json"), "utf8"));
+const repository = resolve(
+  options.repository ?? join(scriptDirectory, "..", ".."),
+);
+const config = JSON.parse(
+  readFileSync(join(scriptDirectory, "affected-modules.v1.json"), "utf8"),
+);
 const rawChangedFiles =
   options.changedFiles.length > 0
     ? options.changedFiles
     : options.mode === "full"
       ? []
       : changedFilesFromGit(repository, options.base, options.head);
-const changedFiles = [...new Set(rawChangedFiles.map((path) => normalizedRepositoryPath(repository, path)))].sort();
+const changedFiles = [
+  ...new Set(
+    rawChangedFiles.map((path) => normalizedRepositoryPath(repository, path)),
+  ),
+].sort();
 const plan = buildPlan(repository, config, changedFiles, options.mode);
 writeActionsOutputs(plan);
 process.stdout.write(`${JSON.stringify(plan)}\n`);

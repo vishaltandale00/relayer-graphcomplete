@@ -1,0 +1,89 @@
+name: Set up isolated Rust compilation
+description: Restore Rust inputs and configure fail-open shared compiler-object acceleration for one isolated lane.
+
+inputs:
+  lane:
+    description: Stable lane name used only for timing evidence.
+    required: true
+
+outputs:
+  rustc-release:
+    value: ${{ steps.identity.outputs.release }}
+  rustc-host:
+    value: ${{ steps.identity.outputs.host }}
+  cache-version:
+    value: ${{ steps.identity.outputs.cache-version }}
+  sccache-enabled:
+    value: ${{ steps.sccache-start.outputs.enabled }}
+  dependency-cache-key:
+    value: ${{ steps.dependencies.outputs.cache-primary-key }}
+  dependency-cache-hit:
+    value: ${{ steps.dependencies.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Start Rust setup timing
+      id: timing
+      shell: bash
+      run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+    - name: Identify Rust cache inputs
+      id: identity
+      shell: bash
+      run: |
+        release="$(rustc --version --verbose | sed -n 's/^release: //p')"
+        host="$(rustc --version --verbose | sed -n 's/^host: //p')"
+        echo "release=$release" >> "$GITHUB_OUTPUT"
+        echo "host=$host" >> "$GITHUB_OUTPUT"
+        echo "cache-version=relayer-rust-parallel-line-tables-v1-${{ runner.os }}-${{ runner.arch }}-$release-$host" >> "$GITHUB_OUTPUT"
+    - name: Restore Rust dependency downloads
+      id: dependencies
+      continue-on-error: true
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: rust-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.release }}-${{ steps.identity.outputs.host }}-v1-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          rust-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.release }}-${{ steps.identity.outputs.host }}-v1-
+    - name: Record Rust dependency cache status
+      shell: bash
+      env:
+        CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
+        CACHE_KEY: ${{ steps.dependencies.outputs.cache-primary-key }}
+        LANE: ${{ inputs.lane }}
+        STARTED: ${{ steps.timing.outputs.started }}
+      run: |
+        elapsed=$(($(date +%s) - STARTED))
+        echo "### $LANE Rust dependency cache" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Setup plus restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Primary key: $CACHE_KEY" >> "$GITHUB_STEP_SUMMARY"
+    - name: Set up shared sccache compiler objects
+      id: sccache-setup
+      if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+      continue-on-error: true
+      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      with:
+        version: v0.17.0
+        disable_annotations: true
+    - name: Start shared sccache service
+      id: sccache-start
+      if: ${{ steps.sccache-setup.outcome == 'success' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        SCCACHE_CLIENT_SIDE: "1"
+        SCCACHE_GHA_ENABLED: "true"
+        SCCACHE_GHA_RW_MODE: READ_WRITE
+        SCCACHE_GHA_VERSION: ${{ steps.identity.outputs.cache-version }}
+        SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+      run: |
+        if "$SCCACHE_PATH" --start-server; then
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi

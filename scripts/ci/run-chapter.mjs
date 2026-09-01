@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const [chapter] = process.argv.slice(2);
 const plan = JSON.parse(process.env.CI_PLAN_JSON ?? "{}");
+const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const portfolio = JSON.parse(
+  readFileSync(join(scriptDirectory, "verification-portfolio.v1.json"), "utf8"),
+);
 
 function run(label, command, args, environment = {}) {
   const startedAt = Date.now();
@@ -15,24 +21,71 @@ function run(label, command, args, environment = {}) {
   const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   const outcome = result.status === 0 ? "passed" : "failed";
   if (process.env.GITHUB_STEP_SUMMARY) {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${label}: **${outcome}** in ${elapsedSeconds}s\n`);
+    appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      `- ${label}: **${outcome}** in ${elapsedSeconds}s\n`,
+    );
     if (result.status !== 0) {
-      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- First actionable failure: **${label}**\n`);
+      appendFileSync(
+        process.env.GITHUB_STEP_SUMMARY,
+        `- First actionable failure: **${label}**\n`,
+      );
     }
   }
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function runDeclared(role, id, label, command, args, environment = {}) {
+  const chapterContract = portfolio.chapters?.[chapter];
+  const field = role === "authority" ? "authorities" : "prerequisites";
+  if (!chapterContract?.[field]?.includes(id)) {
+    throw new Error(`${chapter}: undeclared ${role} invocation ${id}`);
+  }
+  if (process.env.CI_INVOCATION_TRACE) {
+    appendFileSync(
+      process.env.CI_INVOCATION_TRACE,
+      `${JSON.stringify({ chapter, role, id })}\n`,
+    );
+  }
+  run(label, command, args, environment);
+}
+
+function runAuthority(id, label, command, args, environment = {}) {
+  runDeclared("authority", id, label, command, args, environment);
+}
+
+function runPrerequisite(id, label, command, args, environment = {}) {
+  runDeclared("prerequisite", id, label, command, args, environment);
+}
+
 function packageArguments(packages) {
   return packages.flatMap((name) => ["-p", name]);
 }
 
-const npmBuildOrder = ["@relayer/graph-client", "@relayer/harness-host", "@relayer/eval-runner"];
+const npmBuildOrder = [
+  "@relayer/graph-client",
+  "@relayer/harness-host",
+  "@relayer/eval-runner",
+];
 
 if (chapter === "quick") {
-  run("Rust formatting", "cargo", ["fmt", "--all", "--", "--check"]);
-  run("Generated renderer consistency", "npm", ["run", "prepare:renderer"]);
+  run("Verification portfolio ownership", "node", [
+    "scripts/ci/verification-portfolio.mjs",
+  ]);
+  runAuthority("clean-dist", "Clean generated build outputs", "node", [
+    "scripts/clean-dist.mjs",
+  ]);
+  runAuthority("rust-format", "Rust formatting", "cargo", [
+    "fmt",
+    "--all",
+    "--",
+    "--check",
+  ]);
+  runAuthority("renderer-prepare", "Generated renderer consistency", "npm", [
+    "run",
+    "prepare:renderer",
+  ]);
   run("Generated-file diff", "git", [
     "diff",
     "--exit-code",
@@ -40,54 +93,112 @@ if (chapter === "quick") {
     "desktop/renderer/vendor/marked.umd.js",
     "desktop/renderer/vendor/lucide.min.js",
   ]);
-  if (plan.npmWorkspaces.length > 0 || plan.rootTypeScript) {
-    run("Build TypeScript dependency declarations", "npm", ["run", "build:packages"]);
-  }
-  for (const workspace of npmBuildOrder.filter((name) => plan.npmWorkspaces.includes(name))) {
-    run(`Affected typecheck ${workspace}`, "npm", ["run", "check", "-w", workspace]);
-  }
-  if (plan.rootTypeScript) run("Affected root typecheck", "npx", ["tsc", "--noEmit"]);
-} else if (chapter === "rust") {
+} else if (chapter === "rust-clippy") {
   const packages = packageArguments(plan.rustPackages);
-  run("Rust Clippy", "cargo", ["clippy", ...packages, "--all-targets", "--all-features", "--", "-D", "warnings"]);
-  run("Fresh Rust tests", "cargo", ["test", ...packages]);
-  if (plan.rustPackages.some((name) => name === "relayer-graph-server" || name === "relayer-app-server")) {
-    run("Graph crash reconciliation", "npm", ["run", "check:graph-crash-reconciliation"]);
-  }
-  const servers = plan.rustPackages.filter((name) => name === "relayer-graph-server" || name === "relayer-app-server");
-  if (servers.length > 0) run("Affected Rust server builds", "cargo", ["build", ...packageArguments(servers)]);
+  runAuthority("rust-clippy", "Rust Clippy", "cargo", [
+    "clippy",
+    ...packages,
+    "--all-targets",
+    "--all-features",
+    "--",
+    "-D",
+    "warnings",
+  ]);
+} else if (chapter === "rust-tests") {
+  const packages = packageArguments(plan.rustPackages);
+  runAuthority("rust-tests", "Fresh Rust tests", "cargo", [
+    "test",
+    ...packages,
+  ]);
+} else if (chapter === "rust-crash") {
+  runAuthority("rust-crash", "Graph crash reconciliation", "npm", [
+    "run",
+    "check:graph-crash-reconciliation",
+  ]);
+} else if (chapter === "rust-runtime") {
+  runAuthority("rust-runtime", "Selected Rust runtime build", "cargo", [
+    "build",
+    ...packageArguments(plan.runtimeRustPackages),
+  ]);
 } else if (chapter === "typescript") {
-  for (const workspace of npmBuildOrder.filter((name) => plan.npmBuildWorkspaces.includes(name))) {
-    run(`Build ${workspace}`, "npm", ["run", "build", "-w", workspace]);
+  for (const workspace of npmBuildOrder.filter((name) =>
+    plan.npmBuildWorkspaces.includes(name),
+  )) {
+    runAuthority("typescript-packages", `Build ${workspace}`, "npm", [
+      "run",
+      "build",
+      "-w",
+      workspace,
+    ]);
   }
-  if (plan.rootTypeScript) run("Root TypeScript check", "npx", ["tsc", "--noEmit"]);
+  for (const workspace of npmBuildOrder.filter((name) =>
+    plan.npmWorkspaces.includes(name),
+  )) {
+    runAuthority(
+      "typescript-workspaces",
+      `Affected typecheck ${workspace}`,
+      "npm",
+      ["run", "check", "-w", workspace],
+    );
+  }
+  if (plan.rootTypeScript)
+    runAuthority("typescript-root-check", "Root TypeScript check", "npx", [
+      "tsc",
+      "--noEmit",
+    ]);
 } else if (chapter === "vitest-prerequisites") {
-  for (const workspace of npmBuildOrder.filter((name) => plan.npmBuildWorkspaces.includes(name))) {
-    run(`Build Vitest dependency ${workspace}`, "npm", ["run", "build", "-w", workspace]);
+  for (const workspace of npmBuildOrder.filter((name) =>
+    plan.npmBuildWorkspaces.includes(name),
+  )) {
+    runPrerequisite(
+      "typescript-packages",
+      `Build Vitest dependency ${workspace}`,
+      "npm",
+      ["run", "build", "-w", workspace],
+    );
   }
-  const servers = plan.vitestRustPackages;
-  if (servers.length > 0) run("Build selected Vitest Rust runtime", "cargo", ["build", ...packageArguments(servers)]);
-  if (plan.rootTypeScript) run("Build root Vitest TypeScript runtime", "npx", ["tsc", "-p", "tsconfig.build.json"]);
+  if (plan.rootTypeScript)
+    runAuthority(
+      "typescript-root-build",
+      "Build root Vitest TypeScript runtime",
+      "npx",
+      ["tsc", "-p", "tsconfig.build.json"],
+    );
 } else if (chapter === "vitest") {
   const selectedFiles = plan.mode === "full" ? [] : plan.vitestFiles;
-  run("Fresh mapped Vitest tests", "npx", ["vitest", "run", "--maxWorkers=1", ...selectedFiles]);
-  if (plan.mode === "full" || selectedFiles.some((path) => path.startsWith("packages/harness-host/"))) {
-    run("Codex secret boundary", "npm", ["run", "test:codex-secret-boundary"]);
+  runAuthority("vitest", "Fresh mapped Vitest tests", "npx", [
+    "vitest",
+    "run",
+    "--maxWorkers=1",
+    ...selectedFiles,
+  ]);
+  if (
+    plan.mode === "full" ||
+    selectedFiles.some((path) => path.startsWith("packages/harness-host/"))
+  ) {
+    runAuthority("codex-secret-boundary", "Codex secret boundary", "npm", [
+      "run",
+      "test:codex-secret-boundary",
+    ]);
   }
 } else if (chapter === "python") {
-  run(
+  runAuthority(
+    "python",
     "Fresh Python tests",
     "python3",
     ["-m", "unittest", "discover", "-s", "python/relayer-graph/tests"],
     { PYTHONPATH: "python/relayer-graph/src" },
   );
 } else if (chapter === "receipts") {
-  run("Receipt integrity", "npm", ["run", "lint:ladybug-receipt"]);
+  runAuthority("receipts", "Receipt integrity", "npm", [
+    "run",
+    "lint:ladybug-receipt",
+  ]);
 } else if (chapter === "prd") {
-  run("PRD readability", "npm", ["run", "prd:check-readability"]);
-} else if (chapter === "full") {
-  run("Repository-required check", "npm", ["run", "check"]);
-  run("Repository-required build", "npm", ["run", "build"]);
+  runAuthority("prd", "PRD readability", "npm", [
+    "run",
+    "prd:check-readability",
+  ]);
 } else {
   throw new Error(`Unsupported CI chapter: ${chapter}`);
 }

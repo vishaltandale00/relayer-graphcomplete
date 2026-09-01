@@ -10,13 +10,27 @@ Reusable integration branches use the `integration/**` namespace. Pushes to an
 integration branch run the full portfolio and may save Rust compilation caches.
 Component pull requests target that integration branch and receive the
 versioned affected-module plan. The integration branch pull request back to
-`main` runs the full portfolio, including the exact repository-required
-`npm run check` and `npm run build` gates. Merge remains manual.
+`main` runs the full portfolio. The versioned
+`scripts/ci/verification-portfolio.v1.json` manifest assigns every command in
+the repository-required `npm run check` and `npm run build` scripts to exactly
+one authoritative CI job. A deterministic test compares the manifest with the
+current package scripts and executes every declared chapter against the same
+machine-readable authority/prerequisite contract. Adding, removing, reordering,
+or moving a required command to an unrelated job therefore fails before the
+portfolio can silently diverge. Vitest may repeat package compilation as an
+explicit non-authoritative prerequisite; that repetition prepares current
+runtime bytes but does not create a second verification owner. CI executes the
+authorities in parallel instead of rerunning both complete scripts in a second serial job.
+The exact scripts remain the required local pre-commit gates. Merge remains
+manual.
 
 Tests are always invoked for the current source snapshot. Cache entries contain
 dependency and compilation artifacts only; they are untrusted acceleration and
-never verification evidence. The `Rust checks and fresh tests` job canaries a
-content-addressed sccache compiler cache: same-repository pull requests and
+never verification evidence. Rust Clippy, default tests, crash reconciliation,
+and runtime builds use separate `CARGO_TARGET_DIR` values and converge through
+the existing `Rust checks and fresh tests` aggregate. Their isolated runners
+share one toolchain-bound, content-addressed sccache namespace:
+same-repository pull requests and
 repository branch pushes may read and write compiler objects. Fork pull
 requests do not run sccache and receive no compiler-cache credentials; they
 compile directly with `rustc`. GitHub's ref scoping lets pull requests inherit a
@@ -28,30 +42,34 @@ rate-limit storage failures nonfatal, and its native server-I/O fallback invokes
 the local compiler if daemon communication is lost. Any genuine nonzero compiler
 result propagates without a second compiler invocation, so compiler failures
 cannot be delayed or masked.
-It disables Cargo's runner-local incremental mode because sccache cannot cache
-incremental Rust invocations. Its separate Cargo registry/git archive excludes
-`target/` and remains a trusted-branch-only writer.
+Every lane disables Cargo's runner-local incremental mode because sccache cannot
+cache incremental Rust invocations. All four lanes preserve the admitted CI-only
+`line-tables-only` dev/test debug profile from PR #387 and use a new parallel
+cache namespace so incompatible full-debug objects cannot be reused. Each lane
+records text and JSON sccache statistics as a non-gating, 14-day workflow
+artifact. The separate Cargo registry/git archive excludes `target/` and remains
+a trusted-branch-only writer. The platform packaging
+archive retains its existing restore-on-PR, write-on-branch behavior.
 
-The first candidate expansion is a mutually exclusive Vitest canary. An ordinary
-same-repository pull request builds its Rust runtime prerequisites with the same
-reduced-debug compiler profile and namespace as the Rust job, but reads sccache
-objects without writing them. A fork pull request receives no sccache setup or
-credentials and instead restores the existing `target/` archive. Trusted branch
-pushes also use that archive and remain its only writers, keeping a trusted
-dependency/source baseline available to forks; Cargo still rebuilds source
-whose fingerprints do not match the current checkout. Both paths build the current runtime
-prerequisites before invoking every selected Vitest test freshly. If sccache
-setup, daemon startup, or server I/O fails on the trusted pull-request path, the
-wrapper falls back to direct `rustc`; cache telemetry is non-blocking.
-
-Admitting this canary or any further sccache expansion requires one seed run and the next real
-changed-head pull-request run to demonstrate compiler-cache hits, net savings
-against the recorded hosted baseline, no required-job regression, and no
+The parallel namespace is a staged canary until a real changed-head pull request
+and its integrated push demonstrate compiler-cache hits, lower p95 Rust wall
+time than the recorded serial baseline, no required-job regression, and no
 repository-cache thrashing. Do not manufacture repeated cold runs to reach that
-decision. Compiler objects may be retained when a later compilation unit or
-test fails; their presence is not a verification claim. A cache or telemetry
-failure must not make the stable required `check` fail when the same source
-compiles and tests successfully without acceleration.
+decision. Roll back the lane split if p95 Rust latency worsens by more than 15%,
+compiler cache errors become gating, or unexplained differential failures occur.
+Compiler objects may be retained when a later compilation unit or test fails;
+their presence is not a verification claim. A cache or telemetry failure must
+not make the stable required `check` fail when the same source compiles and
+tests successfully without acceleration.
+
+The selected default-feature `relayer-app-server` and
+`relayer-graph-server` binaries are built once in the runtime lane. Its workflow
+artifact is retained for one day and binds the exact workflow commit, runner
+platform and architecture, Rust release, `Cargo.lock` digest, Cargo profile,
+feature set, binary inventory, and per-binary SHA-256 digest. Vitest verifies
+all fields and installs only those authenticated bytes into `target/debug`.
+This removes independent Vitest Rust compilation without caching any test
+result; every mapped Vitest test still runs freshly.
 
 Job summaries record Node setup/npm-cache status and elapsed time, Rust-cache
 status and restore time, chapter duration, and the first actionable failure.
