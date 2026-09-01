@@ -74,8 +74,9 @@ result; every mapped Vitest test still runs freshly.
 Job summaries record Node setup/npm-cache status and elapsed time, Rust-cache
 status and restore time, chapter duration, and the first actionable failure.
 
-The checked-in v1 map is `scripts/ci/affected-modules.v1.json`. Rust and npm
-reverse dependents are derived from their manifests. Lockfile, toolchain,
+The checked-in v1 map is `scripts/ci/affected-modules.v1.json`. Rust selection
+includes reverse dependents and their local build dependencies; npm reverse
+dependents are derived from manifests. Lockfile, toolchain,
 workflow, infrastructure, planner, unknown, and unmapped changes select the
 full portfolio. Each affected owner also names its fresh Vitest checkpoints and
 their build prerequisites. A selected Vitest chapter with no mapped checkpoint

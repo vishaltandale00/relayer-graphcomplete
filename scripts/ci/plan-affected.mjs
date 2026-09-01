@@ -327,7 +327,11 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
     }
   }
 
-  const rustPackages = reverseClosure(localRustGraph(repository), rustRoots);
+  const rustGraph = localRustGraph(repository);
+  const rustPackages = dependencyClosure(
+    rustGraph,
+    reverseClosure(rustGraph, rustRoots),
+  );
   const runtimeRustPackages = new Set(vitestRustPackages);
   for (const packageName of rustPackages) {
     if (config.vitestRustRuntime.fullPortfolio.includes(packageName))
