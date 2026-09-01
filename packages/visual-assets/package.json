@@ -14,5 +14,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "sax": "^1.6.1",
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "@types/sax": "^1.2.7"
   }
 }
