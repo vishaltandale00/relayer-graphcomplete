@@ -285,6 +285,74 @@ describe("affected-module plan v1", () => {
     expect(result.reasons.join(" ")).toContain("deleted test path");
   });
 
+  test("maps CI-tested scripts to their owning Vitest checkpoints", () => {
+    const result = plan("scripts/recursive-live-run-model.mjs");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.vitestFiles).toEqual([
+      "test/recursive-live-run-model.test.mjs",
+    ]);
+  });
+
+  test("maps Ladybug source preparation through Vitest and packaging owners", () => {
+    const result = plan("scripts/prepare-ladybug-source.mjs");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.chapters.packaging).toBe(true);
+    expect(result.vitestFiles).toEqual(
+      expect.arrayContaining([
+        "test/ladybug-packaged-lifecycle.test.mjs",
+        "test/ladybug-source-build.test.mjs",
+      ]),
+    );
+  });
+
+  test("maps the frozen query specification into the graph-core Rust closure", () => {
+    const result = plan("docs/graph-query-v1.md");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.rust).toBe(true);
+    expect(result.rustPackages).toEqual(
+      expect.arrayContaining(["relayer-graph-core"]),
+    );
+    expect(result.rustCrash).toBe(true);
+  });
+
+  test("maps documentation-only and manual-driver paths to no chapter", () => {
+    for (const changedFile of [
+      "LICENSE",
+      ".gitignore",
+      "docs/research/intra-pr-ci-cache.md",
+      "scripts/test-desktop-first-message.mjs",
+    ]) {
+      const result = plan(changedFile);
+
+      expect(result.mode).toBe("affected");
+      expect(Object.values(result.chapters).some(Boolean)).toBe(false);
+    }
+  });
+
+  test("keeps .gitattributes on the byte-stability checkpoint that reads it", () => {
+    const result = plan(".gitattributes");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.vitestFiles).toEqual([
+      "test/prime-agent-packaging.test.mjs",
+    ]);
+  });
+
+  test("keeps CI-tooling scripts on the full portfolio", () => {
+    const result = plan("scripts/check-node-version.mjs");
+
+    expect(result.mode).toBe("full");
+    expect(result.reasons.join(" ")).toContain(
+      "scripts/check-node-version.mjs",
+    );
+  });
+
   test.each([
     "Cargo.lock",
     "package-lock.json",
