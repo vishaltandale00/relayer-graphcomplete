@@ -26,9 +26,10 @@ export const PRIME_AGENT_PACKAGE_TREE_SHA256 = Object.freeze({
   "@earendil-works/pi-coding-agent": "93cf3da2c0777fd7cf88db0e7a524895625c6c2507541eaeb3d6f325ab4ee89f",
   "@earendil-works/pi-tui": "f86a8ab553edaf05e1fc4f4d6cb48c313e5a93f2f3490f74e510661c52d74447",
 });
-export const PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET = Object.freeze({
-  "darwin-arm64": "afd4e30957510486bc8ca473a41a616313783a4243000bb32f5f2536797b5af6",
+export const PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET = Object.freeze({
+  "darwin-arm64": "8c86ed5c66b6022559fb9903426fec212a757bd4837eff2f7dafea6fe1f54062",
 });
+export const PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256 = "afd4e30957510486bc8ca473a41a616313783a4243000bb32f5f2536797b5af6";
 export const PRIME_AGENT_HARNESS_CONFIGURATIONS = Object.freeze([
   "prime-agent-basic.yaml",
   "prime-agent-deep.yaml",
@@ -55,6 +56,17 @@ export const PRIME_AGENT_ASSET_SHA256 = Object.freeze({
   }),
   pythonPackageTree: "4b959d81101a456c1e69ff5ad810944648a438f7934b52847247e34ef2093c75",
 });
+
+export function selectPrimeAgentDependencyClosureSha256({ isPackaged, javascriptContract }) {
+  if (typeof isPackaged !== "boolean") throw new Error("Prime dependency closure environment is invalid.");
+  const digest = isPackaged
+    ? javascriptContract?.dependencyClosureSha256
+    : javascriptContract?.repositoryDependencyClosureSha256;
+  if (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) {
+    throw new Error("Prime dependency closure identity is invalid for this environment.");
+  }
+  return digest;
+}
 
 export async function inspectPrimeAgentRuntime({
   appPath,
@@ -233,8 +245,9 @@ export function validatePrimeAgentManifest(manifest) {
     || manifest?.assets?.pythonPackageTreeSha256 !== PRIME_AGENT_ASSET_SHA256.pythonPackageTree
     || !exactRecord(
       manifest?.dependencyClosureSha256ByTarget,
-      PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
-    )) {
+      PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
+    )
+    || manifest?.repositoryDependencyClosureSha256 !== PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256) {
     throw new Error("the bundled manifest contains an invalid runtime contract");
   }
 }

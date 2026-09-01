@@ -388,7 +388,8 @@ The macOS-arm64 Prime prototype is exact recipe `prime@0.8.1`. A connection,
 reconnect, explicit repair, or recipe-update trigger downloads hash- and
 size-bound uv, CPython, and wheels, then invokes pinned uv by absolute path with
 configuration, index, dependency resolution, network, and source-build paths
-disabled. Assembly verifies and copies the packaged JavaScript closure, Prime
+disabled. The recipe seals distinct repository and packaged JavaScript closure
+digests, and each assembly path accepts only its own byte layout. Assembly verifies and copies the packaged JavaScript closure, Prime
 Python runtime, all 12 Python-backed skills, and `relayer_graph`. The ready
 module URL, isolated Python launcher, and receipt-owned private state root enter
 the Prime harness factory. Prime uses explicit agent and session directories

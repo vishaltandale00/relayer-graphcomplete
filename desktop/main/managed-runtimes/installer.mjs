@@ -488,6 +488,8 @@ function validateResolvedRecipe(recipe, recipeId, targetKey) {
       || typeof contract.primeSourceCommit !== "string" || !/^[a-f0-9]{40}$/.test(contract.primeSourceCommit)
       || typeof javascript?.dependencyClosureSha256 !== "string"
       || !/^[a-f0-9]{64}$/.test(javascript.dependencyClosureSha256)
+      || typeof javascript?.repositoryDependencyClosureSha256 !== "string"
+      || !/^[a-f0-9]{64}$/.test(javascript.repositoryDependencyClosureSha256)
       || !Array.isArray(javascript?.packages) || javascript.packages.length === 0
       || javascript.packages.some((entry) => (
         typeof entry?.name !== "string" || entry.name.trim() === ""

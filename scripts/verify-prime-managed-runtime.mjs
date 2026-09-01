@@ -11,7 +11,7 @@ import {
 } from "../desktop/main/services/prime-managed-runtime.mjs";
 import {
   PRIME_AGENT_ASSET_SHA256,
-  PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
+  PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256,
 } from "../desktop/main/services/prime-agent-runtime.mjs";
 
 if (process.platform !== "darwin" || process.arch !== "arm64") {
@@ -24,7 +24,7 @@ try {
   const copyReviewedTrees = createPrimeReviewedTreeCopier({
     appRoot: repositoryRoot,
     pythonClientRoot: join(repositoryRoot, "python", "relayer-graph", "src"),
-    expectedClosureSha256: PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET["darwin-arm64"],
+    expectedClosureSha256: PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256,
     expectedPythonClientSha256: PRIME_AGENT_ASSET_SHA256.pythonPackageTree,
   });
   const installer = createManagedRuntimeInstaller({
@@ -38,6 +38,8 @@ try {
     recipeId: runtime.recipeId,
     recipeDigest: runtime.recipeDigest,
     target: runtime.target,
+    javascriptClosureKind: "repository",
+    javascriptClosureSha256: PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256,
     ready: true,
   })}\n`);
 } finally {
