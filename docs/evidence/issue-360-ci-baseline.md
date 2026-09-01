@@ -59,9 +59,20 @@ failures are never retried or masked. Cache and telemetry cannot substitute for
 or invalidate freshly executed checks and tests.
 
 The existing 18.5-minute hosted Rust observation above remains the cold
-baseline; no additional synthetic cold runs are required. Hosted canary results
-are pending. Record one seed run and the next real changed-head run here,
-including sccache hits, misses, errors, read/write duration, Rust chapter
-duration, and repository cache usage. Expansion beyond the Rust job requires at
-least five minutes of net Rust compilation savings, no required-job regression,
-and no trusted-cache eviction or thrashing.
+baseline; no additional synthetic cold runs are required.
+
+The first PR seed run (`33461754406`, head `9d617c9a`) took 22 minutes 10
+seconds from Rust-job start to failure. The Cargo dependency archive missed;
+sccache setup and daemon start succeeded. After completion, GitHub reported
+1,184 entries totaling 546,100,346 bytes in the PR merge ref, proving that
+compiler objects were written even though the later gate failed. The failure
+was not a cache error: the cold Clippy build exposed an existing integration
+test that read `CARGO_BIN_EXE_relayer-graph-server` at compile time, where Cargo
+does not provide it for that target. No verification pass or speedup is claimed
+from this seed.
+
+The next real changed-head run after correcting that test is the warm
+comparison. Record its sccache hits, misses, errors, Rust chapter duration, and
+repository cache usage here. Expansion beyond the Rust job requires at least
+five minutes of net Rust compilation savings, no required-job regression, and
+no trusted-cache eviction or thrashing.
