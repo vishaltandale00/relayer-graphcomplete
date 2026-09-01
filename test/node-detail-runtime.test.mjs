@@ -94,6 +94,22 @@ describe("compiled Node Detail product runtime", () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
+  it("does not treat resource-like text inside a CSS string as an executable resource", async () => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    const host = window.document.createElement("div");
+    const detail = compiledPackage({
+      version: 1,
+      components: [{ id: "quoted", order: 0, html: "<p>Quoted CSS value</p>", css: 'p{font-family:"url(foo)"}' }],
+      mounts: [],
+      assets: [],
+    });
+
+    const runtime = await mountCompiledNodeDetail({ host, detail });
+
+    expect(runtime.status).toBe("mounted");
+    expect(runtime.shadowRoot.querySelector("[data-node-detail-authored-styles]").textContent).toContain('"url(foo)"');
+  });
+
   it("adapts invoke, input, expand, and reference through host authority without rebuilding unrelated authored regions", async () => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     const host = window.document.createElement("div");

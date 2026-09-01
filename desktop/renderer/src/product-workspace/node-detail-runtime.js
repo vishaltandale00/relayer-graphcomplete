@@ -36,6 +36,45 @@ function decodeCssEscapes(value) {
   });
 }
 
+function executableCssText(source) {
+  let result = "";
+  let quote = null;
+  let comment = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (comment) {
+      if (character === "*" && next === "/") {
+        comment = false;
+        index += 1;
+      }
+      result += " ";
+      continue;
+    }
+    if (quote !== null) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = null;
+      result += " ";
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      comment = true;
+      index += 1;
+      result += " ";
+    } else if (character === '"' || character === "'") {
+      quote = character;
+      result += " ";
+    } else if (character === "\\") {
+      const escaped = source.slice(index).match(/^\\(?:[0-9a-f]{1,6}(?:\s)?|[\s\S])/i)?.[0] ?? character;
+      result += decodeCssEscapes(escaped);
+      index += escaped.length - 1;
+    } else {
+      result += character;
+    }
+  }
+  return result;
+}
+
 function cssStructureIsClosed(source) {
   const stack = [];
   let quote = null;
@@ -120,7 +159,7 @@ function mountIndex(detail) {
 }
 
 function assertSafeComponent(component, fragment, mounts) {
-  const decodedCss = typeof component.css === "string" ? decodeCssEscapes(component.css) : "";
+  const decodedCss = typeof component.css === "string" ? executableCssText(component.css) : "";
   if (typeof component.css !== "string"
     || !cssStructureIsClosed(component.css)
     || /(?:@import|\bexpression\s*\()/i.test(decodedCss)
