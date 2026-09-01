@@ -291,6 +291,37 @@
       }
     },
     {
+      "id": "reject-vector-function-after-valid-predicate",
+      "query": "MATCH (n:Content) WHERE n.title = $title AND vector_similarity(n.detail, $query) > $score RETURN n",
+      "parameters": {
+        "title": {
+          "type": "string",
+          "value": "Queue"
+        },
+        "query": {
+          "type": "list",
+          "elementType": {
+            "kind": "float"
+          },
+          "values": [
+            {
+              "type": "float",
+              "value": 0.1
+            }
+          ]
+        },
+        "score": {
+          "type": "float",
+          "value": 0.8
+        }
+      },
+      "expectedError": {
+        "code": "query_construct_unsupported",
+        "phase": "parse",
+        "path": "query.where"
+      }
+    },
+    {
       "id": "reject-zero-hop-path-binding",
       "query": "MATCH p = (n:Content) RETURN p",
       "expectedError": {

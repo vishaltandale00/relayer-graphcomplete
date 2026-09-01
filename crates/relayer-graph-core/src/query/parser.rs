@@ -355,15 +355,6 @@ impl Parser {
         }
 
         let predicates = if self.eat_word("where") {
-            if self.peek_word().as_deref() == Some("vector_similarity")
-                && matches!(self.tokens.get(self.position + 1), Some(Token::Symbol(symbol)) if symbol == "(")
-            {
-                return Err(QueryError::new(
-                    QueryCode::QueryConstructUnsupported,
-                    "query.where",
-                    "vector search is deferred from query contract version 1",
-                ));
-            }
             self.where_clause()?
         } else {
             Vec::new()
@@ -712,6 +703,15 @@ impl Parser {
     }
 
     fn predicate(&mut self) -> Result<Predicate, QueryError> {
+        if self.peek_word().as_deref() == Some("vector_similarity")
+            && matches!(self.tokens.get(self.position + 1), Some(Token::Symbol(symbol)) if symbol == "(")
+        {
+            return Err(QueryError::new(
+                QueryCode::QueryConstructUnsupported,
+                "query.where",
+                "vector search is deferred from query contract version 1",
+            ));
+        }
         if self.peek_word().as_deref() == Some("exists")
             && matches!(self.tokens.get(self.position + 1), Some(Token::Symbol(symbol)) if symbol == "(")
         {
