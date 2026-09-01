@@ -121,7 +121,7 @@ jobs:
           SCCACHE_CLIENT_SIDE: "1"
           SCCACHE_GHA_ENABLED: "true"
           SCCACHE_GHA_RW_MODE: READ_WRITE
-          SCCACHE_GHA_VERSION: relayer-rust-canary-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
+          SCCACHE_GHA_VERSION: relayer-rust-line-tables-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
           SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
         run: |
           if "$SCCACHE_PATH" --start-server; then
@@ -134,13 +134,15 @@ jobs:
         run: node scripts/ci/run-chapter.mjs rust
         env:
           CARGO_INCREMENTAL: "0"
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          CARGO_PROFILE_TEST_DEBUG: line-tables-only
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
           RELAYER_SCCACHE_ENABLED: ${{ steps.sccache-start.outputs.enabled }}
           RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
           SCCACHE_CLIENT_SIDE: "1"
           SCCACHE_GHA_ENABLED: "true"
           SCCACHE_GHA_RW_MODE: READ_WRITE
-          SCCACHE_GHA_VERSION: relayer-rust-canary-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
+          SCCACHE_GHA_VERSION: relayer-rust-line-tables-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
           SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
       - name: Report sccache compiler statistics
         if: ${{ always() }}
@@ -149,25 +151,42 @@ jobs:
           SCCACHE_SETUP_OUTCOME: ${{ steps.sccache-setup.outcome }}
           SCCACHE_START_OUTCOME: ${{ steps.sccache-start.outcome }}
         run: |
-          echo "### Rust sccache canary" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Setup: $SCCACHE_SETUP_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Service start: $SCCACHE_START_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Cache access: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'disabled (fork)' || 'read-write' }}" >> "$GITHUB_STEP_SUMMARY"
+          stats_text="$RUNNER_TEMP/sccache-stats.txt"
+          stats_json="$RUNNER_TEMP/sccache-stats.json"
+          append_summary() { printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          append_summary "### Rust sccache canary"
+          append_summary "- Setup: $SCCACHE_SETUP_OUTCOME"
+          append_summary "- Service start: $SCCACHE_START_OUTCOME"
+          append_summary "- Cache access: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'disabled (fork)' || 'read-write' }}"
           if [ "$SCCACHE_SETUP_OUTCOME" = "success" ] &&
              [ "$SCCACHE_START_OUTCOME" = "success" ] &&
              [ -n "${SCCACHE_PATH:-}" ]; then
             set +e
-            stats="$($SCCACHE_PATH --show-stats 2>&1)"
-            stats_status=$?
+            "$SCCACHE_PATH" --show-stats 2>&1 | tee "$stats_text"
+            stats_status=${PIPESTATUS[0]}
+            "$SCCACHE_PATH" --show-stats --stats-format json > "$stats_json"
+            json_status=$?
             set -e
-            echo "- Statistics command: exit $stats_status" >> "$GITHUB_STEP_SUMMARY"
-            echo '```text' >> "$GITHUB_STEP_SUMMARY"
-            echo "$stats" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            append_summary "- Text statistics: exit $stats_status"
+            append_summary "- JSON statistics: exit $json_status"
+            append_summary '```text'
+            cat "$stats_text" >> "$GITHUB_STEP_SUMMARY"
+            append_summary '```'
           else
-            echo "- Statistics: unavailable; compilation fell back to direct rustc" >> "$GITHUB_STEP_SUMMARY"
+            append_summary "- Statistics: unavailable; compilation fell back to direct rustc"
           fi
-          echo "Compiler objects are untrusted acceleration only; cache reuse never substitutes for fresh test execution." >> "$GITHUB_STEP_SUMMARY"
+          append_summary "Compiler objects are untrusted acceleration only; cache reuse never substitutes for fresh test execution."
+      - name: Upload sccache compiler statistics
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: sccache-stats-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/sccache-stats.txt
+            ${{ runner.temp }}/sccache-stats.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Save trusted Rust dependency downloads
         if: ${{ github.event_name == 'push' && success() && steps.rust-dependency-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
@@ -213,9 +232,11 @@ jobs:
           echo "host=$(rustc --version --verbose | sed -n 's/^host: //p')" >> "$GITHUB_OUTPUT"
       - name: Start Rust cache timing
         id: rust-cache-timing
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
         run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
       - name: Restore read-only Vitest runtime compilation acceleration
         id: rust-cache
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
         uses: actions/cache/restore@v5
         with:
           path: |
@@ -227,6 +248,7 @@ jobs:
           restore-keys: |
             rust-affected-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-
       - name: Record Vitest Rust cache status
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
         env:
           CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
           STARTED: ${{ steps.rust-cache-timing.outputs.started }}
@@ -236,7 +258,48 @@ jobs:
           echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
           echo "Cache contents accelerate runtime compilation only; every mapped test runs freshly." >> "$GITHUB_STEP_SUMMARY"
-      - name: Build Vitest runtime prerequisites
+      - name: Set up read-only Vitest sccache
+        id: vitest-sccache-setup
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.17.0
+          disable_annotations: true
+      - name: Start read-only Vitest sccache service
+        id: vitest-sccache-start
+        if: ${{ steps.vitest-sccache-setup.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          SCCACHE_CLIENT_SIDE: "1"
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_GHA_RW_MODE: READ_ONLY
+          SCCACHE_GHA_VERSION: relayer-rust-line-tables-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
+          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+        run: |
+          if "$SCCACHE_PATH" --start-server; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+      - name: Build Vitest runtime prerequisites with read-only sccache
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        run: node scripts/ci/run-chapter.mjs vitest-prerequisites
+        env:
+          CARGO_INCREMENTAL: "0"
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          CARGO_PROFILE_TEST_DEBUG: line-tables-only
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          RELAYER_SCCACHE_ENABLED: ${{ steps.vitest-sccache-start.outputs.enabled }}
+          RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
+          SCCACHE_CLIENT_SIDE: "1"
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_GHA_RW_MODE: READ_ONLY
+          SCCACHE_GHA_VERSION: relayer-rust-line-tables-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}
+          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+      - name: Build Vitest runtime prerequisites from target cache
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
         run: node scripts/ci/run-chapter.mjs vitest-prerequisites
         env:
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
@@ -244,6 +307,49 @@ jobs:
         run: node scripts/ci/run-chapter.mjs vitest
         env:
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+      - name: Report Vitest sccache compiler statistics
+        if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        continue-on-error: true
+        env:
+          SCCACHE_SETUP_OUTCOME: ${{ steps.vitest-sccache-setup.outcome }}
+          SCCACHE_START_OUTCOME: ${{ steps.vitest-sccache-start.outcome }}
+        run: |
+          stats_text="$RUNNER_TEMP/vitest-sccache-stats.txt"
+          stats_json="$RUNNER_TEMP/vitest-sccache-stats.json"
+          append_summary() { printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          append_summary "### Vitest read-only sccache canary"
+          append_summary "- Setup: $SCCACHE_SETUP_OUTCOME"
+          append_summary "- Service start: $SCCACHE_START_OUTCOME"
+          append_summary "- Cache access: read-only"
+          if [ "$SCCACHE_SETUP_OUTCOME" = "success" ] &&
+             [ "$SCCACHE_START_OUTCOME" = "success" ] &&
+             [ -n "${SCCACHE_PATH:-}" ]; then
+            set +e
+            "$SCCACHE_PATH" --show-stats 2>&1 | tee "$stats_text"
+            stats_status=${PIPESTATUS[0]}
+            "$SCCACHE_PATH" --show-stats --stats-format json > "$stats_json"
+            json_status=$?
+            set -e
+            append_summary "- Text statistics: exit $stats_status"
+            append_summary "- JSON statistics: exit $json_status"
+            append_summary '```text'
+            cat "$stats_text" >> "$GITHUB_STEP_SUMMARY"
+            append_summary '```'
+          else
+            append_summary "- Statistics: unavailable; compilation fell back to direct rustc"
+          fi
+          append_summary "Compiler objects are untrusted acceleration only; cache reuse never substitutes for fresh mapped Vitest execution."
+      - name: Upload Vitest sccache compiler statistics
+        if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        continue-on-error: true
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: vitest-sccache-stats-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vitest-sccache-stats.txt
+            ${{ runner.temp }}/vitest-sccache-stats.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Save trusted Vitest runtime compilation acceleration
         if: ${{ github.event_name == 'push' && success() && steps.rust-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
