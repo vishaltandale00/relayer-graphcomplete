@@ -1,6 +1,6 @@
 {
   "name": "relayer-desktop",
-  "version": "0.2.25",
+  "version": "0.2.26",
   "description": "Local-first Relayer desktop application.",
   "author": "Relayer",
   "license": "Apache-2.0",
