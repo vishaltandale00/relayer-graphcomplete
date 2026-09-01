@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename } from "node:fs/promises";
+import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
+const IMPORT_DETAIL_LIMIT = 128;
+const IMPORT_CONTENT_LIMIT = 512;
+const IMPORT_TOTAL_INSERT_LIMIT = 1 << 28;
+
+
 import sax from "sax";
 import sharp from "sharp";
 
@@ -1080,7 +1085,8 @@ export function createMemoryVisualDetailPersistence(library: VisualAssetsLibrary
         || !plainRecord(candidate.provenance)
         || Object.keys(candidate.provenance).sort().join(",") !== "fileName,source"
         || (candidate.provenance.source !== "user" && candidate.provenance.source !== "system")
-        || typeof candidate.provenance.fileName !== "string") {
+        || typeof candidate.provenance.fileName !== "string"
+        || normalizeProvenanceFileName(candidate.provenance.fileName) === "") {
         throw new VisualAssetsError("accepted_detail_invalid", `Accepted Visual Detail asset ${index} is invalid`);
       }
       const packageAsset = packageAssets.get(candidate.assetId);
@@ -1097,7 +1103,7 @@ export function createMemoryVisualDetailPersistence(library: VisualAssetsLibrary
         byteLength: candidate.byteLength as number,
         provenance: {
           source: candidate.provenance.source as "user" | "system",
-          fileName: candidate.provenance.fileName,
+          fileName: normalizeProvenanceFileName(candidate.provenance.fileName),
         },
       });
     });
@@ -1232,7 +1238,7 @@ export function createMemoryVisualDetailPersistence(library: VisualAssetsLibrary
     importArchive(input) {
       const scope = canonicalPersistenceScope(input.scope);
       bridge.assertScope(scope);
-      const archive = snapshotVisualDetailArchive(input.archive);
+      const archive = snapshotVisualDetailArchive(throttleImportArchive(input.archive));
       return (async () => {
         const importedContent = new Map<string, { readonly mediaType: VisualAssetMediaType; readonly bytes: Uint8Array }>();
         for (const [index, candidate] of archive.contents.entries()) {
@@ -1392,10 +1398,19 @@ export async function createFileVisualDetailPersistence(
     try {
       await file.writeFile(`${JSON.stringify({ version: 1, scopes })}\n`, "utf8");
       await file.sync();
-    } finally {
+          } finally {
       await file.close();
     }
-    await rename(temporary, storagePath);
+    try {
+      await rename(temporary, storagePath);
+    } catch (error) {
+      try {
+        await unlink(temporary);
+      } catch {
+        // best-effort staging cleanup; failure to unlink must still surface the primary error
+      }
+      throw error;
+    }
     const directoryHandle = await open(directory, "r");
     try {
       await directoryHandle.sync();
@@ -1443,7 +1458,7 @@ export async function createFileVisualDetailPersistence(
     },
     importArchive(input) {
       const prepared = {
-        archive: snapshotVisualDetailArchive(input.archive),
+        archive: snapshotVisualDetailArchive(throttleImportArchive(input.archive)),
         scope: canonicalPersistenceScope(input.scope),
       };
       return serialize(async () => {
@@ -1457,6 +1472,36 @@ export async function createFileVisualDetailPersistence(
       });
     },
   };
+}
+
+
+function normalizeProvenanceFileName(value: string): string {
+  const tail = value.split(/[\\/]/).pop() ?? "";
+  if (tail.length === 0 || tail === "." || tail === ".." || tail.includes("\0")) {
+    throw new VisualAssetsError("accepted_detail_invalid", "Accepted Visual Detail provenance filename is invalid");
+  }
+  return tail;
+}
+
+function throttleImportArchive(archive: VisualDetailArchive): VisualDetailArchive {
+  if (!plainRecord(archive) || Object.keys(archive).sort().join(",") !== "contents,details,version"
+    || archive.version !== 1 || !Array.isArray(archive.details) || !Array.isArray(archive.contents)) {
+    throw new VisualAssetsError("archive_content_invalid", "Visual Detail archive is invalid");
+  }
+  if (archive.details.length > IMPORT_DETAIL_LIMIT) {
+    throw new VisualAssetsError("archive_detail_invalid", `Visual Detail archive details exceed ${IMPORT_DETAIL_LIMIT}`);
+  }
+  if (archive.contents.length > IMPORT_CONTENT_LIMIT) {
+    throw new VisualAssetsError("archive_content_invalid", `Visual Detail archive contents exceed ${IMPORT_CONTENT_LIMIT}`);
+  }
+  let totalBytes = 0;
+  for (const content of archive.contents as { byteLength: number }[]) {
+    totalBytes += content.byteLength;
+    if (totalBytes > IMPORT_TOTAL_INSERT_LIMIT) {
+      throw new VisualAssetsError("archive_content_invalid", "Visual Detail archive total bytes exceed limits");
+    }
+  }
+  return archive;
 }
 
 function validateCanonicalDetailPackage(value: unknown): CanonicalNodeDetailPackage {
