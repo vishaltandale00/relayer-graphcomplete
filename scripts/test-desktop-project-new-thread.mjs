@@ -390,6 +390,11 @@ async function run() {
     document.querySelector('#scopeLabel')?.textContent === ${JSON.stringify(secondProject.name)}
       && document.querySelector('#newThreadPrompt')?.value === ${JSON.stringify(programmaticPrompt)}
   )`));
+  await waitFor("the programmatically populated prompt to reach the main-process store", async () => {
+    const saved = await desktopSettings.read();
+    return saved.composerDrafts?.pendingNewThread?.text === programmaticPrompt
+      && String(saved.composerDrafts?.pendingNewThread?.scope?.projectId) === String(secondProject.id);
+  });
   await setValue("#newThreadPrompt", pendingPrompt);
   await evaluate(`(() => {
     document.querySelector('[data-project-new-thread="${project.id}"]').click();

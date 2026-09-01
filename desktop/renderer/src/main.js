@@ -51,7 +51,6 @@ import {
   revealDesktopWorkspace,
 } from "./desktop-account.js";
 import {
-  clearPendingNewThreadDraft,
   initializeComposerDrafts,
   pendingNewThreadDraft,
   persistPendingNewThreadDraft,
@@ -59,6 +58,20 @@ import {
 import { createLatestRequestGate } from "./navigation-history.js";
 
 const projectComposerGate = createLatestRequestGate();
+const PROJECT_COMPOSER_DESTINATION_SELECTOR = [
+  "#settingsButton",
+  "[data-thread]",
+  "#createThread",
+  "#sendInteraction",
+  "#confirmContextDraftSend",
+  "#historyBack",
+  "#historyForward",
+  "#previousTurn",
+  "#nextTurn",
+  "[data-turn-id]",
+  "#workspaceBreadcrumb button",
+  "#detailActions .action-control",
+].join(", ");
 
 function applyPlatformCopy() {
   const isMac = desktop?.platform === "darwin";
@@ -142,6 +155,7 @@ async function openNewThreadComposer({
   resetNewThreadModelPicker();
   setMainView("new");
   $("#newThreadPrompt").value = resolvedPrompt;
+  persistPendingNewThreadDraft(resolvedPrompt, scope);
   updateCreateThreadAvailability();
   $("#newThreadPrompt").focus();
   return true;
@@ -159,14 +173,18 @@ async function maybeStartAutomaticTutorial(providerConnected) {
 }
 
 function bindEvents() {
-  document.addEventListener("click", () => projectComposerGate.invalidate(), { capture: true });
+  document.addEventListener("click", (event) => {
+    if (event.target.closest(PROJECT_COMPOSER_DESTINATION_SELECTOR)) {
+      projectComposerGate.invalidate();
+    }
+  }, { capture: true });
   $("#newThread").onclick = async () => {
     const request = projectComposerGate.begin();
     const guard = () => projectComposerGate.isCurrent(request);
     takeOverPendingAutomaticTutorial();
     if (!await prepareCurrentWorkspaceTransition() || !guard()) return;
     try {
-      if (await openNewThreadComposer({ guard }) && guard()) clearPendingNewThreadDraft();
+      await openNewThreadComposer({ guard });
     } catch (error) {
       toast(error.message);
     }
@@ -192,7 +210,7 @@ function bindEvents() {
       }
       if (!await prepareCurrentWorkspaceTransition() || !guard()) return;
       const scope = projectScope(project);
-      const opened = await openNewThreadComposer({
+      await openNewThreadComposer({
         prompt: () => (
           viewState.mainView === "new"
             ? $("#newThreadPrompt").value
@@ -201,9 +219,6 @@ function bindEvents() {
         scope,
         guard,
       });
-      if (opened && guard()) {
-        persistPendingNewThreadDraft($("#newThreadPrompt").value, scope);
-      }
     })().catch((error) => toast(error.message));
   };
   $("#scopeButton").onclick = () => {

@@ -39,5 +39,14 @@ describe("composer draft persistence", () => {
 
     clearThreadFollowupDraft("failed:1");
     expect(threadFollowupDraft("failed:1")).toBeNull();
+
+    for (let index = 0; index < 300; index += 1) {
+      persistThreadFollowupDraft(`unsent:${index}`, `draft ${index}`);
+    }
+    const persisted = JSON.parse(values.get("relayerComposerDraftsV1")).threadFollowups;
+    expect(Object.keys(persisted)).toHaveLength(256);
+    expect(threadFollowupDraft("unsent:43")).toBeNull();
+    expect(threadFollowupDraft("unsent:44")).toBe("draft 44");
+    expect(threadFollowupDraft("unsent:299")).toBe("draft 299");
   });
 });

@@ -1,4 +1,5 @@
 const STORAGE_KEY = "relayerComposerDraftsV1";
+const MAX_THREAD_FOLLOWUP_DRAFTS = 256;
 let desktopState = emptyState();
 let desktopInitialized = false;
 
@@ -90,8 +91,14 @@ export function threadFollowupDraft(scopeKey) {
 export function persistThreadFollowupDraft(scopeKey, text, { preserveEmpty = false } = {}) {
   if (!scopeKey) return;
   const state = readState();
-  if (text || preserveEmpty) state.threadFollowups[scopeKey] = text;
-  else delete state.threadFollowups[scopeKey];
+  delete state.threadFollowups[scopeKey];
+  if (text || preserveEmpty) {
+    state.threadFollowups[scopeKey] = text;
+    const keys = Object.keys(state.threadFollowups);
+    for (const staleKey of keys.slice(0, -MAX_THREAD_FOLLOWUP_DRAFTS)) {
+      delete state.threadFollowups[staleKey];
+    }
+  }
   writeState(state);
 }
 

@@ -978,9 +978,9 @@ describe("onboarding tutorial controller", () => {
     expect(onboarding).toContain("&& isComposerReady()");
     expect(onboarding).toContain("cancelPendingAutomatic,");
     expect(main).toContain("if (pendingNewThreadDraft()?.text) return false;");
-    expect(main).toContain(
-      'document.addEventListener("click", () => projectComposerGate.invalidate(), { capture: true });',
-    );
+    expect(main).toContain("PROJECT_COMPOSER_DESTINATION_SELECTOR");
+    expect(main.indexOf('$("#newThreadPrompt").value = resolvedPrompt;'))
+      .toBeLessThan(main.indexOf("persistPendingNewThreadDraft(resolvedPrompt, scope);"));
     expect(main.match(/takeOverPendingAutomaticTutorial\(\);/g)).toHaveLength(6);
     expect(main).toContain(`$("#newThreadPrompt").oninput = () => {
     takeOverPendingAutomaticTutorial();`);
