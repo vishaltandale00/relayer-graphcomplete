@@ -8,7 +8,22 @@
     "positive": "positive.json",
     "negative": "negative.json",
     "values": "values.json",
-    "limits": "limits.json"
+    "limits": "limits.json",
+    "hardening": "hardening-354.json"
+  },
+  "qualificationEvidence": {
+    "historicalReceipt": {
+      "issue": 261,
+      "positiveFile": "positive.json",
+      "immutable": true
+    },
+    "currentConformance": [
+      {
+        "issue": 354,
+        "file": "hardening-354.json",
+        "runner": "crates/relayer-graph-server/tests/graph_query_v1_conformance.rs"
+      }
+    ]
   },
   "publicCandidateSources": ["structural"],
   "pathMatchMode": "relationship_unique_trail",
@@ -82,7 +97,7 @@
   "coverage": [
     {
       "checkpoint": "grammar-and-typed-plan",
-      "cases": ["whole-target-scan", "one-hop-connected", "two-hop-connected", "distinct-list-record-comparisons-comment-semicolon", "aggregate-allowlist", "reverse-directed-limit-parameter-null-test", "reverse-directed-path", "disconnected-contains-navigation-no-occurrence-constraint", "root-action-query", "reverse-edge-reuse-no-match", "reject-variable-length", "reject-three-hop", "reject-split-three-hop", "reject-dynamic-label", "reject-dynamic-field", "reject-unlabeled-zero-hop", "reject-untyped-empty-list", "reject-mutation", "reject-ddl", "reject-procedure", "reject-extension-load", "reject-duplicate-column", "reject-non-count-star", "reject-count-distinct-star", "reject-nested-aggregate"]
+      "cases": ["whole-target-scan", "one-hop-connected", "two-hop-connected", "distinct-list-record-comparisons-comment-semicolon", "aggregate-allowlist", "reverse-directed-limit-parameter-null-test", "reverse-directed-path", "disconnected-contains-navigation-no-occurrence-constraint", "root-action-query", "reverse-edge-reuse-no-match", "reject-variable-length", "reject-three-hop", "reject-split-three-hop", "reject-dynamic-label", "reject-dynamic-field", "reject-unlabeled-zero-hop", "reject-untyped-empty-list", "reject-mutation", "reject-ddl", "reject-procedure", "reject-extension-load", "reject-duplicate-column", "reject-non-count-star", "reject-count-distinct-star", "reject-nested-aggregate", "read-only-keyword-identifiers", "read-only-unsupported-keyword-identifiers", "engine-safe-relationship-path-and-record-identifiers", "reject-explicit-endpoint-label-contradiction", "reject-inferred-endpoint-label-contradiction", "reject-unbound-return-identifier", "reject-actual-unsupported-union", "reject-actual-unsupported-case-expression", "reject-actual-unsupported-exists-function", "reject-vector-function-after-valid-predicate", "reject-vector-function-as-comparison-value", "reject-zero-hop-path-binding", "reject-path-node-binding-collision", "reject-path-relationship-binding-collision", "reject-duplicate-path-binding", "reject-node-relationship-binding-collision", "reject-duplicate-relationship-binding", "reject-prior-path-relationship-binding-collision", "reject-malformed-node-before-path-binding-collision", "reject-malformed-relationship-before-node-binding-collision", "reject-prior-path-node-binding-collision", "reject-prior-relationship-node-binding-collision", "reject-later-syntax-before-relationship-binding-collision", "reject-later-syntax-before-node-binding-collision", "reject-later-syntax-before-zero-hop-path-binding", "reject-later-syntax-before-path-binding-collision", "reject-later-syntax-before-endpoint-contradiction", "reject-later-syntax-before-unbound-return", "reject-first-plan-error-remains-deterministic", "reject-later-syntax-before-unknown-label", "reject-later-syntax-before-unknown-relationship-type", "reject-later-syntax-before-ast-depth", "reject-first-plan-error-before-later-unknown-label", "reject-first-plan-error-before-later-unknown-relationship-type", "reject-first-plan-error-before-later-ast-depth"]
     },
     {
       "checkpoint": "selector-vs-authority",
@@ -94,7 +109,7 @@
     },
     {
       "checkpoint": "typed-wire-algebra",
-      "cases": ["all-wire-types", "i64-extrema", "negative-zero", "nested-record-list-path", "typed-empty-list-parameter", "typed-empty-nested-list", "homogeneous-record-list", "reject-heterogeneous-list", "reject-engine-heterogeneous-list", "reject-record-shape-list", "reject-nan", "reject-positive-infinity", "reject-negative-infinity", "reject-duplicate-record-field"]
+      "cases": ["all-wire-types", "i64-extrema", "negative-zero", "nested-record-list-path", "typed-empty-list-parameter", "typed-empty-nested-list", "homogeneous-record-list", "reject-heterogeneous-list", "reject-engine-heterogeneous-list", "reject-record-shape-list", "reject-nan", "reject-positive-infinity", "reject-negative-infinity", "reject-duplicate-record-field", "reject-noncanonical-node-identity", "reject-noncanonical-layer-identity"]
     },
     {
       "checkpoint": "ordering-null-numeric-absence",
@@ -110,7 +125,7 @@
     },
     {
       "checkpoint": "compatibility-and-future-seam",
-      "cases": ["reject-version-two", "structural-candidate-source", "reject-vector-syntax"]
+      "cases": ["reject-version-two", "structural-candidate-source", "reject-vector-syntax", "reject-vector-function-after-valid-predicate", "reject-vector-function-as-comparison-value"]
     }
   ],
   "grammarFeatures": [
@@ -122,17 +137,17 @@
     { "feature": "undirected-connected", "cases": ["one-hop-connected", "connected-no-double-count"] },
     { "feature": "forward-directed-relationship", "cases": ["membership-placement", "layer-action-path"] },
     { "feature": "reverse-directed-relationship", "cases": ["reverse-directed-limit-parameter-null-test", "reverse-directed-path"] },
-    { "feature": "path-alias", "cases": ["one-hop-connected", "layer-action-path"] },
-    { "feature": "relationship-alias", "cases": ["one-hop-connected", "membership-placement"] },
+    { "feature": "path-alias", "cases": ["one-hop-connected", "layer-action-path", "engine-safe-relationship-path-and-record-identifiers", "reject-zero-hop-path-binding", "reject-path-node-binding-collision", "reject-path-relationship-binding-collision", "reject-duplicate-path-binding", "reject-malformed-node-before-path-binding-collision", "reject-prior-path-node-binding-collision", "reject-later-syntax-before-zero-hop-path-binding", "reject-later-syntax-before-path-binding-collision"] },
+    { "feature": "relationship-alias", "cases": ["one-hop-connected", "membership-placement", "engine-safe-relationship-path-and-record-identifiers", "reject-node-relationship-binding-collision", "reject-duplicate-relationship-binding", "reject-prior-path-relationship-binding-collision", "reject-malformed-relationship-before-node-binding-collision", "reject-prior-relationship-node-binding-collision", "reject-later-syntax-before-relationship-binding-collision", "reject-later-syntax-before-node-binding-collision", "reject-first-plan-error-remains-deterministic"] },
     { "feature": "parameterized-predicate", "cases": ["thread-selector"] },
     { "feature": "all-comparison-operators", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
     { "feature": "null-test", "cases": ["reverse-directed-limit-parameter-null-test"] },
     { "feature": "absence-test", "cases": ["property-absence"] },
-    { "feature": "return-alias", "cases": ["whole-target-scan"] },
+    { "feature": "return-alias", "cases": ["whole-target-scan", "read-only-keyword-identifiers", "read-only-unsupported-keyword-identifiers"] },
     { "feature": "return-distinct", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
     { "feature": "list-expression", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
     { "feature": "typed-empty-list-expression", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
-    { "feature": "record-expression", "cases": ["distinct-list-record-comparisons-comment-semicolon"] },
+    { "feature": "record-expression", "cases": ["distinct-list-record-comparisons-comment-semicolon", "engine-safe-relationship-path-and-record-identifiers"] },
     { "feature": "aggregate-count-star-and-distinct", "cases": ["aggregate-allowlist"] },
     { "feature": "aggregate-min-max-sum-avg-collect", "cases": ["aggregate-allowlist"] },
     { "feature": "order-asc-null-last", "cases": ["explicit-order-null-last"] },

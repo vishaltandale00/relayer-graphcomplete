@@ -219,6 +219,63 @@ struct Lowering {
     parameters: Vec<(String, Value)>,
 }
 
+fn engine_safe_binding(binding: &str) -> String {
+    format!("relayer_user_{binding}")
+}
+
+fn rename_expression_bindings(expression: &mut Expression) {
+    match expression {
+        Expression::Binding { binding } => *binding = engine_safe_binding(binding),
+        Expression::Property { property } => {
+            property.binding = engine_safe_binding(&property.binding);
+        }
+        Expression::List { items } => items.iter_mut().for_each(rename_expression_bindings),
+        Expression::Record { fields } => fields
+            .iter_mut()
+            .for_each(|field| rename_expression_bindings(&mut field.value)),
+        Expression::Aggregate { argument, .. } => {
+            if let Some(argument) = argument {
+                rename_expression_bindings(argument);
+            }
+        }
+        Expression::Parameter { .. } => {}
+    }
+}
+
+/// Ladybug's dialect reserves words that remain valid public v1 identifiers.
+/// Lower through private, collision-free names so engine syntax never narrows
+/// the frozen public identifier grammar.
+fn engine_safe_plan(plan: &QueryPlan) -> QueryPlan {
+    let mut plan = plan.clone();
+    for pattern in &mut plan.patterns {
+        if let Some(binding) = &mut pattern.path_binding {
+            *binding = engine_safe_binding(binding);
+        }
+        for node in &mut pattern.nodes {
+            node.binding = engine_safe_binding(&node.binding);
+        }
+        for relationship in &mut pattern.relationships {
+            if let Some(binding) = &mut relationship.binding {
+                *binding = engine_safe_binding(binding);
+            }
+            relationship.from = engine_safe_binding(&relationship.from);
+            relationship.to = engine_safe_binding(&relationship.to);
+        }
+    }
+    for predicate in &mut plan.predicates {
+        let property = match predicate {
+            Predicate::PropertyComparison { property, .. }
+            | Predicate::NullTest { property, .. }
+            | Predicate::AbsenceTest { property, .. } => property,
+        };
+        property.binding = engine_safe_binding(&property.binding);
+    }
+    for column in &mut plan.projection.columns {
+        rename_expression_bindings(&mut column.expression);
+    }
+    plan
+}
+
 /// Build the engine query for a plan, confined to `authorized`.
 fn lower(
     plan: &QueryPlan,
@@ -226,6 +283,8 @@ fn lower(
     authorized: SearchTarget,
     limits: &QueryLimits,
 ) -> Result<Lowering, QueryError> {
+    let engine_plan = engine_safe_plan(plan);
+    let plan = &engine_plan;
     let mut bound = Vec::new();
     let mut target_parameter = "__relayer_target".to_owned();
     while parameters.contains_key(&target_parameter) {
@@ -838,7 +897,14 @@ fn lower_expression(plan: &QueryPlan, expression: &Expression) -> String {
             "{{{}}}",
             fields
                 .iter()
-                .map(|field| format!("{}:{}", field.name, lower_expression(plan, &field.value)))
+                .enumerate()
+                .map(|(index, field)| {
+                    format!(
+                        "{}:{}",
+                        engine_safe_record_field(index),
+                        lower_expression(plan, &field.value)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(",")
         ),
@@ -867,6 +933,10 @@ fn lower_expression(plan: &QueryPlan, expression: &Expression) -> String {
             }
         }
     }
+}
+
+fn engine_safe_record_field(index: usize) -> String {
+    format!("relayer_field_{index}")
 }
 
 fn collect_expression_parameters(
@@ -995,6 +1065,7 @@ fn restore_parameter_values(
                 .and_then(JsonValue::as_array_mut)
             {
                 for (value, field) in values.iter_mut().zip(fields) {
+                    value["name"] = JsonValue::String(field.name.clone());
                     value["value"] = restore_parameter_values(
                         plan,
                         &field.value,

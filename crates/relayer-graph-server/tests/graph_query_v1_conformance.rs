@@ -199,6 +199,64 @@ async fn frozen_negative_cases_return_exact_stable_errors() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn frozen_issue_354_hardening_corpus_conforms_through_real_ladybug() {
+    let (_directory, index) = contract_index();
+    let corpus = fixture("hardening-354.json");
+    let target = SearchTarget::Thread(ThreadId::new(41).unwrap());
+    let permit = QueryReadPermit::for_contract_test(target);
+
+    for case in corpus["positiveCases"].as_array().expect("positiveCases") {
+        let outcome = index
+            .query(
+                &permit,
+                &request_json(&request_for(case)),
+                QueryCancellation::default(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{}: {error:?}", case["id"]));
+        assert_eq!(
+            outcome.outcome.to_json(),
+            case["expectedResult"],
+            "{}",
+            case["id"]
+        );
+    }
+
+    for case in corpus["negativeCases"].as_array().expect("negativeCases") {
+        let error = index
+            .query(
+                &permit,
+                &request_json(&request_for(case)),
+                QueryCancellation::default(),
+            )
+            .await
+            .expect_err(case["id"].as_str().expect("id"));
+        let GraphQueryFailure::Contract(error) = error else {
+            panic!("{} returned a non-contract failure", case["id"]);
+        };
+        let expected = &case["expectedError"];
+        assert_eq!(
+            error.code.as_str(),
+            expected["code"].as_str().unwrap(),
+            "{}",
+            case["id"]
+        );
+        assert_eq!(
+            error.phase.as_str(),
+            expected["phase"].as_str().unwrap(),
+            "{}",
+            case["id"]
+        );
+        assert_eq!(
+            error.path,
+            expected["path"].as_str().unwrap(),
+            "{}",
+            case["id"]
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn raw_envelope_and_complete_parameter_planning_precede_authority_and_readiness() {
     let (_directory, index) = contract_index();
     let damaged = SearchTarget::Thread(ThreadId::new(41).unwrap());

@@ -118,6 +118,49 @@ fn every_frozen_positive_plan_matches_the_contract_shape() {
 }
 
 #[test]
+fn frozen_issue_354_hardening_cases_match_the_public_planner_contract() {
+    let corpus = fixture("hardening-354.json");
+    for case in corpus["positiveCases"].as_array().expect("positiveCases") {
+        let mut envelope = request(case["query"].as_str().expect("query"));
+        envelope.parameters = case["parameters"].as_object().cloned().unwrap_or_default();
+        let plan = plan_request(&envelope, &QueryLimits::default())
+            .unwrap_or_else(|error| panic!("{}: {error}", case["id"]));
+        assert_eq!(
+            serde_json::to_value(plan).unwrap(),
+            case["expectedPlan"],
+            "{}",
+            case["id"]
+        );
+    }
+
+    for case in corpus["negativeCases"].as_array().expect("negativeCases") {
+        let mut envelope = request(case["query"].as_str().expect("query"));
+        envelope.parameters = case["parameters"].as_object().cloned().unwrap_or_default();
+        let error = plan_request(&envelope, &QueryLimits::default())
+            .expect_err(case["id"].as_str().expect("id"));
+        let expected = &case["expectedError"];
+        assert_eq!(
+            error.code.as_str(),
+            expected["code"].as_str().unwrap(),
+            "{}",
+            case["id"]
+        );
+        assert_eq!(
+            error.phase.as_str(),
+            expected["phase"].as_str().unwrap(),
+            "{}",
+            case["id"]
+        );
+        assert_eq!(
+            error.path,
+            expected["path"].as_str().unwrap(),
+            "{}",
+            case["id"]
+        );
+    }
+}
+
+#[test]
 fn frozen_negative_cases_are_refused_at_or_before_their_contract_phase() {
     let negative = fixture("negative.json");
     let order = [
