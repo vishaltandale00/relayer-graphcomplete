@@ -99,7 +99,9 @@ describe("Prime Agent packaged runtime", () => {
     expect(JSON.stringify(lockfile)).not.toContain("prime-agent/packages/");
   });
 
-  it("discovers the browser route through Prime's bundled Python skill semantics", async () => {
+  // The first dynamic import of the vendored Prime package plus the bundled
+  // skill-directory scan exceeded the default 5s timeout on loaded runners.
+  it("discovers the browser route through Prime's bundled Python skill semantics", { timeout: 30_000 }, async () => {
     const { loadSkillsFromDir } = await import("@earendil-works/pi-coding-agent");
     const packageRoot = resolve(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "..");
     const { skills } = loadSkillsFromDir({ dir: join(packageRoot, "skills"), source: "builtin" });
