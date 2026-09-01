@@ -62,6 +62,13 @@ describe("Eval harness configuration availability", () => {
     })).toThrow("Unsupported Relayer Desktop target: linux-x64.");
   });
 
+  it("records the package.json product version on unpackaged Eval exports", async () => {
+    const evalMain = await readFile(new URL("../desktop/eval-main/index.mjs", import.meta.url), "utf8");
+    expect(evalMain).toContain("const desktopVersion = app.isPackaged ? app.getVersion() : (metadata.version || app.getVersion());");
+    expect(evalMain).toContain("desktopVersion,");
+    expect(evalMain).not.toContain("desktopVersion: app.getVersion()");
+  });
+
   it("includes Prime configurations when the development package is available", () => {
     const packageAvailable = vi.fn(() => true);
 
