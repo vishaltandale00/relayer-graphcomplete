@@ -22,6 +22,7 @@ import {
   gradeH3Workspace,
   gradeFrontierProjectWorkspace,
   H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
   H3_PROJECT_CASE_ID,
   H3_UPSTREAM_COMMIT,
@@ -48,6 +49,9 @@ import {
   RECURSIVE_GRAPH_MEMORY_CASE_ID,
   RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET,
   selectStandalonePermissionProfile,
+  isSteeredMultiTurn,
+  steeredMaxHumanTurns,
+  parseSteeringDecision,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
 import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
@@ -413,6 +417,7 @@ function isNaturalPriorWorkQueryShape(query, escapedParameterName) {
 const h3CaseIds = new Set([
   H3_PROJECT_CASE_ID,
   H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
 ]);
 const projectCaseIds = new Set([...h3CaseIds, ...frontierAutonomousCaseIds, ...calibrationAutonomousCaseIds]);
@@ -1079,6 +1084,7 @@ export class EvalService {
     configurationPaths,
     onChanged = () => {},
     simulatedUserJudgeRunner = null,
+    steeringDecisionRunner = null,
     projectFixtureMaterializer = materializeH3ProjectFixture,
     workspaceGrader = gradeH3Workspace,
     frontierProjectFixtureMaterializer = materializeFrontierProjectFixture,
@@ -1102,6 +1108,7 @@ export class EvalService {
     this.configurationPaths = configurationPaths;
     this.onChanged = onChanged;
     this.simulatedUserJudgeRunner = simulatedUserJudgeRunner;
+    this.steeringDecisionRunner = steeringDecisionRunner;
     this.projectFixtureMaterializer = projectFixtureMaterializer;
     this.workspaceGrader = workspaceGrader;
     this.frontierProjectFixtureMaterializer = frontierProjectFixtureMaterializer;
@@ -1373,7 +1380,7 @@ export class EvalService {
       && !item.requiredJudgeConfigurationIds.includes(judgeConfigurationName)
     ));
     if (incompatibleJudgeCase) {
-      throw new Error("Input round-trip cases require a compatible simulated-user judge configuration.");
+      throw new Error("Selected cases require a compatible simulated-user judge configuration.");
     }
     const selectsGraphSearch = Array.isArray(harnessConfigurationNames)
       && harnessConfigurationNames.some((name) => (
@@ -2390,19 +2397,47 @@ export class EvalService {
       const workspaceChecks = new Map();
       const workspaceArtifacts = new Map();
       const permissionResolution = execution.permissionProfileResolutions[threadIndex];
+      const steered = isSteeredMultiTurn(definition) || isSteeredMultiTurn(threadDefinition);
+      if (steered) {
+        if (!simulatedUserJudgeIds.has(execution.judgeConfiguration.name)) {
+          throw new Error("Steered multi-turn cases require a simulated-user judge configuration.");
+        }
+        if (typeof this.steeringDecisionRunner !== "function") {
+          throw new Error("Steered multi-turn cases require a simulated-user steering decision runner.");
+        }
+      }
       const executed = await this.#createAndRunThread({
         execution,
         title: `${definition.name} · ${threadDefinition.name}`,
         prompts: threadDefinition.prompts,
         projectId: project.id,
         permissionProfileId: permissionResolution.effectiveProfileId,
+        nextFollowUp: steered
+          ? async ({ interaction, humanTurnCount }) => {
+            const maxTurns = steeredMaxHumanTurns(definition);
+            if (!interaction.completionOutput || humanTurnCount >= maxTurns) return null;
+            const decision = parseSteeringDecision(await this.steeringDecisionRunner({
+              openingPrompt: threadDefinition.prompts[0],
+              simulatedUserBrief: definition.simulatedUserBrief || threadDefinition.simulatedUserBrief,
+              remainingHumanTurns: maxTurns - humanTurnCount,
+              lastTurnSummary: summarizeAcceptedInteraction(interaction),
+              interactionId: String(interaction.id),
+            }));
+            execution.steeringDecisions = [...(execution.steeringDecisions || []), copy(decision)];
+            return decision.kind === "follow-up" ? decision.text : null;
+          }
+          : null,
         afterTurn: async (interactionId, promptIndex) => {
           workspaceArtifacts.set(String(interactionId), await captureTurnArtifactSnapshot(
             execution,
             workspaceDirectory,
             interactionId,
           ));
-          if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
+          if (
+            threadDefinition.mutationPolicy === "read-only"
+            || steered
+            || promptIndex === threadDefinition.prompts.length - 1
+          ) {
             workspaceChecks.set(String(interactionId), isH3
               ? await this.workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade })
               : isCalibration
@@ -2416,7 +2451,7 @@ export class EvalService {
     return executedThreads;
   }
 
-  async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {} }) {
+  async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {}, nextFollowUp = null }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
     let selectedModel = execution.pinnedModelResolution?.selectedModel;
     let productModelSelection = execution.pinnedModelResolution?.productModelSelection;
@@ -2465,18 +2500,43 @@ export class EvalService {
     const rootInteraction = await this.#waitForInteraction(execution, thread.id, thread.rootInteractionId);
     await this.#captureCandidateTrace(execution, rootInteraction);
     await afterTurn(thread.rootInteractionId, 0);
-    for (const [offset, prompt] of prompts.slice(1).entries()) {
-      const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
-        method: "POST",
-        body: {
-          text: prompt,
-          ...evalModelSelectionRequest(selectedModel, productModelSelection),
-        },
-      });
-      humanInteractionIds.push(interaction.id);
-      const completedInteraction = await this.#waitForInteraction(execution, thread.id, interaction.id);
-      await this.#captureCandidateTrace(execution, completedInteraction);
-      await afterTurn(interaction.id, offset + 1);
+    if (typeof nextFollowUp === "function") {
+      let lastInteraction = rootInteraction;
+      let promptIndex = 0;
+      while (true) {
+        const followUp = await nextFollowUp({
+          interaction: lastInteraction,
+          promptIndex,
+          humanTurnCount: promptIndex + 1,
+        });
+        if (typeof followUp !== "string" || followUp.trim() === "") break;
+        const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
+          method: "POST",
+          body: {
+            text: followUp,
+            ...evalModelSelectionRequest(selectedModel, productModelSelection),
+          },
+        });
+        humanInteractionIds.push(interaction.id);
+        lastInteraction = await this.#waitForInteraction(execution, thread.id, interaction.id);
+        await this.#captureCandidateTrace(execution, lastInteraction);
+        promptIndex += 1;
+        await afterTurn(interaction.id, promptIndex);
+      }
+    } else {
+      for (const [offset, prompt] of prompts.slice(1).entries()) {
+        const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
+          method: "POST",
+          body: {
+            text: prompt,
+            ...evalModelSelectionRequest(selectedModel, productModelSelection),
+          },
+        });
+        humanInteractionIds.push(interaction.id);
+        const completedInteraction = await this.#waitForInteraction(execution, thread.id, interaction.id);
+        await this.#captureCandidateTrace(execution, completedInteraction);
+        await afterTurn(interaction.id, offset + 1);
+      }
     }
     const { detail, semanticChildren } = await this.#waitForSemanticChildren(
       execution,
@@ -3097,6 +3157,21 @@ function emptyTraceCoverage() {
     childStreams: "none",
     nativeArtifacts: "none",
   };
+}
+
+function summarizeAcceptedInteraction(interaction) {
+  const root = interaction?.completionOutput?.rootLayer;
+  const nodes = root?.nodes || root?.layer?.nodes || [];
+  const titles = [];
+  for (const node of nodes) {
+    const title = node?.title || node?.node?.title;
+    if (typeof title === "string" && title.trim() !== "") titles.push(title.trim());
+  }
+  if (titles.length > 0) return titles.join("; ");
+  if (typeof interaction?.completionStatus === "string") {
+    return `Turn ${interaction.completionStatus}.`;
+  }
+  return "Accepted graph.";
 }
 
 function disabledCandidateTrace() {

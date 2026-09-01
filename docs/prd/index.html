@@ -2324,6 +2324,18 @@ settings:
 <tr><td>Implementation</td><td>Build or repair behavior and verify it</td><td>Writable</td><td>Diff, protected-file hashes, public and hidden checks, build results, and commits</td></tr>
 </tbody></table>
 <p>Each thread may contain multiple turns. An analytical follow-up may ask the harness to inspect more deeply, challenge its prior answer, or refine an accepted graph. A mutating follow-up that requires another commit must introduce a meaningful additional requirement. It must not reward an empty or cosmetic commit merely to satisfy turn count. The execution records each turn, repository state, commit boundary, and accepted graph independently. Earlier accepted turn displays remain immutable.</p>
+<h3>13.2.2 Single-turn and steered multi-turn variants</h3>
+<p>Each hard-task capability family has two catalog members that share fixture, verifier, and outcome rubric identity and differ only in how the human participates.</p>
+<table>
+<thead><tr><th>Variant</th><th>Human participation</th><th>What the simulated-user judge does</th></tr></thead>
+<tbody>
+<tr><td>Single-turn</td><td>One opening message. One <code>complete()</code>. No later user text.</td><td>After acceptance it reviews the production workspace. It does not send follow-ups.</td></tr>
+<tr><td>Steered multi-turn</td><td>One opening message, then simulated-user authored follow-ups until the user stops, abandons, or hits the turn budget.</td><td>After each accepted human root it explores the visible graph and chooses the next ordinary product action: send a follow-up, accept the work as done, or abandon. Presentation grades stay independent of the outcome verifier.</td></tr>
+</tbody></table>
+<p>This is not the same as a scripted two-prompt thread. Evaluator-authored follow-up text is forbidden on the steered member. The opening prompt is a realistic user request; later messages come from the simulated user after seeing the accepted graph.</p>
+<p>A model turn ending is still not graph completion, and Relayer still owns one-active-human-root-completion per thread. The simulated user cannot start a second human <code>complete()</code> while one is in flight. Steering waits for the current human root to accept, stop, or fail. Published V2 current remains a read-only working surface during that in-flight complete; using it as a live observation channel is a later slice and does not create a concurrent human root.</p>
+<p>Input-action answers remain the existing operator path. They do not replace follow-up messages, and they do not let presentation quality offset verifier failure. The same sealed verifier grades both variants from the final workspace.</p>
+<p>The ten Issue #278 families are specified as this pair even when their fixtures still live in the external capability-eval snapshot. Relayer’s first executable steered member is the H3 status-code repair. Member IDs use <code>.single-turn</code> and <code>.multi-turn</code> suffixes on the family id, except already-published one-shot IDs which remain the single-turn member.</p>
 <p>The catalog verifies every object digest before use and garbage-collects only unreferenced materializations and runs according to an explicit retention policy. Checked-in case/config/judge JSON stays small enough to review normally in pull requests.</p>
 <h3>13.3 Runner execution</h3>
 <p>Local commands are standardized target interfaces:</p>

@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
   HTTPX_PROXY_AUTH_REPORT_CASE_ID,
   OFETCH_RETRY_METHODS_CASE_ID,
@@ -279,6 +280,7 @@ describe("EvalService simulated-user result persistence", () => {
     ]);
     expect(service.catalog().cases.filter(({ caseSnapshot }) => caseSnapshot).map(({ id }) => id)).toEqual([
       H3_AUTONOMOUS_FIX_CASE_ID,
+      H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
       H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
       OFETCH_RETRY_METHODS_CASE_ID,
       TRUE_MYTH_INSPECT_BOTH_CASE_ID,
@@ -440,7 +442,30 @@ describe("EvalService simulated-user result persistence", () => {
       harnessConfigurationNames: ["fixture-task-system"],
       judgeConfigurationName: "deterministic-graph-contract",
     })).rejects.toThrow(
-      "Input round-trip cases require a compatible simulated-user judge configuration.",
+      "Selected cases require a compatible simulated-user judge configuration.",
+    );
+  });
+
+  it("rejects a steered multi-turn run with the deterministic judge before execution", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      simulatedUserJudgeRunner: vi.fn(),
+    }).open();
+
+    const steered = service.catalog().cases.find(({ id }) => id === H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID);
+    expect(steered).toMatchObject({
+      interactionVariant: "multi-turn",
+      requiredJudgeConfigurationIds: ["simulated-user", "simulated-user-sol-high"],
+    });
+    await expect(service.createRun({
+      testCaseIds: [H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow(
+      "Selected cases require a compatible simulated-user judge configuration.",
     );
   });
 

@@ -28,6 +28,7 @@ import {
   captureGroundingTargets,
   createInputOperatorLease,
   createLocalSimulatedUserJudgeRunner,
+  createLocalSimulatedUserSteeringRunner,
   groundingCaptureTargets,
   incompleteInputRoundTripEvidence,
   operatorInteractionIsTerminal,
@@ -537,11 +538,15 @@ async function start() {
     createInputOperator: (input) => createScopedInputOperator(productSession, input),
     captureInputRoundTrip: (input) => captureInputRoundTripEvidence(productSession, input),
   });
+  const steeringDecisionRunner = createLocalSimulatedUserSteeringRunner({
+    resolveCodexRuntime: () => managedCodexRuntime.resolve(),
+  });
   evalService = await new EvalService({
     stateFile: evalStateFile,
     productSession,
     configurationPaths,
     simulatedUserJudgeRunner,
+    steeringDecisionRunner,
     candidateTraceExporter: (productInteractionId, targetDirectory, correlation) => (
       graphRuntime.exportCandidateTrace(productInteractionId, targetDirectory, correlation)
     ),
