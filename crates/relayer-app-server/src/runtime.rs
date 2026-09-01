@@ -1935,6 +1935,13 @@ const PERSONAL_PRESENTATION_V2_NODES: &[PersonalPresentationNodeDefinition] = &[
         title: "Visible working state",
         detail: "For work that will not finish immediately, prefer establishing a useful current early and advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress even when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates.",
     },
+    PersonalPresentationNodeDefinition {
+        client_key: "authored-visual-node-details",
+        kind: "presentation-preference",
+        icon: "layout-template",
+        title: "Authored visual Node Details",
+        detail: "When a node's detail benefits from visual presentation, author a compiled visual Node Detail through the node detail authoring API instead of plain Markdown: structured HTML with authored CSS layout, placed visual assets, and capability controls such as links, invokes, inputs, expands, and references. Keep the authored page self-contained, keyboard operable, and accessible, and let authored actions live inside the detail page rather than a separate action tray.",
+    },
 ];
 
 fn personal_presentation_definition(
@@ -1956,8 +1963,8 @@ fn personal_presentation_definition(
         "personal-presentation-v2" => Ok(PersonalPresentationDefinition {
             interaction_text: "Personal presentation V2",
             nodes: PERSONAL_PRESENTATION_V2_NODES,
-            edges: &[[0, 1], [0, 2]],
-            placements: &[[0.5, 0.2], [0.25, 0.75], [0.75, 0.75]],
+            edges: &[[0, 1], [0, 2], [0, 3]],
+            placements: &[[0.5, 0.15], [0.2, 0.75], [0.5, 0.8], [0.8, 0.75]],
         }),
         _ => Err(RuntimeError::Configuration(format!(
             "unknown personal presentation version {version_key}"
@@ -3521,9 +3528,10 @@ mod tests {
                 "Decision-useful center",
                 "Adaptive progressive disclosure",
                 "Visible working state",
+                "Authored visual Node Details",
             ]
         );
-        assert_eq!(v2.closure.layers[0].edges.len(), 2);
+        assert_eq!(v2.closure.layers[0].edges.len(), 3);
         assert_eq!(
             v2.closure.layers[0]
                 .edges
@@ -3539,7 +3547,16 @@ mod tests {
                     v2.closure.layers[0].nodes[0].id,
                     v2.closure.layers[0].nodes[2].id,
                 ],
+                [
+                    v2.closure.layers[0].nodes[0].id,
+                    v2.closure.layers[0].nodes[3].id,
+                ],
             ]
+        );
+        assert!(
+            v2.closure.layers[0].nodes[3]
+                .detail
+                .contains("compiled visual Node Detail")
         );
         assert!(
             v2.closure.layers[0].nodes[2]
@@ -3557,7 +3574,7 @@ mod tests {
                 .iter()
                 .map(|placement| (placement.x, placement.y))
                 .collect::<Vec<_>>(),
-            vec![(0.5, 0.2), (0.25, 0.75), (0.75, 0.75)]
+            vec![(0.5, 0.15), (0.2, 0.75), (0.5, 0.8), (0.8, 0.75)]
         );
         let replay = runtime
             .ensure_personal_presentation_version("personal-presentation-v1")

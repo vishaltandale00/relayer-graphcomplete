@@ -49,6 +49,7 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "claude-basic.yaml"),
     join(harnessDirectory, "codex-layered-personal-presentation-v0.yaml"),
     join(harnessDirectory, "codex-layered-personal-presentation-v1.yaml"),
+    join(harnessDirectory, "codex-layered-personal-presentation-v2.yaml"),
   ];
   if (!isPackaged && packageAvailable(primeAgentPackage)) {
     paths.push(
