@@ -5,8 +5,8 @@ import { edgeId, layerId, nodeId } from "../src/objects.js";
 describe("agent-facing graph objects", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("does not require the model to invent durable IDs", () => {
-    const node = new NodeObject("queue", "Queue", "Waiting work", "concept", "queue");
+  it("does not require the model to invent durable IDs", async () => {
+    const node = new NodeObject("box", "Queue", "Waiting work", "concept", "queue");
     const edge = new EdgeObject([node, 9], "queue-worker");
     const layer = new LayerObject(
       [node, 9],
@@ -17,7 +17,10 @@ describe("agent-facing graph objects", () => {
     expect(() => nodeId(node)).toThrow("must be submitted");
     expect(() => edgeId(edge)).toThrow("must be created");
     expect(() => layerId(layer)).toThrow("must be submitted");
-    node.ref = { id: 10, kind: "concept", icon: "queue", title: "Queue", detail: "Waiting work", state: "draft" };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: { id: 10, kind: "concept", icon: "box", title: "Queue", detail: "Waiting work", state: "draft" },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node);
     edge.ref = { id: 20, endpoints: [9, 10], state: "draft" };
     layer.ref = { id: 30, nodes: [10, 9], edges: [20], state: "draft" };
     expect([nodeId(node), edgeId(edge), layerId(layer)]).toEqual([10, 20, 30]);
@@ -386,7 +389,20 @@ describe("agent-facing graph objects", () => {
 
   it("serializes a versioned authored layout from node references", async () => {
     let request: Record<string, unknown> | undefined;
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/api/graph/nodes")) {
+        const input = JSON.parse(String(init.body)) as Record<string, string>;
+        return new Response(JSON.stringify({
+          node: {
+            id: input.clientKey === "left" ? 10 : 11,
+            kind: input.kind,
+            icon: input.icon,
+            title: input.title,
+            detail: input.detail,
+            state: "draft",
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
       request = JSON.parse(String(init.body)) as Record<string, unknown>;
       return new Response(JSON.stringify({
         layer: { id: 30, nodes: [10, 11], edges: [], layout: request?.layout, state: "draft" },
@@ -394,8 +410,6 @@ describe("agent-facing graph objects", () => {
     }));
     const left = new NodeObject("box", "Left", "Left detail", "concept", "left");
     const right = new NodeObject("box", "Right", "Right detail", "concept", "right");
-    left.ref = { id: 10, kind: "concept", icon: "box", title: "Left", detail: "Left detail", state: "draft" };
-    right.ref = { id: 11, kind: "concept", icon: "box", title: "Right", detail: "Right detail", state: "draft" };
     const layer = new LayerObject(
       [left, right],
       [],
@@ -403,7 +417,10 @@ describe("agent-facing graph objects", () => {
       "comparison",
     );
 
-    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitLayer(layer);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    await graph.submitNode(left);
+    await graph.submitNode(right);
+    await graph.submitLayer(layer);
 
     expect(request).toMatchObject({
       clientKey: "comparison",

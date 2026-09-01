@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DetailCompilationError, NodeDetailAuthoring, compileAuthenticatedNodeDetail, freezeNodeDetailAuthoring, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
+import { isRelayerIconName } from "./icons.js";
+import { applyAcceptedNodeResponse } from "./node-response.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
 import { GRAPH_QUERY_CONTRACT_VERSION } from "./query-errors.generated.js";
 import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
@@ -59,7 +61,7 @@ export class RelayerGraphClient {
 
   private async submitNodeEnvelope(node: NodeObject, envelope: NodeSubmissionEnvelope): Promise<GraphNode> {
     const authoredDetail = await this.finalizeNodeDetail(node, envelope);
-    const body = await this.request<{ node: GraphNode }>("/api/graph/nodes", {
+    const body = await this.request<unknown>("/api/graph/nodes", {
       method: "POST",
       body: JSON.stringify({
         clientKey: envelope.clientKey,
@@ -70,8 +72,9 @@ export class RelayerGraphClient {
         ...(authoredDetail.components.length === 0 ? {} : { authoredDetail }),
       }),
     });
-    Object.defineProperty(envelope.owner.object, "ref", { value: body.node });
-    return body.node;
+    const accepted = validatedSubmittedNodeResponse(body);
+    applyAcceptedNodeResponse(envelope.owner.object, accepted);
+    return accepted;
   }
 
   async checkpointNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
@@ -342,10 +345,14 @@ function materializeNodeSubmissionEnvelope(node: NodeObject): NodeSubmissionEnve
     for (const field of NODE_ENVELOPE_FIELDS) {
       const descriptor = descriptors[field];
       if (descriptor === undefined) return invalidNodeSubmissionEnvelope();
-      if (!("value" in descriptor) || descriptor.enumerable !== true) return invalidNodeSubmissionEnvelope();
-      if (field === "ref" && (descriptor.configurable !== false || descriptor.writable !== true)) {
-        return invalidNodeSubmissionEnvelope();
+      if (field === "ref") {
+        if (descriptor.configurable !== false || descriptor.enumerable !== true
+          || typeof descriptor.get !== "function" || descriptor.set !== undefined) {
+          return invalidNodeSubmissionEnvelope();
+        }
+        continue;
       }
+      if (!("value" in descriptor) || descriptor.enumerable !== true) return invalidNodeSubmissionEnvelope();
       values.set(field, descriptor.value);
     }
     const clientKey = values.get("clientKey");
@@ -385,6 +392,60 @@ interface ResolvedDetailAsset {
   readonly digestSha256: string;
   readonly mediaType: string;
   readonly representation: { readonly kind: "image"; readonly sanitized: boolean };
+}
+
+const GRAPH_NODE_KEYS = Object.freeze(["detail", "icon", "id", "kind", "state", "title"]);
+const GRAPH_NODE_LEASED_KEYS = Object.freeze(["detail", "icon", "id", "kind", "leasedActionId", "state", "title"]);
+
+function validatedSubmittedNodeResponse(value: unknown): GraphNode {
+  try {
+    if (!isRecord(value) || !hasExactKeys(value, ["node"])) {
+      return invalidNodeResponse("response", "Response must contain exactly one node");
+    }
+    const candidate = value.node;
+    if (!isRecord(candidate)) return invalidNodeResponse("node", "Node must be an object");
+    const hasLease = Object.hasOwn(candidate, "leasedActionId");
+    if (!hasExactKeys(candidate, hasLease ? GRAPH_NODE_LEASED_KEYS : GRAPH_NODE_KEYS)) {
+      return invalidNodeResponse("node", "Node must use the exact GraphNode response shape");
+    }
+    if (!Number.isSafeInteger(candidate.id) || (candidate.id as number) < 1) {
+      return invalidNodeResponse("node.id", "Node id must be a positive safe integer");
+    }
+    if (hasLease && candidate.leasedActionId !== null
+      && (!Number.isSafeInteger(candidate.leasedActionId) || (candidate.leasedActionId as number) < 1)) {
+      return invalidNodeResponse("node.leasedActionId", "Node leased action id must be null or a positive safe integer");
+    }
+    const kind = candidate.kind;
+    const title = candidate.title;
+    const detail = candidate.detail;
+    if (typeof kind !== "string" || kind.trim() === "") {
+      return invalidNodeResponse("node.kind", "Node kind must be a nonblank string");
+    }
+    if (typeof title !== "string" || title.trim() === "") {
+      return invalidNodeResponse("node.title", "Node title must be a nonblank string");
+    }
+    if (typeof detail !== "string" || detail.trim() === "") {
+      return invalidNodeResponse("node.detail", "Node detail must be a nonblank string");
+    }
+    if (typeof candidate.icon !== "string" || !isRelayerIconName(candidate.icon)) {
+      return invalidNodeResponse("node.icon", "Node icon must use the curated Relayer icon vocabulary");
+    }
+    if (candidate.state !== "draft" && candidate.state !== "accepted" && candidate.state !== "stopped") {
+      return invalidNodeResponse("node.state", "Node state must be draft, accepted, or stopped");
+    }
+    return Object.freeze({
+      id: candidate.id as number,
+      ...(hasLease ? { leasedActionId: candidate.leasedActionId as number | null } : {}),
+      kind,
+      icon: candidate.icon,
+      title,
+      detail,
+      state: candidate.state,
+    });
+  } catch (error) {
+    if (error instanceof GraphApiError && error.code === "invalid_node_response") throw error;
+    return invalidNodeResponse("response", "Response must be an ordinary valid GraphNode envelope");
+  }
 }
 
 const RESOLVED_ASSET_KEYS = Object.freeze([
@@ -460,6 +521,10 @@ function isBoundedIdentity(value: string): boolean {
 
 function invalidDetailAssetResponse(path: string, message: string): never {
   throw new GraphApiError(200, "invalid_detail_asset_response", path, message);
+}
+
+function invalidNodeResponse(path: string, message: string): never {
+  throw new GraphApiError(200, "invalid_node_response", path, message);
 }
 
 function requireReference(value: NodeReference | undefined): NodeReference {

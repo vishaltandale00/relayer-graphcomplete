@@ -46,47 +46,105 @@ describe("packaged graph-client authored detail boundary", () => {
     ]);
   });
 
-  it("applies one accepted node response through its stable ref slot across concurrency and retries", async () => {
+  it("applies one immutable accepted response through code-owned state across concurrency and retries", async () => {
     const { NodeObject, RelayerGraphClient } = await import(graphClientIndexUrl.href);
     const node = new NodeObject("box", "Stable ref", "Fallback", "concept", "stable-ref-node");
     let nodeRequests = 0;
     let releaseResponse;
     const heldResponse = new Promise((resolveResponse) => { releaseResponse = resolveResponse; });
     let setterInvocations = 0;
+    const serverNode = {
+      id: 41, kind: "concept", icon: "box", title: "Stable ref", detail: "Fallback", state: "draft",
+    };
     vi.stubGlobal("fetch", vi.fn(async () => {
       nodeRequests += 1;
       await heldResponse;
-      return new Response(JSON.stringify({
-        node: { id: 41, kind: "concept", icon: "box", title: "Stable ref", detail: "Fallback", state: "draft" },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return { ok: true, status: 200, json: async () => ({ node: serverNode }) };
     }));
 
     const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
     const first = client.submitNode(node);
     const concurrent = client.submitNode(node);
     await vi.waitFor(() => expect(nodeRequests).toBeGreaterThan(0));
+    expect(() => Object.defineProperty(node, "ref", { writable: false })).toThrow(TypeError);
     expect(() => Object.defineProperty(node, "ref", {
       enumerable: true,
       configurable: true,
       get: () => undefined,
       set: () => { setterInvocations += 1; throw new TypeError("caller setter invoked"); },
     })).toThrow(TypeError);
+    expect(() => { node.ref = { id: 999 }; }).toThrow(TypeError);
     releaseResponse();
 
-    await expect(Promise.all([first, concurrent])).resolves.toEqual([
-      expect.objectContaining({ id: 41 }),
-      expect.objectContaining({ id: 41 }),
-    ]);
-    await expect(client.submitNode(node)).resolves.toMatchObject({ id: 41 });
+    const [accepted, concurrentAccepted] = await Promise.all([first, concurrent]);
+    expect(concurrentAccepted).toBe(accepted);
+    expect(Object.isFrozen(accepted)).toBe(true);
+    expect(() => { accepted.id = 999; }).toThrow(TypeError);
+    serverNode.id = 999;
+    serverNode.title = "Mutated server object";
+    expect(accepted).toMatchObject({ id: 41, title: "Stable ref" });
+    expect(await client.submitNode(node)).toBe(accepted);
     expect(nodeRequests).toBe(1);
     expect(setterInvocations).toBe(0);
+    expect(node.ref).toBe(accepted);
     expect(node.ref).toMatchObject({ id: 41 });
     expect(Object.getOwnPropertyDescriptor(node, "ref")).toMatchObject({
       configurable: false,
       enumerable: true,
-      writable: true,
-      value: expect.objectContaining({ id: 41 }),
+      get: expect.any(Function),
+      set: undefined,
     });
+  });
+
+  it("rejects malformed successful node responses deterministically and permits an explicit retry", async () => {
+    const { GraphApiError, NodeObject, RelayerGraphClient } = await import(graphClientIndexUrl.href);
+    const validNode = {
+      id: 42,
+      leasedActionId: null,
+      kind: "concept",
+      icon: "box",
+      title: "Validated",
+      detail: "Fallback",
+      state: "draft",
+    };
+    const cases = [
+      ["null", null],
+      ["empty", {}],
+      ["unknown-response-field", { node: validNode, extra: true }],
+      ["null-node", { node: null }],
+      ["unknown-node-field", { node: { ...validNode, extra: true } }],
+      ["invalid-id", { node: { ...validNode, id: 0 } }],
+      ["invalid-lease", { node: { ...validNode, leasedActionId: "42" } }],
+      ["invalid-state", { node: { ...validNode, state: "published" } }],
+      ["blank-title", { node: { ...validNode, title: "  " } }],
+    ];
+
+    for (const [name, responseBody] of cases) {
+      const node = new NodeObject("box", "Validated", "Fallback", "concept", `invalid-response-${name}`);
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })));
+      const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+      const submission = client.submitNode(node);
+      await expect(submission).rejects.toBeInstanceOf(GraphApiError);
+      await expect(submission).rejects.toMatchObject({ status: 200, code: "invalid_node_response" });
+      expect(node.ref).toBeUndefined();
+    }
+
+    const retryNode = new NodeObject("box", "Validated", "Fallback", "concept", "invalid-response-retry");
+    let requests = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      requests += 1;
+      return new Response(JSON.stringify(requests === 1 ? {} : { node: validNode }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+    const retryClient = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    await expect(retryClient.submitNode(retryNode)).rejects.toMatchObject({ code: "invalid_node_response" });
+    await expect(retryClient.submitNode(retryNode)).resolves.toMatchObject({ id: 42 });
+    expect(requests).toBe(2);
   });
 
   it("reuses one coherent node request envelope across microtasks, concurrency, and retries", async () => {
@@ -171,8 +229,11 @@ describe("packaged graph-client authored detail boundary", () => {
     const trappedNode = new Proxy(new NodeObject("box", "Trapped", "Fallback", "concept", "trapped-node"), {
       ownKeys: () => { throw new TypeError("caller node proxy trap escaped"); },
     });
-    const forgedRefNode = new NodeObject("box", "Forged ref", "Fallback", "concept", "forged-ref-node");
-    Object.defineProperty(forgedRefNode, "ref", { writable: false });
+    const forgedRefOwner = new NodeObject("box", "Forged ref", "Fallback", "concept", "forged-ref-node");
+    const forgedRefNode = Object.create(NodeObject.prototype, {
+      ...Object.getOwnPropertyDescriptors(forgedRefOwner),
+      ref: { configurable: true, enumerable: true, writable: true, value: undefined },
+    });
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
     const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
