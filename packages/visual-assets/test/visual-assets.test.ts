@@ -4,6 +4,19 @@ import {
   memoryHarnessFile,
 } from "../src/index.js";
 
+function base64Bytes(value: string): Uint8Array {
+  return new Uint8Array(Buffer.from(value, "base64"));
+}
+
+const pngBytes = base64Bytes(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+);
+const webpBytes = base64Bytes("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEAAUAmJaQAA3AA/vuU");
+const gifBytes = base64Bytes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==");
+const jpegBytes = base64Bytes(
+  "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/AP/EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8Bf//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEABj8Cf//Z",
+);
+
 describe("visual_assets deterministic library interface", () => {
   it("adds identical files as distinct immutable logical assets with one digest", async () => {
     const visualAssets = createMemoryVisualAssetsLibrary();
@@ -34,7 +47,7 @@ describe("visual_assets deterministic library interface", () => {
     const visualAssets = createMemoryVisualAssetsLibrary({
       authority: { projects: [{ projectId: 7, threadIds: [70, 71] }], standaloneThreadIds: [90] },
     });
-    const file = memoryHarnessFile("diagram.png", "image/png", new Uint8Array([1, 2, 3]));
+    const file = memoryHarnessFile("diagram.png", "image/png", pngBytes);
     const projectAsset = await visualAssets.add({
       file,
       scope: { kind: "project", projectId: 7 },
@@ -100,7 +113,7 @@ describe("visual_assets deterministic library interface", () => {
     const projectTag = await visualAssets.createTag({ scope: { kind: "project", projectId: 7 }, name: "Project" });
     const threadTag = await visualAssets.createTag({ scope: { kind: "thread", threadId: 90 }, name: "Standalone" });
     const asset = await visualAssets.add({
-      file: memoryHarnessFile("chart.png", "image/png", new Uint8Array([1, 2, 3])),
+      file: memoryHarnessFile("chart.png", "image/png", pngBytes),
       scope: { kind: "project", projectId: 7 },
       name: "Chart",
       tagIds: [projectTag.id],
@@ -118,10 +131,10 @@ describe("visual_assets deterministic library interface", () => {
       .toEqual([{ kind: "asset", asset: organized }]);
   });
 
-  it("archives assets from normal discovery without invalidating digest-backed downloads", async () => {
+  it("archives assets from normal discovery without invalidating their accepted content", async () => {
     const visualAssets = createMemoryVisualAssetsLibrary();
     const asset = await visualAssets.add({
-      file: memoryHarnessFile("photo.webp", "image/webp", new Uint8Array([8, 6, 7, 5, 3, 0, 9])),
+      file: memoryHarnessFile("photo.webp", "image/webp", webpBytes),
       scope: { kind: "library" },
       name: "Photo",
       tagIds: [],
@@ -129,9 +142,9 @@ describe("visual_assets deterministic library interface", () => {
 
     expect((await visualAssets.archive(asset.id)).archived).toBe(true);
     expect((await visualAssets.listAssets({ scope: { kind: "library" } })).items).toEqual([]);
-    const downloaded = await visualAssets.download({ digest: asset.digest });
+    const downloaded = await visualAssets.download(asset.id);
     expect(downloaded).toMatchObject({ name: "photo.webp", mediaType: "image/webp" });
-    expect([...await downloaded.read()]).toEqual([8, 6, 7, 5, 3, 0, 9]);
+    expect([...await downloaded.read()]).toEqual([...webpBytes]);
   });
 
   it("discovers registry authority while allowing user organization of read-only system assets", async () => {
@@ -251,5 +264,232 @@ describe("visual_assets deterministic library interface", () => {
     expect(await visualAssets.moveTag({ tagId: child.id, parentTagId: null }))
       .toMatchObject({ id: child.id, parentTagId: null });
     expect((await visualAssets.find({ scope: { kind: "library" }, tagId: root.id })).items).toEqual([]);
+  });
+
+  it("canonicalizes and freezes authority-bearing ingress before callers can mutate it", async () => {
+    const initialTagScope = { kind: "project" as const, projectId: 7 };
+    const initialAssetScope = { kind: "project" as const, projectId: 7 };
+    const initialTagIds = ["tag_initial"];
+    const visualAssets = createMemoryVisualAssetsLibrary({
+      authority: {
+        projects: [{ projectId: 7, threadIds: [] }, { projectId: 8, threadIds: [] }],
+        standaloneThreadIds: [90, 91],
+      },
+      initialTags: [{
+        id: "tag_initial",
+        name: "Initial",
+        scope: initialTagScope,
+        parentTagId: null,
+        authority: "system",
+      }],
+      initialAssets: [{
+        id: "asset_initial",
+        registryId: "user",
+        name: "Initial asset",
+        fileName: "initial.svg",
+        mediaType: "image/svg+xml",
+        content: "<svg></svg>",
+        scopes: [initialAssetScope],
+        tagIds: initialTagIds,
+      }],
+    });
+    initialTagScope.projectId = 8;
+    initialAssetScope.projectId = 8;
+    initialTagIds.length = 0;
+
+    const addScope = { kind: "project" as const, projectId: 7 };
+    const added = await visualAssets.add({
+      file: memoryHarnessFile("added.svg", "image/svg+xml", "<svg></svg>"),
+      scope: addScope,
+      name: "Added",
+      tagIds: [],
+    });
+    addScope.projectId = 8;
+    const associationScope = { kind: "thread" as const, threadId: 90 };
+    const associated = await visualAssets.associate({ assetId: added.id, scope: associationScope });
+    associationScope.threadId = 91;
+
+    expect((await visualAssets.listAssets({ scope: { kind: "project", projectId: 7 } })).items)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: "asset_initial" }), expect.objectContaining({ id: added.id })]));
+    expect((await visualAssets.listAssets({ scope: { kind: "project", projectId: 8 } })).items).toEqual([]);
+    expect((await visualAssets.listAssets({ scope: { kind: "thread", threadId: 90 } })).items)
+      .toEqual([associated]);
+    expect((await visualAssets.listAssets({ scope: { kind: "thread", threadId: 91 } })).items).toEqual([]);
+    expect((await visualAssets.listTags({ scope: { kind: "project", projectId: 7 } })).items)
+      .toEqual([expect.objectContaining({ id: "tag_initial" })]);
+    expect(Object.isFrozen(associated)).toBe(true);
+    expect(Object.isFrozen(associated.scopes)).toBe(true);
+    expect(associated.scopes.every(Object.isFrozen)).toBe(true);
+    expect(Object.isFrozen(associated.tagIds)).toBe(true);
+    expect(Object.isFrozen(associated.provenance)).toBe(true);
+
+    let releaseRead!: () => void;
+    const delayedRead = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const concurrentScope = { kind: "project" as const, projectId: 7 };
+    const concurrentTagIds: string[] = [];
+    const concurrentAdd = visualAssets.add({
+      file: {
+        name: "concurrent.svg",
+        mediaType: "image/svg+xml",
+        async read() {
+          await delayedRead;
+          return new TextEncoder().encode("<svg></svg>");
+        },
+      },
+      scope: concurrentScope,
+      name: "Concurrent",
+      tagIds: concurrentTagIds,
+    });
+    concurrentScope.projectId = 8;
+    concurrentTagIds.push("tag_initial");
+    releaseRead();
+    const concurrent = await concurrentAdd;
+    expect(concurrent.scopes).toEqual([{ kind: "project", projectId: 7 }]);
+    expect(concurrent.tagIds).toEqual([]);
+  });
+
+  it("invalidates revision-bound cursors before inserts, archives, or reorganization can duplicate or skip entries", async () => {
+    const inserted = createMemoryVisualAssetsLibrary();
+    await inserted.createTag({ scope: { kind: "library" }, name: "A" });
+    await inserted.createTag({ scope: { kind: "library" }, name: "B" });
+    const insertPage = await inserted.listTags({ scope: { kind: "library" }, limit: 1 });
+    await inserted.createTag({ scope: { kind: "library" }, name: "AA" });
+    await expect(inserted.listTags({
+      scope: { kind: "library" },
+      limit: 1,
+      cursor: insertPage.nextCursor!,
+    })).rejects.toMatchObject({ code: "page_snapshot_stale" });
+
+    const archived = createMemoryVisualAssetsLibrary();
+    await archived.add({
+      file: memoryHarnessFile("a.svg", "image/svg+xml", "<svg></svg>"),
+      scope: { kind: "library" }, name: "A", tagIds: [],
+    });
+    const archiveTarget = await archived.add({
+      file: memoryHarnessFile("b.svg", "image/svg+xml", "<svg></svg>"),
+      scope: { kind: "library" }, name: "B", tagIds: [],
+    });
+    const archivePage = await archived.listAssets({ scope: { kind: "library" }, limit: 1 });
+    await archived.archive(archiveTarget.id);
+    await expect(archived.listAssets({
+      scope: { kind: "library" },
+      limit: 1,
+      cursor: archivePage.nextCursor!,
+    })).rejects.toMatchObject({ code: "page_snapshot_stale" });
+
+    const reorganized = createMemoryVisualAssetsLibrary();
+    const root = await reorganized.createTag({ scope: { kind: "library" }, name: "Root" });
+    await reorganized.createTag({ scope: { kind: "library" }, name: "A", parentTagId: root.id });
+    const moved = await reorganized.createTag({ scope: { kind: "library" }, name: "B", parentTagId: root.id });
+    const findPage = await reorganized.find({ scope: { kind: "library" }, tagId: root.id, limit: 1 });
+    await reorganized.moveTag({ tagId: moved.id, parentTagId: null });
+    await expect(reorganized.find({
+      scope: { kind: "library" },
+      tagId: root.id,
+      limit: 1,
+      cursor: findPage.nextCursor!,
+    })).rejects.toMatchObject({ code: "page_snapshot_stale" });
+  });
+
+  it("validates the bytes of every supported representation and atomically rejects mismatched or unsafe content", async () => {
+    const validRepresentations = [
+      ["image/png", pngBytes],
+      ["image/webp", webpBytes],
+      ["image/jpeg", jpegBytes],
+      ["image/gif", gifBytes],
+      ["image/avif", new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 97, 118, 105, 102, 0, 0, 0, 0, 97, 118, 105, 102])],
+      ["image/svg+xml", new TextEncoder().encode("<svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 0\"/></svg>")],
+    ] as const;
+    const accepted = createMemoryVisualAssetsLibrary();
+    for (const [mediaType, bytes] of validRepresentations) {
+      await expect(accepted.add({
+        file: memoryHarnessFile(`asset-${mediaType.replaceAll("/", "-")}`, mediaType, bytes),
+        scope: { kind: "library" },
+        name: mediaType,
+        tagIds: [],
+      })).resolves.toMatchObject({ mediaType });
+    }
+
+    const rejected = createMemoryVisualAssetsLibrary();
+    for (const mediaType of ["image/png", "image/webp", "image/jpeg", "image/gif", "image/avif"] as const) {
+      await expect(rejected.add({
+        file: memoryHarnessFile(`disguised-${mediaType}.bin`, mediaType, "<svg></svg>"),
+        scope: { kind: "library" }, name: `Disguised ${mediaType}`, tagIds: [],
+      })).rejects.toMatchObject({ code: "media_content_mismatch" });
+    }
+    await expect(rejected.add({
+      file: memoryHarnessFile("active.svg", "image/svg+xml", "<svg><script>alert(1)</script></svg>"),
+      scope: { kind: "library" }, name: "Active", tagIds: [],
+    })).rejects.toMatchObject({ code: "media_content_unsafe" });
+    await expect(rejected.add({
+      file: memoryHarnessFile("broken.svg", "image/svg+xml", "<svg><g></svg>"),
+      scope: { kind: "library" }, name: "Broken", tagIds: [],
+    })).rejects.toMatchObject({ code: "media_content_malformed" });
+    expect((await rejected.listAssets({ scope: { kind: "library" } })).items).toEqual([]);
+  });
+
+  it("inspects a resolved digest-verified preview and reports unavailable or corrupt persisted content", async () => {
+    const visualAssets = createMemoryVisualAssetsLibrary();
+    const asset = await visualAssets.add({
+      file: memoryHarnessFile("preview.svg", "image/svg+xml", "<svg></svg>"),
+      scope: { kind: "library" }, name: "Preview", tagIds: [],
+    });
+
+    const inspected = await visualAssets.inspect(asset.id);
+    expect(inspected.preview).toMatchObject({
+      name: "preview.svg",
+      mediaType: "image/svg+xml",
+      byteLength: 11,
+      digest: asset.digest,
+      expectedDigest: asset.digest,
+    });
+    expect(new TextDecoder().decode(await inspected.preview.read())).toBe("<svg></svg>");
+    expect(Object.isFrozen(inspected)).toBe(true);
+    expect(Object.isFrozen(inspected.preview)).toBe(true);
+
+    const persisted = createMemoryVisualAssetsLibrary({
+      initialAssets: [{
+        id: "asset_unavailable",
+        registryId: "user",
+        name: "Unavailable",
+        fileName: "unavailable.svg",
+        mediaType: "image/svg+xml",
+        digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        byteLength: 11,
+        scopes: [{ kind: "library" }],
+        tagIds: [],
+      }, {
+        id: "asset_corrupt",
+        registryId: "user",
+        name: "Corrupt",
+        fileName: "corrupt.svg",
+        mediaType: "image/svg+xml",
+        content: "<svg></svg>",
+        digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        byteLength: 11,
+        scopes: [{ kind: "library" }],
+        tagIds: [],
+      }],
+    });
+    await expect(persisted.inspect("asset_unavailable"))
+      .rejects.toMatchObject({ code: "content_unavailable" });
+    await expect(persisted.inspect("asset_corrupt"))
+      .rejects.toMatchObject({ code: "digest_mismatch" });
+  });
+
+  it("rejects duplicate initial logical asset IDs deterministically", () => {
+    const duplicate = {
+      id: "asset_duplicate",
+      registryId: "user",
+      name: "Duplicate",
+      fileName: "duplicate.svg",
+      mediaType: "image/svg+xml",
+      content: "<svg></svg>",
+      scopes: [{ kind: "library" as const }],
+      tagIds: [],
+    };
+
+    expect(() => createMemoryVisualAssetsLibrary({ initialAssets: [duplicate, duplicate] }))
+      .toThrow(expect.objectContaining({ code: "asset_conflict" }));
   });
 });

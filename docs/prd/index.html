@@ -2047,6 +2047,18 @@ settings:
 → saved resolved layer opens in the local movable-node result viewer
 </code></pre>
 <p>This runtime milestone now works through the Relayer app server and Electron renderer. The remaining product work includes cancellation, retry, worktrees, context attachments, and signed live-provider proof.</p>
+<h2 data-prd-layer="Contracts" data-prd-order="12.1">12A. Visual-assets library foundation</h2>
+<p><strong>Primary issues:</strong> <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/241">#241 AI-authored visual Node Details and asset library</a> and <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/364">#364 Build the visual asset library and deterministic discovery tools</a>.</p>
+<p>The visual-assets Module exposes deterministic tools to list registries, tags, and assets; add a harness file; inspect a content-resolved preview; create and move tags; associate and organize assets; archive; and download by logical asset ID. The full inventory is discovered through these tools and is never injected into harness context. Logical assets expose provenance and a digest but no generic-store identifier; content storage and deduplication remain behind the Module.</p>
+<ul>
+<li>Every query has an explicit <code>library</code>, <code>project</code>, or <code>thread</code> scope. A project includes assets associated with its authorized threads. A project-attached thread narrows asset visibility while sharing its project tag tree; a projectless thread owns its thread tag tree.</li>
+<li>Each tag has at most one parent. Assets may have many tags. <code>find(tagId)</code> returns exactly the direct assets and immediate subtags, in stable order. Pagination cursors are revision-bound and fail stale after inventory changes so continuation cannot silently duplicate or skip entries.</li>
+<li><code>add</code> accepts a harness file, validates its declared supported representation against its bytes, verifies any expected digest, and atomically creates one immutable logical asset with its initial scope and tags. Identical bytes may share private content and digest records while remaining distinct logical assets.</li>
+<li><code>inspect</code> resolves and digest-verifies bytes before returning a caller-readable file preview. Unavailable or corrupt content fails explicitly. Public <code>download</code> accepts a logical asset ID only; accepted digest resolution remains an internal persistence concern.</li>
+<li>Archival removes an asset from ordinary discovery without invalidating content needed by accepted digest references. System content and default relationships may be read-only while user-created scope and tag relationships remain allowed.</li>
+<li>V1 does not revise or replace an asset's bytes. Revision semantics remain deferred to <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/362">#362</a>.</li>
+</ul>
+<p>This foundation does not compile authored Node Details, define accepted-detail persistence or export, render Product surfaces, or integrate Eval. Those remain separate work nodes under #241.</p>
 <h2 data-prd-layer="Product" data-prd-order="4">4. Run a task</h2>
 <section class="capability-summary" aria-label="Run a task summary">
 <p><strong>User goal:</strong> Send one interaction to the selected agent.</p>
