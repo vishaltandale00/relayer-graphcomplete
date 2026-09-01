@@ -46,6 +46,186 @@ describe("packaged graph-client authored detail boundary", () => {
     ]);
   });
 
+  it("reuses one coherent node request envelope across microtasks, concurrency, and retries", async () => {
+    const {
+      LayerLayoutObject,
+      LayerObject,
+      NodeObject,
+      RelayerGraphClient,
+      detailCapability,
+      html,
+    } = await import(graphClientIndexUrl.href);
+    const node = new NodeObject("box", "Original title", "Original detail", "concept", "original-owner");
+    const sourceLayer = new LayerObject([node], [], new LayerLayoutObject([]), "source-layer");
+    const action = {
+      kind: "invoke",
+      label: "Run",
+      interactionText: "Run",
+      sourceLayer,
+      clientKey: "run-action",
+    };
+    node.detailAuthoring.setComponent(
+      "action",
+      html`<button gc=${detailCapability.invoke("run", action)}>Run</button>`,
+    );
+
+    const requestBodies = [];
+    let requestCount = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      requestBodies.push(String(init.body));
+      requestCount += 1;
+      if (requestCount === 1) {
+        return new Response(JSON.stringify({ error: { code: "temporary_failure" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({
+        node: { id: 1, kind: "concept", icon: "box", title: "Original title", detail: "Original detail", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const first = client.submitNode(node);
+    const concurrent = client.submitNode(node);
+    queueMicrotask(() => {
+      node.clientKey = "changed-owner";
+      node.kind = "changed-kind";
+      node.icon = "changed-icon";
+      node.title = "Changed title";
+      node.detail = "Changed detail";
+    });
+
+    const concurrentResults = await Promise.allSettled([first, concurrent]);
+    expect(concurrentResults.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    await client.submitNode(node);
+
+    expect(requestBodies).toHaveLength(3);
+    expect(new Set(requestBodies).size).toBe(1);
+    const submitted = JSON.parse(requestBodies[0]);
+    expect(submitted).toMatchObject({
+      clientKey: "original-owner",
+      kind: "concept",
+      icon: "box",
+      title: "Original title",
+      detail: "Original detail",
+    });
+    expect(submitted.authoredDetail.mounts[0].capability.action.sourceNode).toEqual({ clientKey: "original-owner" });
+  });
+
+  it("rejects accessor and proxy-trapped node request envelopes source-locally", async () => {
+    const { DetailCompilationError, NodeObject, RelayerGraphClient } = await import(graphClientIndexUrl.href);
+    let clientKeyReads = 0;
+    const accessorNode = new NodeObject("box", "Accessor", "Fallback", "concept", "accessor-node");
+    Object.defineProperty(accessorNode, "clientKey", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        clientKeyReads += 1;
+        return "substituted-node";
+      },
+    });
+    const trappedNode = new Proxy(new NodeObject("box", "Trapped", "Fallback", "concept", "trapped-node"), {
+      ownKeys: () => { throw new TypeError("caller node proxy trap escaped"); },
+    });
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    for (const node of [accessorNode, trappedNode]) {
+      await expect(client.submitNode(node)).rejects.toBeInstanceOf(DetailCompilationError);
+      await expect(client.submitNode(node)).rejects.toMatchObject({
+        issues: [expect.objectContaining({ code: "node_envelope_invalid", path: "node" })],
+      });
+    }
+    expect(clientKeyReads).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("snapshots asset references without invoking caller accessors or proxy traps", async () => {
+    const {
+      DetailCompilationError,
+      NodeObject,
+      RelayerGraphClient,
+      assetRef,
+      html,
+    } = await import(graphClientIndexUrl.href);
+    const brandedAsset = assetRef("brand-source");
+    const assetBrand = Reflect.ownKeys(brandedAsset).find((key) => typeof key === "symbol");
+    let throwingReads = 0;
+    let changingReads = 0;
+    const cases = [
+      ["throwing", {
+        [assetBrand]: true,
+        get logicalId() {
+          throwingReads += 1;
+          throw new TypeError("caller getter escaped");
+        },
+      }],
+      ["changing", {
+        [assetBrand]: true,
+        get logicalId() {
+          changingReads += 1;
+          return changingReads === 1 ? "safe-logo" : "substituted-logo";
+        },
+      }],
+      ["trapped", new Proxy({ [assetBrand]: true, logicalId: "safe-logo" }, {
+        ownKeys: () => { throw new TypeError("caller asset proxy trap escaped"); },
+      })],
+    ];
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    for (const [name, reference] of cases) {
+      const node = new NodeObject("box", "Asset", "Fallback", "concept", `asset-${name}`);
+      node.detailAuthoring.setComponent(name, html`<img alt="Logo" asset=${reference}>`);
+      const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+      await expect(client.checkpointNodeDetail(node)).rejects.toBeInstanceOf(DetailCompilationError);
+      await expect(client.checkpointNodeDetail(node)).rejects.toMatchObject({
+        issues: expect.arrayContaining([expect.objectContaining({ code: "asset_reference_invalid", componentId: name })]),
+      });
+    }
+    expect(throwingReads).toBe(0);
+    expect(changingReads).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("uses one frozen logical asset identity for resolution, mounts, and the asset table", async () => {
+    const { NodeObject, RelayerGraphClient, assetRef, html } = await import(graphClientIndexUrl.href);
+    const brandedAsset = assetRef("brand-source");
+    const assetBrand = Reflect.ownKeys(brandedAsset).find((key) => typeof key === "symbol");
+    const reference = { [assetBrand]: true, logicalId: "safe-logo" };
+    const node = new NodeObject("box", "Asset", "Fallback", "concept", "asset-owner");
+    node.detailAuthoring.setComponent("logo", html`<img alt="Logo" asset=${reference}>`);
+    const requestedIds = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      expect(String(url)).toContain("/detail-assets/resolve");
+      requestedIds.push(...JSON.parse(String(init.body)).logicalIds);
+      queueMicrotask(() => { reference.logicalId = "substituted-logo"; });
+      await Promise.resolve();
+      return new Response(JSON.stringify({
+        assets: [{
+          logicalId: "safe-logo",
+          authority: "current",
+          availability: "available",
+          digestSha256: "a".repeat(64),
+          mediaType: "image/png",
+          representation: { kind: "image", sanitized: true },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    const compiled = await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 })
+      .checkpointNodeDetail(node);
+
+    expect(requestedIds).toEqual(["safe-logo"]);
+    expect(compiled.mounts).toEqual([
+      expect.objectContaining({ kind: "asset", assetId: "safe-logo" }),
+    ]);
+    expect(compiled.assets).toEqual([
+      expect.objectContaining({ id: "safe-logo", digestSha256: "a".repeat(64) }),
+    ]);
+  });
+
   it("rejects forged action shapes through the packaged public checkpoint seam", async () => {
     const {
       DetailCompilationError,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { authoredDetailAssetIds, compileAuthenticatedNodeDetail, freezeNodeDetailAuthoring, type CompiledNodeDetail } from "./detail.js";
+import { DetailCompilationError, NodeDetailAuthoring, compileAuthenticatedNodeDetail, freezeNodeDetailAuthoring, snapshotAuthoredDetailAssets, type AuthenticatedNodeDetailAssetSnapshot, type AuthenticatedNodeDetailOwnerSnapshot, type CompiledNodeDetail } from "./detail.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
 import { GRAPH_QUERY_CONTRACT_VERSION } from "./query-errors.generated.js";
 import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
@@ -8,6 +8,7 @@ import { GraphApiError, type CompletionInputGraph, type CompletionOutput, type C
 export class RelayerGraphClient {
   readonly capability: GraphCapability;
   readonly #submittedDetails = new WeakMap<NodeObject, Promise<CompiledNodeDetail>>();
+  readonly #submissionEnvelopes = new WeakMap<NodeObject, NodeSubmissionEnvelope>();
 
   constructor(capability: GraphCapability) {
     this.capability = { ...capability, url: capability.url.replace(/\/$/, "") };
@@ -42,33 +43,36 @@ export class RelayerGraphClient {
   }
 
   async submitNode(node: NodeObject): Promise<GraphNode> {
-    const authoredDetail = await this.finalizeNodeDetail(node);
+    const envelope = this.submissionEnvelope(node);
+    const authoredDetail = await this.finalizeNodeDetail(node, envelope);
     const body = await this.request<{ node: GraphNode }>("/api/graph/nodes", {
       method: "POST",
       body: JSON.stringify({
-        clientKey: node.clientKey,
-        kind: node.kind,
-        icon: node.icon,
-        title: node.title,
-        detail: node.detail,
+        clientKey: envelope.clientKey,
+        kind: envelope.kind,
+        icon: envelope.icon,
+        title: envelope.title,
+        detail: envelope.detail,
         ...(authoredDetail.components.length === 0 ? {} : { authoredDetail }),
       }),
     });
-    node.ref = body.node;
+    envelope.owner.object.ref = body.node;
     return body.node;
   }
 
   async checkpointNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
     const finalized = this.#submittedDetails.get(node);
     if (finalized !== undefined) return await finalized;
-    const assets = await this.resolveDetailAssets(node);
-    return compileAuthenticatedNodeDetail(node.detailAuthoring, assets);
+    const envelope = materializeNodeSubmissionEnvelope(node);
+    const assetSnapshot = snapshotAuthoredDetailAssets(envelope.detailAuthoring);
+    const assets = await this.resolveDetailAssets(assetSnapshot);
+    return compileAuthenticatedNodeDetail(envelope.detailAuthoring, envelope.owner, assetSnapshot, assets);
   }
 
-  private finalizeNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
+  private finalizeNodeDetail(node: NodeObject, envelope: NodeSubmissionEnvelope): Promise<CompiledNodeDetail> {
     const finalized = this.#submittedDetails.get(node);
     if (finalized !== undefined) return finalized;
-    const finalization = this.compileAndFreezeNodeDetail(node);
+    const finalization = this.compileAndFreezeNodeDetail(envelope);
     this.#submittedDetails.set(node, finalization);
     void finalization.catch(() => {
       if (this.#submittedDetails.get(node) === finalization) this.#submittedDetails.delete(node);
@@ -76,21 +80,30 @@ export class RelayerGraphClient {
     return finalization;
   }
 
-  private async compileAndFreezeNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
-    const assets = await this.resolveDetailAssets(node);
-    const compiled = compileAuthenticatedNodeDetail(node.detailAuthoring, assets);
-    freezeNodeDetailAuthoring(node.detailAuthoring);
+  private async compileAndFreezeNodeDetail(envelope: NodeSubmissionEnvelope): Promise<CompiledNodeDetail> {
+    const assetSnapshot = snapshotAuthoredDetailAssets(envelope.detailAuthoring);
+    const assets = await this.resolveDetailAssets(assetSnapshot);
+    const compiled = compileAuthenticatedNodeDetail(envelope.detailAuthoring, envelope.owner, assetSnapshot, assets);
+    freezeNodeDetailAuthoring(envelope.detailAuthoring);
     return compiled;
   }
 
-  private async resolveDetailAssets(node: NodeObject): Promise<readonly ResolvedDetailAsset[]> {
-    const logicalIds = authoredDetailAssetIds(node.detailAuthoring);
+  private async resolveDetailAssets(snapshot: AuthenticatedNodeDetailAssetSnapshot): Promise<readonly ResolvedDetailAsset[]> {
+    const logicalIds = snapshot.logicalIds;
     if (logicalIds.length === 0) return [];
     const body = await this.request<unknown>("/api/graph/detail-assets/resolve", {
       method: "POST",
       body: JSON.stringify({ logicalIds }),
     });
     return validatedResolvedDetailAssets(body, logicalIds);
+  }
+
+  private submissionEnvelope(node: NodeObject): NodeSubmissionEnvelope {
+    const existing = this.#submissionEnvelopes.get(node);
+    if (existing !== undefined) return existing;
+    const envelope = materializeNodeSubmissionEnvelope(node);
+    this.#submissionEnvelopes.set(node, envelope);
+    return envelope;
   }
 
   async createEdge(left: NodeReference, right: NodeReference, clientKey?: string): Promise<GraphEdge>;
@@ -287,6 +300,67 @@ export class RelayerGraphClient {
     }
     return body;
   }
+}
+
+interface NodeSubmissionEnvelope {
+  readonly owner: AuthenticatedNodeDetailOwnerSnapshot;
+  readonly detailAuthoring: NodeDetailAuthoring;
+  readonly clientKey: string;
+  readonly kind: string;
+  readonly icon: string;
+  readonly title: string;
+  readonly detail: string;
+}
+
+const NODE_ENVELOPE_FIELDS = Object.freeze([
+  "icon", "title", "detail", "kind", "clientKey", "detailAuthoring", "ref",
+] as const);
+
+function materializeNodeSubmissionEnvelope(node: NodeObject): NodeSubmissionEnvelope {
+  try {
+    if (Object.getPrototypeOf(node) !== NodeObject.prototype) return invalidNodeSubmissionEnvelope();
+    const descriptors = Object.getOwnPropertyDescriptors(node);
+    if (Reflect.ownKeys(descriptors).some((key) => typeof key !== "string"
+      || !NODE_ENVELOPE_FIELDS.includes(key as typeof NODE_ENVELOPE_FIELDS[number]))) {
+      return invalidNodeSubmissionEnvelope();
+    }
+    const values = new Map<string, unknown>();
+    for (const field of NODE_ENVELOPE_FIELDS) {
+      const descriptor = descriptors[field];
+      if (descriptor === undefined) {
+        if (field === "ref") continue;
+        return invalidNodeSubmissionEnvelope();
+      }
+      if (!("value" in descriptor) || descriptor.enumerable !== true) return invalidNodeSubmissionEnvelope();
+      values.set(field, descriptor.value);
+    }
+    const clientKey = values.get("clientKey");
+    const kind = values.get("kind");
+    const icon = values.get("icon");
+    const title = values.get("title");
+    const detail = values.get("detail");
+    const detailAuthoring = values.get("detailAuthoring");
+    if (typeof clientKey !== "string" || typeof kind !== "string" || typeof icon !== "string"
+      || typeof title !== "string" || typeof detail !== "string" || !(detailAuthoring instanceof NodeDetailAuthoring)) {
+      return invalidNodeSubmissionEnvelope();
+    }
+    const owner = Object.freeze({ object: node, clientKey });
+    return Object.freeze({ owner, detailAuthoring, clientKey, kind, icon, title, detail });
+  } catch (error) {
+    if (error instanceof DetailCompilationError) throw error;
+    return invalidNodeSubmissionEnvelope();
+  }
+}
+
+function invalidNodeSubmissionEnvelope(): never {
+  throw new DetailCompilationError(Object.freeze([Object.freeze({
+    code: "node_envelope_invalid",
+    componentId: "",
+    path: "node",
+    line: 1,
+    column: 1,
+    message: "Node submission fields must be ordinary own data properties",
+  })]));
 }
 
 interface ResolvedDetailAsset {

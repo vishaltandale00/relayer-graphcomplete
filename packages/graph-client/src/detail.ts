@@ -72,7 +72,8 @@ interface MaterializedSourceLayer {
   readonly containsOwner: boolean;
 }
 
-interface MaterializedOwner {
+/** @internal */
+export interface AuthenticatedNodeDetailOwnerSnapshot {
   readonly object: NodeObject;
   readonly clientKey: string;
 }
@@ -98,9 +99,21 @@ interface ResolvedDetailAsset {
   readonly representation: { readonly kind: "image"; readonly sanitized: boolean };
 }
 
+interface MaterializedAssetRef {
+  readonly logicalId: string;
+}
+
+/** @internal */
+export interface AuthenticatedNodeDetailAssetSnapshot {
+  readonly authoring: NodeDetailAuthoring;
+  readonly logicalIds: readonly string[];
+  readonly references: ReadonlyMap<object, MaterializedAssetRef>;
+}
+
 interface DetailAssetResolver {
   readonly missingAssetCode: "asset_resolution_required" | "asset_unknown";
-  resolve(reference: AssetRef): ResolvedDetailAsset | undefined;
+  materialize(reference: unknown): MaterializedAssetRef | undefined;
+  resolve(reference: MaterializedAssetRef): ResolvedDetailAsset | undefined;
 }
 
 export interface CompiledDetailComponent {
@@ -226,7 +239,8 @@ export class NodeDetailAuthoring {
 
   checkpoint(): CompiledNodeDetail {
     const state = authoringState(this);
-    return compileAuthoring(this, state.owner, REJECTING_ASSET_RESOLVER);
+    const assets = snapshotAuthoredDetailAssets(this);
+    return compileAuthoring(this, safeMaterializeOwner(state.owner), rejectingAssetResolver(assets));
   }
 }
 
@@ -238,17 +252,31 @@ export function createOwnedNodeDetailAuthoring(owner: NodeObject): NodeDetailAut
 }
 
 /** @internal */
-export function authoredDetailAssetIds(authoring: NodeDetailAuthoring): readonly string[] {
+export function snapshotAuthoredDetailAssets(authoring: NodeDetailAuthoring): AuthenticatedNodeDetailAssetSnapshot {
   const state = authoringState(authoring);
   const ids = new Set<string>();
+  const referencesByObject = new Map<object, MaterializedAssetRef>();
+  const invalidReferences = new Set<object>();
   const issues: DetailCompilationIssue[] = [];
   let references = 0;
   for (const [componentId, component] of state.components) {
     for (const [index, value] of component.markup.values.entries()) {
-      if (!isAssetRef(value)) continue;
+      if (bindingKind(component.markup, index) !== "asset") continue;
       references += 1;
-      if (!isStableIdentity(value.logicalId)) {
-        const location = bindingLocation(component.markup, index);
+      const materialized = materializeAssetReference(value, referencesByObject, invalidReferences);
+      const location = bindingLocation(component.markup, index);
+      if (materialized === undefined) {
+        issues.push(Object.freeze({
+          code: "asset_reference_invalid",
+          componentId,
+          path: `html:${location.line}:${location.column}`,
+          line: location.line,
+          column: location.column,
+          message: "Asset references must contain ordinary own data properties",
+        }));
+        continue;
+      }
+      if (!isStableIdentity(materialized.logicalId)) {
         issues.push(Object.freeze({
           code: "asset_identity_invalid",
           componentId,
@@ -257,9 +285,7 @@ export function authoredDetailAssetIds(authoring: NodeDetailAuthoring): readonly
           column: location.column,
           message: "Asset identity must be trimmed, NUL-free, and at most 128 UTF-8 bytes",
         }));
-      } else {
-        ids.add(value.logicalId);
-      }
+      } else ids.add(materialized.logicalId);
     }
   }
   if (references > DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage) {
@@ -283,18 +309,71 @@ export function authoredDetailAssetIds(authoring: NodeDetailAuthoring): readonly
     }));
   }
   if (issues.length !== 0) throw new DetailCompilationError(Object.freeze(issues));
-  return Object.freeze([...ids]);
+  return Object.freeze({
+    authoring,
+    logicalIds: Object.freeze([...ids]),
+    references: referencesByObject,
+  });
+}
+
+function materializeAssetReference(
+  value: unknown,
+  references: Map<object, MaterializedAssetRef>,
+  invalidReferences: Set<object>,
+): MaterializedAssetRef | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const existing = references.get(value);
+  if (existing !== undefined) return existing;
+  if (invalidReferences.has(value)) return undefined;
+  try {
+    if (Object.getPrototypeOf(value) !== Object.prototype) {
+      invalidReferences.add(value);
+      return undefined;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
+    const fields = Reflect.ownKeys(descriptors);
+    const brand = descriptors[DETAIL_ASSET];
+    const logicalId = descriptors.logicalId;
+    if (fields.length !== 2
+      || !fields.includes(DETAIL_ASSET)
+      || !fields.includes("logicalId")
+      || brand === undefined
+      || !("value" in brand)
+      || brand.value !== true
+      || brand.enumerable !== true
+      || logicalId === undefined
+      || !("value" in logicalId)
+      || logicalId.enumerable !== true
+      || typeof logicalId.value !== "string") {
+      invalidReferences.add(value);
+      return undefined;
+    }
+    const materialized = Object.freeze({ logicalId: logicalId.value });
+    references.set(value, materialized);
+    return materialized;
+  } catch {
+    invalidReferences.add(value);
+    return undefined;
+  }
 }
 
 /** @internal */
 export function compileAuthenticatedNodeDetail(
   authoring: NodeDetailAuthoring,
+  owner: AuthenticatedNodeDetailOwnerSnapshot,
+  assetSnapshot: AuthenticatedNodeDetailAssetSnapshot,
   assets: readonly (ResolvedDetailAsset | null)[],
 ): CompiledNodeDetail {
-  const logicalIds = authoredDetailAssetIds(authoring);
+  if (authoringState(authoring).owner !== owner.object || assetSnapshot.authoring !== authoring) {
+    throw new TypeError("Authenticated Node Detail owner does not own this authoring builder");
+  }
+  const logicalIds = assetSnapshot.logicalIds;
   const resolvedByLogicalId = new Map(logicalIds.map((logicalId, index) => [logicalId, assets[index] ?? undefined]));
-  return compileAuthoring(authoring, authoringState(authoring).owner, {
+  return compileAuthoring(authoring, owner, {
     missingAssetCode: "asset_unknown",
+    materialize: (reference) => typeof reference === "object" && reference !== null
+      ? assetSnapshot.references.get(reference)
+      : undefined,
     resolve: (reference) => resolvedByLogicalId.get(reference.logicalId),
   });
 }
@@ -312,11 +391,10 @@ function authoringState(authoring: NodeDetailAuthoring): AuthoringState {
 
 function compileAuthoring(
   authoring: NodeDetailAuthoring,
-  owner: NodeObject | undefined,
+  owner: AuthenticatedNodeDetailOwnerSnapshot | undefined,
   assetResolver: DetailAssetResolver,
 ): CompiledNodeDetail {
   const state = authoringState(authoring);
-  const materializedOwner = safeMaterializeOwner(owner);
   const mounts: CompiledDetailMount[] = [];
   const assets = new Map<string, CompiledAsset>();
   const issues: DetailCompilationIssue[] = [];
@@ -356,7 +434,7 @@ function compileAuthoring(
       return Object.freeze({
         id,
         order: component.order,
-        html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver, materializedOwner, domIdentities),
+        html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver, owner, domIdentities),
         css: compileCss(id, component.styles, issues),
       });
     }));
@@ -417,7 +495,7 @@ function compileHtml(
   assets: Map<string, CompiledAsset>,
   issues: DetailCompilationIssue[],
   assetResolver: DetailAssetResolver,
-  owner: MaterializedOwner | undefined,
+  owner: AuthenticatedNodeDetailOwnerSnapshot | undefined,
   domIdentities: ReadonlyMap<string, DomIdentityRecord>,
 ): string {
   if (template[DETAIL_TEMPLATE] !== "html") throw new Error("Node Detail component markup must use html``");
@@ -446,7 +524,10 @@ function compileHtml(
     if (Number.isSafeInteger(index) && index >= 0 && index < bindingUses.length) bindingUses[index] = (bindingUses[index] ?? 0) + 1;
     const value = template.values[index];
     element.attrs = element.attrs.filter((attribute) => attribute !== binding);
-    const materialization = safeMaterializeDetailCapability(value, owner?.object);
+    const asset = assetResolver.materialize(value);
+    const materialization = asset === undefined
+      ? safeMaterializeDetailCapability(value, owner?.object)
+      : Object.freeze({ matched: false });
     if (materialization.matched) {
       const materializedCapability = materialization.capability;
       if (materializedCapability === undefined) {
@@ -491,33 +572,36 @@ function compileHtml(
           capability: compileCapability(materializedCapability, owner?.clientKey ?? ""),
         }));
       }
-    } else if (isAssetRef(value)) {
-      const resolved = assetResolver.resolve(value);
-      validateAsset(componentId, element, value, resolved, assetResolver.missingAssetCode, issues);
-      const occurrence = assetOccurrences.get(value.logicalId) ?? 0;
-      assetOccurrences.set(value.logicalId, occurrence + 1);
-      const id = mountId("asset", componentId, value.logicalId, occurrence);
+    } else {
+      if (asset === undefined) {
+        issues.push(sourceIssue("binding_type_invalid", componentId, element, "Node Detail binding has the wrong typed value"));
+        element.attrs.sort(compareAttributes);
+        return;
+      }
+      const resolved = assetResolver.resolve(asset);
+      validateAsset(componentId, element, asset, resolved, assetResolver.missingAssetCode, issues);
+      const occurrence = assetOccurrences.get(asset.logicalId) ?? 0;
+      assetOccurrences.set(asset.logicalId, occurrence + 1);
+      const id = mountId("asset", componentId, asset.logicalId, occurrence);
       element.attrs.push({ name: "data-asset-mount", value: id });
-      mounts.push(Object.freeze({ id, componentId, kind: "asset", host: element.tagName, assetId: value.logicalId }));
+      mounts.push(Object.freeze({ id, componentId, kind: "asset", host: element.tagName, assetId: asset.logicalId }));
       const compiledAsset = resolved === undefined ? undefined : Object.freeze({
         id: resolved.logicalId,
         digestSha256: resolved.digestSha256,
         mediaType: resolved.mediaType,
         representation: resolved.representation.kind,
       });
-      const existingAsset = assets.get(value.logicalId);
+      const existingAsset = assets.get(asset.logicalId);
       if (compiledAsset !== undefined && existingAsset !== undefined && canonicalJson(existingAsset) !== canonicalJson(compiledAsset)) {
         issues.push(sourceIssue(
           "asset_identity_conflict",
           componentId,
           element,
-          `Asset ${value.logicalId} resolves to conflicting pinned content in this detail`,
+          `Asset ${asset.logicalId} resolves to conflicting pinned content in this detail`,
         ));
       } else if (compiledAsset !== undefined && existingAsset === undefined) {
-        assets.set(value.logicalId, compiledAsset);
+        assets.set(asset.logicalId, compiledAsset);
       }
-    } else {
-      issues.push(sourceIssue("binding_type_invalid", componentId, element, "Node Detail binding has the wrong typed value"));
     }
     element.attrs.sort(compareAttributes);
   });
@@ -572,6 +656,11 @@ function bindingLocation(template: DetailTemplate, bindingIndex: number): { read
   return sourceLocationAtEnd(source);
 }
 
+function bindingKind(template: DetailTemplate, bindingIndex: number): "gc" | "asset" | undefined {
+  const match = (template.strings[bindingIndex] ?? "").match(/(?:^|\s)(gc|asset)\s*=\s*$/);
+  return match?.[1] === "gc" || match?.[1] === "asset" ? match[1] : undefined;
+}
+
 function bindingSource(componentId: string, template: DetailTemplate, issues: DetailCompilationIssue[]): string {
   let source = template.strings[0] ?? "";
   for (let index = 0; index < template.values.length; index += 1) {
@@ -593,7 +682,7 @@ function bindingSource(componentId: string, template: DetailTemplate, issues: De
       continue;
     }
     const value = template.values[index];
-    if ((match[1] === "gc" && !isPotentialDetailCapability(value)) || (match[1] === "asset" && !isAssetRef(value))) {
+    if (match[1] === "gc" && !isPotentialDetailCapability(value)) {
       const location = sourceLocationAtEnd(source);
       issues.push(Object.freeze({
         code: "binding_type_invalid",
@@ -1175,7 +1264,7 @@ function isOrdinaryRecord(value: unknown): value is Record<PropertyKey, unknown>
   return prototype === Object.prototype || prototype === null;
 }
 
-function safeMaterializeOwner(owner: NodeObject | undefined): MaterializedOwner | undefined {
+function safeMaterializeOwner(owner: NodeObject | undefined): AuthenticatedNodeDetailOwnerSnapshot | undefined {
   if (owner === undefined) return undefined;
   try {
     if (Object.getPrototypeOf(owner) !== NodeObject.prototype) return undefined;
@@ -1416,7 +1505,7 @@ function sourceIssue(
 function validateAsset(
   componentId: string,
   element: HtmlElement,
-  asset: AssetRef,
+  asset: MaterializedAssetRef,
   resolved: ResolvedDetailAsset | undefined,
   missingAssetCode: DetailAssetResolver["missingAssetCode"],
   issues: DetailCompilationIssue[],
@@ -1469,10 +1558,15 @@ function validateAsset(
   }
 }
 
-const REJECTING_ASSET_RESOLVER: DetailAssetResolver = Object.freeze({
-  missingAssetCode: "asset_resolution_required",
-  resolve: () => undefined,
-});
+function rejectingAssetResolver(snapshot: AuthenticatedNodeDetailAssetSnapshot): DetailAssetResolver {
+  return Object.freeze({
+    missingAssetCode: "asset_resolution_required" as const,
+    materialize: (reference: unknown) => typeof reference === "object" && reference !== null
+      ? snapshot.references.get(reference)
+      : undefined,
+    resolve: () => undefined,
+  });
+}
 
 function hasAccessibleName(
   element: HtmlElement,
@@ -1563,15 +1657,6 @@ function compareAttributes(left: { readonly name: string }, right: { readonly na
 
 function sourceLocationAt(source: string, offset: number): { readonly line: number; readonly column: number } {
   return sourceLocationAtEnd(source.slice(0, offset));
-}
-
-function isAssetRef(value: unknown): value is AssetRef {
-  if (typeof value !== "object" || value === null) return false;
-  try {
-    return DETAIL_ASSET in value;
-  } catch {
-    return false;
-  }
 }
 
 function mountId(kind: "capability" | "asset", componentId: string, key: string, occurrence = 0): string {
