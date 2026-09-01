@@ -48,7 +48,7 @@ const flows = [
   },
   {
     adapterId: "openrouter",
-    harnessId: "prime-agent-basic",
+    harnessId: "codex-basic",
     accessContract: "secret@1",
     endpoint: "https://openrouter.ai/api/v1",
     modelIds: [
@@ -59,7 +59,7 @@ const flows = [
   },
   {
     adapterId: "vercel-ai-router",
-    harnessId: "prime-agent-basic",
+    harnessId: "codex-basic",
     accessContract: "secret@1",
     endpoint: "https://ai-gateway.vercel.sh/v1",
     modelIds: [
