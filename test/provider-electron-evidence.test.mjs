@@ -1,6 +1,6 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -135,4 +135,24 @@ describe("provider browser evidence", () => {
       await rm(output, { recursive: true, force: true });
     }
   }, 120_000);
+
+  // The capture flow above needs macOS media tools and skips elsewhere, but
+  // these parse checkpoints run on every CI platform and catch syntax or
+  // import regressions in the evidence scripts.
+  for (const script of [
+    "scripts/capture-provider-ux-video.mjs",
+    "scripts/provider-ux-evidence-browser.mjs",
+  ]) {
+    it(`keeps ${script} parseable`, () => {
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "--check"],
+        {
+          input: readFileSync(new URL(`../${script}`, import.meta.url)),
+          encoding: "utf8",
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+    });
+  }
 });

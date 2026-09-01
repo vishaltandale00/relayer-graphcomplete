@@ -114,12 +114,17 @@ chapters. This keeps product and authority boundaries intact when a new test is
 added outside an older component-specific list.
 
 Explicitly owned paths may select no chapter at all. Repository metadata
-(`LICENSE`, `.gitignore`, `CONTRIBUTING.md`, `ROADMAP.md`, `CONTEXT.md`,
-`live-run.example.json`), process documentation (`docs/research/`,
-`docs/postmortems/`, specification notes), and manual desktop/evidence driver
-scripts have no CI consumer, so a change that touches only those paths still
-runs planning, the quick deterministic checks, and the stable `check`
-aggregator, and nothing else. Two documentation paths are different:
+(`LICENSE`, `.gitignore`, `CONTRIBUTING.md`, `ROADMAP.md`, `CONTEXT.md`),
+process documentation (`docs/research/`, `docs/postmortems/`, specification
+notes), and manual desktop/evidence driver scripts have no CI consumer, so a
+change that touches only those paths still runs planning, the quick
+deterministic checks, and the stable `check` aggregator, and nothing else.
+Executable seams that cannot run their full flow in CI keep deterministic
+substitutes instead: `live-run.example.json` and the paid live-run entry
+point resolve through the live-run model checkpoint, the provider-UX evidence
+scripts and the ask-profile capture entry point parse through
+platform-portable syntax checkpoints, and the ask-profile shell launcher
+passes `sh -n`. Two documentation paths are different:
 `docs/desktop-release-operations.md` is read by the desktop-shell checkpoint,
 and `.gitattributes` is read by the byte-stability and Ladybug receipt-input
 checkpoints, so both select their owning Vitest tests. `scripts/clean-dist.mjs` also
@@ -128,7 +133,8 @@ the portfolio's `clean-dist` authority, so every plan verifies it. Each such
 mapping is an explicit ownership declaration in the v1 map; unknown and
 unmapped paths still fail open to the full portfolio. Scripts that Vitest imports or reads keep their
 owning test files, and `scripts/prepare-ladybug-source.mjs` additionally
-selects packaging because the pinned Ladybug build consumes it.
+selects packaging because the pinned Ladybug build consumes it and receipts
+because the native-receipt authority imports its hashing helpers.
 `docs/graph-query-v1.md` is a compile-time input of the graph-core query
 contract tests, so it selects the Rust closure of `relayer-graph-core`.
 `docs/graph-query-v1-errors.json` is the source of the generated

@@ -1,3 +1,6 @@
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -439,5 +442,40 @@ describe("live run credentials", () => {
       const candidate = { runs: { only: { ...document.runs["codex-openai"], auth: { kind, apiKey } } } };
       expect(resolveRunProfile(candidate, "only", codex).adapterId).toBe(LIVE_RUN_AUTH[kind].adapterId);
     }
+  });
+
+  it("resolves the checked-in live-run template users copy", () => {
+    // The README tells users to copy live-run.example.json; the model tests
+    // above exercise an inline duplicate, so this checkpoint pins the real
+    // template's shape against the same resolver.
+    const template = JSON.parse(
+      readFileSync(new URL("../live-run.example.json", import.meta.url), "utf8"),
+    );
+    const profiles = Object.entries(template.runs);
+    expect(profiles.length).toBeGreaterThan(0);
+    for (const [name, profile] of profiles) {
+      const implementation =
+        profile.harness === "codex-basic" ? "codex.basic" : "prime-agent.basic";
+      const resolved = resolveRunProfile(template, name, { implementation });
+      expect(typeof resolved.adapterId, name).toBe("string");
+      expect(typeof profile.harness, name).toBe("string");
+      expect(typeof profile.modelId, name).toBe("string");
+    }
+  });
+
+  it("keeps the paid live-run entry point parseable without executing it", () => {
+    // The entry point awaits its paid main() at top level, so CI must never
+    // import it; a module parse catches syntax and import regressions.
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--check"],
+      {
+        input: readFileSync(
+          new URL("../scripts/run-recursive-live-run.mjs", import.meta.url),
+        ),
+        encoding: "utf8",
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
   });
 });

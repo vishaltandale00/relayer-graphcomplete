@@ -340,11 +340,10 @@ describe("affected-module plan v1", () => {
     expect(result.vitestFiles).toEqual(["test/desktop-shell.test.mjs"]);
   });
 
-  test("maps the provider-UX evidence scripts to no chapter", () => {
-    // Their only executing consumer is macOS-media-tools gated and skips on
-    // the Ubuntu CI runner, so no checkpoint observes them there; claiming a
-    // Vitest owner would satisfy the mapping guard with a test that cannot
-    // run. The exempted-script guard below polices the declarations.
+  test("maps the provider-UX evidence scripts to a checkpoint runnable in CI", () => {
+    // Their media-capture flow needs macOS tools and skips on Ubuntu, but the
+    // owning test also parses both scripts, and that checkpoint runs on every
+    // CI platform.
     for (const changedFile of [
       "scripts/provider-ux-evidence-browser.mjs",
       "scripts/capture-provider-ux-video.mjs",
@@ -352,8 +351,35 @@ describe("affected-module plan v1", () => {
       const result = plan(changedFile);
 
       expect(result.mode).toBe("affected");
-      expect(Object.values(result.chapters).some(Boolean)).toBe(false);
+      expect(result.chapters.vitest).toBe(true);
+      expect(result.vitestFiles).toEqual([
+        "test/provider-electron-evidence.test.mjs",
+      ]);
     }
+  });
+
+  test("maps the live-run template and entry point to their model checkpoint", () => {
+    for (const changedFile of [
+      "live-run.example.json",
+      "scripts/run-recursive-live-run.mjs",
+    ]) {
+      const result = plan(changedFile);
+
+      expect(result.mode).toBe("affected");
+      expect(result.chapters.vitest).toBe(true);
+      expect(result.vitestFiles).toEqual([
+        "test/recursive-live-run-model.test.mjs",
+      ]);
+    }
+  });
+
+  test("maps Ladybug source preparation through the receipt authority too", () => {
+    const result = plan("scripts/prepare-ladybug-source.mjs");
+
+    expect(result.chapters.receipts).toBe(true);
+    expect(result.vitestFiles).toEqual(
+      expect.arrayContaining(["test/ladybug-native-receipts.test.mjs"]),
+    );
   });
 
   test("guards every exempted path declaration against drift", () => {
@@ -391,8 +417,6 @@ describe("affected-module plan v1", () => {
         "evidence-capture-integrity.test.mjs writes a temp-directory .gitignore fixture",
       LICENSE:
         "ladybug-native-receipts.test.mjs matches OpenSSL LICENSE.txt fixture names only",
-      "scripts/capture-provider-ux-video.mjs":
-        "provider-electron-evidence.test.mjs consumer is macOS-media gated and skips on CI runners",
     };
 
     for (const owner of exempted) {

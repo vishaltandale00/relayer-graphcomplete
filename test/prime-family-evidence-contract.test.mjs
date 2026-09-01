@@ -59,4 +59,14 @@ describe("packaged Prime family evidence contract", () => {
     expect(metadata.scripts["evidence:prime-family:packaged"])
       .toBe("node scripts/capture-packaged-prime-family-evidence.mjs");
   });
+
+  it("loads the contract matrix module instead of only reading its text", async () => {
+    // The text-token checks above cannot catch a syntax or import failure;
+    // the module itself is dependency-free, so CI can load the real seam.
+    const matrix = await import("../scripts/prime-evidence/contract-matrix.mjs");
+    expect(matrix.PRIME_CONTRACT_TEST_NAMES.length).toBeGreaterThan(0);
+    expect(matrix.HOST_CONTRACT_TEST_NAMES.length).toBeGreaterThan(0);
+    expect(matrix.PRIME_SOURCE_TEST_PATHS.length).toBeGreaterThan(0);
+    expect(typeof matrix.verifyPrimeContractMatrix).toBe("function");
+  });
 });
