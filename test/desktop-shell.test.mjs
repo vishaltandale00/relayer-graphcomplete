@@ -1517,9 +1517,11 @@ describe("desktop skeleton", () => {
       exitCode: null,
       signalCode: null,
       kill: vi.fn(function kill(signal) {
-        this.signalCode = signal;
-        this.emit("exit", null, signal);
-        this.emit("close", null, signal);
+        if (signal === "SIGKILL") {
+          this.signalCode = signal;
+          this.emit("exit", null, signal);
+          this.emit("close", null, signal);
+        }
         return true;
       }),
     });
