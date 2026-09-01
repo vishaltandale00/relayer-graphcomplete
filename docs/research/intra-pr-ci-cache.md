@@ -225,9 +225,17 @@ about 12m20s end to end) shows convergence beginning:
 The runtime lane's "write errors" are its rejected stores counted by sccache
 in read-only mode; its average cache write is 0.000s, so it performs no cache
 I/O and creates no entries. Lane durations fell to Clippy 7m31s, runtime
-7m55s, tests 9m22s, and crash 10m19s. If write errors keep falling on later
-runs, the remaining candidate is reducing the number of lanes that
-cold-compile the same dependency graph simultaneously.
+7m55s, tests 9m22s, and crash 10m19s.
+
+The next two runs confirmed the convergence ([33497316910](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33497316910)
+failed one pre-existing timing flake in `product_persistence_flow.rs` that was
+fixed separately; [33498832402](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33498832402)
+passed end to end in about 11 minutes): hit rates reached 83.0% clippy, 83.5%
+tests, 80.3% crash, and 78.7% runtime (Rust-only hits 60–65%), while writer
+write errors fell to 167–236. The read-only runtime lane reports its refused
+stores with 0.000s average write time throughout. Remaining misses are
+dominated by the per-run changed units and the Ladybug build-script graph
+identified by the timing reports.
 
 ### What the first hosted timing reports show
 
