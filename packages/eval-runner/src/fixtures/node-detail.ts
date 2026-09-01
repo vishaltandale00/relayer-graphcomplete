@@ -86,3 +86,33 @@ class NodeDetailHarness implements Harness {
 }
 
 export const nodeDetailFixtureFactory: HarnessFactory = () => new NodeDetailHarness();
+
+const nodeDetailHarnessBase = {
+  schemaVersion: 1,
+  graphCapabilityProfile: { search: "query-v1" },
+  permissionBindings: { ask: {}, auto: {}, full: {} },
+  implementationVersion: 1,
+  revision: 3,
+  executionAccessContracts: ["managed-runtime@1", "secret@1"],
+  settings: {
+    modelReasoningEffort: "medium",
+    promptProfile: "layered-navigation-multi-agent-v1",
+    skipGitRepoCheck: true,
+  },
+} as const;
+
+export const nodeDetailCodexHarnessConfiguration: HarnessConfiguration = {
+  ...nodeDetailHarnessBase,
+  name: "codex-basic-node-detail",
+  implementation: "codex.basic",
+};
+export const nodeDetailClaudeHarnessConfiguration: HarnessConfiguration = {
+  ...nodeDetailHarnessBase,
+  name: "claude-basic-node-detail",
+  implementation: "claude.basic",
+};
+export const nodeDetailPrimeHarnessConfiguration: HarnessConfiguration = {
+  ...nodeDetailHarnessBase,
+  name: "prime-agent-basic-node-detail",
+  implementation: "prime-agent.basic",
+};
