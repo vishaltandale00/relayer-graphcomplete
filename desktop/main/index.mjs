@@ -30,7 +30,16 @@ import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { installElectronMainErrorAdapter } from "./services/electron-main-error-adapter.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService, developerTemporalFeatures } from "./services/graphcomplete-runtime.mjs";
-import { inspectPrimeAgentRuntime, requirePrimeAgentRuntime } from "./services/prime-agent-runtime.mjs";
+import {
+  inspectPrimeAgentRuntime,
+  PRIME_AGENT_ASSET_SHA256,
+  requirePrimeAgentRuntime,
+} from "./services/prime-agent-runtime.mjs";
+import {
+  assemblePrimeManagedRuntime,
+  checkPrimeManagedRuntime,
+  createPrimeReviewedTreeCopier,
+} from "./services/prime-managed-runtime.mjs";
 import { resolveDesktopHarnessConfiguration } from "./services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createTutorialLifecycle } from "./services/tutorial-lifecycle.mjs";
@@ -73,8 +82,23 @@ app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
 const providerRuntimeRoot = join(userDataPath, "provider-runtimes");
+const primeAppRoot = app.isPackaged ? app.getAppPath() : repositoryRoot;
+const primePythonClientRoot = app.isPackaged
+  ? join(process.resourcesPath, "python", "relayer-graph", "src")
+  : join(repositoryRoot, "python", "relayer-graph", "src");
 const managedRuntimeInstaller = createManagedRuntimeInstaller({
   root: join(userDataPath, "managed-runtimes"),
+  assembleRecipe: async (context) => {
+    if (context.recipe.runtimeId !== "prime") return;
+    await assemblePrimeManagedRuntime(context, {
+      copyReviewedTrees: createPrimeReviewedTreeCopier({
+        appRoot: primeAppRoot,
+        pythonClientRoot: primePythonClientRoot,
+        expectedClosureSha256: context.recipe.runtimeContract.javascript.dependencyClosureSha256,
+        expectedPythonClientSha256: PRIME_AGENT_ASSET_SHA256.pythonPackageTree,
+      }),
+    });
+  },
 });
 const managedRuntimeResolver = createManagedRuntimeResolver(managedRuntimeInstaller);
 const legacyCodexHome = resolveLegacyCodexHome(userDataPath, process.env);
@@ -109,9 +133,6 @@ if (!codexBrowserMcpInspection.available) {
     diagnostics: codexBrowserMcpInspection.diagnostics,
   });
 }
-const primePythonClientRoot = app.isPackaged
-  ? join(process.resourcesPath, "python", "relayer-graph", "src")
-  : join(repositoryRoot, "python", "relayer-graph", "src");
 process.env.RELAYER_PRIME_PYTHON_CLIENT_ROOT = primePythonClientRoot;
 const primeAgentRuntime = await inspectPrimeAgentRuntime({
   appPath: app.isPackaged ? app.getAppPath() : repositoryRoot,
@@ -197,6 +218,22 @@ if (primaryInstance) {
     resolveClaudeRuntime: async () => managedRuntimeDescriptor(await managedRuntimeResolver.get(
       managedRuntimeRequirementForHarness("claude.basic").recipeId,
     )),
+    resolvePrimeRuntime: async () => managedRuntimeDescriptor(await managedRuntimeResolver.get(
+      managedRuntimeRequirementForHarness("prime.agent").recipeId,
+    )),
+    validateHarnessRuntime: async (configuration) => {
+      const requirement = managedRuntimeRequirementForHarness(configuration.implementation);
+      await managedRuntimeResolver.validate(requirement.recipeId);
+      return true;
+    },
+    onHarnessRuntimeValidationFailure: async (configuration, error) => {
+      await providerDiagnostics.write({
+        level: "error",
+        category: "harness_startup_validation_failed",
+        harnessId: configuration.name,
+        code: typeof error?.code === "string" ? error.code : "managed_runtime_local_validation_failed",
+      });
+    },
     coordinateHarnessReadiness: true,
   });
   let productServer;
@@ -416,15 +453,12 @@ if (primaryInstance) {
             && runtime.environment !== null
             && typeof runtime.environment === "object",
         }),
-        "prime.agent": async () => ({
-          available: false,
-          reason: {
-            code: "prime_managed_kernel_unavailable",
-            message: "This execution configuration is currently unavailable.",
-          },
-        }),
+        "prime.agent": ({ runtime }) => checkPrimeManagedRuntime({ runtime }),
       },
-      publishAvailability: (updates) => productServer.publishHarnessReadiness(updates),
+      publishAvailability: async (updates) => {
+        await productServer.publishHarnessReadiness(updates);
+        await graphRuntime.recordHarnessReadiness(updates);
+      },
       diagnostics: providerDiagnostics,
     });
     const publishCatalog = (snapshot, { signal } = {}) => (

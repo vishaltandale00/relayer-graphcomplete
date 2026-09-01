@@ -2,7 +2,9 @@
   "schemaVersion": 1,
   "source": {
     "repository": "https://github.com/vishaltandale00/prime-agent",
-    "commit": "f6130839ad3043f1cd3d5294fe03023035bfcd5c"
+    "commit": "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
+    "bridgeCommit": "8f33cfc30a3ce5f52f158122f34d523418aeca3e",
+    "bridgePublication": "local-reviewed-commit"
   },
   "packages": [
     {
@@ -22,9 +24,9 @@
     {
       "name": "@earendil-works/pi-coding-agent",
       "version": "0.8.1",
-      "file": "earendil-works-pi-coding-agent-0.8.1-sha256-ac88dfc53a9c737d214eccd81d77a6cd7f0b12a9e3432281b0a1a2a5cdd82e6a.tgz",
-      "sha256": "ac88dfc53a9c737d214eccd81d77a6cd7f0b12a9e3432281b0a1a2a5cdd82e6a",
-      "treeSha256": "1633b986dd8809ae6fe1013c9cb284bd7f50340dc12c64853b71872f56ea1156"
+      "file": "earendil-works-pi-coding-agent-0.8.1-sha256-a5608c3d617d345a4f1315e9f314c61dfb047c0741d41d0d3eb918ba2c082aaf.tgz",
+      "sha256": "a5608c3d617d345a4f1315e9f314c61dfb047c0741d41d0d3eb918ba2c082aaf",
+      "treeSha256": "93cf3da2c0777fd7cf88db0e7a524895625c6c2507541eaeb3d6f325ab4ee89f"
     },
     {
       "name": "@earendil-works/pi-tui",
@@ -48,8 +50,10 @@
       "createAgentRunKernelBoundaryScope",
       "createHostRequestHandler",
       "createAgentSessionServices",
-      "createAgentSessionFromServices"
+      "createAgentSessionFromServices",
+      "probeManagedKernel"
     ],
+    "managedKernelVersion": 1,
     "sessionFunctions": ["waitForRlmQuiescence"]
   },
   "assets": {
@@ -60,9 +64,7 @@
     "pythonPackageTreeSha256": "4b959d81101a456c1e69ff5ad810944648a438f7934b52847247e34ef2093c75"
   },
   "dependencyClosureSha256ByTarget": {
-    "darwin-arm64": "da92908f0d08ec84e0481fbb4d5cf9938c6fe9a89fbd8f553defad9c38a14dc7",
-    "darwin-x64": "921f4b0394bebdcf87cc88602b65a98777568c3a6c7df8d650196ca33ec9859c",
-    "win32-x64": "dd0774fa26307495e71cd2e44239d1521734cd6d0f0e4c64a854df1df22605f4"
+    "darwin-arm64": "afd4e30957510486bc8ca473a41a616313783a4243000bb32f5f2536797b5af6"
   },
   "harnessConfigurations": ["prime-agent-basic.yaml", "prime-agent-deep.yaml"],
   "pythonPackage": "relayer_graph"

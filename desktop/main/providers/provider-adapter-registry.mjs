@@ -112,6 +112,8 @@ export function productionHarnessRuntimeDescriptor(runtime, { environment = proc
   return Object.freeze({
     runtimeId: runtime.runtimeId,
     version: runtime.version,
+    ...(typeof runtime.installationRoot === "string" ? { installationRoot: runtime.installationRoot } : {}),
+    ...(typeof runtime.privateStateRoot === "string" ? { privateStateRoot: runtime.privateStateRoot } : {}),
     executable: runtime.executable,
     ...(runtime.modulePath ? { moduleUrl: pathToFileURL(runtime.modulePath).href } : {}),
     environment: Object.freeze(productionManagedRuntimeEnvironment(environment)),

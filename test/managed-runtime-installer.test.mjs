@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { access, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -161,6 +161,128 @@ describe("managed runtime installer", () => {
     }
   });
 
+  it("validates an exact installed descriptor locally without running its readiness probe", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    const probe = vi.fn(async ({ version }) => ({ version }));
+    try {
+      const { installer, fetch } = exactClaudeInstaller(root, "local-validation", { probes: { claude: probe } });
+      const prepared = await installer.prepare("claude-fixture@0.3.250");
+      expect(probe).toHaveBeenCalledOnce();
+      const networkCallsAfterPreparation = fetch.mock.calls.length;
+
+      await expect(installer.validate("claude-fixture@0.3.250")).resolves.toMatchObject({
+        installation: prepared.installation,
+        privateStateRoot: join(root, "claude", "macos-arm64", "private-state", prepared.installation),
+      });
+      expect(probe).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledTimes(networkCallsAfterPreparation);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects local validation when descriptor-owned private state is replaced by an escape symlink", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    const outside = await mkdtemp(join(tmpdir(), "relayer-private-state-outside-"));
+    try {
+      const { installer } = exactClaudeInstaller(root, "validate-private-state-symlink");
+      const prepared = await installer.prepare("claude-fixture@0.3.250");
+      await rm(prepared.privateStateRoot, { recursive: true, force: true });
+      await symlink(outside, prepared.privateStateRoot, "dir");
+
+      await expect(installer.validate("claude-fixture@0.3.250"))
+        .rejects.toThrow(/private state.*owned directory/i);
+      expect(await readdir(outside)).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects local validation when a private-state ancestor redirects to another managed subtree", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    try {
+      const { installer } = exactClaudeInstaller(root, "validate-private-state-parent-symlink");
+      const prepared = await installer.prepare("claude-fixture@0.3.250");
+      const privateStateParent = join(root, "claude", "macos-arm64", "private-state");
+      const redirectedParent = join(root, "redirected-private-state");
+      await rm(privateStateParent, { recursive: true, force: true });
+      await mkdir(join(redirectedParent, prepared.installation), { recursive: true });
+      await symlink(redirectedParent, privateStateParent, "dir");
+
+      await expect(installer.validate("claude-fixture@0.3.250"))
+        .rejects.toThrow(/private state escapes the managed runtime root/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects local validation when the installation ownership marker identity changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    try {
+      const { installer } = exactClaudeInstaller(root, "validate-ownership-marker");
+      const prepared = await installer.prepare("claude-fixture@0.3.250");
+      await writeFile(join(prepared.installationRoot, ".relayer-managed-runtime.json"), JSON.stringify({
+        schemaVersion: 1,
+        runtimeId: "claude",
+        target: "macos-arm64",
+        installation: "22222222-2222-4222-8222-222222222222",
+        ownedPath: "claude/macos-arm64/installations/22222222-2222-4222-8222-222222222222",
+      }));
+
+      await expect(installer.validate("claude-fixture@0.3.250"))
+        .rejects.toThrow(/installation ownership marker is invalid/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects local validation when an executable or module symlink escapes its exact installation", async () => {
+    for (const entrypoint of ["executable", "modulePath"]) {
+      const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+      const outside = await mkdtemp(join(tmpdir(), "relayer-entrypoint-outside-"));
+      const outsideFile = join(outside, `${entrypoint}.mjs`);
+      try {
+        const { installer } = exactClaudeInstaller(root, `validate-${entrypoint}-symlink`);
+        const prepared = await installer.prepare("claude-fixture@0.3.250");
+        await writeFile(outsideFile, "outside remains user-owned", { mode: 0o600 });
+        await rm(prepared[entrypoint], { force: true });
+        await symlink(outsideFile, prepared[entrypoint]);
+
+        await expect(installer.validate("claude-fixture@0.3.250"))
+          .rejects.toThrow(/entrypoint escapes its managed installation/i);
+        expect(await readFile(outsideFile, "utf8")).toBe("outside remains user-owned");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(outside, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("refuses to create descriptor-owned private state through a preexisting symlink", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    const outside = await mkdtemp(join(tmpdir(), "relayer-private-state-outside-"));
+    const probe = vi.fn()
+      .mockImplementationOnce(async ({ version }) => ({ version }))
+      .mockRejectedValueOnce(new Error("active runtime needs repair"))
+      .mockImplementation(async ({ version }) => ({ version }));
+    try {
+      const { installer } = exactClaudeInstaller(root, "private-state-symlink", { probes: { claude: probe } });
+      await installer.prepare("claude-fixture@0.3.250");
+      const privateStateParent = join(root, "claude", "macos-arm64", "private-state");
+      await rm(privateStateParent, { recursive: true, force: true });
+      await symlink(outside, privateStateParent, "dir");
+
+      await expect(installer.prepare("claude-fixture@0.3.250"))
+        .rejects.toThrow(/private-state root is not an owned directory/i);
+      await expect(access(join(outside, "sentinel"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect((await readFile(join(root, "claude", "macos-arm64", "active.json"), "utf8"))).toContain("installation");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("prepares the exact reviewed artifact closure for every supported runtime target", async () => {
     const cases = [
       { platform: "darwin", architecture: "arm64", target: "macos-arm64", recipeId: "codex@0.147.0", nativeVersion: "0.147.0-darwin-arm64", nativeIntegrity: "sha512-BEUVkiOW7kLcRyrMLfAr/h9wF8sRVJyZDy6OHtVn6QGDXiv3BvAZVTY1Pu9xF7KdIdkYXbp4uayN0aDQQaAUJw==" },
@@ -278,7 +400,10 @@ describe("managed runtime installer", () => {
       });
       expect(prepared).not.toHaveProperty("receipt");
       expect(await activeReceipt(root, "prime")).toMatchObject({
-        ownedPaths: [`prime/macos-arm64/installations/${prepared.installation}`],
+        ownedPaths: [
+          `prime/macos-arm64/installations/${prepared.installation}`,
+          `prime/macos-arm64/private-state/${prepared.installation}`,
+        ],
       });
       expect(prepared.executable.startsWith(root)).toBe(true);
       await expect(installer.installed("prime-fixture@1.0.0")).resolves.toMatchObject({
@@ -392,22 +517,29 @@ describe("managed runtime installer", () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
     const { installer, fetch } = exactClaudeInstaller(root, "legacy-exact");
     try {
-      const prepared = await installer.prepare("claude-fixture@0.3.250");
-      const preparedReceipt = await activeReceipt(root);
-      const {
-        recipeId: _recipeId,
-        recipeDigest: _recipeDigest,
-        recipeSchemaVersion: _recipeSchemaVersion,
-        assembler: _assembler,
-        readinessContractVersion: _readinessContractVersion,
-        ...legacy
-      } = preparedReceipt;
-      await writeFile(join(root, "claude", "macos-arm64", "active.json"), `${JSON.stringify({
-        ...legacy, schemaVersion: 1,
+      const { recipe } = exactClaudeFixture("legacy-exact");
+      const installation = "11111111-1111-4111-8111-111111111111";
+      const base = join(root, "claude", "macos-arm64");
+      const installationRoot = join(base, "installations", installation);
+      await mkdir(join(installationRoot, "native"), { recursive: true });
+      await mkdir(join(installationRoot, "sdk"), { recursive: true });
+      await writeFile(join(installationRoot, recipe.executableRelativePath), "legacy executable", { mode: 0o755 });
+      await writeFile(join(installationRoot, recipe.moduleRelativePath), "legacy module", { mode: 0o600 });
+      await writeFile(join(base, "active.json"), `${JSON.stringify({
+        schemaVersion: 1,
+        runtimeId: recipe.runtimeId,
+        version: recipe.version,
+        runtimeVersion: recipe.version,
+        target: recipe.target,
+        installation,
+        ownedPaths: [`claude/macos-arm64/installations/${installation}`],
+        executableRelativePath: recipe.executableRelativePath,
+        moduleRelativePath: recipe.moduleRelativePath,
+        artifacts: recipe.artifacts,
       }, null, 2)}\n`, { mode: 0o600 });
       fetch.mockClear();
 
-      await expect(installer.installed("claude-fixture@0.3.250")).resolves.toMatchObject({
+      await expect(installer.validate("claude-fixture@0.3.250")).resolves.toMatchObject({
         recipeId: "claude-fixture@0.3.250", version: "0.3.250",
       });
       expect(fetch).not.toHaveBeenCalled();
@@ -507,6 +639,13 @@ describe("managed runtime installer", () => {
       await installer.prepare("claude-fixture@0.3.250");
       const retired = join(root, "claude", "macos-arm64", "installations", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
       await mkdir(retired, { recursive: true });
+      await writeFile(join(retired, ".relayer-managed-runtime.json"), JSON.stringify({
+        schemaVersion: 1,
+        runtimeId: "claude",
+        target: "macos-arm64",
+        installation: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        ownedPath: "claude/macos-arm64/installations/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      }));
       await writeFile(join(outside, "sentinel"), "user owned");
       await symlink(outside, join(retired, "external"));
 
@@ -1558,6 +1697,22 @@ describe("managed runtime installer", () => {
     }
   });
 
+  it("preserves an unknown unretained installation directory without an ownership receipt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    const unknown = "99999999-9999-4999-8999-999999999999";
+    try {
+      const fixture = await createInstalledClaude(root);
+      const unknownPath = join(root, "claude", "macos-arm64", "installations", unknown);
+      await mkdir(unknownPath, { recursive: true });
+      await writeFile(join(unknownPath, "user-note"), "not owned by Relayer");
+
+      await expect(fixture.installer.pruneInactiveInstallations()).resolves.toEqual({ removed: [], failures: [] });
+      await expect(readFile(join(unknownPath, "user-note"), "utf8")).resolves.toBe("not owned by Relayer");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("removes only abandoned UUID staging directories with Windows-safe retries", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
     const abandoned = [
@@ -1602,6 +1757,13 @@ describe("managed runtime installer", () => {
       const base = join(root, "claude", "macos-arm64");
       await mkdir(join(base, "installations", activeInstallation), { recursive: true });
       await mkdir(join(base, "installations", lockedInstallation), { recursive: true });
+      await writeFile(join(base, "installations", lockedInstallation, ".relayer-managed-runtime.json"), JSON.stringify({
+        schemaVersion: 1,
+        runtimeId: "claude",
+        target: "macos-arm64",
+        installation: lockedInstallation,
+        ownedPath: `claude/macos-arm64/installations/${lockedInstallation}`,
+      }));
       await writeFile(join(base, "active.json"), JSON.stringify({
         schemaVersion: 1,
         runtimeId: "claude",

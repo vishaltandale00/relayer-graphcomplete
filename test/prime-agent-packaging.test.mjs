@@ -317,8 +317,6 @@ describe("Prime Agent packaged runtime", () => {
 
       expect(Object.keys(manifest.dependencyClosureSha256ByTarget).sort()).toEqual([
         "darwin-arm64",
-        "darwin-x64",
-        "win32-x64",
       ]);
 
       const copiedVendor = join(resources, "vendor");

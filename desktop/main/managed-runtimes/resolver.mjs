@@ -15,6 +15,10 @@ export function createManagedRuntimeResolver(installer) {
   }
 
   return Object.freeze({
+    validate(recipeId) {
+      if (typeof installer.validate !== "function") throw new Error("Managed runtime installer does not support local validation.");
+      return installer.validate(recipeId);
+    },
     get(recipeId) {
       const existing = cache.get(recipeId);
       if (existing) return existing.promise;

@@ -182,4 +182,46 @@ describe("production harness readiness", () => {
     await expect(newEvaluation).resolves.toMatchObject({ readyHarnessIds: ["codex-basic"] });
     expect(published).toEqual([1, 2]);
   });
+
+  it("publishes still-current routes from an overlapping batch when only one harness is superseded", async () => {
+    let finishPrime;
+    const primePending = new Promise((resolve) => { finishPrime = resolve; });
+    const codex = configuration("codex-basic", "codex.basic", "openai-api");
+    const prime = {
+      ...configuration("prime-agent-basic", "prime.agent", "openai-api"),
+      modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: "^prime-" }], deny: [] },
+    };
+    const published = [];
+    const coordinator = createHarnessReadinessCoordinator({
+      configurations: new Map([[codex.name, codex], [prime.name, prime]]),
+      digestConfiguration: ({ name }) => `sha256:${name}`,
+      runtimeRequirements: {},
+      prepareRecipe: async () => null,
+      checkers: {
+        "codex.basic": async () => ({ available: true }),
+        "prime.agent": async () => primePending,
+      },
+      publishAvailability: async (updates) => { published.push(updates); },
+    });
+    const providerDefinition = { id: "work", adapterId: "openai-api", accessContract: "secret@1" };
+    const overlapping = coordinator.evaluate({
+      trigger: "reconnect",
+      providerDefinition,
+      models: [{ id: "codex-model" }, { id: "prime-model" }],
+    });
+    await Promise.resolve();
+    const codexOnly = coordinator.evaluate({
+      trigger: "reconnect",
+      providerDefinition,
+      models: [{ id: "codex-model" }],
+    });
+    await codexOnly;
+    finishPrime({ available: true });
+
+    await expect(overlapping).resolves.toMatchObject({ readyHarnessIds: ["prime-agent-basic"] });
+    expect(published).toEqual([
+      [{ harnessId: "codex-basic", configurationDigest: "sha256:codex-basic", generation: 2, available: true, unavailableReason: null }],
+      [{ harnessId: "prime-agent-basic", configurationDigest: "sha256:prime-agent-basic", generation: 1, available: true, unavailableReason: null }],
+    ]);
+  });
 });
