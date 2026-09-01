@@ -2593,6 +2593,14 @@ export class EvalService {
             error: null,
           };
           try {
+            const detail = await this.#productRequest(`/api/threads/${thread.id}`);
+            const interaction = detail.interactions.find((candidate) => (
+              String(candidate.id) === String(snapshot.interactionId)
+            ));
+            if (!interaction || !IN_PROGRESS_COMPLETION_STATUSES.has(interaction.completionStatus)) {
+              throw new Error("The in-flight complete settled before this current action could be applied.");
+            }
+            publishedSurface = await this.#loadPublishedCurrentSurface(thread.id, interaction);
             await this.#applyPublishedCurrentDecision(thread.id, publishedSurface, decision);
           } catch (error) {
             if (decision.kind === "abandon") throw error;
@@ -2936,6 +2944,7 @@ export class EvalService {
       if (layerId == null) {
         throw new Error(`Published current has no navigable layer for ${decision.target}.`);
       }
+      // Current navigation is a layer read. Action destinations require an accepted source.
       await this.#productRequest(
         `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(surface.interactionId)}/layers/${encodeURIComponent(layerId)}`,
       );
