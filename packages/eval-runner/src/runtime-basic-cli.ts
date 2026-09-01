@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCodexBasicFactory, loadHarnessConfigurations, productHarnessImplementations, type HarnessConfiguration } from "@relayer/harness-host";
 import { graphMemoryFixtureConfiguration, graphMemoryFixtureFactory } from "./fixtures/graph-memory.js";
+import { nodeDetailFixtureFactory, nodeDetailHarnessConfiguration } from "./fixtures/node-detail.js";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "./fixtures/task-system.js";
 import { expandTestRun, type TestRunSelection } from "./run-plan.js";
 import { basicEvalCaseId, basicEvalPythonPath, executionDirectory, graphMemoryEvalCaseId, runBasicRuntimeEval, type BasicJudgeConfiguration } from "./runtime-basic.js";
@@ -45,6 +46,7 @@ async function main(): Promise<void> {
   const implementations = productHarnessImplementations({
     "fixture.task-system": taskSystemFixtureFactory,
     "fixture.graph-memory": graphMemoryFixtureFactory,
+    "fixture.node-detail": nodeDetailFixtureFactory,
     ...(candidateUsesCodex ? { "codex.basic": createCodexBasicFactory({ codexPathOverride: managedCodexExecutable! }) } : {}),
   });
   const results = [];

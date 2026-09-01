@@ -4,6 +4,7 @@ export * from "./cases/recursive-complete.js";
 export * from "./cases/recursive-graph-memory.js";
 export * from "./fixtures/approval.js";
 export * from "./fixtures/graph-memory.js";
+export * from "./fixtures/node-detail.js";
 export * from "./fixtures/task-system.js";
 export * from "./outcome/contracts.js";
 export * from "./outcome/grading.js";
