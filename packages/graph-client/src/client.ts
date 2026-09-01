@@ -46,18 +46,25 @@ export class RelayerGraphClient {
     return this.request<ResolvedPersonalPresentation>("/api/graph/personal-presentation");
   }
 
-  async submitNode(node: NodeObject): Promise<GraphNode> {
+  submitNode(node: NodeObject): Promise<GraphNode> {
     const existing = this.#submittedNodes.get(node);
-    if (existing !== undefined) return await existing;
-    const envelope = this.submissionEnvelope(node);
-    const submission = this.submitNodeEnvelope(node, envelope);
-    this.#submittedNodes.set(node, submission);
+    if (existing !== undefined) return existing;
+    const submission = deferred<GraphNode>();
+    this.#submittedNodes.set(node, submission.promise);
+    let work: Promise<GraphNode>;
     try {
-      return await submission;
+      const envelope = this.submissionEnvelope(node);
+      work = this.submitNodeEnvelope(node, envelope);
     } catch (error) {
-      if (this.#submittedNodes.get(node) === submission) this.#submittedNodes.delete(node);
-      throw error;
+      if (this.#submittedNodes.get(node) === submission.promise) this.#submittedNodes.delete(node);
+      submission.reject(error);
+      return submission.promise;
     }
+    void work.then(submission.resolve, (error: unknown) => {
+      if (this.#submittedNodes.get(node) === submission.promise) this.#submittedNodes.delete(node);
+      submission.reject(error);
+    });
+    return submission.promise;
   }
 
   private async submitNodeEnvelope(node: NodeObject, envelope: NodeSubmissionEnvelope): Promise<GraphNode> {
@@ -78,9 +85,13 @@ export class RelayerGraphClient {
     return accepted;
   }
 
-  async checkpointNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
+  checkpointNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
     const finalized = this.#submittedDetails.get(node);
-    if (finalized !== undefined) return await finalized;
+    if (finalized !== undefined) return finalized;
+    return this.compileNodeDetailCheckpoint(node);
+  }
+
+  private async compileNodeDetailCheckpoint(node: NodeObject): Promise<CompiledNodeDetail> {
     const envelope = materializeNodeSubmissionEnvelope(node);
     const program = snapshotAuthoredNodeDetailProgram(envelope.detailAuthoring, envelope.owner);
     const assets = await this.resolveDetailAssets(program);
@@ -90,12 +101,21 @@ export class RelayerGraphClient {
   private finalizeNodeDetail(node: NodeObject, envelope: NodeSubmissionEnvelope): Promise<CompiledNodeDetail> {
     const finalized = this.#submittedDetails.get(node);
     if (finalized !== undefined) return finalized;
-    const finalization = this.compileAndFreezeNodeDetail(envelope);
-    this.#submittedDetails.set(node, finalization);
-    void finalization.catch(() => {
-      if (this.#submittedDetails.get(node) === finalization) this.#submittedDetails.delete(node);
+    const finalization = deferred<CompiledNodeDetail>();
+    this.#submittedDetails.set(node, finalization.promise);
+    let work: Promise<CompiledNodeDetail>;
+    try {
+      work = this.compileAndFreezeNodeDetail(envelope);
+    } catch (error) {
+      if (this.#submittedDetails.get(node) === finalization.promise) this.#submittedDetails.delete(node);
+      finalization.reject(error);
+      return finalization.promise;
+    }
+    void work.then(finalization.resolve, (error: unknown) => {
+      if (this.#submittedDetails.get(node) === finalization.promise) this.#submittedDetails.delete(node);
+      finalization.reject(error);
     });
-    return finalization;
+    return finalization.promise;
   }
 
   private async compileAndFreezeNodeDetail(envelope: NodeSubmissionEnvelope): Promise<CompiledNodeDetail> {
@@ -568,6 +588,20 @@ function invalidDetailAssetResponse(path: string, message: string): never {
 
 function invalidNodeResponse(path: string, message: string): never {
   throw new GraphApiError(200, "invalid_node_response", path, message);
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T | PromiseLike<T>) => void;
+  readonly reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 function requireReference(value: NodeReference | undefined): NodeReference {

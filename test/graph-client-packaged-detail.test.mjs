@@ -46,6 +46,136 @@ describe("packaged graph-client authored detail boundary", () => {
     ]);
   });
 
+  it("registers submit and detail single-flight promises before synchronous resolver re-entry", async () => {
+    const { NodeObject, RelayerGraphClient, assetRef, html } = await import(graphClientIndexUrl.href);
+    const node = new NodeObject("box", "Reentrant", "Fallback", "concept", "reentrant-node");
+    node.detailAuthoring.setComponent(
+      "asset",
+      html`<img alt="Logo" asset=${assetRef("reentrant-logo")}>`,
+    );
+    let resolverPosts = 0;
+    let nodePosts = 0;
+    let didReenter = false;
+    let reentrantSubmission;
+    let reentrantCheckpoint;
+    let concurrentCheckpoint;
+    let submittedDetail;
+    let client;
+    vi.stubGlobal("fetch", vi.fn((url, init) => {
+      if (String(url).endsWith("/api/graph/detail-assets/resolve")) {
+        resolverPosts += 1;
+        if (!didReenter) {
+          didReenter = true;
+          reentrantSubmission = client.submitNode(node);
+          reentrantCheckpoint = client.checkpointNodeDetail(node);
+          concurrentCheckpoint = client.checkpointNodeDetail(node);
+        }
+        return Promise.resolve(new Response(JSON.stringify({
+          assets: [{
+            logicalId: "reentrant-logo",
+            authority: "current",
+            availability: "available",
+            digestSha256: "a".repeat(64),
+            mediaType: "image/png",
+            representation: { kind: "image", sanitized: true },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      nodePosts += 1;
+      submittedDetail = JSON.parse(String(init.body)).authoredDetail;
+      return Promise.resolve(new Response(JSON.stringify({
+        node: {
+          id: 40,
+          kind: "concept",
+          icon: "box",
+          title: "Reentrant",
+          detail: "Fallback",
+          state: "draft",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    }));
+
+    client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const firstSubmission = client.submitNode(node);
+
+    expect(reentrantSubmission).toBe(firstSubmission);
+    expect(concurrentCheckpoint).toBe(reentrantCheckpoint);
+    const [accepted, reentrantAccepted] = await Promise.all([firstSubmission, reentrantSubmission]);
+    const [checkpoint, concurrentCompiled] = await Promise.all([reentrantCheckpoint, concurrentCheckpoint]);
+    expect(reentrantAccepted).toBe(accepted);
+    expect(concurrentCompiled).toBe(checkpoint);
+    expect(submittedDetail).toEqual(checkpoint);
+    expect(await client.submitNode(node)).toBe(accepted);
+    expect(resolverPosts).toBe(1);
+    expect(nodePosts).toBe(1);
+    expect(Object.isFrozen(accepted)).toBe(true);
+    expect(node.ref).toBe(accepted);
+  });
+
+  it("clears failed reentrant placeholders and single-flights an explicit retry", async () => {
+    const { GraphApiError, NodeObject, RelayerGraphClient, assetRef, html } = await import(graphClientIndexUrl.href);
+    const node = new NodeObject("box", "Retry re-entry", "Fallback", "concept", "retry-reentrant-node");
+    node.detailAuthoring.setComponent(
+      "asset",
+      html`<img alt="Logo" asset=${assetRef("retry-logo")}>`,
+    );
+    let resolverPosts = 0;
+    let nodePosts = 0;
+    let didReenter = false;
+    let reentrantSubmission;
+    let client;
+    vi.stubGlobal("fetch", vi.fn((url) => {
+      if (String(url).endsWith("/api/graph/detail-assets/resolve")) {
+        resolverPosts += 1;
+        if (!didReenter) {
+          didReenter = true;
+          reentrantSubmission = client.submitNode(node);
+          return Promise.resolve(new Response(JSON.stringify({
+            code: "temporary_failure",
+            path: "assets",
+            message: "retry",
+          }), { status: 503, headers: { "content-type": "application/json" } }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({
+          assets: [{
+            logicalId: "retry-logo",
+            authority: "current",
+            availability: "available",
+            digestSha256: "b".repeat(64),
+            mediaType: "image/png",
+            representation: { kind: "image", sanitized: true },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      nodePosts += 1;
+      return Promise.resolve(new Response(JSON.stringify({
+        node: {
+          id: 43,
+          kind: "concept",
+          icon: "box",
+          title: "Retry re-entry",
+          detail: "Fallback",
+          state: "draft",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    }));
+
+    client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const failedSubmission = client.submitNode(node);
+    expect(reentrantSubmission).toBe(failedSubmission);
+    await expect(failedSubmission).rejects.toBeInstanceOf(GraphApiError);
+
+    const retrySubmission = client.submitNode(node);
+    const concurrentRetry = client.submitNode(node);
+    expect(concurrentRetry).toBe(retrySubmission);
+    const accepted = await retrySubmission;
+    expect(await concurrentRetry).toBe(accepted);
+    expect(await client.submitNode(node)).toBe(accepted);
+    expect(resolverPosts).toBe(2);
+    expect(nodePosts).toBe(1);
+    expect(node.ref).toBe(accepted);
+  });
+
   it("applies one immutable accepted response through code-owned state across concurrency and retries", async () => {
     const { NodeObject, RelayerGraphClient } = await import(graphClientIndexUrl.href);
     const node = new NodeObject("box", "Stable ref", "Fallback", "concept", "stable-ref-node");

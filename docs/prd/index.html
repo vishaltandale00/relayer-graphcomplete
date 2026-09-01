@@ -2278,7 +2278,7 @@ settings:
 <li>Before authenticated resolution, checkpoint and first-submit finalization snapshot the ordered component program from exact ordinary own data descriptors.</li>
 <li>The snapshot contains HTML/CSS arrays, bindings, actions, provenance, navigate targets, and assets. Resolution-time mutation cannot alter the in-flight package.</li>
 <li>The client resolves logical assets from that snapshot through authenticated transport and validates the complete response as untrusted data before compilation.</li>
-<li>The first submit is one in-progress promise in a private client map keyed by the exact <code>NodeObject</code>. It is installed before resolution begins.</li>
+<li>The first submit registers shared submission and detail-finalization promises in private client maps keyed by the exact <code>NodeObject</code> before envelope, compiler, resolver, or transport work begins. Synchronous re-entry and ordinary concurrency join those same promises.</li>
 <li>Resolution or compilation failure leaves the builder editable. Successful compilation freezes authoring before one shared transport request.</li>
 <li><code>NodeObject.ref</code> is a non-configurable read-only projection of private response state.</li>
 <li>The client snapshots the successful node envelope and every node field once from exact ordinary own data descriptors.</li>
@@ -2303,7 +2303,7 @@ settings:
 <tr><td>Owner provenance and action validity</td><td>Packaged tests cover own-data snapshots, scheme safety, traps, exact-owner membership, layer targets, presentations, options, and graph-core input invariants.</td></tr>
 <tr><td>Markup, CSS, and accessible names</td><td>Public tests cover exact templates, trap rejection, browser trees, safe CSS, unique DOM IDs, label references, hidden content, and image alt.</td></tr>
 <tr><td>Authenticated logical assets</td><td>Public tests prove pre-transport bounds, hostile-response rejection, deduplicated resolution, private authority, and stable repeated-placement mounts.</td></tr>
-<tr><td>Draft lifecycle and retry identity</td><td>Public tests prove snapshots, repair, private immutable response state, exact response validation, single-flight submission, locking, concurrency, and retry identity.</td></tr>
+<tr><td>Draft lifecycle and retry identity</td><td>Public tests prove snapshots, repair, private immutable response state, exact response validation, pre-work single-flight registration, synchronous re-entry, locking, concurrency, and retry identity.</td></tr>
 <tr><td>Private submit authority</td><td><code>test/graph-client-packaged-detail.test.mjs</code> rejects both compiler and host-bridge sibling imports and proves public forged output cannot enter submission.</td></tr>
 <tr><td>Packaged parser runtime</td><td><code>test/graph-client-packaged-detail.test.mjs</code> imports the isolated sole Product and Eval resource entry and performs real HTML/CSS compilation and submission without parent dependencies.</td></tr>
 <tr><td>Canonical package limits</td><td><code>packages/graph-client/test/detail.test.ts</code> covers stable identities, counts, canonical bytes, source locations, element limits, and depth limits.</td></tr>
