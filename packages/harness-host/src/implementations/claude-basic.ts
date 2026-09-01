@@ -61,6 +61,7 @@ export interface ClaudeBasicDependencies {
   readonly clientModuleUrl?: string;
   readonly completeModuleUrl?: string;
   readonly platform?: NodeJS.Platform;
+  readonly resolveClaudeRuntime?: () => Promise<ClaudeRuntimeDescriptor>;
 }
 
 interface ClaudeRuntimeDescriptor {
@@ -203,7 +204,7 @@ export class ClaudeBasicHarness implements Harness {
     attach?: (identity: JsonObject) => void,
     signal?: AbortSignal,
   ): Promise<{ text: string; sessionId?: string }> {
-    const runtime = claudeRuntime(access);
+    const runtime = await claudeRuntime(access, this.dependencies.resolveClaudeRuntime);
     const environment = executionEnvironment(access, runtime.environment, graph, completionBroker, this.dependencies.platform);
     const permissionMode = claudePermissionMode(this.context.permissionBinding.approvalMode);
     const abortController = new AbortController();
@@ -297,7 +298,10 @@ async function loadClaudeSdk(moduleUrl: string): Promise<ClaudeSdkModule> {
   };
 }
 
-function claudeRuntime(access: HarnessExecutionAccess): ClaudeRuntimeDescriptor {
+async function claudeRuntime(
+  access: HarnessExecutionAccess,
+  resolveClaudeRuntime?: () => Promise<ClaudeRuntimeDescriptor>,
+): Promise<ClaudeRuntimeDescriptor> {
   let candidate: unknown;
   if (access.kind === "managed-runtime") {
     if (access.adapterId !== "claude-subscription") {
@@ -308,7 +312,8 @@ function claudeRuntime(access: HarnessExecutionAccess): ClaudeRuntimeDescriptor 
     if (access.adapterId !== "anthropic-api") {
       throw new Error(`claude.basic cannot consume secret provider ${access.adapterId}`);
     }
-    candidate = (access as HarnessExecutionAccess & { readonly runtime?: unknown }).runtime;
+    candidate = (access as HarnessExecutionAccess & { readonly runtime?: unknown }).runtime
+      ?? await resolveClaudeRuntime?.();
   }
   if (!isRecord(candidate)
     || typeof candidate.executable !== "string" || candidate.executable.trim() === ""

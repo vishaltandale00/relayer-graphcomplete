@@ -99,6 +99,16 @@ pub(crate) struct RuntimeProductHarness {
     pub(crate) unavailable_reason: Option<UnavailableReason>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HarnessRuntimeAvailabilityUpdate {
+    pub(crate) harness_id: String,
+    pub(crate) configuration_digest: String,
+    pub(crate) generation: u64,
+    pub(crate) available: bool,
+    pub(crate) unavailable_reason: Option<UnavailableReason>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExecutionHarnessPolicy {

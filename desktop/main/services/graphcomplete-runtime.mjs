@@ -263,6 +263,8 @@ export class GraphCompleteRuntimeService {
     graphAuthoringLauncherPath,
     codexPathOverride,
     resolveCodexRuntime,
+    resolveClaudeRuntime,
+    coordinateHarnessReadiness = false,
     harnessHostModuleUrl,
     candidateTrace,
     acquireProviderExecution,
@@ -284,6 +286,8 @@ export class GraphCompleteRuntimeService {
     this.graphAuthoringLauncherPath = graphAuthoringLauncherPath;
     this.codexPathOverride = codexPathOverride;
     this.resolveCodexRuntime = resolveCodexRuntime;
+    this.resolveClaudeRuntime = resolveClaudeRuntime;
+    this.coordinateHarnessReadiness = coordinateHarnessReadiness;
     this.harnessHostModuleUrl = harnessHostModuleUrl;
     this.candidateTrace = candidateTrace;
     this.acquireProviderExecution = acquireProviderExecution;
@@ -334,6 +338,7 @@ export class GraphCompleteRuntimeService {
     try {
       const {
         digestHarnessConfiguration,
+        createClaudeBasicFactory,
         createCodexBasicFactory,
         loadHarnessConfigurations,
         productHarnessImplementations,
@@ -356,6 +361,13 @@ export class GraphCompleteRuntimeService {
         configurations: [...configurations.values()].map((configuration) => ({
           configuration,
           digest: digestHarnessConfiguration(configuration),
+          ...(this.coordinateHarnessReadiness ? {
+            runtimeAvailable: false,
+            unavailableReason: {
+              code: "harness_readiness_pending",
+              message: "This execution configuration is currently unavailable.",
+            },
+          } : {}),
         })),
         unavailableConfigurations,
       }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 }));
@@ -413,6 +425,9 @@ export class GraphCompleteRuntimeService {
       try {
         harnessHost = await this.#awaitStartupOperation(startHarnessHost({
         implementations: productHarnessImplementations({
+          ...(this.resolveClaudeRuntime ? {
+            "claude.basic": createClaudeBasicFactory({ resolveClaudeRuntime: this.resolveClaudeRuntime }),
+          } : {}),
           ...(this.codexBasicClientModuleUrl || this.codexBrowserMcpRuntime || this.graphAuthoringLauncherPath || this.codexPathOverride || this.resolveCodexRuntime ? {
             "codex.basic": createCodexBasicFactory({
               ...(this.codexBasicClientModuleUrl ? { clientModuleUrl: this.codexBasicClientModuleUrl } : {}),
@@ -442,6 +457,8 @@ export class GraphCompleteRuntimeService {
         harnessControlToken,
         catalogPath,
         configurationNames: Object.freeze([...configurations.keys()]),
+        configurations,
+        digestConfiguration: digestHarnessConfiguration,
       });
       return this.session;
     } catch (error) {

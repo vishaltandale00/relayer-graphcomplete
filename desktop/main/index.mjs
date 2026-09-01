@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   productionProviderAdapterRegistry,
+  productionHarnessRuntimeDescriptor,
   productionProviderRuntimeDependencies,
   resolveLegacyCodexHome,
 } from "./providers/provider-adapter-registry.mjs";
@@ -41,6 +42,7 @@ import {
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { createManagedRuntimeInstaller } from "./managed-runtimes/installer.mjs";
 import { createManagedRuntimeResolver } from "./managed-runtimes/resolver.mjs";
+import { createHarnessReadinessCoordinator } from "./services/harness-readiness.mjs";
 import { confirmManagedRuntimeQuit } from "./managed-runtimes/quit-guard.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
 import { createWindowFactory } from "./window.mjs";
@@ -51,6 +53,7 @@ import {
 import { nativeBinaryName } from "../shared/target.mjs";
 import {
   activeProviderRuntimeRequirements,
+  HARNESS_MANAGED_RUNTIME_REQUIREMENTS,
   compatibleHarnessImplementationForAdapter,
   managedRuntimeRequirementForHarness,
   parseUpdateRuntimeRequirements,
@@ -188,6 +191,13 @@ if (primaryInstance) {
       );
       requestFatalShutdown();
     },
+    resolveCodexRuntime: async () => managedRuntimeDescriptor(await managedRuntimeResolver.get(
+      managedRuntimeRequirementForHarness("codex.basic").recipeId,
+    )),
+    resolveClaudeRuntime: async () => managedRuntimeDescriptor(await managedRuntimeResolver.get(
+      managedRuntimeRequirementForHarness("claude.basic").recipeId,
+    )),
+    coordinateHarnessReadiness: true,
   });
   let productServer;
   let modelCatalog;
@@ -224,12 +234,7 @@ if (primaryInstance) {
     });
   }
 
-  const managedRuntimeDescriptor = (runtime) => Object.freeze({
-    runtimeId: runtime.runtimeId,
-    version: runtime.version,
-    executable: runtime.executable,
-    ...(runtime.modulePath ? { moduleUrl: pathToFileURL(runtime.modulePath).href } : {}),
-  });
+  const managedRuntimeDescriptor = (runtime) => productionHarnessRuntimeDescriptor(runtime);
 
   const canaryEvidenceLog = createCanaryEvidenceLog({
     appIsPackaged: app.isPackaged,
@@ -387,6 +392,41 @@ if (primaryInstance) {
       issueErrorCapability,
     });
     const productSession = await productServer.start();
+    const readiness = createHarnessReadinessCoordinator({
+      configurations: runtimeSession.configurations,
+      digestConfiguration: runtimeSession.digestConfiguration,
+      runtimeRequirements: HARNESS_MANAGED_RUNTIME_REQUIREMENTS,
+      prepareRecipe: async (recipeId) => managedRuntimeDescriptor(
+        await managedRuntimeResolver.prepare(recipeId),
+      ),
+      checkers: {
+        "codex.basic": async ({ runtime }) => ({
+          available: runtime?.runtimeId === "codex"
+            && typeof runtime.executable === "string"
+            && runtime.executable.trim() !== ""
+            && runtime.environment !== null
+            && typeof runtime.environment === "object",
+        }),
+        "claude.basic": async ({ runtime }) => ({
+          available: runtime?.runtimeId === "claude"
+            && typeof runtime.executable === "string"
+            && runtime.executable.trim() !== ""
+            && typeof runtime.moduleUrl === "string"
+            && runtime.moduleUrl.trim() !== ""
+            && runtime.environment !== null
+            && typeof runtime.environment === "object",
+        }),
+        "prime.agent": async () => ({
+          available: false,
+          reason: {
+            code: "prime_managed_kernel_unavailable",
+            message: "This execution configuration is currently unavailable.",
+          },
+        }),
+      },
+      publishAvailability: (updates) => productServer.publishHarnessReadiness(updates),
+      diagnostics: providerDiagnostics,
+    });
     const publishCatalog = (snapshot, { signal } = {}) => (
       productServer.publishProviderCatalog(snapshot, { signal })
     );
@@ -405,6 +445,13 @@ if (primaryInstance) {
       }),
       providerStatuses: () => productServer.providerStatuses(),
       runtimeDependencies: async (definition) => {
+        if (definition.accessContract === "secret@1") {
+          return productionProviderRuntimeDependencies(definition, {
+            runtimeRoot: providerRuntimeRoot,
+            legacyCodexHome,
+            environment: process.env,
+          });
+        }
         const requirement = managedRuntimeRequirementForHarness(
           compatibleHarnessImplementationForAdapter(definition.adapterId),
         );
@@ -419,11 +466,14 @@ if (primaryInstance) {
         });
       },
       prepareRuntime: async ({ adapterId }) => {
+        const descriptor = productionProviderAdapterRegistry.get(adapterId);
+        if (descriptor.accessContract === "secret@1") return;
         const requirement = managedRuntimeRequirementForHarness(
           compatibleHarnessImplementationForAdapter(adapterId),
         );
         await managedRuntimeResolver.prepare(requirement.recipeId);
       },
+      evaluateReadiness: (request) => readiness.evaluate(request),
       publishCatalog,
     });
     ({ modelCatalog, providerDefinitions: providerSetup } = providerComposition);

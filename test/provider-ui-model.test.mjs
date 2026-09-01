@@ -134,6 +134,30 @@ describe("provider renderer model", () => {
     });
   });
 
+  it("directs a connected provider with no ready route to execution repair", () => {
+    const provider = {
+      lifecycleState: "active",
+      connected: true,
+      unavailableReason: {
+        code: "provider_no_available_execution_configurations",
+        message: "This provider currently has no available execution configurations.",
+      },
+    };
+    expect(providerDefinitionStatus(provider)).toMatchObject({
+      lifecycle: "needs_execution_setup",
+      recovery: "repair_execution",
+      usable: false,
+    });
+    expect(firstRunGateState({
+      hasCompletedOnboarding: false,
+      providers: [provider],
+      defaultResolution: null,
+    })).toEqual({
+      blocked: true,
+      reason: "Repair execution configurations for the connected provider.",
+    });
+  });
+
   it("does not announce recovery while the exact provider still has no eligible family", () => {
     const status = { definitions: [{
       id: "work",

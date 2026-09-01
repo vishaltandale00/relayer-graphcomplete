@@ -163,6 +163,19 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn update_harness_runtime_availability(
+        &self,
+        updates: Vec<super::HarnessRuntimeAvailabilityUpdate>,
+    ) -> Result<(), ProductError> {
+        for update in &updates {
+            super::validate_stable_id(&update.harness_id, "harnessId")?;
+        }
+        self.storage
+            .update_harness_runtime_availability(&updates)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn provider_definitions(
         &self,
     ) -> Result<Vec<super::ProviderDefinition>, ProductError> {

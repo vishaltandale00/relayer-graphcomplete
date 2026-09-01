@@ -289,7 +289,7 @@ export class CodexBasicHarness implements Harness {
       if (access.runtime && access.runtime.runtimeId !== "codex") {
         throw new Error("codex.basic cannot consume a non-Codex managed runtime");
       }
-      Object.assign(environment, Object.fromEntries(Object.entries(access.runtime?.environment ?? {}).filter(([key]) => (
+      Object.assign(environment, Object.fromEntries(Object.entries(resolvedRuntimeEnvironment).filter(([key]) => (
         CODEX_MANAGED_RUNTIME_ENVIRONMENT.has(key)
       ))));
       environment.OPENAI_API_KEY = apiKey;
