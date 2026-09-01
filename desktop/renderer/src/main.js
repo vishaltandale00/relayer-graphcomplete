@@ -55,9 +55,7 @@ import {
   pendingNewThreadDraft,
   persistPendingNewThreadDraft,
 } from "./composer-drafts.js";
-import { createLatestRequestGate } from "./navigation-history.js";
-
-const projectComposerGate = createLatestRequestGate();
+import { projectComposerGate } from "./project-composer-navigation.js";
 const PROJECT_COMPOSER_DESTINATION_SELECTOR = [
   "#settingsButton",
   "[data-thread]",

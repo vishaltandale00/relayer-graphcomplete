@@ -979,6 +979,13 @@ describe("onboarding tutorial controller", () => {
     expect(onboarding).toContain("cancelPendingAutomatic,");
     expect(main).toContain("if (pendingNewThreadDraft()?.text) return false;");
     expect(main).toContain("PROJECT_COMPOSER_DESTINATION_SELECTOR");
+    expect(graph).toContain(`onSelectTurn: (delta) => {
+      projectComposerGate.invalidate();`);
+    expect(graph).toContain(`onSelectTurnById: (turnId) => {
+      projectComposerGate.invalidate();`);
+    expect(threads.indexOf("const submission = projectComposerGate.begin();"))
+      .toBeLessThan(threads.indexOf('creatingFirstThread = true;'));
+    expect(threads).toContain("if (!submissionIsCurrent()) return;");
     expect(main.indexOf('$("#newThreadPrompt").value = resolvedPrompt;'))
       .toBeLessThan(main.indexOf("persistPendingNewThreadDraft(resolvedPrompt, scope);"));
     expect(main.match(/takeOverPendingAutomaticTutorial\(\);/g)).toHaveLength(6);

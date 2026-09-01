@@ -14,8 +14,16 @@ export function normalizeComposerDrafts(value) {
       ? Object.fromEntries(Object.entries(followups).filter(([, text]) => typeof text === "string"))
       : {},
   };
-  if (Object.keys(normalized.threadFollowups).length > MAX_FOLLOWUP_DRAFTS
-    || Buffer.byteLength(JSON.stringify(normalized), "utf8") > MAX_COMPOSER_DRAFT_BYTES) {
+  const followupKeys = Object.keys(normalized.threadFollowups);
+  for (const staleKey of followupKeys.slice(0, -MAX_FOLLOWUP_DRAFTS)) {
+    delete normalized.threadFollowups[staleKey];
+  }
+  while (Buffer.byteLength(JSON.stringify(normalized), "utf8") > MAX_COMPOSER_DRAFT_BYTES) {
+    const [staleKey] = Object.keys(normalized.threadFollowups);
+    if (!staleKey) break;
+    delete normalized.threadFollowups[staleKey];
+  }
+  if (Buffer.byteLength(JSON.stringify(normalized), "utf8") > MAX_COMPOSER_DRAFT_BYTES) {
     throw new TypeError("Composer drafts exceed the local persistence limit.");
   }
   return normalized;
@@ -75,7 +83,7 @@ export function registerDesktopIpc({
     if (saved.providerOnboardingComplete == null && validateProviderOnboarding) {
       hasCompletedOnboarding = Boolean(await validateProviderOnboarding());
       if (hasCompletedOnboarding) {
-        await settings.write({ ...saved, providerOnboardingComplete: true });
+        await settings.update((current) => ({ ...current, providerOnboardingComplete: true }));
       }
     }
     return {
@@ -140,8 +148,7 @@ export function registerDesktopIpc({
     if (!validateProviderOnboarding || !await validateProviderOnboarding()) {
       throw new Error("A working default provider, family, and harness are required to continue.");
     }
-    const saved = await settings.read();
-    await settings.write({ ...saved, providerOnboardingComplete: true });
+    await settings.update((current) => ({ ...current, providerOnboardingComplete: true }));
     return { hasCompletedOnboarding: true };
   });
   ipcMain.handle("relayer:conversation-export", (_event, threadId) => conversationExporter.save(threadId));

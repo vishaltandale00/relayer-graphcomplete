@@ -6,7 +6,21 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark" }) {
   const handlers = new Map();
   const writes = [];
+  let currentSettings = structuredClone(savedSettings);
   const modelCatalog = { settingsOpened: vi.fn(), explicitRefresh: vi.fn() };
+  const settings = {
+    read: async () => structuredClone(currentSettings),
+    write: async (value) => {
+      currentSettings = structuredClone(value);
+      writes.push(structuredClone(value));
+      return structuredClone(currentSettings);
+    },
+    update: async (mutate) => {
+      currentSettings = await mutate(structuredClone(currentSettings));
+      writes.push(structuredClone(currentSettings));
+      return structuredClone(currentSettings);
+    },
+  };
   registerDesktopIpc({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     dialog: { showOpenDialog: vi.fn() },
@@ -23,10 +37,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
       })),
     },
     validateProviderOnboarding,
-    settings: {
-      read: async () => savedSettings,
-      write: async (value) => writes.push(value),
-    },
+    settings,
     updater: { status: () => ({ phase: "idle" }), check: vi.fn(), download: vi.fn(), install: vi.fn(), setChannel: vi.fn() },
     getWindow: () => null,
     getAppearance: () => "dark",
@@ -39,6 +50,8 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     reconnect: handlers.get("relayer:provider-reconnect"),
     refreshModels: handlers.get("relayer:model-catalog-refresh"),
     modelCatalog,
+    settings,
+    readSettings: () => structuredClone(currentSettings),
     writes,
   };
 }
@@ -84,6 +97,26 @@ describe("provider onboarding IPC hard gate", () => {
     await expect(status()).resolves.toMatchObject({ hasCompletedOnboarding: true });
     expect(validate).toHaveBeenCalledOnce();
     expect(writes).toEqual([{ appearance: "dark", providerOnboardingComplete: true }]);
+  });
+
+  it("preserves composer drafts written while provider validation is pending", async () => {
+    let finishValidation;
+    const validate = vi.fn(() => new Promise((resolve) => { finishValidation = resolve; }));
+    const { status, settings, readSettings } = fixture(validate, { appearance: "dark" });
+
+    const pendingStatus = status();
+    await vi.waitFor(() => expect(validate).toHaveBeenCalledOnce());
+    await settings.update((current) => ({
+      ...current,
+      composerDrafts: { pendingNewThread: { text: "Keep me", scope: null }, threadFollowups: {} },
+    }));
+    finishValidation(true);
+
+    await expect(pendingStatus).resolves.toMatchObject({ hasCompletedOnboarding: true });
+    expect(readSettings()).toMatchObject({
+      providerOnboardingComplete: true,
+      composerDrafts: { pendingNewThread: { text: "Keep me", scope: null } },
+    });
   });
 
   it("does not migrate an existing user whose defaults no longer resolve", async () => {

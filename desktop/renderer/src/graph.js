@@ -10,6 +10,7 @@ import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { createAnnotationApi } from "./annotation-api.js";
 import { createNodeContextDraftApi } from "./node-context-drafts.js";
 import { createNodeInputDraftApi } from "./node-input-drafts.js";
+import { projectComposerGate } from "./project-composer-navigation.js";
 import {
   getNavigationHistory,
   navigateHistory,
@@ -48,8 +49,14 @@ function workspace() {
         if (error.code !== "navigation_superseded") toast(error.message);
       }
     },
-    onSelectTurn: selectTurn,
-    onSelectTurnById: selectTurnById,
+    onSelectTurn: (delta) => {
+      projectComposerGate.invalidate();
+      return selectTurn(delta);
+    },
+    onSelectTurnById: (turnId) => {
+      projectComposerGate.invalidate();
+      return selectTurnById(turnId);
+    },
     onSelectionChange: (nodeId) => {
       replaceCurrentSelection(nodeId);
       onboardingTutorialController()?.nodeSelected({

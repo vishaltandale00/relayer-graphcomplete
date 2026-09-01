@@ -1,5 +1,6 @@
 const STORAGE_KEY = "relayerComposerDraftsV1";
 const MAX_THREAD_FOLLOWUP_DRAFTS = 256;
+const MAX_COMPOSER_DRAFT_BYTES = 1024 * 1024;
 let desktopState = emptyState();
 let desktopInitialized = false;
 
@@ -36,18 +37,34 @@ function readState() {
 }
 
 function writeState(value) {
+  const bounded = boundedState(value);
+  if (!bounded) return;
   if (window.relayerDesktop?.drafts) {
-    desktopState = structuredClone(value);
+    desktopState = structuredClone(bounded);
     void window.relayerDesktop.drafts.write(desktopState).catch(() => undefined);
     return;
   }
   const target = storage();
   if (!target) return;
   try {
-    target.setItem(STORAGE_KEY, JSON.stringify(value));
+    target.setItem(STORAGE_KEY, JSON.stringify(bounded));
   } catch {
     // Draft persistence is best-effort; the composer remains usable without storage.
   }
+}
+
+function boundedState(value) {
+  const bounded = structuredClone(value);
+  const followupKeys = Object.keys(bounded.threadFollowups);
+  for (const staleKey of followupKeys.slice(0, -MAX_THREAD_FOLLOWUP_DRAFTS)) {
+    delete bounded.threadFollowups[staleKey];
+  }
+  while (new TextEncoder().encode(JSON.stringify(bounded)).byteLength > MAX_COMPOSER_DRAFT_BYTES) {
+    const [staleKey] = Object.keys(bounded.threadFollowups);
+    if (!staleKey) return null;
+    delete bounded.threadFollowups[staleKey];
+  }
+  return bounded;
 }
 
 export async function initializeComposerDrafts() {

@@ -223,7 +223,7 @@ async function run() {
   };
   await openWindow();
 
-  const rejectedDraftLimits = await evaluate(`Promise.all([
+  const draftLimits = await evaluate(`Promise.all([
     window.relayerDesktop.drafts.write({
       pendingNewThread: { text: "x".repeat(1024 * 1024), scope: null },
       threadFollowups: {},
@@ -231,11 +231,26 @@ async function run() {
     window.relayerDesktop.drafts.write({
       pendingNewThread: null,
       threadFollowups: Object.fromEntries(Array.from({ length: 257 }, (_, index) => [String(index), "draft"])),
-    }).then(() => false, (error) => error?.message?.includes("persistence limit")),
+    }).then((value) => ({
+      count: Object.keys(value.threadFollowups).length,
+      first: Object.keys(value.threadFollowups)[0],
+      last: Object.keys(value.threadFollowups).at(-1),
+    })),
   ])`);
-  if (!rejectedDraftLimits.every(Boolean)) {
-    throw new Error(`The production draft IPC did not enforce both persistence limits: ${JSON.stringify(rejectedDraftLimits)}`);
+  if (draftLimits[0] !== true
+    || draftLimits[1]?.count !== 256
+    || draftLimits[1]?.first !== "1"
+    || draftLimits[1]?.last !== "256") {
+    throw new Error(`The production draft IPC did not enforce both persistence limits: ${JSON.stringify(draftLimits)}`);
   }
+  const persistedBoundedDrafts = await desktopSettings.read();
+  const persistedFollowupKeys = Object.keys(persistedBoundedDrafts.composerDrafts?.threadFollowups || {});
+  if (persistedFollowupKeys.length !== 256
+    || persistedFollowupKeys[0] !== "1"
+    || persistedFollowupKeys.at(-1) !== "256") {
+    throw new Error(`The bounded follow-up set did not reach the main-process store: ${JSON.stringify(persistedFollowupKeys)}`);
+  }
+  await evaluate(`window.relayerDesktop.drafts.write({ pendingNewThread: null, threadFollowups: {} })`);
 
   const resting = await waitFor("the project-row compose action", () => webContents.executeJavaScript(`(() => {
     const row = document.querySelector('[data-project-row="${project.id}"]');

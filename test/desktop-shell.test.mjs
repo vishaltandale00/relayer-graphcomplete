@@ -527,6 +527,74 @@ describe("desktop skeleton", () => {
     }
   });
 
+  it("lets a later project composer supersede an in-flight first-thread Send", async () => {
+    const globalNames = ["document", "fetch", "history", "location", "localStorage", "window"];
+    const originalGlobals = new Map(
+      globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
+    );
+    const input = { value: "Keep the newer project draft", disabled: false };
+    const button = { disabled: false };
+    const permissionButton = { disabled: false, setAttribute: vi.fn() };
+    const permissionMenu = { classList: { add: vi.fn() } };
+    const toastElement = { textContent: "", classList: { add: vi.fn(), remove: vi.fn() } };
+    let resolveRequest;
+    const fetch = vi.fn(() => new Promise((resolve) => { resolveRequest = resolve; }));
+    const localStorage = { getItem: vi.fn(() => null), setItem: vi.fn() };
+    const elements = new Map([
+      ["#newThreadPrompt", input],
+      ["#createThread", button],
+      ["#permissionButton", permissionButton],
+      ["#permissionMenu", permissionMenu],
+      ["#toast", toastElement],
+    ]);
+    Object.assign(globalThis, {
+      document: { querySelector: (selector) => elements.get(selector) },
+      fetch,
+      history: { replaceState: vi.fn() },
+      location: new URL("http://127.0.0.1:43123/"),
+      localStorage,
+      window: { GRAPHCOMPLETE_CONFIG: null, relayerDesktop: undefined, localStorage },
+    });
+    vi.useFakeTimers();
+    vi.doMock("../desktop/renderer/src/onboarding-tutorial.js", () => ({
+      onboardingTutorialController: () => ({ cancelPendingAutomatic: vi.fn(), threadCreated: vi.fn() }),
+    }));
+    try {
+      const { viewState } = await import("../desktop/renderer/src/state.js");
+      viewState.currentThreadId = null;
+      viewState.selectedPermissionProfileId = "auto";
+      viewState.selectedScope = { kind: "project", projectId: 1, label: "First" };
+      const { projectComposerGate } = await import("../desktop/renderer/src/project-composer-navigation.js");
+      const { createFirstThread } = await import("../desktop/renderer/src/threads.js?submission-superseded");
+      const pending = createFirstThread({
+        harnessId: "codex-basic",
+        modelSelection: { familyId: 1, providerId: "codex", modelId: "gpt-5" },
+      });
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+
+      projectComposerGate.begin();
+      viewState.selectedScope = { kind: "project", projectId: 2, label: "Second" };
+      resolveRequest(new Response(JSON.stringify({ id: 42, rootInteractionId: 84 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+      await pending;
+
+      expect(viewState.currentThreadId).toBeNull();
+      expect(input.value).toBe("Keep the newer project draft");
+      expect(localStorage.setItem).not.toHaveBeenCalled();
+      expect(toastElement.textContent).toBe("");
+    } finally {
+      vi.doUnmock("../desktop/renderer/src/onboarding-tutorial.js");
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      for (const [name, descriptor] of originalGlobals) {
+        if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+        else delete globalThis[name];
+      }
+    }
+  });
+
   it("starts and stops the Rust product server with an isolated profile and private session", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-app-server-service-"));
     const invocations = [];
