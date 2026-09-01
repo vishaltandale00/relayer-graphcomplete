@@ -60,6 +60,7 @@ import {
   DESKTOP_UPDATE_BASE_URL,
   packagedDesktopReleaseMetadata,
 } from "../shared/release-metadata.mjs";
+import { developmentTelemetryPackageMetadata } from "../shared/telemetry-release.mjs";
 import { nativeBinaryName } from "../shared/target.mjs";
 import {
   activeProviderRuntimeRequirements,
@@ -382,15 +383,13 @@ if (primaryInstance) {
     appearance = saved.appearance === "light" ? "light" : "dark";
     nativeTheme.themeSource = appearance;
     const channel = resolveUpdateChannel(saved.updateChannel);
-    const telemetryPackageMetadata = app.isPackaged ? metadata : {
-      version: app.getVersion(),
-      relayerArtifactMode: "development",
-      relayerProductName: "Relayer Dev",
-    };
+    const telemetryPackageMetadata = app.isPackaged
+      ? metadata
+      : developmentTelemetryPackageMetadata(desktopVersion);
     authenticatedErrorReporting = await initializeDesktopAuthenticatedErrorReporting({
       userDataPath,
       packageMetadata: telemetryPackageMetadata,
-      appVersion: app.getVersion(),
+      appVersion: desktopVersion,
       platform: process.platform,
       architecture: process.arch,
       currentUpdateChannel: releaseArtifact ? channel : "development",

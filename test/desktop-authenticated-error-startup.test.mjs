@@ -11,6 +11,7 @@ import {
   initializeDesktopAuthenticatedErrorReporting,
   setDesktopAuthenticatedErrorChannel,
 } from "../desktop/main/services/authenticated-error-startup.mjs";
+import { developmentTelemetryPackageMetadata } from "../desktop/shared/telemetry-release.mjs";
 
 const directories = [];
 const reportingAuthorities = [];
@@ -183,6 +184,56 @@ describe("desktop authenticated error startup", () => {
     expect(onUnavailable).toHaveBeenCalledOnce();
     expect(onUnavailable).toHaveBeenCalledWith();
     expect(createTransport).toHaveBeenCalledWith({ dsn: GRAPHCOMPLETE_SENTRY_DSN });
+  });
+
+  it("initializes Linux development reporting with the normalized product version", async () => {
+    const userDataPath = await mkdtemp(join(tmpdir(), "relayer-telemetry-linux-"));
+    directories.push(userDataPath);
+    const encryptString = vi.fn((value) => Buffer.from(`sealed:${value}`));
+    const decryptString = vi.fn((value) => value.toString("utf8").replace(/^sealed:/u, ""));
+    const transport = {
+      enable: vi.fn(async () => {}),
+      disable: vi.fn(async () => {}),
+      send: vi.fn(async () => { throw new Error("capture sink unavailable"); }),
+    };
+
+    const reporting = await initializeDesktopAuthenticatedErrorReporting({
+      userDataPath,
+      packageMetadata: developmentTelemetryPackageMetadata("0.2.16"),
+      appVersion: "0.2.16",
+      platform: "linux",
+      architecture: "x64",
+      currentUpdateChannel: "development",
+      safeStorage: { isEncryptionAvailable: () => true, encryptString, decryptString },
+      createTransport: () => transport,
+    });
+    reportingAuthorities.push(reporting);
+
+    expect(reporting).not.toBeNull();
+    await reporting.account.transitionIdentity({ generation: 1, subject: "auth0|linux-dev" });
+    const reporter = reporting.issueReporter({ component: "electron-main", processGeneration: 1 });
+    await expect(reporter.report({
+      code: "electron_main.unhandled_crash",
+      exceptionClass: null,
+      frames: [],
+    })).resolves.toEqual({ accepted: true, delivery: "queued" });
+  });
+
+  it("returns no authority when Electron's unsigned Linux version is supplied", async () => {
+    const onUnavailable = vi.fn();
+
+    await expect(initializeDesktopAuthenticatedErrorReporting({
+      userDataPath: "/unused",
+      packageMetadata: developmentTelemetryPackageMetadata("0.0"),
+      appVersion: "0.0",
+      platform: "linux",
+      architecture: "x64",
+      currentUpdateChannel: "development",
+      safeStorage: { isEncryptionAvailable: () => true, encryptString: vi.fn(), decryptString: vi.fn() },
+      createTransport: vi.fn(),
+      onUnavailable,
+    })).resolves.toBeNull();
+    expect(onUnavailable).toHaveBeenCalledOnce();
   });
 
   it("rotates packaged telemetry before the account channel and contains telemetry failure", async () => {
