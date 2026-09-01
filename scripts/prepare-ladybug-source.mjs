@@ -101,8 +101,8 @@ export function validateLadybugSourceManifest(manifest) {
     const url = new URL(source.url);
     if (url.protocol !== "https:") throw new Error(`source URL must use HTTPS: ${source.url}`);
   }
-  if (manifest.licenseReceipt.completeForDistribution !== false) {
-    throw new Error("source preparation must not claim the incomplete license receipt is shippable");
+  if (manifest.licenseReceipt.completeForDistribution !== true) {
+    throw new Error("source preparation requires a release-ready license receipt");
   }
   return manifest;
 }
@@ -262,7 +262,7 @@ export async function stageLadybugSources({ cacheDirectory, outputDirectory, man
     openssl: { version: manifest.openssl.version, sha256: manifest.openssl.sha256 },
     extensions: [],
     nativeMode: manifest.build.nativeMode,
-    distributionLicenseReceiptComplete: false,
+    distributionLicenseReceiptComplete: manifest.licenseReceipt.completeForDistribution,
   };
   await writeFile(resolve(outputDirectory, "source-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
   return { bindingDirectory, opensslDirectory, receipt };

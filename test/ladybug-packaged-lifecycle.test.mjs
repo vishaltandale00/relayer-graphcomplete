@@ -544,6 +544,9 @@ describe("Ladybug packaged lifecycle qualification", () => {
     await expect(buildReleaseRustServers({
       contract: { targetKey: "macos-arm64", rustTarget: "aarch64-apple-darwin" },
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64", RELAYER_DESKTOP_RELEASE: "1" },
+      verifyLadybugDistributionLicense: async () => {
+        throw new Error("Ladybug distribution license receipts are not release-ready");
+      },
       prepareLadybug: async () => {
         prepareCalls += 1;
         throw new Error("license gate must run before source preparation");

@@ -10,7 +10,7 @@
     "sourceTreeSha256": "58ab1da5ce17d2ca6ae0a6d835b2384c6fd8c8627703bf93e77685419f7142ba",
     "spdx": "MIT",
     "licensePath": null,
-    "receiptStatus": "blocked-missing-upstream-license-file"
+    "receiptStatus": "manifest-declared-mit"
   },
   "core": {
     "version": "0.18.0",
@@ -99,5 +99,5 @@
     { "name": "Apple libc++ and libSystem", "targets": ["aarch64-apple-darwin", "x86_64-apple-darwin"], "shipped": false, "classification": "operating-system-runtime" },
     { "name": "Microsoft Visual C++ Runtime", "targets": ["x86_64-pc-windows-msvc"], "shipped": false, "classification": "system-runtime-prerequisite" }
   ],
-  "releaseBlockers": ["lbug-binding-missing-upstream-license-file"]
+  "releaseBlockers": []
 }

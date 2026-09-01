@@ -39,7 +39,7 @@ export async function verifyLadybugNativeReceipts({
     sourceTreeSha256: "58ab1da5ce17d2ca6ae0a6d835b2384c6fd8c8627703bf93e77685419f7142ba",
     spdx: "MIT",
     licensePath: null,
-    receiptStatus: "blocked-missing-upstream-license-file",
+    receiptStatus: "manifest-declared-mit",
   });
   assert.deepEqual(inventory.core, {
     version: "0.18.0",

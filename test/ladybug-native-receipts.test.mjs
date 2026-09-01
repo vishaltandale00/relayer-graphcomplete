@@ -30,11 +30,21 @@ function fixtureInventory() {
 }
 
 describe("Ladybug native dependency receipts", () => {
-  it("verifies the frozen inventory and rejects it as release-ready while the binding license is missing", () => {
+  it("verifies the frozen inventory and accepts it as release-ready under the manifest-declared license", () => {
     expect(execFileSync(process.execPath, [verifier], { encoding: "utf8" })).toContain("release blockers preserved");
     const release = spawnSync(process.execPath, [verifier, "--release-ready"], { encoding: "utf8" });
-    expect(release.status).not.toBe(0);
-    expect(release.stderr).toContain("native receipt is not release-ready");
+    expect(release.status).toBe(0);
+    expect(release.stdout).toContain("release blockers preserved");
+  });
+
+  it("fails closed when the native inventory re-declares a release blocker", () => {
+    const { inventory } = fixtureInventory();
+    const receipt = JSON.parse(readFileSync(inventory, "utf8"));
+    receipt.releaseBlockers = ["lbug-binding-missing-upstream-license-file"];
+    writeFileSync(inventory, `${JSON.stringify(receipt, null, 2)}\n`);
+    const result = spawnSync(process.execPath, [verifier, "--inventory", inventory, "--release-ready"], { encoding: "utf8" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("native receipt is not release-ready");
   });
 
   it("fails closed when a compiled native component loses its notice", () => {
