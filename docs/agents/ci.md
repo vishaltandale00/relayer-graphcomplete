@@ -30,20 +30,28 @@ result propagates without a second compiler invocation, so compiler failures
 cannot be delayed or masked.
 It disables Cargo's runner-local incremental mode because sccache cannot cache
 incremental Rust invocations. Its separate Cargo registry/git archive excludes
-`target/` and remains a trusted-branch-only writer. Other Rust
-compilation archives retain their
-existing restore-on-PR, write-on-branch behavior until hosted canary evidence
-justifies expansion.
+`target/` and remains a trusted-branch-only writer.
 
-The sccache canary is admitted beyond the Rust job only after one seed run and
-the next real changed-head pull-request run demonstrate compiler-cache hits, at
-least five minutes of net Rust compilation savings against the recorded hosted
-baseline, no required-job regression, and no repository-cache thrashing. Do not
-manufacture repeated cold runs to reach that decision. Compiler objects may be
-retained when a later compilation unit or test fails; their presence is not a
-verification claim. A cache or telemetry failure must not make the stable
-required `check` fail when the same source compiles and tests successfully
-without acceleration.
+The first candidate expansion is a mutually exclusive Vitest canary. An ordinary
+same-repository pull request builds its Rust runtime prerequisites with the same
+reduced-debug compiler profile and namespace as the Rust job, but reads sccache
+objects without writing them. A fork pull request receives no sccache setup or
+credentials and instead restores the existing `target/` archive. Trusted branch
+pushes also use that archive and remain its only writers, keeping a trusted
+dependency/source baseline available to forks; Cargo still rebuilds source
+whose fingerprints do not match the current checkout. Both paths build the current runtime
+prerequisites before invoking every selected Vitest test freshly. If sccache
+setup, daemon startup, or server I/O fails on the trusted pull-request path, the
+wrapper falls back to direct `rustc`; cache telemetry is non-blocking.
+
+Admitting this canary or any further sccache expansion requires one seed run and the next real
+changed-head pull-request run to demonstrate compiler-cache hits, net savings
+against the recorded hosted baseline, no required-job regression, and no
+repository-cache thrashing. Do not manufacture repeated cold runs to reach that
+decision. Compiler objects may be retained when a later compilation unit or
+test fails; their presence is not a verification claim. A cache or telemetry
+failure must not make the stable required `check` fail when the same source
+compiles and tests successfully without acceleration.
 
 Job summaries record Node setup/npm-cache status and elapsed time, Rust-cache
 status and restore time, chapter duration, and the first actionable failure.

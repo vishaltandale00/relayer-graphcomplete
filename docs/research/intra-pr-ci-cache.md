@@ -2,6 +2,9 @@
 
 Research date: 2026-08-31
 
+Post-merge optimization review: 2026-09-01 UTC, after PR
+[#381](https://github.com/vishaltandale00/relayer-graphcomplete/pull/381)
+
 ## Decision
 
 Canary Mozilla sccache in the `Rust checks and fresh tests` job. Ordinary
@@ -103,6 +106,260 @@ cache hits, saves at least five minutes of Rust compilation time, introduces no
 required-job failure, and does not evict or thrash trusted main, packaging, or
 npm caches. Record setup outcome, hit/miss/error counts, write/read durations,
 and the Rust chapter duration in the job summary and evidence ledger.
+
+## Post-#381 measured bottlenecks
+
+The table below uses GitHub's recorded job and step timestamps. It distinguishes
+successful observations from targets. #381's final run is a genuine same-PR
+changed-head warm comparison, but because the workflow/cache implementation
+itself forced full mode, it is not yet a representative affected-component PR.
+
+| Successful run | Full gate | Rust job | Vitest job | Other selected work |
+| --- | --- | --- | --- | --- |
+| [`main` after #359](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33462685754) before the sccache canary | 31m23s job; 29m05s required check/build; 1m51s target-cache save | 11m59s job: 4m01s target restore plus 7m35s compile/check/test | 6m42s job: 2m49s target restore, 30s prerequisites, 2m50s fresh tests | TypeScript job 31s with 10s actual build; packaging 4m37s with 3m46s actual package build |
+| [#381's successful warm changed-head PR run](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33463966913) | 30m24s job; 29m49s required check/build; no usable target restore | 13m04s job: sccache setup/start about 1s, then 12m35s compile/check/test; 5m26s faster than the recorded 18m30s baseline | 8m06s job: 4m14s target restore, 40s prerequisites, 2m44s fresh tests | TypeScript job 24s with 7s actual build; packaging 5m14s with 4m18s actual package build |
+
+Three conclusions follow from the successful evidence:
+
+1. The full repository gate remains the critical path whenever the planner
+   selects `full`; the first sccache seed did not change that job.
+2. Rust and Rust-backed Vitest prerequisites dominate. TypeScript, Python,
+   receipts, PRD, and Node setup are currently too small to justify invasive
+   caching work.
+3. A large target archive can save compilation but costs minutes to restore.
+   The relevant comparison is end-to-end wall time, not a nominal cache hit.
+
+The first post-merge `main` run is **not** successful workflow evidence, though
+its individual Rust job did finish successfully. Its full-gate target restore
+took 3m20s and reached the full Vitest phase about 6m18s after the gate began,
+but a fresh Vitest assertion failed at 9m06s. Its separate Vitest job missed the
+target cache, spent 17m58s rebuilding prerequisites, ran fresh tests in 2m49s,
+and saved the new archive in 47s. The sccache Rust step took 31m39s, versus
+12m35s for #381's PR seed and 7m35s of compilation/check/test after a 4m01s
+target restore in the pre-canary run. This `main` execution is another branch
+seed, not the required warm changed-head comparison: GitHub cache entries made
+on a pull-request merge ref cannot be restored by the default branch.
+([GitHub cache matching and scope](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#cache-key-matching))
+
+During that Rust writer, the repository cache API reported 3.69 GB across
+1,314 active entries and the newest entries were `sccache/*` objects. A later
+completed-run snapshot reported 3.89 GB across 1,449 entries, including 1,445
+main-scoped sccache objects totaling 793,942,004 bytes. These are
+early transfer/rate-limit warnings, not a claim that sccache caused the failed
+workflow or that a warm run will be slow. The sccache statistics were written
+only to the job summary, not the downloadable log, so this review could not
+independently recover the hit/miss/error breakdown from the completed job.
+([post-merge run](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33465911128),
+[GitHub cache usage and rate limits](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#usage-limits-and-eviction-policy))
+
+## Ranked next options
+
+### 1. Keep sccache admitted in Rust, then verify the trusted-main consumer
+
+**Expected impact:** high if a real changed-head run reuses most library
+compilations; negative if per-object service I/O outweighs the saved compile.
+**Correctness risk:** low for verification, medium for reliability and cache
+storage. Tests still run, but service latency and eviction can extend the
+required job.
+
+sccache is not a complete replacement for Cargo's warm target directory. Its
+Rust support requires incremental compilation to be disabled and cannot cache
+crates that invoke the system linker, including binaries, `dylib`, `cdylib`,
+and procedural macros. Its hash includes rustc, sysroot, compiler arguments,
+source, and dependency inputs; absolute-path normalization is available through
+`SCCACHE_BASEDIRS` if equivalent hosted checkouts fail to match.
+([sccache Rust limitations](https://github.com/mozilla/sccache/blob/036fc5c8b6b6f807a70eaf58fd3fe6025454fddb/docs/Rust.md),
+[sccache Rust keys](https://github.com/mozilla/sccache/blob/036fc5c8b6b6f807a70eaf58fd3fe6025454fddb/docs/Caching.md#rust),
+[path normalization](https://github.com/mozilla/sccache/blob/036fc5c8b6b6f807a70eaf58fd3fe6025454fddb/README.md#normalizing-paths-with-sccache_basedirs))
+
+The #381 warm changed-head run cleared the predefined five-minute admission
+threshold, so retaining the Rust canary is justified. The next representative
+affected-component PR after the trusted `main` seed should record:
+
+- total Rust job and compile/check/test step time, excluding queue time;
+- cacheable requests, hits, misses, non-cacheable reasons, read/write errors,
+  timeouts, and backend location from `sccache --show-stats`;
+- repository cache count and bytes before and after;
+- the exact toolchain, runner image, profile, features, flags, and effective
+  `CARGO_INCREMENTAL=0` setting; and
+- a no-cache fallback result proving a service failure does not change source
+  verification.
+
+Emit the statistics to durable logs or an artifact as well as the job summary;
+a green job is not proof that a fail-open backend stored or restored anything.
+The GitHub backend documents read-only/read-write modes, separate read/write
+keys, and nonfatal storage rate limits.
+([sccache GitHub backend](https://github.com/mozilla/sccache/blob/036fc5c8b6b6f807a70eaf58fd3fe6025454fddb/docs/GHA.md),
+[sccache configuration](https://github.com/mozilla/sccache/blob/036fc5c8b6b6f807a70eaf58fd3fe6025454fddb/docs/Configuration.md#cache-configs))
+
+Keep monitoring whether the already-observed five-minute end-to-end saving
+persists without cache growth or reliability regression. Before expanding
+sccache to another job, compare that job's current whole-target transfer plus
+compile time with a mutually exclusive sccache canary on the same commands and
+realistic changed-head delta; do not combine sccache with Cargo incremental
+compilation.
+
+### 2. Mature the existing full-gate and Vitest target-cache baseline
+
+**Expected impact:** high for full-mode PRs and Rust-backed Vitest setup.
+**Correctness risk:** low for verification, medium for transfer time and quota.
+
+The post-merge run suggests the full-gate archive can move the workflow from a
+roughly 29-minute cold gate toward the Issue #360 target, but that run failed
+and therefore cannot establish a warm success. The newly seeded Vitest archive
+also needs one successful consumer. Preserve the current trusted-branch writer,
+fresh tests, and separate cache keys while collecting two successful consumers
+with archive bytes, restore time, prerequisite time, and eviction data.
+
+Cargo documents `target/` as an internal build cache containing dependency
+artifacts, fingerprints, and incremental state; it explicitly names sccache as
+the shared-cache alternative. Target state is sensitive to paths, toolchain,
+profile, features, and flags, so it remains rebuildable acceleration rather
+than an artifact contract.
+([Cargo build cache](https://doc.rust-lang.org/cargo/reference/build-cache.html),
+[GitHub cache versus artifacts](https://docs.github.com/en/actions/concepts/workflows-and-actions/dependency-caching#artifacts-versus-dependency-caching))
+
+Do not promote final executables or a whole `target/` tree through workflow
+artifacts as a shortcut. Artifacts are for explicit outputs and provenance;
+they do not make an untested compilation reusable evidence for a later source
+snapshot.
+
+### 3. Use Cargo timings, then canary reduced debug information
+
+**Expected impact:** medium, especially for linking and target/cache size.
+**Correctness risk:** low to medium because CI backtraces become less detailed.
+
+Add `--timings` to the actual Clippy/test/build experiments and retain the HTML
+report. Cargo's report exposes each compilation unit, features, critical path,
+active/waiting/inactive concurrency, and maximum concurrency; it does not show
+rustc-internal concurrency.
+([Cargo timings](https://doc.rust-lang.org/cargo/reference/timings.html))
+
+Then compare the current profile with CI-only
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only` and
+`CARGO_PROFILE_TEST_DEBUG=line-tables-only`, keeping debug assertions,
+overflow checks, features, and tests unchanged. Cargo says `line-tables-only`
+retains filename/line information for backtraces with much less debug data.
+The test profile inherits dev; non-incremental builds default to 16 codegen
+units, while incremental builds default to 256. Codegen-unit changes trade
+compile parallelism against generated-code quality, so tune them only after the
+timing graph shows idle CPU or codegen pressure.
+([Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html#debug),
+[Cargo default profiles](https://doc.rust-lang.org/cargo/reference/profiles.html#default-profiles))
+
+Measure cold and warm wall time, linker time, cache bytes, and failure
+backtrace usefulness. The profile change must have its own cache namespace.
+
+### 4. Reduce false full-mode selection only through explicit ownership
+
+**Expected impact:** potentially very high because it can omit the 30-minute
+full gate on a component PR. **Correctness risk:** high.
+
+Replay the planner against a representative recent PR set and count the exact
+reasons that selected `full`. For example, #359 correctly failed open because
+it changed `package.json`, the PRD, evidence paths, and unmapped executable
+scripts. A path may leave `full` only after its product, authority, test, build,
+and release consumers have explicit owners and deterministic checkpoints.
+Unknown and unmapped changes must continue to select the complete portfolio.
+
+Measure the percentage of recent PRs whose only full-mode reasons become
+explicitly mapped, plus their resulting critical-path reduction. Review every
+mapping adversarially; never infer that documentation, evidence, or scripts are
+non-executable from their extension or directory alone.
+
+### 5. Audit duplicate Rust feature/profile configurations
+
+**Expected impact:** high on cold/full runs. **Correctness risk:** high because
+different invocations protect different feature and authority boundaries.
+
+The current gate compiles Clippy with all targets/all features, tests default
+features, separately tests crash-support configurations, and builds the
+servers. Use Cargo timings to identify the repeated units and then map each
+configuration to its unique checkpoint before removing anything. Cargo features
+are additive and feature unification can enable a different union than a
+default-feature test, so an all-features pass is not automatically a substitute
+for the default and crash-support cases.
+([Cargo feature unification](https://doc.rust-lang.org/cargo/reference/features.html#feature-unification))
+
+Require replacement-before-deletion, exact command comparisons, mutation or
+subsumption evidence, and the unchanged repository-required full gate at the
+integration boundary until equivalence is established.
+
+### 6. Partition only isolation-safe Vitest files
+
+**Expected impact:** bounded at roughly three minutes in the measured full
+suite, but more valuable after Rust falls below ten minutes. **Correctness
+risk:** medium because this suite intentionally runs with one worker and
+contains processes, timers, files, ports, and shared application state.
+
+Vitest supports file-level workers and deterministic shards, and blob reports
+can be merged after shards complete. It also warns that file parallelism is
+unsafe when tests share an external resource. Keep every test fresh, identify
+explicit isolation-safe groups, and run the unsafe group serially; do not simply
+raise `maxWorkers` globally.
+([Vitest parallelism](https://vitest.dev/guide/parallelism),
+[Vitest sharding CLI](https://vitest.dev/guide/cli#shard),
+[Vitest blob reports](https://vitest.dev/guide/reporters#blob-reporter))
+
+Compare at least ten repeated hosted runs for runtime and flake rate, including
+process-shutdown and timeout-heavy tests. The current post-merge full-gate
+failure is a reason to harden isolation first, not evidence that sharding is
+safe.
+
+### 7. Trial a larger Linux runner only if the account boundary permits it
+
+**Expected impact:** medium to high for cold parallel compilation, low for
+cache-service latency or a single serial linker. **Correctness risk:** low;
+cost and availability risk are high.
+
+GitHub larger runners offer 8- and 16-core Linux shapes, but require an
+organization or enterprise on Team or Enterprise Cloud and are billed even for
+public repositories. The current standard public Linux runner has four CPUs
+and 16 GB RAM. If the repository becomes eligible, compare 4-core and 8-core
+runs on the same source, command, image family, and cache condition; record
+queue time, Cargo concurrency, job time, billed minutes, and dollars per
+successful required run.
+([larger-runner billing](https://docs.github.com/en/actions/concepts/runners/larger-runners#billing),
+[larger-runner sizes](https://docs.github.com/en/actions/reference/runners/larger-runners#machine-sizes-for-larger-runners),
+[standard hosted-runner hardware](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#supported-runners-and-hardware-resources))
+
+### 8. Defer TypeScript incremental/project-reference work
+
+**Expected impact:** low today; measured TypeScript work is 7–10 seconds.
+**Correctness risk:** medium because it changes the build graph and persisted
+state.
+
+TypeScript project references and `tsc --build` can build out-of-date projects
+in dependency order, and `.tsbuildinfo` persists the program graph. Those are
+appropriate when TypeScript becomes material, but cache transfer and migration
+work cannot repay meaningful CI time at the current scale.
+([TypeScript project references](https://www.typescriptlang.org/docs/handbook/project-references),
+[TypeScript incremental state](https://www.typescriptlang.org/tsconfig/incremental.html))
+
+When revisited, preserve fresh compiler invocation, `noEmitOnError` or
+`--stopOnBuildErrors`, exact config/lockfile keys, and declaration ownership.
+
+## Recommended sequence
+
+1. Capture sccache statistics and cache bytes in durable evidence. The staged
+   reduced-debug profile intentionally starts a new compiler-cache generation,
+   so use one seed followed by the next real changed-head run rather than
+   manufacturing a separate consumer of the retired full-debug generation.
+2. Compare the staged same-repository Vitest read-only sccache path against its
+   measured 4m54s target-restore-plus-build floor. Keep fork and trusted-push
+   target-cache paths until the candidate is admitted.
+3. Retain reduced debug information only if the hosted seed/warm pair improves
+   net Rust wall time and cache size without degrading actionable backtraces.
+4. Replay full-mode planner reasons and audit Rust configuration duplication;
+   implement only mappings or removals with explicit checkpoint ownership.
+5. Partition Vitest only after the Rust critical path is below ten minutes.
+6. Defer runner, TypeScript, Electron, and npm work unless new measurements
+   make them material.
+
+Throughout, the stable `check` aggregator, fresh selected tests, fail-open
+unknown mappings, full integration boundary, manual merge, and all product,
+authority, release, and PRD gates remain unchanged. Cache hits and compiler
+objects remain acceleration, never verification evidence.
 
 ## Open-source precedent
 
