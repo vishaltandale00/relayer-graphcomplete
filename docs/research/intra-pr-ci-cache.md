@@ -191,11 +191,11 @@ Vitest no longer compiles Rust. Its job downloaded the 255 MB runtime artifact
 identity fields, installed the binaries into `target/debug`, and ran every
 selected test freshly in about 3m15s.
 
-`--timings=html` reports now upload from the Clippy, default-test, and runtime
-lanes. The crash lane executes through the repository npm script and cannot
-inject Cargo flags, so it records step durations only. Use the reports to
-identify repeated compilation units before any further feature/profile
-consolidation.
+`--timings` reports now upload from the Clippy, default-test, and runtime
+lanes (harvested from each lane's target directory; the crash lane executes
+through the repository npm script, which cannot inject Cargo flags, so it
+records step durations only). Use the reports to identify repeated compilation
+units before any further feature/profile consolidation.
 
 ## Ranked next options
 

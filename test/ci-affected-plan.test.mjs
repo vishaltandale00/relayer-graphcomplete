@@ -320,6 +320,36 @@ describe("affected-module plan v1", () => {
     expect(result.rustCrash).toBe(true);
   });
 
+  test("maps the error catalog to the generated-code and Python consumers", () => {
+    const result = plan("docs/graph-query-v1-errors.json");
+
+    expect(result.mode).toBe("affected");
+    // The catalog feeds generate-query-errors --check in the graph-client
+    // workspace check and the Python client tests; it is not a Rust input.
+    expect(result.chapters.typescript).toBe(true);
+    expect(result.chapters.python).toBe(true);
+    expect(result.chapters.rust).toBe(false);
+    expect(result.npmWorkspaces).toContain("@relayer/graph-client");
+  });
+
+  test("maps the release runbook to the desktop-shell checkpoint that reads it", () => {
+    const result = plan("docs/desktop-release-operations.md");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.vitestFiles).toEqual(["test/desktop-shell.test.mjs"]);
+  });
+
+  test("maps the provider-UX browser helper to the evidence test that serves it", () => {
+    const result = plan("scripts/provider-ux-evidence-browser.mjs");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.vitestFiles).toEqual([
+      "test/provider-electron-evidence.test.mjs",
+    ]);
+  });
+
   test("maps documentation-only and manual-driver paths to no chapter", () => {
     for (const changedFile of [
       "LICENSE",

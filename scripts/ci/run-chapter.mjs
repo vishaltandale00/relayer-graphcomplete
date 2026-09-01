@@ -22,21 +22,28 @@ const cargoTimingsDirectory = process.env.RELAYER_CARGO_TIMINGS_DIR ?? "";
 function cargoTimingArguments(args) {
   if (!cargoTimingsDirectory) return args;
   const separatorIndex = args.indexOf("--");
-  if (separatorIndex === -1) return [...args, "--timings=html"];
+  if (separatorIndex === -1) return [...args, "--timings"];
   return [
     ...args.slice(0, separatorIndex),
-    "--timings=html",
+    "--timings",
     ...args.slice(separatorIndex),
   ];
 }
 
+// Cargo writes its report to $CARGO_TARGET_DIR/cargo-timings/cargo-timing.html.
+// Harvesting is measurement evidence only; it must never fail a lane.
 function harvestCargoTimingReport(label) {
   if (!cargoTimingsDirectory) return;
-  const report = join(process.cwd(), "cargo-timing.html");
-  if (!existsSync(report)) return;
-  mkdirSync(cargoTimingsDirectory, { recursive: true });
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  renameSync(report, join(cargoTimingsDirectory, `${slug}.html`));
+  try {
+    const targetDirectory = process.env.CARGO_TARGET_DIR || "target";
+    const report = join(targetDirectory, "cargo-timings", "cargo-timing.html");
+    if (!existsSync(report)) return;
+    mkdirSync(cargoTimingsDirectory, { recursive: true });
+    const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    renameSync(report, join(cargoTimingsDirectory, `${slug}.html`));
+  } catch {
+    // Leave the lane green; timing telemetry is non-gating.
+  }
 }
 
 function run(label, command, args, environment = {}) {

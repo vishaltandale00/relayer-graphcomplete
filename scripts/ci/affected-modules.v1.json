@@ -85,8 +85,7 @@
       "package": "relayer-telemetry-capability",
       "vitestFiles": ["test/desktop-telemetry-release.test.mjs", "test/telemetry-evidence.test.mjs"]
     },
-    { "prefix": "docs/graph-query-v1.md", "package": "relayer-graph-core" },
-    { "prefix": "docs/graph-query-v1-errors.json", "package": "relayer-graph-core" }
+    { "prefix": "docs/graph-query-v1.md", "package": "relayer-graph-core" }
   ],
   "npmOwners": [
     { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test"] },
@@ -95,6 +94,7 @@
       "package": "@relayer/graph-client",
       "vitestFiles": ["packages/graph-client/test", "test/complete.test.ts", "test/graph-export-capability.test.mjs"]
     },
+    { "prefix": "docs/graph-query-v1-errors.json", "package": "@relayer/graph-client" },
     { "prefix": "packages/harness-host/", "package": "@relayer/harness-host", "vitestFiles": ["packages/harness-host/test"] },
     {
       "prefix": "desktop/",
@@ -146,7 +146,12 @@
     { "exact": "live-run.example.json", "chapters": [] },
     { "prefix": "docs/research/", "chapters": [] },
     { "prefix": "docs/postmortems/", "chapters": [] },
-    { "exact": "docs/desktop-release-operations.md", "chapters": [] },
+    { "exact": "docs/graph-query-v1-errors.json", "chapters": ["python"] },
+    {
+      "exact": "docs/desktop-release-operations.md",
+      "chapters": ["vitest"],
+      "vitestFiles": ["test/desktop-shell.test.mjs"]
+    },
     { "exact": "docs/conversation-export-v1.md", "chapters": [] },
     { "exact": "docs/provider-model-family-harness-test-matrix.md", "chapters": [] }
   ],
@@ -183,7 +188,7 @@
     { "exact": "scripts/check-codex-model-catalog.mjs", "chapters": [] },
     { "exact": "scripts/clean-dist.mjs", "chapters": [] },
     { "exact": "scripts/electron-workspace-driver.mjs", "chapters": [] },
-    { "exact": "scripts/provider-ux-evidence-browser.mjs", "chapters": [] },
+    { "exact": "scripts/provider-ux-evidence-browser.mjs", "chapters": ["vitest"], "vitestFiles": ["test/provider-electron-evidence.test.mjs"] },
     { "exact": "scripts/record-onboarding-tutorial.mjs", "chapters": [] },
     { "exact": "scripts/run-context-draft-warning-test.mjs", "chapters": [] },
     { "exact": "scripts/run-interaction-context-lifecycle-test.mjs", "chapters": [] },

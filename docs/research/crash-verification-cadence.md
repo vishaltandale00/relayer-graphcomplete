@@ -21,7 +21,7 @@ Implementation progress:
   The crash command contains no app-server test, so no checkpoint lost an
   owner; app-server interrupted-execution recovery remains owned by its
   ordinary tests in the default-test lane.
-- Stage 0 evidence collection landed as `--timings=html` artifacts on the
+- Stage 0 evidence collection landed as `--timings` artifacts on the
   Clippy, default-test, and runtime lanes (the crash lane runs through its npm
   script and records step durations only).
 - Stages 1–4 (checkpoint manifest, purpose-split smoke binaries, smoke

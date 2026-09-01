@@ -71,11 +71,12 @@ all fields and installs only those authenticated bytes into `target/debug`.
 This removes independent Vitest Rust compilation without caching any test
 result; every mapped Vitest test still runs freshly.
 
-The Clippy, default-test, and runtime lanes append `--timings=html` to their
+The Clippy, default-test, and runtime lanes append `--timings` to their
 direct Cargo invocations when the workflow gives them a
-`RELAYER_CARGO_TIMINGS_DIR`. Each lane uploads its harvested
-`cargo-timing*.html` reports as a non-gating 14-day artifact beside its
-sccache statistics. The crash lane executes its command through the
+`RELAYER_CARGO_TIMINGS_DIR`, then harvest the report Cargo writes into the
+lane's target directory (`cargo-timings/cargo-timing.html`). Each lane
+uploads the harvested reports as a non-gating 14-day artifact beside its
+sccache statistics; a harvest failure cannot fail the lane. The crash lane executes its command through the
 repository npm script, which cannot inject Cargo flags, so it records step
 durations but no timing report. Timing reports expose compilation units,
 features, critical path, and concurrency; they are measurement evidence, not
@@ -110,11 +111,15 @@ Explicitly owned paths may select no chapter at all. Repository metadata
 `docs/postmortems/`, release-operations and specification notes), and manual
 desktop/evidence driver scripts have no CI consumer, so a change that touches
 only those paths still runs planning, the quick deterministic checks, and the
-stable `check` aggregator, and nothing else. Each such mapping is an explicit
-ownership declaration in the v1 map; unknown and unmapped paths still fail
-open to the full portfolio. Scripts that Vitest imports or reads keep their
+stable `check` aggregator, and nothing else. `scripts/clean-dist.mjs` also
+selects no extra chapter, but the always-running quick chapter executes it as
+the portfolio's `clean-dist` authority, so every plan verifies it. Each such
+mapping is an explicit ownership declaration in the v1 map; unknown and
+unmapped paths still fail open to the full portfolio. Scripts that Vitest imports or reads keep their
 owning test files, and `scripts/prepare-ladybug-source.mjs` additionally
 selects packaging because the pinned Ladybug build consumes it.
-`docs/graph-query-v1.md` and `docs/graph-query-v1-errors.json` are
-compile-time inputs of the graph-core query contract tests, so they select the
-Rust closure of `relayer-graph-core`.
+`docs/graph-query-v1.md` is a compile-time input of the graph-core query
+contract tests, so it selects the Rust closure of `relayer-graph-core`.
+`docs/graph-query-v1-errors.json` is the source of the generated
+query-error code and the Python client contract, so it selects the
+`@relayer/graph-client` workspace closure and the Python chapter.
