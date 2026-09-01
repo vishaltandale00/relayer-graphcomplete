@@ -274,6 +274,23 @@ finds the sccache binary installed by the pinned action. If a future runner
 image adds ccache, the launcher silently switches to a runner-local cache and
 the cross-run Ladybug benefit disappears without changing correctness.
 
+### Warm result after the unified target directory
+
+The first warm run on the unified path ([33517115657](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33517115657),
+about 11m20s end to end; Clippy 7m04s, runtime 6m24s, tests 8m35s, crash
+10m49s) reached 88–91% C/C++ hit rates in every lane with the object cache
+genuinely shared across lanes. The lbug unit nonetheless held at 244–328s per
+lane. The honest accounting: the unification removed the per-lane key
+fragmentation (per-lane C/C++ misses fell from 281–480 to a stable 116–150),
+which protects every future cache reseed from paying four full Ladybug C++
+compiles, but the remaining lbug wall is bounded by a per-run miss tail and
+CMake configure/archive overhead rather than by cache sharing. The prime
+suspect for the stable miss tail is CMake's configure-time feature probes,
+whose scratch-directory sources carry volatile absolute paths; confirming that
+would need `SCCACHE_LOG`-level debugging on a hosted run. The next material
+levers are therefore the crash-lane cadence staging and any reduction of the
+configure/probe cost, not further cache-key work.
+
 ## Ranked next options
 
 ### 1. Keep sccache admitted in Rust, then verify the trusted-main consumer
