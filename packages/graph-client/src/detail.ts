@@ -59,6 +59,16 @@ export interface GraphDetailCapability {
 
 export type DetailCapability = ExternalLinkCapability | GraphDetailCapability;
 
+type MaterializedAction = Readonly<Record<string, unknown>>;
+
+interface MaterializedGraphDetailCapability {
+  readonly key: string;
+  readonly kind: GraphDetailCapability["kind"];
+  readonly action: MaterializedAction;
+}
+
+type MaterializedDetailCapability = ExternalLinkCapability | MaterializedGraphDetailCapability;
+
 export interface AssetRef {
   readonly [DETAIL_ASSET]: true;
   readonly logicalId: string;
@@ -422,14 +432,17 @@ function compileHtml(
     const value = template.values[index];
     element.attrs = element.attrs.filter((attribute) => attribute !== binding);
     if (isDetailCapability(value)) {
-      const validationCodes = safeCapabilityValidationCodes(value, ownerClientKey);
+      const materializedCapability = safeMaterializeDetailCapability(value);
+      const validationCodes = materializedCapability === undefined
+        ? ["capability_invalid"]
+        : safeCapabilityValidationCodes(materializedCapability, ownerClientKey);
       const validCapability = validationCodes.length === 0;
       if (!validCapability) {
         for (const code of validationCodes) {
           issues.push(sourceIssue(code, componentId, element, `Invalid ${value.kind} capability declaration: ${code}`));
         }
       }
-      if (validCapability && !isCompatibleCapabilityHost(value, element)) {
+      if (validCapability && !isCompatibleCapabilityHost(materializedCapability!, element)) {
         issues.push(sourceIssue(
           "capability_host_incompatible",
           componentId,
@@ -445,7 +458,7 @@ function compileHtml(
           `The <${element.tagName}> capability host needs an authored accessible name`,
         ));
       }
-      if (validCapability) normalizeCapabilityHost(componentId, value, element, issues);
+      if (validCapability) normalizeCapabilityHost(componentId, materializedCapability!, element, issues);
       const id = mountId("capability", componentId, value.key);
       element.attrs.push({ name: "data-gc-mount", value: id });
       const duplicateMount = mounts.some((mount) => mount.id === id);
@@ -457,7 +470,7 @@ function compileHtml(
           componentId,
           kind: "capability",
           host: element.tagName,
-          capability: compileCapability(value, ownerClientKey!),
+          capability: compileCapability(materializedCapability!, ownerClientKey!),
         }));
       }
     } else if (isAssetRef(value)) {
@@ -850,14 +863,14 @@ function graphCapability(
   return Object.freeze({ [DETAIL_CAPABILITY]: true as const, key, kind, action });
 }
 
-function compileCapability(capability: DetailCapability, ownerClientKey: string): CompiledCapabilityMount["capability"] {
+function compileCapability(capability: MaterializedDetailCapability, ownerClientKey: string): CompiledCapabilityMount["capability"] {
   if (capability.kind === "link") return Object.freeze({ kind: capability.kind, href: new URL(capability.href).href });
   const clientKey = capability.action.clientKey;
   const sourceLayer = capability.action.sourceLayer;
-  if (clientKey === undefined || clientKey.trim() === "") {
+  if (typeof clientKey !== "string" || clientKey.trim() === "") {
     throw new Error(`Node Detail ${capability.kind} capability requires an explicit stable action clientKey`);
   }
-  if (sourceLayer === undefined) {
+  if (!isStableReference(sourceLayer)) {
     throw new Error(`Node Detail ${capability.kind} capability requires exact source-layer provenance`);
   }
   return Object.freeze({
@@ -878,7 +891,7 @@ function stableReference(reference: NodeReference | LayerReference): StableAutho
   return Object.freeze({ id: reference.id });
 }
 
-function isCompatibleCapabilityHost(capability: DetailCapability, element: HtmlElement): boolean {
+function isCompatibleCapabilityHost(capability: MaterializedDetailCapability, element: HtmlElement): boolean {
   const host = element.tagName;
   if (capability.kind === "link") return host === "a";
   if (capability.kind !== "input") return host === "a" || host === "button";
@@ -892,7 +905,7 @@ function isCompatibleCapabilityHost(capability: DetailCapability, element: HtmlE
 
 function normalizeCapabilityHost(
   componentId: string,
-  capability: DetailCapability,
+  capability: MaterializedDetailCapability,
   element: HtmlElement,
   issues: DetailCompilationIssue[],
 ): void {
@@ -918,7 +931,7 @@ function normalizeCapabilityHost(
   if (element.tagName === "textarea") element.childNodes.splice(0, element.childNodes.length);
 }
 
-function capabilityValidationCodes(capability: DetailCapability, ownerClientKey: string | undefined): readonly string[] {
+function capabilityValidationCodes(capability: MaterializedDetailCapability, ownerClientKey: string | undefined): readonly string[] {
   if (!isStableIdentity(capability.key)) return ["capability_invalid"];
   if (capability.kind !== "link") {
     const actionValue: unknown = capability.action;
@@ -1002,7 +1015,7 @@ function capabilityValidationCodes(capability: DetailCapability, ownerClientKey:
 }
 
 function safeCapabilityValidationCodes(
-  capability: DetailCapability,
+  capability: MaterializedDetailCapability,
   ownerClientKey: string | undefined,
 ): readonly string[] {
   try {
@@ -1010,6 +1023,79 @@ function safeCapabilityValidationCodes(
   } catch {
     return ["capability_invalid"];
   }
+}
+
+function safeMaterializeDetailCapability(capability: DetailCapability): MaterializedDetailCapability | undefined {
+  if (capability.kind === "link") return capability;
+  try {
+    const action = materializeAction(capability.action);
+    return action === undefined
+      ? undefined
+      : Object.freeze({ key: capability.key, kind: capability.kind, action });
+  } catch {
+    return undefined;
+  }
+}
+
+function materializeAction(value: unknown): MaterializedAction | undefined {
+  if (!isOrdinaryRecord(value)) return undefined;
+  const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
+  const snapshot: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const field of Reflect.ownKeys(descriptors)) {
+    if (typeof field !== "string") return undefined;
+    const descriptor = descriptors[field]!;
+    if (!("value" in descriptor) || descriptor.enumerable !== true) return undefined;
+    snapshot[field] = field === "options" && descriptor.value !== undefined
+      ? materializeOptions(descriptor.value)
+      : descriptor.value;
+    if (field === "options" && descriptor.value !== undefined && snapshot[field] === undefined) return undefined;
+  }
+  return Object.freeze(snapshot);
+}
+
+function materializeOptions(value: unknown): readonly MaterializedAction[] | undefined {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return undefined;
+  const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
+  const lengthDescriptor = descriptors.length;
+  if (lengthDescriptor === undefined
+    || !("value" in lengthDescriptor)
+    || typeof lengthDescriptor.value !== "number"
+    || !Number.isSafeInteger(lengthDescriptor.value)
+    || lengthDescriptor.value < 0
+    || lengthDescriptor.value > 51) return undefined;
+  const length = lengthDescriptor.value;
+  const expected = new Set<string>(["length"]);
+  const options: MaterializedAction[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const field = String(index);
+    expected.add(field);
+    const descriptor = descriptors[field];
+    if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) return undefined;
+    const option = materializeOption(descriptor.value);
+    if (option === undefined) return undefined;
+    options.push(option);
+  }
+  if (Reflect.ownKeys(descriptors).some((field) => typeof field !== "string" || !expected.has(field))) return undefined;
+  return Object.freeze(options);
+}
+
+function materializeOption(value: unknown): MaterializedAction | undefined {
+  if (!isOrdinaryRecord(value)) return undefined;
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
+  const snapshot: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const field of Reflect.ownKeys(descriptors)) {
+    if (typeof field !== "string") return undefined;
+    const descriptor = descriptors[field]!;
+    if (!("value" in descriptor) || descriptor.enumerable !== true) return undefined;
+    snapshot[field] = descriptor.value;
+  }
+  return Object.freeze(snapshot);
+}
+
+function isOrdinaryRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 const ACTION_COMMON_FIELDS = Object.freeze([

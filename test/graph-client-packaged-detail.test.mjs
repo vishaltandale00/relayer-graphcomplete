@@ -57,6 +57,7 @@ describe("packaged graph-client authored detail boundary", () => {
       html,
     } = await import(graphClientIndexUrl.href);
     const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const accessorReads = new Map();
     const cases = [
       {
         name: "node-target",
@@ -99,12 +100,141 @@ describe("packaged graph-client authored detail boundary", () => {
       {
         name: "throwing-field",
         capability: "invoke",
-        action: (_owner, sourceLayer) => ({
+        action: (_owner, sourceLayer) => {
+          let reads = 0;
+          accessorReads.set("throwing-field", () => reads);
+          return {
+            kind: "invoke",
+            get label() { reads += 1; throw new TypeError("caller getter escaped"); },
+            interactionText: "Run",
+            sourceLayer,
+            clientKey: "throwing-field",
+          };
+        },
+      },
+      {
+        name: "changing-client-key-getter",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => {
+          let reads = 0;
+          accessorReads.set("changing-client-key-getter", () => reads);
+          return {
+            kind: "invoke",
+            label: "Run",
+            interactionText: "Run",
+            sourceLayer,
+            get clientKey() { return reads++ === 0 ? "first-client-key" : "substituted-client-key"; },
+          };
+        },
+      },
+      {
+        name: "changing-source-layer-getter",
+        capability: "invoke",
+        action: (owner, sourceLayer) => {
+          const unrelatedNode = new NodeObject("box", "Unrelated", "Fallback", "concept", "unrelated-node");
+          const unrelatedLayer = new LayerObject(
+            [unrelatedNode], [], new LayerLayoutObject([]), "unrelated-layer",
+          );
+          let reads = 0;
+          accessorReads.set("changing-source-layer-getter", () => reads);
+          return {
+            kind: "invoke",
+            label: "Run",
+            interactionText: "Run",
+            get sourceLayer() { return reads++ < 2 ? sourceLayer : unrelatedLayer; },
+            clientKey: `${owner.clientKey}-action`,
+          };
+        },
+      },
+      {
+        name: "second-read-throw",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => {
+          let reads = 0;
+          accessorReads.set("second-read-throw", () => reads);
+          return {
+            kind: "invoke",
+            label: "Run",
+            interactionText: "Run",
+            sourceLayer,
+            get clientKey() {
+              if (reads++ === 0) return "single-readable-client-key";
+              throw new TypeError("action field was read twice");
+            },
+          };
+        },
+      },
+      {
+        name: "prototype-only-action",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => Object.create({
           kind: "invoke",
-          get label() { throw new TypeError("caller getter escaped"); },
+          label: "Run",
           interactionText: "Run",
           sourceLayer,
-          clientKey: "throwing-field",
+          clientKey: "prototype-only-action",
+          inheritedUnknown: "forged",
+        }),
+      },
+      {
+        name: "nested-option-accessor",
+        capability: "input",
+        action: (_owner, sourceLayer) => {
+          let reads = 0;
+          accessorReads.set("nested-option-accessor", () => reads);
+          return {
+            kind: "input",
+            label: "Choose",
+            control: "single_select",
+            prompt: "Choose",
+            options: [{ get key() { reads += 1; return "one"; }, label: "One" }],
+            sourceLayer,
+            clientKey: "nested-option-accessor",
+          };
+        },
+      },
+      {
+        name: "presentation-accessor",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => {
+          let reads = 0;
+          accessorReads.set("presentation-accessor", () => reads);
+          return {
+            kind: "invoke",
+            label: "Run",
+            interactionText: "Run",
+            sourceLayer,
+            clientKey: "presentation-accessor",
+            get variant() { reads += 1; return "pill"; },
+          };
+        },
+      },
+      {
+        name: "symbol-field",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => {
+          const action = {
+            kind: "invoke", label: "Run", interactionText: "Run", sourceLayer, clientKey: "symbol-field",
+          };
+          action[Symbol("forged")] = true;
+          return action;
+        },
+      },
+      {
+        name: "non-enumerable-field",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => {
+          const action = { kind: "invoke", interactionText: "Run", sourceLayer, clientKey: "non-enumerable-field" };
+          Object.defineProperty(action, "label", { value: "Run" });
+          return action;
+        },
+      },
+      {
+        name: "descriptor-proxy-trap",
+        capability: "invoke",
+        action: () => new Proxy({}, {
+          getPrototypeOf: () => Object.prototype,
+          ownKeys: () => { throw new TypeError("caller descriptor trap escaped"); },
         }),
       },
     ];
@@ -122,6 +252,8 @@ describe("packaged graph-client authored detail boundary", () => {
           expect.objectContaining({ code: "capability_invalid", componentId: scenario.name, line: 1 }),
         ]),
       });
+      const readCount = accessorReads.get(scenario.name);
+      if (readCount !== undefined) expect(readCount()).toBe(0);
     }
   });
 
