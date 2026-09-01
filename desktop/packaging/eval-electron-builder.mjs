@@ -46,6 +46,7 @@ export default {
     { from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] },
     { from: resolve(repositoryRoot, "permissions/desktop.json"), to: "permissions/desktop.json" },
     { from: resolve(repositoryRoot, "packages/graph-client/dist"), to: "graph-client" },
+    { from: resolve(repositoryRoot, "vendor/ladybug/notices"), to: "notices/ladybug" },
     { from: resolve(desktopRoot, "renderer"), to: "renderer" },
     { from: resolve(desktopRoot, "eval-renderer"), to: "eval-renderer" },
   ],

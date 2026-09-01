@@ -18,6 +18,7 @@ import {
   npmCommandForPlatform,
   npmEnvironmentForDesktopTarget,
   packagedApplicationBuiltAfter,
+  packagedQualificationLimitations,
   qualificationBuildTempPrefix,
   parseMachOArchitectures,
   qualificationLifecycleTimeout,
@@ -81,6 +82,10 @@ function verifyReceiptShape(receipt, targetExpectation, expectedInputPaths = fro
     "/usr/lib/libiconv.2.dylib",
     "/usr/lib/libSystem.B.dylib",
   ]);
+  // The frozen receipts predate the vendored binding license, so they still carry
+  // the retired third limitation. `packagedQualificationLimitations` no longer
+  // emits it; these historical receipts are verified byte-for-byte, not as the
+  // current generator's shape.
   expect(receipt.limitations).toEqual([
     limitation,
     "unsigned development package",
@@ -163,6 +168,26 @@ describe("Ladybug packaged lifecycle qualification", () => {
   it("gives every cold packaged launch one recorded bounded window", () => {
     expect(qualificationLifecycleTimeout({ architecture: "arm64" }, "arm64")).toBe(15_000);
     expect(qualificationLifecycleTimeout({ architecture: "x64" }, "arm64")).toBe(15_000);
+  });
+  it("scopes new packaged receipts to execution and signing, not licensing", () => {
+    expect(packagedQualificationLimitations(
+      { CI: "true" },
+      { key: "macos-arm64", architecture: "arm64" },
+      "arm64",
+    )).toEqual([
+      "hosted macos-arm64 native execution only",
+      "unsigned development package",
+    ]);
+    expect(packagedQualificationLimitations(
+      { CI: undefined },
+      { key: "macos-x64", architecture: "x64" },
+      "arm64",
+    )).toEqual([
+      "local macos-x64 Rosetta execution only",
+      "unsigned development package",
+    ]);
+    expect(packagedQualificationLimitations({}, { key: "macos-arm64", architecture: "arm64" }, "arm64"))
+      .not.toContain("not release-ready licensing evidence");
   });
   it("installs the dependency closure for the packaged architecture", () => {
     expect(npmEnvironmentForDesktopTarget(

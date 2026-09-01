@@ -83,6 +83,7 @@ export function createDesktopBuilderConfig(
       { from: resolve(repositoryRoot, "packages/graph-client/dist"), to: "graph-client" },
       { from: resolve(repositoryRoot, "python/relayer-graph/src/relayer_graph"), to: "python/relayer-graph/src/relayer_graph", filter: ["**/*.py"] },
       { from: resolve(repositoryRoot, "vendor/prime-agent/manifest.json"), to: "prime-agent/manifest.json" },
+      { from: resolve(repositoryRoot, "vendor/ladybug/notices"), to: "notices/ladybug" },
       { from: resolve(desktopRoot, "renderer"), to: "renderer" },
     ],
     artifactName: `${release ? "Relayer" : "Relayer-DEV"}-\${version}-\${os}-\${arch}.\${ext}`,

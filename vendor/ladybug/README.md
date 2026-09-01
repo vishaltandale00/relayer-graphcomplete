@@ -30,7 +30,9 @@ source and admits no extensions. The result carries Ladybug and OpenSSL inside t
 no Ladybug/OpenSSL dylib or Ladybug rpath is packaged. Final packaging must still verify each
 target's imports rather than inferring this result from the build configuration.
 
-The source receipt also remains explicitly incomplete for distribution licensing. The crates.io
-binding archive declares MIT but contains no binding license file. The core, OpenSSL, and
-transitive native notices are inventoried separately in `native-inventory.json`; its remaining
-binding-license blocker must be resolved before packaging.
+The source receipt is complete for distribution licensing. The crates.io binding archive declares
+MIT but ships no binding license file, so the binding notice is vendored from the upstream
+`LadybugDB/ladybug-rust` MIT `LICENSE` at commit `7afc780e` (git blob `9bb12b24…`, SHA-256
+`1c495c95…`). The core, OpenSSL, binding, and transitive native notices are inventoried in
+`native-inventory.json` with their provenance and digests. Packaging must still bundle
+`vendor/ladybug/notices/` and verify the bundle before shipping.

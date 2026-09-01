@@ -9,8 +9,9 @@
     "sourceBasisCommit": "ea283cd1bf5473cd5c233944e3b281eb0d758a45",
     "sourceTreeSha256": "58ab1da5ce17d2ca6ae0a6d835b2384c6fd8c8627703bf93e77685419f7142ba",
     "spdx": "MIT",
-    "licensePath": null,
-    "receiptStatus": "manifest-declared-mit"
+    "licensePath": "vendor/ladybug/notices/ladybug-binding-LICENSE",
+    "noticeProvenance": "https://raw.githubusercontent.com/LadybugDB/ladybug-rust/7afc780e33fb42c8f9b2f0c4ab6833bf2f86c76f/LICENSE at SHA-256 1c495c9546d0de02e83c9d50d5f7eb21f0085bc8f77a0ee333081a123a9c8d0c (git blob 9bb12b2468f7629dd9a6ce15d4d972ad014ff40d)",
+    "receiptStatus": "upstream-license-vendored"
   },
   "core": {
     "version": "0.18.0",
@@ -68,6 +69,7 @@
   "noticeSha256": {
     "vendor/ladybug/notices/openssl-NOTICE.md": "d0516f20c29c31107ad1b53fc249b385f9fd8e2e957d16b7ff8dbe9eacf9070a",
     "vendor/ladybug/notices/openssl-LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+    "vendor/ladybug/notices/ladybug-binding-LICENSE": "1c495c9546d0de02e83c9d50d5f7eb21f0085bc8f77a0ee333081a123a9c8d0c",
     "vendor/ladybug/notices/ladybug-core-LICENSE": "c7ac924b150ec18a9d9c7136a8cd533bcfa33109ea7b4b7712ea952a245186b0",
     "vendor/ladybug/notices/third-party/alp-LICENSE": "905b4e0855ce0a277d19bb7c00d61e3d46598eb62446a95fd8c8c6cccad53d86",
     "vendor/ladybug/notices/third-party/antlr4_runtime-LICENSE": "1e41356f47b55ce77df2f639d1fdf3c2d50587f857307144e9aa547618974b32",

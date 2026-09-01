@@ -30,6 +30,14 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+// The Ladybug native receipt is the authority for the notices a packaged build
+// must ship. Its `noticeSha256` keys are repository-relative under
+// `vendor/ladybug/notices`; `extraResources` bundles that directory to
+// `notices/ladybug`, so the bundled path for a notice is its path with the
+// repository-root prefix replaced by the bundle destination.
+const LADYBUG_NOTICES_ROOT = "vendor/ladybug/notices";
+const LADYBUG_NOTICES_BUNDLE = "notices/ladybug";
+
 function normalizeAsarEntry(entry) {
   return String(entry).replaceAll("\\", "/").replace(/^\/+/, "");
 }
@@ -48,6 +56,7 @@ export async function verifyBundledAppServer(
     listPackageEntries = listPackage,
     verifyPrimeAgent = verifyPackagedPrimeAgent,
     verifyGraphServer = verifyPackagedMacOSGraphServer,
+    verifyNotices = verifyPackagedLadybugNotices,
     primeAgentTargetKey = `${platform}-${expectedArchitecture === "x86_64" ? "x64" : expectedArchitecture}`,
     primeAgentIntegrityPhase = "unsigned",
   } = {},
@@ -59,6 +68,7 @@ export async function verifyBundledAppServer(
   const graphClientPath = join(resourcesPath, "graph-client", "index.js");
   const markedPath = join(resourcesPath, "renderer", "vendor", "marked.umd.js");
   await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath), access(markedPath)]);
+  await verifyNotices(resourcesPath);
   await verifyPackagedGraphClient(graphClientPath);
   const packagedEntries = new Set(listPackageEntries(join(resourcesPath, "app.asar")).map(normalizeAsarEntry));
   for (const entry of [
@@ -91,6 +101,39 @@ export async function verifyBundledAppServer(
     await verifyGraphServer(graphBinaryPath, { execute });
   }
   return { binaryPath, architecture: architectures };
+}
+
+export async function verifyPackagedLadybugNotices(
+  resourcesPath,
+  {
+    inventoryPath = resolve(import.meta.dirname, "../../vendor/ladybug/native-inventory.json"),
+    readBundledFile = (path) => readFile(path),
+    digest = sha256,
+  } = {},
+) {
+  const inventory = JSON.parse(await readFile(inventoryPath, "utf8"));
+  const notices = Object.entries(inventory.noticeSha256 ?? {});
+  if (notices.length === 0) throw new Error("Vendored Ladybug notice inventory is empty.");
+  for (const [noticePath, expectedDigest] of notices) {
+    if (!noticePath.startsWith(`${LADYBUG_NOTICES_ROOT}/`)) {
+      throw new Error(`Ladybug notice path is outside the notices root: ${noticePath}`);
+    }
+    const relative = noticePath.slice(LADYBUG_NOTICES_ROOT.length + 1);
+    const bundledPath = join(resourcesPath, LADYBUG_NOTICES_BUNDLE, relative);
+    let bytes;
+    try {
+      bytes = await readBundledFile(bundledPath);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        throw new Error(`Bundled Relayer runtime is missing the Ladybug notice ${relative}.`);
+      }
+      throw error;
+    }
+    if (digest(bytes) !== expectedDigest) {
+      throw new Error(`Bundled Relayer Ladybug notice ${relative} differs from the vendored digest.`);
+    }
+  }
+  return { notices: notices.length };
 }
 
 export async function verifyPackagedMacOSGraphServer(

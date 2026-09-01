@@ -30,11 +30,11 @@ function fixtureInventory() {
 }
 
 describe("Ladybug native dependency receipts", () => {
-  it("verifies the frozen inventory and accepts it as release-ready under the manifest-declared license", () => {
-    expect(execFileSync(process.execPath, [verifier], { encoding: "utf8" })).toContain("release blockers preserved");
+  it("verifies the frozen inventory and accepts it as release-ready under the vendored upstream license", () => {
+    expect(execFileSync(process.execPath, [verifier], { encoding: "utf8" })).toContain("no release blockers declared");
     const release = spawnSync(process.execPath, [verifier, "--release-ready"], { encoding: "utf8" });
     expect(release.status).toBe(0);
-    expect(release.stdout).toContain("release blockers preserved");
+    expect(release.stdout).toContain("no release blockers declared");
   });
 
   it("fails closed when the native inventory re-declares a release blocker", () => {
@@ -57,6 +57,24 @@ describe("Ladybug native dependency receipts", () => {
     expect(result.stderr).toContain("zstd has no license notice");
   });
 
+  it("fails closed when the binding loses its vendored notice path", () => {
+    const { inventory } = fixtureInventory();
+    const receipt = JSON.parse(readFileSync(inventory, "utf8"));
+    receipt.binding.licensePath = null;
+    writeFileSync(inventory, `${JSON.stringify(receipt, null, 2)}\n`);
+    const result = spawnSync(process.execPath, [verifier, "--inventory", inventory], { encoding: "utf8" });
+    expect(result.status).not.toBe(0);
+  });
+
+  it("fails closed when the binding notice digest is dropped from the notice map", () => {
+    const { inventory } = fixtureInventory();
+    const receipt = JSON.parse(readFileSync(inventory, "utf8"));
+    delete receipt.noticeSha256["vendor/ladybug/notices/ladybug-binding-LICENSE"];
+    writeFileSync(inventory, `${JSON.stringify(receipt, null, 2)}\n`);
+    const result = spawnSync(process.execPath, [verifier, "--inventory", inventory], { encoding: "utf8" });
+    expect(result.status).not.toBe(0);
+  });
+
   it("fails closed when the exact source contains an unlisted native subtree", () => {
     const source = temporaryDirectory("ladybug-native-source-");
     mkdirSync(join(source, "src"), { recursive: true });
@@ -70,7 +88,7 @@ describe("Ladybug native dependency receipts", () => {
     const source = temporaryDirectory("openssl-license-source-");
     cpSync(join(root, "vendor/ladybug/notices/openssl-LICENSE.txt"), join(source, "LICENSE.txt"));
     expect(execFileSync(process.execPath, [verifier, "--openssl-source-root", source], { encoding: "utf8" }))
-      .toContain("release blockers preserved");
+      .toContain("no release blockers declared");
     writeFileSync(join(source, "LICENSE.txt"), "not OpenSSL 3.5.8\n");
     const result = spawnSync(process.execPath, [verifier, "--openssl-source-root", source], { encoding: "utf8" });
     expect(result.status).not.toBe(0);

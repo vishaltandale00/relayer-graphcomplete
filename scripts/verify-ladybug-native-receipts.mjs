@@ -38,8 +38,9 @@ export async function verifyLadybugNativeReceipts({
     sourceBasisCommit: "ea283cd1bf5473cd5c233944e3b281eb0d758a45",
     sourceTreeSha256: "58ab1da5ce17d2ca6ae0a6d835b2384c6fd8c8627703bf93e77685419f7142ba",
     spdx: "MIT",
-    licensePath: null,
-    receiptStatus: "manifest-declared-mit",
+    licensePath: "vendor/ladybug/notices/ladybug-binding-LICENSE",
+    noticeProvenance: "https://raw.githubusercontent.com/LadybugDB/ladybug-rust/7afc780e33fb42c8f9b2f0c4ab6833bf2f86c76f/LICENSE at SHA-256 1c495c9546d0de02e83c9d50d5f7eb21f0085bc8f77a0ee333081a123a9c8d0c (git blob 9bb12b2468f7629dd9a6ce15d4d972ad014ff40d)",
+    receiptStatus: "upstream-license-vendored",
   });
   assert.deepEqual(inventory.core, {
     version: "0.18.0",
@@ -82,6 +83,7 @@ export async function verifyLadybugNativeReceipts({
   assert.equal(new Set(inventory.expectedNativeSubtrees).size, inventory.expectedNativeSubtrees.length);
 
   const licensePaths = new Set([
+    inventory.binding.licensePath,
     inventory.core.licensePath,
     inventory.openssl.licensePath,
     inventory.openssl.noticePath,
@@ -188,5 +190,5 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const options = parseArguments(process.argv.slice(2));
   if (options.generateNotices) await generateNotices(options.inventoryPath ?? defaultInventoryPath, options.sourceRoot);
   const inventory = await verifyLadybugNativeReceipts(options);
-  console.log(`Ladybug native receipt verified: ${inventory.nativeComponents.length} subtrees inventoried; release blockers preserved`);
+  console.log(`Ladybug native receipt verified: ${inventory.nativeComponents.length} subtrees inventoried; no release blockers declared; blocker gate enforced`);
 }

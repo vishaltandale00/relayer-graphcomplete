@@ -35,7 +35,7 @@ import {
 } from "../desktop/shared/release-metadata.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
 import { ACTIVE_PROVIDER_ADAPTER_MODULES } from "../desktop/main/providers/provider-adapter-registry.mjs";
-import { verifyBundledAppServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
+import { verifyBundledAppServer, verifyPackagedLadybugNotices } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import { desktopTarget } from "../desktop/shared/target.mjs";
 import {
   DESKTOP_RELEASE,
@@ -286,6 +286,7 @@ describe("desktop skeleton", () => {
     expect(desktopMain).not.toContain("bundledCodexBinary");
     expect(desktopMain).toContain("createManagedRuntimeInstaller");
     expect(packaging).toContain('to: "renderer"');
+    expect(packaging).toContain('{ from: resolve(repositoryRoot, "vendor/ladybug/notices"), to: "notices/ladybug" }');
     expect(threads).not.toContain("/messages");
     expect(threads).not.toContain("EventSource");
     expect(threads).toContain("permissionProfileId");
@@ -403,6 +404,7 @@ describe("desktop skeleton", () => {
     expect(evalPackaging).toContain('target: [{ target: "dir", arch: [target.architecture] }]');
     expect(evalPackaging).toContain('"main/single-instance.mjs"');
     expect(evalPackaging).toContain('{ from: resolve(desktopRoot, "renderer"), to: "renderer" }');
+    expect(evalPackaging).toContain('{ from: resolve(repositoryRoot, "vendor/ladybug/notices"), to: "notices/ladybug" }');
     expect(evalPackaging).toContain('"packages/graph-client/dist"');
     expect(evalMain).toContain("GraphCompleteRuntimeService");
     expect(evalMain).toContain("RelayerAppServerService");
@@ -2768,12 +2770,14 @@ describe("desktop skeleton", () => {
         libraries: ["/usr/lib/libSystem.B.dylib"],
         state: "created",
       });
+      const verifyNotices = async () => ({ notices: 29 });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
         verifyGraphServer,
         verifyPrimeAgent,
+        verifyNotices,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
@@ -2781,6 +2785,7 @@ describe("desktop skeleton", () => {
         listPackageEntries: packagedRuntimeEntries,
         verifyGraphServer,
         verifyPrimeAgent,
+        verifyNotices,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "x86_64" });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
@@ -2788,6 +2793,7 @@ describe("desktop skeleton", () => {
         listPackageEntries: packagedRuntimeEntries,
         verifyGraphServer,
         verifyPrimeAgent,
+        verifyNotices,
       })).rejects.toThrow("must contain only arm64");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
@@ -2795,6 +2801,7 @@ describe("desktop skeleton", () => {
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/graph-client/dist/index.js"),
         verifyGraphServer,
         verifyPrimeAgent,
+        verifyNotices,
       })).rejects.toThrow("missing node_modules/@relayer/graph-client/dist/index.js");
       await writeFile(bundledGraphClient, "export class RelayerGraphClient {}\n");
       await expect(verifyBundledAppServer(appPath, {
@@ -2803,6 +2810,7 @@ describe("desktop skeleton", () => {
         listPackageEntries: packagedRuntimeEntries,
         verifyGraphServer,
         verifyPrimeAgent,
+        verifyNotices,
       })).rejects.toThrow("missing RelayerGraphClient.prototype.search");
       await writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} }\n");
       await expect(verifyBundledAppServer(appPath, {
@@ -2811,6 +2819,7 @@ describe("desktop skeleton", () => {
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"),
         verifyGraphServer,
         verifyPrimeAgent,
+        verifyNotices,
       })).rejects.toThrow("missing node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
@@ -2818,6 +2827,7 @@ describe("desktop skeleton", () => {
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js"),
         verifyGraphServer,
         verifyPrimeAgent,
+        verifyNotices,
       })).rejects.toThrow("missing node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js");
       await rm(bundledCodexBrowserScript);
       await expect(verifyBundledAppServer(appPath, {
@@ -2826,6 +2836,7 @@ describe("desktop skeleton", () => {
         listPackageEntries: packagedRuntimeEntries,
         verifyGraphServer,
         verifyPrimeAgent,
+        verifyNotices,
       })).rejects.toThrow(/chrome-devtools-mcp\.js|ENOENT/);
       await writeFile(bundledCodexBrowserScript, "helper-fixture");
       await rm(bundledCodexBrowserScript);
@@ -2836,6 +2847,7 @@ describe("desktop skeleton", () => {
         listPackageEntries: packagedRuntimeEntries,
         verifyGraphServer,
         verifyPrimeAgent,
+        verifyNotices,
       })).rejects.toThrow("Bundled Codex browser helper files are invalid.");
       await rm(bundledCodexBrowserScript, { recursive: true });
       await writeFile(bundledCodexBrowserScript, "helper-fixture");
@@ -2845,6 +2857,7 @@ describe("desktop skeleton", () => {
         listPackageEntries: packagedRuntimeEntries,
         verifyGraphServer,
         verifyPrimeAgent: async () => { throw Object.assign(new Error("missing nested Prime asset"), { code: "ENOENT" }); },
+        verifyNotices,
       })).rejects.toThrow("missing nested Prime asset");
 
       const windowsPath = join(directory, "win-unpacked");
@@ -2869,10 +2882,36 @@ describe("desktop skeleton", () => {
           expect(packagedEntries).toEqual(new Set(packagedRuntimeEntries()));
           return verifyPrimeAgent();
         },
+        verifyNotices,
       })).resolves.toEqual({
         binaryPath: join(windowsPath, "resources", "bin", "relayer-app-server.exe"),
         architecture: null,
       });
+
+      const noticeFixture = join(directory, "notice-fixture");
+      await mkdir(join(noticeFixture, "notices", "ladybug", "third-party"), { recursive: true });
+      const noticeBytes = Buffer.from("reviewed MIT notice bytes\n");
+      const noticeDigest = createHash("sha256").update(noticeBytes).digest("hex");
+      const noticeInventoryPath = join(directory, "notice-inventory.json");
+      await writeFile(noticeInventoryPath, `${JSON.stringify({
+        noticeSha256: {
+          "vendor/ladybug/notices/ladybug-binding-LICENSE": noticeDigest,
+          "vendor/ladybug/notices/third-party/alp-LICENSE": noticeDigest,
+        },
+      })}\n`);
+      await writeFile(join(noticeFixture, "notices", "ladybug", "ladybug-binding-LICENSE"), noticeBytes);
+      await writeFile(join(noticeFixture, "notices", "ladybug", "third-party", "alp-LICENSE"), noticeBytes);
+      await expect(verifyPackagedLadybugNotices(noticeFixture, {
+        inventoryPath: noticeInventoryPath,
+      })).resolves.toEqual({ notices: 2 });
+      await rm(join(noticeFixture, "notices", "ladybug", "third-party", "alp-LICENSE"));
+      await expect(verifyPackagedLadybugNotices(noticeFixture, {
+        inventoryPath: noticeInventoryPath,
+      })).rejects.toThrow("missing the Ladybug notice third-party/alp-LICENSE");
+      await writeFile(join(noticeFixture, "notices", "ladybug", "third-party", "alp-LICENSE"), "mutated bytes\n");
+      await expect(verifyPackagedLadybugNotices(noticeFixture, {
+        inventoryPath: noticeInventoryPath,
+      })).rejects.toThrow("differs from the vendored digest");
 
       const names = desktopReleaseArtifactNames(contract);
       const dmg = Buffer.from("signed-notarized-dmg-fixture");
