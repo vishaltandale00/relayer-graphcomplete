@@ -70,6 +70,25 @@ async function removeCodexApiKeyAuthFile(codexHome: string): Promise<void> {
     throw error;
   }
 }
+
+const CODEX_API_KEY_AUTH_USERS = new Map<string, number>();
+
+function retainCodexApiKeyAuth(codexHome: string): void {
+  CODEX_API_KEY_AUTH_USERS.set(codexHome, (CODEX_API_KEY_AUTH_USERS.get(codexHome) ?? 0) + 1);
+}
+
+async function releaseCodexApiKeyAuth(
+  codexHome: string,
+  remove: (codexHome: string) => Promise<void>,
+): Promise<void> {
+  const users = CODEX_API_KEY_AUTH_USERS.get(codexHome) ?? 0;
+  if (users <= 1) {
+    CODEX_API_KEY_AUTH_USERS.delete(codexHome);
+    await remove(codexHome);
+    return;
+  }
+  CODEX_API_KEY_AUTH_USERS.set(codexHome, users - 1);
+}
 const UNDERLYING_TASK_GUIDANCE = `Complete the underlying user task in the working directory. Use the harness's ordinary workspace tools and reasoning as needed; the graph is the presentation of the work, not a substitute for doing it. Author graph content from the work you actually performed and the evidence you actually observed. If you reach a genuine blocker that you cannot resolve, present that blocker and its evidence instead of presenting planned work as completed.`;
 
 export interface CodexBasicDependencies {
@@ -217,14 +236,18 @@ export class CodexBasicHarness implements Harness {
         const apiKey = context.access.fields["api-key"];
         const codexHome = environment.CODEX_HOME;
         if (apiKey !== undefined && apiKey !== "" && codexHome !== undefined && codexHome !== "") {
-          await (this.dependencies.writeCodexApiKeyAuthFile ?? writeCodexApiKeyAuthFile)(codexHome, apiKey);
+          retainCodexApiKeyAuth(codexHome);
           authHome = codexHome;
+          await (this.dependencies.writeCodexApiKeyAuthFile ?? writeCodexApiKeyAuthFile)(codexHome, apiKey);
         }
       }
       await this.runCodexTurn(context, attach, signal, environment, resolvedRuntime.executable, persistentRootSession, personalPresentationVersionId);
     } finally {
       if (authHome !== undefined) {
-        await (this.dependencies.removeCodexApiKeyAuthFile ?? removeCodexApiKeyAuthFile)(authHome);
+        await releaseCodexApiKeyAuth(
+          authHome,
+          this.dependencies.removeCodexApiKeyAuthFile ?? removeCodexApiKeyAuthFile,
+        );
       }
     }
   }

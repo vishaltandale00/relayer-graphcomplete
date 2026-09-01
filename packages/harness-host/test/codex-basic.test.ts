@@ -978,6 +978,54 @@ describe("CodexBasicHarness", () => {
     }
   });
 
+  it("keeps auth.json while overlapping secret turns share a CODEX_HOME", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-home-"));
+    const firstTurn = deferredTurn();
+    const secondTurn = deferredTurn();
+    let overlappingReads = 0;
+    const runAppServerTurn = async (options: CodexAppServerTurnOptions) => {
+      const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
+      expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "selected-secret" });
+      overlappingReads += 1;
+      if (overlappingReads === 1) {
+        secondTurn.resolve();
+        await firstTurn.promise;
+      } else {
+        await secondTurn.promise;
+        firstTurn.resolve();
+      }
+      options.onThreadId(`api-thread-${overlappingReads}`);
+      return { threadId: `api-thread-${overlappingReads}`, turnId: "turn-1", status: "completed" as const };
+    };
+    try {
+      const access = {
+        kind: "secret" as const, contract: "secret@1" as const, providerId: "openai-work", adapterId: "openai-api",
+        adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
+        runtime: {
+          runtimeId: "codex" as const, version: "0.147.0", executable: "/managed/codex",
+          environment: { CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: "/managed/codex" },
+        },
+      };
+      const first = new CodexBasicHarness(context("auto"), { runAppServerTurn }).complete({
+        ...runContext(1, "token"),
+        model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+        access,
+      });
+      const second = new CodexBasicHarness(context("auto"), { runAppServerTurn }).complete({
+        ...runContext(2, "token-2"),
+        model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+        access,
+      });
+      await Promise.all([first, second]);
+      expect(overlappingReads).toBe(2);
+      await expect(readFile(join(codexHome, "auth.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      firstTurn.resolve();
+      secondTurn.resolve();
+      await rm(codexHome, { recursive: true, force: true });
+    }
+  });
+
   it("allows only Codex runtime keys from managed access and preserves graph authority", async () => {
     let submitted: CodexAppServerTurnOptions | undefined;
     const harness = harnessFixture("auto", async (options) => {
@@ -1405,6 +1453,14 @@ describe("CodexBasicHarness", () => {
     }
   });
 });
+
+function deferredTurn(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
 
 function context(permissionProfileId: "ask" | "auto" | "full") {
   return {
