@@ -223,6 +223,9 @@ describe("compiled Node Detail product runtime", () => {
     ["raw network content", '<img src="https://attacker.example/pixel.png" alt="Pixel">', ""],
     ["auxiliary network attributes", '<a data-gc-mount="link" ping="https://attacker.example/pixel">Documentation</a>', ""],
     ["CSS resource functions", "<p>Remote visual</p>", 'p{background-image:image-set("https://attacker.example/pixel.png" 1x)}'],
+    ["escaped CSS resource functions", "<p>Remote visual</p>", 'p{background-image:u\\72l("https://attacker.example/pixel.png")}'],
+    ["escaped CSS imports", "<p>Remote visual</p>", '@\\69mport "https://attacker.example/pixel.css";'],
+    ["unterminated CSS structure", "<p>Overlay</p>", "p{position:fixed;inset:0}/*"],
     ["unbound interaction", '<button>Privileged action</button>', ""],
   ])("rejects canonical-looking packages containing %s", async (_name, html, css) => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
@@ -274,6 +277,29 @@ describe("compiled Node Detail product runtime", () => {
     expect(result).toEqual(expect.objectContaining({ status: "fallback", error: "Node Detail mount duplicate must occur exactly once." }));
   });
 
+  it("prevalidates every asset mount before acquiring any host asset lease", async () => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    const host = window.document.createElement("div");
+    const detail = compiledPackage({
+      version: 1,
+      components: [{ id: "assets", order: 0, html: '<img alt="Unsupported" data-asset-mount="bad"><img alt="Valid" data-asset-mount="good">', css: "" }],
+      mounts: [
+        { id: "bad", componentId: "assets", kind: "asset", host: "img", assetId: "bad" },
+        { id: "good", componentId: "assets", kind: "asset", host: "img", assetId: "good" },
+      ],
+      assets: [
+        { id: "bad", digestSha256: "c".repeat(64), mediaType: "image/png", representation: "icon" },
+        { id: "good", digestSha256: "d".repeat(64), mediaType: "image/png", representation: "image" },
+      ],
+    });
+    const resolveAsset = vi.fn();
+
+    const runtime = await mountCompiledNodeDetail({ host, detail, resolveAsset });
+
+    expect(runtime).toEqual(expect.objectContaining({ status: "fallback", error: "Node Detail asset mount has an unsupported representation." }));
+    expect(resolveAsset).not.toHaveBeenCalled();
+  });
+
   it("degrades an unavailable action at its authored host and keeps an invoked action disabled through host settlement", async () => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     const host = window.document.createElement("div");
@@ -287,12 +313,17 @@ describe("compiled Node Detail product runtime", () => {
       assets: [],
     });
     const settlement = deferred();
+    let missingAvailable = false;
+    const resolveAction = (reference) => {
+      if (reference.clientKey === "invoke") return { id: 9, kind: "invoke", interactionText: "Investigate" };
+      return missingAvailable ? { id: 10, kind: "navigate", relation: "reference", targetLayerId: 22 } : undefined;
+    };
+    const onNavigate = vi.fn();
     const runtime = await mountCompiledNodeDetail({
       host,
       detail,
-      resolveAction: (reference) => reference.clientKey === "invoke"
-        ? { id: 9, kind: "invoke", interactionText: "Investigate" }
-        : undefined,
+      resolveAction,
+      onNavigate,
       onInvoke: () => settlement.promise,
     });
 
@@ -309,6 +340,17 @@ describe("compiled Node Detail product runtime", () => {
     await Promise.resolve();
     expect(invoke.disabled).toBe(true);
     expect(invoke.getAttribute("aria-busy")).toBe("false");
+
+    missingAvailable = true;
+    await runtime.updateAdapters({ resolveAction, onNavigate });
+    runtime.updateCapability("missing", { disabled: false, error: null });
+    missing.click();
+    await window.happyDOM.waitUntilComplete();
+    expect(missing.dataset.capabilityState).toBe("ready");
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 10, targetLayerId: 22 }),
+      expect.objectContaining({ mountId: "missing", relation: "reference" }),
+    );
   });
 
   it("selects the canonical package in the Product Node Details container while retaining legacy Markdown compatibility", async () => {
@@ -356,7 +398,7 @@ describe("compiled Node Detail product runtime", () => {
 
     const runtime = await mountCompiledNodeDetail({ host, detail });
 
-    const runtimeCss = runtime.shadowRoot.querySelector("style").textContent;
+    const runtimeCss = runtime.shadowRoot.querySelector("[data-node-detail-runtime-styles]").textContent;
     expect(runtimeCss).toContain("inline-size:100%!important");
     expect(runtimeCss).toContain("contain:layout paint style!important");
     expect(runtimeCss).toContain("overflow:hidden!important");
@@ -487,6 +529,29 @@ describe("compiled Node Detail product runtime", () => {
       0,
     );
     expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(true);
+
+    node.authoredDetail = compiledPackage({
+      version: 1,
+      components: [{ id: "incomplete", order: 0, html: "<p>Incomplete authored detail</p>", css: "" }],
+      mounts: [],
+      assets: [],
+    });
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(window.document.querySelector("#detailContent [role='status']").textContent).toBe("This authored detail does not bind every accepted node action.");
+    expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(false);
+    expect(window.document.querySelector("#nodeInputActions").classList.contains("hidden")).toBe(false);
+
+    onNavigateLayer.mockClear();
+    node.authoredDetail = { ...detail, integritySha256: "0".repeat(64) };
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(window.document.querySelector("#detailContent [role='status']").textContent).toBe("Node Detail package integrity check failed.");
+    expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(false);
+    expect(window.document.querySelector("#nodeInputActions").classList.contains("hidden")).toBe(false);
+    window.document.querySelector("#detailActions [data-action-id='11']").click();
+    await window.happyDOM.waitUntilComplete();
+    expect(onNavigateLayer).toHaveBeenCalledWith(91, expect.objectContaining({ action: actions[0], sourceNode: node }));
     workspace.dispose();
   });
 });

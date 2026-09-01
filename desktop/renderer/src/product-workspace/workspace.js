@@ -84,6 +84,7 @@ export async function renderProductNodeDetail({
   node,
   mountKey,
   existing,
+  compatibilityIssue,
   resolveAsset,
   resolveAction,
   onNavigate,
@@ -97,12 +98,22 @@ export async function renderProductNodeDetail({
     renderMarkdown(container, node?.detail || node?.summary || node?.content || "No details supplied.");
     return Object.freeze({ authored: false, status: "legacy" });
   }
+  if (compatibilityIssue) {
+    existing?.dispose?.();
+    container.replaceChildren();
+    const fallback = container.ownerDocument.createElement("p");
+    fallback.className = "node-detail-runtime-fallback";
+    fallback.setAttribute("role", "status");
+    fallback.textContent = compatibilityIssue;
+    container.append(fallback);
+    return Object.freeze({ authored: false, status: "fallback", error: compatibilityIssue });
+  }
   const adapters = { resolveAction, onNavigate, onInvoke, onInput };
   if (existing?.authored === true
     && existing.status === "mounted"
     && existing.mountKey === mountKey
     && existing.host?.isConnected) {
-    existing.updateAdapters(adapters);
+    await existing.updateAdapters(adapters);
     for (const [id, state] of Object.entries(capabilityState ?? {})) {
       existing.updateCapability(id, state);
     }
@@ -1294,6 +1305,15 @@ export function resolveCompiledNodeDetailAction(actions, reference, node, layer)
     && action.sourceLayerId != null
     && String(action.sourceLayerId) === String(layer.layer.id)
   ));
+}
+
+export function compiledNodeDetailCoversActions(detail, actions, node, layer) {
+  const boundActionIds = new Set((detail?.mounts ?? [])
+    .filter((mount) => mount.kind === "capability" && mount.capability.kind !== "link")
+    .map((mount) => resolveCompiledNodeDetailAction(actions, mount.capability.action, node, layer)?.id)
+    .filter((id) => id != null)
+    .map(String));
+  return (actions ?? []).every((action) => boundActionIds.has(String(action.id)));
 }
 
 export function captureGraphViewState(
@@ -4848,11 +4868,16 @@ export function createProductWorkspace({
       visibleLayer?.layer?.id,
       node.authoredDetail?.integritySha256 ?? "legacy",
     ].map(String).join(":");
+    const authoredDetailCompatibilityIssue = node.authoredDetail
+      && !compiledNodeDetailCoversActions(node.authoredDetail, actions, node, visibleLayer)
+      ? "This authored detail does not bind every accepted node action."
+      : null;
     const authoredDetail = await renderProductNodeDetail({
       container: $("#detailContent"),
       node,
       mountKey: authoredDetailMountKey,
       existing: mountedAuthoredDetail,
+      compatibilityIssue: authoredDetailCompatibilityIssue,
       resolveAsset: (asset) => resolveNodeDetailAsset(asset, { node, state, thread: getThread() }),
       resolveAction: resolveAuthoredAction,
       capabilityState: authoredCapabilityState,

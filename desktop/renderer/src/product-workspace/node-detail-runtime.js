@@ -29,6 +29,50 @@ const ELEMENT_RUNTIME_ATTRIBUTES = Object.freeze({
 });
 const UNSAFE_CSS_RESOURCE_FUNCTION = /(?:\burl|\bimage|\bimage-set|\bcross-fade|\belement|\bpaint)\s*\(/i;
 
+function decodeCssEscapes(value) {
+  return value.replace(/\\([0-9a-f]{1,6})(?:\s)?|\\(.)/gi, (_match, hex, escaped) => {
+    if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16));
+    return escaped ?? "";
+  });
+}
+
+function cssStructureIsClosed(source) {
+  const stack = [];
+  let quote = null;
+  let comment = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (comment) {
+      if (character === "*" && next === "/") {
+        comment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote !== null) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      comment = true;
+      index += 1;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === "\\") {
+      const escaped = source.slice(index + 1).match(/^[0-9a-f]{1,6}(?:\s)?|^[\s\S]/i)?.[0] ?? "";
+      index += escaped.length;
+    } else if (character === "{" || character === "(" || character === "[") {
+      stack.push(character);
+    } else if (character === "}" || character === ")" || character === "]") {
+      const expected = character === "}" ? "{" : character === ")" ? "(" : "[";
+      if (stack.pop() !== expected) return false;
+    }
+  }
+  return !comment && quote === null && stack.length === 0;
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -76,9 +120,11 @@ function mountIndex(detail) {
 }
 
 function assertSafeComponent(component, fragment, mounts) {
+  const decodedCss = typeof component.css === "string" ? decodeCssEscapes(component.css) : "";
   if (typeof component.css !== "string"
-    || /(?:@import|\bexpression\s*\()/i.test(component.css)
-    || UNSAFE_CSS_RESOURCE_FUNCTION.test(component.css)) {
+    || !cssStructureIsClosed(component.css)
+    || /(?:@import|\bexpression\s*\()/i.test(decodedCss)
+    || UNSAFE_CSS_RESOURCE_FUNCTION.test(decodedCss)) {
     throw new Error("Node Detail package contains unsafe runtime markup.");
   }
   for (const element of fragment.querySelectorAll("*")) {
@@ -198,6 +244,12 @@ function activateGraphHost(host, activation) {
   }
 }
 
+function assertPotentialInputHost(host) {
+  if (host.localName !== "input" && host.localName !== "select" && host.localName !== "textarea") {
+    throw new Error("Node Detail input mount has an incompatible host.");
+  }
+}
+
 function configureInput(host, action, resolveCurrentAction, onInput, context) {
   if (action.control === "text" && host.localName !== "input" && host.localName !== "textarea") {
     throw new Error("Node Detail text input has an incompatible host.");
@@ -237,12 +289,16 @@ function assetFallback(host) {
   host.setAttribute("title", "Visual unavailable");
 }
 
-async function applyImage(host, asset, resolveAsset) {
+function assertImageMount(host, asset) {
   if ((host.localName !== "img" && host.localName !== "span")
     || asset?.representation !== "image"
     || !SAFE_ASSET_MEDIA_TYPES.has(asset.mediaType)) {
     throw new Error("Node Detail asset mount has an unsupported representation.");
   }
+}
+
+async function applyImage(host, asset, resolveAsset) {
+  assertImageMount(host, asset);
   let resolved;
   try {
     resolved = await resolveAsset(asset);
@@ -296,13 +352,16 @@ export async function mountCompiledNodeDetail({
     const components = [...detail.components].sort((left, right) => left.order - right.order);
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
     shadow.replaceChildren();
-    const style = host.ownerDocument.createElement("style");
-    style.textContent = `${components.map((component) => component.css).join("\n")}
-:host{display:block!important;position:relative!important;inline-size:100%!important;min-width:0!important;max-width:100%!important;contain:layout paint style!important;isolation:isolate!important;overflow:hidden!important;color:inherit;font:inherit;overflow-wrap:anywhere}
+    const authoredStyles = host.ownerDocument.createElement("style");
+    authoredStyles.dataset.nodeDetailAuthoredStyles = "";
+    authoredStyles.textContent = components.map((component) => component.css).join("\n");
+    const runtimeStyles = host.ownerDocument.createElement("style");
+    runtimeStyles.dataset.nodeDetailRuntimeStyles = "";
+    runtimeStyles.textContent = `:host{display:block!important;position:relative!important;inline-size:100%!important;min-width:0!important;max-width:100%!important;contain:layout paint style!important;isolation:isolate!important;overflow:hidden!important;color:inherit;font:inherit;overflow-wrap:anywhere}
 *,*::before,*::after{box-sizing:border-box;min-inline-size:0}
 img{max-inline-size:100%}
 .relayer-asset-unavailable{background-image:none!important}`;
-    shadow.append(style);
+    shadow.append(authoredStyles, runtimeStyles);
     for (const component of components) {
       const template = host.ownerDocument.createElement("template");
       template.innerHTML = component.html;
@@ -323,7 +382,42 @@ img{max-inline-size:100%}
     const assetWork = [];
     const capabilityHosts = new Map();
     const capabilityStates = new Map();
+    const capabilityRecords = new Map();
+    const configuredCapabilities = new Set();
     const adapters = { resolveAction, onNavigate, onInvoke, onInput };
+    const configureCapability = (id, element, capability, action, resolveCurrentAction) => {
+      if (configuredCapabilities.has(id)) return;
+      const context = Object.freeze({ mountId: id, capability, actionReference: capability.action });
+      if (capability.kind === "input") {
+        configureInput(element, action, resolveCurrentAction, (...args) => adapters.onInput(...args), context);
+      } else {
+        activateGraphHost(element, async () => {
+          const prior = capabilityStates.get(id) ?? {};
+          applyCapabilityState(element, { ...prior, busy: true });
+          try {
+            const currentAction = await resolveCurrentAction();
+            assertResolvedAction(capability, currentAction);
+            if (capability.kind === "invoke") await adapters.onInvoke(currentAction, context);
+            else await adapters.onNavigate(currentAction, Object.freeze({ ...context, relation: capability.kind }));
+            if (capability.kind === "invoke" && currentAction.targetLayerId == null) {
+              capabilityStates.set(id, { ...prior, disabled: true, busy: false });
+            }
+          } catch (error) {
+            capabilityStates.set(id, {
+              ...prior,
+              busy: false,
+              error: error?.message || `Node Detail ${capability.kind} action failed.`,
+            });
+          } finally {
+            applyCapabilityState(element, capabilityStates.get(id) ?? prior);
+          }
+        });
+      }
+      configuredCapabilities.add(id);
+      const state = capabilityStates.get(id) ?? initialCapabilityState(capabilityState, id);
+      capabilityStates.set(id, state);
+      applyCapabilityState(element, state);
+    };
     for (const [id, mount] of mounts) {
       const attribute = mount.kind === "capability" ? "data-gc-mount" : "data-asset-mount";
       const element = [...shadow.querySelectorAll(`[${attribute}]`)]
@@ -338,7 +432,12 @@ img{max-inline-size:100%}
           capabilityHosts.set(id, element);
           continue;
         }
+        if (capability.kind === "input") assertPotentialInputHost(element);
+        else if (element.localName !== "a" && element.localName !== "button") {
+          throw new Error("Node Detail graph action mount has an incompatible host.");
+        }
         const resolveCurrentAction = () => adapters.resolveAction(capability.action, capability.kind);
+        capabilityRecords.set(id, { element, capability, resolveCurrentAction });
         const action = await resolveCurrentAction();
         try {
           assertResolvedAction(capability, action);
@@ -348,39 +447,13 @@ img{max-inline-size:100%}
           capabilityStates.set(id, { disabled: true, error: error.message });
           continue;
         }
-        const context = Object.freeze({ mountId: id, capability, actionReference: capability.action });
-        if (capability.kind === "input") {
-          configureInput(element, action, resolveCurrentAction, (...args) => adapters.onInput(...args), context);
-        } else {
-          activateGraphHost(element, async () => {
-            const prior = capabilityStates.get(id) ?? {};
-            applyCapabilityState(element, { ...prior, busy: true });
-            try {
-              const currentAction = await resolveCurrentAction();
-              assertResolvedAction(capability, currentAction);
-              if (capability.kind === "invoke") await adapters.onInvoke(currentAction, context);
-              else await adapters.onNavigate(currentAction, Object.freeze({ ...context, relation: capability.kind }));
-              if (capability.kind === "invoke" && currentAction.targetLayerId == null) {
-                capabilityStates.set(id, { ...prior, disabled: true, busy: false });
-              }
-            } catch (error) {
-              capabilityStates.set(id, {
-                ...prior,
-                busy: false,
-                error: error?.message || `Node Detail ${capability.kind} action failed.`,
-              });
-            } finally {
-              applyCapabilityState(element, capabilityStates.get(id) ?? prior);
-            }
-          });
-        }
-        const state = initialCapabilityState(capabilityState, id);
-        capabilityStates.set(id, state);
-        applyCapabilityState(element, state);
+        configureCapability(id, element, capability, action, resolveCurrentAction);
         capabilityHosts.set(id, element);
       } else {
-        assetWork.push(() => applyImage(element, assetById.get(mount.assetId), async (asset) => {
-          const resolved = await resolveAsset(asset);
+        const asset = assetById.get(mount.assetId);
+        assertImageMount(element, asset);
+        assetWork.push(() => applyImage(element, asset, async (requestedAsset) => {
+          const resolved = await resolveAsset(requestedAsset);
           if (typeof resolved?.release === "function") assetReleases.push(resolved.release);
           return resolved;
         }));
@@ -397,16 +470,36 @@ img{max-inline-size:100%}
         applyCapabilityState(capabilityHost, capabilityStates.get(mountId));
         return true;
       },
-      updateAdapters(next) {
+      async updateAdapters(next) {
         Object.assign(adapters, next);
+        for (const [id, record] of capabilityRecords) {
+          if (configuredCapabilities.has(id)) continue;
+          const action = await record.resolveCurrentAction();
+          try {
+            assertResolvedAction(record.capability, action);
+          } catch {
+            continue;
+          }
+          capabilityStates.set(id, {
+            ...(capabilityStates.get(id) ?? {}),
+            disabled: false,
+            busy: false,
+            error: null,
+          });
+          configureCapability(id, record.element, record.capability, action, record.resolveCurrentAction);
+        }
       },
       dispose() {
-        for (const release of assetReleases.splice(0)) release();
+        for (const release of assetReleases.splice(0)) {
+          try { release(); } catch { /* The resolver owns release diagnostics. */ }
+        }
         shadow.replaceChildren();
       },
     });
   } catch (error) {
-    for (const release of assetReleases.splice(0)) release();
+    for (const release of assetReleases.splice(0)) {
+      try { release(); } catch { /* Preserve the deterministic renderer fallback. */ }
+    }
     return renderFallback(host, error?.message || "Node Detail could not be displayed.");
   }
 }
