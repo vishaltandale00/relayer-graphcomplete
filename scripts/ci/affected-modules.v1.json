@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "vitestPrerequisiteWorkspaces": [
+    "@relayer/graph-client",
+    "@relayer/harness-host",
+    "@relayer/eval-runner"
+  ],
+  "sourceVitestPortfolio": ["test", "packages"],
+  "vitestRustRuntime": {
+    "fullPortfolio": ["relayer-app-server", "relayer-graph-server"],
+    "files": [
+      {
+        "exact": "test/first-message-composer-integration.test.mjs",
+        "packages": ["relayer-app-server", "relayer-graph-server"]
+      },
+      {
+        "exact": "test/graph-search-client-parity-e2e.test.mjs",
+        "packages": ["relayer-graph-server"]
+      },
+      {
+        "exact": "test/recursive-complete-e2e.test.mjs",
+        "packages": ["relayer-app-server", "relayer-graph-server"]
+      }
+    ]
+  },
+  "fullPortfolio": {
+    "exact": [
+      ".node-version",
+      "Cargo.lock",
+      "Cargo.toml",
+      "package-lock.json",
+      "package.json",
+      "tsconfig.build.json",
+      "tsconfig.json"
+    ],
+    "prefixes": [
+      ".cargo/",
+      ".github/",
+      "docs/evidence/",
+      "fixtures/graph-query-v1/",
+      "infra/",
+      "scripts/ci/"
+    ]
+  },
+  "rustOwners": [
+    {
+      "prefix": "crates/relayer-app-server/",
+      "package": "relayer-app-server",
+      "vitestFiles": ["test/first-message-composer-integration.test.mjs", "test/recursive-complete-e2e.test.mjs"]
+    },
+    {
+      "prefix": "crates/relayer-graph-core/",
+      "package": "relayer-graph-core",
+      "vitestFiles": ["test/complete.test.ts", "test/graph-export-capability.test.mjs", "test/recursive-complete-e2e.test.mjs"]
+    },
+    {
+      "prefix": "crates/relayer-graph-server/",
+      "package": "relayer-graph-server",
+      "vitestFiles": ["test/graph-search-client-parity-e2e.test.mjs", "test/recursive-complete-e2e.test.mjs"]
+    },
+    {
+      "prefix": "crates/relayer-telemetry-capability/",
+      "package": "relayer-telemetry-capability",
+      "vitestFiles": ["test/desktop-telemetry-release.test.mjs", "test/telemetry-evidence.test.mjs"]
+    }
+  ],
+  "npmOwners": [
+    { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test"] },
+    {
+      "prefix": "packages/graph-client/",
+      "package": "@relayer/graph-client",
+      "vitestFiles": ["packages/graph-client/test", "test/complete.test.ts", "test/graph-export-capability.test.mjs"]
+    },
+    { "prefix": "packages/harness-host/", "package": "@relayer/harness-host", "vitestFiles": ["packages/harness-host/test"] },
+    {
+      "prefix": "desktop/",
+      "package": "relayer-desktop",
+      "packaging": true,
+      "vitestFiles": [
+        "test/composer-context-state.test.mjs",
+        "test/composer-provider-lifecycle.test.mjs",
+        "test/desktop-shell.test.mjs",
+        "test/first-message-composer-integration.test.mjs",
+        "test/settings-navigation.test.mjs",
+        "test/window-factory.test.mjs",
+        "test/workspace-actions.test.mjs",
+        "test/workspace-navigation-integration.test.mjs"
+      ]
+    }
+  ],
+  "chapterOwners": [
+    {
+      "prefix": "python/relayer-graph/src/",
+      "chapters": ["python", "vitest", "packaging"],
+      "vitestFiles": ["test/icon-vocabulary-parity.test.mjs", "test/prime-agent-packaging.test.mjs"]
+    },
+    { "prefix": "python/", "chapters": ["python"] },
+    {
+      "prefix": "docs/prd/",
+      "chapters": ["prd", "vitest"],
+      "vitestFiles": ["test/documentation-product-boundary.test.mjs"]
+    },
+    { "prefix": "docs/evidence/", "chapters": ["receipts"] },
+    { "prefix": "test/", "chapters": ["vitest"], "changedTestFile": true, "rootTypeScript": true },
+    { "prefix": "src/", "chapters": ["typescript", "vitest"], "rootTypeScript": true, "fullVitestPortfolio": true },
+    { "prefix": "eval-cases/", "chapters": ["vitest"], "vitestFiles": ["packages/eval-runner/test"] },
+    { "prefix": "fixtures/", "chapters": ["vitest"], "vitestFiles": ["test", "packages"] },
+    { "prefix": "harnesses/", "chapters": ["vitest", "packaging"], "fullVitestPortfolio": true },
+    { "prefix": "permissions/", "chapters": ["vitest"], "fullVitestPortfolio": true },
+    { "prefix": "vendor/", "chapters": ["typescript", "vitest", "packaging"], "rootTypeScript": true, "fullVitestPortfolio": true },
+    { "exact": "README.md", "chapters": ["vitest", "prd"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
+    { "exact": "AGENTS.md", "chapters": ["vitest"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
+    { "prefix": "docs/agents/", "chapters": ["vitest"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
+    { "prefix": "docs/decisions/", "chapters": ["vitest", "prd"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
+    { "exact": "docs/architecture.md", "chapters": ["vitest", "prd"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] }
+  ],
+  "scriptOwners": [
+    { "prefix": "scripts/lint-ladybug-", "chapters": ["receipts", "vitest"], "vitestFiles": ["test/ladybug-native-receipts.test.mjs"] },
+    { "prefix": "scripts/verify-ladybug-", "chapters": ["receipts", "vitest"], "vitestFiles": ["test/ladybug-native-receipts.test.mjs"] },
+    { "exact": "scripts/prepare-renderer-vendor.mjs", "chapters": ["typescript", "vitest", "packaging"], "rootTypeScript": true, "vitestFiles": ["test/desktop-shell.test.mjs"] }
+  ],
+  "crossModuleChapters": {
+    "rust": ["vitest"],
+    "npm": ["vitest"]
+  }
+}

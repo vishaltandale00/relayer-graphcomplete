@@ -10,6 +10,7 @@ Read `README.md`, `docs/architecture.md`, and the applicable architecture decisi
 - Use deterministic rules for integrity and authority, not as substitutes for model judgment.
 - Do not use paid inference in the default test suite.
 - Run `npm run check` and `npm run build` before committing.
+- Pull-request CI and integration-train conventions are documented in `docs/agents/ci.md`.
 
 ## Change verification workflow
 

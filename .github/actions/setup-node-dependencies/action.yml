@@ -1,0 +1,41 @@
+name: Set up Node dependencies with evidence
+description: Restore trusted npm download acceleration and install dependencies with timing evidence.
+
+runs:
+  using: composite
+  steps:
+    - name: Start setup timing
+      id: timing
+      shell: bash
+      run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+    - name: Set up pinned Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: .node-version
+    - name: Restore npm download acceleration
+      id: cache
+      uses: actions/cache/restore@v5
+      with:
+        path: ~/.npm
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          npm-${{ runner.os }}-${{ runner.arch }}-
+    - name: Record setup and npm cache status
+      shell: bash
+      env:
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        STARTED: ${{ steps.timing.outputs.started }}
+      run: |
+        elapsed=$(($(date +%s) - STARTED))
+        echo "### Node setup and npm download cache" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Setup plus cache restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+    - name: Install Node dependencies
+      shell: bash
+      run: node scripts/ci/run-timed.mjs "Node dependency setup" npm ci
+    - name: Save trusted npm download acceleration
+      if: ${{ github.event_name == 'push' && success() && steps.cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v5
+      with:
+        path: ~/.npm
+        key: ${{ steps.cache.outputs.cache-primary-key }}

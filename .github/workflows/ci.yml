@@ -5,28 +5,301 @@ on:
   push:
     branches:
       - main
+      - integration/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  plan:
+    name: Plan affected verification
     runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+      mode: ${{ steps.plan.outputs.mode }}
+      rust: ${{ steps.plan.outputs.rust }}
+      typescript: ${{ steps.plan.outputs.typescript }}
+      vitest: ${{ steps.plan.outputs.vitest }}
+      python: ${{ steps.plan.outputs.python }}
+      receipts: ${{ steps.plan.outputs.receipts }}
+      prd: ${{ steps.plan.outputs.prd }}
+      packaging: ${{ steps.plan.outputs.packaging }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out source and base history
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - name: Set up pinned Node
+        uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
-          cache: npm
-      - run: node scripts/check-node-version.mjs
-      - run: npm ci
-      - run: npm run check
-      - run: npm run build
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
+      - name: Derive affected-module plan
+        id: plan
+        run: |
+          mode="$(node scripts/ci/select-mode.mjs)"
+          node scripts/ci/plan-affected.mjs \
+            --base "${{ github.event.pull_request.base.sha || github.event.before }}" \
+            --head "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --mode "$mode"
 
-  prime-runtime-package:
+  quick:
+    name: Quick deterministic checks
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Node dependencies with evidence
+        uses: ./.github/actions/setup-node-dependencies
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
+      - name: Formatting, generated files, and affected typechecks
+        run: node scripts/ci/run-chapter.mjs quick
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+
+  rust:
+    name: Rust checks and fresh tests
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Node dependencies with evidence
+        uses: ./.github/actions/setup-node-dependencies
+      - name: Identify Rust cache inputs
+        id: rust-toolchain
+        run: |
+          rustc --version --verbose
+          echo "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
+          echo "host=$(rustc --version --verbose | sed -n 's/^host: //p')" >> "$GITHUB_OUTPUT"
+      - name: Start Rust cache timing
+        id: rust-cache-timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Restore untrusted Rust compilation acceleration
+        id: rust-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-affected-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            rust-affected-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-
+      - name: Record Rust cache status
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.rust-cache.outputs.cache-primary-key }}
+          STARTED: ${{ steps.rust-cache-timing.outputs.started }}
+        run: |
+          elapsed=$(($(date +%s) - STARTED))
+          echo "### Rust compilation cache" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Primary key: $CACHE_KEY" >> "$GITHUB_STEP_SUMMARY"
+          echo "Cache contents accelerate compilation only; every selected test runs freshly for this source snapshot." >> "$GITHUB_STEP_SUMMARY"
+      - name: Selected Rust compilation, checks, and tests
+        run: node scripts/ci/run-chapter.mjs rust
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+      - name: Save trusted Rust compilation acceleration
+        if: ${{ github.event_name == 'push' && success() && steps.rust-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+
+  typescript:
+    name: TypeScript builds
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.typescript == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Node dependencies with evidence
+        uses: ./.github/actions/setup-node-dependencies
+      - name: Build selected TypeScript workspaces
+        run: node scripts/ci/run-chapter.mjs typescript
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+
+  vitest:
+    name: Fresh deterministic Vitest portfolio
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.vitest == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Node dependencies with evidence
+        uses: ./.github/actions/setup-node-dependencies
+      - name: Identify Rust cache inputs
+        id: rust-toolchain
+        run: |
+          rustc --version --verbose
+          echo "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
+          echo "host=$(rustc --version --verbose | sed -n 's/^host: //p')" >> "$GITHUB_OUTPUT"
+      - name: Start Rust cache timing
+        id: rust-cache-timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Restore read-only Vitest runtime compilation acceleration
+        id: rust-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-affected-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            rust-affected-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-
+      - name: Record Vitest Rust cache status
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
+          STARTED: ${{ steps.rust-cache-timing.outputs.started }}
+        run: |
+          elapsed=$(($(date +%s) - STARTED))
+          echo "### Vitest Rust compilation cache" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "Cache contents accelerate runtime compilation only; every mapped test runs freshly." >> "$GITHUB_STEP_SUMMARY"
+      - name: Build Vitest runtime prerequisites
+        run: node scripts/ci/run-chapter.mjs vitest-prerequisites
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+      - name: Run fresh Vitest and secret-boundary tests
+        run: node scripts/ci/run-chapter.mjs vitest
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+
+  python:
+    name: Fresh Python client tests
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.python == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up pinned Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Run fresh Python tests
+        run: node scripts/ci/run-chapter.mjs python
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+
+  receipts:
+    name: Receipt integrity
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.receipts == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Node dependencies with evidence
+        uses: ./.github/actions/setup-node-dependencies
+      - name: Check receipt integrity
+        run: node scripts/ci/run-chapter.mjs receipts
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+
+  prd:
+    name: PRD readability
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.prd == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up pinned Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Check PRD readability
+        run: node scripts/ci/run-chapter.mjs prd
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+
+  full:
+    name: Full repository gates
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.mode == 'full' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Node dependencies with evidence
+        uses: ./.github/actions/setup-node-dependencies
+      - name: Identify Rust cache inputs
+        id: rust-toolchain
+        run: |
+          rustc --version --verbose
+          echo "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
+          echo "host=$(rustc --version --verbose | sed -n 's/^host: //p')" >> "$GITHUB_OUTPUT"
+      - name: Start Rust cache timing
+        id: rust-cache-timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Restore full-gate Rust compilation acceleration
+        id: rust-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-full-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            rust-full-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-all-features-v1-
+      - name: Record full-gate Rust cache status
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
+          STARTED: ${{ steps.rust-cache-timing.outputs.started }}
+        run: |
+          elapsed=$(($(date +%s) - STARTED))
+          echo "### Full-gate Rust compilation cache" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "Cache reuse is acceleration, not verification evidence." >> "$GITHUB_STEP_SUMMARY"
+      - name: Run repository-required check and build
+        run: node scripts/ci/run-chapter.mjs full
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+      - name: Save trusted full-gate Rust compilation acceleration
+        if: ${{ github.event_name == 'push' && success() && steps.rust-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+
+  packaging:
     name: Prime runtime package (${{ matrix.target }})
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.packaging == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,19 +312,76 @@ jobs:
             runner: macos-15
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Node dependencies with evidence
+        uses: ./.github/actions/setup-node-dependencies
+      - name: Verify Node toolchain
+        run: node scripts/check-node-version.mjs
+      - name: Identify Rust cache inputs
+        id: rust-toolchain
+        run: |
+          rustc --version --verbose
+          echo "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
+          echo "host=$(rustc --version --verbose | sed -n 's/^host: //p')" >> "$GITHUB_OUTPUT"
+      - name: Start Rust cache timing
+        id: rust-cache-timing
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Restore packaging Rust compilation acceleration
+        id: rust-cache
+        uses: actions/cache/restore@v5
         with:
-          node-version-file: .node-version
-          cache: npm
-      - run: node scripts/check-node-version.mjs
-      - run: npm ci
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-packaging-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-default-v1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            rust-packaging-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.release }}-${{ steps.rust-toolchain.outputs.host }}-debug-default-v1-
+      - name: Record packaging Rust cache status
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
+          STARTED: ${{ steps.rust-cache-timing.outputs.started }}
+        run: |
+          elapsed=$(($(date +%s) - STARTED))
+          echo "### Packaging Rust compilation cache" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Restore: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
       - name: Seed the locked Cargo dependency closure
-        run: cargo fetch --locked --target aarch64-apple-darwin
+        run: node scripts/ci/run-timed.mjs "Packaging Cargo fetch" cargo fetch --locked --target aarch64-apple-darwin
       - name: Build and inspect the actual target ASAR
-        run: npm run desktop:pack
+        run: node scripts/ci/run-timed.mjs "Apple Silicon packaging" npm run desktop:pack
         env:
           RELAYER_DESKTOP_TARGET: ${{ matrix.target }}
+      - name: Save trusted packaging Rust compilation acceleration
+        if: ${{ github.event_name == 'push' && success() && steps.rust-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+
+  check:
+    name: check
+    if: always()
+    needs: [plan, quick, rust, typescript, vitest, python, receipts, prd, packaging, full]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up pinned Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Assert every selected required chapter passed
+        run: node scripts/ci/assert-required-jobs.mjs
+        env:
+          CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
 
   ladybug-windows-qualification:
     # Parked while Windows is not a release target. The pinned-source setup below
