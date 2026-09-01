@@ -2338,6 +2338,21 @@ settings:
 <tr><td>Product compatibility</td><td>The production workspace seam proves mounting against the projected #365 contract, durable input, action routing, in-place rerender, tray suppression, fallback controls, and legacy Markdown. It is not final #365 or #371 integration evidence.</td></tr>
 </tbody>
 </table>
+<h3>6.4 Accepted Node Detail persistence and portability</h3>
+<p>An accepted authored Node Detail is the exact canonical package attached at node submission. Graph storage, node reads, accepted-history reads, conversation export, and conversation import preserve that package without recompiling it. Nodes written before this package existed remain readable with no authored detail.</p>
+<p>Visual asset bytes remain behind the visual-assets boundary. Acceptance pins the package-referenced bytes and provenance independently from later catalog archive, tag, or organization changes. A portable visual-detail archive contains each reachable content digest once and reconnects every logical asset deterministically on import. Import rejects missing, corrupt, unsupported, unreachable, duplicate, and unauthorized content atomically.</p>
+<p>This contract exposes the same accepted package and asset-resolution interfaces to Product and Eval consumers. It does not render either surface; Product rendering remains #366 and Eval proof remains #371.</p>
+<h4>#365 deterministic checkpoint map</h4>
+<table>
+<thead><tr><th>Checkpoint</th><th>Public deterministic proof</th></tr></thead>
+<tbody>
+<tr><td>Exact accepted package durability</td><td><code>crates/relayer-graph-core/tests/graph_database.rs</code> proves immutable acceptance and reopen; <code>crates/relayer-graph-server/src/lib.rs</code> and <code>packages/graph-client/test/objects.test.ts</code> prove the public node API returns the exact package.</td></tr>
+<tr><td>Accepted-history independence</td><td><code>packages/visual-assets/test/visual-assets.test.ts</code> proves accepted bytes and provenance survive later catalog archive and organization changes and file-backed reopen.</td></tr>
+<tr><td>Single digest and deterministic reconnection</td><td><code>packages/visual-assets/test/visual-assets.test.ts</code> proves two logical assets sharing bytes export one content digest and reconnect to their authored IDs on import.</td></tr>
+<tr><td>Fail-closed portable import</td><td><code>packages/visual-assets/test/visual-assets.test.ts</code> rejects missing, corrupt, unsupported, unreachable, duplicate, and unauthorized content before publishing accepted state.</td></tr>
+<tr><td>Conversation portability and compatibility</td><td><code>crates/relayer-app-server/tests/conversation_export_contract.rs</code> and <code>crates/relayer-app-server/tests/product_persistence_flow.rs</code> prove package preservation through export/import while the schema migration test proves legacy nodes reopen without a package.</td></tr>
+</tbody>
+</table>
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>
 <p>The first evaluation is one fixed two-interaction case. Its name is <code>empty-project.task-system.two-turn</code>. It proves the smallest real conversation path through all runtime components. These components include the graph engine, client, harness host, Codex session, Complete boundary, evaluator, judge, and renderer.</p>
 <p>The second interaction receives a new canonical interaction node and capability token. It reuses the same harness object and provider thread. The case has no existing codebase, grounding requirement, graph search, or subagent dependency.</p>

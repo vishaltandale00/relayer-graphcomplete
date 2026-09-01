@@ -414,6 +414,7 @@ mod tests {
                 icon: "file".into(),
                 title: title.into(),
                 detail: format!("Accepted detail for {title}"),
+                authored_detail: None,
                 state: ExportRecordState::Accepted,
             }],
             edges: vec![],

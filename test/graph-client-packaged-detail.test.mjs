@@ -9,6 +9,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const graphClientIndexUrl = pathToFileURL(resolve("packages/graph-client/agent-resource/index.js"));
 const execFileAsync = promisify(execFile);
 
+function echoedNodeResponse(init, node) {
+  const request = JSON.parse(String(init.body));
+  return new Response(JSON.stringify({
+    node: {
+      ...node,
+      ...(Object.hasOwn(request, "authoredDetail") ? { authoredDetail: request.authoredDetail } : {}),
+    },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
 describe("packaged graph-client authored detail boundary", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -34,9 +44,9 @@ describe("packaged graph-client authored detail boundary", () => {
     let submitted;
     vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
       submitted = JSON.parse(String(init.body));
-      return new Response(JSON.stringify({
-        node: { id: 1, kind: "concept", icon: "box", title: "Safe", detail: "Fallback", state: "draft" },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return echoedNodeResponse(init, {
+        id: 1, kind: "concept", icon: "box", title: "Safe", detail: "Fallback", state: "draft",
+      });
     }));
 
     await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node);
@@ -83,16 +93,14 @@ describe("packaged graph-client authored detail boundary", () => {
       }
       nodePosts += 1;
       submittedDetail = JSON.parse(String(init.body)).authoredDetail;
-      return Promise.resolve(new Response(JSON.stringify({
-        node: {
+      return Promise.resolve(echoedNodeResponse(init, {
           id: 40,
           kind: "concept",
           icon: "box",
           title: "Reentrant",
           detail: "Fallback",
           state: "draft",
-        },
-      }), { status: 200, headers: { "content-type": "application/json" } }));
+      }));
     }));
 
     client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
@@ -124,7 +132,7 @@ describe("packaged graph-client authored detail boundary", () => {
     let didReenter = false;
     let reentrantSubmission;
     let client;
-    vi.stubGlobal("fetch", vi.fn((url) => {
+    vi.stubGlobal("fetch", vi.fn((url, init) => {
       if (String(url).endsWith("/api/graph/detail-assets/resolve")) {
         resolverPosts += 1;
         if (!didReenter) {
@@ -148,16 +156,14 @@ describe("packaged graph-client authored detail boundary", () => {
         }), { status: 200, headers: { "content-type": "application/json" } }));
       }
       nodePosts += 1;
-      return Promise.resolve(new Response(JSON.stringify({
-        node: {
+      return Promise.resolve(echoedNodeResponse(init, {
           id: 43,
           kind: "concept",
           icon: "box",
           title: "Retry re-entry",
           detail: "Fallback",
           state: "draft",
-        },
-      }), { status: 200, headers: { "content-type": "application/json" } }));
+      }));
     }));
 
     client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
@@ -398,9 +404,9 @@ describe("packaged graph-client authored detail boundary", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({
-        node: { id: 1, kind: "concept", icon: "box", title: "Original title", detail: "Original detail", state: "draft" },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return echoedNodeResponse(init, {
+        id: 1, kind: "concept", icon: "box", title: "Original title", detail: "Original detail", state: "draft",
+      });
     }));
 
     const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
@@ -614,9 +620,9 @@ describe("packaged graph-client authored detail boundary", () => {
         }] }), { status: 200, headers: { "content-type": "application/json" } });
       }
       submitted = JSON.parse(String(init.body));
-      return new Response(JSON.stringify({
-        node: { id: 1, kind: "concept", icon: "box", title: "Snapshot", detail: "Fallback", state: "draft" },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return echoedNodeResponse(init, {
+        id: 1, kind: "concept", icon: "box", title: "Snapshot", detail: "Fallback", state: "draft",
+      });
     }));
 
     const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
@@ -1173,7 +1179,7 @@ describe("packaged graph-client authored detail boundary", () => {
         let submitted;
         globalThis.fetch = async (_url, init) => {
           submitted = JSON.parse(String(init.body));
-          return new Response(JSON.stringify({ node: { id: 1, kind: "concept", icon: "box", title: "Packaged", detail: "Fallback", state: "draft" } }), { status: 200, headers: { "content-type": "application/json" } });
+          return new Response(JSON.stringify({ node: { id: 1, kind: "concept", icon: "box", title: "Packaged", detail: "Fallback", authoredDetail: submitted.authoredDetail, state: "draft" } }), { status: 200, headers: { "content-type": "application/json" } });
         };
         await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host", nodeId: 1 }).submitNode(node);
         const compiled = submitted.authoredDetail;

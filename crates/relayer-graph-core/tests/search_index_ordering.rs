@@ -1222,6 +1222,7 @@ fn imported_conversation() -> ImportedConversation {
                         icon: "box".into(),
                         title: "Imported queue".into(),
                         detail: "A queue".into(),
+                        authored_detail: None,
                     }],
                     edges: vec![],
                     actions: vec![],

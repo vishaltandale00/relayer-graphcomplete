@@ -423,6 +423,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                     icon: context.target.icon,
                     title: context.target.title,
                     detail: context.target.detail,
+                    authored_detail: None,
                 },
                 source_interaction_node_id: context.source.interaction_node_id,
                 source_layer_id: context.source.layer_id,
@@ -497,6 +498,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                             icon: node.icon,
                             title: node.title,
                             detail: node.detail,
+                            authored_detail: node.authored_detail,
                         })
                         .collect(),
                     edges: resolved

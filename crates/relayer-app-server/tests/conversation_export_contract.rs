@@ -96,11 +96,34 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
             icon: "file".into(),
             title: format!("Node {node_id}"),
             detail: "Durable accepted detail".into(),
+            authored_detail: Some(serde_json::json!({
+                "version": 1,
+                "components": [{"id":"summary","order":0,"html":"<p>Durable</p><a data-gc-capability=\"open\">Open</a>","css":""}],
+                "mounts": [{"id":"open","componentId":"summary","kind":"capability","host":"a","capability":{"kind":"link","href":"https://example.com"}}],
+                "assets": [],
+                "integritySha256": "49b27b37e787326e0cc4bd1c62a67f65daf3a9184e1c7f792d8ec091b50456ad"
+            })),
             state: ExportRecordState::Accepted,
         }],
         edges: vec![],
         actions,
     }
+}
+
+#[test]
+fn canonical_authored_detail_survives_export_record_serialization() {
+    let records = records();
+    validate_export_records(&records).unwrap();
+    let encoded = serde_json::to_vec(&records[1]).unwrap();
+    let decoded: ConversationExportRecord = serde_json::from_slice(&encoded).unwrap();
+    let ConversationExportRecord::Turn(turn) = decoded else {
+        panic!("second record must be a turn")
+    };
+    let view = turn.accepted_view.unwrap();
+    let package = view.layers[0].nodes[0].authored_detail.as_ref().unwrap();
+    assert_eq!(package["components"][0]["id"], "summary");
+    assert_eq!(package["components"][0]["order"], 0);
+    assert_eq!(package["mounts"][0]["capability"]["kind"], "link");
 }
 
 fn accepted_view() -> ExportAcceptedView {

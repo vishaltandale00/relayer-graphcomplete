@@ -321,6 +321,7 @@ mod tests {
                 icon: "message-square".into(),
                 title: "Explain the queue".into(),
                 detail: "Explain the queue".into(),
+                authored_detail: None,
                 state: RecordState::Accepted,
             },
             root_action: Some(GraphAction {

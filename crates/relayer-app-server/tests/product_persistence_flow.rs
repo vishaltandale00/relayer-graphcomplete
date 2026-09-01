@@ -2605,13 +2605,22 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         .await
         .unwrap();
     let answer = writer
-        .submit_node(&NodeDraft {
-            client_key: "answer".into(),
-            kind: "concept /var/folders/project/tokenizer".into(),
-            icon: "file".into(),
-            title: "Finding /var/folders/project/tokenizer".into(),
-            detail: "Accepted durable detail /var/folders/project/tokenizer".into(),
-        })
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept /var/folders/project/tokenizer".into(),
+                icon: "file".into(),
+                title: "Finding /var/folders/project/tokenizer".into(),
+                detail: "Accepted durable detail /var/folders/project/tokenizer".into(),
+            },
+            Some(&json!({
+                "version": 1,
+                "components": [{"id":"overview","order":0,"html":"<p>Accepted</p>","css":"p{color:#fff}"}],
+                "mounts": [],
+                "assets": [],
+                "integritySha256": "6c34582a24f665dfcf9efa843fdb254a646de79c505d76c80863f81ed8dfe659"
+            })),
+        )
         .await
         .unwrap();
     let nested_node = writer
@@ -2944,6 +2953,10 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
     assert_eq!(exported_answer.icon, "file");
     assert!(exported_answer.title.contains("[project-path]"));
     assert!(exported_answer.detail.contains("[project-path]"));
+    assert_eq!(
+        exported_answer.authored_detail.as_ref().unwrap()["components"][0]["id"],
+        "overview"
+    );
     let exported_invoke = accepted_view
         .layers
         .iter()

@@ -2,6 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DETAIL_AUTHORING_LIMITS, EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, assetRef, html, type ActionObject } from "../src/index.js";
 import { edgeId, layerId, nodeId } from "../src/objects.js";
 
+function nodeResponse(init: RequestInit, node: Record<string, unknown>): Response {
+  const request = JSON.parse(String(init.body)) as Record<string, unknown>;
+  return new Response(JSON.stringify({
+    node: {
+      ...node,
+      ...(Object.hasOwn(request, "authoredDetail") ? { authoredDetail: request.authoredDetail } : {}),
+    },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
 describe("agent-facing graph objects", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -30,9 +40,9 @@ describe("agent-facing graph objects", () => {
     const requests: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
       requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
-      return new Response(JSON.stringify({
-        node: { id: 10, kind: "concept", icon: "box", title: "Draft", detail: "Legacy fallback", state: "draft" },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return nodeResponse(init, {
+        id: 10, kind: "concept", icon: "box", title: "Draft", detail: "Legacy fallback", state: "draft",
+      });
     }));
     const node = new NodeObject("box", "Draft", "Legacy fallback", "concept", "draft-node");
     node.detailAuthoring.setComponent("summary", html`<p>Checkpoint one</p>`);
@@ -53,6 +63,35 @@ describe("agent-facing graph objects", () => {
     });
     expect(() => node.detailAuthoring.setComponent("late", html`<p>Too late</p>`))
       .toThrow("finalized and cannot be mutated");
+  });
+
+  it("returns the exact accepted authored detail package from the node interface", async () => {
+    let submittedPackage: unknown;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      const request = JSON.parse(String(init.body)) as { authoredDetail: unknown };
+      submittedPackage = request.authoredDetail;
+      return new Response(JSON.stringify({
+        node: {
+          id: 10,
+          kind: "concept",
+          icon: "box",
+          title: "Accepted package",
+          detail: "Legacy fallback",
+          authoredDetail: request.authoredDetail,
+          state: "draft",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Accepted package", "Legacy fallback", "concept", "accepted-package");
+    node.detailAuthoring.setComponent("summary", html`<p>Durable detail</p>`);
+
+    const accepted = await new RelayerGraphClient({
+      url: "http://127.0.0.1:1",
+      token: "token",
+      nodeId: 1,
+    }).submitNode(node);
+
+    expect(accepted.authoredDetail).toEqual(submittedPackage);
   });
 
   it("does not let the authored program inject asset verification through NodeObject", () => {
@@ -102,9 +141,9 @@ describe("agent-facing graph objects", () => {
           }],
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
-      return new Response(JSON.stringify({
-        node: { id: 12, kind: "concept", icon: "box", title: "Asset", detail: "Fallback", state: "draft" },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return nodeResponse(init, {
+        id: 12, kind: "concept", icon: "box", title: "Asset", detail: "Fallback", state: "draft",
+      });
     }));
     const node = new NodeObject("box", "Asset", "Fallback", "concept", "asset-node");
     node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("hero")} alt="Hero">`);
@@ -279,9 +318,9 @@ describe("agent-facing graph objects", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({
-        node: { id: 13, kind: "concept", icon: "box", title: "Retry", detail: "Fallback", state: "draft" },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return nodeResponse(init, {
+        id: 13, kind: "concept", icon: "box", title: "Retry", detail: "Fallback", state: "draft",
+      });
     }));
     const node = new NodeObject("box", "Retry", "Fallback", "concept", "retry-node");
     node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("retry-hero")} alt="Retry hero">`);
@@ -325,9 +364,9 @@ describe("agent-facing graph objects", () => {
       } catch {
         mutationResults.push("frozen");
       }
-      return new Response(JSON.stringify({
-        node: { id: 14, kind: "concept", icon: "box", title: "Concurrent", detail: "Fallback", state: "draft" },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return nodeResponse(init, {
+        id: 14, kind: "concept", icon: "box", title: "Concurrent", detail: "Fallback", state: "draft",
+      });
     }));
     const node = new NodeObject("box", "Concurrent", "Fallback", "concept", "concurrent-node");
     node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("single-flight-logo")} alt="Logo">`);
@@ -345,11 +384,11 @@ describe("agent-facing graph objects", () => {
 
   it("drops failed compilation finalization so the unfrozen author can repair", async () => {
     let nodeRequests = 0;
-    vi.stubGlobal("fetch", vi.fn(async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
       nodeRequests += 1;
-      return new Response(JSON.stringify({
-        node: { id: 15, kind: "concept", icon: "box", title: "Repair", detail: "Fallback", state: "draft" },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return nodeResponse(init, {
+        id: 15, kind: "concept", icon: "box", title: "Repair", detail: "Fallback", state: "draft",
+      });
     }));
     const node = new NodeObject("box", "Repair", "Fallback", "concept", "repair-node");
     node.detailAuthoring.setComponent("content", html`<script>unsafe()</script>`);

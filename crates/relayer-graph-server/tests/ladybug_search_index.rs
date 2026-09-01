@@ -226,6 +226,7 @@ fn imported_conversation(project_id: Option<ProjectId>) -> ImportedConversation 
                         icon: "box".into(),
                         title: "Imported queue".into(),
                         detail: "A queue".into(),
+                        authored_detail: None,
                     }],
                     edges: vec![],
                     actions: vec![],

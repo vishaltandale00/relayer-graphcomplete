@@ -1,4 +1,5 @@
 import type { RelayerIconName } from "./icons.js";
+import type { CompiledNodeDetail } from "./detail.js";
 
 export type GraphId = number;
 
@@ -14,6 +15,7 @@ export interface GraphNode {
   readonly icon: string;
   readonly title: string;
   readonly detail: string;
+  readonly authoredDetail?: CompiledNodeDetail;
   readonly state: RecordState;
 }
 

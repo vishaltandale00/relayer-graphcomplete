@@ -1187,17 +1187,26 @@ async fn revoke_capability(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmitNodeRequest {
+    #[serde(flatten)]
+    draft: NodeDraft,
+    #[serde(default)]
+    authored_detail: Option<Value>,
+}
+
 async fn submit_node(
     State(state): State<ServerState>,
     headers: HeaderMap,
-    Json(input): Json<NodeDraft>,
+    Json(input): Json<SubmitNodeRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let authority = session(&state, &headers)?;
     let node = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
-        .submit_node(&input)
+        .submit_node_with_authored_detail(&input.draft, input.authored_detail.as_ref())
         .await?;
     Ok(Json(json!({"node": node})))
 }
@@ -1685,6 +1694,74 @@ mod tests {
         http::Request,
     };
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn node_api_round_trips_the_canonical_authored_detail_package() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Question")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let graph_token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
+        let app = router(state);
+        let package = json!({
+            "version": 1,
+            "components": [{"id":"overview","order":0,"html":"<p>Accepted</p>","css":"p{color:#fff}"}],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "6c34582a24f665dfcf9efa843fdb254a646de79c505d76c80863f81ed8dfe659"
+        });
+
+        let submitted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/nodes")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(
+                        json!({
+                            "clientKey": "answer",
+                            "kind": "concept",
+                            "icon": "box",
+                            "title": "Answer",
+                            "detail": "Legacy fallback",
+                            "authoredDetail": package
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(submitted.status(), StatusCode::OK);
+        let submitted: Value =
+            serde_json::from_slice(&to_bytes(submitted.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        let node_id = submitted["node"]["id"].as_i64().unwrap();
+        assert_eq!(submitted["node"]["authoredDetail"], package);
+
+        let fetched = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/nodes/{node_id}"))
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fetched.status(), StatusCode::OK);
+        let fetched: Value =
+            serde_json::from_slice(&to_bytes(fetched.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(fetched["node"]["authoredDetail"], package);
+    }
 
     #[tokio::test]
     async fn graph_capability_can_discard_an_owned_orphan_layer() {

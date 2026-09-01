@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { mkdir, open, readFile, rename } from "node:fs/promises";
+import { dirname } from "node:path";
 import sax from "sax";
 import sharp from "sharp";
 
@@ -113,6 +115,72 @@ export interface VisualAssetAuthority {
   readonly standaloneThreadIds: readonly number[];
 }
 
+export interface CanonicalNodeDetailPackage {
+  readonly version: 1;
+  readonly components: readonly Readonly<Record<string, unknown>>[];
+  readonly mounts: readonly Readonly<Record<string, unknown>>[];
+  readonly assets: readonly {
+    readonly id: string;
+    readonly digestSha256: string;
+    readonly mediaType: string;
+    readonly representation: "image";
+  }[];
+  readonly integritySha256: string;
+}
+
+export interface AcceptedVisualDetail {
+  readonly package: CanonicalNodeDetailPackage;
+  readonly assets: readonly {
+    readonly assetId: string;
+    readonly digestSha256: string;
+    readonly mediaType: VisualAssetMediaType;
+    readonly byteLength: number;
+    readonly provenance: VisualAsset["provenance"];
+  }[];
+}
+
+export interface VisualDetailArchive {
+  readonly version: 1;
+  readonly details: readonly AcceptedVisualDetail[];
+  readonly contents: readonly {
+    readonly digestSha256: string;
+    readonly mediaType: VisualAssetMediaType;
+    readonly byteLength: number;
+    readonly contentBase64: string;
+  }[];
+}
+
+export interface VisualDetailPersistence {
+  accept(input: {
+    readonly package: CanonicalNodeDetailPackage;
+    readonly scope: VisualAssetScope;
+  }): Promise<AcceptedVisualDetail>;
+  resolve(input: {
+    readonly detail: AcceptedVisualDetail;
+    readonly scope: VisualAssetScope;
+  }): Promise<{
+    readonly package: CanonicalNodeDetailPackage;
+    readonly assets: readonly {
+      readonly assetId: string;
+      readonly digestSha256: string;
+      readonly provenance: VisualAsset["provenance"];
+      readonly file: HarnessFileHandle;
+    }[];
+  }>;
+  read(input: {
+    readonly package: CanonicalNodeDetailPackage;
+    readonly scope: VisualAssetScope;
+  }): Promise<AcceptedVisualDetail>;
+  exportArchive(input: {
+    readonly details: readonly AcceptedVisualDetail[];
+    readonly scope: VisualAssetScope;
+  }): Promise<VisualDetailArchive>;
+  importArchive(input: {
+    readonly archive: VisualDetailArchive;
+    readonly scope: VisualAssetScope;
+  }): Promise<readonly AcceptedVisualDetail[]>;
+}
+
 export class VisualAssetsError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
@@ -124,6 +192,18 @@ interface GenericContentModule {
   index(bytes: Uint8Array): string;
   read(digest: string): Uint8Array | undefined;
 }
+
+interface VisualAssetsPersistenceBridge {
+  readonly ready: () => Promise<void>;
+  readonly assertScope: (scope: VisualAssetScope) => void;
+  readonly visibleIn: (asset: VisualAsset, scope: VisualAssetScope) => boolean;
+  readonly assetById: (assetId: string) => VisualAsset;
+  readonly readContent: (digest: string) => Uint8Array | undefined;
+  readonly validateBytes: (mediaType: VisualAssetMediaType, bytes: Uint8Array) => Promise<void>;
+}
+
+const PERSISTENCE_BRIDGES = new WeakMap<VisualAssetsLibrary, VisualAssetsPersistenceBridge>();
+const ACCEPTED_DETAIL_SCOPES = new WeakMap<object, VisualAssetScope>();
 
 class MemoryGenericContentModule implements GenericContentModule {
   readonly #contentByDigest = new Map<string, Uint8Array>();
@@ -706,7 +786,7 @@ export function createMemoryVisualAssetsLibrary(options: {
     });
   }
 
-  return {
+  const library: VisualAssetsLibrary = {
     async add(input) {
       assertScope(input.scope);
       const scope = canonicalScope(input.scope);
@@ -944,4 +1024,597 @@ export function createMemoryVisualAssetsLibrary(options: {
       );
     },
   };
+  PERSISTENCE_BRIDGES.set(library, {
+    ready,
+    assertScope,
+    visibleIn,
+    assetById,
+    readContent: (digest) => content.read(digest),
+    validateBytes,
+  });
+  return library;
+}
+
+export function createMemoryVisualDetailPersistence(library: VisualAssetsLibrary): VisualDetailPersistence {
+  const bridge = PERSISTENCE_BRIDGES.get(library);
+  if (bridge === undefined) {
+    throw new VisualAssetsError(
+      "persistence_adapter_invalid",
+      "Visual Detail persistence requires a visual-assets library created by this Module",
+    );
+  }
+  const acceptedContent = new Map<string, { readonly mediaType: VisualAssetMediaType; readonly bytes: Uint8Array }>();
+  const detailsByIntegrity = new Map<string, AcceptedVisualDetail>();
+  const ownedDetails = new WeakSet<object>();
+
+  function acceptedDetail(
+    package_: CanonicalNodeDetailPackage,
+    assets: AcceptedVisualDetail["assets"],
+    scope: VisualAssetScope,
+  ): AcceptedVisualDetail {
+    const detail = deepFreeze({ package: package_, assets: [...assets] });
+    ACCEPTED_DETAIL_SCOPES.set(detail, scope);
+    ownedDetails.add(detail);
+    return detail;
+  }
+
+  function validateAcceptedDetail(value: unknown): AcceptedVisualDetail {
+    if (!plainRecord(value)) throw new VisualAssetsError("accepted_detail_invalid", "Accepted Visual Detail is invalid");
+    const keys = Object.keys(value).sort();
+    if (keys.join(",") !== "assets,package" || !Array.isArray(value.assets)) {
+      throw new VisualAssetsError("accepted_detail_invalid", "Accepted Visual Detail must use the exact portable fields");
+    }
+    const package_ = validateCanonicalDetailPackage(value.package);
+    const packageAssets = new Map(package_.assets.map((asset) => [asset.id, asset]));
+    if (value.assets.length !== packageAssets.size) {
+      throw new VisualAssetsError("accepted_detail_invalid", "Accepted Visual Detail asset inventory does not match its package");
+    }
+    const seen = new Set<string>();
+    const assets = value.assets.map((candidate, index) => {
+      if (!plainRecord(candidate)
+        || Object.keys(candidate).sort().join(",") !== "assetId,byteLength,digestSha256,mediaType,provenance"
+        || typeof candidate.assetId !== "string"
+        || typeof candidate.digestSha256 !== "string"
+        || typeof candidate.mediaType !== "string"
+        || !Number.isSafeInteger(candidate.byteLength) || (candidate.byteLength as number) < 1
+        || !plainRecord(candidate.provenance)
+        || Object.keys(candidate.provenance).sort().join(",") !== "fileName,source"
+        || (candidate.provenance.source !== "user" && candidate.provenance.source !== "system")
+        || typeof candidate.provenance.fileName !== "string") {
+        throw new VisualAssetsError("accepted_detail_invalid", `Accepted Visual Detail asset ${index} is invalid`);
+      }
+      const packageAsset = packageAssets.get(candidate.assetId);
+      if (packageAsset === undefined || seen.has(candidate.assetId)
+        || packageAsset.digestSha256 !== candidate.digestSha256
+        || packageAsset.mediaType !== candidate.mediaType) {
+        throw new VisualAssetsError("accepted_detail_invalid", "Accepted Visual Detail assets do not reconnect to package identities");
+      }
+      seen.add(candidate.assetId);
+      return deepFreeze({
+        assetId: candidate.assetId,
+        digestSha256: candidate.digestSha256,
+        mediaType: supportedMediaType(candidate.mediaType),
+        byteLength: candidate.byteLength as number,
+        provenance: {
+          source: candidate.provenance.source as "user" | "system",
+          fileName: candidate.provenance.fileName,
+        },
+      });
+    });
+    return deepFreeze({ package: package_, assets: [...assets] });
+  }
+
+  function ownedDetail(detail: AcceptedVisualDetail, scope: VisualAssetScope): AcceptedVisualDetail {
+    const validated = validateAcceptedDetail(detail);
+    const owner = ACCEPTED_DETAIL_SCOPES.get(detail);
+    if (!ownedDetails.has(detail) || owner === undefined || persistenceScopeKey(owner) !== persistenceScopeKey(scope)) {
+      throw new VisualAssetsError("accepted_detail_not_authorized", "Accepted Visual Detail is not authorized in this scope");
+    }
+    return validated;
+  }
+
+  async function resolve(detail: AcceptedVisualDetail, scope: VisualAssetScope) {
+    const validated = ownedDetail(detail, scope);
+    const assets = validated.assets.map((asset) => {
+      const content = acceptedContent.get(asset.digestSha256);
+      if (content === undefined) {
+        throw new VisualAssetsError("accepted_content_missing", `Accepted visual content is missing: ${asset.digestSha256}`);
+      }
+      if (content.mediaType !== asset.mediaType || content.bytes.byteLength !== asset.byteLength
+        || sha256(content.bytes).slice("sha256:".length) !== asset.digestSha256) {
+        throw new VisualAssetsError("accepted_content_corrupt", `Accepted visual content is corrupt: ${asset.digestSha256}`);
+      }
+      return deepFreeze({
+        assetId: asset.assetId,
+        digestSha256: asset.digestSha256,
+        provenance: { ...asset.provenance },
+        file: memoryHarnessFile(asset.provenance.fileName, asset.mediaType, content.bytes),
+      });
+    });
+    return deepFreeze({ package: validated.package, assets });
+  }
+
+  const persistence: VisualDetailPersistence = {
+    accept(input) {
+      const scope = canonicalPersistenceScope(input.scope);
+      bridge.assertScope(scope);
+      const package_ = validateCanonicalDetailPackage(input.package);
+      return (async () => {
+        await bridge.ready();
+        const assets = [] as Array<AcceptedVisualDetail["assets"][number]>;
+        const stagedContent = new Map<string, { readonly mediaType: VisualAssetMediaType; readonly bytes: Uint8Array }>();
+        for (const packageAsset of package_.assets) {
+          const asset = bridge.assetById(packageAsset.id);
+          if (!bridge.visibleIn(asset, scope)) {
+            throw new VisualAssetsError("asset_not_authorized", `Visual asset is not authorized in this scope: ${packageAsset.id}`);
+          }
+          if (asset.archived) {
+            throw new VisualAssetsError("asset_unavailable", `Visual asset is unavailable: ${packageAsset.id}`);
+          }
+          if (asset.digest.slice("sha256:".length) !== packageAsset.digestSha256
+            || asset.mediaType !== packageAsset.mediaType) {
+            throw new VisualAssetsError("digest_mismatch", `Pinned visual asset does not match its logical record: ${packageAsset.id}`);
+          }
+          const bytes = bridge.readContent(asset.digest);
+          if (bytes === undefined) throw new VisualAssetsError("content_unavailable", `Visual asset content is unavailable: ${packageAsset.id}`);
+          const snapshot = bytes.slice();
+          await bridge.validateBytes(asset.mediaType, snapshot);
+          stagedContent.set(packageAsset.digestSha256, { mediaType: asset.mediaType, bytes: snapshot });
+          assets.push(deepFreeze({
+            assetId: asset.id,
+            digestSha256: packageAsset.digestSha256,
+            mediaType: asset.mediaType,
+            byteLength: snapshot.byteLength,
+            provenance: { ...asset.provenance },
+          }));
+        }
+        const detail = acceptedDetail(package_, assets, scope);
+        const key = persistenceDetailKey(scope, package_.integritySha256);
+        const existing = detailsByIntegrity.get(key);
+        if (existing !== undefined) {
+          if (canonicalDetailJson(existing) !== canonicalDetailJson(detail)) {
+            throw new VisualAssetsError("accepted_detail_conflict", "Accepted Visual Detail provenance conflicts with immutable history");
+          }
+          return existing;
+        }
+        for (const [digest, content] of stagedContent) acceptedContent.set(digest, content);
+        detailsByIntegrity.set(key, detail);
+        return detail;
+      })();
+    },
+    resolve(input) {
+      const scope = canonicalPersistenceScope(input.scope);
+      bridge.assertScope(scope);
+      return resolve(input.detail, scope);
+    },
+    read(input) {
+      const scope = canonicalPersistenceScope(input.scope);
+      bridge.assertScope(scope);
+      const canonical = validateCanonicalDetailPackage(input.package);
+      const detail = detailsByIntegrity.get(persistenceDetailKey(scope, canonical.integritySha256));
+      if (detail === undefined || canonicalDetailJson(detail.package) !== canonicalDetailJson(canonical)) {
+        throw new VisualAssetsError("accepted_detail_not_found", "Accepted Visual Detail is not present in this persistence scope");
+      }
+      return Promise.resolve(detail);
+    },
+    exportArchive(input) {
+      const scope = canonicalPersistenceScope(input.scope);
+      bridge.assertScope(scope);
+      const details = [...input.details];
+      const validated = details.map((detail) => ownedDetail(detail, scope));
+      const required = new Map<string, VisualAssetMediaType>();
+      for (const detail of validated) {
+        for (const asset of detail.assets) {
+          const existing = required.get(asset.digestSha256);
+          if (existing !== undefined && existing !== asset.mediaType) {
+            throw new VisualAssetsError("accepted_content_corrupt", "One accepted digest has conflicting media types");
+          }
+          required.set(asset.digestSha256, asset.mediaType);
+        }
+      }
+      const contents = [...required]
+        .sort(([left], [right]) => compareCodeUnits(left, right))
+        .map(([digestSha256, mediaType]) => {
+          const content = acceptedContent.get(digestSha256);
+          if (content === undefined) throw new VisualAssetsError("accepted_content_missing", `Accepted visual content is missing: ${digestSha256}`);
+          if (content.mediaType !== mediaType || sha256(content.bytes).slice("sha256:".length) !== digestSha256) {
+            throw new VisualAssetsError("accepted_content_corrupt", `Accepted visual content is corrupt: ${digestSha256}`);
+          }
+          return deepFreeze({
+            digestSha256,
+            mediaType,
+            byteLength: content.bytes.byteLength,
+            contentBase64: Buffer.from(content.bytes).toString("base64"),
+          });
+        });
+      return Promise.resolve(deepFreeze({ version: 1 as const, details: validated, contents }));
+    },
+    importArchive(input) {
+      const scope = canonicalPersistenceScope(input.scope);
+      bridge.assertScope(scope);
+      const archive = snapshotVisualDetailArchive(input.archive);
+      return (async () => {
+        const importedContent = new Map<string, { readonly mediaType: VisualAssetMediaType; readonly bytes: Uint8Array }>();
+        for (const [index, candidate] of archive.contents.entries()) {
+        if (!plainRecord(candidate)
+          || Object.keys(candidate).sort().join(",") !== "byteLength,contentBase64,digestSha256,mediaType"
+          || typeof candidate.digestSha256 !== "string" || !isPlainSha256(candidate.digestSha256)
+          || typeof candidate.contentBase64 !== "string"
+          || !Number.isSafeInteger(candidate.byteLength) || (candidate.byteLength as number) < 1) {
+          throw new VisualAssetsError("archive_content_invalid", `Visual Detail archive content ${index} is invalid`);
+        }
+        if (importedContent.has(candidate.digestSha256)) {
+          throw new VisualAssetsError("archive_content_duplicate", `Visual Detail archive repeats content: ${candidate.digestSha256}`);
+        }
+        const bytes = new Uint8Array(Buffer.from(candidate.contentBase64, "base64"));
+        if (Buffer.from(bytes).toString("base64") !== candidate.contentBase64
+          || bytes.byteLength !== candidate.byteLength
+          || sha256(bytes).slice("sha256:".length) !== candidate.digestSha256) {
+          throw new VisualAssetsError("archive_content_corrupt", `Visual Detail archive content ${index} failed integrity verification`);
+        }
+        const mediaType = supportedMediaType(candidate.mediaType);
+        await bridge.validateBytes(mediaType, bytes);
+        importedContent.set(candidate.digestSha256, { mediaType, bytes });
+        }
+        const portableDetails = archive.details.map(validateAcceptedDetail);
+        const detailKeys = new Set<string>();
+        if (portableDetails.some((detail) => !detailKeys.add(detail.package.integritySha256))) {
+          throw new VisualAssetsError("archive_detail_duplicate", "Visual Detail archive repeats one canonical package");
+        }
+        const reachable = new Set(portableDetails.flatMap((detail) => detail.assets.map((asset) => asset.digestSha256)));
+        for (const detail of portableDetails) {
+          for (const asset of detail.assets) {
+            const content = importedContent.get(asset.digestSha256);
+            if (content === undefined) throw new VisualAssetsError("accepted_content_missing", `Accepted visual content is missing: ${asset.digestSha256}`);
+            if (content.mediaType !== asset.mediaType || content.bytes.byteLength !== asset.byteLength) {
+              throw new VisualAssetsError("archive_content_corrupt", `Accepted visual content metadata is corrupt: ${asset.digestSha256}`);
+            }
+          }
+        }
+        if ([...importedContent.keys()].some((digest) => !reachable.has(digest))) {
+          throw new VisualAssetsError("archive_content_unreachable", "Visual Detail archive contains unreachable content");
+        }
+        const details = portableDetails.map((detail) => {
+          const key = persistenceDetailKey(scope, detail.package.integritySha256);
+          const existing = detailsByIntegrity.get(key);
+          if (existing !== undefined) {
+            if (canonicalDetailJson(existing) !== canonicalDetailJson(detail)) {
+              throw new VisualAssetsError("accepted_detail_conflict", "Imported Visual Detail provenance conflicts with immutable history");
+            }
+            return existing;
+          }
+          return acceptedDetail(detail.package, detail.assets, scope);
+        });
+        for (const [digest, content] of importedContent) {
+          acceptedContent.set(digest, { mediaType: content.mediaType, bytes: content.bytes.slice() });
+        }
+        for (const detail of details) {
+          detailsByIntegrity.set(persistenceDetailKey(scope, detail.package.integritySha256), detail);
+        }
+        return Object.freeze(details);
+      })();
+    },
+  };
+  return persistence;
+}
+
+export async function createFileVisualDetailPersistence(
+  library: VisualAssetsLibrary,
+  storagePath: string,
+): Promise<VisualDetailPersistence> {
+  if (typeof storagePath !== "string" || storagePath.length === 0) {
+    throw new VisualAssetsError("persistence_path_invalid", "Visual Detail persistence path is required");
+  }
+  let memory = createMemoryVisualDetailPersistence(library);
+  let details: AcceptedVisualDetail[] = [];
+  try {
+    const stored = JSON.parse(await readFile(storagePath, "utf8")) as unknown;
+    if (!plainRecord(stored) || stored.version !== 1 || !Array.isArray(stored.scopes)
+      || Object.keys(stored).sort().join(",") !== "scopes,version") {
+      throw new VisualAssetsError("persistence_store_corrupt", "Durable Visual Detail persistence is invalid");
+    }
+    const storedScopes = new Set<string>();
+    for (const entry of stored.scopes) {
+      if (!plainRecord(entry) || Object.keys(entry).sort().join(",") !== "archive,scope") {
+        throw new VisualAssetsError("persistence_store_corrupt", "Durable Visual Detail scope entry is invalid");
+      }
+      const scope = canonicalPersistenceScope(entry.scope as VisualAssetScope);
+      if (!storedScopes.add(persistenceScopeKey(scope))) {
+        throw new VisualAssetsError("persistence_store_corrupt", "Durable Visual Detail scope is duplicated");
+      }
+      const imported = await memory.importArchive({ archive: entry.archive as VisualDetailArchive, scope });
+      details.push(...imported);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (error instanceof VisualAssetsError) throw error;
+      throw new VisualAssetsError("persistence_store_corrupt", "Durable Visual Detail persistence could not be read");
+    }
+  }
+
+  let tail: Promise<void> = Promise.resolve();
+  function serialize<T>(work: () => Promise<T>): Promise<T> {
+    const result = tail.then(work, work);
+    tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+  async function groupedArchives(
+    candidate: VisualDetailPersistence,
+    candidateDetails: readonly AcceptedVisualDetail[],
+  ): Promise<readonly { readonly scope: VisualAssetScope; readonly archive: VisualDetailArchive }[]> {
+    const groups = new Map<string, { scope: VisualAssetScope; details: AcceptedVisualDetail[] }>();
+    for (const detail of candidateDetails) {
+      const scope = ACCEPTED_DETAIL_SCOPES.get(detail);
+      if (scope === undefined) throw new VisualAssetsError("accepted_detail_invalid", "Accepted Visual Detail owner is missing");
+      const key = persistenceScopeKey(scope);
+      const group = groups.get(key) ?? { scope, details: [] };
+      group.details.push(detail);
+      groups.set(key, group);
+    }
+    return Promise.all([...groups.values()]
+      .sort((left, right) => compareCodeUnits(persistenceScopeKey(left.scope), persistenceScopeKey(right.scope)))
+      .map(async (group) => ({
+        scope: group.scope,
+        archive: await candidate.exportArchive({ details: group.details, scope: group.scope }),
+      })));
+  }
+  async function cloneState(): Promise<{ persistence: VisualDetailPersistence; details: AcceptedVisualDetail[] }> {
+    const candidate = createMemoryVisualDetailPersistence(library);
+    const cloned: AcceptedVisualDetail[] = [];
+    for (const entry of await groupedArchives(memory, details)) {
+      cloned.push(...await candidate.importArchive(entry));
+    }
+    return { persistence: candidate, details: cloned };
+  }
+  function upsertDetails(
+    existing: readonly AcceptedVisualDetail[],
+    incoming: readonly AcceptedVisualDetail[],
+  ): AcceptedVisualDetail[] {
+    const merged = new Map<string, AcceptedVisualDetail>();
+    for (const detail of [...existing, ...incoming]) {
+      const scope = ACCEPTED_DETAIL_SCOPES.get(detail);
+      if (scope === undefined) throw new VisualAssetsError("accepted_detail_invalid", "Accepted Visual Detail owner is missing");
+      merged.set(persistenceDetailKey(scope, detail.package.integritySha256), detail);
+    }
+    return [...merged]
+      .sort(([left], [right]) => compareCodeUnits(left, right))
+      .map(([, detail]) => detail);
+  }
+  async function persist(
+    candidate: VisualDetailPersistence,
+    candidateDetails: readonly AcceptedVisualDetail[],
+  ): Promise<void> {
+    const scopes = await groupedArchives(candidate, candidateDetails);
+    const directory = dirname(storagePath);
+    await mkdir(directory, { recursive: true });
+    const temporary = `${storagePath}.${randomUUID()}.tmp`;
+    const file = await open(temporary, "wx", 0o600);
+    try {
+      await file.writeFile(`${JSON.stringify({ version: 1, scopes })}\n`, "utf8");
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    await rename(temporary, storagePath);
+    const directoryHandle = await open(directory, "r");
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
+  }
+
+  return {
+    accept(input) {
+      const prepared = {
+        package: validateCanonicalDetailPackage(input.package),
+        scope: canonicalPersistenceScope(input.scope),
+      };
+      return serialize(async () => {
+        const candidate = await cloneState();
+        const detail = await candidate.persistence.accept(prepared);
+        candidate.details = upsertDetails(candidate.details, [detail]);
+        await persist(candidate.persistence, candidate.details);
+        memory = candidate.persistence;
+        details = candidate.details;
+        return detail;
+      });
+    },
+    async resolve(input) {
+      const scope = canonicalPersistenceScope(input.scope);
+      if (persistenceScopeKey(ACCEPTED_DETAIL_SCOPES.get(input.detail) ?? { kind: "library" }) !== persistenceScopeKey(scope)
+        || !ACCEPTED_DETAIL_SCOPES.has(input.detail)) {
+        throw new VisualAssetsError("accepted_detail_not_authorized", "Accepted Visual Detail is not authorized in this scope");
+      }
+      const current = await memory.read({ package: input.detail.package, scope });
+      return memory.resolve({ detail: current, scope });
+    },
+    read(input) {
+      return memory.read(input);
+    },
+    async exportArchive(input) {
+      const scope = canonicalPersistenceScope(input.scope);
+      if (input.details.some((detail) => !ACCEPTED_DETAIL_SCOPES.has(detail)
+        || persistenceScopeKey(ACCEPTED_DETAIL_SCOPES.get(detail)!) !== persistenceScopeKey(scope))) {
+        throw new VisualAssetsError("accepted_detail_not_authorized", "Accepted Visual Detail is not authorized in this scope");
+      }
+      const current = await Promise.all(input.details.map((detail) => memory.read({ package: detail.package, scope })));
+      return memory.exportArchive({ details: current, scope });
+    },
+    importArchive(input) {
+      const prepared = {
+        archive: snapshotVisualDetailArchive(input.archive),
+        scope: canonicalPersistenceScope(input.scope),
+      };
+      return serialize(async () => {
+        const candidate = await cloneState();
+        const imported = await candidate.persistence.importArchive(prepared);
+        candidate.details = upsertDetails(candidate.details, imported);
+        await persist(candidate.persistence, candidate.details);
+        memory = candidate.persistence;
+        details = candidate.details;
+        return imported;
+      });
+    },
+  };
+}
+
+function validateCanonicalDetailPackage(value: unknown): CanonicalNodeDetailPackage {
+  if (!plainRecord(value)
+    || Object.keys(value).sort().join(",") !== "assets,components,integritySha256,mounts,version"
+    || value.version !== 1 || !Array.isArray(value.components) || !Array.isArray(value.mounts)
+    || !Array.isArray(value.assets) || typeof value.integritySha256 !== "string"
+    || !isPlainSha256(value.integritySha256)) {
+    throw new VisualAssetsError("detail_package_invalid", "Canonical Node Detail package is invalid");
+  }
+  if (value.components.length > 64 || value.mounts.length > 128 || value.assets.length > 32) {
+    throw new VisualAssetsError("detail_package_invalid", "Canonical Node Detail package counts exceed V1 limits");
+  }
+  const componentIds = new Set<string>();
+  for (const [index, component] of value.components.entries()) {
+    if (!plainRecord(component) || Object.keys(component).sort().join(",") !== "css,html,id,order"
+      || !boundedPersistenceIdentity(component.id) || component.order !== index
+      || typeof component.html !== "string" || typeof component.css !== "string"
+      || componentIds.has(component.id as string)) {
+      throw new VisualAssetsError("detail_package_invalid", `Canonical Node Detail component ${index} is invalid`);
+    }
+    componentIds.add(component.id as string);
+  }
+  const assetIds = new Set<string>();
+  for (const [index, asset] of value.assets.entries()) {
+    if (!plainRecord(asset)
+      || Object.keys(asset).sort().join(",") !== "digestSha256,id,mediaType,representation"
+      || !boundedPersistenceIdentity(asset.id) || typeof asset.digestSha256 !== "string"
+      || !isPlainSha256(asset.digestSha256) || asset.representation !== "image"
+      || assetIds.has(asset.id as string)) {
+      throw new VisualAssetsError("detail_package_invalid", `Canonical Node Detail asset ${index} is invalid`);
+    }
+    supportedMediaType(asset.mediaType);
+    assetIds.add(asset.id as string);
+  }
+  const mountIds = new Set<string>();
+  for (const [index, mount] of value.mounts.entries()) {
+    if (!plainRecord(mount) || !boundedPersistenceIdentity(mount.id)
+      || !boundedPersistenceIdentity(mount.componentId) || !componentIds.has(mount.componentId as string)
+      || !boundedPersistenceIdentity(mount.host) || mountIds.has(mount.id as string)) {
+      throw new VisualAssetsError("detail_package_invalid", `Canonical Node Detail mount ${index} is invalid`);
+    }
+    if (mount.kind === "asset") {
+      if (Object.keys(mount).sort().join(",") !== "assetId,componentId,host,id,kind"
+        || !boundedPersistenceIdentity(mount.assetId) || !assetIds.has(mount.assetId as string)) {
+        throw new VisualAssetsError("detail_package_invalid", `Canonical Node Detail asset mount ${index} is invalid`);
+      }
+    } else if (mount.kind === "capability") {
+      if (Object.keys(mount).sort().join(",") !== "capability,componentId,host,id,kind"
+        || !validPersistenceCapability(mount.capability)) {
+        throw new VisualAssetsError("detail_package_invalid", `Canonical Node Detail capability mount ${index} is invalid`);
+      }
+    } else {
+      throw new VisualAssetsError("detail_package_invalid", `Canonical Node Detail mount ${index} kind is invalid`);
+    }
+    mountIds.add(mount.id as string);
+  }
+  const { integritySha256, ...content } = value;
+  const canonical = canonicalDetailJson(content);
+  if (Buffer.byteLength(canonical, "utf8") > 512 * 1024) {
+    throw new VisualAssetsError("detail_package_too_large", "Canonical Node Detail package exceeds the V1 byte limit");
+  }
+  const actual = createHash("sha256").update(canonical).digest("hex");
+  if (integritySha256 !== actual) {
+    throw new VisualAssetsError("detail_package_integrity_mismatch", "Canonical Node Detail package integrity does not match its content");
+  }
+  return deepFreeze(JSON.parse(JSON.stringify(value)) as CanonicalNodeDetailPackage);
+}
+
+function validPersistenceCapability(value: unknown): boolean {
+  if (!plainRecord(value) || typeof value.kind !== "string") return false;
+  if (value.kind === "link") {
+    return Object.keys(value).sort().join(",") === "href,kind" && typeof value.href === "string";
+  }
+  if (value.kind !== "expand" && value.kind !== "reference" && value.kind !== "invoke" && value.kind !== "input"
+    || Object.keys(value).sort().join(",") !== "action,kind" || !plainRecord(value.action)
+    || Object.keys(value.action).sort().join(",") !== "clientKey,sourceLayer,sourceNode"
+    || !boundedPersistenceIdentity(value.action.clientKey)) return false;
+  return validPersistenceReference(value.action.sourceLayer) && validPersistenceReference(value.action.sourceNode);
+}
+
+function validPersistenceReference(value: unknown): boolean {
+  return plainRecord(value) && Object.keys(value).length > 0
+    && Object.keys(value).every((key) => key === "id" || key === "clientKey")
+    && (value.id === undefined || (Number.isSafeInteger(value.id) && (value.id as number) > 0))
+    && (value.clientKey === undefined || boundedPersistenceIdentity(value.clientKey));
+}
+
+function boundedPersistenceIdentity(value: unknown): value is string {
+  return typeof value === "string" && value !== "" && value.trim() === value && !value.includes("\0")
+    && Buffer.byteLength(value, "utf8") <= 128;
+}
+
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function isPlainSha256(value: string): boolean {
+  return /^[0-9a-f]{64}$/.test(value);
+}
+
+function supportedMediaType(value: unknown): VisualAssetMediaType {
+  if (value !== "image/jpeg" && value !== "image/png" && value !== "image/svg+xml") {
+    throw new VisualAssetsError("media_type_unsupported", `Unsupported visual asset media type: ${String(value)}`);
+  }
+  return value;
+}
+
+function canonicalPersistenceScope(scope: VisualAssetScope): VisualAssetScope {
+  if (!plainRecord(scope)) throw new VisualAssetsError("scope_invalid", "Visual Detail scope is invalid");
+  if (scope.kind === "library" && Object.keys(scope).sort().join(",") === "kind") {
+    return Object.freeze({ kind: "library" });
+  }
+  if (scope.kind === "project" && Object.keys(scope).sort().join(",") === "kind,projectId"
+    && Number.isSafeInteger(scope.projectId) && (scope.projectId as number) > 0) {
+    return Object.freeze({ kind: "project", projectId: scope.projectId as number });
+  }
+  if (scope.kind === "thread" && Object.keys(scope).sort().join(",") === "kind,threadId"
+    && Number.isSafeInteger(scope.threadId) && (scope.threadId as number) > 0) {
+    return Object.freeze({ kind: "thread", threadId: scope.threadId as number });
+  }
+  throw new VisualAssetsError("scope_invalid", "Visual Detail scope is invalid");
+}
+
+function persistenceScopeKey(scope: VisualAssetScope): string {
+  if (scope.kind === "library") return "library";
+  if (scope.kind === "project") return `project:${scope.projectId}`;
+  return `thread:${scope.threadId}`;
+}
+
+function persistenceDetailKey(scope: VisualAssetScope, integritySha256: string): string {
+  return `${persistenceScopeKey(scope)}:${integritySha256}`;
+}
+
+function snapshotVisualDetailArchive(value: unknown): VisualDetailArchive {
+  let snapshot: unknown;
+  try {
+    snapshot = structuredClone(value);
+  } catch {
+    throw new VisualAssetsError("archive_invalid", "Visual Detail archive must be snapshot-safe data");
+  }
+  if (!plainRecord(snapshot) || Object.keys(snapshot).sort().join(",") !== "contents,details,version"
+    || snapshot.version !== 1 || !Array.isArray(snapshot.details) || !Array.isArray(snapshot.contents)) {
+    throw new VisualAssetsError("archive_invalid", "Visual Detail archive is invalid");
+  }
+  return snapshot as unknown as VisualDetailArchive;
+}
+
+function canonicalDetailJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalDetailJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalDetailJson(record[key])}`).join(",")}}`;
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
 }

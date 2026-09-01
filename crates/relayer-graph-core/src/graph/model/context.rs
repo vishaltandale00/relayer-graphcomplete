@@ -106,6 +106,7 @@ mod tests {
             icon: "user".into(),
             title: "Question".into(),
             detail: "Compare these".into(),
+            authored_detail: None,
             state: RecordState::Accepted,
         });
 

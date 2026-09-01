@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  createFileVisualDetailPersistence,
   createMemoryVisualAssetsLibrary,
+  createMemoryVisualDetailPersistence,
   memoryHarnessFile,
 } from "../src/index.js";
 
@@ -19,7 +25,282 @@ const jpegBytes = base64Bytes(
 );
 const validSvg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1 1\"><path d=\"M0 0h1v1H0z\"/></svg>";
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+}
+
+function packageFor(assetIds: readonly string[]) {
+  const content = {
+    version: 1 as const,
+    components: [],
+    mounts: [],
+    assets: assetIds.map((id) => ({
+      id,
+      digestSha256: "f3d75f6c038e2bf3902613e46943545a1a8adf4c56e6db49cf3045eef716bece",
+      mediaType: "image/svg+xml",
+      representation: "image" as const,
+    })),
+  };
+  return {
+    ...content,
+    integritySha256: createHash("sha256").update(canonicalJson(content)).digest("hex"),
+  };
+}
+
 describe("visual_assets deterministic library interface", () => {
+  it("rejects forged handles, cross-scope reads, and partial failed acceptance", async () => {
+    const initial = (id: string, scopes: readonly ({ kind: "project"; projectId: number })[]) => ({
+      id,
+      registryId: "user",
+      name: id,
+      fileName: `${id}.svg`,
+      mediaType: "image/svg+xml",
+      content: validSvg,
+      scopes,
+      tagIds: [],
+      provenance: { source: "user" as const, fileName: `${id}.svg` },
+    });
+    const library = createMemoryVisualAssetsLibrary({
+      authority: {
+        projects: [{ projectId: 1, threadIds: [] }, { projectId: 2, threadIds: [] }],
+        standaloneThreadIds: [],
+      },
+      initialAssets: [initial("asset-a", [{ kind: "project", projectId: 1 }])],
+    });
+    const persistence = createMemoryVisualDetailPersistence(library);
+    const accepted = await persistence.accept({ package: packageFor(["asset-a"]), scope: { kind: "project", projectId: 1 } });
+    const forged = JSON.parse(JSON.stringify(accepted)) as typeof accepted;
+
+    await expect(persistence.resolve({ detail: forged, scope: { kind: "project", projectId: 1 } }))
+      .rejects.toMatchObject({ code: "accepted_detail_not_authorized" });
+    await expect(persistence.resolve({ detail: accepted, scope: { kind: "project", projectId: 2 } }))
+      .rejects.toMatchObject({ code: "accepted_detail_not_authorized" });
+    expect(() => persistence.read({ package: accepted.package, scope: { kind: "project", projectId: 2 } }))
+      .toThrowError(expect.objectContaining({ code: "accepted_detail_not_found" }));
+
+    await expect(persistence.accept({ package: packageFor(["asset-a", "asset-missing"]), scope: { kind: "project", projectId: 1 } }))
+      .rejects.toMatchObject({ code: "asset_not_found" });
+    expect(() => persistence.exportArchive({ details: [forged], scope: { kind: "project", projectId: 1 } }))
+      .toThrowError(expect.objectContaining({ code: "accepted_detail_not_authorized" }));
+  });
+
+  it("does not publish memory state when a durable rename fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-detail-failure-"));
+    try {
+      const storagePath = join(directory, "accepted-details.json");
+      const library = createMemoryVisualAssetsLibrary({ initialAssets: [{
+        id: "asset-a", registryId: "user", name: "Asset", fileName: "asset.svg",
+        mediaType: "image/svg+xml", content: validSvg, scopes: [{ kind: "library" }], tagIds: [],
+        provenance: { source: "user", fileName: "asset.svg" },
+      }] });
+      const persistence = await createFileVisualDetailPersistence(library, storagePath);
+      await mkdir(storagePath);
+
+      await expect(persistence.accept({ package: packageFor(["asset-a"]), scope: { kind: "library" } }))
+        .rejects.toBeDefined();
+      expect(() => persistence.read({ package: packageFor(["asset-a"]), scope: { kind: "library" } }))
+        .toThrowError(expect.objectContaining({ code: "accepted_detail_not_found" }));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("snapshots a portable archive before asynchronous media validation", async () => {
+    const source = createMemoryVisualAssetsLibrary({ initialAssets: [{
+      id: "asset-a", registryId: "user", name: "Asset", fileName: "asset.svg",
+      mediaType: "image/svg+xml", content: validSvg, scopes: [{ kind: "library" }], tagIds: [],
+      provenance: { source: "user", fileName: "asset.svg" },
+    }] });
+    const sourcePersistence = createMemoryVisualDetailPersistence(source);
+    const accepted = await sourcePersistence.accept({ package: packageFor(["asset-a"]), scope: { kind: "library" } });
+    const exported = await sourcePersistence.exportArchive({ details: [accepted], scope: { kind: "library" } });
+    const mutable = JSON.parse(JSON.stringify(exported)) as typeof exported;
+    const target = createMemoryVisualDetailPersistence(createMemoryVisualAssetsLibrary());
+
+    const importing = target.importArchive({ archive: mutable, scope: { kind: "library" } });
+    (mutable.contents[0] as { contentBase64: string }).contentBase64 = Buffer.from("mutated").toString("base64");
+
+    await expect(importing).resolves.toHaveLength(1);
+  });
+
+  it("reopens accepted visual content from durable storage by canonical package identity", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-detail-"));
+    try {
+      const storagePath = join(directory, "accepted-details.json");
+      const initialAsset = {
+        id: "asset-a",
+        registryId: "user",
+        name: "Asset",
+        fileName: "asset.svg",
+        mediaType: "image/svg+xml",
+        content: validSvg,
+        scopes: [{ kind: "library" as const }],
+        tagIds: [],
+        provenance: { source: "user" as const, fileName: "asset.svg" },
+      };
+      const package_ = {
+        version: 1 as const,
+        components: [],
+        mounts: [],
+        assets: [{
+          id: "asset-a",
+          digestSha256: "f3d75f6c038e2bf3902613e46943545a1a8adf4c56e6db49cf3045eef716bece",
+          mediaType: "image/svg+xml",
+          representation: "image" as const,
+        }],
+        integritySha256: "66d1174682577a01b866fa14ecf6a85d4fdfcca54ff6d3a1f98519b242cc5c6f",
+      };
+      const first = await createFileVisualDetailPersistence(
+        createMemoryVisualAssetsLibrary({ initialAssets: [initialAsset] }),
+        storagePath,
+      );
+      await first.accept({ package: package_, scope: { kind: "library" } });
+      await first.accept({ package: package_, scope: { kind: "library" } });
+
+      const reopened = await createFileVisualDetailPersistence(
+        createMemoryVisualAssetsLibrary(),
+        storagePath,
+      );
+      const persisted = await reopened.read({ package: package_, scope: { kind: "library" } });
+      const resolved = await reopened.resolve({ detail: persisted, scope: { kind: "library" } });
+
+      expect(resolved.package).toEqual(package_);
+      expect(await resolved.assets[0]!.file.read()).toEqual(new TextEncoder().encode(validSvg));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("pins accepted history and exports one shared digest for deterministic import reconnection", async () => {
+    const initial = (id: string) => ({
+      id,
+      registryId: "user",
+      name: id,
+      fileName: `${id}.svg`,
+      mediaType: "image/svg+xml",
+      content: validSvg,
+      scopes: [{ kind: "library" as const }],
+      tagIds: [],
+      provenance: { source: "user" as const, fileName: `${id}.svg` },
+    });
+    const library = createMemoryVisualAssetsLibrary({ initialAssets: [initial("asset-a"), initial("asset-b")] });
+    const persistence = createMemoryVisualDetailPersistence(library);
+    const package_ = {
+      version: 1 as const,
+      components: [{
+        id: "visuals",
+        order: 0,
+        html: "<img data-gc-asset=\"mount-a\"><img data-gc-asset=\"mount-b\">",
+        css: "",
+      }],
+      mounts: [
+        { id: "mount-a", componentId: "visuals", kind: "asset" as const, host: "img", assetId: "asset-a" },
+        { id: "mount-b", componentId: "visuals", kind: "asset" as const, host: "img", assetId: "asset-b" },
+      ],
+      assets: [
+        { id: "asset-a", digestSha256: "f3d75f6c038e2bf3902613e46943545a1a8adf4c56e6db49cf3045eef716bece", mediaType: "image/svg+xml", representation: "image" as const },
+        { id: "asset-b", digestSha256: "f3d75f6c038e2bf3902613e46943545a1a8adf4c56e6db49cf3045eef716bece", mediaType: "image/svg+xml", representation: "image" as const },
+      ],
+      integritySha256: "dd65c5952f5a51797ce3e17e9789e8b8613fa521ed22c8c2bdd7711e99d07f0c",
+    };
+
+    const accepted = await persistence.accept({ package: package_, scope: { kind: "library" } });
+    await library.archive("asset-a");
+    const reorganized = await library.createTag({ scope: { kind: "library" }, name: "Later catalog" });
+    await library.organize({ assetId: "asset-b", addTagIds: [reorganized.id], removeTagIds: [] });
+    const archive = await persistence.exportArchive({ details: [accepted], scope: { kind: "library" } });
+
+    expect(archive.contents).toHaveLength(1);
+    expect(archive.details[0]!.assets.map((asset) => asset.assetId)).toEqual(["asset-a", "asset-b"]);
+    expect((await persistence.resolve({ detail: accepted, scope: { kind: "library" } })).assets.map((asset) => asset.provenance.fileName))
+      .toEqual(["asset-a.svg", "asset-b.svg"]);
+
+    const importedPersistence = createMemoryVisualDetailPersistence(createMemoryVisualAssetsLibrary());
+    const [imported] = await importedPersistence.importArchive({ archive, scope: { kind: "library" } });
+    const resolved = await importedPersistence.resolve({ detail: imported!, scope: { kind: "library" } });
+    expect(resolved.package).toEqual(package_);
+    expect(await resolved.assets[0]!.file.read()).toEqual(new TextEncoder().encode(validSvg));
+    expect(await resolved.assets[1]!.file.read()).toEqual(new TextEncoder().encode(validSvg));
+  });
+
+  it("rejects missing, corrupt, unsupported, and unauthorized accepted visual imports", async () => {
+    const source = createMemoryVisualAssetsLibrary({ initialAssets: [{
+      id: "asset-a",
+      registryId: "user",
+      name: "Asset",
+      fileName: "asset.svg",
+      mediaType: "image/svg+xml",
+      content: validSvg,
+      scopes: [{ kind: "library" }],
+      tagIds: [],
+      provenance: { source: "user", fileName: "asset.svg" },
+    }] });
+    const persistence = createMemoryVisualDetailPersistence(source);
+    const package_ = {
+      version: 1 as const,
+      components: [],
+      mounts: [],
+      assets: [{
+        id: "asset-a",
+        digestSha256: "f3d75f6c038e2bf3902613e46943545a1a8adf4c56e6db49cf3045eef716bece",
+        mediaType: "image/svg+xml",
+        representation: "image" as const,
+      }],
+      integritySha256: "66d1174682577a01b866fa14ecf6a85d4fdfcca54ff6d3a1f98519b242cc5c6f",
+    };
+    const accepted = await persistence.accept({ package: package_, scope: { kind: "library" } });
+    const archive = await persistence.exportArchive({ details: [accepted], scope: { kind: "library" } });
+    const target = createMemoryVisualDetailPersistence(createMemoryVisualAssetsLibrary());
+    const missing = { ...archive, contents: [] };
+    await expect(target.importArchive({ archive: missing, scope: { kind: "library" } }))
+      .rejects.toMatchObject({ code: "accepted_content_missing" });
+
+    const corrupt = {
+      ...archive,
+      contents: archive.contents.map((content, index) => index === 0
+        ? { ...content, contentBase64: Buffer.from("corrupt").toString("base64") }
+        : content),
+    };
+    await expect(target.importArchive({ archive: corrupt, scope: { kind: "library" } }))
+      .rejects.toMatchObject({ code: "archive_content_corrupt" });
+
+    const unsupported = {
+      ...archive,
+      contents: archive.contents.map((content, index) => index === 0
+        ? { ...content, mediaType: "image/gif" as "image/svg+xml" }
+        : content),
+    };
+    await expect(target.importArchive({ archive: unsupported, scope: { kind: "library" } }))
+      .rejects.toMatchObject({ code: "media_type_unsupported" });
+
+    await target.importArchive({ archive, scope: { kind: "library" } });
+    const conflicting = JSON.parse(JSON.stringify(archive)) as typeof archive;
+    (conflicting.details[0]!.assets[0]!.provenance as { fileName: string }).fileName = "rewritten.svg";
+    await expect(target.importArchive({ archive: conflicting, scope: { kind: "library" } }))
+      .rejects.toMatchObject({ code: "accepted_detail_conflict" });
+
+    const oversizedContent = {
+      version: 1 as const,
+      components: [{ id: "oversized", order: 0, html: "x".repeat(512 * 1024), css: "" }],
+      mounts: [],
+      assets: [],
+    };
+    const oversizedPackage = {
+      ...oversizedContent,
+      integritySha256: createHash("sha256").update(canonicalJson(oversizedContent)).digest("hex"),
+    };
+    await expect(target.importArchive({
+      archive: { version: 1, details: [{ package: oversizedPackage, assets: [] }], contents: [] },
+      scope: { kind: "library" },
+    })).rejects.toMatchObject({ code: "detail_package_too_large" });
+
+    expect(() => target.importArchive({ archive, scope: { kind: "project", projectId: 999 } }))
+      .toThrowError(expect.objectContaining({ code: "scope_not_authorized" }));
+  });
+
   it("adds identical files as distinct immutable logical assets with one digest", async () => {
     const visualAssets = createMemoryVisualAssetsLibrary();
     const file = memoryHarnessFile("mark.svg", "image/svg+xml", validSvg);

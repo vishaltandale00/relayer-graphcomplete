@@ -1036,12 +1036,21 @@ fn export_node(
     redactor: &ProjectPathRedactor,
 ) -> Result<ExportNode, ConversationExportBuildError> {
     ensure_accepted(node.state, "node", node.id.value())?;
+    if let Some(authored_detail) = &node.authored_detail {
+        let serialized = serde_json::to_string(authored_detail)?;
+        if redactor.text(&serialized) != serialized {
+            return Err(ConversationExportBuildError::Invalid(
+                "authored Node Detail contains the private project path and cannot be exported without invalidating its integrity".into(),
+            ));
+        }
+    }
     Ok(ExportNode {
         id: ids.node(node.id.value()),
         kind: redactor.text(&node.kind),
         icon: redactor.text(&node.icon),
         title: redactor.text(&node.title),
         detail: redactor.text(&node.detail),
+        authored_detail: node.authored_detail.clone(),
         state: ExportRecordState::Accepted,
     })
 }
@@ -1391,7 +1400,7 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
 mod tests {
     use super::{
         ContextInput, ImportedExportContext, PortableIds, ProjectPathRedactor, RuntimeContextInput,
-        TurnExportContext, completion_status, export_action, export_contexts,
+        TurnExportContext, completion_status, export_action, export_contexts, export_node,
         export_submitted_inputs, export_turn, portable_interaction_input_bytes,
     };
     use crate::{
@@ -1418,6 +1427,39 @@ mod tests {
         assert_eq!(
             completion_status("stopped").unwrap(),
             ExportCompletionStatus::Stopped
+        );
+    }
+
+    #[test]
+    fn rejects_private_project_paths_inside_integrity_bound_authored_detail() {
+        let node = GraphNode {
+            id: NodeId::new(1).unwrap(),
+            leased_action_id: None,
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Private detail".into(),
+            detail: "Fallback".into(),
+            authored_detail: Some(serde_json::json!({
+                "version": 1,
+                "components": [{"id":"summary","order":0,"html":"<p>/private/project/secret</p>","css":""}],
+                "mounts": [],
+                "assets": [],
+                "integritySha256": "1289b05aad5b595800f3ce4e8b27488f75efced3ddd79e20a9a7986f100d714a"
+            })),
+            state: RecordState::Accepted,
+        };
+
+        let error = export_node(
+            &node,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some("/private/project")),
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("cannot be exported without invalidating its integrity")
         );
     }
 
@@ -1634,6 +1676,7 @@ mod tests {
             icon: "file".into(),
             title: "Target".into(),
             detail: "Immutable".into(),
+            authored_detail: None,
             state: RecordState::Accepted,
             leased_action_id: None,
         });
@@ -1645,6 +1688,7 @@ mod tests {
                     icon: "user".into(),
                     title: "Use context".into(),
                     detail: "Use context".into(),
+                    authored_detail: None,
                     state: RecordState::Accepted,
                     leased_action_id: None,
                 }),

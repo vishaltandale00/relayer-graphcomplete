@@ -135,6 +135,8 @@ pub struct ImportedNode {
     pub icon: String,
     pub title: String,
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_detail: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -351,9 +353,18 @@ impl crate::GraphDatabase {
                 ));
             }
             let owner = node_owners[&portable_id];
-            let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,'accepted',?7,?8)")
+            if let Some(authored_detail) = node.authored_detail.as_ref() {
+                crate::graph::model::validate_authored_detail(authored_detail)?;
+            }
+            let authored_detail = node
+                .authored_detail
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| GraphError::Internal(error.to_string()))?;
+            let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,'accepted',?8,?9)")
                 .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(node.kind).bind(node.icon)
-                .bind(node.title).bind(node.detail).bind(owner).bind(&portable_id).execute(&mut *tx).await?;
+                .bind(node.title).bind(node.detail).bind(authored_detail).bind(owner).bind(&portable_id).execute(&mut *tx).await?;
             node_ids.insert(portable_id, result.last_insert_rowid());
         }
 
@@ -1087,14 +1098,23 @@ async fn load_turn(
 
 fn register_imported_node(
     definitions: &mut HashMap<String, ImportedNode>,
-    node: ImportedNode,
+    mut node: ImportedNode,
 ) -> Result<(), GraphError> {
-    if let Some(existing) = definitions.get(&node.id) {
-        if existing != &node {
+    if let Some(existing) = definitions.get_mut(&node.id) {
+        let incoming_authored_detail = node.authored_detail.take();
+        let existing_authored_detail = existing.authored_detail.take();
+        if existing != &node
+            || matches!(
+                (&existing_authored_detail, &incoming_authored_detail),
+                (Some(left), Some(right)) if left != right
+            )
+        {
+            existing.authored_detail = existing_authored_detail;
             return Err(GraphError::Internal(
                 "imported node snapshot changed for one portable ID".into(),
             ));
         }
+        existing.authored_detail = existing_authored_detail.or(incoming_authored_detail);
         return Ok(());
     }
     definitions.insert(node.id.clone(), node);

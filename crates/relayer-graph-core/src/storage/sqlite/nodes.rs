@@ -28,6 +28,7 @@ struct NodeRow {
     icon: String,
     title: String,
     detail: String,
+    authored_detail: Option<String>,
     state: String,
     owner_interaction_id: Option<i64>,
 }
@@ -121,6 +122,7 @@ impl<'connection> NodeTable<'connection> {
             icon: "user".into(),
             title: canonical_text.clone(),
             detail: canonical_text,
+            authored_detail: None,
             state: RecordState::Accepted,
         })
     }
@@ -133,7 +135,7 @@ impl<'connection> NodeTable<'connection> {
         input_digest: &str,
     ) -> Result<Option<GraphNode>, GraphError> {
         let row = sqlx::query_as::<_, NodeRow>(
-            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE thread_id=?1 AND input_identity=?2",
+            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE thread_id=?1 AND input_identity=?2",
         ).bind(thread_id.value()).bind(input_identity).fetch_optional(&mut *self.connection).await?;
         let Some(row) = row else {
             return Ok(None);
@@ -205,7 +207,7 @@ impl<'connection> NodeTable<'connection> {
             return Ok(None);
         };
         let node = self.fetch_optional(
-            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE leased_action_id=?1",
+            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE leased_action_id=?1",
             action_id.value(),
             None,
         )
@@ -401,7 +403,7 @@ impl<'connection> NodeTable<'connection> {
         client_key: &str,
     ) -> Result<Option<NodeRecord>, GraphError> {
         self.fetch_optional(
-            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE owner_interaction_id=?1 AND client_key=?2",
+            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE owner_interaction_id=?1 AND client_key=?2",
             owner.value(),
             Some(client_key),
         )
@@ -414,7 +416,7 @@ impl<'connection> NodeTable<'connection> {
         id: NodeId,
     ) -> Result<GraphNode, GraphError> {
         let row = sqlx::query_as::<_, NodeRow>(
-            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -451,7 +453,7 @@ impl<'connection> NodeTable<'connection> {
 
     pub(crate) async fn record(&mut self, id: NodeId) -> Result<Option<NodeRecord>, GraphError> {
         self.fetch_optional(
-            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE id=?1",
+            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE id=?1",
             id.value(),
             None,
         )
@@ -462,9 +464,14 @@ impl<'connection> NodeTable<'connection> {
         &mut self,
         scope: &InteractionScope,
         draft: &NodeDraft,
+        authored_detail: Option<&serde_json::Value>,
     ) -> Result<GraphNode, GraphError> {
+        let authored_detail = authored_detail
+            .map(serde_json::to_string)
+            .transpose()
+            .expect("serde_json::Value must serialize");
         let result = sqlx::query(
-            "INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,'draft',?7,?8)",
+            "INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',?8,?9)",
         )
         .bind(scope.project_id.map(ProjectId::value))
         .bind(scope.thread_id.value())
@@ -472,6 +479,7 @@ impl<'connection> NodeTable<'connection> {
         .bind(&draft.icon)
         .bind(&draft.title)
         .bind(&draft.detail)
+        .bind(&authored_detail)
         .bind(scope.root_node_id.value())
         .bind(&draft.client_key)
         .execute(&mut *self.connection)
@@ -479,6 +487,7 @@ impl<'connection> NodeTable<'connection> {
         Ok(draft_node(
             valid_node_id(result.last_insert_rowid())?,
             draft,
+            authored_detail.as_deref(),
         ))
     }
 
@@ -486,16 +495,24 @@ impl<'connection> NodeTable<'connection> {
         &mut self,
         id: NodeId,
         draft: &NodeDraft,
+        authored_detail: Option<&serde_json::Value>,
     ) -> Result<GraphNode, GraphError> {
-        sqlx::query("UPDATE nodes SET kind=?1,icon=?2,title=?3,detail=?4 WHERE id=?5")
-            .bind(&draft.kind)
-            .bind(&draft.icon)
-            .bind(&draft.title)
-            .bind(&draft.detail)
-            .bind(id.value())
-            .execute(&mut *self.connection)
-            .await?;
-        Ok(draft_node(id, draft))
+        let authored_detail = authored_detail
+            .map(serde_json::to_string)
+            .transpose()
+            .expect("serde_json::Value must serialize");
+        sqlx::query(
+            "UPDATE nodes SET kind=?1,icon=?2,title=?3,detail=?4,authored_detail=?5 WHERE id=?6",
+        )
+        .bind(&draft.kind)
+        .bind(&draft.icon)
+        .bind(&draft.title)
+        .bind(&draft.detail)
+        .bind(&authored_detail)
+        .bind(id.value())
+        .execute(&mut *self.connection)
+        .await?;
+        Ok(draft_node(id, draft, authored_detail.as_deref()))
     }
 
     pub(crate) async fn neighbors(
@@ -505,7 +522,7 @@ impl<'connection> NodeTable<'connection> {
     ) -> Result<Vec<GraphNode>, GraphError> {
         let rows = sqlx::query_as::<_, NodeRow>(
             r#"
-            SELECT n.id,n.leased_action_id,n.kind,n.icon,n.title,n.detail,n.state,n.owner_interaction_id
+            SELECT n.id,n.leased_action_id,n.kind,n.icon,n.title,n.detail,n.authored_detail,n.state,n.owner_interaction_id
             FROM edges e
             JOIN nodes n ON n.id = CASE WHEN e.left_id = ?1 THEN e.right_id ELSE e.left_id END
             WHERE e.state='accepted'
@@ -528,7 +545,7 @@ impl<'connection> NodeTable<'connection> {
         let derived = sqlx::query_as::<_, NodeRow>(
             r#"
             SELECT source.id,source.leased_action_id,source.kind,source.icon,source.title,
-                   source.detail,source.state,source.owner_interaction_id
+                   source.detail,source.authored_detail,source.state,source.owner_interaction_id
             FROM nodes interaction
             JOIN actions leased ON leased.id=interaction.leased_action_id
             JOIN nodes source ON source.id=leased.source_node_id
@@ -607,6 +624,15 @@ impl TryFrom<NodeRow> for NodeRecord {
                 icon: row.icon,
                 title: row.title,
                 detail: row.detail,
+                authored_detail: row
+                    .authored_detail
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()
+                    .map_err(|error| {
+                        GraphError::Internal(format!(
+                            "stored authored Node Detail is invalid JSON: {error}"
+                        ))
+                    })?,
                 state: RecordState::parse(&row.state)?,
             },
             owner: row.owner_interaction_id.map(valid_node_id).transpose()?,
@@ -614,7 +640,7 @@ impl TryFrom<NodeRow> for NodeRecord {
     }
 }
 
-fn draft_node(id: NodeId, draft: &NodeDraft) -> GraphNode {
+fn draft_node(id: NodeId, draft: &NodeDraft, authored_detail: Option<&str>) -> GraphNode {
     GraphNode {
         id,
         leased_action_id: None,
@@ -622,6 +648,10 @@ fn draft_node(id: NodeId, draft: &NodeDraft) -> GraphNode {
         icon: draft.icon.clone(),
         title: draft.title.clone(),
         detail: draft.detail.clone(),
+        authored_detail: authored_detail
+            .map(serde_json::from_str)
+            .transpose()
+            .expect("serialized authored detail must deserialize"),
         state: RecordState::Draft,
     }
 }

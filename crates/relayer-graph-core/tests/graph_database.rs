@@ -193,6 +193,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                         icon: "box".into(),
                         title: "Queue".into(),
                         detail: "A queue".into(),
+                        authored_detail: None,
                     }],
                     edges: vec![],
                     actions: vec![],
@@ -240,6 +241,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     icon: "box".into(),
                     title: "Path".into(),
                     detail: "Invoke this path".into(),
+                    authored_detail: None,
                 }],
                 edges: vec![],
                 actions: vec![ImportedAction {
@@ -299,6 +301,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     icon: "box".into(),
                     title: "Destination".into(),
                     detail: "Imported result".into(),
+                    authored_detail: None,
                 }],
                 edges: vec![],
                 actions: vec![],
@@ -364,6 +367,40 @@ async fn imported_conversation_is_materialized_read_only_and_removable() {
 }
 
 #[tokio::test]
+async fn imported_conversation_reconnects_the_canonical_authored_detail_to_its_node() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    input.turns[0].accepted_view.as_mut().unwrap().layers[0].nodes[0].authored_detail = Some(
+        serde_json::json!({
+            "version": 1,
+            "components": [{"id":"overview","order":0,"html":"<p>Accepted</p>","css":"p{color:#fff}"}],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "6c34582a24f665dfcf9efa843fdb254a646de79c505d76c80863f81ed8dfe659"
+        }),
+    );
+    let accepted_node = input.turns[0].accepted_view.as_ref().unwrap().layers[0].nodes[0].clone();
+    input.turns[0].contexts.push(ImportedInteractionContext {
+        id: "context-action".into(),
+        target: ImportedNode {
+            authored_detail: None,
+            ..accepted_node
+        },
+        source_interaction_node_id: "source-interaction".into(),
+        source_layer_id: "source-layer".into(),
+        annotations: vec!["Legacy context projection omits authored detail".into()],
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+    let node = &receipt.turns[0].output.as_ref().unwrap().root_layer.nodes[0];
+
+    assert_eq!(
+        node.authored_detail.as_ref().unwrap()["components"][0]["id"],
+        "overview"
+    );
+}
+
+#[tokio::test]
 async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_turns() {
     let database = GraphDatabase::in_memory().await.unwrap();
     let mut input = imported_conversation("interaction-1");
@@ -373,6 +410,7 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
         icon: "box".into(),
         title: "Queue".into(),
         detail: "A queue".into(),
+        authored_detail: None,
     };
     input.turns[0].interaction_node_id = Some("interaction-1".into());
     input.turns[0].contexts = vec![ImportedInteractionContext {
@@ -616,6 +654,7 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
         icon: "box".into(),
         title: "Worker".into(),
         detail: "A worker".into(),
+        authored_detail: None,
     });
     // Two input actions, both genuinely authored by node-1.
     for id in ["input-action-1", "input-action-2"] {
@@ -4274,6 +4313,142 @@ async fn accepted_completion_survives_database_reopen() {
     assert_eq!(output.node_id, interaction.id);
     assert_eq!(output.root_layer.nodes[0].title, "persisted");
     assert_eq!(output.root_layer.layer.layout, layer.layout);
+}
+
+#[tokio::test]
+async fn accepted_authored_detail_survives_caller_mutation_and_database_reopen() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let interaction = database
+        .create_interaction(Some(project(1)), thread(1), "Show the architecture")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let mut authored_detail = serde_json::json!({
+        "version": 1,
+        "components": [{
+            "id": "overview",
+            "order": 0,
+            "html": "<section><img data-gc-asset=\"m_asset\"></section>",
+            "css": "section{display:grid}"
+        }],
+        "mounts": [{
+            "id": "m_asset",
+            "componentId": "overview",
+            "kind": "asset",
+            "host": "img",
+            "assetId": "architecture-diagram"
+        }],
+        "assets": [{
+            "id": "architecture-diagram",
+            "digestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "mediaType": "image/png",
+            "representation": "image"
+        }],
+        "integritySha256": "d9080b60296e82a0084b817742756b226fee981d41c37a7e27983a3bcb682b25"
+    });
+    let answer = writer
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Architecture".into(),
+                detail: "Legacy fallback".into(),
+            },
+            Some(&authored_detail),
+        )
+        .await
+        .unwrap();
+    authored_detail["components"][0]["html"] = serde_json::json!("mutated after submit");
+    accept_single_node(&writer, interaction.clone(), answer.clone()).await;
+    drop(writer);
+    drop(database);
+
+    let reopened = GraphDatabase::open(file.path()).await.unwrap();
+    let persisted = reopened
+        .writer_for_subgraph(interaction.id)
+        .await
+        .unwrap()
+        .get_node(answer.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        persisted.authored_detail.as_ref().unwrap()["components"][0]["html"],
+        "<section><img data-gc-asset=\"m_asset\"></section>"
+    );
+    assert_eq!(persisted.detail, "Legacy fallback");
+}
+
+#[tokio::test]
+async fn authored_detail_rejects_a_package_with_corrupt_canonical_integrity() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let package = serde_json::json!({
+        "version": 1,
+        "components": [{"id":"summary","order":0,"html":"<p>Tampered</p>","css":""}],
+        "mounts": [],
+        "assets": [],
+        "integritySha256": "6c34582a24f665dfcf9efa843fdb254a646de79c505d76c80863f81ed8dfe659"
+    });
+
+    let error = writer
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "tampered".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Tampered".into(),
+                detail: "Legacy fallback".into(),
+            },
+            Some(&package),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        GraphError::Validation { code: "authored_detail_integrity_mismatch", path, .. }
+            if path == "authoredDetail.integritySha256"
+    ));
+}
+
+#[tokio::test]
+async fn authored_detail_rejects_rehashed_noncanonical_asset_schema() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let package = serde_json::json!({
+        "version": 1,
+        "components": [],
+        "mounts": [],
+        "assets": [{
+            "id": "asset",
+            "digestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "mediaType": "image/gif",
+            "representation": "image"
+        }],
+        "integritySha256": "e9263fa99f0603d9990363996c0220d5d4544df0c60c8becc5ce8d9eaa64d8ed"
+    });
+
+    let error = writer
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "unsupported".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Unsupported".into(),
+                detail: "Legacy fallback".into(),
+            },
+            Some(&package),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        GraphError::Validation { code: "authored_detail_invalid", path, .. }
+            if path == "authoredDetail"
+    ));
 }
 
 #[tokio::test]

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { isProxy } from "node:util/types";
 import { DetailCompilationError, NodeDetailAuthoring, compileAuthenticatedNodeDetail, freezeNodeDetailAuthoring, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
 import { isRelayerIconName } from "./icons.js";
@@ -80,7 +81,10 @@ export class RelayerGraphClient {
         ...(authoredDetail.components.length === 0 ? {} : { authoredDetail }),
       }),
     });
-    const accepted = validatedSubmittedNodeResponse(body);
+    const accepted = validatedSubmittedNodeResponse(
+      body,
+      authoredDetail.components.length === 0 ? undefined : authoredDetail,
+    );
     applyAcceptedNodeResponse(envelope.owner.object, accepted);
     return accepted;
   }
@@ -417,7 +421,7 @@ interface ResolvedDetailAsset {
 
 const GRAPH_NODE_KEYS = Object.freeze(["detail", "icon", "id", "kind", "state", "title"]);
 
-function validatedSubmittedNodeResponse(value: unknown): GraphNode {
+function validatedSubmittedNodeResponse(value: unknown, expectedAuthoredDetail?: CompiledNodeDetail): GraphNode {
   try {
     const envelope = snapshotNodeResponseRecord(
       value,
@@ -429,7 +433,7 @@ function validatedSubmittedNodeResponse(value: unknown): GraphNode {
     const candidate = snapshotNodeResponseRecord(
       envelope.values.node,
       GRAPH_NODE_KEYS,
-      ["leasedActionId"],
+      ["authoredDetail", "leasedActionId"],
       "node",
       "Node must use the exact ordinary GraphNode data shape",
     );
@@ -459,6 +463,14 @@ function validatedSubmittedNodeResponse(value: unknown): GraphNode {
     if (fields.state !== "draft" && fields.state !== "accepted" && fields.state !== "stopped") {
       return invalidNodeResponse("node.state", "Node state must be draft, accepted, or stopped");
     }
+    const hasAuthoredDetail = candidate.optionalFields.has("authoredDetail");
+    if (hasAuthoredDetail !== (expectedAuthoredDetail !== undefined)
+      || (hasAuthoredDetail && !isDeepStrictEqual(fields.authoredDetail, expectedAuthoredDetail))) {
+      return invalidNodeResponse(
+        "node.authoredDetail",
+        "Node authored detail must equal the canonical package submitted by this client",
+      );
+    }
     return Object.freeze({
       id: fields.id as number,
       ...(candidate.optionalFields.has("leasedActionId") ? { leasedActionId: fields.leasedActionId as number | null } : {}),
@@ -466,6 +478,7 @@ function validatedSubmittedNodeResponse(value: unknown): GraphNode {
       icon: fields.icon,
       title,
       detail,
+      ...(expectedAuthoredDetail === undefined ? {} : { authoredDetail: expectedAuthoredDetail }),
       state: fields.state,
     });
   } catch (error) {

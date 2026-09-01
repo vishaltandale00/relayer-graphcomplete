@@ -363,6 +363,8 @@ pub struct ExportNode {
     pub icon: String,
     pub title: String,
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_detail: Option<serde_json::Value>,
     pub state: ExportRecordState,
 }
 
@@ -554,7 +556,7 @@ pub struct ConversationExportValidator {
     interaction_ids: HashSet<String>,
     root_action_ids: HashSet<String>,
     layers_by_id: HashMap<String, [u8; 32]>,
-    nodes_by_id: HashMap<String, [u8; 32]>,
+    nodes_by_id: HashMap<String, NodeDefinitionDigest>,
     edges_by_id: HashMap<String, [u8; 32]>,
     actions_by_id: HashMap<String, [u8; 32]>,
     context_actions_by_id: HashMap<String, [u8; 32]>,
@@ -668,9 +670,10 @@ impl ConversationExportValidator {
                 icon: context.target.icon.clone(),
                 title: context.target.title.clone(),
                 detail: context.target.detail.clone(),
+                authored_detail: None,
                 state: context.target.state,
             };
-            register_definition(
+            register_node_definition(
                 &mut self.nodes_by_id,
                 &target.id,
                 &target,
@@ -764,7 +767,7 @@ fn register_immutable_view_records(
     view: &ExportAcceptedView,
     path: &str,
     layers_by_id: &mut HashMap<String, [u8; 32]>,
-    nodes_by_id: &mut HashMap<String, [u8; 32]>,
+    nodes_by_id: &mut HashMap<String, NodeDefinitionDigest>,
     edges_by_id: &mut HashMap<String, [u8; 32]>,
     actions_by_id: &mut HashMap<String, [u8; 32]>,
     root_action_ids: &HashSet<String>,
@@ -778,7 +781,7 @@ fn register_immutable_view_records(
             "layer_identity_conflict",
         )?;
         for node in &resolved.nodes {
-            register_definition(nodes_by_id, &node.id, node, path, "node_identity_conflict")?;
+            register_node_definition(nodes_by_id, &node.id, node, path, "node_identity_conflict")?;
         }
         for edge in &resolved.edges {
             register_definition(edges_by_id, &edge.id, edge, path, "edge_identity_conflict")?;
@@ -799,6 +802,70 @@ fn register_immutable_view_records(
                 "action_identity_conflict",
             )?;
         }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct NodeDefinitionDigest {
+    base: [u8; 32],
+    authored_detail: Option<[u8; 32]>,
+}
+
+fn register_node_definition(
+    definitions: &mut HashMap<String, NodeDefinitionDigest>,
+    id: &str,
+    value: &ExportNode,
+    path: &str,
+    code: &'static str,
+) -> Result<(), ExportValidationError> {
+    let base: [u8; 32] = Sha256::digest(
+        serde_json::to_vec(&(
+            &value.id,
+            &value.kind,
+            &value.icon,
+            &value.title,
+            &value.detail,
+            value.state,
+        ))
+        .map_err(|error| {
+            ExportValidationError::new(code, path, format!("Could not fingerprint {id}: {error}."))
+        })?,
+    )
+    .into();
+    let authored_detail = value
+        .authored_detail
+        .as_ref()
+        .map(|detail| {
+            serde_json::to_vec(detail).map(|bytes| <[u8; 32]>::from(Sha256::digest(bytes)))
+        })
+        .transpose()
+        .map_err(|error| {
+            ExportValidationError::new(code, path, format!("Could not fingerprint {id}: {error}."))
+        })?;
+    if let Some(existing) = definitions.get_mut(id) {
+        if existing.base != base
+            || existing.authored_detail.is_some()
+                && authored_detail.is_some()
+                && existing.authored_detail != authored_detail
+        {
+            return Err(ExportValidationError::new(
+                code,
+                path,
+                format!("Portable ID {id} has conflicting immutable definitions."),
+            ));
+        }
+        if existing.authored_detail.is_none() {
+            existing.authored_detail = authored_detail;
+        }
+    } else {
+        definitions.insert(
+            id.to_owned(),
+            NodeDefinitionDigest {
+                base,
+                authored_detail,
+            },
+        );
     }
     Ok(())
 }
