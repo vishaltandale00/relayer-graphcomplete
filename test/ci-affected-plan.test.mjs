@@ -35,7 +35,9 @@ function fullPlanWithoutDiff() {
   );
 }
 
-describe("affected-module plan v1", () => {
+// Each case spawns the planner as a subprocess, and the full-plan cases also
+// run cargo metadata; the default 5s per-test budget races CI runner load.
+describe("affected-module plan v1", { timeout: 30_000 }, () => {
   test("is a checked-in versioned contract", () => {
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     expect(config.version).toBe(1);
