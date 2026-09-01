@@ -56,6 +56,10 @@ import {
   resolvePublishedCurrentTarget,
   runSteeredInteractionLoop,
   summarizePublishedCurrent,
+  decorateEvalCaseCatalogEntry,
+  EVAL_INTERACTION_CASE_TYPES,
+  EVAL_INTERACTION_CASE_TYPE_LABELS,
+  h3SanitizeInteractionFamily,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
 import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
@@ -1189,7 +1193,14 @@ export class EvalService {
   catalog() {
     const availableConfigurations = new Set(this.configurations.keys());
     return {
-      cases: copy(evalCases.map(({ promptsForRun: _promptsForRun, gradeExecution: _gradeExecution, ...definition }) => definition)),
+      interactionCaseTypes: copy(EVAL_INTERACTION_CASE_TYPES.map((id) => ({
+        id,
+        label: EVAL_INTERACTION_CASE_TYPE_LABELS[id],
+      }))),
+      executableInteractionFamilies: copy([catalogInteractionFamily(h3SanitizeInteractionFamily)]),
+      cases: copy(evalCases.map(({ promptsForRun: _promptsForRun, gradeExecution: _gradeExecution, ...definition }) => (
+        decorateEvalCaseCatalogEntry(definition)
+      ))),
       harnessConfigurations: [...this.configurations.values()].map((configuration) => ({
         name: configuration.name,
         implementation: configuration.implementation,
@@ -1463,7 +1474,7 @@ export class EvalService {
     }
     if (testCaseIds.some((id) => evalCaseIsSteered(evalCases.find((item) => item.id === id)))
       && typeof this.steeringDecisionRunner !== "function") {
-      throw new Error("Steered multi-turn cases require a simulated-user steering decision runner.");
+      throw new Error("In-turn steered cases require a simulated-user steering decision runner.");
     }
     if (!evalJudges.some((judge) => judge.id === judgeConfigurationName)) {
       throw new Error("Unknown judge configuration.");
@@ -2408,10 +2419,10 @@ export class EvalService {
       const steered = evalCaseIsSteered(definition) || isSteeredMultiTurn(threadDefinition);
       if (steered) {
         if (!simulatedUserJudgeIds.has(execution.judgeConfiguration.name)) {
-          throw new Error("Steered multi-turn cases require a simulated-user judge configuration.");
+          throw new Error("In-turn steered cases require a simulated-user judge configuration.");
         }
         if (typeof this.steeringDecisionRunner !== "function") {
-          throw new Error("Steered multi-turn cases require a simulated-user steering decision runner.");
+          throw new Error("In-turn steered cases require a simulated-user steering decision runner.");
         }
       }
       const executed = await this.#createAndRunThread({
@@ -2423,7 +2434,8 @@ export class EvalService {
         steeredPolicy: steered
           ? {
             interactionVariant: "multi-turn",
-            openingPrompt: requireSingleOpeningPrompt(threadDefinition.prompts, "multi-turn"),
+            caseType: "in-turn-steered",
+            openingPrompt: requireSingleOpeningPrompt(threadDefinition.prompts, "in-turn-steered"),
             simulatedUserBrief: definition.simulatedUserBrief || threadDefinition.simulatedUserBrief || "",
             maxHumanTurns: steeredMaxHumanTurns(definition),
           }
@@ -2546,7 +2558,7 @@ export class EvalService {
 
     if (steeredPolicy) {
       if (typeof this.steeringDecisionRunner !== "function") {
-        throw new Error("Steered multi-turn cases require a simulated-user steering decision runner.");
+        throw new Error("In-turn steered cases require a simulated-user steering decision runner.");
       }
       let thread = null;
       const humanInteractionIds = [];
@@ -3360,6 +3372,21 @@ function emptyTraceCoverage() {
     usage: "none",
     childStreams: "none",
     nativeArtifacts: "none",
+  };
+}
+
+function catalogInteractionFamily(family) {
+  return {
+    familyId: family.familyId,
+    name: family.name,
+    executableInRelayerEval: family.executableInRelayerEval,
+    supportedPlatform: family.supportedPlatform,
+    members: Object.fromEntries(Object.entries(family.members).map(([caseType, member]) => [caseType, {
+      caseId: member.caseId,
+      caseType: member.caseType,
+      caseTypeLabel: member.caseTypeLabel,
+      interactionVariant: member.interactionVariant,
+    }])),
   };
 }
 

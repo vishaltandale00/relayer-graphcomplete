@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { bindAutonomousCaseSnapshot } from "../cases/catalog.js";
 import { createAutonomousCaseSnapshot } from "../cases/contracts.js";
 import {
+  H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
   H3_REPOSITORY_URL,
   H3_SEEDED_TREE,
   h3VerifierDigest,
@@ -10,6 +12,7 @@ import {
   h3AutonomousFixMultiTurnEvalCase,
   h3AutonomousInvestigationEvalCase,
 } from "./h3.js";
+import { EVAL_INTERACTION_CASE_TYPE_LABELS } from "./interaction-variants.js";
 
 const digest = (value: string) => `sha256:${value}` as const;
 const hashText = (value: string) => digest(createHash("sha256").update(value).digest("hex"));
@@ -148,3 +151,29 @@ export const h3AutonomousCases = Object.freeze([
   h3AutonomousFixMultiTurnCase,
   h3AutonomousInvestigationCase,
 ]);
+
+export const H3_SANITIZE_FAMILY_ID = "autonomous.h3.sanitize-status-code" as const;
+
+/** Relayer Eval currently executes the PRD §13.2.2 pair only for this family. */
+export const h3SanitizeInteractionFamily = Object.freeze({
+  familyId: H3_SANITIZE_FAMILY_ID,
+  name: "h3 status-code sanitization",
+  executableInRelayerEval: true,
+  supportedPlatform: "darwin" as const,
+  members: Object.freeze({
+    "single-turn": Object.freeze({
+      caseId: H3_AUTONOMOUS_FIX_CASE_ID,
+      caseType: "single-turn" as const,
+      caseTypeLabel: EVAL_INTERACTION_CASE_TYPE_LABELS["single-turn"],
+      interactionVariant: "single-turn" as const,
+      bound: h3AutonomousFixCase,
+    }),
+    "in-turn-steered": Object.freeze({
+      caseId: H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
+      caseType: "in-turn-steered" as const,
+      caseTypeLabel: EVAL_INTERACTION_CASE_TYPE_LABELS["in-turn-steered"],
+      interactionVariant: "multi-turn" as const,
+      bound: h3AutonomousFixMultiTurnCase,
+    }),
+  }),
+});

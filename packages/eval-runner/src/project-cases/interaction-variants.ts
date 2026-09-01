@@ -2,6 +2,26 @@ export const INTERACTION_VARIANTS = Object.freeze(["single-turn", "multi-turn"] 
 
 export type InteractionVariant = typeof INTERACTION_VARIANTS[number];
 
+/** Product-facing catalog types from PRD §13.2.2. */
+export const EVAL_INTERACTION_CASE_TYPES = Object.freeze(["single-turn", "in-turn-steered"] as const);
+
+export type EvalInteractionCaseType = typeof EVAL_INTERACTION_CASE_TYPES[number];
+
+export const EVAL_INTERACTION_CASE_TYPE_LABELS = Object.freeze({
+  "single-turn": "Single-turn",
+  "in-turn-steered": "In-turn steered",
+} as const satisfies Record<EvalInteractionCaseType, string>);
+
+export const CASE_TYPE_BY_INTERACTION_VARIANT = Object.freeze({
+  "single-turn": "single-turn",
+  "multi-turn": "in-turn-steered",
+} as const satisfies Record<InteractionVariant, EvalInteractionCaseType>);
+
+export const INTERACTION_VARIANT_BY_CASE_TYPE = Object.freeze({
+  "single-turn": "single-turn",
+  "in-turn-steered": "multi-turn",
+} as const satisfies Record<EvalInteractionCaseType, InteractionVariant>);
+
 export const DEFAULT_STEERED_MAX_HUMAN_TURNS = 6 as const;
 export const SIMULATED_USER_STEERING_PROMPT_VERSION = "simulated-user-steering-prompt-v2" as const;
 
@@ -12,30 +32,67 @@ export interface InteractionVariantPolicy {
   readonly maxHumanTurns?: number;
 }
 
-export function isSteeredMultiTurn(policy: { readonly interactionVariant?: InteractionVariant } | null | undefined): boolean {
-  return policy?.interactionVariant === "multi-turn";
+export interface InteractionCaseTypePolicy {
+  readonly interactionVariant?: InteractionVariant;
+  readonly caseType?: EvalInteractionCaseType;
+}
+
+export function interactionCaseType(
+  policy: InteractionCaseTypePolicy | null | undefined,
+): EvalInteractionCaseType | undefined {
+  if (policy?.caseType !== undefined) return policy.caseType;
+  if (policy?.interactionVariant === undefined) return undefined;
+  return CASE_TYPE_BY_INTERACTION_VARIANT[policy.interactionVariant];
+}
+
+export function interactionVariantForCaseType(caseType: EvalInteractionCaseType): InteractionVariant {
+  return INTERACTION_VARIANT_BY_CASE_TYPE[caseType];
+}
+
+export function isInTurnSteered(policy: InteractionCaseTypePolicy | null | undefined): boolean {
+  return interactionCaseType(policy) === "in-turn-steered";
+}
+
+export function isSteeredMultiTurn(policy: InteractionCaseTypePolicy | null | undefined): boolean {
+  return isInTurnSteered(policy);
 }
 
 export function steeredMaxHumanTurns(policy: { readonly maxHumanTurns?: number } | null | undefined): number {
   const configured = policy?.maxHumanTurns;
   if (configured === undefined) return DEFAULT_STEERED_MAX_HUMAN_TURNS;
   if (!Number.isInteger(configured) || configured < 2) {
-    throw new Error("Steered multi-turn cases require maxHumanTurns of at least 2.");
+    throw new Error("In-turn steered cases require maxHumanTurns of at least 2.");
   }
   return configured;
 }
 
-export function requireSingleOpeningPrompt(prompts: readonly string[], variant: InteractionVariant): string {
-  if (variant === "single-turn") {
+export function requireSingleOpeningPrompt(
+  prompts: readonly string[],
+  type: InteractionVariant | EvalInteractionCaseType,
+): string {
+  const caseType = type === "multi-turn" || type === "in-turn-steered" ? "in-turn-steered" : "single-turn";
+  if (caseType === "single-turn") {
     if (prompts.length !== 1 || prompts.some((prompt) => prompt.trim() === "")) {
       throw new Error("Single-turn cases must carry exactly one opening prompt.");
     }
     return prompts[0]!;
   }
   if (prompts.length !== 1 || prompts[0]!.trim() === "") {
-    throw new Error("Steered multi-turn cases start from exactly one opening prompt; later participation is in-flight on the published current.");
+    throw new Error("In-turn steered cases start from exactly one opening prompt; later participation is in-flight on the published current.");
   }
   return prompts[0]!;
+}
+
+export function decorateEvalCaseCatalogEntry<Definition extends InteractionCaseTypePolicy>(
+  definition: Definition,
+): Definition & { readonly caseType?: EvalInteractionCaseType; readonly caseTypeLabel?: string } {
+  const caseType = interactionCaseType(definition);
+  if (caseType === undefined) return definition;
+  return {
+    ...definition,
+    caseType,
+    caseTypeLabel: EVAL_INTERACTION_CASE_TYPE_LABELS[caseType],
+  };
 }
 
 export function buildSimulatedUserSteeringPrompt(input: {
@@ -46,7 +103,7 @@ export function buildSimulatedUserSteeringPrompt(input: {
   readonly completionStatus: string;
 }): string {
   if (input.simulatedUserBrief.trim() === "") {
-    throw new Error("Steered multi-turn cases require a simulated-user brief.");
+    throw new Error("In-turn steered cases require a simulated-user brief.");
   }
   return [
     "You are the product user continuing one in-flight GraphComplete turn, not an evaluator rewriting the task.",

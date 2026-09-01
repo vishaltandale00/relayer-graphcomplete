@@ -1,4 +1,9 @@
-import { DEFAULT_STEERED_MAX_HUMAN_TURNS, type InteractionVariant } from "./interaction-variants.js";
+import {
+  DEFAULT_STEERED_MAX_HUMAN_TURNS,
+  INTERACTION_VARIANT_BY_CASE_TYPE,
+  type EvalInteractionCaseType,
+  type InteractionVariant,
+} from "./interaction-variants.js";
 
 export const CAPABILITY_PILOT_SUITE_ID = "harness-capability-pilot-v1" as const;
 
@@ -19,11 +24,14 @@ export type CapabilityPilotFamilyId = typeof capabilityPilotFamilyIds[number];
 
 export interface CapabilityPilotVariantMember {
   readonly caseId: string;
+  readonly caseType: EvalInteractionCaseType;
   readonly variant: InteractionVariant;
   readonly name: string;
   readonly openingPrompt: string;
   readonly simulatedUserBrief?: string;
   readonly maxHumanTurns?: number;
+  /** Relayer Eval currently executes only the H3 pair. These briefs stay specified, not admitted. */
+  readonly executableInRelayerEval: false;
 }
 
 export interface CapabilityPilotFamily {
@@ -33,22 +41,25 @@ export interface CapabilityPilotFamily {
   readonly fixtureStatus: "external-admitted" | "external-candidate";
   readonly members: {
     readonly "single-turn": CapabilityPilotVariantMember;
-    readonly "multi-turn": CapabilityPilotVariantMember;
+    readonly "in-turn-steered": CapabilityPilotVariantMember;
   };
 }
 
 function member(
   familyId: CapabilityPilotFamilyId,
-  variant: InteractionVariant,
+  caseType: EvalInteractionCaseType,
   name: string,
   openingPrompt: string,
   extra: { readonly simulatedUserBrief?: string; readonly maxHumanTurns?: number } = {},
 ): CapabilityPilotVariantMember {
+  const variant = INTERACTION_VARIANT_BY_CASE_TYPE[caseType];
   return Object.freeze({
     caseId: `${familyId}.${variant}`,
+    caseType,
     variant,
     name,
     openingPrompt,
+    executableInRelayerEval: false,
     ...extra,
   });
 }
@@ -68,7 +79,7 @@ function family(
     fixtureStatus,
     members: Object.freeze({
       "single-turn": member(familyId, "single-turn", `${name} · one turn`, singleTurn),
-      "multi-turn": member(familyId, "multi-turn", `${name} · steered`, multiTurn.openingPrompt, {
+      "in-turn-steered": member(familyId, "in-turn-steered", `${name} · steered`, multiTurn.openingPrompt, {
         simulatedUserBrief: multiTurn.simulatedUserBrief,
         maxHumanTurns: multiTurn.maxHumanTurns ?? DEFAULT_STEERED_MAX_HUMAN_TURNS,
       }),
@@ -198,7 +209,7 @@ export const capabilityPilotVariantFamilies: readonly CapabilityPilotFamily[] = 
 ]);
 
 export const capabilityPilotVariantMembers = Object.freeze(
-  capabilityPilotVariantFamilies.flatMap((entry) => [entry.members["single-turn"], entry.members["multi-turn"]]),
+  capabilityPilotVariantFamilies.flatMap((entry) => [entry.members["single-turn"], entry.members["in-turn-steered"]]),
 );
 
 export function capabilityPilotFamily(familyId: CapabilityPilotFamilyId): CapabilityPilotFamily {

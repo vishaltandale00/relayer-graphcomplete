@@ -285,6 +285,31 @@ describe("EvalService simulated-user result persistence", () => {
       "simulated-user",
       "simulated-user-sol-high",
     ]);
+    expect(service.catalog().interactionCaseTypes).toEqual([
+      { id: "single-turn", label: "Single-turn" },
+      { id: "in-turn-steered", label: "In-turn steered" },
+    ]);
+    expect(service.catalog().executableInteractionFamilies).toEqual([{
+      familyId: "autonomous.h3.sanitize-status-code",
+      name: "h3 status-code sanitization",
+      executableInRelayerEval: true,
+      supportedPlatform: "darwin",
+      members: {
+        "single-turn": {
+          caseId: H3_AUTONOMOUS_FIX_CASE_ID,
+          caseType: "single-turn",
+          caseTypeLabel: "Single-turn",
+          interactionVariant: "single-turn",
+        },
+        "in-turn-steered": {
+          caseId: H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
+          caseType: "in-turn-steered",
+          caseTypeLabel: "In-turn steered",
+          interactionVariant: "multi-turn",
+        },
+      },
+    }]);
+    expect(JSON.stringify(service.catalog().executableInteractionFamilies)).not.toContain("sealedPath");
     expect(service.catalog().cases.filter(({ caseSnapshot }) => caseSnapshot).map(({ id }) => id)).toEqual([
       H3_AUTONOMOUS_FIX_CASE_ID,
       H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID,
@@ -462,11 +487,24 @@ describe("EvalService simulated-user result persistence", () => {
       simulatedUserJudgeRunner: vi.fn(),
     }).open();
 
+    const single = service.catalog().cases.find(({ id }) => id === H3_AUTONOMOUS_FIX_CASE_ID);
+    expect(single).toMatchObject({
+      caseType: "single-turn",
+      caseTypeLabel: "Single-turn",
+      interactionVariant: "single-turn",
+    });
     const steered = service.catalog().cases.find(({ id }) => id === H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID);
     expect(steered).toMatchObject({
+      caseType: "in-turn-steered",
+      caseTypeLabel: "In-turn steered",
       interactionVariant: "multi-turn",
       requiredJudgeConfigurationIds: ["simulated-user", "simulated-user-sol-high"],
     });
+    await expect(service.createRun({
+      testCaseIds: ["autonomous.httpcore.cancellation-poisoned-pool.single-turn"],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("Test run contains an unknown test case.");
     await expect(service.createRun({
       testCaseIds: [H3_AUTONOMOUS_FIX_MULTI_TURN_CASE_ID],
       harnessConfigurationNames: ["fixture-task-system"],
@@ -491,7 +529,7 @@ describe("EvalService simulated-user result persistence", () => {
       harnessConfigurationNames: ["fixture-task-system"],
       judgeConfigurationName: "simulated-user",
     })).rejects.toThrow(
-      "Steered multi-turn cases require a simulated-user steering decision runner.",
+      "In-turn steered cases require a simulated-user steering decision runner.",
     );
   });
 

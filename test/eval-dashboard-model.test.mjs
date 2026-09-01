@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   annotatedExecutionExportable,
   authorizeRecursiveCompleteSelection,
+  evalCaseOptionCopy,
   isolateRecursiveCompleteSelection,
   judgeConfigurationCompatibleWithCases,
   projectExecutionCell,
@@ -11,6 +12,27 @@ import {
 } from "../desktop/eval-renderer/run-model.js";
 
 describe("Eval dashboard run presentation", () => {
+  it("prefixes typed hard-task cases with the catalog type label", () => {
+    expect(evalCaseOptionCopy({
+      id: "autonomous.h3.sanitize-status-code.multi-turn",
+      name: "h3 · steered status-code repair",
+      description: "Repairs the seeded decimal status-code bug.",
+      caseTypeLabel: "In-turn steered",
+    })).toEqual({
+      id: "autonomous.h3.sanitize-status-code.multi-turn",
+      name: "h3 · steered status-code repair",
+      description: "In-turn steered. Repairs the seeded decimal status-code bug.",
+    });
+    expect(evalCaseOptionCopy({
+      id: "empty-project.task-system.single-turn",
+      name: "Task system · one turn",
+      description: "Explains the same task system in a fresh standalone thread.",
+    })).toEqual({
+      id: "empty-project.task-system.single-turn",
+      name: "Task system · one turn",
+      description: "Explains the same task system in a fresh standalone thread.",
+    });
+  });
   it("filters judge choices against selected case requirements", () => {
     const cases = [{
       id: "input-roundtrip",

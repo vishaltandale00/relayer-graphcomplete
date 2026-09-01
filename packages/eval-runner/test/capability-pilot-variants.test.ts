@@ -25,17 +25,23 @@ describe("capability-pilot interaction variants", () => {
 
     for (const family of capabilityPilotVariantFamilies) {
       const single = family.members["single-turn"];
-      const multi = family.members["multi-turn"];
+      const steered = family.members["in-turn-steered"];
       expect(single.caseId).toBe(`${family.familyId}.single-turn`);
-      expect(multi.caseId).toBe(`${family.familyId}.multi-turn`);
+      expect(steered.caseId).toBe(`${family.familyId}.multi-turn`);
+      expect(single.caseType).toBe("single-turn");
+      expect(steered.caseType).toBe("in-turn-steered");
+      expect(single.variant).toBe("single-turn");
+      expect(steered.variant).toBe("multi-turn");
+      expect(single.executableInRelayerEval).toBe(false);
+      expect(steered.executableInRelayerEval).toBe(false);
       expect(single.openingPrompt.length).toBeGreaterThan(80);
-      expect(multi.openingPrompt.length).toBeGreaterThan(80);
-      expect(single.openingPrompt).not.toBe(multi.openingPrompt);
+      expect(steered.openingPrompt.length).toBeGreaterThan(80);
+      expect(single.openingPrompt).not.toBe(steered.openingPrompt);
       expect(single.simulatedUserBrief).toBeUndefined();
-      expect(multi.simulatedUserBrief?.length).toBeGreaterThan(80);
-      expect(multi.maxHumanTurns).toBeGreaterThanOrEqual(2);
+      expect(steered.simulatedUserBrief?.length).toBeGreaterThan(80);
+      expect(steered.maxHumanTurns).toBeGreaterThanOrEqual(2);
       expect(single.openingPrompt).not.toMatch(/\blayer\b|graph\.submit|verifier/i);
-      expect(multi.openingPrompt).not.toMatch(/graph\.submit|verifier/i);
+      expect(steered.openingPrompt).not.toMatch(/graph\.submit|verifier/i);
     }
   });
 
@@ -43,13 +49,13 @@ describe("capability-pilot interaction variants", () => {
     const httpcore = capabilityPilotFamily("autonomous.httpcore.cancellation-poisoned-pool");
     expect(requireSingleOpeningPrompt([httpcore.members["single-turn"].openingPrompt], "single-turn"))
       .toContain("one-slot connection pool");
-    expect(requireSingleOpeningPrompt([httpcore.members["multi-turn"].openingPrompt], "multi-turn"))
+    expect(requireSingleOpeningPrompt([httpcore.members["in-turn-steered"].openingPrompt], "in-turn-steered"))
       .toContain("I will follow along");
-    expect(() => requireSingleOpeningPrompt(["one", "two"], "multi-turn")).toThrow(/exactly one opening prompt/);
+    expect(() => requireSingleOpeningPrompt(["one", "two"], "in-turn-steered")).toThrow(/exactly one opening prompt/);
     expect(isSteeredMultiTurn({ interactionVariant: "multi-turn" })).toBe(true);
     expect(isSteeredMultiTurn({ interactionVariant: "single-turn" })).toBe(false);
-    expect(steeredMaxHumanTurns(httpcore.members["multi-turn"])).toBe(6);
-    expect(steeredMaxHumanTurns(capabilityPilotFamily("capability.spreadsheet.saas-operating-model").members["multi-turn"]))
+    expect(steeredMaxHumanTurns(httpcore.members["in-turn-steered"])).toBe(6);
+    expect(steeredMaxHumanTurns(capabilityPilotFamily("capability.spreadsheet.saas-operating-model").members["in-turn-steered"]))
       .toBe(10);
   });
 

@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
 import type { EvalCheck } from "../runtime-basic.js";
+import type { EvalInteractionCaseType, InteractionVariant } from "./interaction-variants.js";
 
 export const H3_PROJECT_CASE_ID = "project.h3.sanitize-status-code";
 export const H3_AUTONOMOUS_FIX_CASE_ID = "autonomous.h3.sanitize-status-code";
@@ -36,7 +37,8 @@ export interface ProjectEvalThreadDefinition {
   readonly mutationPolicy: "read-only" | "writable";
   readonly prompts: readonly string[];
   readonly workspaceGrade: "question" | "diagnosis" | "implementation" | "autonomous-implementation";
-  readonly interactionVariant?: "single-turn" | "multi-turn";
+  readonly caseType?: EvalInteractionCaseType;
+  readonly interactionVariant?: InteractionVariant;
   readonly simulatedUserBrief?: string;
   readonly maxHumanTurns?: number;
 }
@@ -62,7 +64,8 @@ export interface ProjectEvalCaseDefinition {
   readonly autonomous?: true;
   readonly category?: "coding" | "work";
   readonly taskType?: "feature-change" | "debugging" | "investigation";
-  readonly interactionVariant?: "single-turn" | "multi-turn";
+  readonly caseType?: EvalInteractionCaseType;
+  readonly interactionVariant?: InteractionVariant;
   readonly simulatedUserBrief?: string;
   readonly maxHumanTurns?: number;
   readonly requiredJudgeConfigurationIds?: readonly string[];
@@ -134,6 +137,7 @@ export const h3AutonomousFixEvalCase: ProjectEvalCaseDefinition = Object.freeze(
   autonomous: true,
   category: "coding",
   taskType: "debugging",
+  caseType: "single-turn",
   interactionVariant: "single-turn",
   fixture: H3_FIXTURE,
   threads: Object.freeze([
@@ -143,6 +147,7 @@ export const h3AutonomousFixEvalCase: ProjectEvalCaseDefinition = Object.freeze(
       permissionProfileId: "auto",
       mutationPolicy: "writable",
       workspaceGrade: "autonomous-implementation",
+      caseType: "single-turn",
       interactionVariant: "single-turn",
       prompts: Object.freeze([
         "Fix the decimal HTTP status validation bug in this checkout. Add focused regression coverage, run the relevant checks, and commit the repair. Keep the change scoped and do not push or publish anything.",
@@ -174,6 +179,7 @@ export const h3AutonomousFixMultiTurnEvalCase: ProjectEvalCaseDefinition = Objec
   autonomous: true,
   category: "coding",
   taskType: "debugging",
+  caseType: "in-turn-steered",
   interactionVariant: "multi-turn",
   simulatedUserBrief: H3_AUTONOMOUS_FIX_MULTI_TURN_BRIEF,
   maxHumanTurns: 6,
@@ -186,6 +192,7 @@ export const h3AutonomousFixMultiTurnEvalCase: ProjectEvalCaseDefinition = Objec
       permissionProfileId: "auto",
       mutationPolicy: "writable",
       workspaceGrade: "autonomous-implementation",
+      caseType: "in-turn-steered",
       interactionVariant: "multi-turn",
       simulatedUserBrief: H3_AUTONOMOUS_FIX_MULTI_TURN_BRIEF,
       maxHumanTurns: 6,

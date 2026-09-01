@@ -1,6 +1,8 @@
 import {
   buildSimulatedUserSteeringPrompt,
+  interactionCaseType,
   steeredMaxHumanTurns,
+  type EvalInteractionCaseType,
   type InteractionVariant,
 } from "../project-cases/interaction-variants.js";
 
@@ -142,7 +144,8 @@ export interface SteeredLoopObservation {
 }
 
 export interface SteeredLoopPolicy {
-  readonly interactionVariant: InteractionVariant;
+  readonly interactionVariant?: InteractionVariant;
+  readonly caseType?: EvalInteractionCaseType;
   readonly openingPrompt: string;
   readonly simulatedUserBrief: string;
   readonly maxHumanTurns?: number;
@@ -203,14 +206,14 @@ export async function runSteeredInteractionLoop(
   policy: SteeredLoopPolicy,
   ports: SteeredLoopPorts,
 ): Promise<SteeredLoopResult> {
-  if (policy.interactionVariant !== "multi-turn") {
-    throw new Error("Steered interaction loop is only for multi-turn variants.");
+  if (interactionCaseType(policy) !== "in-turn-steered") {
+    throw new Error("Steered interaction loop is only for in-turn-steered cases.");
   }
   const maxHumanTurns = steeredMaxHumanTurns(policy);
   const opening = policy.openingPrompt.trim();
   const brief = policy.simulatedUserBrief.trim();
   if (opening === "" || brief === "") {
-    throw new Error("Steered multi-turn cases require an opening prompt and simulated-user brief.");
+    throw new Error("In-turn steered cases require an opening prompt and simulated-user brief.");
   }
 
   const started = await ports.startOpening(opening);
