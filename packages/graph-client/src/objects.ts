@@ -16,6 +16,12 @@ export class NodeObject {
   ) {
     this.clientKey = clientKey;
     this.detailAuthoring = createOwnedNodeDetailAuthoring(this);
+    Object.defineProperty(this, "ref", {
+      configurable: false,
+      enumerable: true,
+      writable: true,
+      value: undefined,
+    });
   }
 }
 

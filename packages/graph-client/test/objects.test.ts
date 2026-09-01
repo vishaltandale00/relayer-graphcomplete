@@ -293,7 +293,7 @@ describe("agent-facing graph objects", () => {
     expect(submittedBodies[1]).toBe(submittedBodies[0]);
   });
 
-  it("single-flights first finalization across concurrent submissions", async () => {
+  it("single-flights first finalization and transport across concurrent submissions", async () => {
     let releaseResolution!: () => void;
     const resolutionGate = new Promise<void>((resolve) => { releaseResolution = resolve; });
     let resolverRequests = 0;
@@ -336,9 +336,8 @@ describe("agent-facing graph objects", () => {
     await expect(Promise.all(submissions)).resolves.toHaveLength(2);
 
     expect(resolverRequests).toBe(1);
-    expect(submittedBodies).toHaveLength(2);
-    expect(submittedBodies[1]).toBe(submittedBodies[0]);
-    expect(mutationResults).toEqual(["frozen", "frozen"]);
+    expect(submittedBodies).toHaveLength(1);
+    expect(mutationResults).toEqual(["frozen"]);
   });
 
   it("drops failed compilation finalization so the unfrozen author can repair", async () => {

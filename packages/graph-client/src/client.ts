@@ -9,6 +9,7 @@ export class RelayerGraphClient {
   readonly capability: GraphCapability;
   readonly #submittedDetails = new WeakMap<NodeObject, Promise<CompiledNodeDetail>>();
   readonly #submissionEnvelopes = new WeakMap<NodeObject, NodeSubmissionEnvelope>();
+  readonly #submittedNodes = new WeakMap<NodeObject, Promise<GraphNode>>();
 
   constructor(capability: GraphCapability) {
     this.capability = { ...capability, url: capability.url.replace(/\/$/, "") };
@@ -43,7 +44,20 @@ export class RelayerGraphClient {
   }
 
   async submitNode(node: NodeObject): Promise<GraphNode> {
+    const existing = this.#submittedNodes.get(node);
+    if (existing !== undefined) return await existing;
     const envelope = this.submissionEnvelope(node);
+    const submission = this.submitNodeEnvelope(node, envelope);
+    this.#submittedNodes.set(node, submission);
+    try {
+      return await submission;
+    } catch (error) {
+      if (this.#submittedNodes.get(node) === submission) this.#submittedNodes.delete(node);
+      throw error;
+    }
+  }
+
+  private async submitNodeEnvelope(node: NodeObject, envelope: NodeSubmissionEnvelope): Promise<GraphNode> {
     const authoredDetail = await this.finalizeNodeDetail(node, envelope);
     const body = await this.request<{ node: GraphNode }>("/api/graph/nodes", {
       method: "POST",
@@ -56,7 +70,7 @@ export class RelayerGraphClient {
         ...(authoredDetail.components.length === 0 ? {} : { authoredDetail }),
       }),
     });
-    envelope.owner.object.ref = body.node;
+    Object.defineProperty(envelope.owner.object, "ref", { value: body.node });
     return body.node;
   }
 
@@ -327,11 +341,11 @@ function materializeNodeSubmissionEnvelope(node: NodeObject): NodeSubmissionEnve
     const values = new Map<string, unknown>();
     for (const field of NODE_ENVELOPE_FIELDS) {
       const descriptor = descriptors[field];
-      if (descriptor === undefined) {
-        if (field === "ref") continue;
+      if (descriptor === undefined) return invalidNodeSubmissionEnvelope();
+      if (!("value" in descriptor) || descriptor.enumerable !== true) return invalidNodeSubmissionEnvelope();
+      if (field === "ref" && (descriptor.configurable !== false || descriptor.writable !== true)) {
         return invalidNodeSubmissionEnvelope();
       }
-      if (!("value" in descriptor) || descriptor.enumerable !== true) return invalidNodeSubmissionEnvelope();
       values.set(field, descriptor.value);
     }
     const clientKey = values.get("clientKey");
