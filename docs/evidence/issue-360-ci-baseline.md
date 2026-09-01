@@ -45,3 +45,34 @@ artifacts before introducing selection. It then keeps affectedness conservative:
 all selected tests execute for the current snapshot; integration branches and
 PRs run the full portfolio; and lockfiles, toolchains, workflows, infrastructure,
 planner changes, unknown paths, and unmapped paths fail open to full verification.
+
+## Automatic intra-PR sccache canary
+
+A follow-up canary replaces the `Rust checks and fresh tests` job's whole
+`target/` archive with Mozilla sccache compiler objects while retaining a small
+Cargo registry/git download archive. Same-repository pull requests may write
+within GitHub's PR-scoped cache; forks receive no compiler-cache credentials and
+compile directly. Setup or daemon-start failure falls back to direct
+`rustc`; sccache documents rate-limit storage failures as nonfatal, while
+its native server-I/O fallback handles later daemon loss. Genuine compiler
+failures are never retried or masked. Cache and telemetry cannot substitute for
+or invalidate freshly executed checks and tests.
+
+The existing 18.5-minute hosted Rust observation above remains the cold
+baseline; no additional synthetic cold runs are required.
+
+The first PR seed run (`33461754406`, head `9d617c9a`) took 22 minutes 10
+seconds from Rust-job start to failure. The Cargo dependency archive missed;
+sccache setup and daemon start succeeded. After completion, GitHub reported
+1,184 entries totaling 546,100,346 bytes in the PR merge ref, proving that
+compiler objects were written even though the later gate failed. The failure
+was not a cache error: the cold Clippy build exposed an existing integration
+test that read `CARGO_BIN_EXE_relayer-graph-server` at compile time, where Cargo
+does not provide it for that target. No verification pass or speedup is claimed
+from this seed.
+
+The next real changed-head run after correcting that test is the warm
+comparison. Record its sccache hits, misses, errors, Rust chapter duration, and
+repository cache usage here. Expansion beyond the Rust job requires at least
+five minutes of net Rust compilation savings, no required-job regression, and
+no trusted-cache eviction or thrashing.

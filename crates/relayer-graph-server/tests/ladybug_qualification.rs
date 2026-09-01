@@ -15,9 +15,10 @@ fn json_line(bytes: &[u8]) -> serde_json::Value {
 fn qualification_mode_proves_lock_shutdown_and_reopen() {
     let temp = tempfile::tempdir().unwrap();
     let database = temp.path().join("ladybug");
-    let executable = env!("CARGO_BIN_EXE_relayer-graph-server");
+    let executable = std::env::var("CARGO_BIN_EXE_relayer-graph-server")
+        .expect("Cargo must provide the relayer-graph-server test executable");
 
-    let created = Command::new(executable)
+    let created = Command::new(&executable)
         .args([
             "--database",
             database.to_str().unwrap(),
@@ -32,7 +33,7 @@ fn qualification_mode_proves_lock_shutdown_and_reopen() {
     );
     assert_eq!(json_line(&created.stdout)["state"], "created");
 
-    let mut holder = Command::new(executable)
+    let mut holder = Command::new(&executable)
         .args([
             "--database",
             database.to_str().unwrap(),
@@ -51,7 +52,7 @@ fn qualification_mode_proves_lock_shutdown_and_reopen() {
         "reopened"
     );
 
-    let mut contended = Command::new(executable)
+    let mut contended = Command::new(&executable)
         .args([
             "--database",
             database.to_str().unwrap(),
@@ -87,7 +88,7 @@ fn qualification_mode_proves_lock_shutdown_and_reopen() {
         "clean"
     );
 
-    let reopened = Command::new(executable)
+    let reopened = Command::new(&executable)
         .args([
             "--database",
             database.to_str().unwrap(),
