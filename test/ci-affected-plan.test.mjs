@@ -73,6 +73,7 @@ describe("affected-module plan v1", () => {
       "relayer-app-server",
       "relayer-graph-core",
       "relayer-graph-server",
+      "relayer-telemetry-capability",
     ]);
     expect(result.chapters.rust).toBe(true);
     expect(result.rustCrash).toBe(true);
@@ -92,6 +93,17 @@ describe("affected-module plan v1", () => {
       expect.arrayContaining(["packages", "test"]),
     );
     expect(result.chapters.packaging).toBe(false);
+  });
+
+  test("selects local Rust dependencies that Clippy lints through a changed package", () => {
+    const result = plan("crates/relayer-app-server/src/api.rs");
+
+    expect(result.rustPackages).toEqual([
+      "relayer-app-server",
+      "relayer-graph-core",
+      "relayer-graph-server",
+      "relayer-telemetry-capability",
+    ]);
   });
 
   test("derives npm reverse dependents and desktop seams from package dependencies", () => {
