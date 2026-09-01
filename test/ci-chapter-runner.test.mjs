@@ -45,8 +45,11 @@ describe("CI chapter runner", () => {
         ...process.env,
         // Pin the timing inputs so ambient exports cannot flip these tests
         // into the --timings branch or move a real report as a side effect.
+        // GITHUB_STEP_SUMMARY points at a scratch file so spawned failures
+        // never write triage lines into the real CI job summary.
         CARGO_TARGET_DIR: join(directory, "cargo-target"),
         RELAYER_CARGO_TIMINGS_DIR: "",
+        GITHUB_STEP_SUMMARY: join(directory, "step-summary.md"),
         CI_PLAN_JSON: JSON.stringify(plan),
         CI_INVOCATION_TRACE: invocationTrace,
         PATH: `${directory}:${process.env.PATH}`,
@@ -97,6 +100,7 @@ describe("CI chapter runner", () => {
           CI_INVOCATION_TRACE: invocationTrace,
           PATH: `${directory}:${process.env.PATH}`,
           RELAYER_CARGO_TIMINGS_DIR: timingsDirectory,
+          GITHUB_STEP_SUMMARY: join(directory, "step-summary.md"),
           TRACE: trace,
         },
       },
@@ -130,6 +134,7 @@ describe("CI chapter runner", () => {
           CI_INVOCATION_TRACE: invocationTrace,
           PATH: `${directory}:${process.env.PATH}`,
           RELAYER_CARGO_TIMINGS_DIR: timingsDirectory,
+          GITHUB_STEP_SUMMARY: join(directory, "step-summary.md"),
           TRACE: trace,
         },
       },
@@ -159,6 +164,7 @@ describe("CI chapter runner", () => {
           CI_INVOCATION_TRACE: invocationTrace,
           PATH: `${directory}:${process.env.PATH}`,
           RELAYER_CARGO_TIMINGS_DIR: timingsDirectory,
+          GITHUB_STEP_SUMMARY: join(directory, "step-summary.md"),
           TRACE: trace,
         },
       }),

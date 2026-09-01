@@ -95,11 +95,14 @@ status and restore time, chapter duration, and the first actionable failure.
 
 The crash-reconciliation lane selects on the checked-in
 `rustCrashPackages` list (`relayer-graph-core` and `relayer-graph-server`)
-intersected with the affected Rust closure, plus every full-portfolio run.
-`relayer-app-server` is deliberately excluded: the crash command compiles and
-executes no app-server code, and app-server interrupted-execution recovery
-remains owned by its ordinary Rust tests. See
-`docs/research/crash-verification-cadence.md` for the staged narrowing plan.
+intersected with the affected crates' reverse-dependency closure, plus every
+full-portfolio run. Forward build dependencies are excluded: they join the
+affected package list because Clippy lints them, but the crash command never
+compiles or executes them. `relayer-app-server` is likewise deliberately
+excluded: the crash command compiles and executes no app-server code, and
+app-server interrupted-execution recovery remains owned by its ordinary Rust
+tests. See `docs/research/crash-verification-cadence.md` for the staged
+narrowing plan.
 
 The checked-in v1 map is `scripts/ci/affected-modules.v1.json`. Rust selection
 includes reverse dependents and their local build dependencies; npm reverse

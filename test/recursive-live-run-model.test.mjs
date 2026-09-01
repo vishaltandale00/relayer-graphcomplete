@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -444,18 +445,26 @@ describe("live run credentials", () => {
     }
   });
 
-  it("resolves the checked-in live-run template users copy", () => {
+  it("resolves the checked-in live-run template users copy", async () => {
     // The README tells users to copy live-run.example.json; the model tests
     // above exercise an inline duplicate, so this checkpoint pins the real
-    // template's shape against the same resolver.
+    // template's shape against the same resolver. The implementation comes
+    // from the selected harness yaml exactly like the paid entry point
+    // (scripts/run-recursive-live-run.mjs), so an unknown or typo'd harness
+    // id fails here instead of surfacing only when a user spends a run.
+    const { loadHarnessConfigurations } = await import("@relayer/harness-host");
     const template = JSON.parse(
       readFileSync(new URL("../live-run.example.json", import.meta.url), "utf8"),
     );
     const profiles = Object.entries(template.runs);
     expect(profiles.length).toBeGreaterThan(0);
     for (const [name, profile] of profiles) {
-      const implementation =
-        profile.harness === "codex-basic" ? "codex.basic" : "prime-agent.basic";
+      const configurationPath = fileURLToPath(
+        new URL(`../harnesses/${profile.harness}.yaml`, import.meta.url),
+      );
+      const configurations = await loadHarnessConfigurations([configurationPath]);
+      const implementation = configurations.get(profile.harness)?.implementation;
+      expect(typeof implementation, `${name}: harness ${profile.harness}`).toBe("string");
       const resolved = resolveRunProfile(template, name, { implementation });
       expect(typeof resolved.adapterId, name).toBe("string");
       expect(typeof profile.harness, name).toBe("string");

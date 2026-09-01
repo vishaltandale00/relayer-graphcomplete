@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
@@ -416,15 +416,28 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
       "ci-runtime-artifact.test.mjs",
       "ci-verification-portfolio.test.mjs",
     ]);
-    const testCorpus = readdirSync(join(repositoryRoot, "test"))
+    // Scan the top-level suite and the workspace test roots the planner
+    // knows about; substring matching cannot see paths assembled with join()
+    // or new URL(), so a missed reference is possible but the roots cover
+    // the mapped consumers.
+    const corpusRoots = [
+      join(repositoryRoot, "test"),
+      join(repositoryRoot, "packages", "eval-runner", "test"),
+      join(repositoryRoot, "packages", "graph-client", "test"),
+      join(repositoryRoot, "packages", "harness-host", "test"),
+    ];
+    const testCorpus = corpusRoots
+      .flatMap((root) =>
+        existsSync(root)
+          ? readdirSync(root).map((name) => join(root, name))
+          : [],
+      )
       .filter(
-        (name) =>
-          /\.(test|spec)\.[cm]?[jt]sx?$/.test(name) &&
-          !ciContractTests.has(name),
+        (filePath) =>
+          /\.(test|spec)\.[cm]?[jt]sx?$/.test(filePath) &&
+          !ciContractTests.has(basename(filePath)),
       )
-      .map((name) =>
-        readFileSync(join(repositoryRoot, "test", name), "utf8"),
-      )
+      .map((filePath) => readFileSync(filePath, "utf8"))
       .join("\n");
 
     // Verified references that do not consume the repository file in CI.
