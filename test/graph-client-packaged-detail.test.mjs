@@ -147,6 +147,84 @@ describe("packaged graph-client authored detail boundary", () => {
         },
       },
       {
+        name: "changing-layer-client-key-getter",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => {
+          const originalClientKey = sourceLayer.clientKey;
+          let reads = 0;
+          accessorReads.set("changing-layer-client-key-getter", () => reads);
+          Object.defineProperty(sourceLayer, "clientKey", {
+            configurable: true,
+            enumerable: true,
+            get() { return reads++ === 0 ? originalClientKey : "substituted-layer-client-key"; },
+          });
+          return {
+            kind: "invoke",
+            label: "Run",
+            interactionText: "Run",
+            sourceLayer,
+            clientKey: "changing-layer-client-key-getter-action",
+          };
+        },
+      },
+      {
+        name: "changing-layer-nodes-getter",
+        capability: "invoke",
+        action: (owner, sourceLayer) => {
+          let reads = 0;
+          accessorReads.set("changing-layer-nodes-getter", () => reads);
+          Object.defineProperty(sourceLayer, "nodes", {
+            configurable: true,
+            enumerable: true,
+            get() { return reads++ === 0 ? [owner] : []; },
+          });
+          return {
+            kind: "invoke",
+            label: "Run",
+            interactionText: "Run",
+            sourceLayer,
+            clientKey: "changing-layer-nodes-getter-action",
+          };
+        },
+      },
+      {
+        name: "trapping-layer-nodes-getter",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => {
+          let reads = 0;
+          accessorReads.set("trapping-layer-nodes-getter", () => reads);
+          Object.defineProperty(sourceLayer, "nodes", {
+            configurable: true,
+            enumerable: true,
+            get() { reads += 1; throw new TypeError("caller nodes trap escaped"); },
+          });
+          return {
+            kind: "invoke",
+            label: "Run",
+            interactionText: "Run",
+            sourceLayer,
+            clientKey: "trapping-layer-nodes-getter-action",
+          };
+        },
+      },
+      {
+        name: "distinct-same-key-layer-member",
+        capability: "invoke",
+        code: "capability_source_layer_mismatch",
+        action: (owner, sourceLayer) => {
+          sourceLayer.nodes = [
+            new NodeObject("box", "Impostor", "Fallback", "concept", owner.clientKey),
+          ];
+          return {
+            kind: "invoke",
+            label: "Run",
+            interactionText: "Run",
+            sourceLayer,
+            clientKey: "distinct-same-key-layer-member-action",
+          };
+        },
+      },
+      {
         name: "second-read-throw",
         capability: "invoke",
         action: (_owner, sourceLayer) => {
@@ -249,12 +327,54 @@ describe("packaged graph-client authored detail boundary", () => {
       await expect(client.checkpointNodeDetail(owner)).rejects.toBeInstanceOf(DetailCompilationError);
       await expect(client.checkpointNodeDetail(owner)).rejects.toMatchObject({
         issues: expect.arrayContaining([
-          expect.objectContaining({ code: "capability_invalid", componentId: scenario.name, line: 1 }),
+          expect.objectContaining({ code: scenario.code ?? "capability_invalid", componentId: scenario.name, line: 1 }),
         ]),
       });
       const readCount = accessorReads.get(scenario.name);
       if (readCount !== undefined) expect(readCount()).toBe(0);
     }
+  });
+
+  it("rejects external-link accessor substitution and capability proxy traps", async () => {
+    const {
+      DetailCompilationError,
+      NodeObject,
+      RelayerGraphClient,
+      detailCapability,
+      html,
+    } = await import(graphClientIndexUrl.href);
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const brandedLink = detailCapability.externalLink("brand-source", "https://safe.example/");
+    const capabilityBrand = Reflect.ownKeys(brandedLink).find((key) => typeof key === "symbol");
+
+    let hrefReads = 0;
+    const changingHref = {
+      [capabilityBrand]: true,
+      key: "changing-href",
+      kind: "link",
+      get href() {
+        hrefReads += 1;
+        return hrefReads <= 2 ? "https://safe.example/" : "javascript:alert(1)";
+      },
+    };
+    const trappedCapability = new Proxy({
+      [capabilityBrand]: true,
+      key: "trapped-capability",
+      kind: "link",
+      href: "https://safe.example/",
+    }, {
+      has: () => { throw new TypeError("caller has trap escaped"); },
+    });
+
+    for (const [name, capability] of [
+      ["changing-href", changingHref],
+      ["trapped-capability", trappedCapability],
+    ]) {
+      const node = new NodeObject("box", "Owner", "Fallback", "concept", `${name}-owner`);
+      node.detailAuthoring.setComponent(name, html`<a gc=${capability}>Open</a>`);
+      await expect(client.checkpointNodeDetail(node)).rejects.toBeInstanceOf(DetailCompilationError);
+    }
+    expect(hrefReads).toBe(0);
   });
 
   it("imports, compiles, and submits from the exact isolated packaged resource layout", async () => {

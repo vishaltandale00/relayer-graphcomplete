@@ -62,7 +62,7 @@ export class RelayerGraphClient {
     const finalized = this.#submittedDetails.get(node);
     if (finalized !== undefined) return await finalized;
     const assets = await this.resolveDetailAssets(node);
-    return compileAuthenticatedNodeDetail(node.detailAuthoring, node.clientKey, assets);
+    return compileAuthenticatedNodeDetail(node.detailAuthoring, assets);
   }
 
   private finalizeNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
@@ -78,7 +78,7 @@ export class RelayerGraphClient {
 
   private async compileAndFreezeNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
     const assets = await this.resolveDetailAssets(node);
-    const compiled = compileAuthenticatedNodeDetail(node.detailAuthoring, node.clientKey, assets);
+    const compiled = compileAuthenticatedNodeDetail(node.detailAuthoring, assets);
     freezeNodeDetailAuthoring(node.detailAuthoring);
     return compiled;
   }

@@ -2271,7 +2271,7 @@ settings:
 <li>Graph-action mounts derive source-node provenance from the owning node. Capability calls supply only the action; its exact draft source layer must contain that owner.</li>
 <li>Authors checkpoint stable HTML and CSS components through <code>checkpointNodeDetail</code> before submission. Checkpoint errors retain component and source locations; there is no public author-controlled finalize operation.</li>
 <li><code>gc=${capability}</code> binds typed actions to compatible native hosts. <code>asset=${assetRef}</code> carries only a logical visual identity.</li>
-<li>Runtime action values use the exact graph-client grammar. Each action, its options, and presentation fields are materialized once from ordinary own data properties into one frozen snapshot used for both validation and compilation. Accessors, prototype data, symbols, descriptor traps, unknown fields, node navigation targets, malformed options, and invalid presentations fail at their authored source.</li>
+<li>Runtime capability values use the exact graph-client grammar. Each capability, action, option, presentation field, and draft source-layer provenance input is materialized once from ordinary own data properties into one frozen snapshot used for both validation and compilation. Accessors, prototype data, symbols, descriptor traps, unknown fields, node navigation targets, malformed options, and invalid presentations fail at their authored source. Source-layer membership requires the exact owning <code>NodeObject</code> identity, not an equal client key.</li>
 <li>Author code cannot provide asset authority, availability, digest, sanitization, or a resolver.</li>
 <li>The client resolves logical assets through authenticated transport, validates the complete response as untrusted data, then compiles directly from the node’s authored templates.</li>
 <li>The first submit finalization is one in-progress promise in a private client map keyed by the exact <code>NodeObject</code>. It is installed before resolution begins.</li>
@@ -2292,7 +2292,7 @@ settings:
 <table>
 <thead><tr><th>Checkpoint</th><th>Public deterministic proof</th></tr></thead>
 <tbody>
-<tr><td>Owner provenance and action validity</td><td>Public and packaged tests cover one-read own-data action snapshots, accessor and proxy rejection, exact action fields, layer targets, presentations, options, owner provenance, and graph-core input invariants.</td></tr>
+<tr><td>Owner provenance and action validity</td><td>Public and packaged tests cover one-read own-data capability and source-layer snapshots, external-link scheme safety, accessor and proxy rejection, exact-owner membership, action fields, layer targets, presentations, options, and graph-core input invariants.</td></tr>
 <tr><td>Markup, CSS, and accessible names</td><td>Public tests cover browser trees, safe CSS, package-unique DOM IDs, validated label references, hidden content, and image alt.</td></tr>
 <tr><td>Authenticated logical assets</td><td>Public tests prove pre-transport bounds, hostile-response rejection, deduplicated resolution, private authority, and stable repeated-placement mounts.</td></tr>
 <tr><td>Draft lifecycle and retry identity</td><td><code>packages/graph-client/test/objects.test.ts</code> proves incremental checkpointing, single-flight finalization, repair after compilation failure, post-submit locking, legacy strings, concurrent identity, and byte-identical failed-request retry.</td></tr>

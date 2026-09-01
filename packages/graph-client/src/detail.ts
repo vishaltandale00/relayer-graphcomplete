@@ -3,7 +3,7 @@ import { generate as generateCss, parse as parseCss, tokenTypes, tokenize as tok
 import type { CssNode, SyntaxParseError } from "css-tree";
 import { parseFragment, serialize, type DefaultTreeAdapterTypes, type ParserError } from "parse5";
 import { isSupportedRelayerIcon } from "./icons.js";
-import { LayerObject, NodeObject, type ActionObject, type InputActionObject, type InvokeActionObject, type LayerReference, type NavigateActionObject, type NodeReference } from "./objects.js";
+import { LayerObject, NodeObject, type ActionObject, type InputActionObject, type InvokeActionObject, type LayerReference, type NavigateActionObject } from "./objects.js";
 
 const DETAIL_TEMPLATE = Symbol("detail-template");
 const DETAIL_CAPABILITY = Symbol("detail-capability");
@@ -67,7 +67,22 @@ interface MaterializedGraphDetailCapability {
   readonly action: MaterializedAction;
 }
 
+interface MaterializedSourceLayer {
+  readonly clientKey: string;
+  readonly containsOwner: boolean;
+}
+
+interface MaterializedOwner {
+  readonly object: NodeObject;
+  readonly clientKey: string;
+}
+
 type MaterializedDetailCapability = ExternalLinkCapability | MaterializedGraphDetailCapability;
+
+interface DetailCapabilityMaterialization {
+  readonly matched: boolean;
+  readonly capability?: MaterializedDetailCapability;
+}
 
 export interface AssetRef {
   readonly [DETAIL_ASSET]: true;
@@ -185,7 +200,7 @@ interface AuthoringComponent {
 
 interface AuthoringState {
   readonly components: Map<string, AuthoringComponent>;
-  readonly ownerHint: string | undefined;
+  readonly owner: NodeObject | undefined;
   frozen: boolean;
 }
 
@@ -198,7 +213,7 @@ const AUTHORING_STATE = new WeakMap<NodeDetailAuthoring, AuthoringState>();
 
 export class NodeDetailAuthoring {
   constructor() {
-    AUTHORING_STATE.set(this, { components: new Map(), ownerHint: undefined, frozen: false });
+    AUTHORING_STATE.set(this, { components: new Map(), owner: undefined, frozen: false });
   }
 
   setComponent(id: string, markup: DetailTemplate, styles: DetailTemplate = emptyCssTemplate()): this {
@@ -211,14 +226,14 @@ export class NodeDetailAuthoring {
 
   checkpoint(): CompiledNodeDetail {
     const state = authoringState(this);
-    return compileAuthoring(this, state.ownerHint, REJECTING_ASSET_RESOLVER);
+    return compileAuthoring(this, state.owner, REJECTING_ASSET_RESOLVER);
   }
 }
 
 /** @internal */
-export function createOwnedNodeDetailAuthoring(ownerHint: string): NodeDetailAuthoring {
+export function createOwnedNodeDetailAuthoring(owner: NodeObject): NodeDetailAuthoring {
   const authoring = new NodeDetailAuthoring();
-  AUTHORING_STATE.set(authoring, { components: new Map(), ownerHint, frozen: false });
+  AUTHORING_STATE.set(authoring, { components: new Map(), owner, frozen: false });
   return authoring;
 }
 
@@ -274,12 +289,11 @@ export function authoredDetailAssetIds(authoring: NodeDetailAuthoring): readonly
 /** @internal */
 export function compileAuthenticatedNodeDetail(
   authoring: NodeDetailAuthoring,
-  ownerClientKey: string,
   assets: readonly (ResolvedDetailAsset | null)[],
 ): CompiledNodeDetail {
   const logicalIds = authoredDetailAssetIds(authoring);
   const resolvedByLogicalId = new Map(logicalIds.map((logicalId, index) => [logicalId, assets[index] ?? undefined]));
-  return compileAuthoring(authoring, ownerClientKey, {
+  return compileAuthoring(authoring, authoringState(authoring).owner, {
     missingAssetCode: "asset_unknown",
     resolve: (reference) => resolvedByLogicalId.get(reference.logicalId),
   });
@@ -298,10 +312,11 @@ function authoringState(authoring: NodeDetailAuthoring): AuthoringState {
 
 function compileAuthoring(
   authoring: NodeDetailAuthoring,
-  ownerClientKey: string | undefined,
+  owner: NodeObject | undefined,
   assetResolver: DetailAssetResolver,
 ): CompiledNodeDetail {
   const state = authoringState(authoring);
+  const materializedOwner = safeMaterializeOwner(owner);
   const mounts: CompiledDetailMount[] = [];
   const assets = new Map<string, CompiledAsset>();
   const issues: DetailCompilationIssue[] = [];
@@ -341,7 +356,7 @@ function compileAuthoring(
       return Object.freeze({
         id,
         order: component.order,
-        html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver, ownerClientKey, domIdentities),
+        html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver, materializedOwner, domIdentities),
         css: compileCss(id, component.styles, issues),
       });
     }));
@@ -402,7 +417,7 @@ function compileHtml(
   assets: Map<string, CompiledAsset>,
   issues: DetailCompilationIssue[],
   assetResolver: DetailAssetResolver,
-  ownerClientKey: string | undefined,
+  owner: MaterializedOwner | undefined,
   domIdentities: ReadonlyMap<string, DomIdentityRecord>,
 ): string {
   if (template[DETAIL_TEMPLATE] !== "html") throw new Error("Node Detail component markup must use html``");
@@ -431,15 +446,18 @@ function compileHtml(
     if (Number.isSafeInteger(index) && index >= 0 && index < bindingUses.length) bindingUses[index] = (bindingUses[index] ?? 0) + 1;
     const value = template.values[index];
     element.attrs = element.attrs.filter((attribute) => attribute !== binding);
-    if (isDetailCapability(value)) {
-      const materializedCapability = safeMaterializeDetailCapability(value);
-      const validationCodes = materializedCapability === undefined
-        ? ["capability_invalid"]
-        : safeCapabilityValidationCodes(materializedCapability, ownerClientKey);
+    const materialization = safeMaterializeDetailCapability(value, owner?.object);
+    if (materialization.matched) {
+      const materializedCapability = materialization.capability;
+      if (materializedCapability === undefined) {
+        issues.push(sourceIssue("capability_invalid", componentId, element, "Invalid capability declaration: capability_invalid"));
+        return;
+      }
+      const validationCodes = safeCapabilityValidationCodes(materializedCapability, owner?.clientKey);
       const validCapability = validationCodes.length === 0;
       if (!validCapability) {
         for (const code of validationCodes) {
-          issues.push(sourceIssue(code, componentId, element, `Invalid ${value.kind} capability declaration: ${code}`));
+          issues.push(sourceIssue(code, componentId, element, `Invalid ${materializedCapability.kind} capability declaration: ${code}`));
         }
       }
       if (validCapability && !isCompatibleCapabilityHost(materializedCapability!, element)) {
@@ -447,7 +465,7 @@ function compileHtml(
           "capability_host_incompatible",
           componentId,
           element,
-          `${value.kind} capability cannot bind to <${element.tagName}>`,
+          `${materializedCapability.kind} capability cannot bind to <${element.tagName}>`,
         ));
       }
       if (!hasAccessibleName(element, fragment, domIdentities)) {
@@ -459,18 +477,18 @@ function compileHtml(
         ));
       }
       if (validCapability) normalizeCapabilityHost(componentId, materializedCapability!, element, issues);
-      const id = mountId("capability", componentId, value.key);
+      const id = mountId("capability", componentId, materializedCapability.key);
       element.attrs.push({ name: "data-gc-mount", value: id });
       const duplicateMount = mounts.some((mount) => mount.id === id);
       if (duplicateMount) {
-        issues.push(sourceIssue("duplicate_mount_identity", componentId, element, `Binding key ${value.key} is already used in this component`));
+        issues.push(sourceIssue("duplicate_mount_identity", componentId, element, `Binding key ${materializedCapability.key} is already used in this component`));
       } else if (validCapability) {
         mounts.push(Object.freeze({
           id,
           componentId,
           kind: "capability",
           host: element.tagName,
-          capability: compileCapability(materializedCapability!, ownerClientKey!),
+          capability: compileCapability(materializedCapability, owner?.clientKey ?? ""),
         }));
       }
     } else if (isAssetRef(value)) {
@@ -575,7 +593,7 @@ function bindingSource(componentId: string, template: DetailTemplate, issues: De
       continue;
     }
     const value = template.values[index];
-    if ((match[1] === "gc" && !isDetailCapability(value)) || (match[1] === "asset" && !isAssetRef(value))) {
+    if ((match[1] === "gc" && !isPotentialDetailCapability(value)) || (match[1] === "asset" && !isAssetRef(value))) {
       const location = sourceLocationAtEnd(source);
       issues.push(Object.freeze({
         code: "binding_type_invalid",
@@ -851,8 +869,13 @@ function validateHtmlTreeLimits(componentId: string, root: HtmlRoot, issues: Det
   return !reportedElements && !reportedDepth;
 }
 
-function isDetailCapability(value: unknown): value is DetailCapability {
-  return typeof value === "object" && value !== null && DETAIL_CAPABILITY in value;
+function isPotentialDetailCapability(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  try {
+    return DETAIL_CAPABILITY in value;
+  } catch {
+    return true;
+  }
 }
 
 function graphCapability(
@@ -870,7 +893,7 @@ function compileCapability(capability: MaterializedDetailCapability, ownerClient
   if (typeof clientKey !== "string" || clientKey.trim() === "") {
     throw new Error(`Node Detail ${capability.kind} capability requires an explicit stable action clientKey`);
   }
-  if (!isStableReference(sourceLayer)) {
+  if (!isMaterializedSourceLayer(sourceLayer)) {
     throw new Error(`Node Detail ${capability.kind} capability requires exact source-layer provenance`);
   }
   return Object.freeze({
@@ -878,17 +901,9 @@ function compileCapability(capability: MaterializedDetailCapability, ownerClient
     action: Object.freeze({
       clientKey,
       sourceNode: Object.freeze({ clientKey: ownerClientKey }),
-      sourceLayer: stableReference(sourceLayer),
+      sourceLayer: Object.freeze({ clientKey: sourceLayer.clientKey }),
     }),
   });
-}
-
-function stableReference(reference: NodeReference | LayerReference): StableAuthoringReference {
-  if (typeof reference === "number") return Object.freeze({ id: reference });
-  if (reference instanceof NodeObject || reference instanceof LayerObject) {
-    return Object.freeze({ clientKey: reference.clientKey });
-  }
-  return Object.freeze({ id: reference.id });
 }
 
 function isCompatibleCapabilityHost(capability: MaterializedDetailCapability, element: HtmlElement): boolean {
@@ -941,8 +956,10 @@ function capabilityValidationCodes(capability: MaterializedDetailCapability, own
       || actionValue === null) return ["capability_invalid"];
     const action = actionValue as Record<string, unknown>;
     if (!isStableIdentity(action.clientKey)) return ["capability_invalid"];
-    if (!isStableReference(action.sourceLayer)) return ["capability_invalid"];
-    if (!sourceLayerContainsOwner(action.sourceLayer, ownerClientKey)) return ["capability_source_layer_mismatch"];
+    if (!isMaterializedSourceLayer(action.sourceLayer) || !isStableIdentity(action.sourceLayer.clientKey)) {
+      return ["capability_invalid"];
+    }
+    if (!action.sourceLayer.containsOwner) return ["capability_source_layer_mismatch"];
     if (!(action.kind === capability.kind || (action.kind === "navigate" && action.relation === capability.kind))) return ["capability_invalid"];
     if (!hasExactActionFields(action) || !hasValidActionPresentation(action)) return ["capability_invalid"];
     if (typeof action.label !== "string" || action.label.trim() === "") return ["capability_invalid"];
@@ -1025,19 +1042,76 @@ function safeCapabilityValidationCodes(
   }
 }
 
-function safeMaterializeDetailCapability(capability: DetailCapability): MaterializedDetailCapability | undefined {
-  if (capability.kind === "link") return capability;
+function safeMaterializeDetailCapability(
+  value: unknown,
+  owner: NodeObject | undefined,
+): DetailCapabilityMaterialization {
+  if (typeof value !== "object" || value === null) return Object.freeze({ matched: false });
   try {
-    const action = materializeAction(capability.action);
-    return action === undefined
-      ? undefined
-      : Object.freeze({ key: capability.key, kind: capability.kind, action });
+    if (Object.getPrototypeOf(value) !== Object.prototype) return Object.freeze({ matched: true });
+    const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
+    const brand = descriptors[DETAIL_CAPABILITY];
+    if (brand === undefined) return Object.freeze({ matched: false });
+    if (!(DETAIL_CAPABILITY in value)
+      || !("value" in brand)
+      || brand.value !== true
+      || brand.enumerable !== true) return Object.freeze({ matched: true });
+    const key = ownCapabilityData(descriptors, "key");
+    const kind = ownCapabilityData(descriptors, "kind");
+    if (typeof key !== "string") return Object.freeze({ matched: true });
+    const allowed = new Set<PropertyKey>([DETAIL_CAPABILITY, "key", "kind"]);
+    if (kind === "link") {
+      allowed.add("href");
+      const href = ownCapabilityData(descriptors, "href");
+      if (typeof href !== "string" || !hasExactDescriptorFields(descriptors, allowed)) {
+        return Object.freeze({ matched: true });
+      }
+      return Object.freeze({
+        matched: true,
+        capability: Object.freeze({ [DETAIL_CAPABILITY]: true as const, key, kind, href }),
+      });
+    }
+    if (kind !== "expand" && kind !== "reference" && kind !== "invoke" && kind !== "input") {
+      return Object.freeze({ matched: true });
+    }
+    allowed.add("action");
+    const actionValue = ownCapabilityData(descriptors, "action");
+    if (actionValue === INVALID_DESCRIPTOR_VALUE || !hasExactDescriptorFields(descriptors, allowed)) {
+      return Object.freeze({ matched: true });
+    }
+    const action = materializeAction(actionValue, owner);
+    return Object.freeze({
+      matched: true,
+      ...(action === undefined ? {} : { capability: Object.freeze({ key, kind, action }) }),
+    });
   } catch {
-    return undefined;
+    return Object.freeze({ matched: true });
   }
 }
 
-function materializeAction(value: unknown): MaterializedAction | undefined {
+const INVALID_DESCRIPTOR_VALUE = Symbol("invalid-descriptor-value");
+
+function ownCapabilityData(
+  descriptors: Record<PropertyKey, PropertyDescriptor>,
+  field: string,
+): unknown | typeof INVALID_DESCRIPTOR_VALUE {
+  const descriptor = descriptors[field];
+  return descriptor !== undefined && "value" in descriptor && descriptor.enumerable === true
+    ? descriptor.value
+    : INVALID_DESCRIPTOR_VALUE;
+}
+
+function hasExactDescriptorFields(
+  descriptors: Record<PropertyKey, PropertyDescriptor>,
+  allowed: ReadonlySet<PropertyKey>,
+): boolean {
+  return Reflect.ownKeys(descriptors).every((field) => {
+    const descriptor = descriptors[field]!;
+    return allowed.has(field) && "value" in descriptor && descriptor.enumerable === true;
+  });
+}
+
+function materializeAction(value: unknown, owner: NodeObject | undefined): MaterializedAction | undefined {
   if (!isOrdinaryRecord(value)) return undefined;
   const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
   const snapshot: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
@@ -1047,8 +1121,11 @@ function materializeAction(value: unknown): MaterializedAction | undefined {
     if (!("value" in descriptor) || descriptor.enumerable !== true) return undefined;
     snapshot[field] = field === "options" && descriptor.value !== undefined
       ? materializeOptions(descriptor.value)
-      : descriptor.value;
+      : field === "sourceLayer"
+        ? materializeSourceLayer(descriptor.value, owner)
+        : descriptor.value;
     if (field === "options" && descriptor.value !== undefined && snapshot[field] === undefined) return undefined;
+    if (field === "sourceLayer" && snapshot[field] === undefined) return undefined;
   }
   return Object.freeze(snapshot);
 }
@@ -1096,6 +1173,76 @@ function isOrdinaryRecord(value: unknown): value is Record<PropertyKey, unknown>
   if (typeof value !== "object" || value === null) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function safeMaterializeOwner(owner: NodeObject | undefined): MaterializedOwner | undefined {
+  if (owner === undefined) return undefined;
+  try {
+    if (Object.getPrototypeOf(owner) !== NodeObject.prototype) return undefined;
+    const descriptor = Object.getOwnPropertyDescriptor(owner, "clientKey");
+    if (descriptor === undefined
+      || !("value" in descriptor)
+      || descriptor.enumerable !== true
+      || typeof descriptor.value !== "string") return undefined;
+    return Object.freeze({ object: owner, clientKey: descriptor.value });
+  } catch {
+    return undefined;
+  }
+}
+
+function materializeSourceLayer(value: unknown, owner: NodeObject | undefined): MaterializedSourceLayer | undefined {
+  if (typeof value !== "object"
+    || value === null
+    || !(value instanceof LayerObject)
+    || Object.getPrototypeOf(value) !== LayerObject.prototype) return undefined;
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
+  const allowedFields = new Set<PropertyKey>(["clientKey", "edges", "layout", "nodes", "ref"]);
+  for (const field of Reflect.ownKeys(descriptors)) {
+    if (!allowedFields.has(field)) return undefined;
+    const descriptor = descriptors[field]!;
+    if (!("value" in descriptor) || descriptor.enumerable !== true) return undefined;
+  }
+  const clientKeyDescriptor = descriptors.clientKey;
+  const nodesDescriptor = descriptors.nodes;
+  if (clientKeyDescriptor === undefined
+    || !("value" in clientKeyDescriptor)
+    || typeof clientKeyDescriptor.value !== "string"
+    || nodesDescriptor === undefined
+    || !("value" in nodesDescriptor)) return undefined;
+  const containsOwner = materializeLayerOwnerMembership(nodesDescriptor.value, owner);
+  if (containsOwner === undefined) return undefined;
+  return Object.freeze({ clientKey: clientKeyDescriptor.value, containsOwner });
+}
+
+function materializeLayerOwnerMembership(value: unknown, owner: NodeObject | undefined): boolean | undefined {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return undefined;
+  const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
+  const lengthDescriptor = descriptors.length;
+  if (lengthDescriptor === undefined
+    || !("value" in lengthDescriptor)
+    || typeof lengthDescriptor.value !== "number"
+    || !Number.isSafeInteger(lengthDescriptor.value)
+    || lengthDescriptor.value < 0
+    || lengthDescriptor.value > 8) return undefined;
+  const length = lengthDescriptor.value;
+  const expected = new Set<PropertyKey>(["length"]);
+  let containsOwner = false;
+  for (let index = 0; index < length; index += 1) {
+    const field = String(index);
+    expected.add(field);
+    const descriptor = descriptors[field];
+    if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) return undefined;
+    if (descriptor.value === owner) containsOwner = true;
+  }
+  if (Reflect.ownKeys(descriptors).some((field) => !expected.has(field))) return undefined;
+  return containsOwner;
+}
+
+function isMaterializedSourceLayer(value: unknown): value is MaterializedSourceLayer {
+  return typeof value === "object"
+    && value !== null
+    && typeof (value as MaterializedSourceLayer).clientKey === "string"
+    && typeof (value as MaterializedSourceLayer).containsOwner === "boolean";
 }
 
 const ACTION_COMMON_FIELDS = Object.freeze([
@@ -1149,24 +1296,6 @@ function isStableLayerReference(reference: unknown): reference is LayerReference
     && Array.isArray(reference.edges)
     && "state" in reference
     && (reference.state === "draft" || reference.state === "accepted" || reference.state === "stopped");
-}
-
-function isStableReference(reference: unknown): reference is NodeReference | LayerReference {
-  if (typeof reference === "number") return Number.isSafeInteger(reference) && reference > 0;
-  if (reference instanceof NodeObject || reference instanceof LayerObject) {
-    return isStableIdentity(reference.clientKey);
-  }
-  return typeof reference === "object"
-    && reference !== null
-    && "id" in reference
-    && typeof reference.id === "number"
-    && Number.isSafeInteger(reference.id)
-    && reference.id > 0;
-}
-
-function sourceLayerContainsOwner(sourceLayer: NodeReference | LayerReference, ownerClientKey: string): boolean {
-  return sourceLayer instanceof LayerObject
-    && sourceLayer.nodes.some((node) => node instanceof NodeObject && node.clientKey === ownerClientKey);
 }
 
 function validateElementSafety(
@@ -1437,7 +1566,12 @@ function sourceLocationAt(source: string, offset: number): { readonly line: numb
 }
 
 function isAssetRef(value: unknown): value is AssetRef {
-  return typeof value === "object" && value !== null && DETAIL_ASSET in value;
+  if (typeof value !== "object" || value === null) return false;
+  try {
+    return DETAIL_ASSET in value;
+  } catch {
+    return false;
+  }
 }
 
 function mountId(kind: "capability" | "asset", componentId: string, key: string, occurrence = 0): string {

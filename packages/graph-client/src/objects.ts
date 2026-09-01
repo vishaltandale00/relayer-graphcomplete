@@ -15,7 +15,7 @@ export class NodeObject {
     clientKey: string = randomUUID(),
   ) {
     this.clientKey = clientKey;
-    this.detailAuthoring = createOwnedNodeDetailAuthoring(clientKey);
+    this.detailAuthoring = createOwnedNodeDetailAuthoring(this);
   }
 }
 
