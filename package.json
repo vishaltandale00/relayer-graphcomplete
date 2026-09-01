@@ -38,6 +38,7 @@
     "build:packages": "npm run build -w @relayer/graph-client && npm run build -w @relayer/visual-assets && npm run build -w @relayer/harness-host && npm run build -w @relayer/eval-runner",
     "check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && npm run check:graph-crash-reconciliation && cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && tsc --noEmit && npm run check --workspaces --if-present && vitest run && npm run test:codex-secret-boundary && PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests && npm run lint:ladybug-receipt && npm run prd:check-readability",
     "check:graph-crash-reconciliation": "cargo test -p relayer-graph-core -p relayer-graph-server --features crash-test-support",
+    "doctor:dev": "node scripts/doctor-dev.mjs",
     "test": "cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && vitest run",
     "test:codex-secret-boundary": "RELAYER_RUN_CODEX_SECRET_BOUNDARY=1 vitest run packages/harness-host/test/codex-secret-provider-process.test.ts",
     "test:prime-managed-runtime": "node scripts/verify-prime-managed-runtime.mjs",
