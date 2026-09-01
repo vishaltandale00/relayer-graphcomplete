@@ -1,6 +1,10 @@
 import { join } from "node:path";
 
-import { desktopTarget, desktopTargetFromEnvironment } from "../shared/target.mjs";
+import {
+  desktopTarget,
+  developmentDesktopHost,
+  developmentDesktopHostByKey,
+} from "../shared/target.mjs";
 
 const primeAgentPackage = "@earendil-works/pi-coding-agent";
 export const GRAPH_SEARCH_EVAL_TARGET = "macos-arm64";
@@ -11,9 +15,13 @@ export function evalRuntimeTarget({
   platform = process.platform,
   architecture = process.arch,
 }) {
-  return isPackaged
-    ? desktopTarget({ platform, architecture })
-    : desktopTargetFromEnvironment(environment);
+  if (isPackaged) return desktopTarget({ platform, architecture });
+  const requested = String(environment.RELAYER_DESKTOP_TARGET || "").trim();
+  if (requested) return developmentDesktopHostByKey(requested);
+  return developmentDesktopHost({
+    platform: environment.RELAYER_DESKTOP_TARGET_PLATFORM || platform,
+    architecture: environment.RELAYER_DESKTOP_TARGET_ARCH || architecture,
+  });
 }
 
 export function evalHarnessConfigurationPaths({

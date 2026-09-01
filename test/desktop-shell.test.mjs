@@ -235,6 +235,9 @@ describe("desktop skeleton", () => {
     expect(desktopMain.match(/issueErrorCapability,/gu)).toHaveLength(2);
     expect(desktopMain).toContain("authenticatedErrorReporting?.issueCapability({ component, processGeneration }) ?? null");
     expect(desktopMain).toContain("createDesktopAccountTelemetry");
+    expect(desktopMain).toContain("developmentTelemetryPackageMetadata(desktopVersion)");
+    expect(desktopMain).toContain("appVersion: desktopVersion");
+    expect(desktopMain).toContain("removeLeftoverEphemeralCodexAuthFiles(providerRuntimeRoot)");
     expect(desktopMain).toContain("graphRuntime.refreshErrorCapability()");
     expect(desktopMain).toContain("productServer?.refreshErrorCapability()");
     expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');
@@ -1514,9 +1517,11 @@ describe("desktop skeleton", () => {
       exitCode: null,
       signalCode: null,
       kill: vi.fn(function kill(signal) {
-        this.signalCode = signal;
-        this.emit("exit", null, signal);
-        this.emit("close", null, signal);
+        if (signal === "SIGKILL") {
+          this.signalCode = signal;
+          this.emit("exit", null, signal);
+          this.emit("close", null, signal);
+        }
         return true;
       }),
     });

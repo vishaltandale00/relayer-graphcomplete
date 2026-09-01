@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { projectDesktopTelemetryRelease } from "../desktop/shared/telemetry-release.mjs";
+import {
+  developmentTelemetryPackageMetadata,
+  projectDesktopTelemetryRelease,
+} from "../desktop/shared/telemetry-release.mjs";
 import { DESKTOP_UPDATE_BASE_URLS } from "../desktop/shared/release-metadata.mjs";
+import { desktopTarget, desktopTargetFromEnvironment, developmentDesktopHost, targetForElectronBuilder } from "../desktop/shared/target.mjs";
 
 const sourceCommit = "0123456789abcdef0123456789abcdef01234567";
 
@@ -50,11 +54,7 @@ describe("desktop telemetry release projection", () => {
 
   it("projects an explicit development identity without accepting release metadata", () => {
     expect(projectDesktopTelemetryRelease({
-      packageMetadata: {
-        version: "0.2.16",
-        relayerArtifactMode: "development",
-        relayerProductName: "Relayer Dev",
-      },
+      packageMetadata: developmentTelemetryPackageMetadata("0.2.16"),
       appVersion: "0.2.16",
       platform: "darwin",
       architecture: "arm64",
@@ -65,6 +65,43 @@ describe("desktop telemetry release projection", () => {
       os: "macos",
       architecture: "arm64",
     });
+  });
+
+  it("projects linux-x64 development identity without admitting Linux as a signed-release target", () => {
+    expect(developmentDesktopHost({ platform: "linux", architecture: "x64" }))
+      .toMatchObject({ key: "linux-x64", distributionPlatform: "linux", architecture: "x64" });
+    expect(() => desktopTarget({ platform: "linux", architecture: "x64" }))
+      .toThrow("Unsupported Relayer Desktop target: linux-x64.");
+    expect(() => desktopTargetFromEnvironment({ RELAYER_DESKTOP_TARGET: "linux-x64" }))
+      .toThrow("Unsupported Relayer Desktop release target: linux-x64.");
+    expect(() => targetForElectronBuilder({ platform: "linux", architecture: "x64" }))
+      .toThrow("Unsupported Relayer Desktop target: linux-x64.");
+    expect(projectDesktopTelemetryRelease({
+      packageMetadata: developmentTelemetryPackageMetadata("0.2.16"),
+      appVersion: "0.2.16",
+      platform: "linux",
+      architecture: "x64",
+      currentUpdateChannel: "development",
+    })).toEqual({
+      release: "ai.relayer.desktop.development@0.2.16",
+      environment: "development",
+      os: "linux",
+      architecture: "x64",
+    });
+    expect(() => project({
+      platform: "linux",
+      architecture: "x64",
+    })).toThrow("Desktop telemetry sealed release metadata is invalid.");
+  });
+
+  it("rejects Electron's unsigned Linux app version", () => {
+    expect(() => projectDesktopTelemetryRelease({
+      packageMetadata: developmentTelemetryPackageMetadata("0.0"),
+      appVersion: "0.0",
+      platform: "linux",
+      architecture: "x64",
+      currentUpdateChannel: "development",
+    })).toThrow("Desktop telemetry release version does not match package metadata.");
   });
 
   it.each([

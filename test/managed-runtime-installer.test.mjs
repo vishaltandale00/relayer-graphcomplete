@@ -1121,9 +1121,47 @@ describe("managed runtime installer", () => {
     }
   });
 
-  it("rejects targets outside the desktop release matrix", () => {
-    expect(() => createManagedRuntimeInstaller({ root: "/runtime", platform: "linux", architecture: "x64" }))
-      .toThrow("Unsupported managed runtime target: linux-x64");
+  it("resolves the Codex Linux development artifact through the root package alias", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    const nativeBytes = Buffer.from("codex linux archive");
+    const tarball = "https://registry.npmjs.org/codex-linux.tgz";
+    const fetch = registryFixture(new Map([
+      ["https://registry.npmjs.org/@openai%2fcodex/latest", {
+        name: "@openai/codex", version: "0.150.1",
+        optionalDependencies: { "@openai/codex-linux-x64": "npm:@openai/codex@0.150.1-linux-x64" },
+        dist: { tarball: "https://registry.npmjs.org/unused-root.tgz", integrity: integrity(Buffer.from("unused")) },
+      }],
+      ["https://registry.npmjs.org/@openai%2fcodex/0.150.1-linux-x64", {
+        name: "@openai/codex", version: "0.150.1-linux-x64",
+        dist: { tarball, integrity: integrity(nativeBytes) },
+      }],
+      [tarball, nativeBytes],
+    ]));
+
+    try {
+      const installer = createManagedRuntimeInstaller({
+        root, platform: "linux", architecture: "x64", fetch,
+        extract: async (_tarball, destination) => {
+          const bin = join(destination, "vendor", "x86_64-unknown-linux-musl", "bin");
+          await mkdir(bin, { recursive: true });
+          await writeFile(join(bin, "codex"), "managed codex");
+        },
+        probes: { codex: async ({ version }) => ({ version }) },
+      });
+      const result = await installer.ensure("codex", "0.147.0");
+      expect(result).toMatchObject({ runtimeId: "codex", version: "0.150.1", target: "linux-x64" });
+      expect(result.executable).toMatch(/vendor[/\\]x86_64-unknown-linux-musl[/\\]bin[/\\]codex$/);
+      expect(fetch.mock.calls.map(([url]) => String(url))).toContain(
+        "https://registry.npmjs.org/@openai%2fcodex/0.150.1-linux-x64",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects targets outside the supported host matrix", () => {
+    expect(() => createManagedRuntimeInstaller({ root: "/runtime", platform: "linux", architecture: "arm64" }))
+      .toThrow("Unsupported managed runtime target: linux-arm64");
     expect(() => createManagedRuntimeInstaller({ root: "/runtime", platform: "win32", architecture: "arm64" }))
       .toThrow("Unsupported managed runtime target: win32-arm64");
   });
