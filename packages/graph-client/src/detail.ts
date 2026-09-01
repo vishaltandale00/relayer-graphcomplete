@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { generate as generateCss, parse as parseCss, tokenTypes, tokenize as tokenizeCss, walk as walkCss } from "css-tree/dist/csstree.esm";
 import type { CssNode, SyntaxParseError } from "css-tree";
 import { parseFragment, serialize, type DefaultTreeAdapterTypes, type ParserError } from "parse5";
+import { isSupportedRelayerIcon } from "./icons.js";
 import { LayerObject, NodeObject, type ActionObject, type InputActionObject, type InvokeActionObject, type LayerReference, type NavigateActionObject, type NodeReference } from "./objects.js";
 
 const DETAIL_TEMPLATE = Symbol("detail-template");
@@ -178,6 +179,11 @@ interface AuthoringState {
   frozen: boolean;
 }
 
+interface DomIdentityRecord {
+  readonly componentId: string;
+  readonly element: HtmlElement;
+}
+
 const AUTHORING_STATE = new WeakMap<NodeDetailAuthoring, AuthoringState>();
 
 export class NodeDetailAuthoring {
@@ -308,6 +314,7 @@ function compileAuthoring(
       message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxComponents} components`,
     }));
   }
+  const domIdentities = collectDomIdentities(state.components, issues);
   const components = Object.freeze([...state.components.entries()]
     .sort((left, right) => left[1].order - right[1].order)
     .map(([id, component]) => {
@@ -324,7 +331,7 @@ function compileAuthoring(
       return Object.freeze({
         id,
         order: component.order,
-        html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver, ownerClientKey),
+        html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver, ownerClientKey, domIdentities),
         css: compileCss(id, component.styles, issues),
       });
     }));
@@ -386,6 +393,7 @@ function compileHtml(
   issues: DetailCompilationIssue[],
   assetResolver: DetailAssetResolver,
   ownerClientKey: string | undefined,
+  domIdentities: ReadonlyMap<string, DomIdentityRecord>,
 ): string {
   if (template[DETAIL_TEMPLATE] !== "html") throw new Error("Node Detail component markup must use html``");
   const source = bindingSource(componentId, template, issues);
@@ -414,14 +422,14 @@ function compileHtml(
     const value = template.values[index];
     element.attrs = element.attrs.filter((attribute) => attribute !== binding);
     if (isDetailCapability(value)) {
-      const validationCodes = capabilityValidationCodes(value, ownerClientKey);
+      const validationCodes = safeCapabilityValidationCodes(value, ownerClientKey);
       const validCapability = validationCodes.length === 0;
       if (!validCapability) {
         for (const code of validationCodes) {
           issues.push(sourceIssue(code, componentId, element, `Invalid ${value.kind} capability declaration: ${code}`));
         }
       }
-      if (!isCompatibleCapabilityHost(value, element)) {
+      if (validCapability && !isCompatibleCapabilityHost(value, element)) {
         issues.push(sourceIssue(
           "capability_host_incompatible",
           componentId,
@@ -429,7 +437,7 @@ function compileHtml(
           `${value.kind} capability cannot bind to <${element.tagName}>`,
         ));
       }
-      if (!hasAccessibleName(element, fragment)) {
+      if (!hasAccessibleName(element, fragment, domIdentities)) {
         issues.push(sourceIssue(
           "accessibility_name_required",
           componentId,
@@ -437,7 +445,7 @@ function compileHtml(
           `The <${element.tagName}> capability host needs an authored accessible name`,
         ));
       }
-      normalizeCapabilityHost(componentId, value, element, issues);
+      if (validCapability) normalizeCapabilityHost(componentId, value, element, issues);
       const id = mountId("capability", componentId, value.key);
       element.attrs.push({ name: "data-gc-mount", value: id });
       const duplicateMount = mounts.some((mount) => mount.id === id);
@@ -495,6 +503,36 @@ function compileHtml(
     }));
   }
   return serializeHtml(fragment).replace(/\r\n?/g, "\n").trim();
+}
+
+function collectDomIdentities(
+  components: ReadonlyMap<string, AuthoringComponent>,
+  issues: DetailCompilationIssue[],
+): ReadonlyMap<string, DomIdentityRecord> {
+  const identities = new Map<string, DomIdentityRecord>();
+  const duplicates = new Set<string>();
+  for (const [componentId, component] of components) {
+    const scratchIssues: DetailCompilationIssue[] = [];
+    const source = bindingSource(componentId, component.markup, scratchIssues);
+    const fragment = parseAuthoredHtml(source, componentId, scratchIssues);
+    visitElements(fragment, (element) => {
+      const id = attributeValue(element, "id");
+      if (id === undefined || !isStableDomIdentity(id)) return;
+      if (duplicates.has(id) || identities.has(id)) {
+        identities.delete(id);
+        duplicates.add(id);
+        issues.push(sourceIssue(
+          "dom_id_duplicate",
+          componentId,
+          element,
+          `DOM id ${id} must be unique across the complete authored detail`,
+        ));
+        return;
+      }
+      identities.set(id, Object.freeze({ componentId, element }));
+    });
+  }
+  return identities;
 }
 
 function bindingLocation(template: DetailTemplate, bindingIndex: number): { readonly line: number; readonly column: number } {
@@ -893,13 +931,14 @@ function capabilityValidationCodes(capability: DetailCapability, ownerClientKey:
     if (!isStableReference(action.sourceLayer)) return ["capability_invalid"];
     if (!sourceLayerContainsOwner(action.sourceLayer, ownerClientKey)) return ["capability_source_layer_mismatch"];
     if (!(action.kind === capability.kind || (action.kind === "navigate" && action.relation === capability.kind))) return ["capability_invalid"];
+    if (!hasExactActionFields(action) || !hasValidActionPresentation(action)) return ["capability_invalid"];
     if (typeof action.label !== "string" || action.label.trim() === "") return ["capability_invalid"];
     if (action.kind === "invoke") {
       return typeof action.interactionText !== "string" || action.interactionText.trim() === ""
         ? ["capability_invalid"]
         : [];
     }
-    if (action.kind === "navigate") return isStableReference(action.target) ? [] : ["capability_invalid"];
+    if (action.kind === "navigate") return isStableLayerReference(action.target) ? [] : ["capability_invalid"];
     if (action.kind !== "input"
       || (action.control !== "text" && action.control !== "single_select" && action.control !== "multi_select")
       || typeof action.prompt !== "string") return ["capability_invalid"];
@@ -920,7 +959,9 @@ function capabilityValidationCodes(capability: DetailCapability, ownerClientKey:
       for (const option of action.options) {
         if (typeof option !== "object" || option === null) return ["capability_invalid"];
         const optionRecord = option as Record<string, unknown>;
-        if (typeof optionRecord.key !== "string" || typeof optionRecord.label !== "string") return ["capability_invalid"];
+        if (!hasOnlyEnumerableFields(optionRecord, ["key", "label"])
+          || typeof optionRecord.key !== "string"
+          || typeof optionRecord.label !== "string") return ["capability_invalid"];
         const optionKey = optionRecord.key;
         const optionLabel = optionRecord.label;
         if (optionKey === ""
@@ -960,6 +1001,70 @@ function capabilityValidationCodes(capability: DetailCapability, ownerClientKey:
   }
 }
 
+function safeCapabilityValidationCodes(
+  capability: DetailCapability,
+  ownerClientKey: string | undefined,
+): readonly string[] {
+  try {
+    return capabilityValidationCodes(capability, ownerClientKey);
+  } catch {
+    return ["capability_invalid"];
+  }
+}
+
+const ACTION_COMMON_FIELDS = Object.freeze([
+  "clientKey", "description", "icon", "kind", "label", "ref", "sourceLayer", "variant",
+]);
+
+function hasExactActionFields(action: Record<string, unknown>): boolean {
+  if (action.kind === "navigate") {
+    return hasOnlyEnumerableFields(action, [...ACTION_COMMON_FIELDS, "relation", "target"]);
+  }
+  if (action.kind === "invoke") {
+    return hasOnlyEnumerableFields(action, [...ACTION_COMMON_FIELDS, "interactionText"]);
+  }
+  if (action.kind === "input") {
+    return hasOnlyEnumerableFields(action, [
+      ...ACTION_COMMON_FIELDS, "control", "minimumSelections", "options", "prompt",
+    ]);
+  }
+  return false;
+}
+
+function hasOnlyEnumerableFields(value: object, allowed: readonly string[]): boolean {
+  const allowedFields = new Set<PropertyKey>(allowed);
+  return Reflect.ownKeys(value)
+    .filter((key) => Object.prototype.propertyIsEnumerable.call(value, key))
+    .every((key) => allowedFields.has(key));
+}
+
+function hasValidActionPresentation(action: Record<string, unknown>): boolean {
+  const variant = action.variant ?? "pill";
+  if (variant !== "pill" && variant !== "chip" && variant !== "wide" && variant !== "card") return false;
+  if (action.icon !== undefined
+    && (typeof action.icon !== "string" || !isSupportedRelayerIcon(action.icon))) return false;
+  if (variant === "card") return typeof action.description === "string" && action.description.trim() !== "";
+  return action.description === undefined;
+}
+
+function isStableLayerReference(reference: unknown): reference is LayerReference {
+  if (typeof reference === "number") return Number.isSafeInteger(reference) && reference > 0;
+  if (reference instanceof LayerObject) return isStableIdentity(reference.clientKey);
+  return typeof reference === "object"
+    && reference !== null
+    && !(reference instanceof NodeObject)
+    && "id" in reference
+    && typeof reference.id === "number"
+    && Number.isSafeInteger(reference.id)
+    && reference.id > 0
+    && "nodes" in reference
+    && Array.isArray(reference.nodes)
+    && "edges" in reference
+    && Array.isArray(reference.edges)
+    && "state" in reference
+    && (reference.state === "draft" || reference.state === "accepted" || reference.state === "stopped");
+}
+
 function isStableReference(reference: unknown): reference is NodeReference | LayerReference {
   if (typeof reference === "number") return Number.isSafeInteger(reference) && reference > 0;
   if (reference instanceof NodeObject || reference instanceof LayerObject) {
@@ -983,6 +1088,15 @@ function validateElementSafety(
   element: HtmlElement,
   issues: DetailCompilationIssue[],
 ): void {
+  const domId = attributeValue(element, "id");
+  if (domId !== undefined && !isStableDomIdentity(domId)) {
+    issues.push(sourceIssue(
+      "dom_id_invalid",
+      componentId,
+      element,
+      "DOM id must be nonempty, trimmed, NUL-free, and at most 128 UTF-8 bytes",
+    ));
+  }
   if (!SAFE_HTML_ELEMENTS.has(element.tagName)) {
     issues.push(sourceIssue("unsafe_html_element", componentId, element, `<${element.tagName}> is not allowed in Node Detail HTML`));
   }
@@ -1023,6 +1137,10 @@ function validateElementSafety(
       ));
     }
   }
+}
+
+function isStableDomIdentity(value: string): boolean {
+  return isStableIdentity(value) && !value.includes("\uFFFD");
 }
 
 const SAFE_HTML_ELEMENTS = new Set([
@@ -1141,13 +1259,17 @@ const REJECTING_ASSET_RESOLVER: DetailAssetResolver = Object.freeze({
   resolve: () => undefined,
 });
 
-function hasAccessibleName(element: HtmlElement, root: HtmlRoot): boolean {
+function hasAccessibleName(
+  element: HtmlElement,
+  root: HtmlRoot,
+  domIdentities: ReadonlyMap<string, DomIdentityRecord>,
+): boolean {
   if (isAriaHidden(element)) return false;
   const labelledBy = attributeValue(element, "aria-labelledby");
   if (labelledBy !== undefined) {
     const ids = labelledBy.trim().split(/\s+/).filter(Boolean);
     return ids.length > 0 && ids.every((id) => {
-      const target = findElementById(root, id);
+      const target = isStableDomIdentity(id) ? domIdentities.get(id)?.element : undefined;
       return target !== undefined && namingText(target, isAriaHidden(target)).trim() !== "";
     });
   }
@@ -1198,14 +1320,6 @@ function isAriaHidden(element: HtmlElement): boolean {
     current = "parentNode" in current ? current.parentNode : undefined;
   }
   return false;
-}
-
-function findElementById(root: HtmlRoot, id: string): HtmlElement | undefined {
-  let found: HtmlElement | undefined;
-  visitElements(root, (element) => {
-    if (found === undefined && attributeValue(element, "id") === id) found = element;
-  });
-  return found;
 }
 
 function parseAuthoredHtml(source: string, componentId: string, issues: DetailCompilationIssue[]): HtmlRoot {

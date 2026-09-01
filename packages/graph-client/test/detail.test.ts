@@ -47,6 +47,41 @@ describe("typed Node Detail authoring compiler", () => {
     );
   });
 
+  it("rejects malformed authored DOM identities at their source elements", () => {
+    const detail = new NodeDetailAuthoring();
+    detail.setComponent("invalid-dom-ids", htmlSource(`
+      <span id=" leading">Whitespace</span>
+      <span id="${"x".repeat(129)}">Oversized</span>
+      <span id="nul${String.fromCharCode(0)}identity">NUL</span>
+      <span id="">Empty</span>
+    `));
+
+    expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: "dom_id_invalid", componentId: "invalid-dom-ids", line: 2 }),
+        expect.objectContaining({ code: "dom_id_invalid", componentId: "invalid-dom-ids", line: 3 }),
+        expect.objectContaining({ code: "dom_id_invalid", componentId: "invalid-dom-ids", line: 4 }),
+        expect.objectContaining({ code: "dom_id_invalid", componentId: "invalid-dom-ids", line: 5 }),
+      ]),
+    }));
+  });
+
+  it("rejects package-wide DOM id collisions and prevents aria-labelledby from using them", () => {
+    const detail = new NodeDetailAuthoring();
+    detail.setComponent("first-label", html`<span id="shared-label">First label</span>`);
+    detail.setComponent("second-label", html`<span id="shared-label">Second label</span>`);
+    detail.setComponent("labelled-link", html`
+      <a gc=${detailCapability.externalLink("docs", "https://example.com/docs")} aria-labelledby="shared-label"><span aria-hidden="true">↗</span></a>
+    `);
+
+    expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: "dom_id_duplicate", componentId: "second-label", line: 1 }),
+        expect.objectContaining({ code: "accessibility_name_required", componentId: "labelled-link", line: 2 }),
+      ]),
+    }));
+  });
+
   it("compiles an external-link capability and host-resolved visual into opaque native-host mounts", async () => {
     const node = new NodeObject("box", "Documentation", "Fallback", "concept", "documentation-node");
     const detail = node.detailAuthoring;
@@ -381,7 +416,7 @@ describe("typed Node Detail authoring compiler", () => {
     const source = new NodeObject("box", "Source", "Fallback", "concept", "source");
     const layer = new LayerObject([source], [], new LayerLayoutObject([new NodePlacementObject(source, 0.5, 0.5)]), "layer");
     const input = { kind: "input", label: "Choose", control: "single_select", prompt: "Choose", options: [{ key: "a", label: "A" }], sourceLayer: layer, clientKey: "choose" } satisfies ActionObject;
-    const detail = new NodeDetailAuthoring();
+    const detail = source.detailAuthoring;
     detail.setComponent("bad-hosts", html`
       <button gc=${detailCapability.externalLink("docs", "https://docs.example.com")}>Docs</button>
       <textarea gc=${detailCapability.input("choose", input)} aria-label="Choose"></textarea>
@@ -785,12 +820,13 @@ describe("typed Node Detail authoring compiler", () => {
     `);
 
     expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
-      issues: [
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: "dom_id_duplicate", componentId: "link-names", line: 7 }),
         expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 2 }),
         expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 3 }),
         expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 5 }),
         expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 8 }),
-      ],
+      ]),
     }));
   });
 

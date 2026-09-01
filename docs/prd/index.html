@@ -2271,6 +2271,7 @@ settings:
 <li>Graph-action mounts derive source-node provenance from the owning node. Capability calls supply only the action; its exact draft source layer must contain that owner.</li>
 <li>Authors checkpoint stable HTML and CSS components through <code>checkpointNodeDetail</code> before submission. Checkpoint errors retain component and source locations; there is no public author-controlled finalize operation.</li>
 <li><code>gc=${capability}</code> binds typed actions to compatible native hosts. <code>asset=${assetRef}</code> carries only a logical visual identity.</li>
+<li>Runtime action values use the exact graph-client grammar. Unknown fields, node navigation targets, malformed options, and invalid presentations fail at their authored source.</li>
 <li>Author code cannot provide asset authority, availability, digest, sanitization, or a resolver.</li>
 <li>The client resolves logical assets through authenticated transport, validates the complete response as untrusted data, then compiles directly from the node’s authored templates.</li>
 <li>The first submit finalization is one in-progress promise in a private client map keyed by the exact <code>NodeObject</code>. It is installed before resolution begins.</li>
@@ -2278,6 +2279,7 @@ settings:
 <li>Public compiler calls cannot seed retry state or replace the package sent by <code>submitNode</code>.</li>
 <li>Asset IDs are trimmed, NUL-free, at most 128 UTF-8 bytes, deduplicated, and bounded to 32 assets and 64 references before transport. Repeated placements share one resolved asset but retain stable authored occurrence mounts.</li>
 <li>The compiler uses browser-equivalent HTML construction plus a documented accessible-name subset. It supports authored text, title, <code>aria-label</code>, deterministic <code>aria-labelledby</code>, external form labels, and descendant image alt.</li>
+<li>Every DOM <code>id</code> is stable and package-unique. <code>aria-labelledby</code> resolves only through that validated registry.</li>
 <li>Hidden descendants do not name a host unless their hidden node is directly referenced by <code>aria-labelledby</code>. This foundation does not claim the complete browser AccName algorithm.</li>
 <li>Markup and CSS selectors, pseudos, functions, properties, sizes, and traversal all use deterministic fail-closed rules.</li>
 <li>Every emitted stable identity is trimmed, NUL-free, and at most 128 UTF-8 bytes.</li>
@@ -2290,8 +2292,8 @@ settings:
 <table>
 <thead><tr><th>Checkpoint</th><th>Public deterministic proof</th></tr></thead>
 <tbody>
-<tr><td>Owner provenance and action validity</td><td><code>packages/graph-client/test/detail.test.ts</code> covers owner-derived source nodes, legacy spoof rejection, owner membership in exact draft source layers, unknown runtime values, and graph-core input invariants.</td></tr>
-<tr><td>Markup, CSS, and accessible names</td><td><code>packages/graph-client/test/detail.test.ts</code> covers browser tree construction, safe selectors and pseudos, CSS resource rejection, labels, hidden content, image alt, and duplicate IDs.</td></tr>
+<tr><td>Owner provenance and action validity</td><td>Public and packaged tests cover exact action fields, layer targets, presentations, options, owner provenance, and graph-core input invariants.</td></tr>
+<tr><td>Markup, CSS, and accessible names</td><td>Public tests cover browser trees, safe CSS, package-unique DOM IDs, validated label references, hidden content, and image alt.</td></tr>
 <tr><td>Authenticated logical assets</td><td>Public tests prove pre-transport bounds, hostile-response rejection, deduplicated resolution, private authority, and stable repeated-placement mounts.</td></tr>
 <tr><td>Draft lifecycle and retry identity</td><td><code>packages/graph-client/test/objects.test.ts</code> proves incremental checkpointing, single-flight finalization, repair after compilation failure, post-submit locking, legacy strings, concurrent identity, and byte-identical failed-request retry.</td></tr>
 <tr><td>Private submit authority</td><td><code>test/graph-client-packaged-detail.test.mjs</code> rejects both compiler and host-bridge sibling imports and proves public forged output cannot enter submission.</td></tr>

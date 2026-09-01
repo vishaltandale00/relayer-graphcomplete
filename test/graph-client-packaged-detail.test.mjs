@@ -46,6 +46,85 @@ describe("packaged graph-client authored detail boundary", () => {
     ]);
   });
 
+  it("rejects forged action shapes through the packaged public checkpoint seam", async () => {
+    const {
+      DetailCompilationError,
+      LayerLayoutObject,
+      LayerObject,
+      NodeObject,
+      RelayerGraphClient,
+      detailCapability,
+      html,
+    } = await import(graphClientIndexUrl.href);
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const cases = [
+      {
+        name: "node-target",
+        capability: "expand",
+        action: (owner, sourceLayer) => ({
+          kind: "navigate", relation: "expand", label: "Open", target: owner, sourceLayer, clientKey: "node-target",
+        }),
+      },
+      {
+        name: "extra-option-field",
+        capability: "input",
+        action: (_owner, sourceLayer) => ({
+          kind: "input", label: "Choose", control: "single_select", prompt: "Choose",
+          options: [{ key: "one", label: "One", value: "forged" }], sourceLayer, clientKey: "extra-option-field",
+        }),
+      },
+      {
+        name: "unknown-action-field",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => ({
+          kind: "invoke", label: "Run", interactionText: "Run", sourceLayer, clientKey: "unknown-action-field", targetLayerId: 42,
+        }),
+      },
+      {
+        name: "invalid-presentation",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => ({
+          kind: "invoke", label: "Run", interactionText: "Run", sourceLayer, clientKey: "invalid-presentation",
+          variant: "banner", description: "Forged presentation",
+        }),
+      },
+      {
+        name: "invalid-description",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => ({
+          kind: "invoke", label: "Run", interactionText: "Run", sourceLayer, clientKey: "invalid-description",
+          variant: "pill", description: "Cards only",
+        }),
+      },
+      {
+        name: "throwing-field",
+        capability: "invoke",
+        action: (_owner, sourceLayer) => ({
+          kind: "invoke",
+          get label() { throw new TypeError("caller getter escaped"); },
+          interactionText: "Run",
+          sourceLayer,
+          clientKey: "throwing-field",
+        }),
+      },
+    ];
+
+    for (const scenario of cases) {
+      const owner = new NodeObject("box", "Owner", "Fallback", "concept", `${scenario.name}-owner`);
+      const sourceLayer = new LayerObject([owner], [], new LayerLayoutObject([]), `${scenario.name}-layer`);
+      const action = scenario.action(owner, sourceLayer);
+      const capability = detailCapability[scenario.capability](scenario.name, action);
+      owner.detailAuthoring.setComponent(scenario.name, html`<button gc=${capability}>Action</button>`);
+
+      await expect(client.checkpointNodeDetail(owner)).rejects.toBeInstanceOf(DetailCompilationError);
+      await expect(client.checkpointNodeDetail(owner)).rejects.toMatchObject({
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: "capability_invalid", componentId: scenario.name, line: 1 }),
+        ]),
+      });
+    }
+  });
+
   it("imports, compiles, and submits from the exact isolated packaged resource layout", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-packaged-graph-client-"));
     try {
