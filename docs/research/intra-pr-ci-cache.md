@@ -291,6 +291,34 @@ would need `SCCACHE_LOG`-level debugging on a hosted run. The next material
 levers are therefore the crash-lane cadence staging and any reduction of the
 configure/probe cost, not further cache-key work.
 
+### Local sccache experiment on the Ladybug build
+
+To test whether the per-lane Ladybug floor was compile cost or cache overhead,
+the pinned sccache 0.17.0 was run locally against `cargo build -p lbug` with
+CI-parity settings (`CARGO_INCREMENTAL=0`, `line-tables-only` dev profile,
+`RUSTC_WRAPPER=sccache`):
+
+| Run | Wall | Requests | C/C++ hits | C/C++ misses |
+| --- | --- | --- | --- | --- |
+| 1, cold cache | 249s | 1125 | 0 | 1062 |
+| 2, fresh target dir, same cache | 43s | 1125 | 1054 (99.25%) | 8 |
+
+Two conclusions follow. First, the Ladybug CMake build is effectively fully
+cacheable through sccache when paths are stable; the cold 249s matches the
+hosted per-lane Ladybug unit (244–328s), so the hosted lanes are paying close
+to the cold compile cost shape despite their 88–91% C/C++ hit rates. Second,
+the hosted floor is therefore dominated by cache overhead rather than
+compilation: roughly 1,000 cache reads at the observed 0.07–0.23s each, CMake
+reconfiguration and its configure-time probes, the residual miss tail, and the
+final archive step, all on four cores. Cache-key work cannot reduce that floor
+further. The remaining candidate with material headroom is building the pinned
+Ladybug source once in a trusted job and restoring the resulting static
+library through a source-hash-keyed cache entry (`LBUG_LIBRARY_DIR` +
+`LBUG_INCLUDE_DIR` are supported by the crate build script); that keeps the
+reviewed bundled source as the build input and every test fresh, but it
+changes the "compile from source in every lane" property and needs an explicit
+decision before implementation.
+
 ## Ranked next options
 
 ### 1. Keep sccache admitted in Rust, then verify the trusted-main consumer
