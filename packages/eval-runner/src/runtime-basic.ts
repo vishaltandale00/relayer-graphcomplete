@@ -1,5 +1,5 @@
 import { Codex, type CodexOptions, type ThreadOptions, type TurnOptions } from "@openai/codex-sdk";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -7,6 +7,7 @@ import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { EdgeObject, LayerLayoutObject, LayerObject, NodePlacementObject, RelayerGraphClient, NodeObject } from "@relayer/graph-client";
 import type { CompletionOutput, GraphCapability, GraphNode, ResolvedLayer } from "@relayer/graph-client";
 import { digestHarnessConfiguration, startHarnessHost, type HarnessConfiguration, type HarnessFactory, type HarnessImplementationMap, type RunningHarnessHost } from "@relayer/harness-host";
 import {
@@ -166,6 +167,7 @@ export interface GraphMemoryEvidence {
 
 export async function runBasicRuntimeEval(options: {
   outputDirectory: string;
+  keepState?: boolean;
   execution: TestExecutionPlan<BasicJudgeConfiguration>;
   implementations: HarnessImplementationMap;
   serverBinary?: string;
@@ -215,6 +217,7 @@ export async function runBasicRuntimeEval(options: {
     const turns: RuntimeEvalTurn[] = [];
     const sessionStateSnapshots: unknown[] = [];
     const turnStartSequences: number[] = [];
+    let personalPresentationVersionKeyAccepted: number | false = false;
     const prompts = options.execution.testCaseId === replayRepairEvalCaseId
       ? [replayRepairEvalPrompt]
       : options.execution.testCaseId === graphMemoryEvalCaseId
@@ -230,6 +233,14 @@ export async function runBasicRuntimeEval(options: {
       });
       const capability = { url: graphAuditProxy?.url ?? graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
+      const personalPresentationVersionKey = configuration.settings?.personalPresentationVersion as string | undefined;
+      if (personalPresentationVersionKey !== undefined && personalPresentationVersionKey !== "personal-presentation-v0" && personalPresentationVersionKeyAccepted === false) {
+        const version = await ensurePersonalPresentationVersion(graphProcess.url, graphControlToken, personalPresentationVersionKey);
+        personalPresentationVersionKeyAccepted = version.interactionNodeId;
+        await requestJson(`${graphProcess.url}/api/control/interactions/${interaction.node.id}/personal-presentation`, graphControlToken, {
+          versionInteractionNodeId: version.interactionNodeId,
+        });
+      }
       const complete = await completeWithCapabilityCleanup(async () => {
         await requestJson(`${runningHarnessHost.url}/sessions`, harnessControlToken, { threadId, configuration, permissionProfileId, workingDirectory }, 201);
         return requestJson<{ output: CompletionOutput }>(`${runningHarnessHost.url}/sessions/${threadId}/complete`, harnessControlToken, {
@@ -343,10 +354,10 @@ export async function runBasicRuntimeEval(options: {
       },
       async () => {
         if (workingDirectoryCanBeRemoved && graphProcessStopped) {
-          await rm(workingDirectory, { recursive: true, force: true });
+          if (!options.keepState) await rm(workingDirectory, { recursive: true, force: true });
         } else if (graphProcessStopped && deferredHarnessClose !== undefined) {
           void deferredHarnessClose
-            .then(() => rm(workingDirectory, { recursive: true, force: true }))
+            .then(() => { if (!options.keepState) rm(workingDirectory, { recursive: true, force: true }); })
             .catch(() => undefined);
         }
       },
@@ -1182,7 +1193,18 @@ async function terminate(child: ChildProcessWithoutNullStreams): Promise<void> {
     await exited;
   }
 }
-async function requestJson<T=unknown>(url:string,token:string,body:unknown,expected=200):Promise<T>{const response=await fetch(url,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify(body)});const value=await response.json();if(response.status!==expected)throw new Error(`Request ${url} failed (${response.status}): ${JSON.stringify(value)}`);return value as T;}
+const RAW_JSON_REPLACER = /"threadId":\s*"([0-9]+)"/g;
+function rawJsonSerialize(value: unknown): string {
+  // Thread IDs near i64::MAX round through Number(). Emit the exact string, then unwrap the quotes.
+  return JSON.stringify(value).replace(RAW_JSON_REPLACER, (_match, rawId) => `"threadId":${rawId}`);
+}
+async function requestJson<T=unknown>(url:string,token:string,body:unknown,expected=200):Promise<T>{
+  const serialized = rawJsonSerialize(body);
+  const response = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: serialized });
+  const value = await response.json();
+  if (response.status !== expected) throw new Error(`Request ${url} failed (${response.status}): ${JSON.stringify(value)}`);
+  return value as T;
+}
 
 async function requestControlJson<T>(url: string, token: string): Promise<T> {
   const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
@@ -1371,4 +1393,85 @@ export function executionDirectory(
   execution: Pick<TestExecutionPlan<unknown>, "testRunId" | "testCaseId" | "harnessConfigurationName">,
 ): string {
   return join(resolve(outputDirectory), execution.testRunId, execution.testCaseId, execution.harnessConfigurationName);
+}
+
+interface PersonalPresentationVersionManifest {
+  readonly text: string;
+  readonly nodes: readonly { clientKey: string; kind: string; icon: string; title: string; detail: string }[];
+}
+
+const PERSONAL_PRESENTATION_PROFILE_THREAD_ID = "9223372036854775807";
+const PERSONAL_PRESENTATION_MANIFESTS: Readonly<Record<string, PersonalPresentationVersionManifest>> = Object.freeze({
+  "personal-presentation-v1": Object.freeze({
+    text: "Personal presentation V1",
+    nodes: Object.freeze([
+      { clientKey: "decision-useful-center", kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "The user prefers central layers that are immediately decision-useful. Foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations." },
+      { clientKey: "adaptive-progressive-disclosure", kind: "presentation-preference", icon: "layers", title: "Adaptive progressive disclosure", detail: "Reveal additional information according to its value to understanding. Keep information central when it is necessary to understand the response without navigating. Use graph actions when supporting evidence, implementation detail, or secondary context would materially improve understanding or help the user proceed. Do not add branches that merely repeat or decorate the central explanation." },
+    ]),
+  }),
+  "personal-presentation-v2": Object.freeze({
+    text: "Personal presentation V2",
+    nodes: Object.freeze([
+      { clientKey: "decision-useful-center", kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "The user prefers central layers that are immediately decision-useful. Foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations." },
+      { clientKey: "adaptive-progressive-disclosure", kind: "presentation-preference", icon: "layers", title: "Adaptive progressive disclosure", detail: "Reveal additional information according to its value to understanding. Keep information central when it is necessary to understand the response without navigating. Use graph actions when supporting evidence, implementation detail, or secondary context would materially improve understanding or help the user proceed. Do not add branches that merely repeat or decorate the central explanation." },
+      { clientKey: "visible-working-state", kind: "presentation-preference", icon: "workflow", title: "Visible working state", detail: "For work that will not finish immediately, prefer establishing a useful current early and advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress even when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates." },
+      { clientKey: "authored-visual-node-details", kind: "presentation-preference", icon: "layout-template", title: "Authored visual Node Details", detail: "When a node's detail benefits from visual presentation, author a compiled visual Node Detail through the node detail authoring API instead of plain Markdown: structured HTML with authored CSS layout, placed visual assets, and capability controls such as links, invokes, inputs, expands, and references. Keep the authored page self-contained, keyboard operable, and accessible, and let authored actions live inside the detail page rather than a separate action tray." },
+    ]),
+  }),
+});
+
+async function ensurePersonalPresentationVersion(graphUrl: string, controlToken: string, versionKey: string): Promise<{ readonly interactionNodeId: number; readonly rootLayerId: number }> {
+  const definition = PERSONAL_PRESENTATION_MANIFESTS[versionKey];
+  if (definition === undefined) throw new Error(`Unsupported personal presentation version: ${versionKey}`);
+  // The eval runner owns a fresh graph server each run, so create a fresh manifest interaction.
+  const created = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphUrl}/api/control/interactions`, controlToken, {
+    projectId: null,
+    threadId: PERSONAL_PRESENTATION_PROFILE_THREAD_ID as unknown as number,
+    text: definition.text,
+    inputIdentity: `relayer.personal-presentation:${versionKey}`,
+    inputDigest: sha256Hex(JSON.stringify({ schemaVersion: 1, text: definition.text, contexts: [] })),
+    contexts: [],
+    mintCapability: true,
+    personalPresentationProfile: true,
+  }, 200);
+  // Submit the manifest nodes and one layer through the minted capability.
+  const capability = { url: graphUrl, token: created.graphToken, nodeId: created.node.id };
+  const client = new RelayerGraphClient(capability);
+  const nodes = definition.nodes.map((node) => new NodeObject(node.icon, node.title, node.detail, node.kind, node.clientKey));
+  const submitted = [] as NodeObject[];
+  for (const node of nodes) {
+    await client.submitNode(node);
+    submitted.push(node);
+  }
+  const placementsByCount = {
+    2: [[0.25, 0.5], [0.75, 0.5]] as const,
+    4: [[0.5, 0.15], [0.2, 0.75], [0.5, 0.8], [0.8, 0.75]] as const,
+  } as const;
+  const placements = (placementsByCount[submitted.length as keyof typeof placementsByCount] ?? placementsByCount[4]);
+  const layout = new LayerLayoutObject(submitted.map((node, index) => {
+    const [x, y] = (placements[index] ?? [0.5 as number, 0.5 as number]) as readonly number[];
+    return new NodePlacementObject(node, Number(x), Number(y));
+  }));
+  const edges = submitted.slice(1).map((node, index) => new EdgeObject([submitted[0] as NodeObject, node], `manifest-edge-${index}`));
+  for (const edge of edges) {
+    await client.createEdge(edge);
+  }
+  const layer = new LayerObject(submitted, edges, layout);
+  const resolved = await client.submitLayer(layer);
+  const rootLayerId = resolved.id;
+  // Mark the manifest complete by accepting one action expansion, then publish.
+  const rootAction = await client.addAction(created.node, {
+    kind: "navigate",
+    relation: "expand",
+    label: "Open manifest",
+    variant: "pill",
+    target: resolved,
+  } as unknown as Parameters<typeof client.addAction>[1]);
+  await client.submit();
+  await requestJson(`${graphUrl}/api/control/personal-presentation/versions`, controlToken, { versionInteractionNodeId: created.node.id });
+  return { interactionNodeId: created.node.id, rootLayerId };
+}
+
+function sha256Hex(input: string): string {
+  return `sha256:v1:${createHash("sha256").update(input, "utf8").digest("hex")}`;
 }

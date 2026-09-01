@@ -16,6 +16,7 @@ async function main(): Promise<void> {
   const testRunId = singleArgument("--test-run-id") ?? randomUUID();
   const testCaseIds = repeatedArgument("--case");
   const requestedConfigurations = repeatedArgument("--configuration");
+  const keepState = process.argv.includes("--keep-state");
   const requireConfiguration = process.argv.includes("--require-configuration");
   if (requireConfiguration && requestedConfigurations.length === 0) {
     throw new Error("Select at least one harness configuration with --configuration");
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
 
   for (const execution of executions) {
     const artifact = await runBasicRuntimeEval({
+      keepState,
       outputDirectory,
       execution,
       implementations,
