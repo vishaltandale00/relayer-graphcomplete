@@ -86,7 +86,7 @@ jobs:
       - name: Run Rust Clippy
         run: node scripts/ci/run-chapter.mjs rust-clippy
         env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-clippy
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
           RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-rust-clippy
           CARGO_INCREMENTAL: "0"
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
@@ -138,7 +138,7 @@ jobs:
         run: node scripts/ci/run-chapter.mjs rust-tests
         env:
           CARGO_INCREMENTAL: "0"
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-tests
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
           RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-rust-tests
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
@@ -179,7 +179,7 @@ jobs:
         run: node scripts/ci/run-chapter.mjs rust-crash
         env:
           CARGO_INCREMENTAL: "0"
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-crash
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
@@ -224,7 +224,7 @@ jobs:
         run: node scripts/ci/run-chapter.mjs rust-runtime
         env:
           CARGO_INCREMENTAL: "0"
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-runtime
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
           RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-rust-runtime
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
@@ -247,7 +247,7 @@ jobs:
         run: |
           node scripts/ci/runtime-artifact.mjs create \
             --repository "$GITHUB_WORKSPACE" \
-            --target-dir "$RUNNER_TEMP/cargo-target-rust-runtime/debug" \
+            --target-dir "$RUNNER_TEMP/cargo-target/debug" \
             --artifact-dir "$RUNNER_TEMP/relayer-rust-runtime" \
             --source-commit "$GITHUB_SHA" \
             --platform "${{ runner.os }}-${{ runner.arch }}" \

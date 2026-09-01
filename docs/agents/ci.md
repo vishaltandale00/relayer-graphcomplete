@@ -27,9 +27,12 @@ manual.
 Tests are always invoked for the current source snapshot. Cache entries contain
 dependency and compilation artifacts only; they are untrusted acceleration and
 never verification evidence. Rust Clippy, default tests, crash reconciliation,
-and runtime builds use separate `CARGO_TARGET_DIR` values and converge through
-the existing `Rust checks and fresh tests` aggregate. Their isolated runners
-share one toolchain-bound, content-addressed sccache namespace. The Clippy,
+and runtime builds converge through the existing `Rust checks and fresh tests`
+aggregate. Every lane executes on its own fresh runner, so all lanes use one
+shared `CARGO_TARGET_DIR` path: identical paths keep sccache cache keys stable
+across lanes, which matters for the Ladybug CMake build whose generated-header
+paths would otherwise fragment the C/C++ object cache per lane. Their isolated
+runners share one toolchain-bound, content-addressed sccache namespace. The Clippy,
 default-test, and crash lanes read and write compiler objects; the runtime
 lane reads only. Its unique outputs are uncachable binary links, and its
 shareable units are identical to the default-test lane's, so reading without

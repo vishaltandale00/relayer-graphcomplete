@@ -286,8 +286,13 @@ describe("CI workflow contract", () => {
       const run = job.steps.find((step) => step.name.startsWith("Run "));
       expect(setup.uses).toBe("./.github/actions/setup-rust-compilation");
       expect(setup.with.lane).toBe(lane);
+      // Every lane runs on its own fresh runner, so the lanes share one
+      // target-directory path without any filesystem overlap. The identical
+      // path keeps sccache keys stable across lanes, which matters for the
+      // Ladybug CMake build whose generated-header paths would otherwise
+      // fragment the C/C++ cache per lane.
       expect(run.env.CARGO_TARGET_DIR).toBe(
-        `\${{ runner.temp }}/cargo-target-${lane}`,
+        "\${{ runner.temp }}/cargo-target",
       );
       expect(run.env.CARGO_INCREMENTAL).toBe("0");
       expect(run.env.CARGO_PROFILE_DEV_DEBUG).toBe("line-tables-only");

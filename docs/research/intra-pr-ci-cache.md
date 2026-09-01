@@ -254,12 +254,19 @@ each for the app-server and graph-server test builds) and their test-binary
 links. Two consequences follow: further feature/profile consolidation of the
 workspace crate invocations can save at most a few minutes per lane, while
 anything that shortens or cache-shares the Ladybug source build attacks the
-majority of every lane's wall time. Candidate directions, not yet validated:
-verifying whether sccache keys for the build script's C compilations survive
-across lanes and runs (absolute output paths and per-lane target directories
-are the prime suspects), path normalization (`SCCACHE_BASEDIRS`), and whether
-the reviewed prebuilt-library path from the Issue #261 qualification can be
-reused without weakening its provenance guarantees.
+majority of every lane's wall time. Investigation of the lbug unit found that the bundled CMake build already
+auto-detects sccache on `PATH` and uses it as the C/C++ compiler launcher,
+but the lanes' per-lane `CARGO_TARGET_DIR` values put generated build headers
+at different absolute paths per lane. C/C++ cache keys hash preprocessed
+source, including those absolute line-marker paths, so every lane maintained
+its own fragment of the Ladybug object cache while sccache's Rust keys (which
+omit `--out-dir`) were unaffected. Because every lane runs on its own fresh
+runner, the lanes now share one `CARGO_TARGET_DIR` path; the identical path
+makes the generated-header paths match across lanes and runs, letting the
+Ladybug objects compile once and be read by all lanes. Candidate directions
+that remain unvalidated: `SCCACHE_BASEDIRS` normalization if other volatile
+paths appear, and whether the reviewed prebuilt-library path from the Issue
+#261 qualification can be reused without weakening its provenance guarantees.
 
 ## Ranked next options
 
