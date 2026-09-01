@@ -85,6 +85,7 @@
     "@types/node": "^22.20.1",
     "app-builder-lib": "26.15.3",
     "electron": "43.0.0",
+    "happy-dom": "20.0.8",
     "electron-builder": "26.15.3",
     "rolldown": "1.2.3",
     "tar": "7.5.22",

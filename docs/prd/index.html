@@ -2309,6 +2309,34 @@ settings:
 <tr><td>Canonical package limits</td><td><code>packages/graph-client/test/detail.test.ts</code> covers stable identities, counts, canonical bytes, source locations, element limits, and depth limits.</td></tr>
 </tbody>
 </table>
+<h3>6.3 Constrained Product Node Detail runtime</h3>
+<p>Issue <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/366">#366</a> mounts the canonical #363 package in the existing Product Desktop Node Details sidebar. Accepted-package storage, pinned-content transport, history, and export/import remain #365 responsibilities; Eval parity remains #371. Product runtime proof therefore does not claim either downstream integration.</p>
+<ul>
+<li>The renderer verifies canonical package integrity before mounting it, then preserves component order and authored HTML/CSS.</li>
+<li>One shadow-root surface contains the authored page inside the existing sidebar.</li>
+<li>One runtime adapter each owns ordinary HTTP(S) links, expand navigation, reference navigation, invoke, and input. Graph behaviors resolve exact accepted action provenance through host state before activation.</li>
+<li>The image representation adapter fills meaningful <code>img</code> and authored inline <code>span</code> hosts from a host-resolved <code>blob:</code> URL.</li>
+<li>The resolved visual must match the package media type and pinned digest.</li>
+<li>A link visual is an independently placed ordinary asset. Missing visual content leaves the authored label as the same keyboard-operable external link and introduces no link-specific icon grammar.</li>
+<li>Input controls use the accepted action snapshot and the existing durable Product input-draft controller. Review mode and unavailable authority disable mutation.</li>
+<li>Capability-state updates patch only their exact native host. They do not replace the authored page, move focus, or reset unrelated scroll regions.</li>
+<li>Unsafe markup, raw network content, unbound controls, unsafe CSS resources, and package drift fail closed.</li>
+<li>Incompatible hosts and unsupported representations degrade at the affected mount.</li>
+<li>The surface remains width-bound to the existing Node Details sidebar. The runtime establishes a layout-and-paint containment boundary; rendered reflow at supported widths remains a Product visual checkpoint.</li>
+<li>Nodes without a compiled package continue through the existing restricted-Markdown and legacy action compatibility path. A package rejected by the constrained runtime preserves its explicit fallback and the legacy action controls. Successfully mounted compiled pages keep their authored actions inside the page and do not render a second action tray.</li>
+</ul>
+<h4>#366 deterministic checkpoint map</h4>
+<table>
+<thead><tr><th>Checkpoint</th><th>Public deterministic proof</th></tr></thead>
+<tbody>
+<tr><td>Canonical isolated mount and spatial layout</td><td><code>test/node-detail-runtime.test.mjs</code> verifies integrity, component HTML/CSS, shadow-root isolation, deterministic order, and the runtime containment contract. Rendered 260 px and 420 px geometry is deferred to the Product visual checkpoint.</td></tr>
+<tr><td>Behavior authority</td><td>The same test drives expand, invoke, and input through the Product node-selection seam and drives link and reference through the public constrained runtime. Accepted package and asset transport from #365 remains required for final integration.</td></tr>
+<tr><td>Host-owned state continuity</td><td>Focused input, selected values, busy/disabled state, and an unrelated authored scroll region survive exact capability updates and an ordinary Product rerender without remounting.</td></tr>
+<tr><td>Visual representation and #338 fallback</td><td>A link and independent image asset compose in one authored layout; missing content preserves the accessible text link and exposes an explicit visual fallback. Electron system-browser routing and rendered icon placement remain Product visual checkpoints.</td></tr>
+<tr><td>Confinement and rejection</td><td>Integrity drift, executable markup, direct remote image content, unbound interaction, incompatible action authority, unsafe URLs, and unsupported visual resolution fail deterministically without paid inference.</td></tr>
+<tr><td>Product compatibility</td><td>The production workspace seam proves mounting against the projected #365 contract, durable input, action routing, in-place rerender, tray suppression, fallback controls, and legacy Markdown. It is not final #365 or #371 integration evidence.</td></tr>
+</tbody>
+</table>
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>
 <p>The first evaluation is one fixed two-interaction case. Its name is <code>empty-project.task-system.two-turn</code>. It proves the smallest real conversation path through all runtime components. These components include the graph engine, client, harness host, Codex session, Complete boundary, evaluator, judge, and renderer.</p>
 <p>The second interaction receives a new canonical interaction node and capability token. It reuses the same harness object and provider thread. The case has no existing codebase, grounding requirement, graph search, or subagent dependency.</p>

@@ -3911,7 +3911,8 @@ describe("desktop skeleton", () => {
     const markdown = await readFile(new URL("../desktop/renderer/src/product-workspace/markdown.js", import.meta.url), "utf8");
 
     expect(html).toContain('<script src="./vendor/marked.umd.js"></script>');
-    expect(workspace).toContain('renderMarkdown($("#detailContent")');
+    expect(workspace).toContain("renderProductNodeDetail({");
+    expect(workspace).toContain("renderMarkdown(container");
     expect(workspace).not.toContain('<small>${escapeHtml(node.kind)}</small>');
     expect(markdown).toContain("ALLOWED_MARKDOWN_ELEMENTS");
     expect(markdown).toContain("DANGEROUS_MARKDOWN_ELEMENTS");
