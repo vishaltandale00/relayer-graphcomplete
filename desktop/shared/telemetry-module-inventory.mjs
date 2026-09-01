@@ -71,6 +71,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/main/models/model-catalog-adapter.mjs",
     "desktop/main/models/model-catalog-refresh-server.mjs",
     "desktop/main/models/model-catalog-service.mjs",
+    "desktop/main/providers/ephemeral-codex-auth.mjs",
     "desktop/main/providers/implementations/anthropic-api.mjs",
     "desktop/main/providers/implementations/api-provider-adapter.mjs",
     "desktop/main/providers/implementations/claude-subscription.mjs",
