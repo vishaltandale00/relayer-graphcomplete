@@ -1,0 +1,52 @@
+name: Report isolated Rust compilation
+description: Record non-authoritative sccache telemetry after one fresh Rust lane.
+
+inputs:
+  lane:
+    required: true
+    description: Stable Rust lane name.
+  sccache-enabled:
+    required: false
+    default: "false"
+    description: Whether the setup action started sccache successfully.
+
+runs:
+  using: composite
+  steps:
+    - name: Record compiler cache statistics
+      shell: bash
+      env:
+        LANE: ${{ inputs.lane }}
+        SCCACHE_ENABLED: ${{ inputs.sccache-enabled }}
+      run: |
+        stats_text="$RUNNER_TEMP/$LANE-sccache-stats.txt"
+        stats_json="$RUNNER_TEMP/$LANE-sccache-stats.json"
+        append_summary() { printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"; }
+        append_summary "### $LANE compiler cache"
+        if [ "$SCCACHE_ENABLED" = "true" ] && [ -n "${SCCACHE_PATH:-}" ]; then
+          set +e
+          "$SCCACHE_PATH" --show-stats 2>&1 | tee "$stats_text"
+          text_status=${PIPESTATUS[0]}
+          "$SCCACHE_PATH" --show-stats --stats-format json > "$stats_json"
+          json_status=$?
+          set -e
+          append_summary "- Text statistics: exit $text_status"
+          append_summary "- JSON statistics: exit $json_status"
+          append_summary '```text'
+          cat "$stats_text" >> "$GITHUB_STEP_SUMMARY"
+          append_summary '```'
+        else
+          append_summary "- Statistics: unavailable; compilation ran directly with rustc"
+        fi
+        append_summary "Compiler objects are acceleration only; every selected test runs freshly."
+    - name: Upload compiler cache statistics
+      if: ${{ always() }}
+      continue-on-error: true
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: ${{ inputs.lane }}-sccache-stats-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          ${{ runner.temp }}/${{ inputs.lane }}-sccache-stats.txt
+          ${{ runner.temp }}/${{ inputs.lane }}-sccache-stats.json
+        if-no-files-found: ignore
+        retention-days: 14

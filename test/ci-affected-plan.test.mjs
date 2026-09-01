@@ -8,7 +8,12 @@ import { selectCiMode } from "../scripts/ci/select-mode.mjs";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const plannerPath = join(repositoryRoot, "scripts", "ci", "plan-affected.mjs");
-const configPath = join(repositoryRoot, "scripts", "ci", "affected-modules.v1.json");
+const configPath = join(
+  repositoryRoot,
+  "scripts",
+  "ci",
+  "affected-modules.v1.json",
+);
 
 function plan(...changedFiles) {
   const args = [plannerPath, "--repository", repositoryRoot];
@@ -20,9 +25,13 @@ function plan(...changedFiles) {
 
 function fullPlanWithoutDiff() {
   return JSON.parse(
-    execFileSync(process.execPath, [plannerPath, "--repository", repositoryRoot, "--mode", "full"], {
-      encoding: "utf8",
-    }),
+    execFileSync(
+      process.execPath,
+      [plannerPath, "--repository", repositoryRoot, "--mode", "full"],
+      {
+        encoding: "utf8",
+      },
+    ),
   );
 }
 
@@ -37,13 +46,21 @@ describe("affected-module plan v1", () => {
     expect(result.mode).toBe("full");
     expect(Object.values(result.chapters).every(Boolean)).toBe(true);
     expect(result.vitestFiles).toEqual([]);
+    expect(result.rustCrash).toBe(true);
+    expect(result.runtimeRustPackages).toEqual([
+      "relayer-app-server",
+      "relayer-graph-server",
+    ]);
   });
 
   test.each([
     [{ eventName: "push", headRef: "" }, "full"],
     [{ eventName: "push", headRef: "integration/cache-baseline" }, "full"],
     [{ eventName: "pull_request", headRef: "integration/issue-360" }, "full"],
-    [{ eventName: "pull_request", headRef: "component/graph-core" }, "affected"],
+    [
+      { eventName: "pull_request", headRef: "component/graph-core" },
+      "affected",
+    ],
   ])("routes GitHub event %j to %s mode", (event, expected) => {
     expect(selectCiMode(event)).toBe(expected);
   });
@@ -58,11 +75,22 @@ describe("affected-module plan v1", () => {
       "relayer-graph-server",
     ]);
     expect(result.chapters.rust).toBe(true);
+    expect(result.rustCrash).toBe(true);
+    expect(result.runtimeRustPackages).toEqual([
+      "relayer-app-server",
+      "relayer-graph-server",
+    ]);
     expect(result.chapters.vitest).toBe(true);
     expect(result.npmBuildWorkspaces).toEqual(
-      expect.arrayContaining(["@relayer/eval-runner", "@relayer/graph-client", "@relayer/harness-host"]),
+      expect.arrayContaining([
+        "@relayer/eval-runner",
+        "@relayer/graph-client",
+        "@relayer/harness-host",
+      ]),
     );
-    expect(result.vitestFiles).toEqual(expect.arrayContaining(["packages", "test"]));
+    expect(result.vitestFiles).toEqual(
+      expect.arrayContaining(["packages", "test"]),
+    );
     expect(result.chapters.packaging).toBe(false);
   });
 
@@ -84,14 +112,20 @@ describe("affected-module plan v1", () => {
     ]);
     expect(result.chapters.typescript).toBe(true);
     expect(result.chapters.vitest).toBe(true);
-    expect(result.vitestFiles).toEqual(expect.arrayContaining(["packages", "test"]));
+    expect(result.vitestFiles).toEqual(
+      expect.arrayContaining(["packages", "test"]),
+    );
     expect(result.chapters.packaging).toBe(false);
   });
 
   test("includes unchanged npm dependencies needed by a clean selected build", () => {
     const result = plan("packages/harness-host/src/host.ts");
 
-    expect(result.npmWorkspaces).toEqual(["@relayer/eval-runner", "@relayer/harness-host", "relayer-desktop"]);
+    expect(result.npmWorkspaces).toEqual([
+      "@relayer/eval-runner",
+      "@relayer/harness-host",
+      "relayer-desktop",
+    ]);
     expect(result.npmBuildWorkspaces).toContain("@relayer/graph-client");
   });
 
@@ -102,33 +136,76 @@ describe("affected-module plan v1", () => {
     expect(result.npmWorkspaces).toEqual(["relayer-desktop"]);
     expect(result.chapters.packaging).toBe(true);
     expect(result.chapters.rust).toBe(false);
-    expect(result.vitestFiles).toEqual(expect.arrayContaining(["packages", "test"]));
-    expect(result.vitestRustPackages).toEqual(["relayer-app-server", "relayer-graph-server"]);
+    expect(result.rustCrash).toBe(false);
+    expect(result.runtimeRustPackages).toEqual([
+      "relayer-app-server",
+      "relayer-graph-server",
+    ]);
+    expect(result.vitestFiles).toEqual(
+      expect.arrayContaining(["packages", "test"]),
+    );
+    expect(result.vitestRustPackages).toEqual([
+      "relayer-app-server",
+      "relayer-graph-server",
+    ]);
   });
 
   test("builds server binaries required by mapped Vitest integration tests", () => {
     const result = plan("desktop/renderer/src/product-workspace/workspace.js");
 
-    expect(result.vitestFiles).toContain("test/first-message-composer-integration.test.mjs");
-    expect(result.vitestRustPackages).toEqual(["relayer-app-server", "relayer-graph-server"]);
+    expect(result.vitestFiles).toContain(
+      "test/first-message-composer-integration.test.mjs",
+    );
+    expect(result.vitestRustPackages).toEqual([
+      "relayer-app-server",
+      "relayer-graph-server",
+    ]);
   });
 
   test.each([
-    ["test/conversation-export-eval-e2e.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
-    ["test/eval-app-integration.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
-    ["test/eval-managed-codex-runtime.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
-    ["test/first-message-composer-integration.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
+    [
+      "test/conversation-export-eval-e2e.test.mjs",
+      ["relayer-app-server", "relayer-graph-server"],
+    ],
+    [
+      "test/eval-app-integration.test.mjs",
+      ["relayer-app-server", "relayer-graph-server"],
+    ],
+    [
+      "test/eval-managed-codex-runtime.test.mjs",
+      ["relayer-app-server", "relayer-graph-server"],
+    ],
+    [
+      "test/first-message-composer-integration.test.mjs",
+      ["relayer-app-server", "relayer-graph-server"],
+    ],
     ["test/graph-authoring-replay.test.mjs", ["relayer-graph-server"]],
     ["test/graph-search-client-parity-e2e.test.mjs", ["relayer-graph-server"]],
-    ["test/provider-straightforward-flow.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
-    ["test/recursive-complete-e2e.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
-  ])("builds the production Rust runtime required by %s", (changedFile, expectedPackages) => {
-    expect(plan(changedFile).vitestRustPackages).toEqual(expectedPackages);
-  });
+    [
+      "test/provider-straightforward-flow.test.mjs",
+      ["relayer-app-server", "relayer-graph-server"],
+    ],
+    [
+      "test/recursive-complete-e2e.test.mjs",
+      ["relayer-app-server", "relayer-graph-server"],
+    ],
+  ])(
+    "builds the production Rust runtime required by %s",
+    (changedFile, expectedPackages) => {
+      expect(plan(changedFile).vitestRustPackages).toEqual(expectedPackages);
+    },
+  );
 
   test("keeps cross-cutting source and authority seams on the complete fresh Vitest portfolio", () => {
-    for (const changedFile of ["src/index.ts", "permissions/default.json", "harnesses/codex.json", "vendor/runtime.js"]) {
-      expect(plan(changedFile).vitestFiles).toEqual(expect.arrayContaining(["packages", "test"]));
+    for (const changedFile of [
+      "src/index.ts",
+      "permissions/default.json",
+      "harnesses/codex.json",
+      "vendor/runtime.js",
+    ]) {
+      expect(plan(changedFile).vitestFiles).toEqual(
+        expect.arrayContaining(["packages", "test"]),
+      );
     }
   });
 
@@ -141,7 +218,8 @@ describe("affected-module plan v1", () => {
 
     expect(result.mode).toBe("affected");
     expect(result.chapters[chapter]).toBe(true);
-    if (changedFile.startsWith("test/")) expect(result.vitestFiles).toContain(changedFile);
+    if (changedFile.startsWith("test/"))
+      expect(result.vitestFiles).toContain(changedFile);
   });
 
   test("routes PRD changes through readability and product-boundary checks", () => {
@@ -149,7 +227,9 @@ describe("affected-module plan v1", () => {
 
     expect(result.chapters.prd).toBe(true);
     expect(result.chapters.vitest).toBe(true);
-    expect(result.vitestFiles).toContain("test/documentation-product-boundary.test.mjs");
+    expect(result.vitestFiles).toContain(
+      "test/documentation-product-boundary.test.mjs",
+    );
   });
 
   test("routes bundled Python source through unit, integrity, and packaging gates", () => {
@@ -159,7 +239,10 @@ describe("affected-module plan v1", () => {
     expect(result.chapters.vitest).toBe(true);
     expect(result.chapters.packaging).toBe(true);
     expect(result.vitestFiles).toEqual(
-      expect.arrayContaining(["test/icon-vocabulary-parity.test.mjs", "test/prime-agent-packaging.test.mjs"]),
+      expect.arrayContaining([
+        "test/icon-vocabulary-parity.test.mjs",
+        "test/prime-agent-packaging.test.mjs",
+      ]),
     );
   });
 
@@ -181,14 +264,11 @@ describe("affected-module plan v1", () => {
     "docs/evidence/issue-257-browser-harnesses/manifest.json",
     "fixtures/graph-query-v1/positive.json",
     "unmapped/new-seam.txt",
-  ])(
-    "fails open to the full portfolio for %s",
-    (changedFile) => {
-      const result = plan(changedFile);
+  ])("fails open to the full portfolio for %s", (changedFile) => {
+    const result = plan(changedFile);
 
-      expect(result.mode).toBe("full");
-      expect(Object.values(result.chapters).every(Boolean)).toBe(true);
-      expect(result.reasons.join(" ")).toContain(changedFile);
-    },
-  );
+    expect(result.mode).toBe("full");
+    expect(Object.values(result.chapters).every(Boolean)).toBe(true);
+    expect(result.reasons.join(" ")).toContain(changedFile);
+  });
 });

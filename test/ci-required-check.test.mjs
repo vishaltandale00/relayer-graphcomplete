@@ -1,12 +1,22 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { describe, expect, test } from "vitest";
 
-import { evaluateRequiredInputs, evaluateRequiredJobs } from "../scripts/ci/assert-required-jobs.mjs";
+import {
+  evaluateRequiredInputs,
+  evaluateRequiredJobs,
+  evaluateRustJobs,
+} from "../scripts/ci/assert-required-jobs.mjs";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -54,10 +64,12 @@ test("the required check allows unselected chapters to be skipped", () => {
   ).toEqual({ ok: true, failures: [] });
 });
 
-test("the full portfolio requires the repository full gate", () => {
+test("the full portfolio is satisfied by its authoritative chapters without a duplicate full gate", () => {
   const fullPlan = {
     mode: "full",
-    chapters: Object.fromEntries(Object.keys(affectedPlan.chapters).map((chapter) => [chapter, true])),
+    chapters: Object.fromEntries(
+      Object.keys(affectedPlan.chapters).map((chapter) => [chapter, true]),
+    ),
   };
 
   expect(
@@ -71,16 +83,33 @@ test("the full portfolio requires the repository full gate", () => {
       receipts: "success",
       prd: "success",
       packaging: "success",
-      full: "skipped",
-    }).failures,
-  ).toContain("full: skipped");
+    }),
+  ).toEqual({ ok: true, failures: [] });
 });
 
 test("a failed planner with no output still names the first actionable failure", () => {
-  expect(evaluateRequiredInputs("", JSON.stringify({ plan: { result: "failure" } }))).toEqual({
+  expect(
+    evaluateRequiredInputs("", JSON.stringify({ plan: { result: "failure" } })),
+  ).toEqual({
     ok: false,
     failures: ["plan: failure"],
   });
+});
+
+test("the Rust aggregate requires every selected fresh lane", () => {
+  const plan = {
+    chapters: { rust: true },
+    rustCrash: true,
+    runtimeRustPackages: ["relayer-graph-server"],
+  };
+  expect(
+    evaluateRustJobs(plan, {
+      "rust-clippy": "success",
+      "rust-tests": "success",
+      "rust-crash": "failure",
+      "rust-runtime": "success",
+    }),
+  ).toEqual({ ok: false, failures: ["rust-crash: failure"] });
 });
 
 test("the sccache wrapper does not retry or mask a wrapped compiler failure", () => {
@@ -94,17 +123,24 @@ test("the sccache wrapper does not retry or mask a wrapped compiler failure", ()
     chmodSync(compiler, 0o755);
     chmodSync(sccache, 0o755);
 
-    const result = spawnSync(join(repositoryRoot, "scripts", "ci", "sccache-wrapper.sh"), [
-      compiler,
-      "--crate-name",
-      "example",
-    ], {
-      encoding: "utf8",
-      env: { ...process.env, RELAYER_SCCACHE_ENABLED: "true", SCCACHE_PATH: sccache, TRACE: trace },
-    });
+    const result = spawnSync(
+      join(repositoryRoot, "scripts", "ci", "sccache-wrapper.sh"),
+      [compiler, "--crate-name", "example"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          RELAYER_SCCACHE_ENABLED: "true",
+          SCCACHE_PATH: sccache,
+          TRACE: trace,
+        },
+      },
+    );
 
     expect(result.status).toBe(86);
-    expect(readFileSync(trace, "utf8").trim()).toBe(`cache:${compiler} --crate-name example`);
+    expect(readFileSync(trace, "utf8").trim()).toBe(
+      `cache:${compiler} --crate-name example`,
+    );
     expect(result.stderr).not.toContain("retrying directly with rustc");
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -124,231 +160,268 @@ test("the sccache wrapper invokes the compiler directly when setup is unavailabl
       [compiler, "--crate-name", "example"],
       {
         encoding: "utf8",
-        env: { ...process.env, SCCACHE_PATH: join(directory, "missing-sccache"), TRACE: trace },
+        env: {
+          ...process.env,
+          SCCACHE_PATH: join(directory, "missing-sccache"),
+          TRACE: trace,
+        },
       },
     );
 
     expect(result.status).toBe(0);
-    expect(readFileSync(trace, "utf8").trim()).toBe("direct:--crate-name example");
+    expect(readFileSync(trace, "utf8").trim()).toBe(
+      "direct:--crate-name example",
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
 describe("CI workflow contract", () => {
-  const workflow = parse(readFileSync(join(repositoryRoot, ".github", "workflows", "ci.yml"), "utf8"));
+  const workflow = parse(
+    readFileSync(
+      join(repositoryRoot, ".github", "workflows", "ci.yml"),
+      "utf8",
+    ),
+  );
 
   test("cancels superseded PR runs and warms integration branches", () => {
     expect(workflow.concurrency["cancel-in-progress"]).toBe(true);
     expect(workflow.on.push.branches).toContain("integration/**");
-    expect(workflow.jobs.plan.steps.find((step) => step.id === "plan").run).toContain("select-mode.mjs");
+    expect(
+      workflow.jobs.plan.steps.find((step) => step.id === "plan").run,
+    ).toContain("select-mode.mjs");
   });
 
   test("keeps one stable always-running required check aggregator", () => {
     expect(workflow.jobs.check.name).toBe("check");
     expect(workflow.jobs.check.if).toBe("always()");
     expect(workflow.jobs.check.needs).toEqual(
-      expect.arrayContaining(["plan", "quick", "rust", "typescript", "vitest", "python", "receipts", "prd", "packaging", "full"]),
+      expect.arrayContaining([
+        "plan",
+        "quick",
+        "rust",
+        "typescript",
+        "vitest",
+        "python",
+        "receipts",
+        "prd",
+        "packaging",
+      ]),
     );
+    expect(workflow.jobs.check.needs).not.toContain("full");
+    expect(workflow.jobs.full).toBeUndefined();
   });
 
   test("restores compilation caches on PRs but saves them only on trusted branch pushes", () => {
-    const allSteps = Object.values(workflow.jobs).flatMap((job) => job.steps ?? []);
-    const setupAction = parse(
-      readFileSync(join(repositoryRoot, ".github", "actions", "setup-node-dependencies", "action.yml"), "utf8"),
+    const allSteps = Object.values(workflow.jobs).flatMap(
+      (job) => job.steps ?? [],
     );
-    const cacheSteps = [...allSteps, ...setupAction.runs.steps];
-    const restores = cacheSteps.filter((step) => step.uses?.startsWith("actions/cache/restore@"));
-    const saves = cacheSteps.filter((step) => step.uses?.startsWith("actions/cache/save@"));
-    const vitestTargetRestore = restores.find(
-      (step) => step.name === "Restore read-only Vitest runtime compilation acceleration",
+    const setupAction = parse(
+      readFileSync(
+        join(
+          repositoryRoot,
+          ".github",
+          "actions",
+          "setup-node-dependencies",
+          "action.yml",
+        ),
+        "utf8",
+      ),
+    );
+    const rustSetupAction = parse(
+      readFileSync(
+        join(
+          repositoryRoot,
+          ".github",
+          "actions",
+          "setup-rust-compilation",
+          "action.yml",
+        ),
+        "utf8",
+      ),
+    );
+    const cacheSteps = [
+      ...allSteps,
+      ...setupAction.runs.steps,
+      ...rustSetupAction.runs.steps,
+    ];
+    const restores = cacheSteps.filter((step) =>
+      step.uses?.startsWith("actions/cache/restore@"),
+    );
+    const saves = cacheSteps.filter((step) =>
+      step.uses?.startsWith("actions/cache/save@"),
     );
 
     expect(restores.length).toBeGreaterThan(0);
     expect(saves.length).toBeGreaterThan(0);
-    for (const restore of restores) {
-      if (restore === vitestTargetRestore) {
-        expect(restore.if).toBe(
-          "${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}",
-        );
-      } else {
-        expect(restore.if).toBeUndefined();
-      }
-    }
+    for (const restore of restores) expect(restore.if).toBeUndefined();
     for (const save of saves) {
       expect(save.if).toContain("github.event_name == 'push'");
     }
-    const dependencySave = saves.find((step) => step.name === "Save trusted Rust dependency downloads");
+    const rustDependencyRestore = restores.find(
+      (step) => step.name === "Restore Rust dependency downloads",
+    );
+    expect(rustDependencyRestore["continue-on-error"]).toBe(true);
+    for (const save of saves.filter((step) =>
+      step.name.startsWith("Save trusted Rust dependency downloads"),
+    )) {
+      expect(save["continue-on-error"]).toBe(true);
+    }
+    const dependencySave = saves.find(
+      (step) => step.name === "Save trusted Rust dependency downloads",
+    );
     expect(dependencySave.with.path).not.toContain("target");
     const targetSaves = saves.filter(
-      (step) => step !== dependencySave && (step.name.includes("Rust") || step.name.includes("packaging")),
+      (step) => step !== dependencySave && step.name.includes("packaging"),
     );
     for (const save of targetSaves) expect(save.with.path).toContain("target");
   });
 
-  test("canaries writable Rust sccache and read-only trusted-PR Vitest sccache", () => {
-    const rustSteps = workflow.jobs.rust.steps;
-    const vitestSteps = workflow.jobs.vitest.steps;
-    const trustedPullRequest =
-      "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}";
-    const targetCachePath =
-      "${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}";
-    const sccacheStepsByJob = Object.fromEntries(
-      Object.entries(workflow.jobs).map(([jobName, job]) => [
-        jobName,
-        (job.steps ?? []).filter((step) => step.uses?.includes("sccache-action")),
+  test("runs Rust authorities in isolated parallel lanes with one shared compiler-object namespace", () => {
+    const lanes = ["rust-clippy", "rust-tests", "rust-crash", "rust-runtime"];
+    for (const lane of lanes) {
+      const job = workflow.jobs[lane];
+      const setup = job.steps.find((step) => step.id === "rust-setup");
+      const run = job.steps.find((step) => step.name.startsWith("Run "));
+      expect(setup.uses).toBe("./.github/actions/setup-rust-compilation");
+      expect(setup.with.lane).toBe(lane);
+      expect(run.env.CARGO_TARGET_DIR).toBe(
+        `\${{ runner.temp }}/cargo-target-${lane}`,
+      );
+      expect(run.env.CARGO_INCREMENTAL).toBe("0");
+      expect(run.env.CARGO_PROFILE_DEV_DEBUG).toBe("line-tables-only");
+      expect(run.env.CARGO_PROFILE_TEST_DEBUG).toBe("line-tables-only");
+      expect(run.env.RUSTC_WRAPPER).toBe(
+        "${{ github.workspace }}/scripts/ci/sccache-wrapper.sh",
+      );
+      expect(run.env.SCCACHE_GHA_VERSION).toBe(
+        "${{ steps.rust-setup.outputs.cache-version }}",
+      );
+    }
+    expect(workflow.jobs.rust.needs).toEqual(
+      expect.arrayContaining([
+        "plan",
+        "rust-clippy",
+        "rust-tests",
+        "rust-crash",
+        "rust-runtime",
       ]),
     );
-    const setup = rustSteps.find((step) => step.id === "sccache-setup");
-    const start = rustSteps.find((step) => step.id === "sccache-start");
-    const rustRun = rustSteps.find((step) => step.name === "Selected Rust compilation, checks, and tests");
-    const report = rustSteps.find((step) => step.name === "Report sccache compiler statistics");
-    const upload = rustSteps.find((step) => step.name === "Upload sccache compiler statistics");
-    const dependencyCache = rustSteps.find((step) => step.id === "rust-dependency-cache");
-    const vitestSetup = vitestSteps.find((step) => step.id === "vitest-sccache-setup");
-    const vitestStart = vitestSteps.find((step) => step.id === "vitest-sccache-start");
-    const vitestRun = vitestSteps.find(
-      (step) => step.name === "Build Vitest runtime prerequisites with read-only sccache",
-    );
-    const targetRun = vitestSteps.find(
-      (step) => step.name === "Build Vitest runtime prerequisites from target cache",
-    );
-    const targetTiming = vitestSteps.find((step) => step.id === "rust-cache-timing");
-    const targetRestore = vitestSteps.find((step) => step.id === "rust-cache");
-    const targetRecord = vitestSteps.find((step) => step.name === "Record Vitest Rust cache status");
-    const targetSave = vitestSteps.find(
-      (step) => step.name === "Save trusted Vitest runtime compilation acceleration",
-    );
-    const vitestReport = vitestSteps.find((step) => step.name === "Report Vitest sccache compiler statistics");
-    const vitestUpload = vitestSteps.find((step) => step.name === "Upload Vitest sccache compiler statistics");
 
-    expect(setup.uses).toMatch(/^mozilla-actions\/sccache-action@[0-9a-f]{40}$/);
-    expect(setup.with.version).toMatch(/^v\d+\.\d+\.\d+$/);
-    expect(setup.if).toBe(
+    const rustSetup = parse(
+      readFileSync(
+        join(
+          repositoryRoot,
+          ".github",
+          "actions",
+          "setup-rust-compilation",
+          "action.yml",
+        ),
+        "utf8",
+      ),
+    );
+    const sccache = rustSetup.runs.steps.find(
+      (step) => step.id === "sccache-setup",
+    );
+    expect(sccache.uses).toMatch(
+      /^mozilla-actions\/sccache-action@[0-9a-f]{40}$/,
+    );
+    expect(sccache["continue-on-error"]).toBe(true);
+    expect(sccache.if).toBe(
       "${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}",
     );
-    expect(setup["continue-on-error"]).toBe(true);
-    expect(setup.with.disable_annotations).toBe(true);
-    expect(start.if).toBe("${{ steps.sccache-setup.outcome == 'success' }}");
-    expect(start["continue-on-error"]).toBe(true);
-    expect(rustRun.env.CARGO_INCREMENTAL).toBe("0");
-    expect(rustRun.env.CARGO_PROFILE_DEV_DEBUG).toBe("line-tables-only");
-    expect(rustRun.env.CARGO_PROFILE_TEST_DEBUG).toBe("line-tables-only");
-    expect(start.env.SCCACHE_GHA_VERSION).toBe(rustRun.env.SCCACHE_GHA_VERSION);
-    expect(rustRun.env.SCCACHE_GHA_VERSION).toContain("relayer-rust-line-tables-v1-");
-    expect(rustRun.env.RELAYER_SCCACHE_ENABLED).toBe("${{ steps.sccache-start.outputs.enabled }}");
-    expect(rustRun.env.RUSTC_WRAPPER).toBe("${{ github.workspace }}/scripts/ci/sccache-wrapper.sh");
-    expect(rustRun.env.SCCACHE_GHA_RW_MODE).toBe("READ_WRITE");
-    expect(rustRun.env.SCCACHE_IGNORE_SERVER_IO_ERROR).toBe("1");
-    expect(rustRun.run).toBe("node scripts/ci/run-chapter.mjs rust");
-    expect(readFileSync(join(repositoryRoot, "scripts", "ci", "run-chapter.mjs"), "utf8")).toContain(
-      'run("Fresh Rust tests", "cargo", ["test", ...packages])',
+    expect(rustSetup.outputs["cache-version"].value).toContain(
+      "steps.identity.outputs.cache-version",
     );
-    expect(report.if).toContain("always()");
-    expect(report["continue-on-error"]).toBe(true);
-    expect(report.run).toContain('[ "$SCCACHE_START_OUTCOME" = "success" ]');
+    expect(
+      rustSetup.runs.steps.find((step) => step.id === "identity").run,
+    ).toContain("relayer-rust-parallel-line-tables-v1-");
+
+    const rustReport = parse(
+      readFileSync(
+        join(
+          repositoryRoot,
+          ".github",
+          "actions",
+          "report-rust-compilation",
+          "action.yml",
+        ),
+        "utf8",
+      ),
+    );
+    const report = rustReport.runs.steps.find(
+      (step) => step.name === "Record compiler cache statistics",
+    );
+    const upload = rustReport.runs.steps.find(
+      (step) => step.name === "Upload compiler cache statistics",
+    );
     expect(report.run).toContain('| tee "$stats_text"');
-    expect(report.run).toContain("stats_status=${PIPESTATUS[0]}");
+    expect(report.run).toContain("text_status=${PIPESTATUS[0]}");
     expect(report.run).toContain("--show-stats --stats-format json");
-    expect(report.run).not.toContain("every selected test ran");
-    expect(report.run).toContain("never substitutes for fresh test execution");
     expect(upload.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
     expect(upload.if).toBe("${{ always() }}");
     expect(upload["continue-on-error"]).toBe(true);
-    expect(upload.with.path).toContain("sccache-stats.txt");
-    expect(upload.with.path).toContain("sccache-stats.json");
     expect(upload.with["if-no-files-found"]).toBe("ignore");
-    const rustArchivePaths = rustSteps
-      .filter((step) => step.uses?.startsWith("actions/cache/"))
-      .map((step) => step.with.path);
-    expect(rustArchivePaths.length).toBeGreaterThan(0);
-    for (const path of rustArchivePaths) expect(path.split("\n")).not.toContain("target");
-    expect(dependencyCache.with.path).not.toContain("target");
-    expect(Object.entries(sccacheStepsByJob).filter(([, steps]) => steps.length > 0).map(([name]) => name)).toEqual([
-      "rust",
-      "vitest",
-    ]);
-
-    expect(vitestSetup.uses).toBe(setup.uses);
-    expect(vitestSetup.with.version).toBe(setup.with.version);
-    expect(vitestSetup.if).toBe(trustedPullRequest);
-    expect(vitestSetup["continue-on-error"]).toBe(true);
-    expect(vitestSetup.with.disable_annotations).toBe(true);
-    expect(vitestStart.if).toBe("${{ steps.vitest-sccache-setup.outcome == 'success' }}");
-    expect(vitestStart["continue-on-error"]).toBe(true);
-    expect(vitestStart.env.SCCACHE_GHA_RW_MODE).toBe("READ_ONLY");
-    expect(vitestRun.if).toBe(trustedPullRequest);
-    expect(vitestRun.env.CARGO_INCREMENTAL).toBe("0");
-    expect(vitestRun.env.CARGO_PROFILE_DEV_DEBUG).toBe(rustRun.env.CARGO_PROFILE_DEV_DEBUG);
-    expect(vitestRun.env.CARGO_PROFILE_TEST_DEBUG).toBe(rustRun.env.CARGO_PROFILE_TEST_DEBUG);
-    expect(vitestStart.env.SCCACHE_GHA_VERSION).toBe(rustRun.env.SCCACHE_GHA_VERSION);
-    expect(vitestRun.env.SCCACHE_GHA_VERSION).toBe(rustRun.env.SCCACHE_GHA_VERSION);
-    expect(vitestRun.env.SCCACHE_GHA_RW_MODE).toBe("READ_ONLY");
-    expect(vitestRun.env.RELAYER_SCCACHE_ENABLED).toBe("${{ steps.vitest-sccache-start.outputs.enabled }}");
-    expect(vitestRun.env.RUSTC_WRAPPER).toBe("${{ github.workspace }}/scripts/ci/sccache-wrapper.sh");
-    expect(vitestRun.env.SCCACHE_IGNORE_SERVER_IO_ERROR).toBe("1");
-
-    for (const step of [targetTiming, targetRestore, targetRecord, targetRun]) {
-      expect(step.if).toBe(targetCachePath);
-    }
-    expect(targetRestore.with.path.split("\n")).toContain("target");
-    expect(targetSave.with.path).toBe(targetRestore.with.path);
-    expect(targetSave.with.key).toBe("${{ steps.rust-cache.outputs.cache-primary-key }}");
-    expect(targetSave.if).toBe(
-      "${{ github.event_name == 'push' && success() && steps.rust-cache.outputs.cache-hit != 'true' }}",
-    );
-    expect(vitestReport.if).toContain("always()");
-    expect(vitestReport.if).toContain("github.event.pull_request.head.repo.full_name == github.repository");
-    expect(vitestReport["continue-on-error"]).toBe(true);
-    expect(vitestReport.run).toContain("compilation fell back to direct rustc");
-    expect(vitestReport.run).not.toContain("every mapped Vitest test ran freshly");
-    expect(vitestReport.run).toContain("never substitutes for fresh mapped Vitest execution");
-    expect(vitestUpload.uses).toBe(upload.uses);
-    expect(vitestUpload.if).toBe(vitestReport.if);
-    expect(vitestUpload["continue-on-error"]).toBe(true);
-    expect(vitestUpload.with["if-no-files-found"]).toBe("ignore");
-    expect(vitestUpload.with.path.split("\n")).toEqual(
-      expect.arrayContaining([
-        "${{ runner.temp }}/vitest-sccache-stats.txt",
-        "${{ runner.temp }}/vitest-sccache-stats.json",
-      ]),
-    );
-    expect(vitestUpload.with["retention-days"]).toBe(14);
-
-    for (const [jobName, job] of Object.entries(workflow.jobs)) {
-      if (jobName === "rust" || jobName === "vitest") continue;
-      for (const step of job.steps ?? []) {
-        expect(step.env?.CARGO_PROFILE_DEV_DEBUG).toBeUndefined();
-        expect(step.env?.CARGO_PROFILE_TEST_DEBUG).toBeUndefined();
-      }
-    }
+    expect(upload.with["retention-days"]).toBe(14);
   });
 
-  test("builds runtime prerequisites before executing the fresh Vitest portfolio", () => {
+  test("verifies the exact Rust runtime artifact before executing the fresh Vitest portfolio", () => {
     const steps = workflow.jobs.vitest.steps;
-    const prerequisiteIndexes = [
-      "Build Vitest runtime prerequisites with read-only sccache",
-      "Build Vitest runtime prerequisites from target cache",
-    ].map((name) => steps.findIndex((step) => step.name === name));
-    const testIndex = steps.findIndex((step) => step.name === "Run fresh Vitest and secret-boundary tests");
-    const cacheRestore = steps.find((step) => step.id === "rust-cache");
-    const cacheSave = steps.find((step) => step.name === "Save trusted Vitest runtime compilation acceleration");
-
-    for (const prerequisiteIndex of prerequisiteIndexes) {
-      expect(prerequisiteIndex).toBeGreaterThan(-1);
-      expect(testIndex).toBeGreaterThan(prerequisiteIndex);
-    }
-    expect(cacheSave.with.key).toBe("${{ steps.rust-cache.outputs.cache-primary-key }}");
-    expect(cacheSave.with.path).toBe(cacheRestore.with.path);
-    expect(cacheSave.if).toContain("github.event_name == 'push'");
-    expect(readFileSync(join(repositoryRoot, "scripts", "ci", "run-chapter.mjs"), "utf8")).toContain(
-      "plan.vitestRustPackages",
+    const downloadIndex = steps.findIndex(
+      (step) => step.name === "Download selected Rust runtime",
     );
+    const verifyIndex = steps.findIndex(
+      (step) => step.name === "Verify and install selected Rust runtime",
+    );
+    const prerequisiteIndex = steps.findIndex(
+      (step) => step.name === "Build non-Rust Vitest prerequisites",
+    );
+    const testIndex = steps.findIndex(
+      (step) => step.name === "Run fresh Vitest and secret-boundary tests",
+    );
+    const download = steps[downloadIndex];
+    const verify = steps[verifyIndex];
+    const upload = workflow.jobs["rust-runtime"].steps.find(
+      (step) => step.name === "Upload selected Rust runtime",
+    );
+
+    expect(workflow.jobs.vitest.needs).toContain("rust-runtime");
+    expect(downloadIndex).toBeGreaterThan(-1);
+    expect(verifyIndex).toBeGreaterThan(downloadIndex);
+    expect(prerequisiteIndex).toBeGreaterThan(-1);
+    expect(testIndex).toBeGreaterThan(prerequisiteIndex);
+    expect(download.uses).toMatch(/^actions\/download-artifact@[0-9a-f]{40}$/);
+    expect(upload.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
+    expect(download.with.name).toBe(upload.with.name);
+    for (const identity of [
+      "--source-commit",
+      "--platform",
+      "--rustc-release",
+      "--cargo-profile",
+    ]) {
+      expect(verify.run).toContain(identity);
+    }
+    expect(
+      steps.some(
+        (step) =>
+          step.uses?.startsWith("actions/cache/") &&
+          step.with?.path?.includes("target"),
+      ),
+    ).toBe(false);
+    expect(
+      readFileSync(
+        join(repositoryRoot, "scripts", "ci", "run-chapter.mjs"),
+        "utf8",
+      ),
+    ).not.toContain('run("Build selected Vitest Rust runtime"');
   });
 
   test("preserves PR parent history for complete Vitest evidence checks", () => {
-    for (const jobName of ["vitest", "full"]) {
-      const checkout = workflow.jobs[jobName].steps.find((step) => step.uses?.startsWith("actions/checkout@"));
+    for (const jobName of ["vitest"]) {
+      const checkout = workflow.jobs[jobName].steps.find((step) =>
+        step.uses?.startsWith("actions/checkout@"),
+      );
       expect(checkout.with["fetch-depth"]).toBe(0);
     }
   });

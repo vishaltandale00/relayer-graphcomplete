@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "commands": {
+    "renderer-prepare": {
+      "shell": "npm run prepare:renderer",
+      "owner": "quick"
+    },
+    "rust-format": {
+      "shell": "cargo fmt --all -- --check",
+      "owner": "quick"
+    },
+    "rust-clippy": {
+      "shell": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+      "owner": "rust-clippy"
+    },
+    "rust-tests": {
+      "shell": "cargo test --workspace",
+      "owner": "rust-tests"
+    },
+    "rust-crash": {
+      "shell": "npm run check:graph-crash-reconciliation",
+      "owner": "rust-crash"
+    },
+    "rust-runtime": {
+      "shell": "cargo build -p relayer-app-server -p relayer-graph-server",
+      "owner": "rust-runtime"
+    },
+    "typescript-packages": {
+      "shell": "npm run build:packages",
+      "owner": "typescript"
+    },
+    "typescript-root-check": {
+      "shell": "tsc --noEmit",
+      "owner": "typescript"
+    },
+    "typescript-workspaces": {
+      "shell": "npm run check --workspaces --if-present",
+      "owner": "typescript"
+    },
+    "vitest": {
+      "shell": "vitest run --maxWorkers=1",
+      "owner": "vitest"
+    },
+    "codex-secret-boundary": {
+      "shell": "npm run test:codex-secret-boundary",
+      "owner": "vitest"
+    },
+    "python": {
+      "shell": "PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests",
+      "owner": "python"
+    },
+    "receipts": {
+      "shell": "npm run lint:ladybug-receipt",
+      "owner": "receipts"
+    },
+    "prd": {
+      "shell": "npm run prd:check-readability",
+      "owner": "prd"
+    },
+    "clean-dist": {
+      "shell": "node scripts/clean-dist.mjs",
+      "owner": "quick"
+    },
+    "typescript-root-build": {
+      "shell": "tsc -p tsconfig.build.json",
+      "owner": "vitest"
+    }
+  },
+  "chapters": {
+    "quick": {
+      "job": "quick",
+      "authorities": ["renderer-prepare", "rust-format", "clean-dist"],
+      "prerequisites": []
+    },
+    "rust-clippy": {
+      "job": "rust-clippy",
+      "authorities": ["rust-clippy"],
+      "prerequisites": []
+    },
+    "rust-tests": {
+      "job": "rust-tests",
+      "authorities": ["rust-tests"],
+      "prerequisites": []
+    },
+    "rust-crash": {
+      "job": "rust-crash",
+      "authorities": ["rust-crash"],
+      "prerequisites": []
+    },
+    "rust-runtime": {
+      "job": "rust-runtime",
+      "authorities": ["rust-runtime"],
+      "prerequisites": []
+    },
+    "typescript": {
+      "job": "typescript",
+      "authorities": [
+        "typescript-packages",
+        "typescript-root-check",
+        "typescript-workspaces"
+      ],
+      "prerequisites": []
+    },
+    "vitest-prerequisites": {
+      "job": "vitest",
+      "authorities": ["typescript-root-build"],
+      "prerequisites": ["typescript-packages"]
+    },
+    "vitest": {
+      "job": "vitest",
+      "authorities": ["vitest", "codex-secret-boundary"],
+      "prerequisites": []
+    },
+    "python": {
+      "job": "python",
+      "authorities": ["python"],
+      "prerequisites": []
+    },
+    "receipts": {
+      "job": "receipts",
+      "authorities": ["receipts"],
+      "prerequisites": []
+    },
+    "prd": {
+      "job": "prd",
+      "authorities": ["prd"],
+      "prerequisites": []
+    }
+  },
+  "scripts": {
+    "check": [
+      "rust-format",
+      "rust-clippy",
+      "rust-tests",
+      "rust-crash",
+      "rust-runtime",
+      "typescript-packages",
+      "typescript-root-check",
+      "typescript-workspaces",
+      "vitest",
+      "codex-secret-boundary",
+      "python",
+      "receipts",
+      "prd"
+    ],
+    "build": [
+      "clean-dist",
+      "rust-runtime",
+      "typescript-root-build",
+      "typescript-packages"
+    ]
+  },
+  "lifecycleHooks": {
+    "check": "renderer-prepare",
+    "build": "renderer-prepare"
+  }
+}
