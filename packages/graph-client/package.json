@@ -14,5 +14,12 @@
   "scripts": {
     "build": "node scripts/generate-query-errors.mjs --check && tsc -p tsconfig.build.json",
     "check": "node scripts/generate-query-errors.mjs --check && tsc --noEmit"
+  },
+  "dependencies": {
+    "css-tree": "3.1.0",
+    "parse5": "8.0.0"
+  },
+  "devDependencies": {
+    "@types/css-tree": "3.2.0"
   }
 }

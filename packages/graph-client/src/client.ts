@@ -40,9 +40,17 @@ export class RelayerGraphClient {
   }
 
   async submitNode(node: NodeObject): Promise<GraphNode> {
+    const authoredDetail = node.detailAuthoring.finalize();
     const body = await this.request<{ node: GraphNode }>("/api/graph/nodes", {
       method: "POST",
-      body: JSON.stringify({ clientKey: node.clientKey, kind: node.kind, icon: node.icon, title: node.title, detail: node.detail }),
+      body: JSON.stringify({
+        clientKey: node.clientKey,
+        kind: node.kind,
+        icon: node.icon,
+        title: node.title,
+        detail: node.detail,
+        ...(authoredDetail.components.length === 0 ? {} : { authoredDetail }),
+      }),
     });
     node.ref = body.node;
     return body.node;

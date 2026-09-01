@@ -133,6 +133,8 @@ Each product or Eval review window owns one bounded renderer-side navigation his
 13. The selected harness owns model execution and any provider-native child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md) and [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
 14. A personal-presentation attachment is a control relation from one interaction to one published accepted profile completion. It never participates in ordinary response topology or graph authority, and one interaction can pin it only once. See [ADR 0009](decisions/0009-personal-presentation-graph-attachments.md).
 
+The Issue #363 client foundation attaches one `NodeDetailAuthoring` builder to each draft `NodeObject`. Checkpoint compiles stable components through standards-based HTML and CSS parsers, resolves logical assets through a trusted dependency, and emits canonical opaque mounts. `submitNode` finalizes and attaches that package once while preserving the legacy detail string and locking the builder for retry-safe reuse. The graph server does not persist that package yet; #365 owns durability and #366 owns the isolated Product runtime.
+
 ## Target self-assessing policy invariants
 
 The following apply when the optional recursive self-assessment policy is enabled; they are not prerequisites for the initial direct recursive completion slice.
@@ -233,7 +235,7 @@ The ordinary test suite never invokes inference. `runtime-basic` remains a harne
 - `crates/relayer-graph-core/src/graph.rs` is the graph behavior boundary. `graph/database` and `graph/writer` expose the public control flow, `graph/model` owns the node, edge, layer, action, ID, and state objects, and `graph/completion` separates closure planning from atomic acceptance.
 - `crates/relayer-graph-core/src/storage.rs` is the persistence boundary. `SqliteGraphStore` owns the SQLx pool and connection lifecycle, its table-specific modules contain all queries, and `storage/sqlite/migrations` contains both the embedded migration runner and versioned SQL. Graph behavior does not import SQLx. This mirrors the app server's `SqliteProductStore` boundary without introducing a transport API inside graph core.
 - `crates/relayer-graph-server` exposes that same core through the loopback API.
-- `packages/graph-client` is the typed Node authoring client and contains no graph persistence.
+- `packages/graph-client` is the typed Node authoring client and contains no graph persistence. Its authored-detail compiler owns draft checkpoints and the `submitNode` request seam, not durable storage or rendering.
 - `packages/visual-assets` owns the deterministic logical visual-assets interface, scope and tag semantics, and the private generic-content Module used for digest indexing. It does not compile Node Details or inject asset inventory into harness prompts.
 - `packages/harness-host` owns persistent per-thread harness objects and code-owned implementations such as `codex.basic`.
 - `packages/eval-runner` owns harness-agnostic case/run expansion, deterministic checks, and the lower-level CLI artifact path. The Relayer Eval shell composes those contracts around the production app server and renderer.

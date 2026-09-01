@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, type ActionObject } from "../src/index.js";
+import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, assetRef, html, type ActionObject, type DetailAssetResolver } from "../src/index.js";
 import { edgeId, layerId, nodeId } from "../src/objects.js";
 
 describe("agent-facing graph objects", () => {
@@ -21,6 +21,81 @@ describe("agent-facing graph objects", () => {
     edge.ref = { id: 20, endpoints: [9, 10], state: "draft" };
     layer.ref = { id: 30, nodes: [10, 9], edges: [20], state: "draft" };
     expect([nodeId(node), edgeId(edge), layerId(layer)]).toEqual([10, 20, 30]);
+  });
+
+  it("owns authored detail through the draft node lifecycle and submits it exactly once", async () => {
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({
+        node: { id: 10, kind: "concept", icon: "box", title: "Draft", detail: "Legacy fallback", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Draft", "Legacy fallback", "concept", "draft-node");
+    node.detailAuthoring.setComponent("summary", html`<p>Checkpoint one</p>`);
+    const checkpoint = node.detailAuthoring.checkpoint();
+    node.detailAuthoring.setComponent("summary", html`<p>Submitted detail</p>`);
+
+    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node);
+
+    expect(checkpoint.components[0]?.html).toBe("<p>Checkpoint one</p>");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      clientKey: "draft-node",
+      detail: "Legacy fallback",
+      authoredDetail: {
+        version: 1,
+        components: [{ id: "summary", order: 0, html: "<p>Submitted detail</p>", css: "" }],
+      },
+    });
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Too late</p>`))
+      .toThrow("finalized and cannot be mutated");
+  });
+
+  it("creates draft-owned detail authoring with its trusted asset checkpoint resolver", () => {
+    const resolver: DetailAssetResolver = {
+      resolve(reference) {
+        return {
+          logicalId: reference.logicalId,
+          authority: "current",
+          availability: "available",
+          digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          mediaType: "image/png",
+          representation: { kind: "image", sanitized: true },
+        };
+      },
+    };
+    const node = new NodeObject("box", "Draft", "Legacy", "concept", "asset-node", resolver);
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("hero")} alt="Hero">`);
+
+    expect(node.detailAuthoring.checkpoint().assets).toEqual([{
+      id: "hero",
+      digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      mediaType: "image/png",
+      representation: "image",
+    }]);
+  });
+
+  it("keeps the legacy string-only submit request backward compatible while locking its empty builder", async () => {
+    let request: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      request = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        node: { id: 11, kind: "concept", icon: "box", title: "Legacy", detail: "Markdown detail", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Legacy", "Markdown detail", "concept", "legacy-node");
+
+    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node);
+
+    expect(request).toEqual({
+      clientKey: "legacy-node",
+      kind: "concept",
+      icon: "box",
+      title: "Legacy",
+      detail: "Markdown detail",
+    });
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Too late</p>`)).toThrow("finalized");
   });
 
   it("serializes a versioned authored layout from node references", async () => {

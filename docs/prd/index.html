@@ -2264,6 +2264,16 @@ settings:
 <li>Product and Eval use the same renderer-owned history controller and controls. Eval remains read-only and does not maintain a second history stack.</li>
 <li>The renderer shows the immutable accepted snapshot for that turn even if later turns update shared nodes.</li>
 </ul>
+<h3>6.2 Authored Node Detail compiler foundation</h3>
+<p>This foundation implements Issue #363’s client contract for #241. It expresses #338 through ordinary link and asset bindings.</p>
+<ul>
+<li>Each draft <code>NodeObject</code> owns one typed detail builder alongside its backward-compatible string detail.</li>
+<li>Authors checkpoint stable HTML and CSS components before submission. Checkpoint errors retain component and source locations.</li>
+<li><code>gc=${capability}</code> binds typed actions to compatible native hosts. <code>asset=${assetRef}</code> binds resolver-verified logical visuals.</li>
+<li>The compiler uses browser-equivalent HTML construction, fail-closed markup rules, parsed CSS validation, deterministic limits, and canonical output.</li>
+<li><code>submitNode</code> finalizes and attaches the compiled package once. Later authoring rejects, while exact retries reuse the frozen package.</li>
+<li>This foundation does not claim accepted-package durability or Product rendering. Those remain #365 and #366 work.</li>
+</ul>
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>
 <p>The first evaluation is one fixed two-interaction case. Its name is <code>empty-project.task-system.two-turn</code>. It proves the smallest real conversation path through all runtime components. These components include the graph engine, client, harness host, Codex session, Complete boundary, evaluator, judge, and renderer.</p>
 <p>The second interaction receives a new canonical interaction node and capability token. It reuses the same harness object and provider thread. The case has no existing codebase, grounding requirement, graph search, or subagent dependency.</p>
