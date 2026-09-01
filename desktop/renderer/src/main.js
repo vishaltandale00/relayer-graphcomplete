@@ -10,7 +10,7 @@ import {
   preparePermissionProfiles,
   togglePermissionMenu,
 } from "./permission-profiles.js";
-import { appState, desktop, evalReview, productApiAvailable, viewState } from "./state.js";
+import { appState, desktop, evalReview, productApiAvailable, query, viewState } from "./state.js";
 import {
   closeNewThreadModelPicker,
   initializeNewThreadModelPicker,
@@ -50,6 +50,26 @@ import {
   refreshDesktopAccountUi,
   revealDesktopWorkspace,
 } from "./desktop-account.js";
+import {
+  initializeComposerDrafts,
+  pendingNewThreadDraft,
+  persistPendingNewThreadDraft,
+} from "./composer-drafts.js";
+import { projectComposerGate } from "./project-composer-navigation.js";
+const PROJECT_COMPOSER_DESTINATION_SELECTOR = [
+  "#settingsButton",
+  "[data-thread]",
+  "#createThread",
+  "#sendInteraction",
+  "#confirmContextDraftSend",
+  "#historyBack",
+  "#historyForward",
+  "#previousTurn",
+  "#nextTurn",
+  "[data-turn-id]",
+  "#workspaceBreadcrumb button",
+  "#detailActions .action-control",
+].join(", ");
 
 function applyPlatformCopy() {
   const isMac = desktop?.platform === "darwin";
@@ -85,7 +105,39 @@ function takeOverPendingAutomaticTutorial() {
   onboardingTutorialController()?.cancelPendingAutomatic();
 }
 
-async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
+function projectScope(project) {
+  return {
+    kind: "project",
+    projectId: project.id,
+    label: project.name,
+    path: project.path,
+  };
+}
+
+function restoredDraftScope(scope) {
+  if (scope?.kind === "project") {
+    const project = appState.projects.find((candidate) => (
+      String(candidate.id) === String(scope.projectId)
+    ));
+    return project ? projectScope(project) : { kind: "standalone", label: "No folder" };
+  }
+  if (scope?.kind === "folder" && typeof scope.path === "string" && scope.path) {
+    return {
+      kind: "folder",
+      label: typeof scope.label === "string" && scope.label ? scope.label : scope.path,
+      path: scope.path,
+      git: scope.git === true,
+      ...(typeof scope.branch === "string" ? { branch: scope.branch } : {}),
+    };
+  }
+  return { kind: "standalone", label: "No folder" };
+}
+
+async function openNewThreadComposer({
+  prompt = "",
+  scope = { kind: "standalone", label: "No folder" },
+  guard = null,
+} = {}) {
   const applyPermissionProfiles = await preparePermissionProfiles(
     appState.modelSettings?.defaults?.harnessId,
   );
@@ -93,13 +145,15 @@ async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
   applyPermissionProfiles?.();
   updateTutorialAvailability();
   if (guard && !guard()) return false;
+  const resolvedPrompt = typeof prompt === "function" ? prompt() : prompt;
   cancelNavigationHistory();
   viewState.currentThreadId = null;
   viewState.currentInteractionId = null;
-  selectScope({ kind: "standalone", label: "No folder" });
+  selectScope(scope);
   resetNewThreadModelPicker();
   setMainView("new");
-  $("#newThreadPrompt").value = prompt;
+  $("#newThreadPrompt").value = resolvedPrompt;
+  persistPendingNewThreadDraft(resolvedPrompt, scope);
   updateCreateThreadAvailability();
   $("#newThreadPrompt").focus();
   return true;
@@ -108,6 +162,7 @@ async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
 async function maybeStartAutomaticTutorial(providerConnected) {
   const tutorial = onboardingTutorialController();
   if (!tutorial || evalReview) return false;
+  if (pendingNewThreadDraft()?.text) return false;
   if (!tutorialComposerReady()) return false;
   return tutorial.maybeStartAutomatic({
     providerConnected,
@@ -116,14 +171,53 @@ async function maybeStartAutomaticTutorial(providerConnected) {
 }
 
 function bindEvents() {
+  document.addEventListener("click", (event) => {
+    if (event.target.closest(PROJECT_COMPOSER_DESTINATION_SELECTOR)) {
+      projectComposerGate.invalidate();
+    }
+  }, { capture: true });
   $("#newThread").onclick = async () => {
-    if (!await prepareCurrentWorkspaceTransition()) return;
+    const request = projectComposerGate.begin();
+    const guard = () => projectComposerGate.isCurrent(request);
     takeOverPendingAutomaticTutorial();
+    if (!await prepareCurrentWorkspaceTransition() || !guard()) return;
     try {
-      await openNewThreadComposer();
+      await openNewThreadComposer({ guard });
     } catch (error) {
       toast(error.message);
     }
+  };
+  $("#projectList").onclick = (event) => {
+    const action = event.target.closest("[data-project-new-thread]");
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void (async () => {
+      const project = appState.projects.find((candidate) => (
+        String(candidate.id) === action.dataset.projectNewThread
+      ));
+      if (!project) return;
+      const request = projectComposerGate.begin();
+      const guard = () => projectComposerGate.isCurrent(request);
+      takeOverPendingAutomaticTutorial();
+      if (viewState.mainView === "new"
+        && viewState.selectedScope.kind === "project"
+        && String(viewState.selectedScope.projectId) === String(project.id)) {
+        $("#newThreadPrompt").focus();
+        return;
+      }
+      if (!await prepareCurrentWorkspaceTransition() || !guard()) return;
+      const scope = projectScope(project);
+      await openNewThreadComposer({
+        prompt: () => (
+          viewState.mainView === "new"
+            ? $("#newThreadPrompt").value
+            : pendingNewThreadDraft()?.text ?? ""
+        ),
+        scope,
+        guard,
+      });
+    })().catch((error) => toast(error.message));
   };
   $("#scopeButton").onclick = () => {
     takeOverPendingAutomaticTutorial();
@@ -144,6 +238,7 @@ function bindEvents() {
   $("#createThread").onclick = () => createFirstThread();
   $("#newThreadPrompt").oninput = () => {
     takeOverPendingAutomaticTutorial();
+    persistPendingNewThreadDraft($("#newThreadPrompt").value, viewState.selectedScope);
     updateCreateThreadAvailability();
   };
   bindComposerKeydown($("#newThreadPrompt"), () => {
@@ -157,6 +252,7 @@ function bindEvents() {
     $("#collapseSidebar").setAttribute("aria-label", label);
   };
   $("#settingsButton").onclick = async () => {
+    projectComposerGate.invalidate();
     takeOverPendingAutomaticTutorial();
     if (!await prepareCurrentWorkspaceTransition()) return;
     cancelNavigationHistory();
@@ -253,6 +349,7 @@ function bindEvents() {
     const threadButton = event.target.closest("[data-thread]");
     if (threadButton) {
       event.preventDefault();
+      projectComposerGate.invalidate();
       void (async () => {
         if (!await prepareCurrentWorkspaceTransition()) return;
         await loadThread(threadButton.dataset.thread);
@@ -282,6 +379,7 @@ async function boot() {
   if (evalReview) viewState.evalContext = await evalReview.context();
   applyPlatformCopy();
   bindEvents();
+  await initializeComposerDrafts();
   window.addEventListener("focus", () => {
     void refreshCurrentEnvironment({ force: true, minimumAgeMs: 1_000 }).catch(() => {});
   });
@@ -326,6 +424,13 @@ async function boot() {
   }
   updateCreateThreadAvailability();
   await refreshState(viewState.currentThreadId);
+  const pendingDraft = pendingNewThreadDraft();
+  if (pendingDraft?.text && !query.get("threadId")) {
+    await openNewThreadComposer({
+      prompt: pendingDraft.text,
+      scope: restoredDraftScope(pendingDraft.scope),
+    });
+  }
   await initializeDesktopAccountUi({
     desktop,
     offerOnboarding: account?.status === "connected",

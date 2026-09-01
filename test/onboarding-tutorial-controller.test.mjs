@@ -961,7 +961,9 @@ describe("onboarding tutorial controller", () => {
     expect(main).toContain('$("#startTutorial").disabled = !ready;');
     expect(onboarding.indexOf('if (source === "manual" && !isComposerReady()) return false;'))
       .toBeLessThan(onboarding.indexOf("const attempt = ownedAttempt ?? claimStart(source);"));
-    expect(main).toContain('async function openNewThreadComposer({ prompt = "", guard = null } = {})');
+    expect(main).toContain("async function openNewThreadComposer({");
+    expect(main).toContain('scope = { kind: "standalone", label: "No folder" },');
+    expect(main).toContain("guard = null,");
     expect(main.indexOf("const applyPermissionProfiles = await preparePermissionProfiles("))
       .toBeLessThan(main.indexOf("if (guard && !guard()) return false;"));
     expect(main.indexOf("if (guard && !guard()) return false;"))
@@ -975,10 +977,22 @@ describe("onboarding tutorial controller", () => {
     expect(onboarding).toContain("guard: canOpen,");
     expect(onboarding).toContain("&& isComposerReady()");
     expect(onboarding).toContain("cancelPendingAutomatic,");
-    expect(main.match(/takeOverPendingAutomaticTutorial\(\);/g)).toHaveLength(5);
+    expect(main).toContain("if (pendingNewThreadDraft()?.text) return false;");
+    expect(main).toContain("PROJECT_COMPOSER_DESTINATION_SELECTOR");
+    expect(graph).toContain(`onSelectTurn: (delta) => {
+      projectComposerGate.invalidate();`);
+    expect(graph).toContain(`onSelectTurnById: (turnId) => {
+      projectComposerGate.invalidate();`);
+    expect(threads.indexOf("const submission = projectComposerGate.begin();"))
+      .toBeLessThan(threads.indexOf('creatingFirstThread = true;'));
+    expect(threads).toContain("if (!submissionIsCurrent()) return;");
+    expect(main.indexOf('$("#newThreadPrompt").value = resolvedPrompt;'))
+      .toBeLessThan(main.indexOf("persistPendingNewThreadDraft(resolvedPrompt, scope);"));
+    expect(main.match(/takeOverPendingAutomaticTutorial\(\);/g)).toHaveLength(6);
     expect(main).toContain(`$("#newThreadPrompt").oninput = () => {
     takeOverPendingAutomaticTutorial();`);
     expect(main).toContain(`$("#settingsButton").onclick = async () => {
+    projectComposerGate.invalidate();
     takeOverPendingAutomaticTutorial();`);
     expect(main).toContain("onUserTakeover: takeOverPendingAutomaticTutorial,");
     expect(composerPicker).toContain("onUserTakeover,");

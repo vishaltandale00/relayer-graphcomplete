@@ -73,6 +73,8 @@ import {
   resolveEnvironmentSnapshot,
 } from "./environment-context.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
+import { clearPendingNewThreadDraft } from "./composer-drafts.js";
+import { projectComposerGate } from "./project-composer-navigation.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -1324,6 +1326,8 @@ export async function createFirstThread(pickerPayloadOverride = null) {
     return;
   }
   if (!promptText || !permissionProfileId || creatingFirstThread) return;
+  const submission = projectComposerGate.begin();
+  const submissionIsCurrent = () => projectComposerGate.isCurrent(submission);
   creatingFirstThread = true;
   input.disabled = true;
   $("#createThread").disabled = true;
@@ -1341,7 +1345,7 @@ export async function createFirstThread(pickerPayloadOverride = null) {
         createId: () => crypto.randomUUID(),
       });
       viewState.currentThreadId = thread.id;
-      input.value = "";
+      clearSuccessfulNewThreadInput(input);
       renderSidebar();
       renderThread();
       return;
@@ -1349,6 +1353,7 @@ export async function createFirstThread(pickerPayloadOverride = null) {
     let projectId = selectedScope.projectId;
     if (selectedScope.kind === "folder") {
       const project = await createOrReuseProject(selectedScope);
+      if (!submissionIsCurrent()) return;
       projectId = project.id;
     }
     const thread = await request("/api/threads", {
@@ -1361,14 +1366,16 @@ export async function createFirstThread(pickerPayloadOverride = null) {
         pickerPayload,
       })),
     });
+    if (!submissionIsCurrent()) return;
     viewState.currentThreadId = thread.id;
     onboardingTutorialController()?.threadCreated({
       threadId: thread.id,
       interactionId: thread.rootInteractionId,
     });
-    input.value = "";
+    clearSuccessfulNewThreadInput(input);
     await loadThread(thread.id);
   } catch (error) {
+    if (!submissionIsCurrent()) return;
     await refreshAfterModelSelectionRejection(error);
     toast(error.message);
   } finally {
@@ -1378,6 +1385,11 @@ export async function createFirstThread(pickerPayloadOverride = null) {
     setNewThreadModelPickerDisabled(false);
     updateCreateThreadAvailability();
   }
+}
+
+function clearSuccessfulNewThreadInput(input) {
+  input.value = "";
+  clearPendingNewThreadDraft();
 }
 
 export function connectEvents() {

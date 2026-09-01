@@ -1,7 +1,8 @@
 import { appState, desktop, viewState } from "./state.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
-import { $, $$, escapeHtml } from "./ui.js";
+import { $, $$, escapeHtml, escapeHtmlAttribute } from "./ui.js";
 import { evalSidebarHeading } from "./navigation-model.js";
+import { persistPendingNewThreadDraft } from "./composer-drafts.js";
 
 const settingsTabs = {
   account: "Account",
@@ -88,7 +89,10 @@ export function renderSidebar() {
     : `<div class="entry"><span class="entry-icon">—</span><span>No chats yet</span></div>`;
   $("#projectList").innerHTML = appState.projects.map((project) => {
     const threads = appState.threads.filter((thread) => String(thread.projectId) === String(project.id));
-    return `<div><button class="project-button"><i></i><span>${escapeHtml(project.name)}</span><span>${threads.length}</span></button><div class="project-threads">${threads.map(threadEntry).join("")}</div></div>`;
+    const projectId = escapeHtmlAttribute(project.id);
+    const projectName = escapeHtml(project.name);
+    const projectNameAttribute = escapeHtmlAttribute(project.name);
+    return `<div><div class="project-row" data-project-row="${projectId}"><button class="project-button" type="button"><i></i><span>${projectName}</span></button><button class="project-new-thread" type="button" data-project-new-thread="${projectId}" aria-label="New thread in ${projectNameAttribute}" title="New thread in ${projectNameAttribute}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.69 4.05 19.95 9.31M4 20l3.75-.75L19.2 7.8a1.75 1.75 0 0 0 0-2.48l-.52-.52a1.75 1.75 0 0 0-2.48 0L4.75 16.25 4 20Z"/><path d="M13 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-7"/></svg></button></div><div class="project-threads">${threads.map(threadEntry).join("")}</div></div>`;
   }).join("");
 }
 
@@ -102,6 +106,9 @@ export function selectScope(scope, { userInitiated = false } = {}) {
     summary.innerHTML = `<b>${scope.git ? `Git · ${escapeHtml(scope.branch || "repository")}` : "Local folder"}</b>${escapeHtml(scope.path)}`;
   } else {
     summary.classList.add("hidden");
+  }
+  if (userInitiated && viewState.mainView === "new") {
+    persistPendingNewThreadDraft($("#newThreadPrompt").value, scope);
   }
 }
 

@@ -1,0 +1,235 @@
+<!doctype html>
+<!--
+  THROWAWAY PROTOTYPE: three project-row hover affordances, switchable with
+  ?variant=A|B|C, shown at the density of the existing Relayer sidebar.
+
+  Decisions so far:
+  - A wins: the resting row has no thread count; hover reveals one compose action.
+  - One locally persisted New thread draft is restored or re-scoped, never dropped.
+  - Saved-thread follow-up drafts remain owned by their thread.
+  - Draft presence has no sidebar badge, dot, or label.
+  - Only the revealed compose control starts or re-scopes a draft; the project row does not.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Project row hover prototype</title>
+  <style>
+    :root {
+      --bg: #0b0c0d;
+      --panel: #101214;
+      --raised: #17191c;
+      --hover: #1c1f22;
+      --line: #292c30;
+      --text: #f1f2f3;
+      --muted: #969ba2;
+      --faint: #666c74;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      font-size: 13px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; overflow: hidden; background: var(--bg); }
+    button { font: inherit; cursor: default; }
+    button:focus-visible { outline: 2px solid #80aef8; outline-offset: 1px; }
+    .shell { min-height: 100vh; display: grid; grid-template-columns: 274px 1fr; }
+    .sidebar {
+      min-width: 0;
+      border-right: 1px solid var(--line);
+      background: #0d0f10;
+      padding: 44px 9px 9px;
+      display: flex;
+      flex-direction: column;
+    }
+    .brand { height: 34px; display: flex; align-items: center; gap: 9px; padding: 0 7px; }
+    .logo { width: 24px; height: 24px; border: 1px solid #4a4f55; border-radius: 7px; background: #f7f0e5; color: #151718; display: grid; place-items: center; font-weight: 800; }
+    .new-thread { margin: 12px 0 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); height: 36px; border-radius: 8px; display: flex; align-items: center; gap: 9px; padding: 0 10px; }
+    .new-thread kbd { margin-left: auto; color: var(--faint); font: 10px inherit; }
+    .section { margin-top: 10px; }
+    .section-label { height: 27px; padding: 0 8px; display: flex; align-items: center; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-size: 10px; font-weight: 650; }
+    .thread-list { margin-left: 13px; border-left: 1px solid var(--line); padding-left: 4px; display: grid; gap: 2px; }
+    .thread { height: 34px; border: 0; border-radius: 7px; background: transparent; color: #b7bbc0; display: flex; align-items: center; gap: 8px; padding: 0 9px; min-width: 0; }
+    .thread span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .thread.active { background: var(--hover); color: #fff; }
+    .project { display: grid; gap: 2px; }
+    .project-row { position: relative; min-width: 0; }
+    .project-main { width: 100%; min-width: 0; height: 36px; border: 0; border-radius: 7px; background: transparent; color: #b7bbc0; display: flex; align-items: center; gap: 8px; padding: 0 9px; text-align: left; }
+    .project-row:hover .project-main, .project-row:focus-within .project-main { background: var(--hover); color: #fff; }
+    .project-dot { width: 7px; height: 7px; border-radius: 50%; background: #8092a8; flex: none; }
+    .project-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .compose {
+      border: 0;
+      color: var(--muted);
+      background: transparent;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .compose:hover { color: #fff; background: #2a2e32; }
+    .compose svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .project-row:hover .compose, .project-row:focus-within .compose { opacity: 1; pointer-events: auto; }
+
+    /* A: quiet resting row; one trailing compose action appears on hover. */
+    [data-variant="A"] .project-main { padding-right: 39px; }
+    [data-variant="A"] .compose { position: absolute; width: 28px; height: 28px; top: 4px; right: 5px; }
+
+    /* B: the same action is permanently visible rather than hover-revealed. */
+    [data-variant="B"] .project-main { padding-right: 39px; }
+    [data-variant="B"] .compose { position: absolute; width: 28px; height: 28px; top: 4px; right: 5px; }
+    [data-variant="B"] .compose { opacity: 1; pointer-events: auto; }
+
+    /* C: Hover reveals an explicit action shelf instead of an icon-only target. */
+    [data-variant="C"] .project-row { transition: padding-bottom .12s ease; }
+    [data-variant="C"] .project-row:hover, [data-variant="C"] .project-row:focus-within { padding-bottom: 34px; }
+    [data-variant="C"] .compose { position: absolute; left: 22px; right: 5px; bottom: 2px; height: 30px; display: flex; gap: 7px; justify-content: flex-start; padding: 0 10px; background: #171a1d; border: 1px solid var(--line); }
+    [data-variant="C"] .compose::after { content: "New thread in this project"; }
+
+    .main { display: grid; place-items: center; padding: 48px; background: radial-gradient(circle at 50% 42%, #111418, var(--bg) 52%); }
+    .empty { width: min(620px, 80%); text-align: center; color: var(--muted); }
+    .empty h1 { margin: 0 0 10px; color: var(--text); font-size: 28px; }
+    .empty p { margin: 0 auto 26px; max-width: 470px; line-height: 1.55; }
+    .composer { min-height: 118px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); text-align: left; padding: 16px; box-shadow: 0 18px 60px rgba(0,0,0,.22); }
+    .composer-label { color: var(--faint); font-size: 11px; margin-bottom: 14px; }
+    .draft { width: 100%; min-height: 48px; resize: none; border: 0; outline: 0; padding: 0; margin: 0 0 12px; background: transparent; color: var(--text); font: inherit; line-height: 1.45; }
+    .composer-scope { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
+    .state { position: fixed; top: 16px; right: 18px; color: var(--faint); font-size: 11px; }
+    .switcher { position: fixed; z-index: 10; left: 50%; bottom: 20px; transform: translateX(-50%); display: grid; grid-template-columns: 34px auto 34px; align-items: center; gap: 4px; padding: 5px; border: 1px solid #454b52; border-radius: 999px; background: #f2f3f4; color: #111315; box-shadow: 0 12px 36px rgba(0,0,0,.42); }
+    .switcher button { width: 34px; height: 30px; border: 0; border-radius: 999px; background: transparent; color: inherit; }
+    .switcher button:hover { background: #dfe2e5; }
+    .switcher strong { min-width: 220px; text-align: center; font-size: 12px; }
+  </style>
+</head>
+<body data-variant="A">
+  <div class="shell">
+    <aside class="sidebar" aria-label="Relayer sidebar prototype">
+      <div class="brand"><span class="logo">R</span><strong>Relayer</strong></div>
+      <button class="new-thread" id="globalNewThread"><span>＋</span> New thread <kbd>⌘N</kbd></button>
+      <section class="section">
+        <div class="section-label">Chats</div>
+        <div class="thread-list" style="margin-left:0;border-left:0;padding-left:0">
+          <button class="thread"><span>◌</span><span>Release readiness notes</span></button>
+        </div>
+      </section>
+      <section class="section">
+        <div class="section-label">Projects</div>
+        <div class="project">
+          <div class="project-row">
+            <button class="project-main" type="button"><i class="project-dot"></i><span class="project-name">relayer-graphcomplete</span></button>
+            <button class="compose" id="projectCompose" type="button" aria-label="New thread in relayer-graphcomplete" title="New thread in relayer-graphcomplete">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.8 3.2H5.4A2.4 2.4 0 0 0 3 5.6v9A2.4 2.4 0 0 0 5.4 17h9a2.4 2.4 0 0 0 2.4-2.4V8.2"/><path d="m9 11 1.1-3.1 5.5-5.5a1.4 1.4 0 0 1 2 2l-5.5 5.5L9 11Z"/></svg>
+            </button>
+          </div>
+          <div class="thread-list">
+            <button class="thread active" id="savedThread"><span>◌</span><span>Project row affordance</span></button>
+            <button class="thread"><span>◌</span><span>Provider execution matrix</span></button>
+            <button class="thread"><span>◌</span><span>Recursive completion semantics</span></button>
+            <button class="thread"><span>◌</span><span>Desktop release paper</span></button>
+          </div>
+        </div>
+      </section>
+    </aside>
+    <main class="main">
+      <div class="empty">
+        <h1 id="heading">Project row affordance</h1>
+        <p id="description">This saved thread has its own unsent follow-up. Use the project compose button to leave it here and open a separate New thread draft.</p>
+        <div class="composer">
+          <div class="composer-label" id="composerLabel">Unsent follow-up — attached to saved thread</div>
+          <textarea class="draft" id="draft">One more thing: verify the hover target with keyboard focus…</textarea>
+          <div class="composer-scope" id="scope">⌁ relayer-graphcomplete</div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="state" id="state">variant=A · view=saved-thread · persistence=local · mutation=none</div>
+  <nav class="switcher" aria-label="Prototype variants">
+    <button id="previous" type="button" aria-label="Previous variant">←</button>
+    <strong id="variantLabel"></strong>
+    <button id="next" type="button" aria-label="Next variant">→</button>
+  </nav>
+  <script>
+    const variants = [
+      { key: "A", name: "Selected · hover compose" },
+      { key: "B", name: "Persistent compose button" },
+      { key: "C", name: "Explicit action shelf" },
+    ];
+    const params = new URLSearchParams(location.search);
+    let index = Math.max(0, variants.findIndex(({ key }) => key === (params.get("variant") || "A").toUpperCase()));
+    const storageKey = "relayer-project-row-hover-prototype-drafts";
+    const storedDrafts = JSON.parse(localStorage.getItem(storageKey) || "null") || {};
+    const drafts = {
+      saved: storedDrafts.saved || "One more thing: verify the hover target with keyboard focus…",
+      newText: storedDrafts.newText ?? storedDrafts.project ?? "",
+      newScope: storedDrafts.newScope ?? (storedDrafts.project ? "project" : null),
+    };
+    let view = "saved";
+    let newScope = drafts.newScope;
+    const draft = document.querySelector("#draft");
+    const saveVisibleDraft = () => {
+      if (view === "saved") drafts.saved = draft.value;
+      else {
+        drafts.newText = draft.value;
+        drafts.newScope = newScope;
+      }
+      localStorage.setItem(storageKey, JSON.stringify(drafts));
+    };
+    const showSavedThread = () => {
+      saveVisibleDraft();
+      view = "saved";
+      document.querySelector("#heading").textContent = "Project row affordance";
+      document.querySelector("#description").textContent = "The saved thread's unsent follow-up is restored exactly where it was left.";
+      document.querySelector("#composerLabel").textContent = "Unsent follow-up — attached to saved thread";
+      document.querySelector("#scope").textContent = "⌁ relayer-graphcomplete";
+      draft.value = drafts.saved;
+      document.querySelector("#state").textContent = `variant=${variants[index].key} · view=saved-thread · persistence=local · mutation=none`;
+      draft.focus();
+    };
+    const showNewDraft = (requestedScope = null) => {
+      saveVisibleDraft();
+      if (requestedScope) newScope = requestedScope;
+      else newScope = drafts.newScope || "standalone";
+      drafts.newScope = newScope;
+      view = "new";
+      document.querySelector("#heading").textContent = "New thread";
+      document.querySelector("#description").textContent = drafts.newText
+        ? `The one pending New thread draft is restored with its ${newScope === "project" ? "project" : "No folder"} scope.`
+        : `A new empty draft opens with ${newScope === "project" ? "relayer-graphcomplete" : "No folder"} selected. The saved thread's follow-up remains attached to that thread.`;
+      document.querySelector("#composerLabel").textContent = "New thread draft — no thread exists until Send";
+      document.querySelector("#scope").textContent = newScope === "project" ? "⌁ relayer-graphcomplete" : "⌁ No folder";
+      draft.value = drafts.newText;
+      saveVisibleDraft();
+      document.querySelector("#state").textContent = `variant=${variants[index].key} · view=new-thread · scope=${newScope === "project" ? "project:relayer-graphcomplete" : "standalone"} · persistence=local · mutation=none`;
+      draft.focus();
+    };
+    const render = () => {
+      const variant = variants[index];
+      document.body.dataset.variant = variant.key;
+      document.querySelector("#variantLabel").textContent = `${variant.key} — ${variant.name}`;
+      params.set("variant", variant.key);
+      history.replaceState(null, "", `${location.pathname}?${params}`);
+      document.querySelector("#state").textContent = `variant=${variant.key} · view=${view === "saved" ? "saved-thread" : "new-thread"} · persistence=local · mutation=none`;
+    };
+    const cycle = (offset) => { index = (index + offset + variants.length) % variants.length; render(); };
+    document.querySelector("#previous").onclick = () => cycle(-1);
+    document.querySelector("#next").onclick = () => cycle(1);
+    document.addEventListener("keydown", (event) => {
+      if (event.target.matches("input, textarea, [contenteditable]")) return;
+      if (event.key === "ArrowLeft") cycle(-1);
+      if (event.key === "ArrowRight") cycle(1);
+    });
+    document.querySelector("#projectCompose").onclick = () => {
+      if (view === "new" && newScope === "project") draft.focus();
+      else showNewDraft("project");
+    };
+    document.querySelector("#globalNewThread").onclick = () => view === "new" ? draft.focus() : showNewDraft();
+    document.querySelector("#savedThread").onclick = () => view === "saved" ? draft.focus() : showSavedThread();
+    draft.addEventListener("input", saveVisibleDraft);
+    window.addEventListener("beforeunload", saveVisibleDraft);
+    render();
+  </script>
+</body>
+</html>

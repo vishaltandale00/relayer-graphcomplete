@@ -134,6 +134,10 @@ if (contextBridge) contextBridge.exposeInMainWorld("relayerDesktop", {
     read: () => ipcRenderer.invoke("relayer:appearance-read"),
     set: (appearance) => ipcRenderer.invoke("relayer:appearance-set", appearance),
   },
+  drafts: {
+    read: () => ipcRenderer.invoke("relayer:composer-drafts-read"),
+    write: (value) => ipcRenderer.invoke("relayer:composer-drafts-write", value),
+  },
   tutorial: {
     read: (context) => ipcRenderer.invoke("relayer:tutorial-read", context),
     beginAutomatic: (context) => ipcRenderer.invoke("relayer:tutorial-begin-automatic", context),

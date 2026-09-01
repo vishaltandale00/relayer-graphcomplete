@@ -634,7 +634,7 @@ describe("product workspace keyboard behavior", () => {
     }
     expect(workspaceSource).toContain("prepareSelectionChange: prepareNodeContextSelectionChange");
     expect(graphSource).toContain("productWorkspace?.prepareSelectionChange()");
-    expect(mainSource.match(/prepareCurrentWorkspaceTransition\(\)/g)).toHaveLength(3);
+    expect(mainSource.match(/prepareCurrentWorkspaceTransition\(\)/g)).toHaveLength(4);
   });
 
   it("presents every unconfirmed draft with stable accessible identity", () => {
@@ -1542,6 +1542,20 @@ describe("product workspace keyboard behavior", () => {
         promptValue: "user edited the restored prompt",
         restoredDraftInteractionId: 100,
       });
+  });
+
+  it("keeps an explicit empty follow-up tombstone ahead of a failed prompt restoration", () => {
+    const transition = transitionComposerDraftScope(createComposerDraftScopeState(), {
+      threadId: 10,
+      interactionId: 100,
+      currentPromptValue: "",
+      restoredDraft: { text: "do not resurrect this failed prompt" },
+      persistedDraftText: "",
+    });
+
+    expect(transition.promptValue).toBe("");
+    expect(transition.state.drafts.get(composerDraftScopeKey(10, 100)))
+      .toMatchObject({ promptValue: "", restoredDraftInteractionId: 100 });
   });
 
   it("starts at one line, grows to its cap, and then enables vertical scrolling", async () => {
