@@ -250,7 +250,7 @@ if (primaryInstance) {
       if (!providerSetup) return;
       const incoming = parseUpdateRuntimeRequirements(info);
       const requirements = activeProviderRuntimeRequirements(await providerSetup.list())
-        .map(({ runtimeId }) => ({ runtimeId, minimumVersion: incoming[runtimeId] }));
+        .map(({ runtimeId }) => ({ runtimeId, recipeId: incoming[runtimeId] }));
       if (requirements.length === 0) return;
       const result = await managedRuntimeInstaller.stageForAppUpdate(info.version, requirements);
       if (result.failures.length) {
@@ -409,8 +409,7 @@ if (primaryInstance) {
           compatibleHarnessImplementationForAdapter(definition.adapterId),
         );
         const managedRuntime = managedRuntimeDescriptor(await managedRuntimeResolver.get(
-          requirement.runtimeId,
-          requirement.minimumVersion,
+          requirement.recipeId,
         ));
         return productionProviderRuntimeDependencies(definition, {
           runtimeRoot: providerRuntimeRoot,
@@ -423,7 +422,7 @@ if (primaryInstance) {
         const requirement = managedRuntimeRequirementForHarness(
           compatibleHarnessImplementationForAdapter(adapterId),
         );
-        await managedRuntimeResolver.prepare(requirement.runtimeId, requirement.minimumVersion);
+        await managedRuntimeResolver.prepare(requirement.recipeId);
       },
       publishCatalog,
     });

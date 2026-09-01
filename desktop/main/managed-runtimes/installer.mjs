@@ -18,6 +18,7 @@ import { x as extractTar } from "tar";
 
 import { managedRuntimeTarget, MANAGED_RUNTIME_IDS } from "./catalog.mjs";
 import { createDefaultRuntimeProbes } from "./probes.mjs";
+import { resolveManagedRuntimeRecipe } from "./recipes.mjs";
 
 const REGISTRY = "https://registry.npmjs.org";
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
@@ -196,7 +197,7 @@ async function regularFile(path, label) {
 async function readActive(base) {
   try {
     const receipt = JSON.parse(await readFile(join(base, "active.json"), "utf8"));
-    if (receipt?.schemaVersion !== 1 || typeof receipt.installation !== "string" || !/^[a-f0-9-]{36}$/.test(receipt.installation)) {
+    if (![1, 2].includes(receipt?.schemaVersion) || typeof receipt.installation !== "string" || !/^[a-f0-9-]{36}$/.test(receipt.installation)) {
       return null;
     }
     return receipt;
@@ -225,7 +226,7 @@ function sameArtifacts(receipt, resolved) {
     && JSON.stringify(receipt.artifacts) === JSON.stringify(resolved.artifacts);
 }
 
-function validateReceiptArtifacts(receipt, runtimeId) {
+function validateReceiptArtifacts(receipt, runtimeId, { allowCodeOwnedHttps = false } = {}) {
   if (!Array.isArray(receipt.artifacts) || receipt.artifacts.length === 0) {
     throw new Error(`${runtimeId} managed runtime receipt is invalid.`);
   }
@@ -234,7 +235,7 @@ function validateReceiptArtifacts(receipt, runtimeId) {
     validateVersion(artifact?.version, "Managed runtime receipt package version");
     sha512Integrity(artifact?.integrity);
     const tarball = new URL(requiredString(artifact?.tarball, "Managed runtime receipt tarball"));
-    if (tarball.protocol !== "https:" || tarball.hostname !== "registry.npmjs.org") {
+    if (tarball.protocol !== "https:" || (!allowCodeOwnedHttps && tarball.hostname !== "registry.npmjs.org")) {
       throw new Error("Managed runtime receipt tarball is invalid.");
     }
   }
@@ -262,6 +263,7 @@ function installedResult(base, receipt) {
   const installationRoot = join(base, "installations", receipt.installation);
   return Object.freeze({
     runtimeId: receipt.runtimeId,
+    ...(receipt.recipeId ? { recipeId: receipt.recipeId, recipeDigest: receipt.recipeDigest } : {}),
     version: receipt.version,
     target: receipt.target,
     executable: confinedInstallationPath(installationRoot, receipt.executableRelativePath, "Managed runtime executable path"),
@@ -272,14 +274,159 @@ function installedResult(base, receipt) {
   });
 }
 
+function publicInstallationDescriptor(result) {
+  const { receipt, ...descriptor } = result;
+  return Object.freeze({
+    ...descriptor,
+    installation: receipt.installation,
+  });
+}
+
+function managedSegment(value, label) {
+  const segment = requiredString(value, label);
+  if (segment === "." || segment === ".." || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(segment)) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return segment;
+}
+
+function sameExactRecipeReceipt(receipt, recipe, { checkOwnership = true } = {}) {
+  if (receipt?.schemaVersion === 1) {
+    return ["codex", "claude"].includes(recipe.runtimeId) && sameArtifacts(receipt, recipe);
+  }
+  const expectedOwnedPaths = receipt?.installation
+    ? [posix.join(recipe.runtimeId, recipe.target, "installations", receipt.installation)]
+    : [];
+  return receipt?.schemaVersion === 2
+    && receipt.recipeId === recipe.recipeId
+    && receipt.recipeDigest === recipe.recipeDigest
+    && receipt.recipeSchemaVersion === recipe.schemaVersion
+    && receipt.assembler === recipe.assembler
+    && receipt.readinessContractVersion === recipe.readinessContractVersion
+    && receipt.executableRelativePath === recipe.executableRelativePath
+    && receipt.moduleRelativePath === recipe.moduleRelativePath
+    && (!checkOwnership || JSON.stringify(receipt.ownedPaths) === JSON.stringify(expectedOwnedPaths))
+    && sameArtifacts(receipt, recipe);
+}
+
+function validateResolvedRecipe(recipe, recipeId, targetKey) {
+  if (!recipe || typeof recipe !== "object" || Array.isArray(recipe)
+    || recipe.schemaVersion !== 1 || recipe.recipeId !== recipeId
+    || typeof recipe.runtimeId !== "string" || recipe.runtimeId.trim() === ""
+    || recipe.target !== targetKey || !semver.valid(recipe.version)
+    || typeof recipe.recipeDigest !== "string" || !/^[a-f0-9]{64}$/.test(recipe.recipeDigest)
+    || typeof recipe.assembler !== "string" || recipe.assembler.trim() === ""
+    || !Number.isInteger(recipe.readinessContractVersion) || recipe.readinessContractVersion < 1
+    || !Array.isArray(recipe.artifacts) || recipe.artifacts.length === 0) {
+    throw new Error(`Managed runtime recipe ${recipeId} is invalid.`);
+  }
+  const { recipeDigest, ...lockedRecipe } = recipe;
+  const actualDigest = createHash("sha256").update(JSON.stringify(lockedRecipe)).digest("hex");
+  if (actualDigest !== recipeDigest) {
+    throw new Error(`Managed runtime recipe digest does not match ${recipeId}.`);
+  }
+  managedSegment(recipe.runtimeId, "Managed runtime recipe identity");
+  confinedInstallationPath("/managed-installation", recipe.executableRelativePath, "Managed runtime recipe executable path");
+  if (recipe.moduleRelativePath) {
+    confinedInstallationPath("/managed-installation", recipe.moduleRelativePath, "Managed runtime recipe module path");
+  }
+  const artifactKeys = new Set();
+  for (const artifact of recipe.artifacts) {
+    if (artifact?.kind === "sdist" || artifact?.sourceBuild === true) {
+      throw new Error("Managed runtime recipes cannot contain source distributions or source builds.");
+    }
+    managedSegment(artifact?.role, "Managed runtime recipe artifact role");
+    const artifactKey = requiredString(artifact?.artifactId || artifact?.role, "Managed runtime recipe artifact identity");
+    if (artifactKeys.has(artifactKey)) throw new Error("Managed runtime recipe artifact identities must be unique.");
+    artifactKeys.add(artifactKey);
+    requiredString(artifact?.package, "Managed runtime recipe artifact package");
+    requiredString(artifact?.version, "Managed runtime recipe artifact version");
+    const tarball = new URL(requiredString(artifact?.tarball, "Managed runtime recipe artifact URL"));
+    if (tarball.protocol !== "https:") throw new Error("Managed runtime recipe artifact URL is invalid.");
+    sha512Integrity(artifact?.integrity);
+  }
+  if (recipe.runtimeId === "prime") {
+    const contract = recipe.runtimeContract;
+    const javascript = contract?.javascript;
+    const python = contract?.python;
+    const client = python?.client;
+    if (!contract || typeof contract !== "object" || Array.isArray(contract)
+      || typeof contract.primeSourceCommit !== "string" || !/^[a-f0-9]{40}$/.test(contract.primeSourceCommit)
+      || typeof javascript?.dependencyClosureSha256 !== "string"
+      || !/^[a-f0-9]{64}$/.test(javascript.dependencyClosureSha256)
+      || !Array.isArray(javascript?.packages) || javascript.packages.length === 0
+      || javascript.packages.some((entry) => (
+        typeof entry?.name !== "string" || entry.name.trim() === ""
+        || !semver.valid(entry?.version)
+        || typeof entry?.archiveSha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.archiveSha256)
+        || typeof entry?.treeSha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.treeSha256)
+      ))
+      || new Set(javascript.packages.map(({ name }) => name)).size !== javascript.packages.length
+      || !semver.valid(contract.uv?.version) || !artifactKeys.has(contract.uv?.artifactId)
+      || typeof contract.uv?.executableRelativePath !== "string" || contract.uv.executableRelativePath.trim() === ""
+      || !semver.valid(python?.version) || !artifactKeys.has(python?.artifactId) || python?.onlyBinary !== true
+      || typeof python?.executableRelativePath !== "string" || python.executableRelativePath.trim() === ""
+      || !Array.isArray(python?.wheelArtifactIds) || python.wheelArtifactIds.length === 0
+      || python.wheelArtifactIds.some((artifactId) => !artifactKeys.has(artifactId))
+      || typeof client?.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(client.sha256)
+      || !artifactKeys.has(client?.artifactId)
+      || typeof client?.installRule !== "string" || client.installRule.trim() === "") {
+      throw new Error("Prime managed runtime recipe requires an exact Python runtime contract.");
+    }
+    const artifactsById = new Map(recipe.artifacts.map((artifact) => [recipeArtifactKey(artifact), artifact]));
+    if (python.wheelArtifactIds.some((artifactId) => artifactsById.get(artifactId)?.kind !== "wheel")) {
+      throw new Error("Prime managed runtime Python closure must contain only locked wheels.");
+    }
+  }
+  return recipe;
+}
+
+function recipeArtifactKey(artifact) {
+  return artifact.artifactId || artifact.role;
+}
+
+function managedAssemblyContext(staging, installationRoot, recipe, signal) {
+  const pythonContract = recipe.runtimeContract?.python;
+  const tools = pythonContract ? Object.freeze({
+    uv: confinedInstallationPath(installationRoot, recipe.runtimeContract.uv.executableRelativePath, "Managed uv executable path"),
+    python: confinedInstallationPath(installationRoot, pythonContract.executableRelativePath, "Managed Python executable path"),
+  }) : Object.freeze({});
+  return Object.freeze({
+    recipe,
+    installationRoot,
+    artifactRoots: Object.freeze(Object.fromEntries(recipe.artifacts.map((artifact) => (
+      [recipeArtifactKey(artifact), join(installationRoot, artifact.role)]
+    )))),
+    tools,
+    environment: Object.freeze({
+      PATH: "",
+      UV_NO_CONFIG: "1",
+      UV_NO_MODIFY_PATH: "1",
+      TMPDIR: join(staging, "tmp"),
+      UV_CACHE_DIR: join(staging, "uv-cache"),
+      UV_PYTHON_INSTALL_DIR: join(installationRoot, "python"),
+      UV_TOOL_DIR: join(installationRoot, "uv-tools"),
+      UV_TOOL_BIN_DIR: join(installationRoot, "uv-bin"),
+      XDG_CACHE_HOME: join(staging, "xdg-cache"),
+      XDG_CONFIG_HOME: join(staging, "xdg-config"),
+      XDG_DATA_HOME: join(staging, "xdg-data"),
+    }),
+    signal,
+  });
+}
+
 export function createManagedRuntimeInstaller({
   root,
   platform = process.platform,
   architecture = process.arch,
   fetch = globalThis.fetch,
+  downloadArtifactFile = downloadArtifact,
   extract = defaultExtract,
   spawnProcess,
   probes = {},
+  resolveRecipe = resolveManagedRuntimeRecipe,
+  assembleRecipe = async () => {},
+  testOnlyLegacyMinimumVersionResolution = false,
   removeDirectory = rm,
   removeInactiveInstallation = (path) => removeDirectory(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
   removeAbandonedStaging = (path) => removeDirectory(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
@@ -288,13 +435,15 @@ export function createManagedRuntimeInstaller({
 } = {}) {
   const target = managedRuntimeTarget({ platform, architecture });
   if (typeof root !== "string" || root.trim() === "") throw new Error("Managed runtime root is required.");
-  if (typeof fetch !== "function" || typeof extract !== "function"
+  if (typeof fetch !== "function" || typeof downloadArtifactFile !== "function" || typeof extract !== "function"
     || typeof removeDirectory !== "function" || typeof removeInactiveInstallation !== "function"
     || typeof removeAbandonedStaging !== "function" || typeof readPruneDirectory !== "function"
+    || typeof resolveRecipe !== "function" || typeof assembleRecipe !== "function"
     || typeof readPendingUpdateDirectory !== "function") {
     throw new Error("Managed runtime installer dependencies are invalid.");
   }
   const effectiveProbes = { ...createDefaultRuntimeProbes({ spawnProcess }), ...probes };
+  const legacyMinimumVersionResolution = testOnlyLegacyMinimumVersionResolution && process.env.NODE_ENV === "test";
   const operations = new Map();
   const pendingOperations = new Map();
   const activationOperations = new Map();
@@ -331,16 +480,16 @@ export function createManagedRuntimeInstaller({
 
   async function install(runtimeId, operation) {
     const signal = operation.controller.signal;
-    const resolved = runtimeId === "claude"
+    const resolved = operation.recipe || (runtimeId === "claude"
       ? await resolveClaude(fetch, target, signal)
-      : await resolveCodex(fetch, target, signal);
-    if (!semver.gte(resolved.version, operation.minimumVersion)) {
+      : await resolveCodex(fetch, target, signal));
+    if (operation.recipe ? resolved.version !== operation.minimumVersion : !semver.gte(resolved.version, operation.minimumVersion)) {
       throw new Error(`${runtimeId} latest ${resolved.version} is below required ${operation.minimumVersion}.`);
     }
     operation.resolvedVersion = resolved.version;
     const base = join(root, runtimeId, target.key);
     const previous = await readActive(base);
-    if (sameArtifacts(previous, resolved)) {
+    if (operation.recipe ? sameExactRecipeReceipt(previous, resolved) : sameArtifacts(previous, resolved)) {
       try {
         return await probeReceipt(base, previous, operation.minimumVersion, signal);
       } catch {
@@ -359,10 +508,11 @@ export function createManagedRuntimeInstaller({
       for (const [index, artifact] of resolved.artifacts.entries()) {
         signal.throwIfAborted();
         const tarball = join(staging, "downloads", `${index}.tgz`);
-        await downloadArtifact(fetch, artifact, tarball, signal);
+        await downloadArtifactFile(fetch, artifact, tarball, signal);
         const destination = join(stagedInstallation, artifact.role);
         await extract(tarball, destination, { runtimeId, artifact, target });
       }
+      await assembleRecipe(managedAssemblyContext(staging, stagedInstallation, resolved, signal));
       const executable = join(stagedInstallation, resolved.executableRelativePath);
       await regularFile(executable, "Managed runtime executable");
       if (platform !== "win32") await chmod(executable, 0o755);
@@ -389,12 +539,20 @@ export function createManagedRuntimeInstaller({
       await rename(stagedInstallation, finalInstallation);
       moved = true;
       const receipt = {
-        schemaVersion: 1,
+        schemaVersion: operation.recipe ? 2 : 1,
         runtimeId,
+        ...(operation.recipe ? {
+          recipeId: operation.recipe.recipeId,
+          recipeDigest: operation.recipe.recipeDigest,
+          recipeSchemaVersion: operation.recipe.schemaVersion,
+          assembler: operation.recipe.assembler,
+          readinessContractVersion: operation.recipe.readinessContractVersion,
+        } : {}),
         version: resolved.version,
         runtimeVersion: probedVersion,
         target: target.key,
         installation,
+        ownedPaths: [posix.join(runtimeId, target.key, "installations", installation)],
         executableRelativePath: resolved.executableRelativePath,
         moduleRelativePath: resolved.moduleRelativePath,
         artifacts: resolved.artifacts,
@@ -427,7 +585,7 @@ export function createManagedRuntimeInstaller({
     try {
       const receipt = JSON.parse(await readFile(pendingPath(appVersion, runtimeId), "utf8"));
       if (
-        receipt?.schemaVersion !== 1
+        ![1, 2].includes(receipt?.schemaVersion)
         || receipt.appVersion !== appVersion
         || receipt.runtimeId !== runtimeId
         || receipt.target !== target.key
@@ -460,10 +618,10 @@ export function createManagedRuntimeInstaller({
 
   async function stageOne(appVersion, runtimeId, operation) {
     const signal = operation.controller.signal;
-    const resolved = runtimeId === "claude"
+    const resolved = operation.recipe || (runtimeId === "claude"
       ? await resolveClaude(fetch, target, signal)
-      : await resolveCodex(fetch, target, signal);
-    if (!semver.gte(resolved.version, operation.minimumVersion)) {
+      : await resolveCodex(fetch, target, signal));
+    if (operation.recipe ? resolved.version !== operation.minimumVersion : !semver.gte(resolved.version, operation.minimumVersion)) {
       throw new Error(`${runtimeId} latest ${resolved.version} is below required ${operation.minimumVersion}.`);
     }
     operation.resolvedVersion = resolved.version;
@@ -471,7 +629,7 @@ export function createManagedRuntimeInstaller({
     const active = await readActive(base);
     const priorPending = await readPending(appVersion, runtimeId);
 
-    if (sameArtifacts(priorPending, resolved)) {
+    if (operation.recipe ? sameExactRecipeReceipt(priorPending, resolved) : sameArtifacts(priorPending, resolved)) {
       try {
         const existing = await probeReceipt(base, priorPending, operation.minimumVersion, signal);
         return Object.freeze({ ...existing, appVersion });
@@ -480,7 +638,7 @@ export function createManagedRuntimeInstaller({
       }
     }
 
-    if (sameArtifacts(active, resolved)) {
+    if (operation.recipe ? sameExactRecipeReceipt(active, resolved) : sameArtifacts(active, resolved)) {
       try {
         const existing = await probeReceipt(base, active, operation.minimumVersion, signal);
         const receipt = {
@@ -513,9 +671,10 @@ export function createManagedRuntimeInstaller({
       for (const [index, artifact] of resolved.artifacts.entries()) {
         signal.throwIfAborted();
         const tarball = join(staging, "downloads", `${index}.tgz`);
-        await downloadArtifact(fetch, artifact, tarball, signal);
+        await downloadArtifactFile(fetch, artifact, tarball, signal);
         await extract(tarball, join(stagedInstallation, artifact.role), { runtimeId, artifact, target });
       }
+      await assembleRecipe(managedAssemblyContext(staging, stagedInstallation, resolved, signal));
       const executable = join(stagedInstallation, resolved.executableRelativePath);
       await regularFile(executable, "Managed runtime executable");
       if (platform !== "win32") await chmod(executable, 0o755);
@@ -544,15 +703,23 @@ export function createManagedRuntimeInstaller({
       await rename(stagedInstallation, finalInstallation);
       moved = true;
       const receipt = {
-        schemaVersion: 1,
+        schemaVersion: operation.recipe ? 2 : 1,
         appVersion,
         minimumVersion: operation.minimumVersion,
         pendingOwnsInstallation: true,
         runtimeId,
+        ...(operation.recipe ? {
+          recipeId: operation.recipe.recipeId,
+          recipeDigest: operation.recipe.recipeDigest,
+          recipeSchemaVersion: operation.recipe.schemaVersion,
+          assembler: operation.recipe.assembler,
+          readinessContractVersion: operation.recipe.readinessContractVersion,
+        } : {}),
         version: resolved.version,
         runtimeVersion: probedVersion,
         target: target.key,
         installation,
+        ownedPaths: [posix.join(runtimeId, target.key, "installations", installation)],
         executableRelativePath: resolved.executableRelativePath,
         moduleRelativePath: resolved.moduleRelativePath,
         artifacts: resolved.artifacts,
@@ -573,7 +740,10 @@ export function createManagedRuntimeInstaller({
     }
   }
 
-  async function stageActivatedRuntime(appVersion, runtimeId, minimumVersion, result) {
+  async function stageActivatedRuntime(appVersion, runtimeId, minimumVersion, result, recipe = null) {
+    if (recipe && result.recipeId !== recipe.recipeId) {
+      throw new Error(`${runtimeId} runtime does not match requested recipe ${recipe.recipeId}.`);
+    }
     if (!semver.gte(result.version, minimumVersion)) {
       throw new Error(`${runtimeId} runtime is below required ${minimumVersion}.`);
     }
@@ -595,12 +765,15 @@ export function createManagedRuntimeInstaller({
     return Object.freeze({ ...result, appVersion });
   }
 
-  function stageRuntime(appVersion, runtimeId, minimumVersion) {
+  function stageRuntime(appVersion, runtimeId, minimumVersion, recipe = null) {
     const connecting = operations.get(runtimeId);
     if (connecting) {
-      if (semver.gt(minimumVersion, connecting.minimumVersion)) connecting.minimumVersion = minimumVersion;
+      if (recipe && connecting.recipe?.recipeId !== recipe.recipeId) {
+        return connecting.promise.then(() => stageRuntime(appVersion, runtimeId, minimumVersion, recipe));
+      }
+      if (!recipe && semver.gt(minimumVersion, connecting.minimumVersion)) connecting.minimumVersion = minimumVersion;
       return connecting.promise.then((result) => (
-        stageActivatedRuntime(appVersion, runtimeId, minimumVersion, result)
+        stageActivatedRuntime(appVersion, runtimeId, minimumVersion, result, recipe)
       ));
     }
     const key = `${appVersion}:${runtimeId}`;
@@ -613,6 +786,7 @@ export function createManagedRuntimeInstaller({
       controller: new AbortController(),
       minimumVersion,
       resolvedVersion: null,
+      recipe,
       promise: null,
     };
     operation.promise = stageOne(appVersion, runtimeId, operation).finally(() => {
@@ -629,6 +803,16 @@ export function createManagedRuntimeInstaller({
     }
     const normalized = requirements.map((requirement) => {
       if (!RUNTIME_IDS.has(requirement?.runtimeId)) throw new Error(`Unknown managed runtime: ${requirement?.runtimeId}.`);
+      if (requirement.recipeId !== undefined) {
+        const recipe = validateResolvedRecipe(resolveRecipe(requirement.recipeId, target.key), requirement.recipeId, target.key);
+        if (recipe.runtimeId !== requirement.runtimeId) {
+          throw new Error(`Managed runtime recipe ${requirement.recipeId} does not belong to ${requirement.runtimeId}.`);
+        }
+        return Object.freeze({ runtimeId: requirement.runtimeId, recipeId: recipe.recipeId, minimumVersion: recipe.version, recipe });
+      }
+      if (!legacyMinimumVersionResolution) {
+        throw new Error("App update runtime requirements must name an exact recipe identity.");
+      }
       return Object.freeze({
         runtimeId: requirement.runtimeId,
         minimumVersion: validateVersion(requirement.minimumVersion, `${requirement.runtimeId} minimum version`),
@@ -649,14 +833,16 @@ export function createManagedRuntimeInstaller({
       }
       await rm(join(pendingRoot, entry.name), { recursive: true, force: true });
     }
-    const settled = await Promise.allSettled(normalized.map(({ runtimeId, minimumVersion }) => (
-      stageRuntime(appVersion, runtimeId, minimumVersion)
+    const settled = await Promise.allSettled(normalized.map(({ runtimeId, minimumVersion, recipe }) => (
+      stageRuntime(appVersion, runtimeId, minimumVersion, recipe)
     )));
     const staged = [];
     const failures = [];
     settled.forEach((result, index) => {
       const runtimeId = normalized[index].runtimeId;
-      if (result.status === "fulfilled") staged.push(result.value);
+      if (result.status === "fulfilled") {
+        staged.push(normalized[index].recipe ? publicInstallationDescriptor(result.value) : result.value);
+      }
       else failures.push(Object.freeze({ runtimeId, error: result.reason }));
     });
     return Object.freeze({ appVersion, staged: Object.freeze(staged), failures: Object.freeze(failures) });
@@ -671,7 +857,18 @@ export function createManagedRuntimeInstaller({
     if (!semver.gte(version, minimumVersion)) {
       throw new Error(`${runtimeId} pending ${version} is below required ${minimumVersion}.`);
     }
-    validateReceiptArtifacts(receipt, runtimeId);
+    if (receipt.schemaVersion === 2) {
+      let recipe;
+      try {
+        recipe = validateResolvedRecipe(resolveRecipe(receipt.recipeId, target.key), receipt.recipeId, target.key);
+      } catch {
+        throw new Error(`${runtimeId} pending managed runtime recipe is invalid.`);
+      }
+      if (recipe.runtimeId !== runtimeId || !sameExactRecipeReceipt(receipt, recipe)) {
+        throw new Error(`${runtimeId} pending managed runtime recipe is invalid.`);
+      }
+    }
+    validateReceiptArtifacts(receipt, runtimeId, { allowCodeOwnedHttps: receipt.schemaVersion === 2 });
     const base = join(root, runtimeId, target.key);
     const previous = await readActive(base);
     if (previous?.version && semver.valid(previous.version) && semver.gt(previous.version, version)) {
@@ -729,7 +926,10 @@ export function createManagedRuntimeInstaller({
     for (const runtimeId of runtimeIds) {
       try {
         operation.controller.signal.throwIfAborted();
-        activated.push(await activatePendingRuntime(appVersion, runtimeId, operation.controller.signal));
+        const activatedRuntime = await activatePendingRuntime(appVersion, runtimeId, operation.controller.signal);
+        activated.push(activatedRuntime.receipt.schemaVersion === 2
+          ? publicInstallationDescriptor(activatedRuntime)
+          : activatedRuntime);
       } catch (error) {
         failures.push(Object.freeze({ runtimeId, error }));
         await discardFailedPending(appVersion, runtimeId).catch(() => undefined);
@@ -883,9 +1083,70 @@ export function createManagedRuntimeInstaller({
     return operation.promise;
   }
 
+  async function installedRecipe(recipeId) {
+    const recipe = validateResolvedRecipe(resolveRecipe(recipeId, target.key), recipeId, target.key);
+    const base = join(root, recipe.runtimeId, target.key);
+    const receipt = await readActive(base);
+    if (!receipt || receipt.runtimeId !== recipe.runtimeId || receipt.target !== target.key) {
+      throw new Error(`${recipe.runtimeId} managed runtime is not installed.`);
+    }
+    const exactLegacy = receipt.schemaVersion === 1
+      && ["codex", "claude"].includes(recipe.runtimeId)
+      && receipt.version === recipe.version
+      && sameArtifacts(receipt, recipe);
+    const exactCurrent = sameExactRecipeReceipt(receipt, recipe, { checkOwnership: false });
+    if (!exactLegacy && !exactCurrent) {
+      throw new Error(`${recipe.runtimeId} managed runtime does not match requested recipe ${recipe.recipeId}.`);
+    }
+    if (exactCurrent) {
+      const expectedOwnedPaths = [posix.join(recipe.runtimeId, target.key, "installations", receipt.installation)];
+      if (JSON.stringify(receipt.ownedPaths) !== JSON.stringify(expectedOwnedPaths)) {
+        throw new Error(`${recipe.runtimeId} managed runtime ownership receipt is invalid.`);
+      }
+    }
+    validateReceiptArtifacts(receipt, recipe.runtimeId, { allowCodeOwnedHttps: exactCurrent });
+    const result = installedResult(base, receipt);
+    await regularFile(result.executable, "Managed runtime executable");
+    if (result.modulePath) await regularFile(result.modulePath, "Managed runtime module");
+    return publicInstallationDescriptor(Object.freeze({
+      ...result,
+      recipeId: recipe.recipeId,
+      recipeDigest: recipe.recipeDigest,
+    }));
+  }
+
+  function prepare(recipeId) {
+    let recipe;
+    try { recipe = validateResolvedRecipe(resolveRecipe(recipeId, target.key), recipeId, target.key); } catch (error) { return Promise.reject(error); }
+    let operation = operations.get(recipe.runtimeId);
+    if (operation) {
+      if (operation.recipe?.recipeId !== recipe.recipeId) {
+        return operation.promise.then(() => prepare(recipeId));
+      }
+      return operation.promise.then((result) => publicInstallationDescriptor(result));
+    }
+    operation = {
+      controller: new AbortController(),
+      minimumVersion: recipe.version,
+      resolvedVersion: recipe.version,
+      recipe,
+      promise: null,
+    };
+    operation.promise = install(recipe.runtimeId, operation).finally(() => {
+      if (operations.get(recipe.runtimeId) === operation) operations.delete(recipe.runtimeId);
+    });
+    operations.set(recipe.runtimeId, operation);
+    return operation.promise.then((result) => publicInstallationDescriptor(result));
+  }
+
   return Object.freeze({
-    ensure,
-    installed,
+    prepare,
+    installed: (runtimeOrRecipeId, minimumVersion) => minimumVersion === undefined
+      ? installedRecipe(runtimeOrRecipeId)
+      : legacyMinimumVersionResolution
+        ? installed(runtimeOrRecipeId, minimumVersion)
+        : Promise.reject(new Error("Managed runtime lookup requires an exact recipe identity.")),
+    ...(legacyMinimumVersionResolution ? { ensure } : {}),
     stageForAppUpdate,
     activatePendingAppUpdate,
     pruneInactiveInstallations,

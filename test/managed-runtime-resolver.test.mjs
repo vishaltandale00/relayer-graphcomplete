@@ -14,31 +14,31 @@ describe("managed runtime process resolver", () => {
   });
 
   it("coalesces active-generation probes and replaces the cache after prepare", async () => {
-    const installed = vi.fn(async () => ({ runtimeId: "codex", version: "0.150.0" }));
-    const ensure = vi.fn(async () => ({ runtimeId: "codex", version: "0.151.0" }));
-    const resolver = createManagedRuntimeResolver({ installed, ensure });
+    const installed = vi.fn(async () => ({ runtimeId: "codex", recipeId: "codex@0.147.0", version: "0.147.0" }));
+    const prepare = vi.fn(async () => ({ runtimeId: "codex", recipeId: "codex@0.147.0", version: "0.147.0" }));
+    const resolver = createManagedRuntimeResolver({ installed, prepare });
 
     const [first, second] = await Promise.all([
-      resolver.get("codex", "0.147.0"),
-      resolver.get("codex", "0.147.0"),
+      resolver.get("codex@0.147.0"),
+      resolver.get("codex@0.147.0"),
     ]);
     expect(first).toBe(second);
     expect(installed).toHaveBeenCalledOnce();
 
-    await expect(resolver.prepare("codex", "0.147.0")).resolves.toMatchObject({ version: "0.151.0" });
-    await expect(resolver.get("codex", "0.147.0")).resolves.toMatchObject({ version: "0.151.0" });
-    expect(ensure).toHaveBeenCalledOnce();
+    await expect(resolver.prepare("codex@0.147.0")).resolves.toMatchObject({ recipeId: "codex@0.147.0" });
+    await expect(resolver.get("codex@0.147.0")).resolves.toMatchObject({ recipeId: "codex@0.147.0" });
+    expect(prepare).toHaveBeenCalledOnce();
     expect(installed).toHaveBeenCalledOnce();
   });
 
   it("evicts a rejected active-generation probe", async () => {
     const installed = vi.fn()
       .mockRejectedValueOnce(new Error("missing"))
-      .mockResolvedValueOnce({ runtimeId: "claude", version: "0.3.250" });
-    const resolver = createManagedRuntimeResolver({ installed, ensure: vi.fn() });
+      .mockResolvedValueOnce({ runtimeId: "claude", recipeId: "claude@0.3.250", version: "0.3.250" });
+    const resolver = createManagedRuntimeResolver({ installed, prepare: vi.fn() });
 
-    await expect(resolver.get("claude", "0.3.200")).rejects.toThrow("missing");
-    await expect(resolver.get("claude", "0.3.250")).resolves.toMatchObject({ version: "0.3.250" });
+    await expect(resolver.get("claude@0.3.250")).rejects.toThrow("missing");
+    await expect(resolver.get("claude@0.3.250")).resolves.toMatchObject({ recipeId: "claude@0.3.250" });
     expect(installed).toHaveBeenCalledTimes(2);
   });
 });
