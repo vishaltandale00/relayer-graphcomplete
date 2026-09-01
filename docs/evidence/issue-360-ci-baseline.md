@@ -45,3 +45,23 @@ artifacts before introducing selection. It then keeps affectedness conservative:
 all selected tests execute for the current snapshot; integration branches and
 PRs run the full portfolio; and lockfiles, toolchains, workflows, infrastructure,
 planner changes, unknown paths, and unmapped paths fail open to full verification.
+
+## Automatic intra-PR sccache canary
+
+A follow-up canary replaces the `Rust checks and fresh tests` job's whole
+`target/` archive with Mozilla sccache compiler objects while retaining a small
+Cargo registry/git download archive. Same-repository pull requests may write
+within GitHub's PR-scoped cache; forks receive no compiler-cache credentials and
+compile directly. Setup or daemon-start failure falls back to direct
+`rustc`; sccache documents rate-limit storage failures as nonfatal, while
+its native server-I/O fallback handles later daemon loss. Genuine compiler
+failures are never retried or masked. Cache and telemetry cannot substitute for
+or invalidate freshly executed checks and tests.
+
+The existing 18.5-minute hosted Rust observation above remains the cold
+baseline; no additional synthetic cold runs are required. Hosted canary results
+are pending. Record one seed run and the next real changed-head run here,
+including sccache hits, misses, errors, read/write duration, Rust chapter
+duration, and repository cache usage. Expansion beyond the Rust job requires at
+least five minutes of net Rust compilation savings, no required-job regression,
+and no trusted-cache eviction or thrashing.
