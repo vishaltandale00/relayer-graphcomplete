@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import * as sax from "sax";
+import sax from "sax";
 import sharp from "sharp";
 
 export type VisualAssetScope =
@@ -148,12 +148,80 @@ function sha256(bytes: Uint8Array): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
 
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function malformed(message: string): never {
   throw new VisualAssetsError("media_content_malformed", message);
 }
 
 function unsafeSvg(message: string): never {
   throw new VisualAssetsError("media_content_unsafe", message);
+}
+
+function uint32be(bytes: Uint8Array, offset: number): number {
+  return ((bytes[offset]! * 0x1000000)
+    + (bytes[offset + 1]! << 16)
+    + (bytes[offset + 2]! << 8)
+    + bytes[offset + 3]!) >>> 0;
+}
+
+function assertCompletePng(bytes: Uint8Array): void {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.byteLength < 20 || !signature.every((byte, index) => bytes[index] === byte)) {
+    malformed("PNG signature is invalid");
+  }
+  let offset = 8;
+  let chunkIndex = 0;
+  while (offset < bytes.byteLength) {
+    if (offset + 12 > bytes.byteLength) malformed("PNG chunk is truncated");
+    const length = uint32be(bytes, offset);
+    const end = offset + 12 + length;
+    if (!Number.isSafeInteger(end) || end > bytes.byteLength) malformed("PNG chunk is truncated");
+    const type = Buffer.from(bytes.subarray(offset + 4, offset + 8)).toString("ascii");
+    if (chunkIndex === 0 && (type !== "IHDR" || length !== 13)) malformed("PNG must begin with IHDR");
+    offset = end;
+    chunkIndex += 1;
+    if (type === "IEND") {
+      if (length !== 0 || offset !== bytes.byteLength) malformed("PNG contains bytes after its actual IEND chunk");
+      return;
+    }
+  }
+  malformed("PNG is missing its IEND chunk");
+}
+
+function assertCompleteJpeg(bytes: Uint8Array): void {
+  if (bytes.byteLength < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) malformed("JPEG SOI marker is invalid");
+  let offset = 2;
+  let inScan = false;
+  while (offset < bytes.byteLength) {
+    if (bytes[offset] !== 0xff) {
+      if (!inScan) malformed("JPEG marker framing is invalid");
+      offset += 1;
+      continue;
+    }
+    while (bytes[offset] === 0xff) offset += 1;
+    if (offset >= bytes.byteLength) malformed("JPEG marker is truncated");
+    const marker = bytes[offset++]!;
+    if (inScan && marker === 0x00) continue;
+    if (marker >= 0xd0 && marker <= 0xd7) {
+      if (!inScan) malformed("JPEG restart marker occurs outside scan data");
+      continue;
+    }
+    if (marker === 0xd9) {
+      if (offset !== bytes.byteLength) malformed("JPEG contains bytes after its actual EOI marker");
+      return;
+    }
+    if (marker === 0xd8) malformed("JPEG contains an unexpected SOI marker");
+    if (marker === 0x01) continue;
+    if (offset + 2 > bytes.byteLength) malformed("JPEG segment length is truncated");
+    const length = (bytes[offset]! << 8) + bytes[offset + 1]!;
+    if (length < 2 || offset + length > bytes.byteLength) malformed("JPEG segment is truncated");
+    offset += length;
+    inScan = marker === 0xda;
+  }
+  malformed("JPEG is missing its EOI marker");
 }
 
 function validateSvg(bytes: Uint8Array): void {
@@ -208,6 +276,9 @@ function validateSvg(bytes: Uint8Array): void {
         }
         continue;
       }
+      if (value.includes("\\") || /[\u0000-\u001f\u007f]/.test(value)) {
+        unsafeSvg(`SVG attribute contains an escaped or control value: ${name}`);
+      }
       if (/[@]|javascript:|data:|https?:|file:/i.test(value) || value.includes("//")) {
         unsafeSvg(`SVG attribute contains an external or active value: ${name}`);
       }
@@ -216,6 +287,14 @@ function validateSvg(bytes: Uint8Array): void {
       }
       if ((name === "href" || name === "xlink:href") && !/^#[A-Za-z_][\w:.-]*$/.test(value)) {
         unsafeSvg("SVG href must be an internal fragment");
+      }
+      if ((name === "fill" || name === "stroke" || name === "stop-color")
+        && !/^(?:none|currentColor|transparent|#[0-9A-Fa-f]{3,8}|(?:rgb|rgba|hsl|hsla)\([0-9.,% +\-]+\)|url\(#[A-Za-z_][\w:.-]*\))$/.test(value)) {
+        unsafeSvg(`SVG presentation value is outside the safe grammar: ${name}`);
+      }
+      if ((name === "clip-path" || name === "mask")
+        && value !== "none" && !/^url\(#[A-Za-z_][\w:.-]*\)$/.test(value)) {
+        unsafeSvg(`SVG resource value must be an internal fragment: ${name}`);
       }
     }
     if (element.name === "svg") {
@@ -259,19 +338,25 @@ async function validateVisualBytes(mediaType: VisualAssetMediaType, bytes: Uint8
   if (mediaType !== "image/png" && mediaType !== "image/jpeg") {
     throw new VisualAssetsError("media_type_unsupported", `Unsupported visual asset media type: ${mediaType}`);
   }
-  if (mediaType === "image/png") {
-    const finalType = bytes.byteLength >= 12
-      ? Buffer.from(bytes.subarray(bytes.byteLength - 8, bytes.byteLength - 4)).toString("ascii")
-      : "";
-    if (finalType !== "IEND") malformed("PNG must end exactly at its IEND chunk");
-  } else if (bytes.at(-2) !== 0xff || bytes.at(-1) !== 0xd9) {
-    malformed("JPEG must end exactly at its EOI marker");
+  if (bytes.byteLength > 8 * 1024 * 1024) {
+    throw new VisualAssetsError("media_encoded_bytes_limit", "Raster representation exceeds the 8 MiB encoded-byte limit");
   }
+  if (mediaType === "image/png") {
+    assertCompletePng(bytes);
+  } else assertCompleteJpeg(bytes);
   try {
-    const decoderOptions = { failOn: "warning" as const, limitInputPixels: 16_777_216 };
+    const decoderOptions = { failOn: "warning" as const, limitInputPixels: false as const };
     const metadata = await sharp(bytes, decoderOptions).metadata();
     if (metadata.format !== (mediaType === "image/png" ? "png" : "jpeg")) {
       malformed(`Visual asset bytes do not decode as ${mediaType}`);
+    }
+    const pixels = (metadata.width ?? 0) * (metadata.height ?? 0);
+    if (!Number.isSafeInteger(pixels) || pixels > 16_777_216) {
+      throw new VisualAssetsError("media_decoded_pixels_limit", "Raster exceeds the 16,777,216 decoded-pixel limit");
+    }
+    const decodedBytes = pixels * (metadata.channels ?? 4);
+    if (!Number.isSafeInteger(decodedBytes) || decodedBytes > 32 * 1024 * 1024) {
+      throw new VisualAssetsError("media_decoded_bytes_limit", "Raster exceeds the 32 MiB decoded-byte limit");
     }
     const decoded = await sharp(bytes, decoderOptions).raw().toBuffer({ resolveWithObject: true });
     if (decoded.info.width < 1 || decoded.info.height < 1 || decoded.data.byteLength < 1) {
@@ -320,6 +405,22 @@ export function createMemoryVisualAssetsLibrary(options: {
   function assertSupportedMediaType(mediaType: string): asserts mediaType is VisualAssetMediaType {
     if (mediaType !== "image/jpeg" && mediaType !== "image/png" && mediaType !== "image/svg+xml") {
       throw new VisualAssetsError("media_type_unsupported", `Unsupported visual asset media type: ${mediaType}`);
+    }
+  }
+  let activeRasterValidations = 0;
+  async function validateBytes(mediaType: VisualAssetMediaType, bytes: Uint8Array): Promise<void> {
+    if (mediaType === "image/svg+xml") return validateVisualBytes(mediaType, bytes);
+    if (activeRasterValidations >= 2) {
+      throw new VisualAssetsError(
+        "media_validation_concurrency_limit",
+        "At most two raster representations may be validated concurrently per visual-assets library",
+      );
+    }
+    activeRasterValidations += 1;
+    try {
+      await validateVisualBytes(mediaType, bytes);
+    } finally {
+      activeRasterValidations -= 1;
     }
   }
   const assets = new Map<string, VisualAsset>();
@@ -431,6 +532,16 @@ export function createMemoryVisualAssetsLibrary(options: {
     });
   }
 
+  function snapshotPageInput(input: { readonly limit?: number; readonly cursor?: string }): {
+    readonly limit?: number;
+    readonly cursor?: string;
+  } {
+    return Object.freeze({
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+      ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+    });
+  }
+
   function tagForScope(tagId: string, scope: VisualAssetScope): VisualAssetTag {
     const tag = tags.get(tagId);
     if (tag === undefined) throw new VisualAssetsError("tag_not_found", `Unknown visual asset tag: ${tagId}`);
@@ -453,15 +564,54 @@ export function createMemoryVisualAssetsLibrary(options: {
     return replacement;
   }
 
+  const initialTags = new Map<string, VisualAssetTag>();
   for (const initial of options.initialTags ?? []) {
-    const scope = tagScope(initial.scope);
-    if (!sameScope(scope, initial.scope)) {
+    const id = initial.id.trim();
+    const name = initial.name.trim();
+    if (id.length === 0 || id !== initial.id) {
+      throw new VisualAssetsError("tag_id_invalid", "Initial visual asset tag ID must be non-empty and canonical");
+    }
+    if (name.length === 0) throw new VisualAssetsError("tag_name_invalid", "Visual asset tag name is required");
+    if (initial.parentTagId !== null
+      && (initial.parentTagId.length === 0 || initial.parentTagId.trim() !== initial.parentTagId)) {
+      throw new VisualAssetsError("tag_id_invalid", "Initial visual asset parent tag ID must be non-empty and canonical");
+    }
+    if (initial.authority !== "user" && initial.authority !== "system") {
+      throw new VisualAssetsError("tag_authority_invalid", "Initial visual asset tag authority is invalid");
+    }
+    const requestedScope = canonicalScope(initial.scope);
+    const scope = tagScope(requestedScope);
+    if (!sameScope(scope, requestedScope)) {
       throw new VisualAssetsError("tag_scope_mismatch", "Initial tag must use its owning project tag scope");
     }
-    if (tags.has(initial.id)) throw new VisualAssetsError("tag_conflict", `Duplicate visual asset tag: ${initial.id}`);
-    if (initial.parentTagId !== null) tagForScope(initial.parentTagId, initial.scope);
-    tags.set(initial.id, immutableTag({ ...initial, scope }));
+    if (initialTags.has(id)) throw new VisualAssetsError("tag_conflict", `Duplicate visual asset tag: ${id}`);
+    initialTags.set(id, immutableTag({
+      id,
+      name,
+      scope,
+      parentTagId: initial.parentTagId,
+      authority: initial.authority,
+    }));
   }
+  for (const tag of initialTags.values()) {
+    if (tag.parentTagId === null) continue;
+    const parent = initialTags.get(tag.parentTagId);
+    if (parent === undefined) throw new VisualAssetsError("tag_not_found", `Unknown visual asset tag: ${tag.parentTagId}`);
+    if (!sameScope(tag.scope, parent.scope)) {
+      throw new VisualAssetsError("tag_scope_mismatch", "Initial visual asset parent tag belongs to another scope");
+    }
+  }
+  const tagVisit = new Map<string, "visiting" | "visited">();
+  function visitInitialTag(tag: VisualAssetTag): void {
+    const state = tagVisit.get(tag.id);
+    if (state === "visiting") throw new VisualAssetsError("tag_hierarchy_cycle", "Visual asset tag hierarchy cannot contain a cycle");
+    if (state === "visited") return;
+    tagVisit.set(tag.id, "visiting");
+    if (tag.parentTagId !== null) visitInitialTag(initialTags.get(tag.parentTagId)!);
+    tagVisit.set(tag.id, "visited");
+  }
+  for (const tag of initialTags.values()) visitInitialTag(tag);
+  for (const tag of initialTags.values()) tags.set(tag.id, tag);
 
   const initialAssetIds = new Set<string>();
   for (const initial of options.initialAssets ?? []) {
@@ -507,7 +657,7 @@ export function createMemoryVisualAssetsLibrary(options: {
       if (initial.byteLength !== undefined && initial.byteLength !== bytes.byteLength) {
         throw new VisualAssetsError("content_length_invalid", "Initial visual asset byte length does not match its content");
       }
-      await validateVisualBytes(initial.mediaType, bytes);
+      await validateBytes(initial.mediaType, bytes);
       for (const tagId of initial.tagIds) {
         const tag = tags.get(tagId);
         if (tag === undefined) throw new VisualAssetsError("tag_not_found", `Unknown visual asset tag: ${tagId}`);
@@ -564,6 +714,7 @@ export function createMemoryVisualAssetsLibrary(options: {
       const fileName = input.file.name;
       const mediaType = input.file.mediaType;
       const expectedDigest = input.file.expectedDigest;
+      const readFile = input.file.read.bind(input.file);
       const registryId = input.registryId ?? "user";
       const name = input.name.trim();
       await ready();
@@ -580,7 +731,7 @@ export function createMemoryVisualAssetsLibrary(options: {
       }
       let bytes: Uint8Array;
       try {
-        bytes = await input.file.read();
+        bytes = (await readFile()).slice();
       } catch {
         throw new VisualAssetsError("file_unavailable", "Harness file is unavailable");
       }
@@ -588,8 +739,11 @@ export function createMemoryVisualAssetsLibrary(options: {
       if (expectedDigest !== undefined && expectedDigest !== digest) {
         throw new VisualAssetsError("digest_mismatch", "Harness file digest does not match its expected digest");
       }
-      await validateVisualBytes(mediaType, bytes);
-      content.index(bytes);
+      await validateBytes(mediaType, bytes);
+      const indexedDigest = content.index(bytes);
+      if (indexedDigest !== digest) {
+        throw new VisualAssetsError("digest_mismatch", "Indexed visual asset digest does not match its logical record");
+      }
       const asset: VisualAsset = immutableAsset({
         id: `asset_${randomUUID()}`,
         registryId,
@@ -607,14 +761,15 @@ export function createMemoryVisualAssetsLibrary(options: {
       return asset;
     },
     async inspect(assetId) {
+      const requestedAssetId = assetId;
       await ready();
-      const asset = assetById(assetId);
+      const asset = assetById(requestedAssetId);
       const bytes = content.read(asset.digest);
       if (bytes === undefined) throw new VisualAssetsError("content_unavailable", "Visual asset content is unavailable");
       if (bytes.byteLength !== asset.byteLength) {
         throw new VisualAssetsError("content_corrupt", "Visual asset content length does not match its logical record");
       }
-      await validateVisualBytes(asset.mediaType, bytes);
+      await validateBytes(asset.mediaType, bytes);
       const preview = Object.freeze({
         name: asset.provenance.fileName,
         mediaType: asset.mediaType,
@@ -631,10 +786,13 @@ export function createMemoryVisualAssetsLibrary(options: {
       });
     },
     async createTag(input) {
+      const requestedScope = canonicalScope(input.scope);
+      const requestedName = input.name;
+      const requestedParentTagId = input.parentTagId;
+      const scope = tagScope(requestedScope);
       await ready();
-      const scope = tagScope(input.scope);
-      const parent = input.parentTagId === undefined ? undefined : tagForScope(input.parentTagId, scope);
-      const name = input.name.trim();
+      const parent = requestedParentTagId === undefined ? undefined : tagForScope(requestedParentTagId, scope);
+      const name = requestedName.trim();
       if (name.length === 0) throw new VisualAssetsError("tag_name_invalid", "Visual asset tag name is required");
       const tag: VisualAssetTag = immutableTag({
         id: `tag_${randomUUID()}`,
@@ -648,11 +806,13 @@ export function createMemoryVisualAssetsLibrary(options: {
       return tag;
     },
     async moveTag(input) {
+      const requestedTagId = input.tagId;
+      const requestedParentTagId = input.parentTagId;
       await ready();
-      const tag = tags.get(input.tagId);
-      if (tag === undefined) throw new VisualAssetsError("tag_not_found", `Unknown visual asset tag: ${input.tagId}`);
+      const tag = tags.get(requestedTagId);
+      if (tag === undefined) throw new VisualAssetsError("tag_not_found", `Unknown visual asset tag: ${requestedTagId}`);
       if (tag.authority !== "user") throw new VisualAssetsError("tag_read_only", "Visual asset tag is read-only");
-      const parent = input.parentTagId === null ? null : tagForScope(input.parentTagId, tag.scope);
+      const parent = requestedParentTagId === null ? null : tagForScope(requestedParentTagId, tag.scope);
       let ancestor = parent;
       while (ancestor !== null) {
         if (ancestor.id === tag.id) throw new VisualAssetsError("tag_hierarchy_cycle", "Visual asset tag hierarchy cannot contain a cycle");
@@ -666,34 +826,41 @@ export function createMemoryVisualAssetsLibrary(options: {
       return moved;
     },
     async find(input) {
+      const requestedScope = canonicalScope(input.scope);
+      const requestedTagId = input.tagId;
+      const pageInput = snapshotPageInput(input);
+      assertScope(requestedScope);
       await ready();
-      assertScope(input.scope);
-      const tag = tagForScope(input.tagId, input.scope);
+      const tag = tagForScope(requestedTagId, requestedScope);
       const items: VisualAssetFindItem[] = [
         ...[...tags.values()]
           .filter((candidate) => candidate.parentTagId === tag.id)
-          .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
+          .sort((left, right) => compareCodeUnits(left.name, right.name) || compareCodeUnits(left.id, right.id))
           .map((candidate): VisualAssetFindItem => Object.freeze({ kind: "tag", tag: candidate })),
         ...[...assets.values()]
-          .filter((asset) => !asset.archived && asset.tagIds.includes(tag.id) && visibleIn(asset, input.scope))
-          .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
+          .filter((asset) => !asset.archived && asset.tagIds.includes(tag.id) && visibleIn(asset, requestedScope))
+          .sort((left, right) => compareCodeUnits(left.name, right.name) || compareCodeUnits(left.id, right.id))
           .map((asset): VisualAssetFindItem => Object.freeze({ kind: "asset", asset })),
       ];
-      return page(items, input, `find:${scopeKey(input.scope)}:${scopeKey(tag.scope)}:${tag.id}:sort:kind-name-id:v1`);
+      return page(items, pageInput, `find:${scopeKey(requestedScope)}:${scopeKey(tag.scope)}:${tag.id}:sort:kind-name-id:utf16-v1`);
     },
     async associate(input) {
       assertScope(input.scope);
       const scope = canonicalScope(input.scope);
+      const requestedAssetId = input.assetId;
       await ready();
-      const asset = assetById(input.assetId);
+      const asset = assetById(requestedAssetId);
       if (asset.scopes.some((associated) => sameScope(associated, scope))) return asset;
       return replaceAsset(asset, { scopes: [...asset.scopes, scope] });
     },
     async organize(input) {
+      const requestedAssetId = input.assetId;
+      const addTagIds = Object.freeze([...input.addTagIds]);
+      const removeTagIds = Object.freeze([...input.removeTagIds]);
       await ready();
-      const asset = assetById(input.assetId);
+      const asset = assetById(requestedAssetId);
       const associatedTagScopes = asset.scopes.map(tagScope);
-      const added = input.addTagIds.map((tagId) => {
+      const added = addTagIds.map((tagId) => {
         const tag = tags.get(tagId);
         if (tag === undefined) throw new VisualAssetsError("tag_not_found", `Unknown visual asset tag: ${tagId}`);
         if (!associatedTagScopes.some((scope) => sameScope(scope, tag.scope))) {
@@ -701,14 +868,14 @@ export function createMemoryVisualAssetsLibrary(options: {
         }
         return tag.id;
       });
-      for (const tagId of input.removeTagIds) {
+      for (const tagId of removeTagIds) {
         if (!tags.has(tagId)) throw new VisualAssetsError("tag_not_found", `Unknown visual asset tag: ${tagId}`);
         if (defaultTagIdsByAsset.get(asset.id)?.has(tagId)
           && registries.get(asset.registryId)?.defaultRelationshipAuthority === "read-only") {
           throw new VisualAssetsError("tag_relationship_read_only", "Default visual asset tag relationship is read-only");
         }
       }
-      const removed = new Set(input.removeTagIds);
+      const removed = new Set(removeTagIds);
       const tagIds = [...asset.tagIds.filter((tagId) => !removed.has(tagId))];
       for (const tagId of added) if (!tagIds.includes(tagId)) tagIds.push(tagId);
       if (tagIds.length === asset.tagIds.length
@@ -716,8 +883,9 @@ export function createMemoryVisualAssetsLibrary(options: {
       return replaceAsset(asset, { tagIds });
     },
     async archive(assetId) {
+      const requestedAssetId = assetId;
       await ready();
-      const asset = assetById(assetId);
+      const asset = assetById(requestedAssetId);
       if (registries.get(asset.registryId)?.contentAuthority !== "user") {
         throw new VisualAssetsError("asset_content_read_only", "Visual asset content is read-only");
       }
@@ -725,47 +893,54 @@ export function createMemoryVisualAssetsLibrary(options: {
       return replaceAsset(asset, { archived: true });
     },
     async download(assetId) {
+      const requestedAssetId = assetId;
       await ready();
-      const asset = assetById(assetId);
+      const asset = assetById(requestedAssetId);
       const bytes = content.read(asset.digest);
       if (bytes === undefined) throw new VisualAssetsError("content_unavailable", "Visual asset content is unavailable");
       if (bytes.byteLength !== asset.byteLength) {
         throw new VisualAssetsError("content_corrupt", "Visual asset content length does not match its logical record");
       }
-      await validateVisualBytes(asset.mediaType, bytes);
+      await validateBytes(asset.mediaType, bytes);
       return memoryHarnessFile(asset.provenance.fileName, asset.mediaType, bytes);
     },
     async listRegistries(input) {
+      const requestedScope = canonicalScope(input.scope);
+      const pageInput = snapshotPageInput(input);
+      assertScope(requestedScope);
       await ready();
-      assertScope(input.scope);
       return page(
-        [...registries.values()].sort((left, right) => left.id.localeCompare(right.id)),
-        input,
-        `registries:${scopeKey(input.scope)}:sort:id:v1`,
+        [...registries.values()].sort((left, right) => compareCodeUnits(left.id, right.id)),
+        pageInput,
+        `registries:${scopeKey(requestedScope)}:sort:id:utf16-v1`,
       );
     },
     async listAssets(input) {
+      const requestedScope = canonicalScope(input.scope);
+      const pageInput = snapshotPageInput(input);
+      assertScope(requestedScope);
       await ready();
-      assertScope(input.scope);
       return page(
         [...assets.values()]
-          .filter((asset) => !asset.archived && visibleIn(asset, input.scope))
-          .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)),
-        input,
-        `assets:${scopeKey(input.scope)}:sort:name-id:v1`,
+          .filter((asset) => !asset.archived && visibleIn(asset, requestedScope))
+          .sort((left, right) => compareCodeUnits(left.name, right.name) || compareCodeUnits(left.id, right.id)),
+        pageInput,
+        `assets:${scopeKey(requestedScope)}:sort:name-id:utf16-v1`,
       );
     },
     async listTags(input) {
-      await ready();
-      const scope = tagScope(input.scope);
+      const requestedScope = canonicalScope(input.scope);
       const parentTagId = input.parentTagId ?? null;
+      const pageInput = snapshotPageInput(input);
+      const scope = tagScope(requestedScope);
+      await ready();
       if (parentTagId !== null) tagForScope(parentTagId, scope);
       return page(
         [...tags.values()]
           .filter((tag) => sameScope(tag.scope, scope) && tag.parentTagId === parentTagId)
-          .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)),
-        input,
-        `tags:${scopeKey(input.scope)}:${scopeKey(scope)}:${parentTagId ?? "root"}:sort:name-id:v1`,
+          .sort((left, right) => compareCodeUnits(left.name, right.name) || compareCodeUnits(left.id, right.id)),
+        pageInput,
+        `tags:${scopeKey(requestedScope)}:${scopeKey(scope)}:${parentTagId ?? "root"}:sort:name-id:utf16-v1`,
       );
     },
   };
