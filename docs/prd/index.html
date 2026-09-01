@@ -2272,11 +2272,16 @@ settings:
 <li>Authors checkpoint stable HTML and CSS components before submission. Checkpoint errors retain component and source locations.</li>
 <li><code>gc=${capability}</code> binds typed actions to compatible native hosts. <code>asset=${assetRef}</code> carries only a logical visual identity.</li>
 <li>Author code cannot provide asset authority, availability, digest, sanitization, or a resolver.</li>
-<li><code>RelayerGraphClient.checkpointNodeDetail</code> and <code>submitNode</code> resolve logical assets through the authenticated host transport before passing non-public verified records into compilation.</li>
+<li>The client resolves logical assets through authenticated transport, then compiles directly from the node’s authored templates.</li>
+<li>The first submit package lives only in a private client map keyed by the exact <code>NodeObject</code>.</li>
+<li>Public compiler calls cannot seed retry state or replace the package sent by <code>submitNode</code>.</li>
 <li>Asset IDs are trimmed, NUL-free, at most 128 UTF-8 bytes, deduplicated, and bounded to 32 assets and 64 references before transport.</li>
 <li>The compiler uses browser-equivalent HTML construction plus a documented accessible-name subset. It supports authored text, title, <code>aria-label</code>, deterministic <code>aria-labelledby</code>, external form labels, and descendant image alt.</li>
 <li>Hidden descendants do not name a host unless their hidden node is directly referenced by <code>aria-labelledby</code>. This foundation does not claim the complete browser AccName algorithm.</li>
 <li>Markup and CSS selectors, pseudos, functions, properties, sizes, and traversal all use deterministic fail-closed rules.</li>
+<li>Every emitted stable identity is trimmed, NUL-free, and at most 128 UTF-8 bytes.</li>
+<li>Packages allow 64 components, 128 mounts, 32 assets, 64 asset references, and at most 524,288 canonical UTF-8 bytes.</li>
+<li>The packaged Product and Eval client includes its pinned parser closure beside the exact resource entry module.</li>
 <li><code>submitNode</code> finalizes and attaches the compiled package once before transport. Later authoring rejects, while a failed request retries the byte-identical frozen package without re-resolution drift.</li>
 <li>This foundation does not claim accepted-package durability or Product rendering. Those remain #365 and #366 work.</li>
 </ul>
@@ -2288,7 +2293,9 @@ settings:
 <tr><td>Markup, CSS, and accessible names</td><td><code>packages/graph-client/test/detail.test.ts</code> covers browser tree construction, safe selectors and pseudos, CSS resource rejection, labels, hidden content, image alt, and duplicate IDs.</td></tr>
 <tr><td>Authenticated logical assets</td><td><code>packages/graph-client/test/objects.test.ts</code> proves malformed and excessive references never reach transport, duplicate IDs resolve once, and author-supplied authority cannot enter compilation.</td></tr>
 <tr><td>Draft lifecycle and retry identity</td><td><code>packages/graph-client/test/objects.test.ts</code> proves checkpoint, finalization, post-submit locking, legacy strings, and byte-identical failed-request retry.</td></tr>
-<tr><td>Canonical package limits</td><td><code>packages/graph-client/test/detail.test.ts</code> covers stable ordering, immutable output, source locations, byte limits, element limits, and depth limits.</td></tr>
+<tr><td>Private submit authority</td><td><code>test/graph-client-packaged-detail.test.mjs</code> rejects sibling bridge imports and proves public forged output cannot enter submission.</td></tr>
+<tr><td>Packaged parser runtime</td><td><code>test/graph-client-packaged-detail.test.mjs</code> imports the isolated Product and Eval resource path and performs real HTML and CSS compilation.</td></tr>
+<tr><td>Canonical package limits</td><td><code>packages/graph-client/test/detail.test.ts</code> covers stable identities, counts, canonical bytes, source locations, element limits, and depth limits.</td></tr>
 </tbody>
 </table>
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>

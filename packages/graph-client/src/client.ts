@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { checkpointWithHostAssets, detailAssetIds, finalizedDetail, finalizeWithHostAssets, type HostResolvedDetailAsset } from "./detail-host.js";
-import type { CompiledNodeDetail } from "./detail.js";
+import { authoredDetailAssetIds, compileAuthenticatedNodeDetail, freezeNodeDetailAuthoring, type CompiledNodeDetail } from "./detail.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
 import { GRAPH_QUERY_CONTRACT_VERSION } from "./query-errors.generated.js";
 import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
@@ -8,6 +7,7 @@ import { GraphApiError, type CompletionInputGraph, type CompletionOutput, type C
 
 export class RelayerGraphClient {
   readonly capability: GraphCapability;
+  readonly #submittedDetails = new WeakMap<NodeObject, CompiledNodeDetail>();
 
   constructor(capability: GraphCapability) {
     this.capability = { ...capability, url: capability.url.replace(/\/$/, "") };
@@ -59,23 +59,26 @@ export class RelayerGraphClient {
   }
 
   async checkpointNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
-    const finalized = finalizedDetail(node.detailAuthoring);
+    const finalized = this.#submittedDetails.get(node);
     if (finalized !== undefined) return finalized;
     const assets = await this.resolveDetailAssets(node);
-    return checkpointWithHostAssets(node.detailAuthoring, assets);
+    return compileAuthenticatedNodeDetail(node.detailAuthoring, node.clientKey, assets);
   }
 
   private async finalizeNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
-    const finalized = finalizedDetail(node.detailAuthoring);
+    const finalized = this.#submittedDetails.get(node);
     if (finalized !== undefined) return finalized;
     const assets = await this.resolveDetailAssets(node);
-    return finalizeWithHostAssets(node.detailAuthoring, assets);
+    const compiled = compileAuthenticatedNodeDetail(node.detailAuthoring, node.clientKey, assets);
+    freezeNodeDetailAuthoring(node.detailAuthoring);
+    this.#submittedDetails.set(node, compiled);
+    return compiled;
   }
 
-  private async resolveDetailAssets(node: NodeObject): Promise<readonly (HostResolvedDetailAsset | null)[]> {
-    const logicalIds = detailAssetIds(node.detailAuthoring);
+  private async resolveDetailAssets(node: NodeObject): Promise<readonly (ResolvedDetailAsset | null)[]> {
+    const logicalIds = authoredDetailAssetIds(node.detailAuthoring);
     if (logicalIds.length === 0) return [];
-    const body = await this.request<{ readonly assets: readonly (HostResolvedDetailAsset | null)[] }>("/api/graph/detail-assets/resolve", {
+    const body = await this.request<{ readonly assets: readonly (ResolvedDetailAsset | null)[] }>("/api/graph/detail-assets/resolve", {
       method: "POST",
       body: JSON.stringify({ logicalIds }),
     });
@@ -276,6 +279,15 @@ export class RelayerGraphClient {
     }
     return body;
   }
+}
+
+interface ResolvedDetailAsset {
+  readonly logicalId: string;
+  readonly authority: "current" | "stale";
+  readonly availability: "available" | "unavailable" | "revoked";
+  readonly digestSha256: string;
+  readonly mediaType: string;
+  readonly representation: { readonly kind: "image"; readonly sanitized: boolean };
 }
 
 function requireReference(value: NodeReference | undefined): NodeReference {

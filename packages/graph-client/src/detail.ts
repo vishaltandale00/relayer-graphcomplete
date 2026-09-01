@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { generate as generateCss, parse as parseCss, tokenTypes, tokenize as tokenizeCss, walk as walkCss, type CssNode, type SyntaxParseError } from "css-tree";
 import { parseFragment, serialize, type DefaultTreeAdapterTypes, type ParserError } from "parse5";
-import { registerDetailHostAccess, type HostResolvedDetailAsset } from "./detail-host.js";
 import { LayerObject, NodeObject, type ActionObject, type InputActionObject, type InvokeActionObject, type LayerReference, type NavigateActionObject, type NodeReference } from "./objects.js";
 
 const DETAIL_TEMPLATE = Symbol("detail-template");
@@ -16,8 +15,10 @@ export const DETAIL_AUTHORING_LIMITS = Object.freeze({
   maxCssBytesPerComponent: 128 * 1024,
   maxElementsPerComponent: 4_096,
   maxElementDepth: 64,
+  maxMountsPerPackage: 128,
   maxAssetReferencesPerPackage: 64,
   maxAssetsPerPackage: 32,
+  maxCompiledPackageBytes: 512 * 1024,
 });
 
 type HtmlRoot = DefaultTreeAdapterTypes.DocumentFragment;
@@ -61,9 +62,18 @@ export interface AssetRef {
   readonly logicalId: string;
 }
 
+interface ResolvedDetailAsset {
+  readonly logicalId: string;
+  readonly authority: "current" | "stale";
+  readonly availability: "available" | "unavailable" | "revoked";
+  readonly digestSha256: string;
+  readonly mediaType: string;
+  readonly representation: { readonly kind: "image"; readonly sanitized: boolean };
+}
+
 interface DetailAssetResolver {
   readonly missingAssetCode: "asset_resolution_required" | "asset_unknown";
-  resolve(reference: AssetRef): HostResolvedDetailAsset | undefined;
+  resolve(reference: AssetRef): ResolvedDetailAsset | undefined;
 }
 
 export interface CompiledDetailComponent {
@@ -155,147 +165,205 @@ export function css(strings: TemplateStringsArray, ...values: readonly unknown[]
   return template("css", strings, values);
 }
 
-export class NodeDetailAuthoring {
-  readonly #components = new Map<string, { markup: DetailTemplate; styles: DetailTemplate; order: number }>();
-  #ownerClientKey?: string;
-  #finalized?: CompiledNodeDetail;
+interface AuthoringComponent {
+  readonly markup: DetailTemplate;
+  readonly styles: DetailTemplate;
+  readonly order: number;
+}
 
-  constructor() {
-    registerDetailHostAccess(this, {
-      bindOwner: (clientKey) => {
-        if (this.#ownerClientKey !== undefined && this.#ownerClientKey !== clientKey) {
-          throw new TypeError("Node Detail authoring cannot be rebound to another node");
-        }
-        this.#ownerClientKey = clientKey;
-      },
-      assetIds: () => this.#assetIds(),
-      checkpoint: (assets, finalize) => this.#checkpointWithHostAssets(assets, finalize),
-      finalized: () => this.#finalized,
-    });
+interface AuthoringState {
+  readonly components: Map<string, AuthoringComponent>;
+  readonly ownerHint: string | undefined;
+  frozen: boolean;
+  publicFinalized?: CompiledNodeDetail;
+}
+
+const AUTHORING_STATE = new WeakMap<NodeDetailAuthoring, AuthoringState>();
+
+export class NodeDetailAuthoring {
+  constructor(ownerHint?: string) {
+    AUTHORING_STATE.set(this, { components: new Map(), ownerHint, frozen: false });
   }
 
   setComponent(id: string, markup: DetailTemplate, styles: DetailTemplate = emptyCssTemplate()): this {
-    if (this.#finalized !== undefined) throw new Error("Node Detail authoring is finalized and cannot be mutated");
-    const existing = this.#components.get(id);
-    this.#components.set(id, { markup, styles, order: existing?.order ?? this.#components.size });
+    const state = authoringState(this);
+    if (state.frozen) throw new Error("Node Detail authoring is finalized and cannot be mutated");
+    const existing = state.components.get(id);
+    state.components.set(id, { markup, styles, order: existing?.order ?? state.components.size });
     return this;
   }
 
   checkpoint(): CompiledNodeDetail {
-    if (this.#finalized !== undefined) return this.#finalized;
-    return this.#compile(REJECTING_ASSET_RESOLVER);
+    const state = authoringState(this);
+    return state.publicFinalized ?? compileAuthoring(this, state.ownerHint, REJECTING_ASSET_RESOLVER);
   }
 
   finalize(): CompiledNodeDetail {
-    return this.#finalized ??= this.checkpoint();
+    const state = authoringState(this);
+    state.publicFinalized ??= this.checkpoint();
+    state.frozen = true;
+    return state.publicFinalized;
   }
+}
 
-  #assetIds(): readonly string[] {
-    const ids = new Set<string>();
-    const issues: DetailCompilationIssue[] = [];
-    let references = 0;
-    for (const [componentId, component] of this.#components) {
-      for (const [index, value] of component.markup.values.entries()) {
-        if (!isAssetRef(value)) continue;
-        references += 1;
-        if (!isStableIdentity(value.logicalId)) {
-          const location = bindingLocation(component.markup, index);
-          issues.push(Object.freeze({
-            code: "asset_identity_invalid",
-            componentId,
-            path: `html:${location.line}:${location.column}`,
-            line: location.line,
-            column: location.column,
-            message: "Asset identity must be trimmed, NUL-free, and at most 128 UTF-8 bytes",
-          }));
-        } else {
-          ids.add(value.logicalId);
-        }
+/** @internal */
+export function authoredDetailAssetIds(authoring: NodeDetailAuthoring): readonly string[] {
+  const state = authoringState(authoring);
+  const ids = new Set<string>();
+  const issues: DetailCompilationIssue[] = [];
+  let references = 0;
+  for (const [componentId, component] of state.components) {
+    for (const [index, value] of component.markup.values.entries()) {
+      if (!isAssetRef(value)) continue;
+      references += 1;
+      if (!isStableIdentity(value.logicalId)) {
+        const location = bindingLocation(component.markup, index);
+        issues.push(Object.freeze({
+          code: "asset_identity_invalid",
+          componentId,
+          path: `html:${location.line}:${location.column}`,
+          line: location.line,
+          column: location.column,
+          message: "Asset identity must be trimmed, NUL-free, and at most 128 UTF-8 bytes",
+        }));
+      } else {
+        ids.add(value.logicalId);
       }
     }
-    if (references > DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage) {
-      issues.push(Object.freeze({
-        code: "asset_reference_limit_exceeded",
-        componentId: "",
-        path: "asset",
-        line: 1,
-        column: 1,
-        message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage} asset references`,
-      }));
-    }
-    if (ids.size > DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage) {
-      issues.push(Object.freeze({
-        code: "asset_package_limit_exceeded",
-        componentId: "",
-        path: "asset",
-        line: 1,
-        column: 1,
-        message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage} logical assets`,
-      }));
-    }
-    if (issues.length !== 0) throw new DetailCompilationError(Object.freeze(issues));
-    return Object.freeze([...ids]);
   }
-
-  #checkpointWithHostAssets(assets: readonly (HostResolvedDetailAsset | null)[], finalize: boolean): CompiledNodeDetail {
-    if (this.#finalized !== undefined) return this.#finalized;
-    const logicalIds = this.#assetIds();
-    const resolvedByLogicalId = new Map(logicalIds.map((logicalId, index) => [logicalId, assets[index] ?? undefined]));
-    const checkpoint = this.#compile({
-      missingAssetCode: "asset_unknown",
-      resolve: (reference) => resolvedByLogicalId.get(reference.logicalId),
-    });
-    if (finalize) this.#finalized = checkpoint;
-    return checkpoint;
+  if (references > DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage) {
+    issues.push(Object.freeze({
+      code: "asset_reference_limit_exceeded",
+      componentId: "",
+      path: "asset",
+      line: 1,
+      column: 1,
+      message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage} asset references`,
+    }));
   }
-
-  #compile(assetResolver: DetailAssetResolver): CompiledNodeDetail {
-    const mounts: CompiledDetailMount[] = [];
-    const assets = new Map<string, CompiledAsset>();
-    const issues: DetailCompilationIssue[] = [];
-    if (this.#components.size > DETAIL_AUTHORING_LIMITS.maxComponents) {
-      issues.push(Object.freeze({
-        code: "component_limit_exceeded",
-        componentId: "",
-        path: "component",
-        line: 1,
-        column: 1,
-        message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxComponents} components`,
-      }));
-    }
-    const components = Object.freeze([...this.#components.entries()]
-      .sort((left, right) => left[1].order - right[1].order)
-      .map(([id, component]) => {
-        if (!isStableIdentity(id)) {
-          issues.push(Object.freeze({
-            code: "component_identity_invalid",
-            componentId: id,
-            path: "component",
-            line: 1,
-            column: 1,
-            message: "Node Detail component identity must be stable, non-whitespace, and at most 128 UTF-8 bytes",
-          }));
-        }
-        return Object.freeze({
-          id,
-          order: component.order,
-          html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver, this.#ownerClientKey),
-          css: compileCss(id, component.styles, issues),
-        });
-      }));
-    if (issues.length !== 0) throw new DetailCompilationError(Object.freeze(issues));
-    const content = Object.freeze({
-      version: 1 as const,
-      components,
-      mounts: Object.freeze(mounts),
-      assets: Object.freeze([...assets.values()]),
-    });
-    return Object.freeze({
-      ...content,
-      integritySha256: createHash("sha256").update(canonicalJson(content)).digest("hex"),
-    });
+  if (ids.size > DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage) {
+    issues.push(Object.freeze({
+      code: "asset_package_limit_exceeded",
+      componentId: "",
+      path: "asset",
+      line: 1,
+      column: 1,
+      message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage} logical assets`,
+    }));
   }
+  if (issues.length !== 0) throw new DetailCompilationError(Object.freeze(issues));
+  return Object.freeze([...ids]);
+}
 
+/** @internal */
+export function compileAuthenticatedNodeDetail(
+  authoring: NodeDetailAuthoring,
+  ownerClientKey: string,
+  assets: readonly (ResolvedDetailAsset | null)[],
+): CompiledNodeDetail {
+  const logicalIds = authoredDetailAssetIds(authoring);
+  const resolvedByLogicalId = new Map(logicalIds.map((logicalId, index) => [logicalId, assets[index] ?? undefined]));
+  return compileAuthoring(authoring, ownerClientKey, {
+    missingAssetCode: "asset_unknown",
+    resolve: (reference) => resolvedByLogicalId.get(reference.logicalId),
+  });
+}
+
+/** @internal */
+export function freezeNodeDetailAuthoring(authoring: NodeDetailAuthoring): void {
+  authoringState(authoring).frozen = true;
+}
+
+function authoringState(authoring: NodeDetailAuthoring): AuthoringState {
+  const state = AUTHORING_STATE.get(authoring);
+  if (state === undefined) throw new TypeError("Unknown Node Detail authoring object");
+  return state;
+}
+
+function compileAuthoring(
+  authoring: NodeDetailAuthoring,
+  ownerClientKey: string | undefined,
+  assetResolver: DetailAssetResolver,
+): CompiledNodeDetail {
+  const state = authoringState(authoring);
+  const mounts: CompiledDetailMount[] = [];
+  const assets = new Map<string, CompiledAsset>();
+  const issues: DetailCompilationIssue[] = [];
+  const authoredTemplateBytes = [...state.components.values()].reduce(
+    (total, component) => total
+      + component.markup.strings.reduce((sum, part) => sum + Buffer.byteLength(part, "utf8"), 0)
+      + component.styles.strings.reduce((sum, part) => sum + Buffer.byteLength(part, "utf8"), 0),
+    0,
+  );
+  if (authoredTemplateBytes > DETAIL_AUTHORING_LIMITS.maxCompiledPackageBytes) {
+    throw compiledPackageByteLimitError();
+  }
+  if (state.components.size > DETAIL_AUTHORING_LIMITS.maxComponents) {
+    issues.push(Object.freeze({
+      code: "component_limit_exceeded",
+      componentId: "",
+      path: "component",
+      line: 1,
+      column: 1,
+      message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxComponents} components`,
+    }));
+  }
+  const components = Object.freeze([...state.components.entries()]
+    .sort((left, right) => left[1].order - right[1].order)
+    .map(([id, component]) => {
+      if (!isStableIdentity(id)) {
+        issues.push(Object.freeze({
+          code: "component_identity_invalid",
+          componentId: id,
+          path: "component",
+          line: 1,
+          column: 1,
+          message: "Node Detail component identity must be stable, non-whitespace, and at most 128 UTF-8 bytes",
+        }));
+      }
+      return Object.freeze({
+        id,
+        order: component.order,
+        html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver, ownerClientKey),
+        css: compileCss(id, component.styles, issues),
+      });
+    }));
+  if (mounts.length > DETAIL_AUTHORING_LIMITS.maxMountsPerPackage) {
+    issues.push(Object.freeze({
+      code: "mount_limit_exceeded",
+      componentId: "",
+      path: "mount",
+      line: 1,
+      column: 1,
+      message: `Node Detail supports at most ${DETAIL_AUTHORING_LIMITS.maxMountsPerPackage} mounts`,
+    }));
+  }
+  if (issues.length !== 0) throw new DetailCompilationError(Object.freeze(issues));
+  const content = Object.freeze({
+    version: 1 as const,
+    components,
+    mounts: Object.freeze(mounts),
+    assets: Object.freeze([...assets.values()]),
+  });
+  const compiled = Object.freeze({
+    ...content,
+    integritySha256: createHash("sha256").update(canonicalJson(content)).digest("hex"),
+  });
+  if (Buffer.byteLength(canonicalJson(compiled), "utf8") > DETAIL_AUTHORING_LIMITS.maxCompiledPackageBytes) {
+    throw compiledPackageByteLimitError();
+  }
+  return compiled;
+}
+
+function compiledPackageByteLimitError(): DetailCompilationError {
+  return new DetailCompilationError(Object.freeze([Object.freeze({
+    code: "compiled_package_byte_limit_exceeded",
+    componentId: "",
+    path: "package",
+    line: 1,
+    column: 1,
+    message: `Compiled Node Detail exceeds ${DETAIL_AUTHORING_LIMITS.maxCompiledPackageBytes} UTF-8 bytes`,
+  })]));
 }
 
 function template(kind: TemplateKind, strings: TemplateStringsArray, values: readonly unknown[]): DetailTemplate {
@@ -810,11 +878,11 @@ function normalizeCapabilityHost(
 }
 
 function capabilityValidationCodes(capability: DetailCapability, ownerClientKey: string | undefined): readonly string[] {
-  if (capability.key.trim() === "" || capability.key.includes("\0")) return ["capability_invalid"];
+  if (!isStableIdentity(capability.key)) return ["capability_invalid"];
   if (capability.kind !== "link") {
     const action = capability.action;
     if (ownerClientKey === undefined || !isStableIdentity(ownerClientKey) || typeof action !== "object" || action === null) return ["capability_invalid"];
-    if (action.clientKey === undefined || action.clientKey.trim() === "" || action.clientKey.includes("\0")) return ["capability_invalid"];
+    if (action.clientKey === undefined || !isStableIdentity(action.clientKey)) return ["capability_invalid"];
     if (action.sourceLayer === undefined || !isStableReference(action.sourceLayer)) return ["capability_invalid"];
     if (!(action.kind === capability.kind || (action.kind === "navigate" && action.relation === capability.kind))) return ["capability_invalid"];
     if (action.label.trim() === "") return ["capability_invalid"];
@@ -873,7 +941,7 @@ function capabilityValidationCodes(capability: DetailCapability, ownerClientKey:
 function isStableReference(reference: NodeReference | LayerReference): boolean {
   if (typeof reference === "number") return Number.isSafeInteger(reference) && reference > 0;
   if (reference instanceof NodeObject || reference instanceof LayerObject) {
-    return reference.clientKey.trim() !== "" && !reference.clientKey.includes("\0");
+    return isStableIdentity(reference.clientKey);
   }
   return Number.isSafeInteger(reference.id) && reference.id > 0;
 }
@@ -984,7 +1052,7 @@ function validateAsset(
   componentId: string,
   element: HtmlElement,
   asset: AssetRef,
-  resolved: HostResolvedDetailAsset | undefined,
+  resolved: ResolvedDetailAsset | undefined,
   missingAssetCode: DetailAssetResolver["missingAssetCode"],
   issues: DetailCompilationIssue[],
 ): void {

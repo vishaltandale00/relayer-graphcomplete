@@ -12,7 +12,8 @@
     }
   },
   "scripts": {
-    "build": "node scripts/generate-query-errors.mjs --check && tsc -p tsconfig.build.json",
+    "prebuild": "node scripts/clean-dist.mjs",
+    "build": "node scripts/generate-query-errors.mjs --check && tsc -p tsconfig.build.json && node scripts/package-runtime-deps.mjs",
     "check": "node scripts/generate-query-errors.mjs --check && tsc --noEmit"
   },
   "dependencies": {

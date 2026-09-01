@@ -172,6 +172,97 @@ describe("typed Node Detail authoring compiler", () => {
     ]);
   });
 
+  it("rejects a one-megabyte action identity before compiling provenance", async () => {
+    const owner = new NodeObject("box", "Owner", "Fallback", "concept", "owner-node");
+    const layer = new LayerObject([owner], [], new LayerLayoutObject([]), "owner-layer");
+    const action = {
+      kind: "invoke",
+      label: "Investigate",
+      interactionText: "Investigate this",
+      sourceLayer: layer,
+      clientKey: "x".repeat(1024 * 1024),
+    } satisfies ActionObject;
+    owner.detailAuthoring.setComponent("oversized-action", html`
+      <button gc=${detailCapability.invoke("investigate", action)}>Investigate</button>
+    `);
+
+    await expect(checkpointWithHostAssets(owner, [])).rejects.toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: [expect.objectContaining({ code: "capability_invalid", componentId: "oversized-action" })],
+    }));
+  });
+
+  it("bounds every emitted graph provenance identity", async () => {
+    const invalidCases = [
+      {
+        ownerKey: "x".repeat(129),
+        layerKey: "layer",
+        actionKey: "action",
+        mountKey: "mount",
+      },
+      {
+        ownerKey: "owner",
+        layerKey: "é".repeat(65),
+        actionKey: "action",
+        mountKey: "mount",
+      },
+      {
+        ownerKey: "owner",
+        layerKey: "layer",
+        actionKey: "action",
+        mountKey: `mount\0spoof`,
+      },
+    ];
+
+    for (const [index, invalid] of invalidCases.entries()) {
+      const owner = new NodeObject("box", "Owner", "Fallback", "concept", invalid.ownerKey);
+      const layer = new LayerObject([owner], [], new LayerLayoutObject([]), invalid.layerKey);
+      const action = {
+        kind: "invoke",
+        label: "Investigate",
+        interactionText: "Investigate this",
+        sourceLayer: layer,
+        clientKey: invalid.actionKey,
+      } satisfies ActionObject;
+      owner.detailAuthoring.setComponent(`invalid-provenance-${index}`, html`
+        <button gc=${detailCapability.invoke(invalid.mountKey, action)}>Investigate</button>
+      `);
+
+      await expect(checkpointWithHostAssets(owner, [])).rejects.toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+        issues: [expect.objectContaining({ code: "capability_invalid", componentId: `invalid-provenance-${index}` })],
+      }));
+    }
+  });
+
+  it("bounds component, mount, and total compiled package size", () => {
+    const excessiveComponents = new NodeDetailAuthoring();
+    for (let index = 0; index <= DETAIL_AUTHORING_LIMITS.maxComponents; index += 1) {
+      excessiveComponents.setComponent(`component-${index}`, html`<p>Bounded</p>`);
+    }
+    expect(() => excessiveComponents.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: expect.arrayContaining([expect.objectContaining({ code: "component_limit_exceeded" })]),
+    }));
+
+    const excessiveMounts = new NodeDetailAuthoring();
+    for (let index = 0; index < 43; index += 1) {
+      excessiveMounts.setComponent(`mounts-${index}`, html`
+        <a gc=${detailCapability.externalLink(`a-${index}`, "https://example.com/a")}>A</a>
+        <a gc=${detailCapability.externalLink(`b-${index}`, "https://example.com/b")}>B</a>
+        <a gc=${detailCapability.externalLink(`c-${index}`, "https://example.com/c")}>C</a>
+      `);
+    }
+    expect(() => excessiveMounts.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: [expect.objectContaining({ code: "mount_limit_exceeded" })],
+    }));
+
+    const excessiveBytes = new NodeDetailAuthoring();
+    for (let index = 0; index < 3; index += 1) {
+      excessiveBytes.setComponent(`large-${index}`, htmlSource(`<section>${"x".repeat(200_000)}</section>`));
+    }
+    expect(() => excessiveBytes.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: [expect.objectContaining({ code: "compiled_package_byte_limit_exceeded" })],
+    }));
+  });
+
   it("mirrors graph-core select option invariants at each input binding source", () => {
     const owner = new NodeObject("box", "Inputs", "Fallback", "concept", "input-owner");
     const layer = new LayerObject([owner], [], new LayerLayoutObject([new NodePlacementObject(owner, 0.5, 0.5)]), "input-layer");
