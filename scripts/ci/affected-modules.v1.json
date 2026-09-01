@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "rustCrashPackages": ["relayer-graph-core", "relayer-graph-server"],
   "vitestPrerequisiteWorkspaces": [
     "@relayer/graph-client",
     "@relayer/harness-host",

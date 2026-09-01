@@ -346,11 +346,7 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
     vitestRustPackages: [...vitestRustPackages].sort(),
     runtimeRustPackages: [...runtimeRustPackages].sort(),
     rustCrash: rustPackages.some((name) =>
-      new Set([
-        "relayer-graph-core",
-        "relayer-graph-server",
-        "relayer-app-server",
-      ]).has(name),
+      config.rustCrashPackages.includes(name),
     ),
     rootTypeScript,
     chapters,

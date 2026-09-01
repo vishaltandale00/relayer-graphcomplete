@@ -37,7 +37,12 @@ function fullPlanWithoutDiff() {
 
 describe("affected-module plan v1", () => {
   test("is a checked-in versioned contract", () => {
-    expect(JSON.parse(readFileSync(configPath, "utf8")).version).toBe(1);
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    expect(config.version).toBe(1);
+    expect(config.rustCrashPackages).toEqual([
+      "relayer-graph-core",
+      "relayer-graph-server",
+    ]);
   });
 
   test("full integration mode does not depend on a diff base", () => {
@@ -92,6 +97,29 @@ describe("affected-module plan v1", () => {
       expect.arrayContaining(["packages", "test"]),
     );
     expect(result.chapters.packaging).toBe(false);
+  });
+
+  test("keeps crash reconciliation fresh for graph-crate changes and their dependents", () => {
+    expect(plan("crates/relayer-graph-core/src/graph.rs").rustCrash).toBe(true);
+    expect(plan("crates/relayer-graph-server/src/main.rs").rustCrash).toBe(
+      true,
+    );
+    // Telemetry changes flow into graph-server through the dependency
+    // closure, so the crash portfolio stays fresh for them too.
+    expect(
+      plan("crates/relayer-telemetry-capability/src/lib.rs").rustCrash,
+    ).toBe(true);
+  });
+
+  test("skips the crash lane for app-server-only changes it does not exercise", () => {
+    const result = plan("crates/relayer-app-server/src/main.rs");
+
+    expect(result.mode).toBe("affected");
+    expect(result.rustPackages).toEqual(["relayer-app-server"]);
+    expect(result.chapters.rust).toBe(true);
+    // The crash command compiles and runs no app-server code; app-server
+    // interrupted-execution recovery stays owned by its ordinary tests.
+    expect(result.rustCrash).toBe(false);
   });
 
   test("derives npm reverse dependents and desktop seams from package dependencies", () => {
