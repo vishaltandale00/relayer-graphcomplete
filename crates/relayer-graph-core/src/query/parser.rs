@@ -220,6 +220,11 @@ impl Parser {
         }
     }
 
+    fn is_function_call(&self, name: &str) -> bool {
+        self.peek_word().as_deref() == Some(name)
+            && matches!(self.tokens.get(self.position + 1), Some(Token::Symbol(symbol)) if symbol == "(")
+    }
+
     fn expect_symbol(&mut self, expected: &str) -> Result<(), QueryError> {
         if self.eat_symbol(expected) {
             Ok(())
@@ -703,18 +708,14 @@ impl Parser {
     }
 
     fn predicate(&mut self) -> Result<Predicate, QueryError> {
-        if self.peek_word().as_deref() == Some("vector_similarity")
-            && matches!(self.tokens.get(self.position + 1), Some(Token::Symbol(symbol)) if symbol == "(")
-        {
+        if self.is_function_call("vector_similarity") {
             return Err(QueryError::new(
                 QueryCode::QueryConstructUnsupported,
                 "query.where",
                 "vector search is deferred from query contract version 1",
             ));
         }
-        if self.peek_word().as_deref() == Some("exists")
-            && matches!(self.tokens.get(self.position + 1), Some(Token::Symbol(symbol)) if symbol == "(")
-        {
+        if self.is_function_call("exists") {
             return Err(QueryError::new(
                 QueryCode::QueryConstructUnsupported,
                 "query",
@@ -748,6 +749,13 @@ impl Parser {
             }
             _ => return Err(self.syntax("expected a comparison operator")),
         };
+        if self.is_function_call("vector_similarity") {
+            return Err(QueryError::new(
+                QueryCode::QueryConstructUnsupported,
+                "query.where",
+                "vector search is deferred from query contract version 1",
+            ));
+        }
         match self.peek().cloned() {
             Some(Token::Parameter(name)) => {
                 self.position += 1;

@@ -897,7 +897,14 @@ fn lower_expression(plan: &QueryPlan, expression: &Expression) -> String {
             "{{{}}}",
             fields
                 .iter()
-                .map(|field| format!("{}:{}", field.name, lower_expression(plan, &field.value)))
+                .enumerate()
+                .map(|(index, field)| {
+                    format!(
+                        "{}:{}",
+                        engine_safe_record_field(index),
+                        lower_expression(plan, &field.value)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(",")
         ),
@@ -926,6 +933,10 @@ fn lower_expression(plan: &QueryPlan, expression: &Expression) -> String {
             }
         }
     }
+}
+
+fn engine_safe_record_field(index: usize) -> String {
+    format!("relayer_field_{index}")
 }
 
 fn collect_expression_parameters(
@@ -1054,6 +1065,7 @@ fn restore_parameter_values(
                 .and_then(JsonValue::as_array_mut)
             {
                 for (value, field) in values.iter_mut().zip(fields) {
+                    value["name"] = JsonValue::String(field.name.clone());
                     value["value"] = restore_parameter_values(
                         plan,
                         &field.value,

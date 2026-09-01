@@ -296,7 +296,7 @@
     {
       "id": "distinct-list-record-comparisons-comment-semicolon",
       "target": { "scope": "thread", "id": 41 },
-      "query": "// all scalar comparisons and structured projection\nMATCH (n:Content) WHERE n.title = $title AND n.title <> $other AND n.title > $low AND n.title >= $title AND n.title < $high AND n.title <= $title RETURN DISTINCT [n.title, n.kind] AS pair, {title: n.title, kind: n.kind} AS item, [[n.title], []] AS nested;",
+      "query": "// all scalar comparisons and structured projection\nMATCH (n:Content) WHERE n.title = $title AND n.title <> $other AND n.title > $low AND n.title >= $title AND n.title < $high AND n.title <= $title RETURN DISTINCT [n.title, n.kind] AS pair, {create: n.title, union: n.kind} AS item, [[n.title], []] AS nested;",
       "parameters": { "title": { "type": "string", "value": "Queue" }, "other": { "type": "string", "value": "Worker" }, "low": { "type": "string", "value": "A" }, "high": { "type": "string", "value": "Z" } },
       "expectedPlan": {
         "queryContractVersion": 1,
@@ -310,14 +310,14 @@
           { "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "lt", "right": { "kind": "parameter", "name": "high", "valueType": "string" } },
           { "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "lte", "right": { "kind": "parameter", "name": "title", "valueType": "string" } }
         ],
-        "projection": { "distinct": true, "columns": [{ "name": "pair", "expression": { "kind": "list", "elementType": { "kind": "string" }, "items": [{ "kind": "property", "binding": "n", "name": "title", "valueType": "string" }, { "kind": "property", "binding": "n", "name": "kind", "valueType": "string" }] } }, { "name": "item", "expression": { "kind": "record", "fields": [{ "name": "title", "expression": { "kind": "property", "binding": "n", "name": "title", "valueType": "string" } }, { "name": "kind", "expression": { "kind": "property", "binding": "n", "name": "kind", "valueType": "string" } }] } }, { "name": "nested", "expression": { "kind": "list", "elementType": { "kind": "list", "elementType": { "kind": "string" } }, "items": [{ "kind": "list", "elementType": { "kind": "string" }, "items": [{ "kind": "property", "binding": "n", "name": "title", "valueType": "string" }] }, { "kind": "list", "elementType": { "kind": "string" }, "items": [] }] } }] },
+        "projection": { "distinct": true, "columns": [{ "name": "pair", "expression": { "kind": "list", "elementType": { "kind": "string" }, "items": [{ "kind": "property", "binding": "n", "name": "title", "valueType": "string" }, { "kind": "property", "binding": "n", "name": "kind", "valueType": "string" }] } }, { "name": "item", "expression": { "kind": "record", "fields": [{ "name": "create", "expression": { "kind": "property", "binding": "n", "name": "title", "valueType": "string" } }, { "name": "union", "expression": { "kind": "property", "binding": "n", "name": "kind", "valueType": "string" } }] } }, { "name": "nested", "expression": { "kind": "list", "elementType": { "kind": "list", "elementType": { "kind": "string" } }, "items": [{ "kind": "list", "elementType": { "kind": "string" }, "items": [{ "kind": "property", "binding": "n", "name": "title", "valueType": "string" }] }, { "kind": "list", "elementType": { "kind": "string" }, "items": [] }] } }] },
         "aggregation": null,
         "ordering": [],
         "limit": null,
         "maxTraversalHops": 0,
         "requiresOccurrenceConstraint": false
       },
-      "expectedResult": { "queryContractVersion": 1, "columns": ["pair", "item", "nested"], "rows": [[{ "type": "list", "elementType": { "kind": "string" }, "values": [{ "type": "string", "value": "Queue" }, { "type": "string", "value": "concept" }] }, { "type": "record", "fields": [{ "name": "title", "value": { "type": "string", "value": "Queue" } }, { "name": "kind", "value": { "type": "string", "value": "concept" } }] }, { "type": "list", "elementType": { "kind": "list", "elementType": { "kind": "string" } }, "values": [{ "type": "list", "elementType": { "kind": "string" }, "values": [{ "type": "string", "value": "Queue" }] }, { "type": "list", "elementType": { "kind": "string" }, "values": [] }] }]], "truncated": false }
+      "expectedResult": { "queryContractVersion": 1, "columns": ["pair", "item", "nested"], "rows": [[{ "type": "list", "elementType": { "kind": "string" }, "values": [{ "type": "string", "value": "Queue" }, { "type": "string", "value": "concept" }] }, { "type": "record", "fields": [{ "name": "create", "value": { "type": "string", "value": "Queue" } }, { "name": "union", "value": { "type": "string", "value": "concept" } }] }, { "type": "list", "elementType": { "kind": "list", "elementType": { "kind": "string" } }, "values": [{ "type": "list", "elementType": { "kind": "string" }, "values": [{ "type": "string", "value": "Queue" }] }, { "type": "list", "elementType": { "kind": "string" }, "values": [] }] }]], "truncated": false }
     },
     {
       "id": "aggregate-allowlist",

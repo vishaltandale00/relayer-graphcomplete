@@ -322,6 +322,15 @@
       }
     },
     {
+      "id": "reject-vector-function-as-comparison-value",
+      "query": "MATCH (n:Content) WHERE n.title = vector_similarity(n.detail, $query) RETURN n",
+      "expectedError": {
+        "code": "query_construct_unsupported",
+        "phase": "parse",
+        "path": "query.where"
+      }
+    },
+    {
       "id": "reject-zero-hop-path-binding",
       "query": "MATCH p = (n:Content) RETURN p",
       "expectedError": {
