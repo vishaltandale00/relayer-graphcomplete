@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { generate as generateCss, parse as parseCss, tokenTypes, tokenize as tokenizeCss, walk as walkCss, type CssNode, type SyntaxParseError } from "css-tree";
 import { parseFragment, serialize, type DefaultTreeAdapterTypes, type ParserError } from "parse5";
+import { registerDetailHostAccess, type HostResolvedDetailAsset } from "./detail-host.js";
 import { LayerObject, NodeObject, type ActionObject, type InputActionObject, type InvokeActionObject, type LayerReference, type NavigateActionObject, type NodeReference } from "./objects.js";
 
 const DETAIL_TEMPLATE = Symbol("detail-template");
@@ -59,17 +60,9 @@ export interface AssetRef {
   readonly logicalId: string;
 }
 
-export interface ResolvedDetailAsset {
-  readonly logicalId: string;
-  readonly authority: "current" | "stale";
-  readonly availability: "available" | "unavailable" | "revoked";
-  readonly digestSha256: string;
-  readonly mediaType: string;
-  readonly representation: { readonly kind: "image"; readonly sanitized: boolean };
-}
-
-export interface DetailAssetResolver {
-  resolve(reference: AssetRef): ResolvedDetailAsset | undefined;
+interface DetailAssetResolver {
+  readonly missingAssetCode: "asset_resolution_required" | "asset_unknown";
+  resolve(reference: AssetRef): HostResolvedDetailAsset | undefined;
 }
 
 export interface CompiledDetailComponent {
@@ -165,7 +158,13 @@ export class NodeDetailAuthoring {
   readonly #components = new Map<string, { markup: DetailTemplate; styles: DetailTemplate; order: number }>();
   #finalized?: CompiledNodeDetail;
 
-  constructor(private readonly assetResolver: DetailAssetResolver = REJECTING_ASSET_RESOLVER) {}
+  constructor() {
+    registerDetailHostAccess(this, {
+      assetIds: () => this.#assetIds(),
+      checkpoint: (assets, finalize) => this.#checkpointWithHostAssets(assets, finalize),
+      finalized: () => this.#finalized,
+    });
+  }
 
   setComponent(id: string, markup: DetailTemplate, styles: DetailTemplate = emptyCssTemplate()): this {
     if (this.#finalized !== undefined) throw new Error("Node Detail authoring is finalized and cannot be mutated");
@@ -176,6 +175,36 @@ export class NodeDetailAuthoring {
 
   checkpoint(): CompiledNodeDetail {
     if (this.#finalized !== undefined) return this.#finalized;
+    return this.#compile(REJECTING_ASSET_RESOLVER);
+  }
+
+  finalize(): CompiledNodeDetail {
+    return this.#finalized ??= this.checkpoint();
+  }
+
+  #assetIds(): readonly string[] {
+    const ids = new Set<string>();
+    for (const component of this.#components.values()) {
+      for (const value of component.markup.values) {
+        if (isAssetRef(value)) ids.add(value.logicalId);
+      }
+    }
+    return Object.freeze([...ids]);
+  }
+
+  #checkpointWithHostAssets(assets: readonly (HostResolvedDetailAsset | null)[], finalize: boolean): CompiledNodeDetail {
+    if (this.#finalized !== undefined) return this.#finalized;
+    const logicalIds = this.#assetIds();
+    const resolvedByLogicalId = new Map(logicalIds.map((logicalId, index) => [logicalId, assets[index] ?? undefined]));
+    const checkpoint = this.#compile({
+      missingAssetCode: "asset_unknown",
+      resolve: (reference) => resolvedByLogicalId.get(reference.logicalId),
+    });
+    if (finalize) this.#finalized = checkpoint;
+    return checkpoint;
+  }
+
+  #compile(assetResolver: DetailAssetResolver): CompiledNodeDetail {
     const mounts: CompiledDetailMount[] = [];
     const assets = new Map<string, CompiledAsset>();
     const issues: DetailCompilationIssue[] = [];
@@ -205,7 +234,7 @@ export class NodeDetailAuthoring {
         return Object.freeze({
           id,
           order: component.order,
-          html: compileHtml(id, component.markup, mounts, assets, issues, this.assetResolver),
+          html: compileHtml(id, component.markup, mounts, assets, issues, assetResolver),
           css: compileCss(id, component.styles, issues),
         });
       }));
@@ -222,9 +251,6 @@ export class NodeDetailAuthoring {
     });
   }
 
-  finalize(): CompiledNodeDetail {
-    return this.#finalized ??= this.checkpoint();
-  }
 }
 
 function template(kind: TemplateKind, strings: TemplateStringsArray, values: readonly unknown[]): DetailTemplate {
@@ -285,7 +311,7 @@ function compileHtml(
           `${value.kind} capability cannot bind to <${element.tagName}>`,
         ));
       }
-      if (!hasAccessibleName(element)) {
+      if (!hasAccessibleName(element, fragment)) {
         issues.push(sourceIssue(
           "accessibility_name_required",
           componentId,
@@ -310,7 +336,7 @@ function compileHtml(
       }
     } else if (isAssetRef(value)) {
       const resolved = assetResolver.resolve(value);
-      validateAsset(componentId, element, value, resolved, issues);
+      validateAsset(componentId, element, value, resolved, assetResolver.missingAssetCode, issues);
       const id = mountId("asset", componentId, value.logicalId);
       element.attrs.push({ name: "data-asset-mount", value: id });
       if (mounts.some((mount) => mount.id === id)) {
@@ -487,10 +513,10 @@ function compileCss(componentId: string, template: DetailTemplate, issues: Detai
       addCssIssue(componentId, node, issues, `@${node.name} is not available to authored detail CSS`);
     } else if (node.type === "Url") {
       addCssIssue(componentId, node, issues, "CSS URL resources are not available to authored details");
-    } else if (node.type === "Function" && UNSAFE_CSS_FUNCTIONS.has(decodeCssIdentifier(node.name).toLowerCase())) {
-      addCssIssue(componentId, node, issues, `${node.name}() can address an external resource or host API`);
-    } else if (node.type === "Declaration" && UNSAFE_CSS_PROPERTIES.has(decodeCssIdentifier(node.property).toLowerCase())) {
-      addCssIssue(componentId, node, issues, `${node.property} can address an external resource or privileged host behavior`);
+    } else if (node.type === "Function" && !SAFE_CSS_FUNCTIONS.has(decodeCssIdentifier(node.name).toLowerCase())) {
+      addCssIssue(componentId, node, issues, `${node.name}() is not in the authored detail CSS function allowlist`);
+    } else if (node.type === "Declaration" && !isSafeCssProperty(node.property)) {
+      addCssIssue(componentId, node, issues, `${node.property} is not in the authored detail CSS property allowlist`);
     } else if (node.type === "Raw") {
       addCssIssue(componentId, node, issues, "CSS must parse without opaque recovery tokens");
     }
@@ -499,8 +525,53 @@ function compileCss(componentId: string, template: DetailTemplate, issues: Detai
 }
 
 const SAFE_CSS_AT_RULES = new Set(["container", "keyframes", "layer", "media", "supports"]);
-const UNSAFE_CSS_FUNCTIONS = new Set(["element", "env", "expression", "image-set", "paint", "url", "-webkit-image-set"]);
-const UNSAFE_CSS_PROPERTIES = new Set(["behavior", "src", "-moz-binding"]);
+const SAFE_CSS_FUNCTIONS = new Set([
+  "calc", "clamp", "max", "min", "minmax", "repeat", "fit-content", "var",
+  "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color",
+  "matrix", "matrix3d", "perspective", "rotate", "rotate3d", "rotatex", "rotatey", "rotatez",
+  "scale", "scale3d", "scalex", "scaley", "scalez", "skew", "skewx", "skewy",
+  "translate", "translate3d", "translatex", "translatey", "translatez", "cubic-bezier", "steps",
+]);
+const SAFE_CSS_PROPERTIES = new Set([
+  "align-content", "align-items", "align-self", "animation", "animation-delay", "animation-direction",
+  "animation-duration", "animation-fill-mode", "animation-iteration-count", "animation-name", "animation-play-state",
+  "animation-timing-function", "aspect-ratio", "background-color", "border", "border-block", "border-block-color",
+  "border-block-end", "border-block-start", "border-block-style", "border-block-width", "border-bottom",
+  "border-bottom-color", "border-bottom-left-radius", "border-bottom-right-radius", "border-bottom-style",
+  "border-bottom-width", "border-color", "border-inline", "border-inline-color", "border-inline-end",
+  "border-inline-start", "border-inline-style", "border-inline-width", "border-left", "border-left-color",
+  "border-left-style", "border-left-width", "border-radius", "border-right", "border-right-color",
+  "border-right-style", "border-right-width", "border-style", "border-top", "border-top-color",
+  "border-top-left-radius", "border-top-right-radius", "border-top-style", "border-top-width", "border-width",
+  "box-shadow", "box-sizing", "break-after", "break-before", "break-inside", "clear", "color", "column-count",
+  "column-gap", "column-rule", "column-rule-color", "column-rule-style", "column-rule-width", "column-width",
+  "columns", "contain", "container", "container-name", "container-type", "display", "flex", "flex-basis",
+  "flex-direction", "flex-flow", "flex-grow", "flex-shrink", "flex-wrap", "float", "font", "font-family",
+  "font-feature-settings", "font-kerning", "font-optical-sizing", "font-size", "font-stretch", "font-style",
+  "font-variant", "font-variant-caps", "font-weight", "gap", "grid", "grid-area", "grid-auto-columns",
+  "grid-auto-flow", "grid-auto-rows", "grid-column", "grid-column-end", "grid-column-gap", "grid-column-start",
+  "grid-gap", "grid-row", "grid-row-end", "grid-row-gap", "grid-row-start", "grid-template",
+  "grid-template-areas", "grid-template-columns", "grid-template-rows", "height", "hyphens", "inset",
+  "inset-block", "inset-block-end", "inset-block-start", "inset-inline", "inset-inline-end", "inset-inline-start",
+  "isolation", "justify-content", "justify-items", "justify-self", "left", "letter-spacing", "line-height",
+  "list-style", "list-style-position", "list-style-type", "margin", "margin-block", "margin-block-end",
+  "margin-block-start", "margin-bottom", "margin-inline", "margin-inline-end", "margin-inline-start", "margin-left",
+  "margin-right", "margin-top", "max-height", "max-width", "min-height", "min-width", "object-fit",
+  "object-position", "opacity", "order", "outline", "outline-color", "outline-offset", "outline-style",
+  "outline-width", "overflow", "overflow-wrap", "overflow-x", "overflow-y", "padding", "padding-block",
+  "padding-block-end", "padding-block-start", "padding-bottom", "padding-inline", "padding-inline-end",
+  "padding-inline-start", "padding-left", "padding-right", "padding-top", "place-content", "place-items",
+  "place-self", "position", "right", "row-gap", "table-layout", "text-align", "text-decoration",
+  "text-decoration-color", "text-decoration-line", "text-decoration-style", "text-indent", "text-overflow",
+  "text-transform", "top", "transform", "transform-origin", "transition", "transition-delay", "transition-duration",
+  "transition-property", "transition-timing-function", "vertical-align", "visibility", "white-space", "width",
+  "word-break", "word-spacing", "writing-mode", "z-index",
+]);
+
+function isSafeCssProperty(property: string): boolean {
+  const decoded = decodeCssIdentifier(property).toLowerCase();
+  return decoded.startsWith("--") || SAFE_CSS_PROPERTIES.has(decoded);
+}
 
 function decodeCssIdentifier(value: string): string {
   return value.replace(/\\([0-9a-f]{1,6})(?:\s)?|\\(.)/gi, (_match, hex: string | undefined, escaped: string | undefined) => {
@@ -808,7 +879,8 @@ function validateAsset(
   componentId: string,
   element: HtmlElement,
   asset: AssetRef,
-  resolved: ResolvedDetailAsset | undefined,
+  resolved: HostResolvedDetailAsset | undefined,
+  missingAssetCode: DetailAssetResolver["missingAssetCode"],
   issues: DetailCompilationIssue[],
 ): void {
   if (!isStableIdentity(asset.logicalId)) {
@@ -823,7 +895,14 @@ function validateAsset(
     ));
   }
   if (resolved === undefined) {
-    issues.push(sourceIssue("asset_unknown", componentId, element, `Asset ${asset.logicalId} is unknown to the current resolver`));
+    issues.push(sourceIssue(
+      missingAssetCode,
+      componentId,
+      element,
+      missingAssetCode === "asset_unknown"
+        ? `Asset ${asset.logicalId} is unknown to the authenticated host`
+        : `Asset ${asset.logicalId} requires authenticated host resolution`,
+    ));
     return;
   }
   if (resolved.logicalId !== asset.logicalId || resolved.authority !== "current") {
@@ -853,25 +932,57 @@ function validateAsset(
 }
 
 const REJECTING_ASSET_RESOLVER: DetailAssetResolver = Object.freeze({
+  missingAssetCode: "asset_resolution_required",
   resolve: () => undefined,
 });
 
-function hasAccessibleName(element: HtmlElement): boolean {
+function hasAccessibleName(element: HtmlElement, root: HtmlRoot): boolean {
+  if (isAriaHidden(element)) return false;
   if (attributeValue(element, "aria-label")?.trim()) return true;
-  if (attributeValue(element, "aria-labelledby")?.trim()) return true;
+  const labelledBy = attributeValue(element, "aria-labelledby");
+  if (labelledBy !== undefined) {
+    const ids = labelledBy.trim().split(/\s+/).filter(Boolean);
+    return ids.length > 0 && ids.every((id) => {
+      const target = findElementById(root, id);
+      return target !== undefined && !isAriaHidden(target) && namingText(target).trim() !== "";
+    });
+  }
   if (attributeValue(element, "title")?.trim()) return true;
-  return descendantText(element).trim() !== "";
+  return visibleDescendantText(element).trim() !== "";
 }
 
 function attributeValue(element: HtmlElement, name: string): string | undefined {
   return element.attrs.find((attribute) => attribute.name === name)?.value;
 }
 
-function descendantText(element: HtmlElement): string {
+function namingText(element: HtmlElement): string {
+  return attributeValue(element, "aria-label")?.trim()
+    || attributeValue(element, "title")?.trim()
+    || visibleDescendantText(element);
+}
+
+function visibleDescendantText(element: HtmlElement): string {
   return element.childNodes.map((child) => {
     if ("value" in child) return child.value;
-    return "tagName" in child ? descendantText(child) : "";
+    return "tagName" in child && !isAriaHidden(child) ? visibleDescendantText(child) : "";
   }).join("");
+}
+
+function isAriaHidden(element: HtmlElement): boolean {
+  let current: DefaultTreeAdapterTypes.Node | null | undefined = element;
+  while (current !== null && current !== undefined) {
+    if ("tagName" in current && attributeValue(current, "aria-hidden")?.trim().toLowerCase() === "true") return true;
+    current = "parentNode" in current ? current.parentNode : undefined;
+  }
+  return false;
+}
+
+function findElementById(root: HtmlRoot, id: string): HtmlElement | undefined {
+  let found: HtmlElement | undefined;
+  visitElements(root, (element) => {
+    if (found === undefined && attributeValue(element, "id") === id) found = element;
+  });
+  return found;
 }
 
 function parseAuthoredHtml(source: string, componentId: string, issues: DetailCompilationIssue[]): HtmlRoot {

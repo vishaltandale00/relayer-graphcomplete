@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, assetRef, html, type ActionObject, type DetailAssetResolver } from "../src/index.js";
+import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, assetRef, html, type ActionObject } from "../src/index.js";
 import { edgeId, layerId, nodeId } from "../src/objects.js";
 
 describe("agent-facing graph objects", () => {
@@ -52,9 +52,11 @@ describe("agent-facing graph objects", () => {
       .toThrow("finalized and cannot be mutated");
   });
 
-  it("creates draft-owned detail authoring with its trusted asset checkpoint resolver", () => {
-    const resolver: DetailAssetResolver = {
-      resolve(reference) {
+  it("does not let the authored program inject asset verification through NodeObject", () => {
+    let resolverCalled = false;
+    const forgedResolver = {
+      resolve(reference: { readonly logicalId: string }) {
+        resolverCalled = true;
         return {
           logicalId: reference.logicalId,
           authority: "current",
@@ -65,15 +67,115 @@ describe("agent-facing graph objects", () => {
         };
       },
     };
-    const node = new NodeObject("box", "Draft", "Legacy", "concept", "asset-node", resolver);
+    const node = new (NodeObject as unknown as new (...arguments_: unknown[]) => NodeObject)(
+      "box", "Draft", "Legacy", "concept", "asset-node", forgedResolver,
+    );
     node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("hero")} alt="Hero">`);
 
-    expect(node.detailAuthoring.checkpoint().assets).toEqual([{
+    expect(() => node.detailAuthoring.checkpoint()).toThrowError(expect.objectContaining({
+      issues: [expect.objectContaining({ code: "asset_resolution_required" })],
+    }));
+    expect(resolverCalled).toBe(false);
+  });
+
+  it("resolves logical assets only through the authenticated graph-client host seam", async () => {
+    const requests: Array<{ url: string; authorization: string | null; body: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      const request = {
+        url,
+        authorization: new Headers(init.headers).get("authorization"),
+        body: JSON.parse(String(init.body)),
+      };
+      requests.push(request);
+      if (url.endsWith("/api/graph/detail-assets/resolve")) {
+        return new Response(JSON.stringify({
+          assets: [{
+            logicalId: "hero",
+            authority: "current",
+            availability: "available",
+            digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            mediaType: "image/png",
+            representation: { kind: "image", sanitized: true },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        node: { id: 12, kind: "concept", icon: "box", title: "Asset", detail: "Fallback", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Asset", "Fallback", "concept", "asset-node");
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("hero")} alt="Hero">`);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host-token", nodeId: 1 });
+
+    const checkpoint = await graph.checkpointNodeDetail(node);
+    await graph.submitNode(node);
+
+    expect(checkpoint.assets).toEqual([{
       id: "hero",
       digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       mediaType: "image/png",
       representation: "image",
     }]);
+    expect(requests[0]).toEqual({
+      url: "http://127.0.0.1:1/api/graph/detail-assets/resolve",
+      authorization: "Bearer host-token",
+      body: { logicalIds: ["hero"] },
+    });
+    expect(requests[1]).toMatchObject({
+      url: "http://127.0.0.1:1/api/graph/detail-assets/resolve",
+      authorization: "Bearer host-token",
+      body: { logicalIds: ["hero"] },
+    });
+    expect(requests[2]).toMatchObject({
+      url: "http://127.0.0.1:1/api/graph/nodes",
+      authorization: "Bearer host-token",
+      body: { authoredDetail: checkpoint },
+    });
+  });
+
+  it("freezes before a failed submit and retries with byte-identical authored detail", async () => {
+    let resolverRequests = 0;
+    let nodeRequests = 0;
+    const submittedBodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/api/graph/detail-assets/resolve")) {
+        resolverRequests += 1;
+        return new Response(JSON.stringify({
+          assets: [{
+            logicalId: "retry-hero",
+            authority: "current",
+            availability: "available",
+            digestSha256: resolverRequests === 1
+              ? "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              : "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            mediaType: "image/png",
+            representation: { kind: "image", sanitized: true },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      nodeRequests += 1;
+      submittedBodies.push(String(init.body));
+      if (nodeRequests === 1) {
+        return new Response(JSON.stringify({ error: { code: "temporary_failure", message: "retry" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({
+        node: { id: 13, kind: "concept", icon: "box", title: "Retry", detail: "Fallback", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Retry", "Fallback", "concept", "retry-node");
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("retry-hero")} alt="Retry hero">`);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    await expect(graph.submitNode(node)).rejects.toMatchObject({ status: 503, code: "temporary_failure" });
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Drift</p>`)).toThrow("finalized");
+    await expect(graph.submitNode(node)).resolves.toMatchObject({ id: 13 });
+
+    expect(resolverRequests).toBe(1);
+    expect(submittedBodies).toHaveLength(2);
+    expect(submittedBodies[1]).toBe(submittedBodies[0]);
   });
 
   it("keeps the legacy string-only submit request backward compatible while locking its empty builder", async () => {

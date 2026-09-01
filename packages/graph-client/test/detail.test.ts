@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LayerLayoutObject,
   LayerObject,
   NodeDetailAuthoring,
   NodeObject,
   NodePlacementObject,
+  RelayerGraphClient,
   assetRef,
   css,
   DetailCompilationError,
@@ -12,10 +13,11 @@ import {
   detailCapability,
   html,
   type ActionObject,
-  type DetailAssetResolver,
 } from "../src/index.js";
 
 describe("typed Node Detail authoring compiler", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("checkpoints incrementally authored components in stable identity order", () => {
     const detail = new NodeDetailAuthoring();
 
@@ -44,20 +46,9 @@ describe("typed Node Detail authoring compiler", () => {
     );
   });
 
-  it("compiles an external-link capability and independent visual into opaque native-host mounts", () => {
-    const resolver: DetailAssetResolver = {
-      resolve(reference) {
-        return {
-          logicalId: reference.logicalId,
-          authority: "current",
-          availability: "available",
-          digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          mediaType: "image/svg+xml",
-          representation: { kind: "image", sanitized: true },
-        };
-      },
-    };
-    const detail = new NodeDetailAuthoring(resolver);
+  it("compiles an external-link capability and host-resolved visual into opaque native-host mounts", async () => {
+    const node = new NodeObject("box", "Documentation", "Fallback", "concept", "documentation-node");
+    const detail = node.detailAuthoring;
     const documentation = detailCapability.externalLink("documentation", "https://docs.example.com/guide");
     const externalLinkVisual = assetRef("external-link-visual");
 
@@ -68,7 +59,14 @@ describe("typed Node Detail authoring compiler", () => {
       </a>
     `, css`.documentation-link { display: inline-flex; gap: 0.5rem; }`);
 
-    const checkpoint = detail.checkpoint();
+    const checkpoint = await checkpointWithHostAssets(node, [{
+      logicalId: "external-link-visual",
+      authority: "current",
+      availability: "available",
+      digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      mediaType: "image/svg+xml",
+      representation: { kind: "image", sanitized: true },
+    }]);
     expect(checkpoint.components).toEqual([{
       id: "documentation",
       order: 0,
@@ -98,7 +96,14 @@ describe("typed Node Detail authoring compiler", () => {
       mediaType: "image/svg+xml",
       representation: "image",
     }]);
-    expect(detail.checkpoint()).toEqual(checkpoint);
+    expect(await checkpointWithHostAssets(node, [{
+      logicalId: "external-link-visual",
+      authority: "current",
+      availability: "available",
+      digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      mediaType: "image/svg+xml",
+      representation: { kind: "image", sanitized: true },
+    }])).toEqual(checkpoint);
   });
 
   it("binds graph controls to exact stable action provenance", () => {
@@ -171,24 +176,23 @@ describe("typed Node Detail authoring compiler", () => {
     }));
   });
 
-  it("validates asset availability and integrity together with authored accessibility", () => {
+  it("validates host-owned asset availability and integrity together with authored accessibility", async () => {
     const unavailable = assetRef("missing-visual");
-    const detail = new NodeDetailAuthoring({
-      resolve: () => ({
-        logicalId: "missing-visual",
-        authority: "current",
-        availability: "unavailable",
-        digestSha256: "not-a-sha256",
-        mediaType: "image/svg+xml",
-        representation: { kind: "image", sanitized: false },
-      }),
-    });
+    const node = new NodeObject("box", "Asset errors", "Fallback", "concept", "asset-errors-node");
+    const detail = node.detailAuthoring;
     detail.setComponent("asset-errors", html`
       <a gc=${detailCapability.externalLink("empty-link", "https://example.com")}></a>
       <span asset=${unavailable}></span>
     `);
 
-    expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+    await expect(checkpointWithHostAssets(node, [{
+      logicalId: "missing-visual",
+      authority: "current",
+      availability: "unavailable",
+      digestSha256: "not-a-sha256",
+      mediaType: "image/svg+xml",
+      representation: { kind: "image", sanitized: false },
+    }])).rejects.toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
       issues: expect.arrayContaining([
         expect.objectContaining({ code: "accessibility_name_required", componentId: "asset-errors", line: 2 }),
         expect.objectContaining({ code: "asset_unavailable", componentId: "asset-errors", line: 3 }),
@@ -199,22 +203,10 @@ describe("typed Node Detail authoring compiler", () => {
     }));
   });
 
-  it("rejects unknown, mismatched, unavailable, revoked, and unsafe resolver checkpoints", () => {
+  it("rejects unknown, mismatched, unavailable, revoked, and unsafe host checkpoints", async () => {
     const digest = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-    const resolver: DetailAssetResolver = {
-      resolve(reference) {
-        if (reference.logicalId === "unknown") return undefined;
-        return {
-          logicalId: reference.logicalId === "mismatch" ? "different" : reference.logicalId,
-          authority: reference.logicalId === "stale" ? "stale" : "current",
-          availability: reference.logicalId === "unavailable" ? "unavailable" : reference.logicalId === "revoked" ? "revoked" : "available",
-          digestSha256: digest,
-          mediaType: reference.logicalId === "unsafe" ? "image/tiff" : "image/png",
-          representation: { kind: "image", sanitized: reference.logicalId !== "unsafe" },
-        };
-      },
-    };
-    const detail = new NodeDetailAuthoring(resolver);
+    const node = new NodeObject("box", "Resolver errors", "Fallback", "concept", "resolver-errors-node");
+    const detail = node.detailAuthoring;
     detail.setComponent("resolver-errors", html`
       <span asset=${assetRef("unknown")} aria-hidden="true"></span>
       <span asset=${assetRef("mismatch")} aria-hidden="true"></span>
@@ -224,7 +216,14 @@ describe("typed Node Detail authoring compiler", () => {
       <span asset=${assetRef("unsafe")} aria-hidden="true"></span>
     `);
 
-    expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+    await expect(checkpointWithHostAssets(node, [
+      null,
+      { logicalId: "different", authority: "current", availability: "available", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
+      { logicalId: "stale", authority: "stale", availability: "available", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
+      { logicalId: "unavailable", authority: "current", availability: "unavailable", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
+      { logicalId: "revoked", authority: "current", availability: "revoked", digestSha256: digest, mediaType: "image/png", representation: { kind: "image", sanitized: true } },
+      { logicalId: "unsafe", authority: "current", availability: "available", digestSha256: digest, mediaType: "image/tiff", representation: { kind: "image", sanitized: false } },
+    ])).rejects.toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
       issues: expect.arrayContaining([
         expect.objectContaining({ code: "asset_unknown", line: 2 }),
         expect.objectContaining({ code: "asset_authority_mismatch", line: 3 }),
@@ -327,22 +326,13 @@ describe("typed Node Detail authoring compiler", () => {
 
   it("requires image assets to bind to explicit native visual hosts", () => {
     const visual = assetRef("visual");
-    const detail = new NodeDetailAuthoring({
-      resolve: () => ({
-        logicalId: "visual",
-        authority: "current",
-        availability: "available",
-        digestSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        mediaType: "image/png",
-        representation: { kind: "image", sanitized: true },
-      }),
-    });
+    const detail = new NodeDetailAuthoring();
     detail.setComponent("bad-asset-host", html`
       <div asset=${visual} aria-hidden="true"></div>
     `);
 
     expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
-      issues: [expect.objectContaining({ code: "asset_host_incompatible", componentId: "bad-asset-host", line: 2 })],
+      issues: expect.arrayContaining([expect.objectContaining({ code: "asset_host_incompatible", componentId: "bad-asset-host", line: 2 })]),
     }));
   });
 
@@ -367,27 +357,18 @@ describe("typed Node Detail authoring compiler", () => {
     }));
   });
 
-  it("rejects conflicting pinned content for one logical asset identity", () => {
+  it("keeps duplicate logical asset references behind the host resolution boundary", () => {
     const first = assetRef("shared");
     const changed = assetRef("shared");
-    let resolution = 0;
-    const detail = new NodeDetailAuthoring({
-      resolve: () => ({
-        logicalId: "shared",
-        authority: "current",
-        availability: "available",
-        digestSha256: resolution++ === 0
-          ? "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-          : "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-        mediaType: "image/png",
-        representation: { kind: "image", sanitized: true },
-      }),
-    });
+    const detail = new NodeDetailAuthoring();
     detail.setComponent("first", html`<span asset=${first} aria-hidden="true"></span>`);
     detail.setComponent("second", html`<span asset=${changed} aria-hidden="true"></span>`);
 
     expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
-      issues: [expect.objectContaining({ code: "asset_identity_conflict", componentId: "second" })],
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: "asset_resolution_required", componentId: "first" }),
+        expect.objectContaining({ code: "asset_resolution_required", componentId: "second" }),
+      ]),
     }));
   });
 
@@ -429,6 +410,25 @@ describe("typed Node Detail authoring compiler", () => {
     expect(detail.checkpoint().components[0]?.css).toContain("grid-template-columns:minmax(12rem,1fr) 2fr");
   });
 
+  it("fail-closes unknown CSS functions that can produce external resources", () => {
+    const detail = new NodeDetailAuthoring();
+    detail.setComponent("unknown-css-function", html`<section>Unsafe image</section>`, css`
+      .hero {
+        background-image: image("https://attacker.example/a.png");
+      }
+    `);
+
+    expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: expect.arrayContaining([expect.objectContaining({
+        code: "unsafe_css",
+        componentId: "unknown-css-function",
+        path: "css:2:27",
+        line: 2,
+        column: 27,
+      })]),
+    }));
+  });
+
   it("rejects CSS external-resource and host API tokens at precise multiline locations", () => {
     const detail = new NodeDetailAuthoring();
     detail.setComponent("unsafe-css-ast", html`<section>Unsafe styles</section>`, css`
@@ -465,6 +465,39 @@ describe("typed Node Detail authoring compiler", () => {
         expect.objectContaining({ code: "accessibility_name_required", componentId: "encoded-names", line: 3 }),
       ],
     }));
+  });
+
+  it("does not treat hidden link icons or broken aria-labelledby references as accessible names", () => {
+    const detail = new NodeDetailAuthoring();
+    detail.setComponent("link-names", html`
+      <a gc=${detailCapability.externalLink("icon-only", "https://example.com/icon")}><span aria-hidden="true">External link</span></a>
+      <a gc=${detailCapability.externalLink("missing", "https://example.com/missing")} aria-labelledby="missing-label"><span aria-hidden="true">↗</span></a>
+      <span id="empty-label"></span>
+      <a gc=${detailCapability.externalLink("empty", "https://example.com/empty")} aria-labelledby="empty-label"><span aria-hidden="true">↗</span></a>
+      <span aria-hidden="true"><span id="hidden-label">Hidden label</span></span>
+      <a gc=${detailCapability.externalLink("hidden", "https://example.com/hidden")} aria-labelledby="hidden-label"><span aria-hidden="true">↗</span></a>
+    `);
+
+    expect(() => detail.checkpoint()).toThrowError(expect.objectContaining<Partial<DetailCompilationError>>({
+      issues: [
+        expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 2 }),
+        expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 3 }),
+        expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 5 }),
+        expect.objectContaining({ code: "accessibility_name_required", componentId: "link-names", line: 7 }),
+      ],
+    }));
+  });
+
+  it("accepts a #338 icon link when aria-labelledby resolves to a visible authored label", () => {
+    const detail = new NodeDetailAuthoring();
+    detail.setComponent("visible-link-label", html`
+      <span id="docs-label">Read documentation</span>
+      <a gc=${detailCapability.externalLink("docs", "https://example.com/docs")} aria-labelledby="docs-label"><span aria-hidden="true">↗</span></a>
+    `);
+
+    expect(detail.checkpoint().components[0]?.html).toMatch(
+      /<a aria-labelledby="docs-label" data-gc-mount="m_[a-f0-9]{16}"><span aria-hidden="true">↗<\/span><\/a>/,
+    );
   });
 
   it("returns typed limit errors for excessive bytes, elements, and depth without overflowing", () => {
@@ -627,4 +660,12 @@ function htmlSource(source: string) {
 function cssSource(source: string) {
   const strings = Object.assign([source], { raw: [source] }) as unknown as TemplateStringsArray;
   return css(strings);
+}
+
+async function checkpointWithHostAssets(node: NodeObject, assets: readonly unknown[]) {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ assets }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  })));
+  return new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host", nodeId: 1 }).checkpointNodeDetail(node);
 }

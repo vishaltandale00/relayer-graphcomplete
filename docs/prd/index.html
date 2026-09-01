@@ -2269,9 +2269,11 @@ settings:
 <ul>
 <li>Each draft <code>NodeObject</code> owns one typed detail builder alongside its backward-compatible string detail.</li>
 <li>Authors checkpoint stable HTML and CSS components before submission. Checkpoint errors retain component and source locations.</li>
-<li><code>gc=${capability}</code> binds typed actions to compatible native hosts. <code>asset=${assetRef}</code> binds resolver-verified logical visuals.</li>
-<li>The compiler uses browser-equivalent HTML construction, fail-closed markup rules, parsed CSS validation, deterministic limits, and canonical output.</li>
-<li><code>submitNode</code> finalizes and attaches the compiled package once. Later authoring rejects, while exact retries reuse the frozen package.</li>
+<li><code>gc=${capability}</code> binds typed actions to compatible native hosts. <code>asset=${assetRef}</code> carries only a logical visual identity.</li>
+<li>Author code cannot provide asset authority, availability, digest, sanitization, or a resolver.</li>
+<li><code>RelayerGraphClient.checkpointNodeDetail</code> and <code>submitNode</code> resolve logical assets through the authenticated host transport before passing non-public verified records into compilation.</li>
+<li>The compiler uses browser-equivalent HTML construction and accessible-name semantics for the supported subset, fail-closed markup and CSS function/property allowlists, deterministic limits, and canonical output.</li>
+<li><code>submitNode</code> finalizes and attaches the compiled package once before transport. Later authoring rejects, while a failed request retries the byte-identical frozen package without re-resolution drift.</li>
 <li>This foundation does not claim accepted-package durability or Product rendering. Those remain #365 and #366 work.</li>
 </ul>
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>

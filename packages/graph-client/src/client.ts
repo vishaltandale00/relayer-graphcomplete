@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { checkpointWithHostAssets, detailAssetIds, finalizedDetail, finalizeWithHostAssets, type HostResolvedDetailAsset } from "./detail-host.js";
+import type { CompiledNodeDetail } from "./detail.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
 import { GRAPH_QUERY_CONTRACT_VERSION } from "./query-errors.generated.js";
 import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
@@ -40,7 +42,7 @@ export class RelayerGraphClient {
   }
 
   async submitNode(node: NodeObject): Promise<GraphNode> {
-    const authoredDetail = node.detailAuthoring.finalize();
+    const authoredDetail = await this.finalizeNodeDetail(node);
     const body = await this.request<{ node: GraphNode }>("/api/graph/nodes", {
       method: "POST",
       body: JSON.stringify({
@@ -54,6 +56,30 @@ export class RelayerGraphClient {
     });
     node.ref = body.node;
     return body.node;
+  }
+
+  async checkpointNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
+    const finalized = finalizedDetail(node.detailAuthoring);
+    if (finalized !== undefined) return finalized;
+    const assets = await this.resolveDetailAssets(node);
+    return checkpointWithHostAssets(node.detailAuthoring, assets);
+  }
+
+  private async finalizeNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
+    const finalized = finalizedDetail(node.detailAuthoring);
+    if (finalized !== undefined) return finalized;
+    const assets = await this.resolveDetailAssets(node);
+    return finalizeWithHostAssets(node.detailAuthoring, assets);
+  }
+
+  private async resolveDetailAssets(node: NodeObject): Promise<readonly (HostResolvedDetailAsset | null)[]> {
+    const logicalIds = detailAssetIds(node.detailAuthoring);
+    if (logicalIds.length === 0) return [];
+    const body = await this.request<{ readonly assets: readonly (HostResolvedDetailAsset | null)[] }>("/api/graph/detail-assets/resolve", {
+      method: "POST",
+      body: JSON.stringify({ logicalIds }),
+    });
+    return body.assets;
   }
 
   async createEdge(left: NodeReference, right: NodeReference, clientKey?: string): Promise<GraphEdge>;
