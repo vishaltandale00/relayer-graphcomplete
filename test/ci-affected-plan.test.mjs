@@ -113,6 +113,19 @@ describe("affected-module plan v1", () => {
     expect(result.vitestRustPackages).toEqual(["relayer-app-server", "relayer-graph-server"]);
   });
 
+  test.each([
+    ["test/conversation-export-eval-e2e.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
+    ["test/eval-app-integration.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
+    ["test/eval-managed-codex-runtime.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
+    ["test/first-message-composer-integration.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
+    ["test/graph-authoring-replay.test.mjs", ["relayer-graph-server"]],
+    ["test/graph-search-client-parity-e2e.test.mjs", ["relayer-graph-server"]],
+    ["test/provider-straightforward-flow.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
+    ["test/recursive-complete-e2e.test.mjs", ["relayer-app-server", "relayer-graph-server"]],
+  ])("builds the production Rust runtime required by %s", (changedFile, expectedPackages) => {
+    expect(plan(changedFile).vitestRustPackages).toEqual(expectedPackages);
+  });
+
   test("keeps cross-cutting source and authority seams on the complete fresh Vitest portfolio", () => {
     for (const changedFile of ["src/index.ts", "permissions/default.json", "harnesses/codex.json", "vendor/runtime.js"]) {
       expect(plan(changedFile).vitestFiles).toEqual(expect.arrayContaining(["packages", "test"]));

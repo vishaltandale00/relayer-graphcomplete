@@ -10,12 +10,32 @@
     "fullPortfolio": ["relayer-app-server", "relayer-graph-server"],
     "files": [
       {
+        "exact": "test/conversation-export-eval-e2e.test.mjs",
+        "packages": ["relayer-app-server", "relayer-graph-server"]
+      },
+      {
+        "exact": "test/eval-app-integration.test.mjs",
+        "packages": ["relayer-app-server", "relayer-graph-server"]
+      },
+      {
+        "exact": "test/eval-managed-codex-runtime.test.mjs",
+        "packages": ["relayer-app-server", "relayer-graph-server"]
+      },
+      {
         "exact": "test/first-message-composer-integration.test.mjs",
         "packages": ["relayer-app-server", "relayer-graph-server"]
       },
       {
+        "exact": "test/graph-authoring-replay.test.mjs",
+        "packages": ["relayer-graph-server"]
+      },
+      {
         "exact": "test/graph-search-client-parity-e2e.test.mjs",
         "packages": ["relayer-graph-server"]
+      },
+      {
+        "exact": "test/provider-straightforward-flow.test.mjs",
+        "packages": ["relayer-app-server", "relayer-graph-server"]
       },
       {
         "exact": "test/recursive-complete-e2e.test.mjs",

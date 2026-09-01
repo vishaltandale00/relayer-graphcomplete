@@ -307,6 +307,13 @@ describe("CI workflow contract", () => {
     expect(vitestUpload.if).toBe(vitestReport.if);
     expect(vitestUpload["continue-on-error"]).toBe(true);
     expect(vitestUpload.with["if-no-files-found"]).toBe("ignore");
+    expect(vitestUpload.with.path.split("\n")).toEqual(
+      expect.arrayContaining([
+        "${{ runner.temp }}/vitest-sccache-stats.txt",
+        "${{ runner.temp }}/vitest-sccache-stats.json",
+      ]),
+    );
+    expect(vitestUpload.with["retention-days"]).toBe(14);
 
     for (const [jobName, job] of Object.entries(workflow.jobs)) {
       if (jobName === "rust" || jobName === "vitest") continue;
