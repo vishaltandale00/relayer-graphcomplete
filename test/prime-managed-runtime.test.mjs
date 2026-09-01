@@ -9,9 +9,11 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveManagedRuntimeRecipe } from "../desktop/main/managed-runtimes/recipes.mjs";
 import { createManagedRuntimeInstaller } from "../desktop/main/managed-runtimes/installer.mjs";
 import {
-  PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
+  PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
+  PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256,
   PRIME_AGENT_PACKAGE_SHA256,
   PRIME_AGENT_PACKAGE_TREE_SHA256,
+  selectPrimeAgentDependencyClosureSha256,
 } from "../desktop/main/services/prime-agent-runtime.mjs";
 import {
   PRIME_MANAGED_KERNEL_IMPORTS,
@@ -27,7 +29,8 @@ describe("Prime managed runtime", () => {
       primeSourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
       primeBridgeCommit: "8f33cfc30a3ce5f52f158122f34d523418aeca3e",
       javascript: {
-        dependencyClosureSha256: PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET["darwin-arm64"],
+        dependencyClosureSha256: PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET["darwin-arm64"],
+        repositoryDependencyClosureSha256: PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256,
         packages: Object.keys(PRIME_AGENT_PACKAGE_SHA256).sort().map((name) => ({
           name,
           version: "0.8.1",
@@ -38,9 +41,27 @@ describe("Prime managed runtime", () => {
       uv: { version: "0.12.0" },
       python: { version: "3.11.16+20260825", onlyBinary: true },
     });
+    expect(recipe.runtimeContract.javascript.dependencyClosureSha256)
+      .not.toBe(recipe.runtimeContract.javascript.repositoryDependencyClosureSha256);
     expect(recipe.artifacts.filter(({ kind }) => kind === "wheel")).toHaveLength(78);
     expect(recipe.artifacts.every(({ sha256, size }) => /^[a-f0-9]{64}$/.test(sha256) && size > 0)).toBe(true);
     expect(recipe.artifacts.some(({ kind }) => kind === "sdist")).toBe(false);
+  });
+
+  it("selects exactly the closure identity for the assembly environment", () => {
+    const javascriptContract = resolveManagedRuntimeRecipe("prime@0.8.1", "macos-arm64").runtimeContract.javascript;
+    expect(selectPrimeAgentDependencyClosureSha256({ isPackaged: true, javascriptContract }))
+      .toBe(PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET["darwin-arm64"]);
+    expect(selectPrimeAgentDependencyClosureSha256({ isPackaged: false, javascriptContract }))
+      .toBe(PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256);
+    expect(() => selectPrimeAgentDependencyClosureSha256({
+      isPackaged: true,
+      javascriptContract: { repositoryDependencyClosureSha256: PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256 },
+    })).toThrow("invalid for this environment");
+    expect(() => selectPrimeAgentDependencyClosureSha256({
+      isPackaged: false,
+      javascriptContract: { dependencyClosureSha256: PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET["darwin-arm64"] },
+    })).toThrow("invalid for this environment");
   });
 
   it("admits the real SHA-256 Prime recipe through the public installer seam", async () => {

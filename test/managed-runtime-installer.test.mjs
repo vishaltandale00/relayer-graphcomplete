@@ -352,6 +352,7 @@ describe("managed runtime installer", () => {
         primeSourceCommit: "1".repeat(40),
         javascript: {
           dependencyClosureSha256: "3".repeat(64),
+          repositoryDependencyClosureSha256: "6".repeat(64),
           packages: [{
             name: "fixture-prime", version: "1.0.0",
             archiveSha256: "4".repeat(64), treeSha256: "5".repeat(64),

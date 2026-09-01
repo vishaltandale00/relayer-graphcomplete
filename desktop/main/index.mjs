@@ -34,6 +34,7 @@ import {
   inspectPrimeAgentRuntime,
   PRIME_AGENT_ASSET_SHA256,
   requirePrimeAgentRuntime,
+  selectPrimeAgentDependencyClosureSha256,
 } from "./services/prime-agent-runtime.mjs";
 import {
   assemblePrimeManagedRuntime,
@@ -94,7 +95,10 @@ const managedRuntimeInstaller = createManagedRuntimeInstaller({
       copyReviewedTrees: createPrimeReviewedTreeCopier({
         appRoot: primeAppRoot,
         pythonClientRoot: primePythonClientRoot,
-        expectedClosureSha256: context.recipe.runtimeContract.javascript.dependencyClosureSha256,
+        expectedClosureSha256: selectPrimeAgentDependencyClosureSha256({
+          isPackaged: app.isPackaged,
+          javascriptContract: context.recipe.runtimeContract.javascript,
+        }),
         expectedPythonClientSha256: PRIME_AGENT_ASSET_SHA256.pythonPackageTree,
       }),
     });
