@@ -98,6 +98,7 @@ jobs:
           # the macos-x64 publisher target together to resume Intel Previews.
           - target: macos-arm64
             runner: macos-15
+            cargo_target: aarch64-apple-darwin
             update_base_url: https://updates.relayerlabs.ai/desktop/macos/arm64
     runs-on: ${{ matrix.runner }}
     environment:
@@ -120,6 +121,13 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
+
+      # The pinned Ladybug packaging build runs with --locked --offline so the
+      # candidate is reproducible from reviewed bytes. Seed the exact closure
+      # Cargo.lock pins while the network is still available; the build itself
+      # stays offline.
+      - name: Seed the locked Cargo dependency closure
+        run: node scripts/ci/run-timed.mjs "Preview Cargo fetch" cargo fetch --locked --target "${{ matrix.cargo_target }}"
 
       - name: Build signed and notarized Preview candidate
         shell: bash
