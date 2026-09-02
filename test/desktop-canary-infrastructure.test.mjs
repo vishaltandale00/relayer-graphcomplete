@@ -3,20 +3,15 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("desktop canary infrastructure", () => {
-  it("gives the Windows VM the identity required by AADLoginForWindows", async () => {
-    const template = await readFile(
-      new URL("../infra/azure/desktop-canary/main.bicep", import.meta.url),
-      "utf8",
-    );
-    expect(template).toMatch(
-      /resource sessionHost 'Microsoft\.Compute\/virtualMachines@[^']+' = \{[\s\S]*?identity: \{\s*type: 'SystemAssigned'\s*\}[\s\S]*?resource entraJoin/,
-    );
-  });
+  it("deploys the Windows canary VM with Entra identity, supported extension upgrades, and native-tenant authentication", async () => {
+    const [template, deploymentScript, cloudLoginScript] = await Promise.all([
+      readFile(new URL("../infra/azure/desktop-canary/main.bicep", import.meta.url), "utf8"),
+      readFile(new URL("../infra/azure/desktop-canary/complete-deployment.ps1", import.meta.url), "utf8"),
+      readFile(new URL("../infra/azure/desktop-canary/enable-windows-cloud-login.ps1", import.meta.url), "utf8"),
+    ]);
 
-  it("uses automatic-upgrade settings supported by the Windows VM extensions", async () => {
-    const template = await readFile(
-      new URL("../infra/azure/desktop-canary/main.bicep", import.meta.url),
-      "utf8",
+    expect(template, "Windows VM identity required by AADLoginForWindows").toMatch(
+      /resource sessionHost 'Microsoft\.Compute\/virtualMachines@[^']+' = \{[\s\S]*?identity: \{\s*type: 'SystemAssigned'\s*\}[\s\S]*?resource entraJoin/,
     );
     const entraExtension = template.slice(
       template.indexOf("resource entraJoin"),
@@ -26,33 +21,21 @@ describe("desktop canary infrastructure", () => {
       template.indexOf("resource avdAgent"),
       template.indexOf("resource automaticShutdown"),
     );
-    expect(entraExtension).toContain("autoUpgradeMinorVersion: true");
-    expect(avdExtension).toContain("autoUpgradeMinorVersion: true");
-    expect(entraExtension).not.toContain("enableAutomaticUpgrade");
-    expect(avdExtension).not.toContain("enableAutomaticUpgrade");
-  });
+    expect(entraExtension, "Entra extension automatic minor-version upgrade").toContain("autoUpgradeMinorVersion: true");
+    expect(avdExtension, "AVD agent extension automatic minor-version upgrade").toContain("autoUpgradeMinorVersion: true");
+    expect(entraExtension, "Entra extension avoids unsupported enableAutomaticUpgrade").not.toContain("enableAutomaticUpgrade");
+    expect(avdExtension, "AVD agent extension avoids unsupported enableAutomaticUpgrade").not.toContain("enableAutomaticUpgrade");
 
-  it("rejects external identities even when their permission level is Member", async () => {
-    const script = await readFile(
-      new URL("../infra/azure/desktop-canary/complete-deployment.ps1", import.meta.url),
-      "utf8",
-    );
-    expect(script).toContain("-Select UserType,CreationType,ExternalUserState");
-    expect(script).toContain("$testUser.UserPrincipalName -match '#EXT#'");
-    expect(script).toContain("$testUser.CreationType -eq 'Invitation'");
-    expect(script).toContain("$testUser.ExternalUserState");
-    expect(script).toContain("must authenticate natively in this tenant");
-  });
+    expect(deploymentScript, "audit UserType, CreationType, and ExternalUserState").toContain("-Select UserType,CreationType,ExternalUserState");
+    expect(deploymentScript, "reject #EXT# external identities").toContain("$testUser.UserPrincipalName -match '#EXT#'");
+    expect(deploymentScript, "reject invitation-created users").toContain("$testUser.CreationType -eq 'Invitation'");
+    expect(deploymentScript, "check ExternalUserState").toContain("$testUser.ExternalUserState");
+    expect(deploymentScript, "native tenant authentication message").toContain("must authenticate natively in this tenant");
 
-  it("configures and verifies the tenant-level Windows Cloud Login prerequisite", async () => {
-    const script = await readFile(
-      new URL("../infra/azure/desktop-canary/enable-windows-cloud-login.ps1", import.meta.url),
-      "utf8",
-    );
-    expect(script).toContain("270efc09-cd0d-444b-a71f-39af4910ec45");
-    expect(script).toContain("Application-RemoteDesktopConfig.ReadWrite.All");
-    expect(script).toContain("Update-MgServicePrincipalRemoteDesktopSecurityConfiguration");
-    expect(script).toContain("IsRemoteDesktopProtocolEnabled");
-    expect(script).toContain("SupportsShouldProcess");
+    expect(cloudLoginScript, "Windows Cloud Login prerequisite app ID").toContain("270efc09-cd0d-444b-a71f-39af4910ec45");
+    expect(cloudLoginScript, "Windows Cloud Login prerequisite permission").toContain("Application-RemoteDesktopConfig.ReadWrite.All");
+    expect(cloudLoginScript, "service principal configuration update").toContain("Update-MgServicePrincipalRemoteDesktopSecurityConfiguration");
+    expect(cloudLoginScript, "RDP enablement verification").toContain("IsRemoteDesktopProtocolEnabled");
+    expect(cloudLoginScript, "WhatIf-safe script").toContain("SupportsShouldProcess");
   });
 });

@@ -75,184 +75,162 @@ function fixture() {
 }
 
 describe("desktop account presentation", () => {
-  it("releases the startup visibility gate before showing the workspace during recovery", () => {
+  it("holds the workspace behind the optional onboarding gate and survives read, refresh, and storage failures", async () => {
+    // Phase 1: the startup visibility gate releases before showing the
+    // workspace during recovery.
     const body = { classList: classList("desktop-account-pending") };
     const showApplication = vi.fn();
-
     revealDesktopWorkspace(showApplication, body);
+    expect(body.classList.contains("desktop-account-pending"), "startup pending class released").toBe(false);
+    expect(showApplication, "application shown exactly once").toHaveBeenCalledOnce();
 
-    expect(body.classList.contains("desktop-account-pending")).toBe(false);
-    expect(showApplication).toHaveBeenCalledOnce();
-  });
+    // Phase 2: the optional account step gates the workspace until the user
+    // continues, persists the dismissal, and stays dismissed across refreshes.
+    const gating = fixture();
+    await gating.controller.start({ offerOnboarding: true });
+    expect(gating.elements.onboarding.classList.contains("hidden"), "onboarding surface visible").toBe(false);
+    expect(gating.showWorkspace, "workspace held behind onboarding").not.toHaveBeenCalled();
+    expect(gating.elements.accountButton.textContent, "corner control offers sign-in").toBe("Sign in");
+    expect(gating.elements.onboardingStatus.textContent, "onboarding privacy copy").toContain("privacy-filtered error reports");
 
-  it("holds the workspace behind a standalone optional account step until the user continues", async () => {
-    const { controller, elements, storage, showWorkspace } = fixture();
+    gating.elements.onboardingNotNow.onclick();
+    expect(gating.storage.setItem, "dismissal preference persisted").toHaveBeenCalledWith(ACCOUNT_ONBOARDING_PREFERENCE_KEY, "dismissed");
+    expect(gating.elements.onboarding.classList.contains("hidden"), "onboarding dismissed").toBe(true);
+    expect(gating.showWorkspace, "workspace revealed on dismissal").toHaveBeenCalledOnce();
 
-    await controller.start({ offerOnboarding: true });
+    await gating.controller.refresh({ offerOnboarding: true });
+    expect(gating.elements.onboarding.classList.contains("hidden"), "dismissal survives refresh").toBe(true);
+    expect(gating.showWorkspace, "workspace not re-revealed by refresh").toHaveBeenCalledOnce();
 
-    expect(elements.onboarding.classList.contains("hidden")).toBe(false);
-    expect(showWorkspace).not.toHaveBeenCalled();
-    expect(elements.accountButton.textContent).toBe("Sign in");
-    expect(elements.onboardingStatus.textContent).toContain("privacy-filtered error reports");
+    // Phase 3: signing in completes onboarding.
+    const completing = fixture();
+    await completing.controller.start({ offerOnboarding: true });
+    completing.changed({ status: "signed-in", channel: "stable", subject: "auth0|pseudonymous-123" });
+    expect(completing.storage.setItem, "completion preference persisted").toHaveBeenCalledWith(ACCOUNT_ONBOARDING_PREFERENCE_KEY, "completed");
+    expect(completing.elements.onboarding.classList.contains("hidden"), "onboarding hidden after sign-in").toBe(true);
+    expect(completing.showWorkspace, "workspace revealed on sign-in").toHaveBeenCalledOnce();
 
-    elements.onboardingNotNow.onclick();
-    expect(storage.setItem).toHaveBeenCalledWith(ACCOUNT_ONBOARDING_PREFERENCE_KEY, "dismissed");
-    expect(elements.onboarding.classList.contains("hidden")).toBe(true);
-    expect(showWorkspace).toHaveBeenCalledOnce();
+    // Phase 4: an account read failure stays inside the optional surface
+    // instead of failing desktop boot.
+    const readFailing = fixture();
+    readFailing.api.read.mockRejectedValueOnce(new Error("private failure detail"));
+    await expect(readFailing.controller.start({ offerOnboarding: true }), "boot survives the read failure").resolves.toEqual({
+      status: "error",
+      channel: "stable",
+      reason: "authentication-failed",
+    });
+    expect(readFailing.elements.settingsStatus.textContent, "read failure status copy").toBe("Account status unavailable");
+    expect(readFailing.elements.onboarding.classList.contains("hidden"), "gate still offered after read failure").toBe(false);
+    expect(readFailing.showWorkspace, "workspace still held after read failure").not.toHaveBeenCalled();
+    readFailing.elements.onboardingNotNow.onclick();
+    expect(readFailing.showWorkspace, "workspace reachable after failed read").toHaveBeenCalledOnce();
 
-    await controller.refresh({ offerOnboarding: true });
-    expect(elements.onboarding.classList.contains("hidden")).toBe(true);
-    expect(showWorkspace).toHaveBeenCalledOnce();
-  });
+    // Phase 5: a failed post-provider refresh keeps the optional gate.
+    const refreshFailing = fixture();
+    await refreshFailing.controller.start();
+    refreshFailing.api.read.mockRejectedValueOnce(new Error("private refresh failure"));
+    await refreshFailing.controller.refresh({ offerOnboarding: true });
+    expect(refreshFailing.elements.onboarding.classList.contains("hidden"), "gate held after refresh failure").toBe(false);
+    expect(refreshFailing.showWorkspace, "workspace held after refresh failure").not.toHaveBeenCalled();
+    refreshFailing.elements.onboardingNotNow.onclick();
+    expect(refreshFailing.showWorkspace, "workspace reachable after failed refresh").toHaveBeenCalledOnce();
 
-  it("reveals the workspace when optional onboarding completes by signing in", async () => {
-    const { controller, elements, storage, showWorkspace, changed } = fixture();
+    // Phase 6: an unavailable preference store never blocks continuation.
+    const storageFailing = fixture();
+    await storageFailing.controller.start({ offerOnboarding: true });
+    storageFailing.storage.setItem.mockImplementationOnce(() => { throw new Error("storage unavailable"); });
+    expect(() => storageFailing.elements.onboardingNotNow.onclick(), "dismissal survives storage failure").not.toThrow();
+    expect(storageFailing.elements.onboarding.classList.contains("hidden"), "onboarding dismissed despite storage failure").toBe(true);
+    expect(storageFailing.showWorkspace, "workspace revealed despite storage failure").toHaveBeenCalledOnce();
+  }, 10_000);
 
-    await controller.start({ offerOnboarding: true });
-    changed({ status: "signed-in", channel: "stable", subject: "auth0|pseudonymous-123" });
-
-    expect(storage.setItem).toHaveBeenCalledWith(ACCOUNT_ONBOARDING_PREFERENCE_KEY, "completed");
-    expect(elements.onboarding.classList.contains("hidden")).toBe(true);
-    expect(showWorkspace).toHaveBeenCalledOnce();
-  });
-
-  it("keeps account settings minimal and excludes sensitive or release-channel details", async () => {
-    const { controller, elements, changed } = fixture();
-    await controller.start();
-
-    changed({
+  it("renders minimal account status and coalesces sign-in actions on the corner control", async () => {
+    // Phase 1: settings stay minimal and exclude sensitive or release details.
+    const minimal = fixture();
+    await minimal.controller.start();
+    minimal.changed({
       status: "signed-in",
       channel: "preview",
       subject: "auth0|pseudonymous-123",
       email: "must-not-render@example.test",
       accessToken: "secret",
     });
+    expect(minimal.elements.accountButton.textContent, "corner control labels the account").toBe("Account");
+    expect(minimal.elements.settingsStatus.textContent, "settings status excludes sensitive detail").toBe("Signed in");
+    expect(minimal.elements.settingsLogout.classList.contains("hidden"), "logout offered while signed in").toBe(false);
+    expect(minimal.elements.settingsSignIn.classList.contains("hidden"), "sign-in hidden while signed in").toBe(true);
 
-    expect(elements.accountButton.textContent).toBe("Account");
-    expect(elements.settingsStatus.textContent).toBe("Signed in");
-    expect(elements.settingsLogout.classList.contains("hidden")).toBe(false);
-    expect(elements.settingsSignIn.classList.contains("hidden")).toBe(true);
-  });
-
-  it("keeps local use available in uncertain and error states with concise status copy", async () => {
-    const { controller, elements, changed } = fixture();
-    await controller.start();
-
-    changed({ status: "uncertain", channel: "stable", subject: "auth0|123", reason: "offline" });
-    expect(elements.settingsStatus.textContent).toBe("Account unavailable offline");
-
-    changed({ status: "totally-new", channel: "preview", token: "secret" });
-    expect(elements.settingsStatus.textContent).toBe("Account status unavailable");
-    expect(normalizeDesktopAccountState({ status: "totally-new", channel: "preview" })).toEqual({
+    // Phase 2: uncertain and unknown states keep local use available with
+    // concise copy.
+    const degraded = fixture();
+    await degraded.controller.start();
+    degraded.changed({ status: "uncertain", channel: "stable", subject: "auth0|123", reason: "offline" });
+    expect(degraded.elements.settingsStatus.textContent, "uncertain offline status copy").toBe("Account unavailable offline");
+    degraded.changed({ status: "totally-new", channel: "preview", token: "secret" });
+    expect(degraded.elements.settingsStatus.textContent, "unknown status copy").toBe("Account status unavailable");
+    expect(normalizeDesktopAccountState({ status: "totally-new", channel: "preview" }), "unknown state normalizes to auth failure").toEqual({
       status: "error",
       channel: "preview",
       reason: "authentication-failed",
     });
-  });
 
-  it("starts sign-in directly from the bottom-right control and opens settings only for an existing account", async () => {
-    const { controller, elements, openSettings, api, changed } = fixture();
-    await controller.start();
+    // Phase 3: the bottom-right control starts sign-in directly and opens
+    // settings only for an existing account.
+    const control = fixture();
+    await control.controller.start();
+    expect(control.elements.accountButton.getAttribute("title"), "corner control title while signed out").toBe("Sign in");
+    expect(control.elements.accountButton.getAttribute("aria-label"), "corner control accessible label").toBe("Sign in to Relayer.");
+    control.elements.accountButton.onclick();
+    expect(control.api.login, "corner click starts sign-in").toHaveBeenCalledOnce();
+    expect(control.openSettings, "corner click does not open settings while signed out").not.toHaveBeenCalled();
+    control.changed({ status: "signing-in", channel: "stable" });
+    expect(control.elements.settingsStatus.textContent, "signing-in status copy").toBe("Finish signing in in your browser");
+    control.changed({ status: "signed-in", channel: "stable", subject: "auth0|123" });
+    expect(control.elements.accountButton.getAttribute("title"), "corner control title while signed in").toBe("Account");
+    control.elements.accountButton.onclick();
+    expect(control.openSettings, "corner click opens settings for an existing account").toHaveBeenCalledOnce();
+    control.elements.settingsLogout.onclick();
+    expect(control.api.logout, "settings logout action").toHaveBeenCalledOnce();
 
-    expect(elements.accountButton.getAttribute("title")).toBe("Sign in");
-    expect(elements.accountButton.getAttribute("aria-label")).toBe("Sign in to Relayer.");
-    elements.accountButton.onclick();
-    expect(api.login).toHaveBeenCalledOnce();
-    expect(openSettings).not.toHaveBeenCalled();
-
-    changed({ status: "signing-in", channel: "stable" });
-    expect(elements.settingsStatus.textContent).toBe("Finish signing in in your browser");
-
-    changed({ status: "signed-in", channel: "stable", subject: "auth0|123" });
-    expect(elements.accountButton.getAttribute("title")).toBe("Account");
-    elements.accountButton.onclick();
-    expect(openSettings).toHaveBeenCalledOnce();
-
-    elements.settingsLogout.onclick();
-    expect(api.logout).toHaveBeenCalledOnce();
-  });
-
-  it("coalesces rapid sign-in actions into one browser flow", async () => {
-    const { controller, elements, api } = fixture();
+    // Phase 4: rapid sign-in actions coalesce into one browser flow.
+    const coalescing = fixture();
     let resolveLogin;
-    api.login.mockImplementationOnce(() => new Promise((resolve) => { resolveLogin = resolve; }));
-    await controller.start();
-
-    elements.accountButton.onclick();
-    elements.accountButton.onclick();
-    elements.onboardingSignIn.onclick();
-    elements.settingsSignIn.onclick();
-
-    expect(api.login).toHaveBeenCalledOnce();
-    expect(elements.accountButton.textContent).toBe("Signing in…");
-    expect(elements.accountButton.disabled).toBe(true);
-    expect(elements.onboardingSignIn.disabled).toBe(true);
-    expect(elements.settingsSignIn.disabled).toBe(true);
-
+    coalescing.api.login.mockImplementationOnce(() => new Promise((resolve) => { resolveLogin = resolve; }));
+    await coalescing.controller.start();
+    coalescing.elements.accountButton.onclick();
+    coalescing.elements.accountButton.onclick();
+    coalescing.elements.onboardingSignIn.onclick();
+    coalescing.elements.settingsSignIn.onclick();
+    expect(coalescing.api.login, "rapid actions coalesce into one login").toHaveBeenCalledOnce();
+    expect(coalescing.elements.accountButton.textContent, "corner control shows pending sign-in").toBe("Signing in…");
+    expect(coalescing.elements.accountButton.disabled, "corner control disabled while signing in").toBe(true);
+    expect(coalescing.elements.onboardingSignIn.disabled, "onboarding sign-in disabled while signing in").toBe(true);
+    expect(coalescing.elements.settingsSignIn.disabled, "settings sign-in disabled while signing in").toBe(true);
     resolveLogin({ status: "signing-in", channel: "stable" });
-    await vi.waitFor(() => expect(elements.settingsStatus.textContent).toBe("Finish signing in in your browser"));
-  });
+    await vi.waitFor(() => expect(coalescing.elements.settingsStatus.textContent, "pending browser sign-in copy").toBe("Finish signing in in your browser"));
+  }, 10_000);
 
-  it("contains account read failures inside the optional surface instead of failing desktop boot", async () => {
-    const { controller, elements, api, showWorkspace } = fixture();
-    api.read.mockRejectedValueOnce(new Error("private failure detail"));
-
-    await expect(controller.start({ offerOnboarding: true })).resolves.toEqual({
-      status: "error",
-      channel: "stable",
-      reason: "authentication-failed",
-    });
-    expect(elements.settingsStatus.textContent).toBe("Account status unavailable");
-    expect(elements.onboarding.classList.contains("hidden")).toBe(false);
-    expect(showWorkspace).not.toHaveBeenCalled();
-    elements.onboardingNotNow.onclick();
-    expect(showWorkspace).toHaveBeenCalledOnce();
-  });
-
-  it("preserves the optional startup gate when the post-provider account refresh fails", async () => {
-    const { controller, elements, api, showWorkspace } = fixture();
-    await controller.start();
-    api.read.mockRejectedValueOnce(new Error("private refresh failure"));
-
-    await controller.refresh({ offerOnboarding: true });
-
-    expect(elements.onboarding.classList.contains("hidden")).toBe(false);
-    expect(showWorkspace).not.toHaveBeenCalled();
-    elements.onboardingNotNow.onclick();
-    expect(showWorkspace).toHaveBeenCalledOnce();
-  });
-
-  it("continues into the workspace when onboarding preference storage is unavailable", async () => {
-    const { controller, elements, storage, showWorkspace } = fixture();
-    await controller.start({ offerOnboarding: true });
-    storage.setItem.mockImplementationOnce(() => { throw new Error("storage unavailable"); });
-
-    expect(() => elements.onboardingNotNow.onclick()).not.toThrow();
-    expect(elements.onboarding.classList.contains("hidden")).toBe(true);
-    expect(showWorkspace).toHaveBeenCalledOnce();
-  });
-
-  it("uses a full onboarding surface and anchors the account control to the app viewport", async () => {
+  it("anchors the account surface in the static markup contract", async () => {
     const [html, css] = await Promise.all([
       readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
     ]);
     const sidebarFooter = html.slice(html.indexOf('<div class="sidebar-footer">'), html.indexOf("</aside>"));
 
-    expect(html).toContain('<section class="desktop-account-onboarding hidden" id="desktopAccountOnboarding"');
-    expect(html).not.toContain('<dialog class="desktop-account-onboarding"');
-    expect(html).toContain('id="desktopAccountOnboardingNotNow">Continue without an account</button>');
-    expect(sidebarFooter).not.toContain('id="desktopAccountButton"');
-    expect(html).toContain('class="desktop-account-corner-control hidden" id="desktopAccountButton"');
+    expect(html, "onboarding is a full surface, not a dialog").toContain('<section class="desktop-account-onboarding hidden" id="desktopAccountOnboarding"');
+    expect(html, "no dialog-based onboarding").not.toContain('<dialog class="desktop-account-onboarding"');
+    expect(html, "onboarding continue action copy").toContain('id="desktopAccountOnboardingNotNow">Continue without an account</button>');
+    expect(sidebarFooter, "account control not anchored in the sidebar footer").not.toContain('id="desktopAccountButton"');
+    expect(html, "account control is a hidden corner control").toContain('class="desktop-account-corner-control hidden" id="desktopAccountButton"');
     const accountPanel = html.slice(html.indexOf('id="accountSettingsPanel"'), html.indexOf('id="providerSettingsPanel"'));
-    expect(accountPanel).toContain('id="desktopAccountStatus"');
-    expect(accountPanel).toContain('id="desktopAccountSignIn"');
-    expect(accountPanel).toContain('id="desktopAccountLogout"');
-    expect(accountPanel).not.toContain("account-settings-intro");
-    expect(accountPanel).not.toContain("desktopAccountDetail");
-    expect(accountPanel).not.toContain("desktopAccountChannel");
-    expect(accountPanel).not.toContain("Release channel");
-    expect(css).toContain(".desktop-account-onboarding{position:fixed;inset:0;");
-    expect(css).toContain(".desktop-account-corner-control{position:fixed;right:16px;bottom:14px;");
+    expect(accountPanel, "account panel exposes status").toContain('id="desktopAccountStatus"');
+    expect(accountPanel, "account panel exposes sign-in").toContain('id="desktopAccountSignIn"');
+    expect(accountPanel, "account panel exposes logout").toContain('id="desktopAccountLogout"');
+    expect(accountPanel, "account panel has no intro copy").not.toContain("account-settings-intro");
+    expect(accountPanel, "account panel leaks no detail row").not.toContain("desktopAccountDetail");
+    expect(accountPanel, "account panel exposes no channel control").not.toContain("desktopAccountChannel");
+    expect(accountPanel, "account panel exposes no release channel copy").not.toContain("Release channel");
+    expect(css, "onboarding surface covers the viewport").toContain(".desktop-account-onboarding{position:fixed;inset:0;");
+    expect(css, "corner control anchored bottom-right").toContain(".desktop-account-corner-control{position:fixed;right:16px;bottom:14px;");
   });
 });

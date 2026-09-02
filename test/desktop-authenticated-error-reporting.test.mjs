@@ -12,69 +12,76 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
+function transportFixture() {
+  return {
+    enable: vi.fn(async () => {}),
+    disable: vi.fn(async () => {}),
+    send: vi.fn(async () => {}),
+  };
+}
+
+const releaseIdentity = Object.freeze({
+  release: "ai.relayer.desktop@0.2.16+fixture",
+  environment: "preview",
+  os: "macos",
+  architecture: "arm64",
+});
+
+function base64Encrypt() {
+  return {
+    encrypt: async (value) => Buffer.from(value).toString("base64"),
+    decrypt: async (value) => Buffer.from(value, "base64").toString("utf8"),
+  };
+}
+
 describe("desktop authenticated error reporting composition", () => {
-  it("keeps transport and capabilities unavailable until account verification and closes all authority together", async () => {
+  it("gates authority on account verification, survives receiver bind failure, and closes all authority together", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-error-reporting-"));
     directories.push(directory);
-    const transport = {
-      enable: vi.fn(async () => {}),
-      disable: vi.fn(async () => {}),
-      send: vi.fn(async () => {}),
-    };
+    const queuePath = join(directory, "queue.json");
+    const transport = transportFixture();
+
     const reporting = await createDesktopAuthenticatedErrorReporting({
-      queuePath: join(directory, "queue.json"),
-      encrypt: async (value) => Buffer.from(value).toString("base64"),
-      decrypt: async (value) => Buffer.from(value, "base64").toString("utf8"),
+      queuePath,
+      ...base64Encrypt(),
       transport,
-      releaseIdentity: {
-        release: "ai.relayer.desktop@0.2.16+fixture",
-        environment: "preview",
-        os: "macos",
-        architecture: "arm64",
-      },
+      releaseIdentity,
     });
 
-    expect(reporting.issueReporter({ component: "electron-main", processGeneration: 1 })).toBeNull();
-    expect(reporting.issueCapability({ component: "rust-app-server", processGeneration: 1 })).toBeNull();
-    expect(transport.enable).not.toHaveBeenCalled();
+    expect(reporting.issueReporter({ component: "electron-main", processGeneration: 1 }),
+      "no reporter authority before account verification").toBeNull();
+    expect(reporting.issueCapability({ component: "rust-app-server", processGeneration: 1 }),
+      "no loopback capability before account verification").toBeNull();
+    expect(transport.enable, "transport stays disabled before account verification").not.toHaveBeenCalled();
 
     await reporting.account.transitionIdentity({ generation: 1, subject: "auth0|person" });
-    expect(transport.enable).toHaveBeenCalledOnce();
-    expect(reporting.issueReporter({ component: "electron-main", processGeneration: 1 })).not.toBeNull();
+    expect(transport.enable, "account verification enables transport exactly once").toHaveBeenCalledOnce();
+    expect(reporting.issueReporter({ component: "electron-main", processGeneration: 1 }),
+      "verification issues main-process reporter authority").not.toBeNull();
     const capability = reporting.issueCapability({ component: "rust-app-server", processGeneration: 1 });
-    expect(capability.endpoint).toMatch(/^http:\/\/127\.0\.0\.1:/u);
+    expect(capability.endpoint, "verification issues a loopback capability").toMatch(/^http:\/\/127\.0\.0\.1:/u);
 
     await reporting.account.retireIdentity();
-    expect(reporting.issueReporter({ component: "electron-main", processGeneration: 2 })).toBeNull();
+    expect(reporting.issueReporter({ component: "electron-main", processGeneration: 2 }),
+      "retirement nulls reporter authority").toBeNull();
+    expect(reporting.issueCapability({ component: "rust-app-server", processGeneration: 2 }),
+      "retirement nulls capability authority").toBeNull();
     await reporting.close();
-    expect(transport.disable).toHaveBeenCalled();
-  });
+    expect(transport.disable, "close disables transport").toHaveBeenCalled();
 
-  it("keeps main-process reporting available when the local capability receiver cannot bind", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-error-reporting-"));
-    directories.push(directory);
-    const transport = {
-      enable: vi.fn(async () => {}),
-      disable: vi.fn(async () => {}),
-      send: vi.fn(async () => {}),
-    };
-    const reporting = await createDesktopAuthenticatedErrorReporting({
-      queuePath: join(directory, "queue.json"),
-      encrypt: async (value) => Buffer.from(value).toString("base64"),
-      decrypt: async (value) => Buffer.from(value, "base64").toString("utf8"),
-      transport,
-      releaseIdentity: {
-        release: "ai.relayer.desktop@0.2.16+fixture",
-        environment: "preview",
-        os: "macos",
-        architecture: "arm64",
-      },
+    const bindFailureTransport = transportFixture();
+    const degraded = await createDesktopAuthenticatedErrorReporting({
+      queuePath,
+      ...base64Encrypt(),
+      transport: bindFailureTransport,
+      releaseIdentity,
       createReceiver: async () => { throw new Error("bind unavailable"); },
     });
-
-    await reporting.account.transitionIdentity({ generation: 1, subject: "auth0|person" });
-    expect(reporting.issueReporter({ component: "electron-main", processGeneration: 1 })).not.toBeNull();
-    expect(reporting.issueCapability({ component: "rust-app-server", processGeneration: 1 })).toBeNull();
-    await reporting.close();
-  });
+    await degraded.account.transitionIdentity({ generation: 1, subject: "auth0|person" });
+    expect(degraded.issueReporter({ component: "electron-main", processGeneration: 1 }),
+      "receiver bind failure keeps main-process reporting available").not.toBeNull();
+    expect(degraded.issueCapability({ component: "rust-app-server", processGeneration: 1 }),
+      "receiver bind failure nulls the loopback capability").toBeNull();
+    await degraded.close();
+  }, 15_000);
 });

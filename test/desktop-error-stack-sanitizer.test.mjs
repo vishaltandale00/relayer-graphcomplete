@@ -7,41 +7,34 @@ import {
 } from "../desktop/shared/error-stack-sanitizer.mjs";
 
 describe("desktop error stack sanitizer", () => {
-  it("projects renderer source-tree stack locations to closed application-relative frames", () => {
-    const error = new TypeError("private graph and workspace content");
-    error.stack = [
-      "TypeError: private graph and workspace content",
-      "    at renderWorkspace (/Users/alice/private-checkout/desktop/renderer/src/product-workspace/view.js:41:7)",
-      "    at async file:///Users/alice/private-checkout/desktop/renderer/src/main.js:19:3",
-    ].join("\n");
+  it("projects JavaScript errors to closed application-relative frames and bounds every hostile stack", () => {
+    const projected = [
+      ["renderer source tree", "renderer", [
+        "TypeError: private graph and workspace content",
+        "    at renderWorkspace (/Users/alice/private-checkout/desktop/renderer/src/product-workspace/view.js:41:7)",
+        "    at async file:///Users/alice/private-checkout/desktop/renderer/src/main.js:19:3",
+      ].join("\n"), [
+        { module: "desktop/renderer/src/product-workspace/view.js", line: 41, column: 7 },
+        { module: "desktop/renderer/src/main.js", line: 19, column: 3 },
+      ]],
+      ["packaged electron-main", "electron-main",
+        "Error: private\n    at boot (/Applications/Relayer.app/Contents/Resources/app.asar/main/index.mjs:308:11)", [
+          { module: "desktop/main/index.mjs", line: 308, column: 11 },
+        ]],
+      ["packaged harness-host", "node-harness-host",
+        "Error: private\n    at host (C:\\Program Files\\Relayer\\resources\\app.asar\\node_modules\\@relayer\\harness-host\\dist\\index.js:72:5)", [
+          { module: "packages/harness-host/dist/index.js", line: 72, column: 5 },
+        ]],
+    ];
+    expect(projected, "projection inventory").toHaveLength(3);
+    for (const [label, component, stack, frames] of projected) {
+      expect(sanitizeJavaScriptErrorFrames({ component, error: { stack } }), `${label} projected without installation paths`).toEqual(frames);
+    }
 
-    expect(sanitizeJavaScriptErrorFrames({ component: "renderer", error })).toEqual([
-      { module: "desktop/renderer/src/product-workspace/view.js", line: 41, column: 7 },
-      { module: "desktop/renderer/src/main.js", line: 19, column: 3 },
-    ]);
-  });
-
-  it("recognizes packaged Electron-main and harness-host locations without retaining installation paths", () => {
-    const mainError = {
-      stack: "Error: private\n    at boot (/Applications/Relayer.app/Contents/Resources/app.asar/main/index.mjs:308:11)",
-    };
-    const harnessError = {
-      stack: "Error: private\n    at host (C:\\Program Files\\Relayer\\resources\\app.asar\\node_modules\\@relayer\\harness-host\\dist\\index.js:72:5)",
-    };
-
-    expect(sanitizeJavaScriptErrorFrames({ component: "electron-main", error: mainError })).toEqual([
-      { module: "desktop/main/index.mjs", line: 308, column: 11 },
-    ]);
-    expect(sanitizeJavaScriptErrorFrames({ component: "node-harness-host", error: harnessError })).toEqual([
-      { module: "packages/harness-host/dist/index.js", line: 72, column: 5 },
-    ]);
-  });
-
-  it("drops absolute, third-party, cross-component, traversal, and malformed locations and caps output", () => {
     const accepted = Array.from({ length: 40 }, (_, index) => (
       `    at frame${index} (/Applications/Relayer.app/Contents/Resources/renderer/src/frame-${index}.js:${index + 1}:2)`
     ));
-    const error = {
+    const hostile = {
       stack: [
         "Error: private workspace content",
         "    at secret (/Users/alice/Documents/customer.js:2:3)",
@@ -54,39 +47,29 @@ describe("desktop error stack sanitizer", () => {
         ...accepted,
       ].join("\n"),
     };
+    const frames = sanitizeJavaScriptErrorFrames({ component: "renderer", error: hostile });
+    expect(frames, "absolute, third-party, cross-component, traversal, and malformed locations dropped; output capped").toHaveLength(32);
+    expect(frames[0], "first capped frame").toEqual({ module: "desktop/renderer/src/frame-0.js", line: 1, column: 2 });
+    expect(frames[31], "last capped frame").toEqual({ module: "desktop/renderer/src/frame-31.js", line: 32, column: 2 });
+    expect(Object.isFrozen(frames) && frames.every((frame) => Object.isFrozen(frame)), "frames frozen").toBe(true);
+    expect(JSON.stringify(frames), "no hostile location leaked").not.toMatch(/alice|customer|node_modules|vendor|\.\.|private/u);
 
-    const frames = sanitizeJavaScriptErrorFrames({ component: "renderer", error });
-    expect(frames).toHaveLength(32);
-    expect(frames[0]).toEqual({ module: "desktop/renderer/src/frame-0.js", line: 1, column: 2 });
-    expect(frames[31]).toEqual({ module: "desktop/renderer/src/frame-31.js", line: 32, column: 2 });
-    expect(Object.isFrozen(frames)).toBe(true);
-    expect(frames.every((frame) => Object.isFrozen(frame))).toBe(true);
-    expect(JSON.stringify(frames)).not.toMatch(/alice|customer|node_modules|vendor|\.\.|private/u);
-  });
-
-  it("returns no raw detail when stack access or component input is untrusted", () => {
     const throwingError = Object.create(null, {
       stack: { get() { throw new Error("private stack getter detail"); } },
     });
-    expect(sanitizeJavaScriptErrorFrames({ component: "renderer", error: throwingError })).toEqual([]);
-    expect(sanitizeJavaScriptErrorFrames({
-      component: "rust-app-server",
-      error: { stack: "Error: private\n at f (/repo/desktop/main/index.mjs:1:1)" },
-    })).toEqual([]);
+    const rejected = [
+      ["throwing stack getter", "renderer", throwingError],
+      ["cross-component frame for a Rust component", "rust-app-server", { stack: "Error: private\n at f (/repo/desktop/main/index.mjs:1:1)" }],
+      ["oversized stack", "electron-main", { stack: `${"x".repeat(64 * 1024)}\n at f (/repo/desktop/main/index.mjs:1:1)` }],
+      ["overlong stack", "electron-main", { stack: `${Array.from({ length: 256 }, () => "ignored").join("\n")}\n at f (/repo/desktop/main/index.mjs:1:1)` }],
+    ];
+    expect(rejected, "rejection inventory").toHaveLength(4);
+    for (const [label, component, error] of rejected) {
+      expect(sanitizeJavaScriptErrorFrames({ component, error }), `${label} returns no raw detail`).toEqual([]);
+    }
   });
 
-  it("rejects oversized or overlong stacks before parsing application frames", () => {
-    expect(sanitizeJavaScriptErrorFrames({
-      component: "electron-main",
-      error: { stack: `${"x".repeat(64 * 1024)}\n at f (/repo/desktop/main/index.mjs:1:1)` },
-    })).toEqual([]);
-    expect(sanitizeJavaScriptErrorFrames({
-      component: "electron-main",
-      error: { stack: `${Array.from({ length: 256 }, () => "ignored").join("\n")}\n at f (/repo/desktop/main/index.mjs:1:1)` },
-    })).toEqual([]);
-  });
-
-  it("accepts only closed typed frames from the Rust component's approved crate", () => {
+  it("accepts only closed typed frames from each Rust component's approved crate", () => {
     const frames = sanitizeRustFrames({
       component: "rust-app-server",
       frames: [
@@ -99,37 +82,31 @@ describe("desktop error stack sanitizer", () => {
         { module: "crates/relayer-app-server/src/lib.rs", line: 1, column: 1, raw: "private" },
       ],
     });
-
-    expect(frames).toEqual([
+    expect(frames, "only the approved crate frame survives").toEqual([
       { module: "crates/relayer-app-server/src/main.rs", line: 81, column: 14 },
     ]);
-    expect(Object.isFrozen(frames)).toBe(true);
-    expect(Object.isFrozen(frames[0])).toBe(true);
-    expect(JSON.stringify(frames)).not.toMatch(/alice|private|vendor/u);
-  });
+    expect(Object.isFrozen(frames) && Object.isFrozen(frames[0]), "rust frames frozen").toBe(true);
+    expect(JSON.stringify(frames), "no hostile rust location leaked").not.toMatch(/alice|private|vendor/u);
 
-  it("caps Rust output and rejects malformed containers without exposing them", () => {
-    const frames = Array.from({ length: 40 }, (_, index) => ({
+    const capFrames = Array.from({ length: 40 }, (_, index) => ({
       module: `crates/relayer-graph-server/src/frame_${index}.rs`,
       line: index + 1,
       column: 1,
     }));
-    expect(sanitizeRustFrames({ component: "rust-graph-server", frames })).toHaveLength(32);
-    expect(sanitizeRustFrames({ component: "electron-main", frames })).toEqual([]);
-    expect(sanitizeRustFrames({ component: "rust-graph-server", frames: "private" })).toEqual([]);
-  });
+    expect(sanitizeRustFrames({ component: "rust-graph-server", frames: capFrames }), "rust output capped").toHaveLength(32);
+    expect(sanitizeRustFrames({ component: "electron-main", frames: capFrames }), "rust frames rejected for a non-rust component").toEqual([]);
+    expect(sanitizeRustFrames({ component: "rust-graph-server", frames: "private" }), "malformed frame container rejected").toEqual([]);
 
-  it("extracts only approved crate-relative Rust locations from raw diagnostics", () => {
     const text = [
       "private panic at crates/relayer-app-server/src/main.rs:81:14",
       "dependency at crates/other/src/lib.rs:2:3",
       "graph at crates/relayer-graph-server/src/main.rs:9:4",
       "absolute secret /Users/person/private.rs:3:2",
     ].join("\n");
-    expect(parseRustDiagnosticFrames({ component: "rust-app-server", text })).toEqual([
+    expect(parseRustDiagnosticFrames({ component: "rust-app-server", text }), "only approved crate-relative diagnostics").toEqual([
       { module: "crates/relayer-app-server/src/main.rs", line: 81, column: 14 },
     ]);
-    expect(JSON.stringify(parseRustDiagnosticFrames({ component: "rust-app-server", text })))
+    expect(JSON.stringify(parseRustDiagnosticFrames({ component: "rust-app-server", text })), "no raw diagnostic leaked")
       .not.toMatch(/private panic|Users|dependency/u);
   });
 });

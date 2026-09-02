@@ -30,7 +30,8 @@ function contract(overrides = {}) {
 }
 
 describe("desktop telemetry release artifacts", () => {
-  it("produces deterministic version-matched source maps and Rust debug artifacts", async () => {
+  it("produces, verifies, audits, and plans upload of sealed telemetry artifacts", async () => {
+    // macOS: deterministic version-matched source maps and Rust debug artifacts.
     const root = await mkdtemp(join(tmpdir(), "relayer-telemetry-artifacts-"));
     const outputRoot = join(root, "desktop", "dist", "telemetry");
     const packagedApplication = join(root, "desktop", "dist", "mac-arm64", "Relayer.app");
@@ -76,23 +77,23 @@ describe("desktop telemetry release artifacts", () => {
       capture,
     });
     const verified = await verifyDesktopTelemetryArtifacts({ outputRoot });
-    expect(verified).toEqual(first);
-    expect(first).toMatchObject({
+    expect(verified, "verification reproduces the manifest").toEqual(first);
+    expect(first, "sealed manifest identity").toMatchObject({
       schema: "relayer.desktop-telemetry-artifacts/v1",
       release: `ai.relayer.desktop@0.2.17+${commit}`,
       candidateChannel: "preview",
       target: "macos-arm64",
       packagedApplication: "mac-arm64/Relayer.app",
     });
-    expect(first.sourceMaps.map((entry) => entry.component)).toEqual(["electron", "renderer", "node"]);
-    expect(first.debugArtifacts.some((entry) => entry.path.endsWith("relayer-app-server"))).toBe(true);
-    expect(first.nativeDebugIdentities).toEqual([{
+    expect(first.sourceMaps.map((entry) => entry.component), "source maps for every component").toEqual(["electron", "renderer", "node"]);
+    expect(first.debugArtifacts.some((entry) => entry.path.endsWith("relayer-app-server")), "Rust debug artifact captured").toBe(true);
+    expect(first.nativeDebugIdentities, "dSYM correlated by UUID").toEqual([{
       binary: "bin/relayer-app-server",
       debug: "debug/relayer-app-server.dSYM",
       debugId: "12345678-1234-1234-1234-123456789abc",
     }]);
     const map = JSON.parse(await readFile(join(outputRoot, "source-maps", "desktop/main/index.mjs.map"), "utf8"));
-    expect(map).toMatchObject({ version: 3, file: "desktop/main/index.mjs", sources: ["desktop/main/index.mjs"] });
+    expect(map, "source map pinned to its module").toMatchObject({ version: 3, file: "desktop/main/index.mjs", sources: ["desktop/main/index.mjs"] });
 
     const second = await prepareDesktopTelemetryArtifacts({
       contract: contract(),
@@ -104,9 +105,10 @@ describe("desktop telemetry release artifacts", () => {
       execute,
       capture,
     });
-    expect(second).toEqual(first);
+    expect(second, "artifact preparation is deterministic").toEqual(first);
     await writeFile(join(outputRoot, first.sourceMaps[0].path), "tampered", "utf8");
-    await expect(verifyDesktopTelemetryArtifacts({ outputRoot })).rejects.toThrow("does not match its manifest");
+    await expect(verifyDesktopTelemetryArtifacts({ outputRoot }), "tampered artifact fails verification")
+      .rejects.toThrow("does not match its manifest");
 
     await writeFile(join(root, "desktop/main/index.mjs"), "export const mismatch = true;\n", "utf8");
     await expect(prepareDesktopTelemetryArtifacts({
@@ -118,7 +120,7 @@ describe("desktop telemetry release artifacts", () => {
       rustBinaries: [rustBinary],
       execute,
       capture,
-    })).rejects.toThrow("packaged source bytes");
+    }), "packaged bytes must match source bytes").rejects.toThrow("packaged source bytes");
 
     await writeFile(join(root, "desktop/main/index.mjs"), "export const answer = 42;\n", "utf8");
     const mismatchedUuidCapture = vi.fn(async (_command, args) => ({
@@ -135,79 +137,71 @@ describe("desktop telemetry release artifacts", () => {
       rustBinaries: [rustBinary],
       execute,
       capture: mismatchedUuidCapture,
-    })).rejects.toThrow("dSYM UUID");
-  });
+    }), "mismatched dSYM UUID rejected").rejects.toThrow("dSYM UUID");
 
-  it("correlates the packaged Windows PE CodeView identity with its PDB", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-telemetry-windows-symbols-"));
-    const outputRoot = join(root, "desktop", "dist", "telemetry");
-    const packagedApplication = join(root, "desktop", "dist", "win-unpacked");
-    const resources = join(packagedApplication, "resources");
-    const asarSource = join(root, "asar-source");
-    await mkdir(join(root, "desktop", "main"), { recursive: true });
-    await mkdir(join(asarSource, "main"), { recursive: true });
-    await writeFile(join(root, "desktop", "main", "index.mjs"), "export const answer = 42;\n", "utf8");
-    await writeFile(join(asarSource, "main", "index.mjs"), "export const answer = 42;\n", "utf8");
+    // Windows: the packaged PE CodeView identity correlates with its PDB.
+    const winRoot = await mkdtemp(join(tmpdir(), "relayer-telemetry-windows-symbols-"));
+    const winOutputRoot = join(winRoot, "desktop", "dist", "telemetry");
+    const winPackagedApplication = join(winRoot, "desktop", "dist", "win-unpacked");
+    const resources = join(winPackagedApplication, "resources");
+    const winAsarSource = join(winRoot, "asar-source");
+    await mkdir(join(winRoot, "desktop", "main"), { recursive: true });
+    await mkdir(join(winAsarSource, "main"), { recursive: true });
+    await writeFile(join(winRoot, "desktop", "main", "index.mjs"), "export const answer = 42;\n", "utf8");
+    await writeFile(join(winAsarSource, "main", "index.mjs"), "export const answer = 42;\n", "utf8");
     await mkdir(resources, { recursive: true });
-    await createPackage(asarSource, join(resources, "app.asar"));
-    const rustBinary = join(root, "target", "x86_64-pc-windows-msvc", "release", "relayer-app-server.exe");
-    await mkdir(join(rustBinary, ".."), { recursive: true });
+    await createPackage(winAsarSource, join(resources, "app.asar"));
+    const winRustBinary = join(winRoot, "target", "x86_64-pc-windows-msvc", "release", "relayer-app-server.exe");
+    await mkdir(join(winRustBinary, ".."), { recursive: true });
     await mkdir(join(resources, "bin"), { recursive: true });
-    await writeFile(rustBinary, "pe", "utf8");
-    await writeFile(join(rustBinary, "..", "relayer-app-server.pdb"), "pdb", "utf8");
+    await writeFile(winRustBinary, "pe", "utf8");
+    await writeFile(join(winRustBinary, "..", "relayer-app-server.pdb"), "pdb", "utf8");
     await writeFile(join(resources, "bin", "relayer-app-server.exe"), "pe", "utf8");
     const guid = "87654321-4321-4321-4321-cba987654321";
-    const capture = vi.fn(async (command) => ({
+    const winCapture = vi.fn(async (command) => ({
       stdout: command === "llvm-readobj" ? `PDBGUID: {${guid}}\nPDBAge: 3\n` : `Guid: ${guid}\nAge: 3\n`,
     }));
-    const manifest = await prepareDesktopTelemetryArtifacts({
-      contract: contract({
-        targetKey: "windows-x64",
-        distributionPlatform: "windows",
-        platform: "win32",
-        architecture: "x64",
-        rustTarget: "x86_64-pc-windows-msvc",
-      }),
-      repositoryRoot: root,
-      outputRoot,
-      packagedApplication,
-      sourceGroups: [["electron", "desktop/main/index.mjs"]],
-      rustBinaries: [rustBinary],
-      capture,
+    const windowsContract = contract({
+      targetKey: "windows-x64",
+      distributionPlatform: "windows",
+      platform: "win32",
+      architecture: "x64",
+      rustTarget: "x86_64-pc-windows-msvc",
     });
-    expect(manifest.nativeDebugIdentities[0].debugId).toBe(`${guid}-3`);
-    expect(capture).toHaveBeenCalledWith("llvm-readobj", expect.arrayContaining([expect.stringMatching(/relayer-app-server\.exe$/u)]));
+    const winManifest = await prepareDesktopTelemetryArtifacts({
+      contract: windowsContract,
+      repositoryRoot: winRoot,
+      outputRoot: winOutputRoot,
+      packagedApplication: winPackagedApplication,
+      sourceGroups: [["electron", "desktop/main/index.mjs"]],
+      rustBinaries: [winRustBinary],
+      capture: winCapture,
+    });
+    expect(winManifest.nativeDebugIdentities[0].debugId, "PE CodeView identity correlated with PDB").toBe(`${guid}-3`);
+    expect(winCapture, "CodeView read from the packaged executable").toHaveBeenCalledWith("llvm-readobj", expect.arrayContaining([expect.stringMatching(/relayer-app-server\.exe$/u)]));
 
     const mismatchedCapture = vi.fn(async (command) => ({
       stdout: command === "llvm-readobj" ? `PDBGUID: {${guid}}\nPDBAge: 3\n` : `Guid: ${guid}\nAge: 4\n`,
     }));
     await expect(prepareDesktopTelemetryArtifacts({
-      contract: contract({
-        targetKey: "windows-x64",
-        distributionPlatform: "windows",
-        platform: "win32",
-        architecture: "x64",
-        rustTarget: "x86_64-pc-windows-msvc",
-      }),
-      repositoryRoot: root,
-      outputRoot: join(root, "desktop", "dist", "mismatched"),
-      packagedApplication,
+      contract: windowsContract,
+      repositoryRoot: winRoot,
+      outputRoot: join(winRoot, "desktop", "dist", "mismatched"),
+      packagedApplication: winPackagedApplication,
       sourceGroups: [["electron", "desktop/main/index.mjs"]],
-      rustBinaries: [rustBinary],
+      rustBinaries: [winRustBinary],
       capture: mismatchedCapture,
-    })).rejects.toThrow("PDB identity");
-  });
+    }), "mismatched PDB identity rejected").rejects.toThrow("PDB identity");
 
-  it("keeps upload credentials out of plans and audits the exact packaged bytes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-telemetry-package-audit-"));
-    await writeFile(join(root, "app.asar"), "sealed application bytes", "utf8");
-    await expect(assertCredentialAbsentFromTree({ root, credential: "ci-only-secret-token" })).resolves.toBeUndefined();
-    await writeFile(join(root, "bad.bin"), "prefix-ci-only-secret-token-suffix", "utf8");
-    await expect(assertCredentialAbsentFromTree({ root, credential: "ci-only-secret-token" }))
+    // Upload credentials stay out of plans and the packaged tree is audited.
+    const auditRoot = await mkdtemp(join(tmpdir(), "relayer-telemetry-package-audit-"));
+    await writeFile(join(auditRoot, "app.asar"), "sealed application bytes", "utf8");
+    await expect(assertCredentialAbsentFromTree({ root: auditRoot, credential: "ci-only-secret-token" }), "clean tree passes audit").resolves.toBeUndefined();
+    await writeFile(join(auditRoot, "bad.bin"), "prefix-ci-only-secret-token-suffix", "utf8");
+    await expect(assertCredentialAbsentFromTree({ root: auditRoot, credential: "ci-only-secret-token" }), "embedded credential fails audit")
       .rejects.toThrow("packaged application bytes");
-  });
 
-  it("creates a pinned Sentry CLI plan only for exact Preview or Stable CI authority", () => {
+    // The pinned Sentry CLI plan is created only for exact Preview or Stable CI authority.
     const manifest = {
       schema: "relayer.desktop-telemetry-artifacts/v1",
       release: `ai.relayer.desktop@0.2.17+${commit}`,
@@ -247,59 +241,41 @@ describe("desktop telemetry release artifacts", () => {
       SENTRY_PROJECT: "graphcomplete-desktop",
     };
     const plan = createDesktopTelemetryUploadPlan({ manifest, environment, artifactsRoot: "/tmp/telemetry" });
-    expect(plan).toHaveLength(4);
-    expect(plan.flatMap((step) => step.args)).toContain(manifest.release);
-    expect(JSON.stringify(plan)).not.toContain(environment.SENTRY_AUTH_TOKEN);
-    expect(plan.every((step) => step.command === environment.SENTRY_CLI_BINARY)).toBe(true);
+    expect(plan, "four pinned upload steps").toHaveLength(4);
+    expect(plan.flatMap((step) => step.args), "release identity uploaded").toContain(manifest.release);
+    expect(JSON.stringify(plan), "auth token never appears in the plan").not.toContain(environment.SENTRY_AUTH_TOKEN);
+    expect(plan.every((step) => step.command === environment.SENTRY_CLI_BINARY), "pinned sentry-cli binary").toBe(true);
     // sentry-cli scopes --org/--project to the subcommand. Passing them as
     // global options ahead of it aborts with "unexpected argument '--org'",
     // which only surfaces during a signed release, so pin the order here.
-    expect(plan.map((step) => step.args.slice(0, 4))).toEqual([
+    expect(plan.map((step) => step.args.slice(0, 4)), "subcommand-scoped option order").toEqual([
       ["releases", "new", "--org", environment.SENTRY_ORG],
       ["sourcemaps", "upload", "--org", environment.SENTRY_ORG],
       ["debug-files", "upload", "--org", environment.SENTRY_ORG],
       ["releases", "finalize", "--org", environment.SENTRY_ORG],
     ]);
     for (const step of plan) {
-      expect(step.args[step.args.indexOf("--org") + 1]).toBe(environment.SENTRY_ORG);
-      expect(step.args[step.args.indexOf("--project") + 1]).toBe(environment.SENTRY_PROJECT);
-      expect(step.args.findIndex((argument) => argument.startsWith("--"))).toBeGreaterThan(1);
+      expect(step.args[step.args.indexOf("--org") + 1], "org scoped to subcommand").toBe(environment.SENTRY_ORG);
+      expect(step.args[step.args.indexOf("--project") + 1], "project scoped to subcommand").toBe(environment.SENTRY_PROJECT);
+      expect(step.args.findIndex((argument) => argument.startsWith("--")), "no global options before the subcommand").toBeGreaterThan(1);
     }
     expect(() => createDesktopTelemetryUploadPlan({
       manifest,
       environment: { ...environment, RELAYER_DESKTOP_CHANNEL: "stable" },
       artifactsRoot: "/tmp/telemetry",
-    })).not.toThrow();
+    }), "Stable CI authority accepted").not.toThrow();
 
-    expect(() => createDesktopTelemetryUploadPlan({
-      manifest,
-      environment: { ...environment, RELAYER_DESKTOP_CHANNEL: "development" },
-      artifactsRoot: "/tmp/telemetry",
-    })).toThrow("Preview or Stable");
-    expect(() => createDesktopTelemetryUploadPlan({
-      manifest,
-      environment: { ...environment, SENTRY_AUTH_TOKEN: "" },
-      artifactsRoot: "/tmp/telemetry",
-    })).toThrow("SENTRY_AUTH_TOKEN");
-    expect(() => createDesktopTelemetryUploadPlan({
-      manifest,
-      environment: { ...environment, GITHUB_SHA: "f".repeat(40) },
-      artifactsRoot: "/tmp/telemetry",
-    })).toThrow("source commit");
-    expect(() => createDesktopTelemetryUploadPlan({
-      manifest,
-      environment: { ...environment, SENTRY_PROJECT: "other-project" },
-      artifactsRoot: "/tmp/telemetry",
-    })).toThrow("approved Sentry project");
-    expect(() => createDesktopTelemetryUploadPlan({
-      manifest: { ...manifest, architecture: "x64" },
-      environment,
-      artifactsRoot: "/tmp/telemetry",
-    })).toThrow("target tuple");
-    expect(() => createDesktopTelemetryUploadPlan({
-      manifest: { ...manifest, extra: true },
-      environment,
-      artifactsRoot: "/tmp/telemetry",
-    })).toThrow("manifest is invalid");
-  });
+    const rejectedPlans = [
+      ["development channel", { manifest, environment: { ...environment, RELAYER_DESKTOP_CHANNEL: "development" }, artifactsRoot: "/tmp/telemetry" }, "Preview or Stable"],
+      ["missing auth token", { manifest, environment: { ...environment, SENTRY_AUTH_TOKEN: "" }, artifactsRoot: "/tmp/telemetry" }, "SENTRY_AUTH_TOKEN"],
+      ["mismatched source commit", { manifest, environment: { ...environment, GITHUB_SHA: "f".repeat(40) }, artifactsRoot: "/tmp/telemetry" }, "source commit"],
+      ["unapproved Sentry project", { manifest, environment: { ...environment, SENTRY_PROJECT: "other-project" }, artifactsRoot: "/tmp/telemetry" }, "approved Sentry project"],
+      ["mismatched target tuple", { manifest: { ...manifest, architecture: "x64" }, environment, artifactsRoot: "/tmp/telemetry" }, "target tuple"],
+      ["invalid manifest shape", { manifest: { ...manifest, extra: true }, environment, artifactsRoot: "/tmp/telemetry" }, "manifest is invalid"],
+    ];
+    expect(rejectedPlans, "upload plan rejection inventory").toHaveLength(6);
+    for (const [label, input, message] of rejectedPlans) {
+      expect(() => createDesktopTelemetryUploadPlan(input), label).toThrow(message);
+    }
+  }, 30_000);
 });

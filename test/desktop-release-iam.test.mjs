@@ -28,28 +28,26 @@ function targetResources(target) {
 }
 
 describe("desktop release AWS authority", () => {
-  it("limits Preview to target release objects and Preview control objects", async () => {
-    const policy = await readPolicy("preview-policy.json");
-    expect(policy.Statement).toHaveLength(1);
-    const objects = policy.Statement.find((statement) => Array.isArray(statement.Action));
-    expect(objects.Action).toEqual(["s3:GetObject", "s3:PutObject"]);
-    expect(policy.Statement.some((statement) => statement.Action === "s3:ListBucket")).toBe(false);
-    expect(policy.Statement.flatMap(resourcesFor)).not.toContain(bucketArn);
+  it("limits Preview and Stable to their sealed release objects and trusts only the pinned repository environments", async () => {
+    const preview = await readPolicy("preview-policy.json");
+    expect(preview.Statement, "Preview is one object-write statement").toHaveLength(1);
+    const objects = preview.Statement.find((statement) => Array.isArray(statement.Action));
+    expect(objects.Action, "Preview gets and puts objects only").toEqual(["s3:GetObject", "s3:PutObject"]);
+    expect(preview.Statement.some((statement) => statement.Action === "s3:ListBucket"), "no bucket listing").toBe(false);
+    expect(preview.Statement.flatMap(resourcesFor), "no bare bucket authority").not.toContain(bucketArn);
 
-    const expected = Object.values(DESKTOP_RELEASE_TARGETS).flatMap((target) => {
+    const expectedPreview = Object.values(DESKTOP_RELEASE_TARGETS).flatMap((target) => {
       const resources = targetResources(target);
       return [resources.release, resources.previewPointer, resources.previewHistory, resources.previewReceipt];
     });
-    expect(resourcesFor(objects).sort()).toEqual(expected.sort());
-  });
+    expect(resourcesFor(objects).sort(), "Preview limited to release objects and Preview control objects").toEqual(expectedPreview.sort());
 
-  it("lets Stable read Preview evidence but write only Stable control objects", async () => {
-    const policy = await readPolicy("stable-policy.json");
-    expect(policy.Statement).toHaveLength(2);
-    const read = policy.Statement.find((statement) => statement.Action === "s3:GetObject");
-    const write = policy.Statement.find((statement) => statement.Action === "s3:PutObject");
-    expect(policy.Statement.some((statement) => statement.Action === "s3:ListBucket")).toBe(false);
-    expect(policy.Statement.flatMap(resourcesFor)).not.toContain(bucketArn);
+    const stable = await readPolicy("stable-policy.json");
+    expect(stable.Statement, "Stable is a read/write statement pair").toHaveLength(2);
+    const read = stable.Statement.find((statement) => statement.Action === "s3:GetObject");
+    const write = stable.Statement.find((statement) => statement.Action === "s3:PutObject");
+    expect(stable.Statement.some((statement) => statement.Action === "s3:ListBucket"), "no bucket listing for Stable").toBe(false);
+    expect(stable.Statement.flatMap(resourcesFor), "no bare bucket authority for Stable").not.toContain(bucketArn);
 
     const expectedRead = Object.values(DESKTOP_RELEASE_TARGETS).flatMap((target) => {
       const resources = targetResources(target);
@@ -66,21 +64,19 @@ describe("desktop release AWS authority", () => {
       const resources = targetResources(target);
       return [resources.stablePointer, resources.stableHistory, resources.stableReceipt];
     });
-    expect(resourcesFor(read).sort()).toEqual(expectedRead.sort());
-    expect(resourcesFor(write).sort()).toEqual(expectedWrite.sort());
-    expect(resourcesFor(write)).not.toEqual(expect.arrayContaining(
+    expect(resourcesFor(read).sort(), "Stable reads Preview evidence plus Stable control objects").toEqual(expectedRead.sort());
+    expect(resourcesFor(write).sort(), "Stable writes only Stable control objects").toEqual(expectedWrite.sort());
+    expect(resourcesFor(write), "Stable never writes release artifacts").not.toEqual(expect.arrayContaining(
       Object.values(DESKTOP_RELEASE_TARGETS).map((target) => targetResources(target).release),
     ));
-  });
 
-  it("trusts only the exact immutable repository and protected environment subjects", async () => {
-    const expectations = [
+    const trustExpectations = [
       ["preview-trust-policy.json", "desktop-update-preview"],
       ["stable-trust-policy.json", "desktop-update-stable-promotion"],
     ];
-    for (const [file, environment] of expectations) {
+    for (const [file, environment] of trustExpectations) {
       const policy = await readPolicy(file);
-      expect(policy.Statement).toEqual([expect.objectContaining({
+      expect(policy.Statement, `${file} trusts only the exact repository environment subject`).toEqual([expect.objectContaining({
         Effect: "Allow",
         Principal: {
           Federated: "arn:aws:iam::647746916062:oidc-provider/token.actions.githubusercontent.com",
