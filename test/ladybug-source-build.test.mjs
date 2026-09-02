@@ -106,7 +106,7 @@ describe("pinned Ladybug source build", () => {
         requiredPackagedRpath: null,
         externalOpenSSLLibraries: false,
       },
-      licenseReceipt: { completeForDistribution: false },
+      licenseReceipt: { completeForDistribution: true },
     });
 
     const environment = createLadybugCargoEnvironment({
@@ -184,7 +184,7 @@ describe("pinned Ladybug source build", () => {
       openssl: { version: "3.5.8", sha256: manifest.openssl.sha256 },
       extensions: [],
       nativeMode: "fully-static-ladybug-and-openssl",
-      distributionLicenseReceiptComplete: false,
+      distributionLicenseReceiptComplete: true,
     });
     expect(await readFile(join(staged.bindingDirectory, "build.rs"), "utf8")).toBe("fn main() {}\n");
     expect(JSON.parse(await readFile(join(outputDirectory, "source-receipt.json"), "utf8")))
@@ -208,5 +208,11 @@ describe("pinned Ladybug source build", () => {
       mutate(manifest);
       expect(() => validateLadybugSourceManifest(manifest)).toThrow();
     }
+  });
+
+  it("rejects a source manifest whose license receipt is not complete for distribution", async () => {
+    const manifest = structuredClone(await loadLadybugSourceManifest());
+    manifest.licenseReceipt.completeForDistribution = false;
+    expect(() => validateLadybugSourceManifest(manifest)).toThrow("release-ready license receipt");
   });
 });

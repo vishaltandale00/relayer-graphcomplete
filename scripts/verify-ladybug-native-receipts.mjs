@@ -3,7 +3,8 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { digestLadybugSourceTree, sha256File } from "./prepare-ladybug-source.mjs";
+import { LADYBUG_NOTICES_REPO_ROOT } from "../desktop/packaging/ladybug-notices.mjs";
+import { digestLadybugSourceTree, relativeFiles, sha256File } from "./prepare-ladybug-source.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const defaultInventoryPath = resolve(repositoryRoot, "vendor/ladybug/native-inventory.json");
@@ -26,6 +27,7 @@ export async function verifyLadybugNativeReceipts({
   sourceRoot,
   opensslSourceRoot,
   requireReleaseReady = false,
+  noticesRoot,
 } = {}) {
   const inventory = JSON.parse(await readFile(inventoryPath, "utf8"));
   assert.equal(inventory.schemaVersion, 1);
@@ -38,8 +40,9 @@ export async function verifyLadybugNativeReceipts({
     sourceBasisCommit: "ea283cd1bf5473cd5c233944e3b281eb0d758a45",
     sourceTreeSha256: "58ab1da5ce17d2ca6ae0a6d835b2384c6fd8c8627703bf93e77685419f7142ba",
     spdx: "MIT",
-    licensePath: null,
-    receiptStatus: "blocked-missing-upstream-license-file",
+    licensePath: "vendor/ladybug/notices/ladybug-binding-LICENSE",
+    noticeProvenance: "https://raw.githubusercontent.com/LadybugDB/ladybug-rust/7afc780e33fb42c8f9b2f0c4ab6833bf2f86c76f/LICENSE at SHA-256 1c495c9546d0de02e83c9d50d5f7eb21f0085bc8f77a0ee333081a123a9c8d0c (git blob 9bb12b2468f7629dd9a6ce15d4d972ad014ff40d)",
+    receiptStatus: "upstream-license-vendored",
   });
   assert.deepEqual(inventory.core, {
     version: "0.18.0",
@@ -82,18 +85,42 @@ export async function verifyLadybugNativeReceipts({
   assert.equal(new Set(inventory.expectedNativeSubtrees).size, inventory.expectedNativeSubtrees.length);
 
   const licensePaths = new Set([
+    inventory.binding.licensePath,
     inventory.core.licensePath,
     inventory.openssl.licensePath,
     inventory.openssl.noticePath,
     ...inventory.nativeComponents.filter(({ licensePath }) => licensePath).map(({ licensePath }) => licensePath),
   ]);
-  assert.deepEqual([...licensePaths].sort(), Object.keys(inventory.noticeSha256).sort());
+  assert.deepEqual(
+    [...licensePaths].sort(),
+    Object.keys(inventory.noticeSha256).sort(),
+    "every license notice path must have exactly one digest entry",
+  );
   for (const licensePath of licensePaths) {
     const path = resolveRepositoryPath(licensePath, "licensePath");
     assert.ok((await stat(path)).isFile(), `license notice is not a file: ${licensePath}`);
     assert.ok((await readFile(path)).length > 0, `license notice is empty: ${licensePath}`);
     assert.equal(await sha256File(path), inventory.noticeSha256[licensePath], `license notice changed: ${licensePath}`);
   }
+
+  // An unlisted file under the notices root would ship without a digest or
+  // provenance, so the directory must contain exactly the inventoried notices
+  // (ignoring only the two filenames electron-builder's copy drops).
+  const noticesDirectory = noticesRoot
+    ? resolve(noticesRoot)
+    : resolveRepositoryPath(LADYBUG_NOTICES_REPO_ROOT, "notices root");
+  const noticesPrefix = `${LADYBUG_NOTICES_REPO_ROOT}/`;
+  const expectedNotices = Object.keys(inventory.noticeSha256)
+    .map((path) => {
+      assert.ok(path.startsWith(noticesPrefix), `notice path is outside the notices root: ${path}`);
+      return path.slice(noticesPrefix.length);
+    })
+    .sort();
+  assert.deepEqual(
+    (await relativeFiles(noticesDirectory, noticesDirectory, [], { strict: true, skipCopyDropped: true })).sort(),
+    expectedNotices,
+    "notices directory must contain exactly the inventoried files",
+  );
 
   assert.deepEqual(inventory.systemRuntimes, [
     { name: "Apple libc++ and libSystem", targets: ["aarch64-apple-darwin", "x86_64-apple-darwin"], shipped: false, classification: "operating-system-runtime" },
@@ -177,6 +204,7 @@ function parseArguments(argv) {
     if (argument === "--inventory") options.inventoryPath = resolve(argv[++index]);
     else if (argument === "--source-root") options.sourceRoot = resolve(argv[++index]);
     else if (argument === "--openssl-source-root") options.opensslSourceRoot = resolve(argv[++index]);
+    else if (argument === "--notices-root") options.noticesRoot = resolve(argv[++index]);
     else if (argument === "--release-ready") options.requireReleaseReady = true;
     else if (argument === "--generate-notices") options.generateNotices = true;
     else throw new Error(`unknown argument: ${argument}`);
@@ -188,5 +216,13 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const options = parseArguments(process.argv.slice(2));
   if (options.generateNotices) await generateNotices(options.inventoryPath ?? defaultInventoryPath, options.sourceRoot);
   const inventory = await verifyLadybugNativeReceipts(options);
-  console.log(`Ladybug native receipt verified: ${inventory.nativeComponents.length} subtrees inventoried; release blockers preserved`);
+  // The blocker phrase must match what this invocation actually verified: plain
+  // mode preserves any recognized blocker it found, while --release-ready
+  // asserted the list is empty.
+  const blockerPhrase = options.requireReleaseReady
+    ? "no release blockers declared; blocker gate enforced"
+    : inventory.releaseBlockers.length === 0
+      ? "no release blockers declared"
+      : `release blockers preserved: ${inventory.releaseBlockers.join(", ")}`;
+  console.log(`Ladybug native receipt verified: ${inventory.nativeComponents.length} subtrees inventoried; ${blockerPhrase}`);
 }

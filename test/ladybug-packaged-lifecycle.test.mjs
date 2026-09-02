@@ -18,6 +18,7 @@ import {
   npmCommandForPlatform,
   npmEnvironmentForDesktopTarget,
   packagedApplicationBuiltAfter,
+  packagedQualificationLimitations,
   qualificationBuildTempPrefix,
   parseMachOArchitectures,
   qualificationLifecycleTimeout,
@@ -81,6 +82,10 @@ function verifyReceiptShape(receipt, targetExpectation, expectedInputPaths = fro
     "/usr/lib/libiconv.2.dylib",
     "/usr/lib/libSystem.B.dylib",
   ]);
+  // The frozen receipts predate the vendored binding license, so they still carry
+  // the retired third limitation. `packagedQualificationLimitations` no longer
+  // emits it; these historical receipts are verified byte-for-byte, not as the
+  // current generator's shape.
   expect(receipt.limitations).toEqual([
     limitation,
     "unsigned development package",
@@ -114,6 +119,31 @@ describe("Ladybug packaged lifecycle qualification", () => {
       loadSourceManifest: async () => manifest,
       verifyNativeReceipts: async () => nativeReceipt,
     })).resolves.toEqual({ manifest, nativeReceipt });
+  });
+  it("rejects incomplete or malformed distribution-license receipts in the real gate", async () => {
+    const complete = { licenseReceipt: { completeForDistribution: true } };
+    const clean = { releaseBlockers: [] };
+    // Only a literal `true` counts as complete; a truthy stand-in must not pass.
+    for (const completeForDistribution of [false, "true"]) {
+      await expect(requireLadybugDistributionLicenseReady({
+        loadSourceManifest: async () => ({ licenseReceipt: { completeForDistribution } }),
+        verifyNativeReceipts: async () => clean,
+      })).rejects.toThrow("not release-ready: source complete=false; native blockers=none.");
+    }
+    await expect(requireLadybugDistributionLicenseReady({
+      loadSourceManifest: async () => complete,
+      verifyNativeReceipts: async () => ({ releaseBlockers: ["lbug-binding-missing-upstream-license-file"] }),
+    })).rejects.toThrow("source complete=true; native blockers=lbug-binding-missing-upstream-license-file.");
+    // A receipt without a blocker list is not a receipt; it must not read as clean.
+    await expect(requireLadybugDistributionLicenseReady({
+      loadSourceManifest: async () => complete,
+      verifyNativeReceipts: async () => ({}),
+    })).rejects.toThrow("native blockers=invalid-native-license-receipt.");
+    // A verifier failure propagates unchanged instead of being swallowed.
+    await expect(requireLadybugDistributionLicenseReady({
+      loadSourceManifest: async () => complete,
+      verifyNativeReceipts: async () => { throw new Error("license notice changed: ladybug-binding-LICENSE"); },
+    })).rejects.toThrow("license notice changed: ladybug-binding-LICENSE");
   });
   function minimalPe({
     machine = 0x8664,
@@ -163,6 +193,26 @@ describe("Ladybug packaged lifecycle qualification", () => {
   it("gives every cold packaged launch one recorded bounded window", () => {
     expect(qualificationLifecycleTimeout({ architecture: "arm64" }, "arm64")).toBe(15_000);
     expect(qualificationLifecycleTimeout({ architecture: "x64" }, "arm64")).toBe(15_000);
+  });
+  it("scopes new packaged receipts to execution and signing, not licensing", () => {
+    expect(packagedQualificationLimitations(
+      { CI: "true" },
+      { key: "macos-arm64", architecture: "arm64" },
+      "arm64",
+    )).toEqual([
+      "hosted macos-arm64 native execution only",
+      "unsigned development package",
+    ]);
+    expect(packagedQualificationLimitations(
+      { CI: undefined },
+      { key: "macos-x64", architecture: "x64" },
+      "arm64",
+    )).toEqual([
+      "local macos-x64 Rosetta execution only",
+      "unsigned development package",
+    ]);
+    expect(packagedQualificationLimitations({}, { key: "macos-arm64", architecture: "arm64" }, "arm64"))
+      .not.toContain("not release-ready licensing evidence");
   });
   it("installs the dependency closure for the packaged architecture", () => {
     expect(npmEnvironmentForDesktopTarget(
@@ -544,6 +594,9 @@ describe("Ladybug packaged lifecycle qualification", () => {
     await expect(buildReleaseRustServers({
       contract: { targetKey: "macos-arm64", rustTarget: "aarch64-apple-darwin" },
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64", RELAYER_DESKTOP_RELEASE: "1" },
+      verifyLadybugDistributionLicense: async () => {
+        throw new Error("Ladybug distribution license receipts are not release-ready");
+      },
       prepareLadybug: async () => {
         prepareCalls += 1;
         throw new Error("license gate must run before source preparation");

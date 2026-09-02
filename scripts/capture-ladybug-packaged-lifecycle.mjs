@@ -294,6 +294,18 @@ export function qualificationLifecycleTimeout(target, hostArchitecture = process
   return 15_000;
 }
 
+// The packaged lifecycle receipt describes a single-host, unsigned development
+// build. It is deliberately not a release-licensing claim: distribution
+// licensing is proven separately by the vendored notices and the release gate,
+// so the receipt must not reassert the retired "not release-ready licensing
+// evidence" limitation.
+export function packagedQualificationLimitations(environment, target, architecture) {
+  return [
+    `${environment.CI === "true" ? "hosted" : "local"} ${target.key} ${architecture === target.architecture ? "native" : "Rosetta"} execution only`,
+    "unsigned development package",
+  ];
+}
+
 function parseArguments(arguments_) {
   const options = {};
   for (let index = 0; index < arguments_.length; index += 2) {
@@ -819,11 +831,7 @@ export async function captureLadybugPackagedLifecycle({
     preparedSourceSha256,
     lifecycleTimeoutMs,
     ...lifecycle,
-    limitations: [
-      `${environment.CI === "true" ? "hosted" : "local"} ${target.key} ${process.arch === target.architecture ? "native" : "Rosetta"} execution only`,
-      "unsigned development package",
-      "not release-ready licensing evidence",
-    ],
+    limitations: packagedQualificationLimitations(environment, target, process.arch),
   };
     return result;
   } catch (error) {

@@ -7,6 +7,8 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import * as tar from "tar";
 
+import { relativeFiles } from "../../scripts/prepare-ladybug-source.mjs";
+
 import { desktopTargetFromEnvironment } from "../shared/target.mjs";
 import { PACKAGED_PROVIDER_MODULES } from "../main/providers/provider-adapter-registry.mjs";
 import {
@@ -27,6 +29,7 @@ import {
   sha256,
   verifySignedDependencyClosureSnapshot,
 } from "../shared/prime-runtime-integrity.mjs";
+import { LADYBUG_NOTICES_BUNDLE_DIR, LADYBUG_NOTICES_REPO_ROOT } from "./ladybug-notices.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,6 +51,7 @@ export async function verifyBundledAppServer(
     listPackageEntries = listPackage,
     verifyPrimeAgent = verifyPackagedPrimeAgent,
     verifyGraphServer = verifyPackagedMacOSGraphServer,
+    verifyNotices = verifyPackagedLadybugNotices,
     primeAgentTargetKey = `${platform}-${expectedArchitecture === "x86_64" ? "x64" : expectedArchitecture}`,
     primeAgentIntegrityPhase = "unsigned",
   } = {},
@@ -59,6 +63,7 @@ export async function verifyBundledAppServer(
   const graphClientPath = join(resourcesPath, "graph-client", "index.js");
   const markedPath = join(resourcesPath, "renderer", "vendor", "marked.umd.js");
   await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath), access(markedPath)]);
+  await verifyNotices(resourcesPath);
   await verifyPackagedGraphClient(graphClientPath);
   const packagedEntries = new Set(listPackageEntries(join(resourcesPath, "app.asar")).map(normalizeAsarEntry));
   for (const entry of [
@@ -91,6 +96,53 @@ export async function verifyBundledAppServer(
     await verifyGraphServer(graphBinaryPath, { execute });
   }
   return { binaryPath, architecture: architectures };
+}
+
+export async function verifyPackagedLadybugNotices(
+  resourcesPath,
+  {
+    inventoryPath = resolve(import.meta.dirname, "../../vendor/ladybug/native-inventory.json"),
+    readBundledFile = (path) => readFile(path),
+    digest = sha256,
+  } = {},
+) {
+  const inventory = JSON.parse(await readFile(inventoryPath, "utf8"));
+  const notices = Object.entries(inventory.noticeSha256 ?? {});
+  if (notices.length === 0) throw new Error("Vendored Ladybug notice inventory is empty.");
+  const expectedRelatives = new Set();
+  for (const [noticePath, expectedDigest] of notices) {
+    if (!noticePath.startsWith(`${LADYBUG_NOTICES_REPO_ROOT}/`)) {
+      throw new Error(`Ladybug notice path is outside the notices root: ${noticePath}`);
+    }
+    const relativePath = noticePath.slice(LADYBUG_NOTICES_REPO_ROOT.length + 1);
+    expectedRelatives.add(relativePath);
+    const bundledPath = join(resourcesPath, LADYBUG_NOTICES_BUNDLE_DIR, relativePath);
+    let bytes;
+    try {
+      bytes = await readBundledFile(bundledPath);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        throw new Error(`Bundled Relayer runtime is missing the Ladybug notice ${relativePath}.`);
+      }
+      throw error;
+    }
+    if (digest(bytes) !== expectedDigest) {
+      throw new Error(`Bundled Relayer Ladybug notice ${relativePath} differs from the vendored digest.`);
+    }
+  }
+  // An unlisted file in the bundle would ship without a digest or provenance,
+  // so the bundle must contain exactly the inventoried notices (ignoring only
+  // the two filenames electron-builder's copy drops).
+  const bundleRoot = join(resourcesPath, LADYBUG_NOTICES_BUNDLE_DIR);
+  const bundledFiles = await relativeFiles(bundleRoot, bundleRoot, [], {
+    strict: true,
+    skipCopyDropped: true,
+  });
+  const unexpected = bundledFiles.filter((path) => !expectedRelatives.has(path));
+  if (unexpected.length !== 0) {
+    throw new Error(`Bundled Relayer runtime ships unlisted Ladybug notices: ${unexpected.join(", ")}.`);
+  }
+  return { notices: notices.length };
 }
 
 export async function verifyPackagedMacOSGraphServer(
@@ -420,7 +472,14 @@ export async function normalizePackagedBundlePermissions(bundlePath) {
   return changed;
 }
 
-export default async function verifyElectronBuilderBundledAppServer(context) {
+export default async function verifyElectronBuilderBundledAppServer(
+  context,
+  {
+    includePrimeAgent = true,
+    verifyBundled = verifyBundledAppServer,
+    writeSigningClosure = writePrimeAgentSigningClosureSnapshot,
+  } = {},
+) {
   const productFilename = String(context?.packager?.appInfo?.productFilename || "").trim();
   const appOutDir = String(context?.appOutDir || "").trim();
   if (!productFilename || !appOutDir) {
@@ -429,10 +488,19 @@ export default async function verifyElectronBuilderBundledAppServer(context) {
   const target = desktopTargetFromEnvironment(process.env);
   const expectedArchitecture = target.architecture === "x64" ? "x86_64" : target.architecture;
   const appPath = target.platform === "darwin" ? join(appOutDir, `${productFilename}.app`) : appOutDir;
-  const result = await verifyBundledAppServer(appPath, { platform: target.platform, expectedArchitecture });
+  const result = await verifyBundled(appPath, {
+    platform: target.platform,
+    expectedArchitecture,
+    // The Eval package bundles the compiled Ladybug graph server but not the
+    // Prime Agent runtime, so its build scopes Prime Agent verification out
+    // instead of narrowing the rest of the bundle check.
+    ...(includePrimeAgent ? {} : { verifyPrimeAgent: async () => ({ sourceCommit: null, packages: 0 }) }),
+  });
   if (target.platform === "darwin") {
     const resourcesPath = join(appPath, "Contents", "Resources");
-    await writePrimeAgentSigningClosureSnapshot(resourcesPath, `${target.platform}-${target.architecture}`);
+    if (includePrimeAgent) {
+      await writeSigningClosure(resourcesPath, `${target.platform}-${target.architecture}`);
+    }
     // Last, so every file this hook wrote is covered, and before
     // electron-builder signs: the signature is then taken over the bundle users
     // actually receive. Windows governs access through ACLs rather than POSIX

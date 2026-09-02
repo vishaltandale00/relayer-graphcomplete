@@ -101,8 +101,8 @@ export function validateLadybugSourceManifest(manifest) {
     const url = new URL(source.url);
     if (url.protocol !== "https:") throw new Error(`source URL must use HTTPS: ${source.url}`);
   }
-  if (manifest.licenseReceipt.completeForDistribution !== false) {
-    throw new Error("source preparation must not claim the incomplete license receipt is shippable");
+  if (manifest.licenseReceipt.completeForDistribution !== true) {
+    throw new Error("source preparation requires a release-ready license receipt");
   }
   return manifest;
 }
@@ -262,7 +262,7 @@ export async function stageLadybugSources({ cacheDirectory, outputDirectory, man
     openssl: { version: manifest.openssl.version, sha256: manifest.openssl.sha256 },
     extensions: [],
     nativeMode: manifest.build.nativeMode,
-    distributionLicenseReceiptComplete: false,
+    distributionLicenseReceiptComplete: manifest.licenseReceipt.completeForDistribution,
   };
   await writeFile(resolve(outputDirectory, "source-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
   return { bindingDirectory, opensslDirectory, receipt };
@@ -308,11 +308,36 @@ async function run(command, args, options) {
   await execFileAsync(command, args, { ...options, maxBuffer: 16 * 1024 * 1024 });
 }
 
-async function relativeFiles(root, directory = root, output = []) {
+// electron-builder's `extraResources` copy (builder-util `copyDir`) drops exactly
+// these two filenames. Every other file — `Thumbs.db`, `desktop.ini`, AppleDouble
+// `._*` — is copied into the bundle, so the notice gates must fail closed on
+// those rather than skip them.
+const COPY_DROPPED_FILENAMES = new Set([".DS_Store", ".gitkeep"]);
+
+export function isCopyDroppedFilename(name) {
+  return COPY_DROPPED_FILENAMES.has(name);
+}
+
+// Lists files under `root` as forward-slash paths relative to `root`. `strict`
+// throws on a non-file, non-directory entry (a symlink), so a gate can never
+// silently agree with the other side about a tree that differs; the OpenSSL
+// shared-library scan keeps the lenient default.
+export async function relativeFiles(
+  root,
+  directory = root,
+  output = [],
+  { strict = false, skipCopyDropped = false } = {},
+) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) await relativeFiles(root, path, output);
-    else if (entry.isFile()) output.push(relative(root, path).replaceAll("\\", "/"));
+    if (entry.isDirectory()) {
+      await relativeFiles(root, path, output, { strict, skipCopyDropped });
+    } else if (entry.isFile()) {
+      if (skipCopyDropped && isCopyDroppedFilename(entry.name)) continue;
+      output.push(relative(root, path).replaceAll("\\", "/"));
+    } else if (strict) {
+      throw new Error(`unsupported entry: ${relative(root, path).replaceAll("\\", "/")}`);
+    }
   }
   return output;
 }

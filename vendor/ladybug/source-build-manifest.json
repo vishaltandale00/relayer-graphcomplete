@@ -91,8 +91,8 @@
     "bindingArchiveContainsLicenseFile": false,
     "coreRepositoryDeclares": "MIT",
     "opensslSourceContainsLicenseFile": true,
-    "completeForDistribution": false,
+    "completeForDistribution": true,
     "nativeInventory": "vendor/ladybug/native-inventory.json",
-    "remainingObligation": "Obtain a reviewed upstream license file for the lbug binding before packaging."
+    "remainingObligation": null
   }
 }

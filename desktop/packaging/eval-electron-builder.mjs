@@ -1,5 +1,7 @@
 import { resolve } from "node:path";
 import { desktopTargetFromEnvironment } from "../shared/target.mjs";
+import { ladybugNoticesExtraResource } from "./ladybug-notices.mjs";
+import verifyElectronBuilderBundledAppServer from "./verify-bundled-app-server.mjs";
 
 const desktopRoot = resolve(import.meta.dirname, "..");
 const repositoryRoot = resolve(desktopRoot, "..");
@@ -46,11 +48,15 @@ export default {
     { from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] },
     { from: resolve(repositoryRoot, "permissions/desktop.json"), to: "permissions/desktop.json" },
     { from: resolve(repositoryRoot, "packages/graph-client/dist"), to: "graph-client" },
+    ladybugNoticesExtraResource(repositoryRoot),
     { from: resolve(desktopRoot, "renderer"), to: "renderer" },
     { from: resolve(desktopRoot, "eval-renderer"), to: "eval-renderer" },
   ],
   artifactName: "Relayer-Eval-\${version}-\${os}-\${arch}.\${ext}",
-  afterPack: target.platform === "darwin" ? "desktop/packaging/verify-bundled-app-server.mjs" : undefined,
+  // The Eval package ships the compiled Ladybug graph server but not the Prime
+  // Agent runtime, so the shared bundle check runs with Prime Agent scoped out
+  // instead of a narrower notices-only hook.
+  afterPack: (context) => verifyElectronBuilderBundledAppServer(context, { includePrimeAgent: false }),
   mac: {
     category: "public.app-category.developer-tools",
     icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg"),
