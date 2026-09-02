@@ -33,14 +33,16 @@ const settings = {
   }],
 };
 
+const unsentSelection = {
+  harnessId: "coding-default",
+  familyId: 12,
+  providerId: "anthropic-work",
+  modelId: "claude-sonnet-4",
+};
+
 describe("composer provider lifecycle", () => {
-  it("reselects only within the current family while a turn is unsent", () => {
-    expect(resolveUnsentModelIntent(settings, {
-      harnessId: "coding-default",
-      familyId: 12,
-      providerId: "anthropic-work",
-      modelId: "claude-sonnet-4",
-    })).toEqual({
+  it("reselects unsent model intents inside the current family under rules and blocks instead of jumping families", () => {
+    expect(resolveUnsentModelIntent(settings, unsentSelection), "reselect stays inside the current family").toEqual({
       selection: {
         harnessId: "coding-default",
         familyId: 12,
@@ -49,9 +51,26 @@ describe("composer provider lifecycle", () => {
       },
       blockedFamilyId: null,
     });
-  });
 
-  it("blocks instead of jumping families when the selected family has no resolvable member", () => {
+    const ruled = structuredClone(settings);
+    ruled.providers[0].adapterId = "anthropic-api";
+    ruled.providers[0].models[0].available = true;
+    ruled.providers[1].adapterId = "openai-api";
+    ruled.providers[1].connected = true;
+    ruled.providers[2].adapterId = "openai-api";
+    ruled.harnesses[0] = {
+      id: "coding-default",
+      modelRules: {
+        allow: [
+          { adapterId: "anthropic-api", modelIdRegex: "^claude-" },
+          { adapterId: "openai-api", modelIdExact: "gpt-5.2" },
+        ],
+        deny: [{ adapterId: "anthropic-api", modelIdRegex: "-sonnet-" }],
+      },
+    };
+    expect(resolveUnsentModelIntent(ruled, unsentSelection).selection, "adapter exact/regex allow rules with deny precedence")
+      .toMatchObject({ providerId: "openai-work", modelId: "gpt-5.2" });
+
     const unavailable = structuredClone(settings);
     unavailable.providers[2].connected = false;
     unavailable.families.push({
@@ -59,15 +78,11 @@ describe("composer provider lifecycle", () => {
       enabled: true,
       members: [{ providerId: "openai-personal", modelId: "gpt-5.2", position: 0 }],
     });
-    expect(resolveUnsentModelIntent(unavailable, {
-      harnessId: "coding-default",
-      familyId: 12,
-      providerId: "anthropic-work",
-      modelId: "claude-sonnet-4",
-    })).toEqual({ selection: null, blockedFamilyId: 12 });
+    expect(resolveUnsentModelIntent(unavailable, unsentSelection), "no resolvable member blocks instead of jumping families")
+      .toEqual({ selection: null, blockedFamilyId: 12 });
   });
 
-  it("restores model-related failures as the same unsent draft", () => {
+  it("restores model-failed interactions as unsent retry drafts and re-admits them instead of duplicating", () => {
     expect(restoredDraftForInteraction({
       completionStatus: "not_started",
       text: "Review this repository",
@@ -79,18 +94,18 @@ describe("composer provider lifecycle", () => {
         failureCategory: "rate_limit",
         failureMessage: "OpenAI Work is rate limited.",
       },
-    })).toEqual({
+    }), "model failure restores the same unsent draft").toEqual({
       text: "Review this repository",
       modelSelection: { familyId: 12, providerId: "openai-work", modelId: "gpt-5.2" },
       failureCategory: "rate_limit",
       retryAttemptId: 44,
       message: "OpenAI Work is rate limited.",
     });
-  });
 
-  it("restores model failures after partial effects under the accepted duplicate-risk contract", () => {
-    for (const effectBoundary of ["partial_output", "graph_write", "tool_effect", "unknown"]) {
-      expect(restoredDraftForInteraction({
+    const partialEffectBoundaries = ["partial_output", "graph_write", "tool_effect", "unknown"];
+    expect(partialEffectBoundaries, "partial-effect inventory").toHaveLength(4);
+    for (const effectBoundary of partialEffectBoundaries) {
+      expect.soft(restoredDraftForInteraction({
         completionStatus: "not_started",
         text: "Review this repository",
         modelSelection: { familyId: 12, providerId: "openai-work", modelId: "gpt-5.2" },
@@ -100,15 +115,13 @@ describe("composer provider lifecycle", () => {
           effectBoundary,
           failureCategory: "provider_timeout",
         },
-      })).toMatchObject({
+      }), `duplicate-risk contract after ${effectBoundary}`).toMatchObject({
         text: "Review this repository",
         retryAttemptId: 44,
         failureCategory: "provider_timeout",
       });
     }
-  });
 
-  it("uses the durable model-failed outcome when admission has only a generic execution category", () => {
     expect(restoredDraftForInteraction({
       completionStatus: "not_started",
       text: "Review this repository",
@@ -118,14 +131,22 @@ describe("composer provider lifecycle", () => {
         effectBoundary: "none",
         failureCategory: "execution",
       },
-    })).toMatchObject({
+    }), "generic execution category keeps the durable model-failed outcome").toMatchObject({
       text: "Review this repository",
       retryAttemptId: 45,
       failureCategory: "execution",
     });
-  });
 
-  it("restores confirmations again when the same interaction fails on a later retry attempt", () => {
+    const nonRestorableCategories = ["harness_logic", "graph_validation", "tool_failure", "permission_denied", "application_bug"];
+    expect(nonRestorableCategories, "non-restorable category inventory").toHaveLength(5);
+    for (const failureCategory of nonRestorableCategories) {
+      expect.soft(restoredDraftForInteraction({
+        completionStatus: "failed",
+        text: "Do not restore",
+        latestAttempt: { failureCategory },
+      }), `${failureCategory} is not restored`).toBeNull();
+    }
+
     const interaction = {
       id: 91,
       completionStatus: "not_started",
@@ -136,23 +157,12 @@ describe("composer provider lifecycle", () => {
         failureCategory: "rate_limit",
       },
     };
-
-    expect(confirmationRestorationKey(7, interaction)).toBe("7:91:44");
+    expect(confirmationRestorationKey(7, interaction), "confirmation restoration key tracks the attempt")
+      .toBe("7:91:44");
     interaction.latestAttempt.id = 45;
-    expect(confirmationRestorationKey(7, interaction)).toBe("7:91:45");
-  });
+    expect(confirmationRestorationKey(7, interaction), "later retry attempt restores confirmations again")
+      .toBe("7:91:45");
 
-  it("does not restore harness, graph, tool, permission, or app failures", () => {
-    for (const failureCategory of ["harness_logic", "graph_validation", "tool_failure", "permission_denied", "application_bug"]) {
-      expect(restoredDraftForInteraction({
-        completionStatus: "failed",
-        text: "Do not restore",
-        latestAttempt: { failureCategory },
-      })).toBeNull();
-    }
-  });
-
-  it("re-admits the serialized unsent turn instead of creating a duplicate interaction", () => {
     const latestInteraction = {
       id: 91,
       completionStatus: "not_started",
@@ -173,7 +183,7 @@ describe("composer provider lifecycle", () => {
       { familyId: 12, providerId: "openai-personal", modelId: "gpt-5.2" },
       "retry-input-2",
       [{ target: { nodeId: 8, sourceInteractionNodeId: 3, sourceLayerId: 4 }, annotations: ["new context"] }],
-    )).toEqual({
+    ), "unsent turn re-admits through the retry route").toEqual({
       path: "/api/threads/7/interactions/91/retry",
       body: {
         attemptId: 44,
@@ -184,9 +194,7 @@ describe("composer provider lifecycle", () => {
         modelSelection: { familyId: 12, providerId: "openai-personal", modelId: "gpt-5.2" },
       },
     });
-  });
 
-  it("carries the inspected input draft revision through create and retry requests", () => {
     const selection = { familyId: 12, providerId: "openai-work", modelId: "gpt-5.2" };
     expect(interactionSubmissionTarget(
       7,
@@ -197,7 +205,7 @@ describe("composer provider lifecycle", () => {
       [],
       [],
       9,
-    ).body).toMatchObject({ inputDraftRevision: 9 });
+    ).body, "create request carries the inspected input draft revision").toMatchObject({ inputDraftRevision: 9 });
     expect(interactionSubmissionTarget(
       7,
       {
@@ -211,31 +219,6 @@ describe("composer provider lifecycle", () => {
       [],
       [],
       9,
-    ).body).toMatchObject({ inputId: "input-1", inputDraftRevision: 9 });
-  });
-
-  it("applies adapter exact/regex allow rules with deny precedence", () => {
-    const ruled = structuredClone(settings);
-    ruled.providers[0].adapterId = "anthropic-api";
-    ruled.providers[0].models[0].available = true;
-    ruled.providers[1].adapterId = "openai-api";
-    ruled.providers[1].connected = true;
-    ruled.providers[2].adapterId = "openai-api";
-    ruled.harnesses[0] = {
-      id: "coding-default",
-      modelRules: {
-        allow: [
-          { adapterId: "anthropic-api", modelIdRegex: "^claude-" },
-          { adapterId: "openai-api", modelIdExact: "gpt-5.2" },
-        ],
-        deny: [{ adapterId: "anthropic-api", modelIdRegex: "-sonnet-" }],
-      },
-    };
-    expect(resolveUnsentModelIntent(ruled, {
-      harnessId: "coding-default",
-      familyId: 12,
-      providerId: "anthropic-work",
-      modelId: "claude-sonnet-4",
-    }).selection).toMatchObject({ providerId: "openai-work", modelId: "gpt-5.2" });
+    ).body, "retry request carries the inspected input draft revision").toMatchObject({ inputId: "input-1", inputDraftRevision: 9 });
   });
 });

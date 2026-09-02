@@ -30,82 +30,62 @@ function settle({
 }
 
 describe("composer submission settlement", () => {
-  it("clears submitted contexts without clearing the next scope prompt after refresh advances", () => {
-    const result = settle({
-      current: submittedDraft({
+  it("clears only the submitted fields while a succeeded send meets newer concurrent edits", () => {
+    const newerContexts = [{ target: { nodeId: 4 }, annotations: ["new note"] }];
+    const cases = [
+      ["scope advanced after refresh", submittedDraft({
         scopeKey: "10:101",
         prompt: field("", "prompt:next-scope"),
-      }),
-    });
-
-    expect(result.current).toMatchObject({
-      threadId: 10,
-      scopeKey: "10:101",
-      prompt: { value: "", revision: "prompt:next-scope" },
-    });
-    expect(result.current.contexts.value).toEqual([]);
-    expect(result.submittedScopeKey).toBe("10:100");
+      }), (result, label) => {
+        expect.soft(result.current, `${label}: next-scope draft untouched`).toMatchObject({
+          threadId: 10,
+          scopeKey: "10:101",
+          prompt: { value: "", revision: "prompt:next-scope" },
+        });
+        expect.soft(result.current.contexts.value, `${label}: submitted contexts cleared`).toEqual([]);
+      }],
+      ["newer prompt revision", submittedDraft({ prompt: field("send B", "prompt:2") }), (result, label) => {
+        expect.soft(result.current.prompt, `${label}: newer prompt preserved`).toEqual(field("send B", "prompt:2"));
+        expect.soft(result.current.contexts.value, `${label}: submitted contexts cleared`).toEqual([]);
+      }],
+      ["newer contexts revision", submittedDraft({ contexts: field(newerContexts, "contexts:2") }), (result, label) => {
+        expect.soft(result.current.prompt.value, `${label}: submitted prompt cleared`).toBe("");
+        expect.soft(result.current.contexts, `${label}: newer contexts preserved`).toEqual(field(newerContexts, "contexts:2"));
+      }],
+      ["same prompt value with a newer revision", submittedDraft({ prompt: field("send A", "prompt:2") }), (result, label) => {
+        expect.soft(result.current.prompt, `${label}: same-value retype preserved`).toEqual(field("send A", "prompt:2"));
+        expect.soft(result.current.contexts.value, `${label}: submitted contexts cleared`).toEqual([]);
+      }],
+    ];
+    expect(cases, "concurrent-edit settlement inventory").toHaveLength(4);
+    for (const [label, current, assertRow] of cases) {
+      const result = settle({ current });
+      assertRow(result, label);
+      expect.soft(result.submittedScopeKey, `${label}: submitted scope key`).toBe("10:100");
+    }
   });
 
-  it("preserves the exact prompt, contexts, and cache after failure", () => {
-    const current = submittedDraft();
-    const result = settle({ outcome: "failed", current });
+  it("preserves the draft unchanged on failure, thread switches, and repeated settlement", () => {
+    const failedCurrent = submittedDraft();
+    const failed = settle({ outcome: "failed", current: failedCurrent });
+    expect(failed.current, "failure keeps the exact current draft").toBe(failedCurrent);
+    expect(failed.current.prompt.value, "failure keeps the prompt text").toBe("send A");
+    expect(failed.current.contexts.value, "failure keeps the same contexts array").toBe(failedCurrent.contexts.value);
+    expect(failed.submittedScopeKey, "failure records no submitted scope").toBeNull();
 
-    expect(result.current).toBe(current);
-    expect(result.current.prompt.value).toBe("send A");
-    expect(result.current.contexts.value).toBe(current.contexts.value);
-    expect(result.submittedScopeKey).toBeNull();
-  });
-
-  it("preserves a newer prompt while clearing only the submitted contexts", () => {
-    const result = settle({
-      current: submittedDraft({ prompt: field("send B", "prompt:2") }),
-    });
-
-    expect(result.current.prompt).toEqual(field("send B", "prompt:2"));
-    expect(result.current.contexts.value).toEqual([]);
-  });
-
-  it("preserves newer contexts while clearing only the submitted prompt", () => {
-    const newerContexts = [{ target: { nodeId: 4 }, annotations: ["new note"] }];
-    const result = settle({
-      current: submittedDraft({ contexts: field(newerContexts, "contexts:2") }),
-    });
-
-    expect(result.current.prompt.value).toBe("");
-    expect(result.current.contexts).toEqual(field(newerContexts, "contexts:2"));
-  });
-
-  it("preserves a same-value retype when its prompt revision is newer", () => {
-    const result = settle({
-      current: submittedDraft({ prompt: field("send A", "prompt:2") }),
-    });
-
-    expect(result.current.prompt).toEqual(field("send A", "prompt:2"));
-    expect(result.current.contexts.value).toEqual([]);
-  });
-
-  it("does not touch work in the switched-to thread", () => {
     const otherContexts = [{ target: { nodeId: 9 }, annotations: ["other"] }];
-    const current = submittedDraft({
+    const switchedCurrent = submittedDraft({
       threadId: 11,
       scopeKey: "11:200",
       prompt: field("thread B", "prompt:b1"),
       contexts: field(otherContexts, "contexts:b1"),
     });
-    const result = settle({ current });
+    const switched = settle({ current: switchedCurrent });
+    expect(switched.current, "switched-to thread draft untouched").toBe(switchedCurrent);
+    expect(switched.submittedScopeKey, "switched settlement still reports the submitted scope").toBe("10:100");
 
-    expect(result.current).toBe(current);
-    expect(result.submittedScopeKey).toBe("10:100");
-  });
-
-  it("settles field revisions idempotently", () => {
     const first = settle();
-
-    const second = settle({
-      submission: capture(),
-      current: first.current,
-    });
-    expect(second.current).toBe(first.current);
+    const second = settle({ submission: capture(), current: first.current });
+    expect(second.current, "settlement is idempotent once fields are settled").toBe(first.current);
   });
 });

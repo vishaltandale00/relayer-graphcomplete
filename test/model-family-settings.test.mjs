@@ -39,9 +39,15 @@ const codexProvider = {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("model family settings model", () => {
-  it("reconciles a persisted create before a follow-up refresh", () => {
+describe("model family settings", () => {
+  it("drafts, validates, orders, and preserves model families across catalog refreshes", () => {
     const draft = createModelFamilyDraft([codexProvider], 7);
+    expect(draft, "custom draft starts with the first connected model").toMatchObject({ id: "draft-7", kind: "custom", enabled: true, draft: true });
+    expect(draft.models, "draft seed model").toEqual([expect.objectContaining({
+      providerId: "codex",
+      modelId: "gpt-5.6-sol",
+    })]);
+
     draft.name = "Coding";
     const saved = reconcileSavedFamily(draft, {
       id: 42,
@@ -50,7 +56,7 @@ describe("model family settings model", () => {
       enabled: true,
       position: 3,
     });
-    expect(saved).toMatchObject({
+    expect(saved, "persisted create reconciles before a follow-up refresh").toMatchObject({
       id: 42,
       name: "Coding",
       kind: "custom",
@@ -59,96 +65,78 @@ describe("model family settings model", () => {
       draft: false,
       editing: false,
     });
-    expect(saved.models).toEqual(draft.models);
-  });
+    expect(saved.models, "reconciled family keeps draft members").toEqual(draft.models);
 
-  it("serializes visibility updates across all families", () => {
-    const gate = createFamilyVisibilityGate();
-    expect(gate.begin(7)).toBe(true);
-    expect(gate.begin(8)).toBe(false);
-    expect(gate.isPending(8)).toBe(true);
-    gate.end(7);
-    expect(gate.begin(8)).toBe(true);
-  });
-
-  it("starts a custom family with the first available model from a connected provider", () => {
-    const draft = createModelFamilyDraft([codexProvider], 7);
-    expect(draft).toMatchObject({ id: "draft-7", kind: "custom", enabled: true, draft: true });
-    expect(draft.models).toEqual([expect.objectContaining({
-      providerId: "codex",
-      modelId: "gpt-5.6-sol",
-    })]);
-  });
-
-  it("starts a new family from the saved default provider without constraining later membership", () => {
     const other = {
       id: "other",
       label: "Other",
       connected: true,
       models: [{ id: "other-first", label: "Other first", available: true }],
     };
-    const draft = createModelFamilyDraft([other, codexProvider], 8, "codex");
-    expect(draft.models[0]).toMatchObject({ providerId: "codex", modelId: "gpt-5.6-sol" });
-  });
+    const defaultProviderDraft = createModelFamilyDraft([other, codexProvider], 8, "codex");
+    expect(defaultProviderDraft.models[0], "new family seeds from the saved default provider")
+      .toMatchObject({ providerId: "codex", modelId: "gpt-5.6-sol" });
 
-  it("rejects empty, duplicate, zero-member, duplicate-member, and oversized custom families", () => {
-    expect(validateCustomFamily({ id: "new", name: " ", models: [] }, []))
-      .toEqual({ name: "Enter a family name.", models: "Add at least one model." });
+    const gate = createFamilyVisibilityGate();
+    expect(gate.begin(7), "visibility gate opens for the first family").toBe(true);
+    expect(gate.begin(8), "visibility gate serializes concurrent families").toBe(false);
+    expect(gate.isPending(8), "blocked family stays pending").toBe(true);
+    gate.end(7);
+    expect(gate.begin(8), "pending family proceeds after the prior update").toBe(true);
 
-    const member = { providerId: "codex", modelId: "gpt-5.6-sol" };
-    expect(validateCustomFamily(
-      { id: "new", name: "Coding", models: [member, member] },
-      [{ id: "existing", name: "coding", models: [member] }],
-    )).toEqual({
-      name: "A family with this name already exists.",
-      models: "Each provider model can appear only once.",
-    });
+    const sharedMember = { providerId: "codex", modelId: "gpt-5.6-sol" };
+    const validationCases = [
+      ["empty name and zero members", { id: "new", name: " ", models: [] }, [], {
+        name: "Enter a family name.",
+        models: "Add at least one model.",
+      }],
+      ["duplicate name and duplicate member", { id: "new", name: "Coding", models: [sharedMember, sharedMember] }, [
+        { id: "existing", name: "coding", models: [sharedMember] },
+      ], {
+        name: "A family with this name already exists.",
+        models: "Each provider model can appear only once.",
+      }],
+      ["oversized family", {
+        id: "new",
+        name: "Large",
+        models: Array.from({ length: MAX_MODELS_PER_FAMILY + 1 }, (_, index) => ({
+          providerId: "codex",
+          modelId: `model-${index}`,
+        })),
+      }, [], { models: "Remove 1 model." }],
+      ["same model id from different providers is valid", {
+        id: "cross-provider",
+        name: "Coding",
+        models: [
+          { providerId: "codex", modelId: "shared-name" },
+          { providerId: "future-provider", modelId: "shared-name" },
+        ],
+      }, [], {}],
+    ];
+    expect(validationCases, "custom family validation inventory").toHaveLength(4);
+    for (const [label, family, otherFamilies, expected] of validationCases) {
+      expect.soft(validateCustomFamily(family, otherFamilies), label).toEqual(expected);
+    }
 
-    expect(validateCustomFamily({
-      id: "new",
-      name: "Large",
-      models: Array.from({ length: MAX_MODELS_PER_FAMILY + 1 }, (_, index) => ({
-        providerId: "codex",
-        modelId: `model-${index}`,
-      })),
-    })).toEqual({ models: "Remove 1 model." });
-  });
-
-  it("preserves explicit order and copies system membership into an editable custom draft", () => {
-    expect(moveItem(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
+    expect(moveItem(["a", "b", "c"], 2, 0), "explicit family order").toEqual(["c", "a", "b"]);
     const source = {
       name: "Codex",
       kind: "system",
       models: Array.from({ length: 6 }, (_, index) => ({ providerId: "codex", modelId: `m-${index}` })),
     };
     const copy = copySystemFamily(source, 9);
-    expect(copy).toMatchObject({ id: "draft-9", name: "Copy of Codex", kind: "custom", draft: true });
-    expect(copy.models).toHaveLength(MAX_MODELS_PER_FAMILY);
-  });
+    expect(copy, "system family copies into an editable custom draft").toMatchObject({ id: "draft-9", name: "Copy of Codex", kind: "custom", draft: true });
+    expect(copy.models, "copy is capped at the family model limit").toHaveLength(MAX_MODELS_PER_FAMILY);
 
-  it("treats the same model id from different providers as distinct family members", () => {
-    expect(validateCustomFamily({
-      id: "cross-provider",
-      name: "Coding",
-      models: [
-        { providerId: "codex", modelId: "shared-name" },
-        { providerId: "future-provider", modelId: "shared-name" },
-      ],
-    })).toEqual({});
-  });
-
-  it("marks disconnected-provider and hidden-model family members unavailable", () => {
     expect(modelMember(
       { id: "offline", label: "Offline", connected: false },
       { id: "model", label: "Model", visible: true, available: true },
-    )).toMatchObject({ available: false, unavailableReason: "This provider is not connected." });
+    ), "disconnected provider member").toMatchObject({ available: false, unavailableReason: "This provider is not connected." });
     expect(modelMember(
       { id: "codex", label: "Codex", connected: true },
       { id: "hidden", label: "Hidden", visible: false, available: true },
-    )).toMatchObject({ available: false, unavailableReason: "This model is hidden by the provider." });
-  });
+    ), "hidden model member").toMatchObject({ available: false, unavailableReason: "This model is hidden by the provider." });
 
-  it("preserves unsaved draft and edit state across provider catalog refreshes", () => {
     const serverFamilies = [{ id: 1, name: "Server", kind: "custom", position: 0, models: [] }];
     const edited = preserveFamilyEditAfterRefresh(serverFamilies, {
       id: 1,
@@ -158,18 +146,18 @@ describe("model family settings model", () => {
       editing: true,
       models: [{ providerId: "codex", modelId: "gpt-5.6-sol" }],
     });
-    expect(edited.families[0]).toMatchObject({ name: "Unsaved name", editing: true });
-    expect(edited.editSnapshot).toMatchObject({ name: "Server" });
+    expect(edited.families[0], "unsaved edit survives refresh").toMatchObject({ name: "Unsaved name", editing: true });
+    expect(edited.editSnapshot, "edit snapshot keeps the server name").toMatchObject({ name: "Server" });
 
-    const draft = preserveFamilyEditAfterRefresh(serverFamilies, {
+    const preservedDraft = preserveFamilyEditAfterRefresh(serverFamilies, {
       id: "draft-1",
       name: "Draft",
       kind: "custom",
       draft: true,
       models: [],
     });
-    expect(draft.selectedIndex).toBe(1);
-    expect(draft.families[1]).toMatchObject({ name: "Draft", draft: true });
+    expect(preservedDraft.selectedIndex, "draft stays selected").toBe(1);
+    expect(preservedDraft.families[1], "draft survives refresh").toMatchObject({ name: "Draft", draft: true });
 
     const offScreen = preserveFamilyEditAfterRefresh(serverFamilies, [
       {
@@ -188,15 +176,15 @@ describe("model family settings model", () => {
         models: [],
       },
     ]);
-    expect(offScreen.preservedIndexes).toEqual([0, 1]);
-    expect(offScreen.families).toEqual([
+    expect(offScreen.preservedIndexes, "off-screen edits and drafts preserved").toEqual([0, 1]);
+    expect(offScreen.families, "off-screen family state").toEqual([
       expect.objectContaining({ id: 1, name: "Edited off screen", editing: true }),
       expect.objectContaining({ id: "draft-2", name: "Draft off screen", draft: true }),
     ]);
   });
 
-  it("surfaces an unavailable saved harness instead of selecting another", () => {
-    const settings = {
+  it("offers only executable default harnesses and surfaces the saved one when blocked", () => {
+    const unavailableSaved = {
       defaults: { harnessId: "codex-basic" },
       harnesses: [
         { id: "codex-basic", available: false, unavailableReason: {
@@ -206,12 +194,12 @@ describe("model family settings model", () => {
         { id: "other", available: true },
       ],
     };
-    expect(defaultHarnessError(settings)).toBe("No available models for this harness.");
-    expect(settings.defaults.harnessId).toBe("codex-basic");
-  });
+    expect(defaultHarnessError(unavailableSaved), "unavailable saved harness surfaces its reason")
+      .toBe("No available models for this harness.");
+    expect(unavailableSaved.defaults.harnessId, "unavailable saved harness is not silently replaced")
+      .toBe("codex-basic");
 
-  it("offers only currently usable harnesses as new defaults", () => {
-    const settings = {
+    const usableNow = {
       defaults: { harnessId: "claude-basic" },
       harnesses: [
         { id: "codex-basic", usableNow: true },
@@ -224,15 +212,14 @@ describe("model family settings model", () => {
         },
       ],
     };
-    expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
-    expect(defaultHarnessError(settings)).toBe(
+    expect(usableDefaultHarnesses(usableNow), "only currently usable harnesses are offered")
+      .toEqual([usableNow.harnesses[0]]);
+    expect(defaultHarnessError(usableNow), "not-yet-usable saved harness surfaces its reason").toBe(
       "No currently connected provider and eligible model can use this harness.",
     );
-    expect(settings.defaults.harnessId).toBe("claude-basic");
-  });
+    expect(usableNow.defaults.harnessId, "not-yet-usable saved harness is not replaced").toBe("claude-basic");
 
-  it("keeps configuration-owned harnesses selectable without a provider/model route", () => {
-    const settings = {
+    const configurationOwned = {
       defaults: { harnessId: "codex-layered-navigation-luna" },
       harnesses: [
         {
@@ -244,13 +231,13 @@ describe("model family settings model", () => {
         },
       ],
     };
-    expect(usableDefaultHarnesses(settings)).toEqual(settings.harnesses);
-    expect(defaultHarnessIsSelectable(settings, settings.defaults.harnessId)).toBe(true);
-    expect(defaultHarnessError(settings)).toBeNull();
-  });
+    expect(usableDefaultHarnesses(configurationOwned), "configuration-owned harness stays offered")
+      .toEqual(configurationOwned.harnesses);
+    expect(defaultHarnessIsSelectable(configurationOwned, configurationOwned.defaults.harnessId), "configuration-owned harness stays selectable")
+      .toBe(true);
+    expect(defaultHarnessError(configurationOwned), "configuration-owned harness has no error").toBeNull();
 
-  it("offers ordinary harness defaults only when the saved family can execute them", () => {
-    const settings = {
+    const familyGated = {
       defaults: { harnessId: "codex-basic", familyId: 11 },
       harnesses: [
         {
@@ -263,59 +250,59 @@ describe("model family settings model", () => {
         },
       ],
     };
-    expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
-    expect(defaultHarnessIsSelectable(settings, "claude-basic")).toBe(false);
+    expect(usableDefaultHarnesses(familyGated), "ordinary defaults require an executable saved family")
+      .toEqual([familyGated.harnesses[0]]);
+    expect(defaultHarnessIsSelectable(familyGated, "claude-basic"), "family-incompatible harness is not selectable")
+      .toBe(false);
   });
-});
 
-describe("model settings API boundary", () => {
-  it("uses the catalog and granular persistence routes", async () => {
+  it("persists model settings through granular routes and ships the family settings layout", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) }));
     vi.stubGlobal("fetch", fetchMock);
+    try {
+      await loadModelSettings();
+      await saveModelDefaults({ harnessId: "codex-basic", providerId: "codex" });
+      await validateModelSelection({ harnessId: "codex-basic", familyId: 1, providerId: "codex", modelId: "gpt-5" });
+      await createModelFamily({ name: "Coding", enabled: true, members: [] });
+      await updateModelFamily(12, { name: "Coding", enabled: false, members: [] });
+      await deleteModelFamily(12);
+      await saveModelFamilyOrder([12, 4]);
+      await loadProviderOnboardingProjection("anthropic work");
+      await completeProviderOnboarding({
+        providerId: "anthropic-work", harnessId: "claude-basic", expectedProjectionRevision: "revision-3",
+        family: { kind: "existing", familyId: 12 },
+      });
+      await loadProviderOnboardingStatus();
 
-    await loadModelSettings();
-    await saveModelDefaults({ harnessId: "codex-basic", providerId: "codex" });
-    await validateModelSelection({ harnessId: "codex-basic", familyId: 1, providerId: "codex", modelId: "gpt-5" });
-    await createModelFamily({ name: "Coding", enabled: true, members: [] });
-    await updateModelFamily(12, { name: "Coding", enabled: false, members: [] });
-    await deleteModelFamily(12);
-    await saveModelFamilyOrder([12, 4]);
-    await loadProviderOnboardingProjection("anthropic work");
-    await completeProviderOnboarding({
-      providerId: "anthropic-work", harnessId: "claude-basic", expectedProjectionRevision: "revision-3",
-      family: { kind: "existing", familyId: 12 },
-    });
-    await loadProviderOnboardingStatus();
+      expect(fetchMock.mock.calls.map(([path, options]) => [path, options?.method ?? "GET"]), "catalog and granular persistence routes")
+        .toEqual([
+          ["/api/model-settings", "GET"],
+          ["/api/model-settings/defaults", "PUT"],
+          ["/api/model-selection/validate", "POST"],
+          ["/api/model-families", "POST"],
+          ["/api/model-families/12", "PUT"],
+          ["/api/model-families/12", "DELETE"],
+          ["/api/model-families/order", "PUT"],
+          ["/api/provider-onboarding/projection?providerId=anthropic%20work", "GET"],
+          ["/api/provider-onboarding/complete", "POST"],
+          ["/api/provider-onboarding/status", "GET"],
+        ]);
+      expect(JSON.parse(fetchMock.mock.calls.at(-2)[1].body), "onboarding completion body").toEqual({
+        providerId: "anthropic-work", harnessId: "claude-basic", expectedProjectionRevision: "revision-3",
+        family: { kind: "existing", familyId: 12 },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
 
-    expect(fetchMock.mock.calls.map(([path, options]) => [path, options?.method ?? "GET"])).toEqual([
-      ["/api/model-settings", "GET"],
-      ["/api/model-settings/defaults", "PUT"],
-      ["/api/model-selection/validate", "POST"],
-      ["/api/model-families", "POST"],
-      ["/api/model-families/12", "PUT"],
-      ["/api/model-families/12", "DELETE"],
-      ["/api/model-families/order", "PUT"],
-      ["/api/provider-onboarding/projection?providerId=anthropic%20work", "GET"],
-      ["/api/provider-onboarding/complete", "POST"],
-      ["/api/provider-onboarding/status", "GET"],
-    ]);
-    expect(JSON.parse(fetchMock.mock.calls.at(-2)[1].body)).toEqual({
-      providerId: "anthropic-work", harnessId: "claude-basic", expectedProjectionRevision: "revision-3",
-      family: { kind: "existing", familyId: 12 },
-    });
-  });
-});
-
-describe("model family settings layout", () => {
-  it("ships one-family snap scrolling, a scrollable hover/focus list, and light/narrow styles", async () => {
     const [html, css] = await Promise.all([
       readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
     ]);
-    expect(html).toContain('data-settings-tab="providers"');
+    expect(html, "settings tabs").toContain('data-settings-tab="providers"');
     expect(html).toContain('data-settings-tab="models"');
     expect(html).toContain('data-settings-tab="harnesses"');
-    expect(html).toContain("Model families");
+    expect(html, "model family sections").toContain("Model families");
     expect(html).toContain("<h3>Defaults</h3>");
     expect(html).toContain("<b>Harness</b>");
     expect(html).toContain("<b>Provider</b>");
@@ -325,46 +312,47 @@ describe("model family settings layout", () => {
     const familyControlsIndex = html.indexOf('class="family-carousel-controls"');
     const newFamilyIndex = html.indexOf('id="newModelFamily"');
     const carouselIndex = html.indexOf('id="familyCarousel"');
-    expect(defaultsIndex).toBeLessThan(dividerIndex);
-    expect(dividerIndex).toBeLessThan(familyHeadingIndex);
-    expect(familyHeadingIndex).toBeLessThan(familyControlsIndex);
-    expect(familyControlsIndex).toBeLessThan(carouselIndex);
-    expect(newFamilyIndex).toBeLessThan(carouselIndex);
-    expect(html).toContain('id="familyCarousel"');
-    expect(html).toContain('id="familyJumpList" role="listbox"');
-    expect(css).toContain(".family-slide{flex:0 0 100%");
+    expect(defaultsIndex, "defaults precede the divider").toBeLessThan(dividerIndex);
+    expect(dividerIndex, "divider precedes the family heading").toBeLessThan(familyHeadingIndex);
+    expect(familyHeadingIndex, "family heading precedes controls").toBeLessThan(familyControlsIndex);
+    expect(familyControlsIndex, "controls precede the carousel").toBeLessThan(carouselIndex);
+    expect(newFamilyIndex, "new family button precedes the carousel").toBeLessThan(carouselIndex);
+    expect(html, "family carousel present").toContain('id="familyCarousel"');
+    expect(html, "family jump list present").toContain('id="familyJumpList" role="listbox"');
+    expect(css, "one-family snap scrolling").toContain(".family-slide{flex:0 0 100%");
     expect(css).toContain("scroll-snap-type:x mandatory");
-    expect(css).toContain(".current-family-control:hover .family-jump-list,.current-family-control:focus-within .family-jump-list");
-    expect(css).toContain("max-height:190px;overflow-y:auto");
-    expect(css).toContain('@media(max-width:760px)');
-    expect(css).toContain('html[data-theme="light"] .family-card');
-    expect(css).toContain(".model-settings-divider{height:1px");
-    expect(css).toContain(".model-families-heading{display:grid;grid-template-columns:1fr auto 1fr");
-    expect(css).toContain(".model-families-heading .family-carousel-controls{margin:0}");
-    expect(html).not.toContain("Families contain up to 5 models");
+    expect(css, "hover/focus jump list").toContain(".current-family-control:hover .family-jump-list,.current-family-control:focus-within .family-jump-list");
+    expect(css, "scrollable jump list").toContain("max-height:190px;overflow-y:auto");
+    expect(css, "narrow viewport styles").toContain('@media(max-width:760px)');
+    expect(css, "light theme styles").toContain('html[data-theme="light"] .family-card');
+    expect(css, "settings divider").toContain(".model-settings-divider{height:1px");
+    expect(css, "family heading grid").toContain(".model-families-heading{display:grid;grid-template-columns:1fr auto 1fr");
+    expect(css, "embedded carousel controls").toContain(".model-families-heading .family-carousel-controls{margin:0}");
+    expect(html, "retired copy removed").not.toContain("Families contain up to 5 models");
+
     const settingsSource = await readFile(new URL("../desktop/renderer/src/model-family-settings.js", import.meta.url), "utf8");
-    expect(settingsSource).toContain("owner?.connected === false || model.visible === false || model.available === false");
-    expect(settingsSource).toContain('data-family-delete="${index}"');
-    expect(settingsSource).toContain("await deleteModelFamily(family.id);");
-    expect(settingsSource).toContain("if (settings.families.some((family) => family.draft || family.editing)) return;");
-    expect(settingsSource).toContain("if (savingFamily) return;");
-    expect(settingsSource).toContain("reconcileSavedFamily(family, saved)");
-    expect(settingsSource).toContain("String(candidate.id) === String(familyId)");
-    expect(settingsSource).not.toContain("settings.families[selectedFamilyIndex] = reconcileSavedFamily");
-    expect(settingsSource).toContain("Saved, but could not refresh:");
-    expect(settingsSource).toContain("familyVisibilityGate.isPending()");
-    expect(settingsSource).toContain("const settingsRefreshGate = createLatestRequestGate();");
-    expect(settingsSource).toContain("if (!settingsRefreshGate.isCurrent(refreshToken)) return false;");
-    expect(settingsSource).toContain("const invalidDefault = defaultHarnessIsSelectable(");
-    expect(settingsSource).toContain('$("#defaultHarnessSelect").disabled = savingDefaults');
-    expect(settingsSource).toContain("await preparePermissionProfiles(candidate)");
-    expect(settingsSource).toContain("await saveModelDefaults({ [field]: candidate })");
-    expect(settingsSource).toContain("resetNewThreadModelPicker();");
-    expect(settingsSource).toContain("refreshNewThreadModelPicker();");
-    expect(settingsSource).toContain('$("#familyNameInput").value = current.name;');
-    expect(settingsSource).not.toContain('value="${escapeHtml(family.name)}"');
-    expect(settingsSource).toContain("if (savingOrder) return;");
-    expect(settingsSource).toContain('savingOrder || index === 0 ? "disabled"');
-    expect(settingsSource).toContain('savingOrder || index === settings.families.length - 1 ? "disabled"');
-  });
+    expect(settingsSource, "member availability gate").toContain("owner?.connected === false || model.visible === false || model.available === false");
+    expect(settingsSource, "family delete control").toContain('data-family-delete="${index}"');
+    expect(settingsSource, "delete route call").toContain("await deleteModelFamily(family.id);");
+    expect(settingsSource, "dirty-state refresh guard").toContain("if (settings.families.some((family) => family.draft || family.editing)) return;");
+    expect(settingsSource, "save-in-flight guard").toContain("if (savingFamily) return;");
+    expect(settingsSource, "saved family reconciliation").toContain("reconcileSavedFamily(family, saved)");
+    expect(settingsSource, "candidate id comparison").toContain("String(candidate.id) === String(familyId)");
+    expect(settingsSource, "no index-based reconciliation splice").not.toContain("settings.families[selectedFamilyIndex] = reconcileSavedFamily");
+    expect(settingsSource, "refresh failure surface").toContain("Saved, but could not refresh:");
+    expect(settingsSource, "visibility gate check").toContain("familyVisibilityGate.isPending()");
+    expect(settingsSource, "settings refresh gate").toContain("const settingsRefreshGate = createLatestRequestGate();");
+    expect(settingsSource, "stale refresh rejection").toContain("if (!settingsRefreshGate.isCurrent(refreshToken)) return false;");
+    expect(settingsSource, "invalid default detection").toContain("const invalidDefault = defaultHarnessIsSelectable(");
+    expect(settingsSource, "disabled default select while saving").toContain('$("#defaultHarnessSelect").disabled = savingDefaults');
+    expect(settingsSource, "permission profile preparation").toContain("await preparePermissionProfiles(candidate)");
+    expect(settingsSource, "granular default persistence").toContain("await saveModelDefaults({ [field]: candidate })");
+    expect(settingsSource, "picker reset on default change").toContain("resetNewThreadModelPicker();");
+    expect(settingsSource, "picker refresh on settings change").toContain("refreshNewThreadModelPicker();");
+    expect(settingsSource, "family name input binding").toContain('$("#familyNameInput").value = current.name;');
+    expect(settingsSource, "no attribute-injected family name").not.toContain('value="${escapeHtml(family.name)}"');
+    expect(settingsSource, "order save guard").toContain("if (savingOrder) return;");
+    expect(settingsSource, "first position disabled").toContain('savingOrder || index === 0 ? "disabled"');
+    expect(settingsSource, "last position disabled").toContain('savingOrder || index === settings.families.length - 1 ? "disabled"');
+  }, 10_000);
 });

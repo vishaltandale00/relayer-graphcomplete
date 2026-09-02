@@ -33,29 +33,14 @@ const settings = {
 };
 
 describe("composer model picker UI contract", () => {
-  it("places Model immediately before Submit in both composers", async () => {
-    const index = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
-    const newModel = index.indexOf('id="newModelControl"');
-    const newSubmit = index.indexOf('id="createThread"');
-    expect(newModel).toBeGreaterThan(index.indexOf('id="permissionButton"'));
-    expect(newModel).toBeLessThan(newSubmit);
-
-    const ongoing = productWorkspaceMarkup();
-    expect(ongoing.indexOf('data-model-picker="ongoing"')).toBeLessThan(
-      ongoing.indexOf('id="sendInteraction"'),
-    );
-  });
-
-  it("renders Model and Advanced tabs for new and ongoing pickers", () => {
+  it("renders picker markup and resolves keyboard, click, and dismissal intents", () => {
     for (const mode of ["new", "ongoing"]) {
       const markup = modelPickerMarkup({ mode });
-      expect(markup).toContain('data-model-picker-tab="model"');
-      expect(markup).toContain('data-model-picker-tab="advanced"');
-      expect(markup).toContain(`data-model-picker="${mode}"`);
+      expect(markup, `${mode} picker shows the Model tab`).toContain('data-model-picker-tab="model"');
+      expect(markup, `${mode} picker shows the Advanced tab`).toContain('data-model-picker-tab="advanced"');
+      expect(markup, `${mode} picker is tagged`).toContain(`data-model-picker="${mode}"`);
     }
-  });
 
-  it("presents another family for explicit choice when the prior family is invalid", () => {
     const catalog = {
       defaults: { harnessId: "codex-basic", familyId: 99 },
       harnesses: [{ id: "codex-basic", available: true, compatibleProviderIds: ["codex"] }],
@@ -73,102 +58,88 @@ describe("composer model picker UI contract", () => {
       }],
     };
     const presentation = modelPickerFamilyPresentation(catalog, "codex-basic", null);
-    expect(presentation.selectedFamily.id).toBe(7);
-    expect(presentation.requiresExplicitSelection).toBe(true);
+    expect(presentation.selectedFamily.id, "invalid prior family presents another family for choice").toBe(7);
+    expect(presentation.requiresExplicitSelection, "invalid prior family requires an explicit choice").toBe(true);
     const member = presentation.selectedFamily.availableMembers[0];
     expect(modelPickerMemberIsSelected(7, {
       familyId: 99,
       providerId: "codex",
       modelId: "gpt-5",
-    }, member)).toBe(false);
-  });
+    }, member), "member from an invalid family is not marked selected").toBe(false);
 
-  it("maps escape, tab arrows, and option arrows deterministically", () => {
     const tabTarget = { matches: (selector) => selector === '[role="tab"]' };
-    expect(modelPickerKeyIntent({ key: "Escape", target: {} }, "model")).toBe("close");
-    expect(modelPickerKeyIntent({ key: "ArrowRight", target: tabTarget }, "model")).toBe("advanced");
-    expect(modelPickerKeyIntent({ key: "ArrowLeft", target: tabTarget }, "model")).toBe("advanced");
-    expect(modelPickerKeyIntent({ key: "Home", target: tabTarget }, "advanced")).toBe("model");
-    expect(modelPickerKeyIntent({ key: "End", target: tabTarget }, "model")).toBe("advanced");
-    expect(modelPickerCycleIndex(0, 3, "ArrowUp")).toBe(2);
-    expect(modelPickerCycleIndex(2, 3, "ArrowDown")).toBe(0);
-    expect(modelPickerCycleIndex(0, 0, "ArrowDown")).toBeNull();
-  });
+    const keyIntentCases = [
+      ["escape closes", { key: "Escape", target: {} }, "model", "close"],
+      ["arrow right moves from model to advanced", { key: "ArrowRight", target: tabTarget }, "model", "advanced"],
+      ["arrow left moves from model to advanced", { key: "ArrowLeft", target: tabTarget }, "model", "advanced"],
+      ["home moves from advanced to model", { key: "Home", target: tabTarget }, "advanced", "model"],
+      ["end moves from model to advanced", { key: "End", target: tabTarget }, "model", "advanced"],
+    ];
+    expect(keyIntentCases, "key intent inventory").toHaveLength(5);
+    for (const [label, event, activeTab, expected] of keyIntentCases) {
+      expect.soft(modelPickerKeyIntent(event, activeTab), label).toBe(expected);
+    }
+    const cycleCases = [
+      ["arrow up wraps to the last option", 0, 3, "ArrowUp", 2],
+      ["arrow down wraps to the first option", 2, 3, "ArrowDown", 0],
+      ["empty list has no cycle target", 0, 0, "ArrowDown", null],
+    ];
+    expect(cycleCases, "cycle index inventory").toHaveLength(3);
+    for (const [label, current, count, key, expected] of cycleCases) {
+      expect.soft(modelPickerCycleIndex(current, count, key), label).toBe(expected);
+    }
 
-  it("distinguishes inside clicks from outside-click dismissal", () => {
     const inside = {};
     const outside = {};
     const root = { contains: (target) => target === inside };
-    expect(modelPickerClickIsOutside(root, inside)).toBe(false);
-    expect(modelPickerClickIsOutside(root, outside)).toBe(true);
-  });
+    expect(modelPickerClickIsOutside(root, inside), "inside click stays open").toBe(false);
+    expect(modelPickerClickIsOutside(root, outside), "outside click dismisses").toBe(true);
 
-  it("keeps an option click that re-renders the picker from dismissing it as an outside click", () => {
     const option = {};
-    const root = { contains: (target) => target === option };
-    const watcher = createModelPickerDismissWatcher(root);
+    const watchedRoot = { contains: (target) => target === option };
+    const watcher = createModelPickerDismissWatcher(watchedRoot);
     watcher.observe({ target: option });
     // Choosing a harness re-renders the Advanced panel, which detaches the clicked option
     // before the document-level dismissal listener sees the same click.
-    root.contains = () => false;
-    expect(watcher.shouldDismiss()).toBe(false);
+    watchedRoot.contains = () => false;
+    expect(watcher.shouldDismiss(), "detached option click is not an outside click").toBe(false);
     watcher.observe({ target: {} });
-    expect(watcher.shouldDismiss()).toBe(true);
-  });
+    expect(watcher.shouldDismiss(), "later outside click still dismisses").toBe(true);
 
-  it("decides picker dismissal in the capture phase, before any handler re-renders", async () => {
-    const source = await readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8");
-    expect(source).toContain('addEventListener("click", dismissWatcher.observe, true)');
-    expect(source.indexOf('addEventListener("click", dismissWatcher.observe, true)')).toBeLessThan(
-      source.indexOf('addEventListener("click", outsideClick)'),
-    );
-  });
-
-  it("escapes connector identities for HTML attribute context", () => {
-    expect(escapeHtmlAttribute('provider&model"quoted\'')).toBe(
+    expect(escapeHtmlAttribute('provider&model"quoted\''), "connector identities escape for attributes").toBe(
       "provider&amp;model&quot;quoted&#39;",
     );
-  });
 
-  it("ignores stale asynchronous Advanced harness validation results", () => {
     const gate = createModelPickerRequestGate();
     const first = gate.begin();
     const second = gate.begin();
-    expect(gate.isCurrent(first)).toBe(false);
-    expect(gate.isCurrent(second)).toBe(true);
+    expect(gate.isCurrent(first), "superseded validation is stale").toBe(false);
+    expect(gate.isCurrent(second), "latest validation is current").toBe(true);
     gate.invalidate();
-    expect(gate.isCurrent(second)).toBe(false);
+    expect(gate.isCurrent(second), "invalidation stales the latest validation").toBe(false);
   });
 
-  it("returns focus to the trigger when Escape closes the picker", async () => {
-    const source = await readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8");
-    expect(source).toContain('close({ returnFocus: true });');
-    expect(source).toContain("if (returnFocus) trigger.focus();");
-  });
-
-  it("uses canonical nested interaction identities with a migration fallback", () => {
+  it("sends canonical product identities and rotates draft send identities through failure", () => {
     expect(interactionModelSelection({
       modelSelection: { familyId: 7, providerId: "codex", modelId: "gpt-5" },
       modelFamilyId: 99,
-    })).toEqual({ familyId: 7, providerId: "codex", modelId: "gpt-5" });
+    }), "canonical nested identities win").toEqual({ familyId: 7, providerId: "codex", modelId: "gpt-5" });
     expect(interactionModelSelection({
       modelFamilyId: 7,
       modelProviderId: "codex",
       providerModelId: "gpt-5",
-    })).toEqual({ familyId: 7, providerId: "codex", modelId: "gpt-5" });
+    }), "flat identities migrate").toEqual({ familyId: 7, providerId: "codex", modelId: "gpt-5" });
     expect(modelSelectionLabels(settings, {
       familyId: 7,
       providerId: "codex",
       modelId: "gpt-5",
-    })).toMatchObject({ compact: "Codex latest · GPT-5", provider: "Codex" });
+    }), "labels for a known family").toMatchObject({ compact: "Codex latest · GPT-5", provider: "Codex" });
     expect(modelSelectionLabels(settings, {
       familyId: 404,
       providerId: "codex",
       modelId: "gpt-5",
-    })).toMatchObject({ compact: "Codex · GPT-5", family: null });
-  });
+    }), "labels fall back for an unknown family").toMatchObject({ compact: "Codex · GPT-5", family: null });
 
-  it("sends product identities and never exposes the pinned harness on follow-ups", () => {
     const pickerPayload = {
       harnessId: "codex-basic",
       modelSelection: { familyId: 7, providerId: "codex", modelId: "gpt-5" },
@@ -179,21 +150,22 @@ describe("composer model picker UI contract", () => {
       permissionProfileId: "ask",
       projectId: 12,
       pickerPayload,
-    })).toEqual({
+    }), "new thread sends product identities").toEqual({
       title: "A thread",
       initialMessage: "Hello",
       permissionProfileId: "ask",
       projectId: 12,
       ...pickerPayload,
     });
-    expect(followupRequestBody("Next", pickerPayload.modelSelection, "send-1")).toEqual({
+    expect(followupRequestBody("Next", pickerPayload.modelSelection, "send-1"), "follow-up carries the model selection").toEqual({
       text: "Next",
       inputId: "send-1",
       contexts: [],
       contextConfirmationIds: [],
       modelSelection: pickerPayload.modelSelection,
     });
-    expect(followupRequestBody("Next", pickerPayload.modelSelection, "send-2")).not.toHaveProperty("harnessId");
+    expect(followupRequestBody("Next", pickerPayload.modelSelection, "send-2"), "follow-up never exposes the pinned harness")
+      .not.toHaveProperty("harnessId");
     expect(followupRequestBody(
       "Next",
       pickerPayload.modelSelection,
@@ -201,29 +173,27 @@ describe("composer model picker UI contract", () => {
       [],
       [],
       7,
-    )).toMatchObject({ inputId: "send-3", inputDraftRevision: 7 });
-    expect(JSON.stringify(pickerPayload)).not.toContain("harnessConfigurationName");
-  });
+    ), "follow-up carries the draft revision").toMatchObject({ inputId: "send-3", inputDraftRevision: 7 });
+    expect(JSON.stringify(pickerPayload), "picker payload keeps no harness configuration").not.toContain("harnessConfigurationName");
 
-  it("reuses a draft send identity through failure and rotates on success or content change", () => {
     const selection = { familyId: 7, providerId: "codex", modelId: "gpt-5" };
-    const first = stableFollowupInputId(3, "Next", selection, []);
-    expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
+    const firstIdentity = stableFollowupInputId(3, "Next", selection, []);
+    expect(stableFollowupInputId(3, "Next", selection, []), "unchanged input keeps its identity").toBe(firstIdentity);
     const changed = stableFollowupInputId(3, "Changed", selection, []);
-    expect(changed).not.toBe(first);
+    expect(changed, "content change rotates the identity").not.toBe(firstIdentity);
     const otherThread = stableFollowupInputId(4, "Next", selection, []);
-    expect(otherThread).not.toBe(first);
-    expect(stableFollowupInputId(3, "Next", selection, [], ["confirmation-a"]))
-      .not.toBe(first);
-    expect(stableFollowupInputId(3, "Next", selection, [], [], 2)).not.toBe(first);
-    expect(stableFollowupInputId(3, "Next", selection, [], [], 2)).toBe(
+    expect(otherThread, "another thread has its own identity").not.toBe(firstIdentity);
+    expect(stableFollowupInputId(3, "Next", selection, [], ["confirmation-a"]), "confirmations rotate the identity")
+      .not.toBe(firstIdentity);
+    expect(stableFollowupInputId(3, "Next", selection, [], [], 2), "draft revisions rotate the identity").not.toBe(firstIdentity);
+    expect(stableFollowupInputId(3, "Next", selection, [], [], 2), "identical revisions stay stable").toBe(
       stableFollowupInputId(3, "Next", selection, [], [], 2),
     );
-    expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
+    expect(stableFollowupInputId(3, "Next", selection, []), "failure reuses the original identity").toBe(firstIdentity);
     markFollowupSendSucceeded(changed);
-    expect(stableFollowupInputId(3, "Changed", selection, [])).not.toBe(changed);
-    expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
-    expect(stableFollowupInputId(4, "Next", selection, [])).toBe(otherThread);
+    expect(stableFollowupInputId(3, "Changed", selection, []), "success rotates the identity").not.toBe(changed);
+    expect(stableFollowupInputId(3, "Next", selection, []), "success does not disturb other drafts").toBe(firstIdentity);
+    expect(stableFollowupInputId(4, "Next", selection, []), "success does not disturb other threads").toBe(otherThread);
 
     const contexts = [{
       target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
@@ -242,7 +212,7 @@ describe("composer model picker UI contract", () => {
       selection,
       contexts,
       ["confirmation-a"],
-    )).toBe(confirmationSend);
+    ), "confirmed sends stay stable through failure").toBe(confirmationSend);
     markFollowupSendSucceeded(confirmationSend);
     expect(stableFollowupInputId(
       3,
@@ -250,73 +220,83 @@ describe("composer model picker UI contract", () => {
       selection,
       contexts,
       ["confirmation-a"],
-    )).not.toBe(confirmationSend);
+    ), "confirmed sends rotate after success").not.toBe(confirmationSend);
   });
 
-  it("delegates the one trusted pre-inference refresh to the product backend", async () => {
-    const [threads, main] = await Promise.all([
-      readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8"),
-      readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8"),
-    ]);
-    expect(threads).not.toContain("desktop.models.refresh");
-    expect(threads).not.toContain("refreshModelCatalogBeforeSend");
-    expect(threads).toContain('await request("/api/threads", {');
-    expect(threads).toContain("/actions/${encodeURIComponent(action.id)}/invoke");
-    expect(threads).toContain("await refreshAfterModelSelectionRejection(error, true)");
-    expect(threads).toContain("await refreshAfterModelSelectionRejection(error);");
-    expect(threads).toContain("productApiAvailable && !newThreadModelSelectionReady()");
-    expect(threads).toContain("if (productApiAvailable && !pickerPayload)");
-    expect(main).toContain("if (productApiAvailable) await initializeModelFamilySettings();");
-    expect(main).toContain("if (productApiAvailable && !newThreadModelSelectionReady())");
-  });
-
-  it("server-validates Advanced harness candidates before committing them", async () => {
-    const [picker, composerPicker, permissions] = await Promise.all([
+  it("keeps renderer source contracts for placement, dismissal, refresh, validation, and styling", async () => {
+    const [indexHtml, picker, composerPicker, permissions, threads, main, graph, styles] = await Promise.all([
+      readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/composer-model-picker.js", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/permission-profiles.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
     ]);
-    expect(picker).toContain("await validateCandidateHarness(");
-    expect(picker.indexOf("await validateCandidateHarness(")).toBeLessThan(
-      picker.indexOf("commit(result.selection);"),
-    );
-    expect(picker.indexOf("validatingHarness = true;")).toBeLessThan(
-      picker.indexOf("await validateCandidateHarness("),
-    );
-    expect(picker).toContain("onSelectionChange(null);");
-    expect(picker.indexOf("await prepareHarnessChange(candidateHarnessId)")).toBeLessThan(
-      picker.indexOf("commit(result.selection);"),
-    );
-    expect(composerPicker).toContain("prepareHarnessChange: preparePermissionProfiles");
-    expect(permissions).toContain("/api/permission-profiles?harnessId=${encodeURIComponent(harnessId)}");
-  });
 
-  it("reloads renderer model state after provider account changes", async () => {
-    const main = await readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8");
-    expect(main).toContain("async function refreshProviderModelUi()");
-    expect(main).toContain("await refreshModelFamilySettings();");
-    expect(main).toContain("refreshNewThreadModelPicker();");
-    expect(main).toContain(`setProviderOnboardingCompletionHandler(async () => {
+    const newModel = indexHtml.indexOf('id="newModelControl"');
+    const newSubmit = indexHtml.indexOf('id="createThread"');
+    expect(newModel, "new-thread Model control sits after permissions").toBeGreaterThan(indexHtml.indexOf('id="permissionButton"'));
+    expect(newModel, "new-thread Model control sits immediately before Submit").toBeLessThan(newSubmit);
+    const ongoing = productWorkspaceMarkup();
+    expect(ongoing.indexOf('data-model-picker="ongoing"'), "ongoing Model picker sits before Submit")
+      .toBeLessThan(ongoing.indexOf('id="sendInteraction"'));
+
+    expect(picker, "dismissal watcher registers in the capture phase")
+      .toContain('addEventListener("click", dismissWatcher.observe, true)');
+    expect(picker.indexOf('addEventListener("click", dismissWatcher.observe, true)'), "capture registration precedes the outside-click handler")
+      .toBeLessThan(picker.indexOf('addEventListener("click", outsideClick'));
+    expect(picker, "Escape returns focus to the trigger").toContain('close({ returnFocus: true });');
+    expect(picker, "returned focus is applied").toContain("if (returnFocus) trigger.focus();");
+
+    expect(picker, "harness candidates validate before commit").toContain("await validateCandidateHarness(");
+    expect(picker.indexOf("await validateCandidateHarness("), "validation precedes commit")
+      .toBeLessThan(picker.indexOf("commit(result.selection);"));
+    expect(picker.indexOf("validatingHarness = true;"), "validating flag precedes validation")
+      .toBeLessThan(picker.indexOf("await validateCandidateHarness("));
+    expect(picker, "rejected candidates clear the selection").toContain("onSelectionChange(null);");
+    expect(picker.indexOf("await prepareHarnessChange(candidateHarnessId)"), "harness preparation precedes commit")
+      .toBeLessThan(picker.indexOf("commit(result.selection);"));
+    expect(composerPicker, "composer wires permission profiles as harness preparation")
+      .toContain("prepareHarnessChange: preparePermissionProfiles");
+    expect(permissions, "permission profiles load per harness")
+      .toContain("/api/permission-profiles?harnessId=${encodeURIComponent(harnessId)}");
+
+    expect(threads, "renderer threads never refresh the catalog directly").not.toContain("desktop.models.refresh");
+    expect(threads, "renderer threads never call the pre-send refresh hook").not.toContain("refreshModelCatalogBeforeSend");
+    expect(threads, "threads create through the product API").toContain('await request("/api/threads", {');
+    expect(threads, "thread actions invoke through the product API").toContain("/actions/${encodeURIComponent(action.id)}/invoke");
+    expect(threads, "rejection refreshes before retry").toContain("await refreshAfterModelSelectionRejection(error, true)");
+    expect(threads, "rejection refreshes after failure").toContain("await refreshAfterModelSelectionRejection(error);");
+    expect(threads, "catalog readiness gates new-thread selection").toContain("productApiAvailable && !newThreadModelSelectionReady()");
+    expect(threads, "picker payload gates thread creation").toContain("if (productApiAvailable && !pickerPayload)");
+    expect(main, "main initializes family settings through the product API")
+      .toContain("if (productApiAvailable) await initializeModelFamilySettings();");
+    expect(main, "main gates selection readiness through the product API")
+      .toContain("if (productApiAvailable && !newThreadModelSelectionReady())");
+
+    expect(main, "provider changes reload renderer model state").toContain("async function refreshProviderModelUi()");
+    expect(main, "provider changes refresh family settings").toContain("await refreshModelFamilySettings();");
+    expect(main, "provider changes refresh the new-thread picker").toContain("refreshNewThreadModelPicker();");
+    expect(main, "onboarding completion reloads model UI before permission profiles").toContain(`setProviderOnboardingCompletionHandler(async () => {
     await refreshProviderModelUi();
     await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
     resetNewThreadModelPicker();`);
-    expect(main).toContain("await preparePermissionProfiles(");
-    expect(main.indexOf("await preparePermissionProfiles(")).toBeLessThan(
+    expect(main, "permission profiles prepare before picker reset").toContain("await preparePermissionProfiles(");
+    expect(main.indexOf("await preparePermissionProfiles("), "preparation precedes picker reset").toBeLessThan(
       main.indexOf("resetNewThreadModelPicker();"),
     );
-  });
 
-  it("routes every model setup failure to Models and harnesses", async () => {
-    const graph = await readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8");
-    const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
     const modelTab = 'setSettingsTab("models");';
-    expect(graph.indexOf(modelTab)).toBeLessThan(graph.indexOf('querySelector("#settingsButton")?.click();'));
-    expect(threads.match(/setSettingsTab\("models"\);/g)).toHaveLength(2);
-  });
+    expect(graph.indexOf(modelTab), "graph setup failures open the Models settings tab")
+      .toBeLessThan(graph.indexOf('querySelector("#settingsButton")?.click();'));
+    expect(threads.match(/setSettingsTab\("models"\);/g), "every thread model setup failure routes to Models")
+      .toHaveLength(2);
 
-  it("defines a viewport-safe narrow layout and light-mode surface", async () => {
-    const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
-    expect(styles).toContain(".model-picker-popover{position:fixed;left:12px;right:12px;bottom:72px;width:auto");
-    expect(styles).toContain('html[data-theme="light"] .model-picker-popover{background:#fff');
-  });
+    expect(styles, "narrow popover stays viewport-safe")
+      .toContain(".model-picker-popover{position:fixed;left:12px;right:12px;bottom:72px;width:auto");
+    expect(styles, "light theme surfaces the popover")
+      .toContain('html[data-theme="light"] .model-picker-popover{background:#fff');
+  }, 10_000);
 });

@@ -6,34 +6,34 @@ import {
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("composer context state", () => {
-  it("increments revisions for user replacements", () => {
+  it("replaces, clears, and settles contexts through one advancing revision chain", () => {
     const value = [{ target: { nodeId: 7 }, node: { id: 7 }, annotations: ["draft"] }];
-    const replaced = transitionComposerContextState(createComposerContextState(), {
-      type: "user_replace",
-      value,
-    });
+    let state = createComposerContextState();
+    expect(state, "fresh state").toEqual({ value: [], revision: 0 });
 
-    expect(replaced).toEqual({ value, revision: 1 });
-  });
+    state = transitionComposerContextState(state, { type: "user_replace", value });
+    expect(state, "user replacement increments the revision").toEqual({ value, revision: 1 });
 
-  it("adopts submission settlement values and revisions", () => {
-    const settled = transitionComposerContextState(createComposerContextState(), {
-      type: "settlement",
-      field: { value: [], revision: 4 },
-    });
+    state = transitionComposerContextState(state, { type: "thread_change" });
+    expect(state, "thread change clears contexts and advances the revision").toEqual({ value: [], revision: 2 });
 
-    expect(settled).toEqual({ value: [], revision: 4 });
-  });
-
-  it("clears contexts and advances the revision on thread changes", () => {
-    const replaced = transitionComposerContextState(createComposerContextState(), {
+    state = transitionComposerContextState(state, {
       type: "user_replace",
       value: [{ target: { nodeId: 7 }, node: { id: 7 }, annotations: [] }],
     });
-    const cleared = transitionComposerContextState(replaced, {
-      type: "thread_change",
+    state = transitionComposerContextState(state, {
+      type: "settlement",
+      field: { value: [], revision: 4 },
     });
+    expect(state, "settlement adopts the submitted value and revision").toEqual({ value: [], revision: 4 });
 
-    expect(cleared).toEqual({ value: [], revision: 2 });
+    state = transitionComposerContextState(state, {
+      type: "user_replace",
+      value: [{ target: { nodeId: 8 }, node: { id: 8 }, annotations: [] }],
+    });
+    expect(state, "revisions continue from the adopted settlement revision").toEqual({
+      value: [{ target: { nodeId: 8 }, node: { id: 8 }, annotations: [] }],
+      revision: 5,
+    });
   });
 });
