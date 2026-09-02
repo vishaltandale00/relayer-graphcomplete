@@ -40,75 +40,73 @@ afterEach(async () => {
 });
 
 describe("recursive live-run provenance", () => {
-  it("binds a clean workspace to its exact commit", () => {
+  it("binds workspace, executable, and bundle bytes into one execution identity and fails drift closed", () => {
     const path = repository();
     const provenance = workspaceProvenance(path);
 
-    expect(provenance.commit).toMatch(/^[0-9a-f]{40}$/u);
-    expect(provenance.clean).toBe(true);
-    expect(provenance.workspaceDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
-  });
+    expect(provenance.commit, "a clean workspace pins its exact commit").toMatch(/^[0-9a-f]{40}$/u);
+    expect(provenance.clean, "a fresh fixture repository is clean").toBe(true);
+    expect(provenance.workspaceDigest, "workspace digest shape").toMatch(/^sha256:[0-9a-f]{64}$/u);
 
-  it("changes the private workspace digest for tracked and untracked bytes", () => {
-    const path = repository();
-    const clean = workspaceProvenance(path);
     writeFileSync(join(path, "tracked.txt"), "second\n");
     writeFileSync(join(path, "private-name.txt"), "untracked bytes\n");
     const dirty = workspaceProvenance(path);
+    expect(dirty.clean, "tracked edits dirty the workspace").toBe(false);
+    expect(dirty.workspaceDigest, "the digest moves with the workspace bytes").not.toBe(provenance.workspaceDigest);
+    expect(JSON.stringify(dirty), "untracked file names stay private").not.toContain("private-name");
 
-    expect(dirty.clean).toBe(false);
-    expect(dirty.workspaceDigest).not.toBe(clean.workspaceDigest);
-    expect(JSON.stringify(dirty)).not.toContain("private-name");
-  });
-
-  it("hashes tracked diffs as raw bytes rather than lossy UTF-8 text", () => {
-    const path = repository();
     writeFileSync(join(path, "tracked.txt"), Buffer.from([0x80]));
-    const first = workspaceProvenance(path).workspaceDigest;
+    const rawDigest = workspaceProvenance(path).workspaceDigest;
     writeFileSync(join(path, "tracked.txt"), Buffer.from([0x81]));
+    expect(workspaceProvenance(path).workspaceDigest, "diffs hash raw bytes, not lossy UTF-8 text").not.toBe(rawDigest);
 
-    expect(workspaceProvenance(path).workspaceDigest).not.toBe(first);
-  });
-
-  it("records executable bytes and the immutable comparison header", () => {
-    const path = repository();
     const executable = join(path, "fixture-bin");
     writeFileSync(executable, "binary bytes");
-
-    expect(executableProvenance(executable, "fixture 1.0")).toMatchObject({
+    expect(executableProvenance(executable, "fixture 1.0"), "executable bytes and version").toMatchObject({
       bytes: 12,
       version: "fixture 1.0",
       sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
     });
+
     const bundle = join(path, "dist");
     mkdirSync(bundle);
-    writeFileSync(join(bundle, "index.js"), "generated bundle");
-    const identity = executionIdentity({
+    writeFileSync(join(bundle, "b.js"), "b");
+    writeFileSync(join(bundle, "a.js"), "a");
+    const inputs = {
       repositoryRoot: path,
       executables: { fixture: { path: executable, version: "fixture 1.0" } },
       bundles: { rootDist: bundle },
-    });
-    const provenance = liveRunProvenance({
+    };
+    const identity = executionIdentity(inputs);
+    expect(directoryProvenance(bundle), "generated-directory byte census").toMatchObject({ files: 2, bytes: 2 });
+
+    const record = liveRunProvenance({
       harnessConfigurationDigest: "sha256:harness",
       temporalFeatureSchemaVersion: 1,
       identity,
       now: new Date("2026-08-30T12:00:00.000Z"),
       runId: "run-fixture",
     });
-
-    expect(provenance).toMatchObject({
+    expect(record, "the immutable comparison header").toMatchObject({
       schemaVersion: 1,
       runId: "run-fixture",
       createdAt: "2026-08-30T12:00:00.000Z",
       harnessConfigurationDigest: "sha256:harness",
       temporalFeatureSchemaVersion: 1,
       executables: { fixture: { version: "fixture 1.0" } },
-      bundles: { rootDist: { files: 1 } },
+      bundles: { rootDist: { files: 2 } },
     });
-  });
 
-  it("digests only public run-profile selection", () => {
-    const digest = publicProfileDigest({
+    expect(() => assertExecutionIdentity(identity, executionIdentity(inputs), "before-enabled"),
+      "stable bytes keep the execution identity").not.toThrow();
+    writeFileSync(join(bundle, "a.js"), "changed");
+    expect(() => assertExecutionIdentity(identity, executionIdentity(inputs), "after-enabled"),
+      "generated-byte drift fails closed and names the checkpoint")
+      .toThrow("Live-run execution identity changed at after-enabled");
+  }, 20_000);
+
+  it("publishes only public profile selection, bounded timeouts, and atomic Check 1 verdicts", () => {
+    const subscriptionProfile = {
       name: "subscription",
       harness: "codex-basic",
       implementation: "codex.basic",
@@ -119,88 +117,54 @@ describe("recursive live-run provenance", () => {
       endpoint: "https://api.example.test/v1/",
       codexHome: "/private/home",
       apiKey: "secret",
-    });
-
-    expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(digest).toBe(publicProfileDigest({
-      name: "subscription",
-      harness: "codex-basic",
-      implementation: "codex.basic",
-      providerId: "codex",
-      adapterId: "codex-subscription",
-      contract: "managed-runtime@1",
-      modelId: "gpt-5.6-sol",
+    };
+    const digest = publicProfileDigest(subscriptionProfile);
+    expect(digest, "profile digest shape").toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(digest, "homes, keys, and trailing slashes never enter the digest").toBe(publicProfileDigest({
+      ...subscriptionProfile,
       endpoint: "https://api.example.test/v1",
       codexHome: "/different/private/home",
       apiKey: "different-secret",
     }));
-  });
 
-  it("binds a normalized public endpoint without exposing it", () => {
-    const profile = {
+    const apiProfile = {
       name: "api", harness: "codex-basic", implementation: "codex.basic",
       providerId: "codex", adapterId: "openai-api", contract: "secret@1", modelId: "gpt",
     };
-    const first = publicProfileDigest({ ...profile, endpoint: "https://gateway.example.test/v1/" });
-    const normalized = publicProfileDigest({ ...profile, endpoint: "https://gateway.example.test/v1" });
-    const other = publicProfileDigest({ ...profile, endpoint: "https://other.example.test/v1" });
+    const gateway = publicProfileDigest({ ...apiProfile, endpoint: "https://gateway.example.test/v1/" });
+    expect(gateway, "endpoint normalization").toBe(
+      publicProfileDigest({ ...apiProfile, endpoint: "https://gateway.example.test/v1" }),
+    );
+    expect(gateway, "a different endpoint changes the digest").not.toBe(
+      publicProfileDigest({ ...apiProfile, endpoint: "https://other.example.test/v1" }),
+    );
+    expect(gateway, "the endpoint never appears in the digest").not.toContain("gateway.example.test");
+    expect(() => publicProfileDigest({ ...apiProfile, endpoint: "https://user:secret@example.test/v1" }),
+      "endpoints carry no credentials").toThrow(/without credentials/);
 
-    expect(first).toBe(normalized);
-    expect(first).not.toBe(other);
-    expect(first).not.toContain("gateway.example.test");
-    expect(() => publicProfileDigest({ ...profile, endpoint: "https://user:secret@example.test/v1" }))
-      .toThrow(/without credentials/);
-  });
-
-  it("bounds the paid-arm timeout before execution", () => {
-    expect(liveRunTimeoutMs("900000")).toBe(900_000);
-    for (const invalid of ["0", "-1", "1.5", "nope", String(MAX_LIVE_RUN_TIMEOUT_MS + 1)]) {
-      expect(() => liveRunTimeoutMs(invalid)).toThrow(/--timeout-ms/);
+    expect(liveRunTimeoutMs("900000"), "an explicit paid-arm timeout parses").toBe(900_000);
+    const invalidTimeouts = ["0", "-1", "1.5", "nope", String(MAX_LIVE_RUN_TIMEOUT_MS + 1)];
+    expect(invalidTimeouts, "timeout guard inventory").toHaveLength(5);
+    for (const invalid of invalidTimeouts) {
+      expect(() => liveRunTimeoutMs(invalid), `timeout ${invalid} is rejected before execution`).toThrow(/--timeout-ms/);
     }
-  });
 
-  it("binds stable generated-directory bytes and fails identity drift closed", () => {
-    const path = repository();
-    const executable = join(path, "fixture-bin");
-    const bundle = join(path, "dist");
-    writeFileSync(executable, "binary bytes");
-    mkdirSync(bundle);
-    writeFileSync(join(bundle, "b.js"), "b");
-    writeFileSync(join(bundle, "a.js"), "a");
-    const inputs = {
-      repositoryRoot: path,
-      executables: { node: { path: executable, version: "v1" } },
-      bundles: { rootDist: bundle },
-    };
-    const first = executionIdentity(inputs);
-    expect(directoryProvenance(bundle)).toMatchObject({ files: 2, bytes: 2 });
-    expect(() => assertExecutionIdentity(first, executionIdentity(inputs), "before-enabled")).not.toThrow();
-
-    writeFileSync(join(bundle, "a.js"), "changed");
-    expect(() => assertExecutionIdentity(first, executionIdentity(inputs), "after-enabled"))
-      .toThrow("Live-run execution identity changed at after-enabled");
-  });
-
-  it("atomically publishes one complete private JSON receipt", () => {
     const directory = mkdtempSync(join(tmpdir(), "recursive-live-receipt-"));
     directories.push(directory);
-    const path = join(directory, "run.json");
-    writeJsonAtomic(path, { status: "check1-passed", verificationLevel: "check1" });
-
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+    const receipt = join(directory, "run.json");
+    writeJsonAtomic(receipt, { status: "check1-passed", verificationLevel: "check1" });
+    expect(JSON.parse(readFileSync(receipt, "utf8")), "one complete receipt").toEqual({
       status: CHECK1_STATUS.passed,
       verificationLevel: CHECK1_VERIFICATION_LEVEL,
     });
-    expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(readdirSync(directory)).toEqual(["run.json"]);
-  });
+    expect(statSync(receipt).mode & 0o777, "the receipt is owner-only").toBe(0o600);
+    expect(readdirSync(directory), "no temporary litter").toEqual(["run.json"]);
 
-  it("names every top-level verdict as Check 1 rather than a merge-gate pass", () => {
-    expect(CHECK1_VERIFICATION_LEVEL).toBe("check1");
-    expect(CHECK1_STATUS).toEqual({
+    expect(CHECK1_VERIFICATION_LEVEL, "the top-level verdict stays Check 1").toBe("check1");
+    expect(CHECK1_STATUS, "every verdict names Check 1 rather than a merge-gate pass").toEqual({
       running: "check1-running",
       passed: "check1-passed",
       failed: "check1-failed",
     });
-  });
+  }, 20_000);
 });

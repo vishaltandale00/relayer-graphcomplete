@@ -24,7 +24,14 @@ afterEach(async () => {
 });
 
 describe("desktop conversation export", () => {
-  it("opens the native dialog before fetching and leaves cancellation side-effect free", async () => {
+  it("derives the dialog filename from a validated thread ID and keeps cancellation side-effect free", async () => {
+    expect(conversationExportFilename(123), "the filename derives from the thread ID")
+      .toBe("relayer-conversation-123.jsonl");
+    const invalidIds = [[0, "zero"], ["123", "a string"]];
+    for (const [id, label] of invalidIds) {
+      expect(() => conversationExportFilename(id), `${label} is not a thread ID`).toThrow("positive thread ID");
+    }
+
     const events = [];
     const exportConversation = vi.fn(async () => {
       events.push("fetch");
@@ -34,8 +41,10 @@ describe("desktop conversation export", () => {
       dialog: {
         showSaveDialog: vi.fn(async (_window, options) => {
           events.push("dialog");
-          expect(options.defaultPath).toBe("relayer-conversation-7.jsonl");
-          expect(options.filters).toEqual([{ name: "JSON Lines", extensions: ["jsonl"] }]);
+          expect.soft(options.defaultPath, "the default path matches the validated thread ID")
+            .toBe("relayer-conversation-7.jsonl");
+          expect.soft(options.filters, "the dialog offers JSON Lines only")
+            .toEqual([{ name: "JSON Lines", extensions: ["jsonl"] }]);
           return { canceled: true, filePath: undefined };
         }),
       },
@@ -43,17 +52,17 @@ describe("desktop conversation export", () => {
       exportConversation,
     });
 
-    await expect(service.save(7)).resolves.toEqual({ status: "canceled" });
-    expect(events).toEqual(["dialog"]);
-    expect(exportConversation).not.toHaveBeenCalled();
-  });
+    await expect(service.save(7), "cancellation resolves as canceled").resolves.toEqual({ status: "canceled" });
+    expect(events, "the native dialog opens before any fetch").toEqual(["dialog"]);
+    expect(exportConversation, "cancellation never fetches the conversation").not.toHaveBeenCalled();
+  }, 15_000);
 
-  it("writes a sibling permission-restricted temp file and atomically installs JSONL bytes", async () => {
-    const directory = await temporaryDirectory();
-    const destinationWithoutExtension = join(directory, "debug-conversation");
+  it("installs export bytes atomically: fresh write, replacement, failure cleanup, collision guard", async () => {
+    const freshDirectory = await temporaryDirectory();
+    const destinationWithoutExtension = join(freshDirectory, "debug-conversation");
     const bytes = new TextEncoder().encode('{"recordType":"header"}\n');
     const exportConversation = vi.fn(async () => bytes);
-    const service = createConversationExportService({
+    const freshService = createConversationExportService({
       dialog: {
         showSaveDialog: vi.fn(async () => ({
           canceled: false,
@@ -65,75 +74,67 @@ describe("desktop conversation export", () => {
       createTemporaryId: () => "fixed",
     });
 
-    await expect(service.save(42)).resolves.toEqual({ status: "saved" });
-    expect(exportConversation).toHaveBeenCalledWith(42);
+    await expect(freshService.save(42), "a fresh export saves").resolves.toEqual({ status: "saved" });
+    expect(exportConversation, "the fetch names the selected thread").toHaveBeenCalledWith(42);
     const destination = `${destinationWithoutExtension}.jsonl`;
-    expect(await readFile(destination)).toEqual(Buffer.from(bytes));
-    expect(await readdir(directory)).toEqual(["debug-conversation.jsonl"]);
+    expect(await readFile(destination), "the installed bytes").toEqual(Buffer.from(bytes));
+    expect(await readdir(freshDirectory), "the sibling temp file is gone after install")
+      .toEqual(["debug-conversation.jsonl"]);
     if (process.platform !== "win32") {
-      expect((await stat(destination)).mode & 0o777).toBe(0o600);
+      expect((await stat(destination)).mode & 0o777, "the destination is owner-only").toBe(0o600);
     }
-  });
 
-  it("atomically replaces a confirmed existing regular destination with the new bytes", async () => {
-    const directory = await temporaryDirectory();
-    const destination = join(directory, "existing.jsonl");
-    await writeFile(destination, "old complete export", { mode: 0o600 });
-    const bytes = new TextEncoder().encode('{"recordType":"header","exportVersion":1}\n');
-    const service = createConversationExportService({
+    const replacementDirectory = await temporaryDirectory();
+    const replacementDestination = join(replacementDirectory, "existing.jsonl");
+    await writeFile(replacementDestination, "old complete export", { mode: 0o600 });
+    const replacementBytes = new TextEncoder().encode('{"recordType":"header","exportVersion":1}\n');
+    const replacementService = createConversationExportService({
       dialog: {
-        showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: destination })),
+        showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: replacementDestination })),
       },
       getWindow: () => null,
-      exportConversation: async () => bytes,
+      exportConversation: async () => replacementBytes,
       createTemporaryId: () => "fixed",
     });
 
-    await expect(service.save(8)).resolves.toEqual({ status: "saved" });
-    expect(await readFile(destination)).toEqual(Buffer.from(bytes));
-    expect(await readdir(directory)).toEqual(["existing.jsonl"]);
-  });
+    await expect(replacementService.save(8), "a confirmed existing export is replaced").resolves.toEqual({ status: "saved" });
+    expect(await readFile(replacementDestination), "the new bytes win").toEqual(Buffer.from(replacementBytes));
+    expect(await readdir(replacementDirectory), "no litter around the replacement").toEqual(["existing.jsonl"]);
 
-  it("removes the temporary file when installation fails", async () => {
-    const directory = await temporaryDirectory();
-    const destination = join(directory, "occupied.jsonl");
-    await mkdir(destination);
-    const service = createConversationExportService({
+    const occupiedDirectory = await temporaryDirectory();
+    const occupiedDestination = join(occupiedDirectory, "occupied.jsonl");
+    await mkdir(occupiedDestination);
+    const occupiedService = createConversationExportService({
       dialog: {
-        showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: destination })),
+        showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: occupiedDestination })),
       },
       getWindow: () => null,
       exportConversation: async () => new TextEncoder().encode("complete bytes"),
       createTemporaryId: () => "fixed",
     });
 
-    await expect(service.save(9)).rejects.toThrow();
-    expect(await readdir(directory)).toEqual(["occupied.jsonl"]);
-    expect((await stat(destination)).isDirectory()).toBe(true);
-  });
+    await expect(occupiedService.save(9), "a failed install rejects").rejects.toThrow();
+    expect(await readdir(occupiedDirectory), "the temp file is removed when installation fails")
+      .toEqual(["occupied.jsonl"]);
+    expect((await stat(occupiedDestination)).isDirectory(), "the occupying directory survives untouched").toBe(true);
 
-  it("does not remove a pre-existing file on an exclusive temporary-name collision", async () => {
-    const directory = await temporaryDirectory();
-    const destination = join(directory, "debug.jsonl");
-    const collision = join(directory, ".debug.jsonl.fixed.tmp");
+    const collisionDirectory = await temporaryDirectory();
+    const collisionDestination = join(collisionDirectory, "debug.jsonl");
+    const collision = join(collisionDirectory, ".debug.jsonl.fixed.tmp");
     await writeFile(collision, "foreign file", { mode: 0o600 });
-    const service = createConversationExportService({
+    const collisionService = createConversationExportService({
       dialog: {
-        showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: destination })),
+        showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: collisionDestination })),
       },
       getWindow: () => null,
       exportConversation: async () => new TextEncoder().encode("export bytes"),
       createTemporaryId: () => "fixed",
     });
 
-    await expect(service.save(9)).rejects.toMatchObject({ code: "EEXIST" });
-    expect(await readFile(collision, "utf8")).toBe("foreign file");
-    await expect(stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("derives a safe filename only from a validated selected thread ID", () => {
-    expect(conversationExportFilename(123)).toBe("relayer-conversation-123.jsonl");
-    expect(() => conversationExportFilename(0)).toThrow("positive thread ID");
-    expect(() => conversationExportFilename("123")).toThrow("positive thread ID");
-  });
+    await expect(collisionService.save(9), "an exclusive temp-name collision rejects")
+      .rejects.toMatchObject({ code: "EEXIST" });
+    expect(await readFile(collision, "utf8"), "the foreign file survives the collision").toBe("foreign file");
+    await expect(stat(collisionDestination), "no destination appears after the collision")
+      .rejects.toMatchObject({ code: "ENOENT" });
+  }, 15_000);
 });

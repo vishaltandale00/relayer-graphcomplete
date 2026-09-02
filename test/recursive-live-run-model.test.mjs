@@ -9,13 +9,8 @@ import {
   RECURSIVE_LIVE_RUN_TASK,
   compareRuns,
   liveRunProfileNames,
-  normalizedTemporalFeatures,
   resolveRunProfile,
-  orderedRevisions,
-  revisionFindings,
-  semanticChildren,
   summarizeRun,
-  timeToFirstObservableGraph,
 } from "../scripts/recursive-live-run-model.mjs";
 
 function revision(sequence, number, overrides = {}) {
@@ -74,143 +69,239 @@ const coherentRun = {
   ],
 };
 
+/** Swaps completion 101's event stream while keeping the child arm intact. */
+function withRootEvents(rootEvents) {
+  return coherentRun.events.filter((event) => event.completionId !== 101).concat(rootEvents);
+}
+
 describe("recursive live run analysis", () => {
-  it("names a demanding task without instructing the agent to delegate", () => {
-    expect(RECURSIVE_LIVE_RUN_TASK).not.toMatch(/delegat|sub-?agent|child|complete\(/i);
-    expect(RECURSIVE_LIVE_RUN_TASK.length).toBeGreaterThan(200);
-  });
-
-  it("orders paged projection events by durable sequence and drops repeats", () => {
-    const paged = [revision(3, 2), revision(1, 0), revision(2, 1), revision(2, 1)];
-
-    expect(orderedRevisions(paged).map((event) => event.sequence)).toEqual([1, 2, 3]);
-  });
-
-  it("accepts a sequence where every revision follows its predecessor", () => {
-    expect(revisionFindings(
-      101,
-      orderedRevisions(coherentRun.events).filter((event) => event.completionId === 101),
-    )).toEqual([]);
-  });
-
-  it("reports a revision that is not reachable from the one before it", () => {
-    const gapped = [revision(1, 0, { currentLayerId: null }), revision(2, 2, { previousRevision: 1 })];
-
-    expect(revisionFindings(101, gapped)).toContain(
-      "completion 101 revision 2 is not reachable from 0",
-    );
-  });
-
-  it("reports an advance that published no layer", () => {
-    const silent = [revision(1, 0, { currentLayerId: null }), revision(2, 1, { currentLayerId: null })];
-
-    expect(revisionFindings(101, silent)).toContain(
-      "completion 101 revision 1 advanced without publishing a layer",
-    );
-  });
-
-  it("reports a revision published after the completion settled", () => {
-    const late = [
-      revision(1, 0, { currentLayerId: null }),
-      revision(2, 1, { lifecycle: "stopped" }),
-      revision(3, 2),
-    ];
-
-    expect(revisionFindings(101, late)).toContain(
-      "completion 101 published revision 2 after settling stopped",
-    );
-  });
-
-  it("counts a completion as a child only when its invocation names the root", () => {
-    const metadata = [
-      { nodeId: 202, invocation: { sourceInteractionNodeId: 101, sourceActionId: 41 } },
-      { nodeId: 303, invocation: { sourceInteractionNodeId: 202, sourceActionId: 7 } },
-      { nodeId: 404, invocation: null },
-    ];
-
-    expect(semanticChildren(101, metadata)).toEqual([202]);
-  });
-
-  it("measures the first observable graph from the first published layer", () => {
-    expect(timeToFirstObservableGraph(1_000, coherentRun.observations)).toBe(3_500);
-    expect(timeToFirstObservableGraph(1_000, [{ observedAtMs: 2_000, currentLayerId: null }])).toBeNull();
-  });
-
-  it("passes a run whose child, pointer sequence, and settlement all hold", () => {
+  it("accepts a coherent recursive run and records its observable facts", () => {
     const summary = summarizeRun(coherentRun);
 
-    expect(summary.passed).toBe(true);
-    expect(summary.findings).toEqual([]);
-    expect(summary.semanticChildren).toEqual([202]);
-    expect(summary.timings).toEqual({ timeToFirstObservableGraphMs: 3_500, totalTaskMs: 60_000 });
-    expect(summary.judge.verdict).toBe("not-run");
-  });
+    expect(summary.passed, "a coherent run passes").toBe(true);
+    expect(summary.findings, "a coherent run is finding-free").toEqual([]);
+    expect(summary.semanticChildren, "the invocation-named child").toEqual([202]);
+    expect(summary.timings, "first observable graph and total task time").toEqual({
+      timeToFirstObservableGraphMs: 3_500,
+      totalTaskMs: 60_000,
+    });
+    expect(summary.judge.verdict, "the deterministic gate never grades semantics").toBe("not-run");
 
-  it("fails a recursion run where the agent created no semantic child", () => {
-    const summary = summarizeRun({ ...coherentRun, completionMetadata: [], completionExecutions: [], traces: coherentRun.traces.slice(0, 1) });
-
-    expect(summary.passed).toBe(false);
-    expect(summary.findings).toContain("no semantic child was created by the agent's own decision");
-  });
-
-  it("fails a recursion run whose pointer never advanced observably", () => {
-    const summary = summarizeRun({
+    // The runner pages the projection feed, so repeats and out-of-order pages must
+    // collapse back into one durable sequence per completion.
+    const paged = summarizeRun({
       ...coherentRun,
-      observations: coherentRun.observations.slice(0, 1),
       events: [
+        revision(3, 2),
         revision(1, 0, { currentLayerId: null }),
-        revision(2, 1, { lifecycle: "succeeded" }),
-        revision(3, 0, { completionId: 202, currentLayerId: null }),
-        revision(4, 1, { completionId: 202, lifecycle: "succeeded", currentLayerId: 702 }),
+        revision(2, 1),
+        revision(2, 1),
+        ...coherentRun.events.filter((event) => event.completionId === 202),
       ],
     });
+    expect(
+      paged.revisions.find((entry) => entry.completionId === 101).revisions.map((event) => event.sequence),
+      "paged repeats drop and durable sequence order is restored",
+    ).toEqual([1, 2, 3]);
+    expect(paged.findings, "reordered pages introduce no findings").toEqual([]);
 
-    expect(summary.findings).toContain(
-      "the root current pointer did not advance observably while work proceeded",
-    );
-  });
-
-  it("does not count post-settlement backfill or two revisions first seen in one poll as live progress", () => {
-    const afterSettlement = summarizeRun({
+    const filtered = summarizeRun({
       ...coherentRun,
-      observations: coherentRun.observations.map((observation) => ({
-        ...observation,
-        source: "backfill",
-        rootStatus: "accepted",
-      })),
+      completionMetadata: [
+        ...coherentRun.completionMetadata,
+        { nodeId: 303, invocation: { sourceInteractionNodeId: 202, sourceActionId: 7 } },
+        { nodeId: 404, invocation: null },
+      ],
     });
-    const onePoll = summarizeRun({
-      ...coherentRun,
-      observations: coherentRun.observations.map((observation) => ({ ...observation, pollSequence: 1 })),
-    });
+    expect(filtered.semanticChildren, "grandchildren and uninvoked completions are not children").toEqual([202]);
+    expect(filtered.passed, "extra invocations introduce no findings").toBe(true);
 
-    expect(afterSettlement.findings).toContain(
-      "the root current pointer did not advance observably while work proceeded",
-    );
-    expect(onePoll.findings).toContain(
-      "the root current pointer did not advance observably while work proceeded",
-    );
-  });
-
-  it("fails a run whose root did not settle accepted", () => {
-    const summary = summarizeRun({ ...coherentRun, completionStatus: "failed" });
-
-    expect(summary.findings).toContain("the root completion settled failed rather than accepted");
-  });
-
-  it("expects no child when recursion is disabled for the timing comparison", () => {
-    const summary = summarizeRun({
+    const disabled = summarizeRun({
       ...coherentRun,
       recursionEnabled: false,
       completionMetadata: [],
       completionExecutions: [],
       traces: [{ ...coherentRun.traces[0], completionBrokerAvailable: false }],
     });
+    expect(disabled.passed, "recursion disabled expects no child and no broker").toBe(true);
 
-    expect(summary.passed).toBe(true);
+    const sparse = summarizeRun({
+      ...coherentRun,
+      requestedTemporalFeatures: { providerRecursion: true },
+      actualTemporalFeatures: {
+        configVersion: 1,
+        schemaRead: false, rootCurrentWrite: false, projectionUi: false, invokeResolution: false, providerRecursion: true,
+      },
+    });
+    expect(sparse.requestedTemporalFeatures, "omitted temporal features normalize to false").toEqual({
+      configVersion: 1,
+      schemaRead: false, rootCurrentWrite: false, projectionUi: false, invokeResolution: false, providerRecursion: true,
+    });
+    expect(sparse.passed, "normalized request and explicit actual features agree").toBe(true);
   });
 
-  it("reports the total-time cost of publishing intermediate accepted states", () => {
+  it("names every broken recursive-run promise by name", () => {
+    const settledExecution = coherentRun.completionExecutions[0];
+    const cases = [
+      ["an agent that created no semantic child",
+        (run) => ({ ...run, completionMetadata: [], completionExecutions: [], traces: run.traces.slice(0, 1) }),
+        ["no semantic child was created by the agent's own decision"]],
+      ["a root pointer that never advanced observably",
+        (run) => ({
+          ...run,
+          observations: run.observations.slice(0, 1),
+          events: withRootEvents([
+            revision(1, 0, { currentLayerId: null }),
+            revision(2, 1, { lifecycle: "succeeded" }),
+          ]),
+        }),
+        ["the root current pointer did not advance observably while work proceeded"]],
+      ["post-settlement backfill posed as live observations",
+        (run) => ({
+          ...run,
+          observations: run.observations.map((observation) => ({
+            ...observation,
+            source: "backfill",
+            rootStatus: "accepted",
+          })),
+        }),
+        ["the root current pointer did not advance observably while work proceeded"]],
+      ["two revisions first seen in one poll",
+        (run) => ({
+          ...run,
+          observations: run.observations.map((observation) => ({ ...observation, pollSequence: 1 })),
+        }),
+        ["the root current pointer did not advance observably while work proceeded"]],
+      ["a root that settled failed",
+        (run) => ({ ...run, completionStatus: "failed" }),
+        ["the root completion settled failed rather than accepted"]],
+      ["a revision unreachable from its predecessor",
+        (run) => ({
+          ...run,
+          events: withRootEvents([
+            revision(1, 0, { currentLayerId: null }),
+            revision(2, 2, { previousRevision: 1 }),
+          ]),
+        }),
+        ["completion 101 revision 2 is not reachable from 0"]],
+      ["an advance that published no layer",
+        (run) => ({
+          ...run,
+          events: withRootEvents([
+            revision(1, 0, { currentLayerId: null }),
+            revision(2, 1, { currentLayerId: null }),
+          ]),
+        }),
+        ["completion 101 revision 1 advanced without publishing a layer"]],
+      ["a revision published after settling stopped",
+        (run) => ({
+          ...run,
+          events: withRootEvents([
+            revision(1, 0, { currentLayerId: null }),
+            revision(2, 1, { lifecycle: "stopped" }),
+            revision(3, 2),
+          ]),
+        }),
+        ["completion 101 published revision 2 after settling stopped"]],
+      ["a prepared child that never attached or settled",
+        (run) => ({
+          ...run,
+          completionExecutions: [{
+            ...settledExecution,
+            phase: "prepared",
+            attachment: { present: false },
+            settlement: { present: false, valid: false, completionStatus: "running" },
+          }],
+        }),
+        ["child completion 202 was not durably attached and settled accepted"]],
+      ["the wrong attachment provider",
+        (run) => ({
+          ...run,
+          completionExecutions: [{
+            ...settledExecution,
+            attachment: { present: true, provider: "claude", schemaVersion: 1 },
+          }],
+        }),
+        ["child completion 202 was not durably attached and settled accepted"]],
+      ["an unsupported attachment schema",
+        (run) => ({
+          ...run,
+          completionExecutions: [{
+            ...settledExecution,
+            attachment: { present: true, provider: "codex", schemaVersion: 2 },
+          }],
+        }),
+        ["child completion 202 was not durably attached and settled accepted"]],
+      ["an invalid settlement object",
+        (run) => ({
+          ...run,
+          completionExecutions: [{
+            ...settledExecution,
+            settlement: { present: true, valid: false, completionStatus: "accepted" },
+          }],
+        }),
+        ["child completion 202 was not durably attached and settled accepted"]],
+      ["an invocation action that mismatches the durable execution",
+        (run) => ({
+          ...run,
+          completionExecutions: [{ ...settledExecution, sourceActionId: 99 }],
+        }),
+        ["child completion 202 invocation action did not match durable execution"]],
+      ["a child that never advanced or published a terminal layer",
+        (run) => ({
+          ...run,
+          events: run.events.filter((event) => event.completionId !== 202).concat([
+            revision(5, 0, { completionId: 202, lifecycle: "succeeded", currentLayerId: null }),
+          ]),
+        }),
+        ["child completion 202 did not advance past revision 0",
+          "child completion 202 did not publish a succeeded terminal layer"]],
+      ["a missing child trace",
+        (run) => ({ ...run, traces: run.traces.slice(0, 1) }),
+        ["completion 202 has no complete untruncated full-coverage candidate trace"]],
+      ["a child trace without broker authority while recursion was enabled",
+        (run) => ({
+          ...run,
+          traces: [run.traces[0], { ...run.traces[1], completionBrokerAvailable: false }],
+        }),
+        ["completion 202 trace reported completion broker unavailable while recursion was enabled"]],
+      ["a root trace with broker authority while recursion was disabled",
+        (run) => ({
+          ...run,
+          recursionEnabled: false,
+          completionMetadata: [],
+          completionExecutions: [],
+          traces: run.traces.slice(0, 1),
+        }),
+        ["root trace reported completion broker available while recursion was disabled"]],
+      ["a runtime feature set that drifted from the request",
+        (run) => ({
+          ...run,
+          requestedTemporalFeatures: { providerRecursion: true },
+          actualTemporalFeatures: {
+            configVersion: 1,
+            schemaRead: false, rootCurrentWrite: false, projectionUi: false, invokeResolution: false,
+            providerRecursion: false,
+          },
+        }),
+        ["the graph runtime temporal features did not match the requested feature set"]],
+    ];
+    expect(cases, "broken-promise inventory").toHaveLength(18);
+    for (const [label, mutate, expectedFindings] of cases) {
+      const summary = summarizeRun(mutate(coherentRun));
+      expect(summary.passed, `${label}: the run fails`).toBe(false);
+      for (const finding of expectedFindings) {
+        expect(summary.findings, label).toContain(finding);
+      }
+    }
+
+    expect(summarizeRun({
+      ...coherentRun,
+      observations: [{ observedAtMs: 2_000, currentLayerId: null }],
+    }).timings.timeToFirstObservableGraphMs, "no published layer means no observable graph yet").toBeNull();
+  });
+
+  it("reports recursion's time cost as diagnostic-only", () => {
     const enabled = summarizeRun(coherentRun);
     const disabled = summarizeRun({
       ...coherentRun,
@@ -222,111 +313,11 @@ describe("recursive live run analysis", () => {
       traces: [{ ...coherentRun.traces[0], completionBrokerAvailable: false }],
     });
 
-    expect(compareRuns(enabled, disabled)).toEqual({
+    expect(compareRuns(enabled, disabled), "one ordered pair never proves a performance effect").toEqual({
       interpretation: "diagnostic-only; an order-balanced repeated portfolio is required for a performance claim",
       timeToFirstObservableGraphMs: { enabled: 3_500, disabled: 39_000 },
       totalTaskMs: { enabled: 60_000, disabled: 45_000, overheadMs: 15_000 },
     });
-  });
-
-  it("fails closed when a prepared child never attached or settled", () => {
-    const summary = summarizeRun({
-      ...coherentRun,
-      completionExecutions: [{
-        completionId: 202,
-        sourceCompletionId: 101,
-        sourceActionId: 41,
-        phase: "prepared",
-        attachment: { present: false },
-        settlement: { present: false, valid: false, completionStatus: "running" },
-      }],
-    });
-
-    expect(summary.passed).toBe(false);
-    expect(summary.findings).toContain("child completion 202 was not durably attached and settled accepted");
-  });
-
-  it("requires the exact attachment provider, schema, and a valid object settlement", () => {
-    for (const execution of [
-      { ...coherentRun.completionExecutions[0], attachment: { present: true, provider: "claude", schemaVersion: 1 } },
-      { ...coherentRun.completionExecutions[0], attachment: { present: true, provider: "codex", schemaVersion: 2 } },
-      { ...coherentRun.completionExecutions[0], settlement: { present: true, valid: false, completionStatus: "accepted" } },
-    ]) {
-      const summary = summarizeRun({ ...coherentRun, completionExecutions: [execution] });
-      expect(summary.findings).toContain("child completion 202 was not durably attached and settled accepted");
-    }
-  });
-
-  it("requires graph invocation action identity to match the durable execution binding", () => {
-    const summary = summarizeRun({
-      ...coherentRun,
-      completionExecutions: [{ ...coherentRun.completionExecutions[0], sourceActionId: 99 }],
-    });
-
-    expect(summary.findings).toContain(
-      "child completion 202 invocation action did not match durable execution",
-    );
-  });
-
-  it("requires the child to advance and publish a terminal layer", () => {
-    const summary = summarizeRun({
-      ...coherentRun,
-      events: coherentRun.events.filter((event) => event.completionId !== 202).concat([
-        revision(5, 0, { completionId: 202, lifecycle: "succeeded", currentLayerId: null }),
-      ]),
-    });
-
-    expect(summary.findings).toContain("child completion 202 did not advance past revision 0");
-    expect(summary.findings).toContain("child completion 202 did not publish a succeeded terminal layer");
-  });
-
-  it("requires complete traces and the exact broker scope for both arms", () => {
-    const missingChildTrace = summarizeRun({ ...coherentRun, traces: coherentRun.traces.slice(0, 1) });
-    const childWithoutBroker = summarizeRun({
-      ...coherentRun,
-      traces: [coherentRun.traces[0], { ...coherentRun.traces[1], completionBrokerAvailable: false }],
-    });
-    const disabledWithBroker = summarizeRun({
-      ...coherentRun,
-      recursionEnabled: false,
-      completionMetadata: [],
-      completionExecutions: [],
-      traces: coherentRun.traces.slice(0, 1),
-    });
-
-    expect(missingChildTrace.findings).toContain("completion 202 has no complete untruncated full-coverage candidate trace");
-    expect(childWithoutBroker.findings).toContain(
-      "completion 202 trace reported completion broker unavailable while recursion was enabled",
-    );
-    expect(disabledWithBroker.findings).toContain(
-      "root trace reported completion broker available while recursion was disabled",
-    );
-  });
-
-  it("normalizes and verifies the graph runtime's effective temporal feature set", () => {
-    expect(normalizedTemporalFeatures({ providerRecursion: true })).toEqual({
-      configVersion: 1,
-      schemaRead: false,
-      rootCurrentWrite: false,
-      projectionUi: false,
-      invokeResolution: false,
-      providerRecursion: true,
-    });
-    const summary = summarizeRun({
-      ...coherentRun,
-      requestedTemporalFeatures: { providerRecursion: true },
-      actualTemporalFeatures: {
-        configVersion: 1,
-        schemaRead: false,
-        rootCurrentWrite: false,
-        projectionUi: false,
-        invokeResolution: false,
-        providerRecursion: false,
-      },
-    });
-    expect(summary.findings).toContain(
-      "the graph runtime temporal features did not match the requested feature set",
-    );
   });
 });
 
@@ -349,11 +340,11 @@ describe("live run credentials", () => {
   };
   const prime = { implementation: "prime.agent" };
   const codex = { implementation: "codex.basic" };
+  const withRun = (run) => ({ runs: { only: { ...document.runs["codex-openai"], ...run } } });
 
-  it("resolves an OpenRouter key for Prime onto the secret contract, with no Codex runtime", () => {
+  it("resolves run profiles onto adapter contracts and names every mistake without leaking the key", () => {
     const resolved = resolveRunProfile(document, "prime-openrouter", prime);
-
-    expect(resolved).toEqual({
+    expect(resolved, "an OpenRouter key lands on the secret contract").toEqual({
       name: "prime-openrouter",
       harness: "prime-agent-basic",
       implementation: "prime.agent",
@@ -364,39 +355,18 @@ describe("live run credentials", () => {
       modelId: "openai/gpt-5",
       apiKey: "test-key",
     });
-    expect(resolved).not.toHaveProperty("codexExecutable");
-  });
+    expect(resolved, "a key harness carries no Codex runtime").not.toHaveProperty("codexExecutable");
 
-  it("resolves an OpenAI key for Codex with its isolated executable and home", () => {
-    expect(resolveRunProfile(document, "codex-openai", codex)).toMatchObject({
-      adapterId: "openai-api",
-      contract: "secret@1",
-      endpoint: "https://api.openai.com/v1",
-      codexExecutable: "/managed/codex",
-      codexHome: "/isolated/codex-home",
-      modelId: "gpt-5-codex",
-    });
-  });
+    expect(resolveRunProfile(document, "codex-openai", codex), "an OpenAI key binds the isolated Codex runtime")
+      .toMatchObject({
+        adapterId: "openai-api",
+        contract: "secret@1",
+        endpoint: "https://api.openai.com/v1",
+        codexExecutable: "/managed/codex",
+        codexHome: "/isolated/codex-home",
+        modelId: "gpt-5-codex",
+      });
 
-  it("requires the Codex executable and home only for a Codex harness", () => {
-    const withoutCodex = {
-      runs: { plain: { ...document.runs["codex-openai"], codexExecutable: null, codexHome: null } },
-    };
-
-    expect(() => resolveRunProfile(withoutCodex, "plain", codex)).toThrow(/needs codexExecutable/);
-    expect(resolveRunProfile(withoutCodex, "plain", prime).modelId).toBe("gpt-5-codex");
-  });
-
-  it("refuses a subscription login for a harness that takes a key", () => {
-    const subscription = {
-      runs: { sub: { harness: "prime-agent-basic", modelId: "m", auth: { kind: "codex-subscription" } } },
-    };
-
-    expect(() => resolveRunProfile(subscription, "sub", prime))
-      .toThrow(/accepts a key rather than a codex-subscription login/);
-  });
-
-  it("honours an endpoint override and falls back to the provider default", () => {
     const overridden = {
       runs: {
         gateway: {
@@ -405,59 +375,69 @@ describe("live run credentials", () => {
         },
       },
     };
-
-    expect(resolveRunProfile(overridden, "gateway", prime).endpoint).toBe("https://gateway.internal/v1");
-    expect(resolveRunProfile(document, "prime-openrouter", prime).endpoint)
+    expect(resolveRunProfile(overridden, "gateway", prime).endpoint, "an endpoint override wins")
+      .toBe("https://gateway.internal/v1");
+    expect(resolveRunProfile(document, "prime-openrouter", prime).endpoint, "otherwise the provider default")
       .toBe("https://openrouter.ai/api/v1");
-  });
 
-  it("lists the profiles a document defines so an unknown name is actionable", () => {
-    expect(liveRunProfileNames(document)).toEqual(["prime-openrouter", "codex-openai"]);
-    expect(liveRunProfileNames({})).toEqual([]);
-    expect(() => resolveRunProfile(document, "typo", prime))
-      .toThrow(/It defines: prime-openrouter, codex-openai/);
-  });
+    expect(liveRunProfileNames(document), "the document's profile names").toEqual(["prime-openrouter", "codex-openai"]);
+    expect(liveRunProfileNames({}), "an empty document defines nothing").toEqual([]);
 
-  it("names the missing field without ever quoting the key", () => {
-    const withRun = (run) => ({ runs: { only: { ...document.runs["codex-openai"], ...run } } });
     const cases = [
-      [withRun({ auth: { kind: "nope", apiKey: "test-key" } }), /auth.kind set to one of/],
-      [withRun({ auth: { kind: "openrouter" } }), /needs auth.apiKey for openrouter/],
-      [withRun({ auth: { kind: "codex-subscription", apiKey: "test-key" } }), /leave auth.apiKey null/],
-      [withRun({ modelId: "" }), /needs modelId/],
-      [withRun({ harness: "  " }), /needs harness/],
+      ["an unknown auth kind", withRun({ auth: { kind: "nope", apiKey: "test-key" } }), "only", codex,
+        /auth.kind set to one of/],
+      ["a secret adapter missing its key", withRun({ auth: { kind: "openrouter" } }), "only", codex,
+        /needs auth.apiKey for openrouter/],
+      ["a subscription login carrying a key", withRun({ auth: { kind: "codex-subscription", apiKey: "test-key" } }),
+        "only", codex, /leave auth.apiKey null/],
+      ["a subscription login on a key harness",
+        { runs: { sub: { harness: "prime-agent-basic", modelId: "m", auth: { kind: "codex-subscription" } } } },
+        "sub", prime, /accepts a key rather than a codex-subscription login/],
+      ["a missing modelId", withRun({ modelId: "" }), "only", codex, /needs modelId/],
+      ["a blank harness", withRun({ harness: "  " }), "only", codex, /needs harness/],
+      ["a codex harness missing its executable and home",
+        withRun({ codexExecutable: null, codexHome: null }), "only", codex, /needs codexExecutable/],
+      ["an unknown profile name", document, "typo", prime, /It defines: prime-openrouter, codex-openai/],
     ];
-    for (const [candidate, expected] of cases) {
-      expect(() => resolveRunProfile(candidate, "only", codex)).toThrow(expected);
+    expect(cases, "credential mistake inventory").toHaveLength(8);
+    for (const [label, candidate, name, implementation, expected] of cases) {
+      let error;
       try {
-        resolveRunProfile(candidate, "only", codex);
-      } catch (error) {
-        expect(error.message).not.toContain("test-key");
+        resolveRunProfile(candidate, name, implementation);
+      } catch (caught) {
+        error = caught;
       }
+      expect(error, `${label}: rejects`).toBeDefined();
+      expect(error.message, label).toMatch(expected);
+      expect(error.message, `${label}: never quotes the key`).not.toContain("test-key");
     }
-  });
 
-  it("covers every auth kind the file offers", () => {
+    expect(
+      resolveRunProfile(withRun({ codexExecutable: null, codexHome: null }), "only", prime).modelId,
+      "the executable and home bind only a Codex harness",
+    ).toBe("gpt-5-codex");
+
     for (const kind of Object.keys(LIVE_RUN_AUTH)) {
       const apiKey = LIVE_RUN_AUTH[kind].contract === "secret@1" ? "test-key" : null;
       const candidate = { runs: { only: { ...document.runs["codex-openai"], auth: { kind, apiKey } } } };
-      expect(resolveRunProfile(candidate, "only", codex).adapterId).toBe(LIVE_RUN_AUTH[kind].adapterId);
+      expect(resolveRunProfile(candidate, "only", codex).adapterId, `auth kind ${kind} resolves`)
+        .toBe(LIVE_RUN_AUTH[kind].adapterId);
     }
   });
 
-  it("resolves the checked-in live-run template users copy", async () => {
-    // The README tells users to copy live-run.example.json; the model tests
-    // above exercise an inline duplicate, so this checkpoint pins the real
-    // template's shape against the same resolver. The implementation comes
-    // from the selected harness yaml exactly like the paid entry point
-    // (scripts/run-recursive-live-run.mjs), so an unknown or typo'd harness
-    // id fails here instead of surfacing only when a user spends a run.
+  it("keeps the checked-in live-run artifacts usable", async () => {
+    expect(RECURSIVE_LIVE_RUN_TASK, "the task never instructs delegation").not.toMatch(/delegat|sub-?agent|child|complete\(/i);
+    expect(RECURSIVE_LIVE_RUN_TASK.length, "the task is demanding enough to need delegation").toBeGreaterThan(200);
+
+    // The README tells users to copy live-run.example.json; pin the real template's shape
+    // against the resolver, loading each harness yaml exactly like the paid entry point, so
+    // an unknown or typo'd harness id fails here instead of when a user spends a run.
     const { loadHarnessConfigurations } = await import("@relayer/harness-host");
     const template = JSON.parse(
       readFileSync(new URL("../live-run.example.json", import.meta.url), "utf8"),
     );
     const profiles = Object.entries(template.runs);
-    expect(profiles.length).toBeGreaterThan(0);
+    expect(profiles.length, "the template defines at least one run").toBeGreaterThan(0);
     for (const [name, profile] of profiles) {
       const configurationPath = fileURLToPath(
         new URL(`../harnesses/${profile.harness}.yaml`, import.meta.url),
@@ -470,11 +450,9 @@ describe("live run credentials", () => {
       expect(typeof profile.harness, name).toBe("string");
       expect(typeof profile.modelId, name).toBe("string");
     }
-  });
 
-  it("keeps the paid live-run entry point parseable without executing it", () => {
-    // The entry point awaits its paid main() at top level, so CI must never
-    // import it; a module parse catches syntax and import regressions.
+    // The entry point awaits its paid main() at top level, so CI must never import it; a
+    // module parse catches syntax and import regressions.
     const result = spawnSync(
       process.execPath,
       ["--input-type=module", "--check"],
@@ -486,5 +464,5 @@ describe("live run credentials", () => {
       },
     );
     expect(result.status, result.stderr).toBe(0);
-  });
+  }, 20_000);
 });

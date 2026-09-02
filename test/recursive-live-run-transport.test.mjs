@@ -82,11 +82,11 @@ function sqlString(value) {
 }
 
 describe("recursive live run transport", () => {
-  it("authenticates product JSON requests with the loopback session cookie", async () => {
+  it("authenticates product JSON and graph-control reads with their exact loopback credentials", async () => {
     const origin = await serve((request, response) => {
-      expect(request.url).toBe("/api/model-families");
-      expect(request.headers.cookie).toBe("relayer_session=session-value");
-      expect(request.headers["content-type"]).toBe("application/json");
+      expect.soft(request.url, "product request path").toBe("/api/model-families");
+      expect.soft(request.headers.cookie, "loopback session cookie").toBe("relayer_session=session-value");
+      expect.soft(request.headers["content-type"], "json content type").toBe("application/json");
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ id: 41 }));
     });
@@ -97,14 +97,23 @@ describe("recursive live run transport", () => {
     }, "/api/model-families", {
       method: "POST",
       body: JSON.stringify({ name: "Live run models" }),
-    })).resolves.toEqual({ id: 41 });
-  });
+    }), "product JSON round-trip").resolves.toEqual({ id: 41 });
 
-  it("reads completion invocation metadata through graph control authority", async () => {
     const graphUrl = await serve((request, response) => {
-      expect(request.headers.authorization).toBe("Bearer graph-control");
-      const nodeId = Number(request.url.split("/").at(-1));
+      expect.soft(request.headers.authorization, "graph-control bearer authority").toBe("Bearer graph-control");
       response.writeHead(200, { "content-type": "application/json" });
+      if (request.url === "/api/control/temporal-features") {
+        response.end(JSON.stringify({
+          configVersion: 1,
+          schemaRead: true,
+          rootCurrentWrite: true,
+          projectionUi: true,
+          invokeResolution: true,
+          providerRecursion: true,
+        }));
+        return;
+      }
+      const nodeId = Number(request.url.split("/").at(-1));
       response.end(JSON.stringify({ nodeId, invocation: nodeId === 2
         ? { sourceInteractionNodeId: 1, sourceActionId: 7 }
         : null }));
@@ -113,32 +122,15 @@ describe("recursive live run transport", () => {
     await expect(completionMetadata({
       graphUrl,
       graphControlToken: "graph-control",
-    }, [1, 2])).resolves.toEqual([
+    }, [1, 2]), "invocation metadata per node").resolves.toEqual([
       { nodeId: 1, invocation: null },
       { nodeId: 2, invocation: { sourceInteractionNodeId: 1, sourceActionId: 7 } },
     ]);
-  });
-
-  it("reads effective temporal features through graph control authority", async () => {
-    const graphUrl = await serve((request, response) => {
-      expect(request.url).toBe("/api/control/temporal-features");
-      expect(request.headers.authorization).toBe("Bearer graph-control");
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({
-        configVersion: 1,
-        schemaRead: true,
-        rootCurrentWrite: true,
-        projectionUi: true,
-        invokeResolution: true,
-        providerRecursion: true,
-      }));
-    });
-
-    await expect(temporalFeatures({ graphUrl, graphControlToken: "graph-control" }))
+    await expect(temporalFeatures({ graphUrl, graphControlToken: "graph-control" }), "effective temporal features")
       .resolves.toMatchObject({ configVersion: 1, providerRecursion: true });
-  });
+  }, 15_000);
 
-  it("reads sanitized durable attachment and settlement evidence from the production schema", async () => {
+  it("reads sanitized, validated, settled completion-execution evidence from the production schema", async () => {
     const database = await completionDatabase();
     const canonicalAttachment = JSON.stringify({
       provider: "codex",
@@ -149,7 +141,7 @@ describe("recursive live run transport", () => {
 
     const evidence = await completionExecutionEvidence(database);
 
-    expect(evidence).toEqual([
+    expect(evidence, "sanitized evidence rows from the production schema").toEqual([
       {
         interactionId: 2,
         completionId: 202,
@@ -185,109 +177,83 @@ describe("recursive live run transport", () => {
         updatedAt: "4000",
       },
     ]);
-    expect(JSON.stringify(evidence)).not.toContain("native-thread-secret");
-    expect(JSON.stringify(evidence)).not.toContain("native-turn-secret");
-    expect(JSON.stringify(evidence)).not.toContain("rootLayer");
-  });
+    const serialized = JSON.stringify(evidence);
+    expect(serialized, "thread secret stays in the database").not.toContain("native-thread-secret");
+    expect(serialized, "turn secret stays in the database").not.toContain("native-turn-secret");
+    expect(serialized, "settlement payload stays in the database").not.toContain("rootLayer");
 
-  it("hashes canonical attachment JSON independently of stored object key order", async () => {
-    const first = await completionDatabase();
-    const second = await completionDatabase({ attachment: JSON.stringify({
+    const reordered = await completionDatabase({ attachment: JSON.stringify({
       schemaVersion: 1,
       threadId: "native-thread-secret",
       provider: "codex",
       turnId: "native-turn-secret",
     }) });
+    const [reorderedRow] = await completionExecutionEvidence(reordered);
+    expect(evidence[0].attachment.sha256, "the canonical hash ignores stored key order")
+      .toBe(reorderedRow.attachment.sha256);
 
-    const [left] = await completionExecutionEvidence(first);
-    const [right] = await completionExecutionEvidence(second);
+    const invalidCases = [
+      ["malformed attachment JSON", { attachment: "{native-secret" },
+        /SQLite stored invalid attachment JSON for completion 202/, /native-secret/],
+      ["an unbounded provider identity", { attachment: JSON.stringify({ provider: "codex secret identity", schemaVersion: 1 }) },
+        /SQLite stored an invalid provider attachment for completion 202/, /codex secret identity/],
+      ["an unsupported attachment schema", { attachment: JSON.stringify({ provider: "codex", schemaVersion: 2 }) },
+        /SQLite stored an invalid provider attachment for completion 202/, /native-secret/],
+    ];
+    expect(invalidCases, "invalid attachment inventory").toHaveLength(3);
+    for (const [label, options, expected, secret] of invalidCases) {
+      const candidate = await completionDatabase(options);
+      await expect(completionExecutionEvidence(candidate), `${label}: fails closed`).rejects.toThrow(expected);
+      await expect(completionExecutionEvidence(candidate), `${label}: raw bytes stay hidden`)
+        .rejects.not.toThrow(secret);
+    }
 
-    expect(left.attachment.sha256).toBe(right.attachment.sha256);
-  });
+    const settlementCases = [
+      ["malformed settlement JSON", "{settlement-secret"],
+      ["a non-object settlement", '"settlement-secret"'],
+    ];
+    for (const [label, settlement] of settlementCases) {
+      const candidate = await completionDatabase({ settlement });
+      const rows = await completionExecutionEvidence(candidate);
+      expect(rows[0].settlement, `${label}: present but invalid`).toMatchObject({ present: true, valid: false });
+      expect(JSON.stringify(rows), `${label}: raw bytes stay hidden`).not.toContain("settlement-secret");
+    }
 
-  it("rejects malformed durable attachment JSON without returning its raw bytes", async () => {
-    const database = await completionDatabase({ attachment: "{native-secret" });
-
-    await expect(completionExecutionEvidence(database)).rejects.toThrow(
-      "SQLite stored invalid attachment JSON for completion 202",
-    );
-    await expect(completionExecutionEvidence(database)).rejects.not.toThrow(/native-secret/);
-  });
-
-  it("rejects an unbounded provider identity or unsupported attachment schema", async () => {
-    const identity = await completionDatabase({ attachment: JSON.stringify({
-      provider: "codex secret identity",
-      schemaVersion: 1,
-    }) });
-    const schema = await completionDatabase({ attachment: JSON.stringify({
-      provider: "codex",
-      schemaVersion: 2,
-    }) });
-
-    await expect(completionExecutionEvidence(identity)).rejects.toThrow(
-      "SQLite stored an invalid provider attachment for completion 202",
-    );
-    await expect(completionExecutionEvidence(schema)).rejects.toThrow(
-      "SQLite stored an invalid provider attachment for completion 202",
-    );
-  });
-
-  it("marks malformed or non-object settlement JSON invalid without exposing it", async () => {
-    const malformed = await completionDatabase({ settlement: "{settlement-secret" });
-    const nonObject = await completionDatabase({ settlement: '"settlement-secret"' });
-
-    const malformedEvidence = await completionExecutionEvidence(malformed);
-    const nonObjectEvidence = await completionExecutionEvidence(nonObject);
-
-    expect(malformedEvidence[0].settlement).toMatchObject({ present: true, valid: false });
-    expect(nonObjectEvidence[0].settlement).toMatchObject({ present: true, valid: false });
-    expect(JSON.stringify([malformedEvidence, nonObjectEvidence])).not.toContain("settlement-secret");
-  });
-
-  it("waits through the accepted-to-settled commit ordering race", async () => {
-    const database = await completionDatabase({ phase: "attached", settlement: null });
+    const pending = await completionDatabase({ phase: "attached", settlement: null });
     setTimeout(() => {
-      execFileSync("/usr/bin/sqlite3", [database, `
+      execFileSync("/usr/bin/sqlite3", [pending, `
         UPDATE completion_executions
         SET phase='settled', settlement_json='{"rootLayer":{"layer":{"id":900}}}', updated_at='2100'
         WHERE graph_completion_id=202;
       `]);
     }, 30);
-
-    const evidence = await waitForSettledCompletionExecutionEvidence(database, [202], {
+    const settled = await waitForSettledCompletionExecutionEvidence(pending, [202], {
       timeoutMs: 1_000,
       pollIntervalMs: 10,
     });
-
-    expect(evidence[0]).toMatchObject({
+    expect(settled[0], "waits through the accepted-to-settled commit ordering race").toMatchObject({
       completionId: 202,
       phase: "settled",
       settlement: { present: true, valid: true },
       updatedAt: "2100",
     });
-  });
 
-  it("fails a bounded settlement wait for missing rows and invalid timing", async () => {
-    const database = await completionDatabase({ phase: "attached", settlement: null });
-
-    await expect(waitForSettledCompletionExecutionEvidence(database, [202], {
+    const stuck = await completionDatabase({ phase: "attached", settlement: null });
+    await expect(waitForSettledCompletionExecutionEvidence(stuck, [202], {
       timeoutMs: 20,
       pollIntervalMs: 5,
-    })).rejects.toThrow(/did not settle before timeout: 202/);
-    await expect(waitForSettledCompletionExecutionEvidence(database, [202], {
+    }), "a bounded wait names the unsettled completion").rejects.toThrow(/did not settle before timeout: 202/);
+    await expect(waitForSettledCompletionExecutionEvidence(stuck, [202], {
       timeoutMs: Number.POSITIVE_INFINITY,
-    })).rejects.toThrow(/bounded positive timing values/);
-  });
+    }), "wait timing must be bounded and positive").rejects.toThrow(/bounded positive timing values/);
 
-  it("reports a missing database or SQLite executable as an evidence read failure", async () => {
     const directory = await mkdtemp(join(tmpdir(), "recursive-live-transport-"));
     temporaryDirectories.push(directory);
-
-    await expect(completionExecutionEvidence(join(directory, "missing.sqlite3"))).rejects.toThrow(
-      /Could not read durable completion-execution evidence/,
-    );
+    await expect(completionExecutionEvidence(join(directory, "missing.sqlite3")),
+      "a missing database is an evidence read failure").rejects.toThrow(/Could not read durable completion-execution evidence/);
     await expect(completionExecutionEvidence(join(directory, "missing.sqlite3"), {
       sqliteExecutable: join(directory, "missing-sqlite3"),
-    })).rejects.toThrow(/Could not read durable completion-execution evidence/);
-  });
+    }), "a missing SQLite executable is an evidence read failure")
+      .rejects.toThrow(/Could not read durable completion-execution evidence/);
+  }, 30_000);
 });

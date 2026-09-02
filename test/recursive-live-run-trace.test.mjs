@@ -58,10 +58,12 @@ async function fixture(events, {
   return { directory, runtime, calls };
 }
 
+const brokerScope = { type: "execution.scope", data: { completionBrokerAvailable: true } };
+
 describe("recursive live-run trace evidence", () => {
-  it("exports a product-attributed trace and exposes only the broker boolean inline", async () => {
+  it("exports product-attributed evidence, fails closed on every integrity break, and retries only an unsealed trace", async () => {
     const { directory, runtime, calls } = await fixture([
-      { type: "execution.scope", data: { completionBrokerAvailable: true } },
+      brokerScope,
       { type: "prompt", data: { text: "task" } },
       { type: "message", data: { text: "answer" } },
     ]);
@@ -74,74 +76,46 @@ describe("recursive live-run trace evidence", () => {
       correlation: { runId: "run-1", arm: "enabled" },
     });
 
-    expect(evidence).toEqual([expect.objectContaining({
-      productInteractionId: 29,
-      completionId: 202,
-      status: "complete",
-      coverageComplete: true,
-      completionBrokerAvailable: true,
-      ref: "traces/enabled/29/manifest.json",
-    })]);
-    expect(calls[0].correlation).toEqual({ runId: "run-1", arm: "enabled", interactionId: "29" });
-    expect(JSON.stringify(evidence)).not.toContain("task");
-    expect(JSON.stringify(evidence)).not.toContain("answer");
-  });
+    expect(evidence, "product-attributed evidence exposes only the broker boolean inline").toEqual([
+      expect.objectContaining({
+        productInteractionId: 29,
+        completionId: 202,
+        status: "complete",
+        coverageComplete: true,
+        completionBrokerAvailable: true,
+        ref: "traces/enabled/29/manifest.json",
+      }),
+    ]);
+    expect(calls[0].correlation, "the export correlation names the interaction").toEqual({
+      runId: "run-1",
+      arm: "enabled",
+      interactionId: "29",
+    });
+    expect(JSON.stringify(evidence), "prompt bytes stay in the trace file").not.toContain("task");
+    expect(JSON.stringify(evidence), "answer bytes stay in the trace file").not.toContain("answer");
 
-  it("fails closed when the host scope event omits or contradicts broker scope", async () => {
-    const missing = await fixture([{ type: "prompt", data: { text: "task" } }], { interactionNodeId: 101 });
-    await expect(exportTraceEvidence({
-      runtime: missing.runtime,
-      interactions: [{ id: 1, graphNodeId: 101 }],
-      directory: missing.directory,
-      refPrefix: "traces/enabled",
-      correlation: {},
-    })).rejects.toThrow(/broker-scope marker/);
+    const integrityCases = [
+      ["a missing broker-scope marker", [{ type: "prompt", data: { text: "task" } }], {}, /broker-scope marker/],
+      ["conflicting broker-scope markers", [
+        brokerScope,
+        { type: "execution.scope", data: { completionBrokerAvailable: false } },
+      ], {}, /broker-scope marker/],
+      ["a manifest identity mismatch", [brokerScope], { corruptManifest: true }, /manifest or event integrity/],
+      ["an event-byte descriptor mismatch", [brokerScope], { corruptDescriptor: true }, /manifest or event integrity/],
+    ];
+    expect(integrityCases, "integrity break inventory").toHaveLength(4);
+    for (const [label, events, options, expected] of integrityCases) {
+      const broken = await fixture(events, { interactionNodeId: 101, ...options });
+      await expect(exportTraceEvidence({
+        runtime: broken.runtime,
+        interactions: [{ id: 1, graphNodeId: 101 }],
+        directory: broken.directory,
+        refPrefix: "traces/enabled",
+        correlation: {},
+      }), `${label} fails closed`).rejects.toThrow(expected);
+    }
 
-    const conflicting = await fixture([
-      { type: "execution.scope", data: { completionBrokerAvailable: true } },
-      { type: "execution.scope", data: { completionBrokerAvailable: false } },
-    ], { interactionNodeId: 101 });
-    await expect(exportTraceEvidence({
-      runtime: conflicting.runtime,
-      interactions: [{ id: 1, graphNodeId: 101 }],
-      directory: conflicting.directory,
-      refPrefix: "traces/enabled",
-      correlation: {},
-    })).rejects.toThrow(/broker-scope marker/);
-  });
-
-  it("fails closed when the exported manifest identity does not match the trace target", async () => {
-    const corrupted = await fixture([
-      { type: "execution.scope", data: { completionBrokerAvailable: true } },
-    ], { interactionNodeId: 101, corruptManifest: true });
-
-    await expect(exportTraceEvidence({
-      runtime: corrupted.runtime,
-      interactions: [{ id: 1, graphNodeId: 101 }],
-      directory: corrupted.directory,
-      refPrefix: "traces/enabled",
-      correlation: {},
-    })).rejects.toThrow(/manifest or event integrity/);
-  });
-
-  it("fails closed when exported event bytes do not match the returned descriptor", async () => {
-    const corrupted = await fixture([
-      { type: "execution.scope", data: { completionBrokerAvailable: true } },
-    ], { interactionNodeId: 101, corruptDescriptor: true });
-
-    await expect(exportTraceEvidence({
-      runtime: corrupted.runtime,
-      interactions: [{ id: 1, graphNodeId: 101 }],
-      directory: corrupted.directory,
-      refPrefix: "traces/enabled",
-      correlation: {},
-    })).rejects.toThrow(/manifest or event integrity/);
-  });
-
-  it("waits only for a child trace that has not sealed yet", async () => {
-    const pending = await fixture([
-      { type: "execution.scope", data: { completionBrokerAvailable: true } },
-    ], { interactionNodeId: 101 });
+    const pending = await fixture([brokerScope], { interactionNodeId: 101 });
     const exportTrace = pending.runtime.exportCandidateTrace.bind(pending.runtime);
     let attempts = 0;
     pending.runtime.exportCandidateTrace = async (...args) => {
@@ -158,8 +132,8 @@ describe("recursive live-run trace evidence", () => {
       correlation: {},
       timeoutMs: 100,
       pollIntervalMs: 1,
-    })).resolves.toHaveLength(1);
-    expect(attempts).toBe(2);
+    }), "waits for a child trace that has not sealed yet").resolves.toHaveLength(1);
+    expect(attempts, "retries only until the trace exists").toBe(2);
 
     let unrelatedAttempts = 0;
     pending.runtime.exportCandidateTrace = async () => {
@@ -174,8 +148,8 @@ describe("recursive live-run trace evidence", () => {
       correlation: {},
       timeoutMs: 100,
       pollIntervalMs: 1,
-    })).rejects.toThrow("Candidate trace integrity failed");
-    expect(unrelatedAttempts).toBe(1);
+    }), "an integrity failure never retries").rejects.toThrow("Candidate trace integrity failed");
+    expect(unrelatedAttempts, "integrity failures propagate immediately").toBe(1);
 
     let timedAttempts = 0;
     pending.runtime.exportCandidateTrace = async () => {
@@ -190,7 +164,7 @@ describe("recursive live-run trace evidence", () => {
       correlation: {},
       timeoutMs: 1,
       pollIntervalMs: 1,
-    })).rejects.toThrow("No candidate trace exists for product interaction 3");
-    expect(timedAttempts).toBeGreaterThanOrEqual(1);
-  });
+    }), "a never-sealed trace times out").rejects.toThrow("No candidate trace exists for product interaction 3");
+    expect(timedAttempts, "the wait kept polling until the deadline").toBeGreaterThanOrEqual(1);
+  }, 30_000);
 });

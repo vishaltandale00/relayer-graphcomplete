@@ -104,7 +104,7 @@ afterEach(() => {
 });
 
 describe("conversation export product control", () => {
-  it("passes the currently selected thread, suppresses a second click, and restores after save", async () => {
+  it("exports the selected thread once, suppresses a second click, and reports every outcome honestly", async () => {
     vi.useFakeTimers();
     const toast = installToast();
     const completion = deferred();
@@ -116,48 +116,48 @@ describe("conversation export product control", () => {
     });
 
     settingsButton.onclick();
-    expect(settingsButton.getAttribute("aria-expanded")).toBe("true");
-    expect(settingsMenu.classes.has("hidden")).toBe(false);
+    expect(settingsButton.getAttribute("aria-expanded"), "the settings menu opens").toBe("true");
+    expect(settingsMenu.classes.has("hidden"), "the settings menu is visible").toBe(false);
     const first = button.onclick();
     const second = button.onclick();
-    expect(onExportConversation).toHaveBeenCalledTimes(1);
-    expect(onExportConversation).toHaveBeenCalledWith(41);
-    expect(button.disabled).toBe(true);
-    expect(button.getAttribute("aria-busy")).toBe("true");
-    expect(button.textContent).toBe("Exporting…");
-    expect(classes.has("hidden")).toBe(false);
-    expect(settingsButton.getAttribute("aria-expanded")).toBe("false");
-    expect(settingsMenu.classes.has("hidden")).toBe(true);
+    expect(onExportConversation, "a second click is suppressed").toHaveBeenCalledTimes(1);
+    expect(onExportConversation, "the export names the currently selected thread").toHaveBeenCalledWith(41);
+    expect(button.disabled, "the button disables while busy").toBe(true);
+    expect(button.getAttribute("aria-busy"), "the button reports busy").toBe("true");
+    expect(button.textContent, "the busy label").toBe("Exporting…");
+    expect(classes.has("hidden"), "the button stays visible").toBe(false);
+    expect(settingsButton.getAttribute("aria-expanded"), "starting an export closes the menu").toBe("false");
+    expect(settingsMenu.classes.has("hidden"), "the menu hides").toBe(true);
 
     completion.resolve({ status: "saved" });
     await Promise.all([first, second]);
-    expect(button.disabled).toBe(false);
-    expect(button.getAttribute("aria-busy")).toBe("false");
-    expect(button.textContent).toBe("Export conversation…");
-    expect(toast.textContent).toBe("Conversation exported.");
+    expect(button.disabled, "the button restores after save").toBe(false);
+    expect(button.getAttribute("aria-busy"), "the button goes idle").toBe("false");
+    expect(button.textContent, "the idle label").toBe("Export conversation…");
+    expect(toast.textContent, "a saved export toasts").toBe("Conversation exported.");
+
+    const outcomes = [
+      ["a canceled export", { status: "canceled" }, "Export canceled."],
+      ["a failed export", new Error("Disk is full."), "Disk is full."],
+    ];
+    expect(outcomes, "outcome inventory").toHaveLength(2);
+    for (const [label, outcome, message] of outcomes) {
+      const outcomeToast = installToast();
+      const { button: outcomeButton } = captureExportHandler({
+        getThread: () => ({ id: 8 }),
+        onExportConversation: outcome instanceof Error
+          ? vi.fn(async () => { throw outcome; })
+          : vi.fn(async () => outcome),
+      });
+
+      await outcomeButton.onclick();
+      expect(outcomeToast.textContent, `${label} reports honestly`).toBe(message);
+      expect(outcomeButton.disabled, `${label} restores the button`).toBe(false);
+      expect(outcomeButton.getAttribute("aria-busy"), `${label} clears the busy state`).toBe("false");
+    }
   });
 
-  it.each([
-    [{ status: "canceled" }, "Export canceled."],
-    [new Error("Disk is full."), "Disk is full."],
-  ])("reports cancellation and failure honestly", async (outcome, message) => {
-    vi.useFakeTimers();
-    const toast = installToast();
-    const onExportConversation = outcome instanceof Error
-      ? vi.fn(async () => { throw outcome; })
-      : vi.fn(async () => outcome);
-    const { button } = captureExportHandler({
-      getThread: () => ({ id: 8 }),
-      onExportConversation,
-    });
-
-    await button.onclick();
-    expect(toast.textContent).toBe(message);
-    expect(button.disabled).toBe(false);
-    expect(button.getAttribute("aria-busy")).toBe("false");
-  });
-
-  it("dismisses conversation settings from Escape or an outside pointer", () => {
+  it("dismisses the settings menu on Escape or an outside pointer and stays inert in review mode", async () => {
     const { settingsButton, settingsMenu, listeners } = captureExportHandler({
       getThread: () => ({ id: 12 }),
       onExportConversation: vi.fn(async () => ({ status: "saved" })),
@@ -165,26 +165,24 @@ describe("conversation export product control", () => {
 
     settingsButton.onclick();
     listeners.get("keydown")({ key: "Escape" });
-    expect(settingsMenu.classes.has("hidden")).toBe(true);
-    expect(settingsButton.focus).toHaveBeenCalledOnce();
+    expect(settingsMenu.classes.has("hidden"), "escape dismisses the menu").toBe(true);
+    expect(settingsButton.focus, "focus returns to the trigger").toHaveBeenCalledOnce();
 
     settingsButton.onclick();
     listeners.get("pointerdown")({ target: {} });
-    expect(settingsMenu.classes.has("hidden")).toBe(true);
-    expect(settingsButton.getAttribute("aria-expanded")).toBe("false");
-  });
+    expect(settingsMenu.classes.has("hidden"), "an outside pointer dismisses the menu").toBe(true);
+    expect(settingsButton.getAttribute("aria-expanded"), "the aria state collapses").toBe("false");
 
-  it("remains hidden and inert in review mode even if an export callback is supplied", async () => {
     installToast();
-    const onExportConversation = vi.fn(async () => ({ status: "saved" }));
+    const reviewExport = vi.fn(async () => ({ status: "saved" }));
     const { button, settingsControl } = captureExportHandler({
       mode: "review",
       getThread: () => ({ id: 19 }),
-      onExportConversation,
+      onExportConversation: reviewExport,
     });
 
-    expect(settingsControl.classes.has("hidden")).toBe(true);
+    expect(settingsControl.classes.has("hidden"), "review mode hides the control").toBe(true);
     await button.onclick();
-    expect(onExportConversation).not.toHaveBeenCalled();
+    expect(reviewExport, "review mode never exports").not.toHaveBeenCalled();
   });
 });

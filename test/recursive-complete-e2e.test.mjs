@@ -32,11 +32,13 @@ function centered(node) {
   return new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]);
 }
 
-afterEach(async () => {
+async function teardown() {
   for (const close of closers.splice(0).reverse()) await close();
   for (const service of services.splice(0).reverse()) await service.close();
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
-});
+}
+
+afterEach(teardown);
 
 /** Counts every broker request an awaiting execution actually makes. */
 async function countingBrokerProxy(targetOrigin) {
@@ -215,11 +217,12 @@ async function graphMetadata(runtimeSession, nodeId) {
   return response.json();
 }
 
-// These prove the recursive seam against the real graph server, the real app server, and the
+// This proves the recursive seam against the real graph server, the real app server, and the
 // real exported `complete(inputGraph)`, with no provider and no inference. Every earlier test
 // of this seam mocked the transport, which is why four separate defects survived in it.
 describe("recursive complete end to end", () => {
-  it("provides broker authority only when temporal provider recursion is enabled", async () => {
+  it("gates broker authority on temporal features, settles a real semantic child, and honours a parent-requested stop", async () => {
+    // Phase 1: broker authority is provided only when temporal provider recursion is enabled.
     const enabled = {};
     const enabledStack = await startRecursiveStack(enabled, {
       implementationFactory: brokerScopeFixtureFactory(enabled),
@@ -253,18 +256,19 @@ describe("recursive complete end to end", () => {
     });
     await waitForStatus(disabledStack.session, disabledThread.id, 0, "accepted", disabled);
 
-    expect(enabled.completionBroker).toMatchObject({
+    expect(enabled.completionBroker, "the enabled arm receives broker authority").toMatchObject({
       tokenPresent: true,
     });
-    expect(new URL(enabled.completionBroker.url)).toMatchObject({
+    expect(new URL(enabled.completionBroker.url), "the broker url is the loopback product completions API").toMatchObject({
       protocol: "http:",
       hostname: "127.0.0.1",
       pathname: "/api/completions",
     });
-    expect(disabled.completionBroker).toBeNull();
-  }, 60_000);
+    expect(disabled.completionBroker, "the disabled arm receives no broker authority").toBeNull();
+    await teardown();
 
-  it("creates a real semantic child, advances the pointer, and settles the parent from the child's returned layer", async () => {
+    // Phase 2: the agent's own complete() call creates a real semantic child, advances both
+    // pointers, and settles the parent from the child's returned layer.
     const observed = { childDelayMs: 1_500 };
     const { session, runtimeSession, proxy, selection } = await startRecursiveStack(observed);
 
@@ -281,19 +285,19 @@ describe("recursive complete end to end", () => {
     const detail = await waitForStatus(session, thread.id, 0, "accepted", observed);
     const parent = detail.interactions[0];
 
-    // 1. The agent's own complete() call produced a real semantic child.
-    expect(observed.childCompletionId).toBe(observed.preparedChild);
+    expect(observed.childCompletionId, "the agent's own complete() call produced a real semantic child")
+      .toBe(observed.preparedChild);
     const child = detail.interactions.find((turn) => turn.graphNodeId === observed.childCompletionId);
     expect(child, "the child is a durable product interaction").toBeTruthy();
-    expect(child.completionStatus).toBe("accepted");
+    expect(child.completionStatus, "the child settled accepted").toBe("accepted");
     const childMetadata = await graphMetadata(runtimeSession, observed.childCompletionId);
-    expect(childMetadata.invocation.sourceInteractionNodeId).toBe(parent.graphNodeId);
+    expect(childMetadata.invocation.sourceInteractionNodeId, "the graph invocation names the parent")
+      .toBe(parent.graphNodeId);
 
-    // 2. The parent consumed the child's returned layer, not a fabricated one.
-    expect(observed.childRootLayer.nodes.map((node) => node.title)).toEqual(["Delegated finding"]);
-    expect(observed.awaitedMs).toBeGreaterThan(1_000);
+    expect(observed.childRootLayer.nodes.map((node) => node.title), "the parent consumed the child's returned layer, not a fabricated one")
+      .toEqual(["Delegated finding"]);
+    expect(observed.awaitedMs, "the parent actually awaited the child").toBeGreaterThan(1_000);
 
-    // 3. Both pointers advanced through numbered outbox revisions.
     const projection = await productRequest(
       session,
       `/api/state?currentProjectionAfter=0&currentProjectionCompletionId=${observed.childCompletionId}`,
@@ -301,47 +305,48 @@ describe("recursive complete end to end", () => {
     const sequence = (completionId) => projection.currentProjection.events
       .filter((event) => event.completionId === completionId)
       .map((event) => [event.revision, event.previousRevision, event.lifecycle]);
-    expect(sequence(parent.graphNodeId)).toEqual([
+    expect(sequence(parent.graphNodeId), "the parent pointer advanced through numbered outbox revisions").toEqual([
       [0, null, "active"],
       [1, 0, "active"],
       [2, 1, "succeeded"],
     ]);
-    expect(sequence(observed.childCompletionId)).toEqual([
+    expect(sequence(observed.childCompletionId), "the child pointer advanced through numbered outbox revisions").toEqual([
       [0, null, "active"],
       [1, 0, "active"],
       [2, 1, "succeeded"],
     ]);
 
-    // 4. Awaiting a 1.5s child cost a handful of requests, not one every 100ms.
     const resultRequests = proxy.requests.filter((request) => request.includes("/result"));
-    expect(resultRequests.length).toBeLessThanOrEqual(5);
-    expect(resultRequests.at(-1)).toMatch(/afterRevision=\d+$/);
-    expect(proxy.requests.filter((request) => request.endsWith("/api/completions"))).toHaveLength(1);
-  }, 60_000);
+    expect(resultRequests.length, "awaiting a 1.5s child costs a handful of requests, not one every 100ms")
+      .toBeLessThanOrEqual(5);
+    expect(resultRequests.at(-1), "the final poll resumes after a revision").toMatch(/afterRevision=\d+$/);
+    expect(proxy.requests.filter((request) => request.endsWith("/api/completions")), "exactly one completion was prepared")
+      .toHaveLength(1);
+    await teardown();
 
-  it("stops a child on its parent's request and keeps the child's retained current", async () => {
-    const observed = { childBlocks: true };
-    const { session, runtimeSession, proxy, selection } = await startRecursiveStack(observed);
+    // Phase 3: a parent-requested stop reports stopped, keeps the child's retained current.
+    const stopped = { childBlocks: true };
+    const stopStack = await startRecursiveStack(stopped);
 
-    const thread = await productRequest(session, "/api/threads", {
+    const stopThread = await productRequest(stopStack.session, "/api/threads", {
       method: "POST",
       body: JSON.stringify({
         title: "Recursive stop",
         initialMessage: "Delegate the hard half",
         harnessId: "fixture-recursive",
         permissionProfileId: "auto",
-        modelSelection: selection,
+        modelSelection: stopStack.selection,
       }),
     });
-    await waitForStatus(session, thread.id, 0, "accepted", observed);
+    await waitForStatus(stopStack.session, stopThread.id, 0, "accepted", stopped);
 
-    // The child reports stopped, not failed, and keeps the layer it had published.
-    expect(observed.stoppedChild.lifecycle).toBe("stopped");
-    expect(observed.stoppedChild.revision).toBeGreaterThan(1);
-    expect(observed.stoppedChild.currentLayerId).not.toBeNull();
-    expect(observed.stoppedChild.safeReason).toBe("cancelled_by_user");
-    const childMetadata = await graphMetadata(runtimeSession, observed.childCompletionId);
-    expect(childMetadata.invocation.sourceInteractionNodeId).toBeTruthy();
-    expect(proxy.requests.filter((request) => request.endsWith("/stop"))).toHaveLength(1);
-  }, 60_000);
+    expect(stopped.stoppedChild.lifecycle, "the child reports stopped, not failed").toBe("stopped");
+    expect(stopped.stoppedChild.revision, "the child had advanced before the stop").toBeGreaterThan(1);
+    expect(stopped.stoppedChild.currentLayerId, "the child keeps the layer it had published").not.toBeNull();
+    expect(stopped.stoppedChild.safeReason, "the stop is attributed to the user").toBe("cancelled_by_user");
+    const stoppedMetadata = await graphMetadata(stopStack.runtimeSession, stopped.childCompletionId);
+    expect(stoppedMetadata.invocation.sourceInteractionNodeId, "the stopped child still names its parent").toBeTruthy();
+    expect(stopStack.proxy.requests.filter((request) => request.endsWith("/stop")), "exactly one broker stop request")
+      .toHaveLength(1);
+  }, 180_000);
 });
