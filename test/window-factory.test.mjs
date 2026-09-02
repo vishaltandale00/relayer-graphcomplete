@@ -88,4 +88,38 @@ describe("createWindowFactory", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(openExternal).not.toHaveBeenCalled();
   });
+
+  it("starts recurring update polling for a packaged window and leaves development alone", async () => {
+    class FakeBrowserWindow {
+      constructor() {
+        this.webContents = Object.assign(new EventEmitter(), {
+          setWindowOpenHandler: vi.fn(),
+          session: { cookies: { set: vi.fn(async () => undefined) } },
+        });
+        this.loadURL = vi.fn(async () => undefined);
+      }
+    }
+    const productSession = {
+      origin: "http://127.0.0.1:4321/session",
+      cookie: { name: "session", value: "private" },
+    };
+    const windowFor = async (phase) => {
+      const updater = {
+        status: () => ({ phase }),
+        check: vi.fn(async () => undefined),
+        startPolling: vi.fn(),
+      };
+      await createWindowFactory({
+        BrowserWindow: FakeBrowserWindow,
+        desktopDirectory: "/immutable-desktop",
+        getAppearance: () => "dark",
+        updater,
+        openExternal: vi.fn(async () => undefined),
+      })(productSession);
+      return updater;
+    };
+
+    expect((await windowFor("idle")).startPolling).toHaveBeenCalledOnce();
+    expect((await windowFor("development")).startPolling).not.toHaveBeenCalled();
+  });
 });

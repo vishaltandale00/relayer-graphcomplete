@@ -114,6 +114,7 @@ export function createWindowFactory({
     await window.loadURL(productOrigin);
     if (updater.status().phase !== "development") {
       setTimeout(() => { void updater.check().catch(() => undefined); }, 5_000);
+      updater.startPolling?.();
     }
     return window;
   };

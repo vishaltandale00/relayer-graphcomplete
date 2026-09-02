@@ -113,6 +113,7 @@ export function createDesktopAccountService({
   timeoutMs = LOGIN_TIMEOUT_MS,
   emit = () => {},
   beforeCredentialCommit = async () => {},
+  presentWindow = () => {},
   telemetry = null,
 }) {
   if (initialChannel !== "stable" && initialChannel !== "preview") throw new TypeError("Desktop account channel must be stable or preview.");
@@ -322,6 +323,14 @@ export function createDesktopAccountService({
         response.end("This sign-in attempt is no longer active.");
         return;
       }
+      // The user is in the browser, not in Relayer. Once this callback has
+      // decided the attempt, the outcome belongs in the app they left. A
+      // superseded attempt returns above and presents nothing.
+      const returnToRelayer = () => {
+        try { presentWindow(); } catch {
+          // Window presentation is a courtesy and cannot fail a sign-in.
+        }
+      };
       const url = new URL(request.url, current.redirectUri);
       const callback = new URL(current.redirectUri);
       if (request.method !== "GET" || request.headers.host !== callback.host ||
@@ -329,6 +338,7 @@ export function createDesktopAccountService({
         response.statusCode = 400;
         response.end("Sign-in could not be verified.");
         await finishAttempt(current, publicState(current.channel, "error", { reason: "authentication-failed" }));
+        returnToRelayer();
         return;
       }
       const keys = [...url.searchParams.keys()];
@@ -352,17 +362,22 @@ export function createDesktopAccountService({
         response.statusCode = 400;
         response.end("Sign-in could not be verified.");
         await finishAttempt(current, publicState(current.channel, "error", { reason: "authentication-failed" }));
+        returnToRelayer();
         return;
       }
       if (hasAuthError) {
         response.statusCode = 400;
         response.end("Sign-in was cancelled or rejected.");
         await finishAttempt(current, publicState(current.channel, "signed-out"));
+        returnToRelayer();
         return;
       }
       response.statusCode = 200;
       response.setHeader("content-type", "text/plain; charset=utf-8");
       response.end("Sign-in received. You can return to Relayer.");
+      // Come forward now rather than after the token exchange, so the user is
+      // watching Relayer settle instead of a spent browser tab.
+      returnToRelayer();
       await closeServer(current.server, { wait: false });
       try {
         const { tokens, subject } = await tokenRequest({

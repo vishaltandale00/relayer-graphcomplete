@@ -23,6 +23,14 @@ export function resolveUpdateChannel(savedChannel) {
   return savedChannel === "preview" ? "preview" : "stable";
 }
 
+// Phases where an update is already in the user's hands. Neither a channel
+// change nor a background poll may disturb one.
+const IN_FLIGHT_UPDATE_PHASES = ["checking", "available", "downloading", "ready"];
+
+// A session left open past a release would otherwise never learn it is behind,
+// because the only other checks are one at startup and the Settings button.
+export const UPDATE_POLL_INTERVAL_MS = 3 * 60 * 60 * 1000;
+
 export function createDesktopUpdater({
   autoUpdater,
   app,
@@ -32,9 +40,13 @@ export function createDesktopUpdater({
   onRuntimePrefetchFailure = () => {},
   platform = process.platform,
   release = systemRelease(),
+  pollIntervalMs = UPDATE_POLL_INTERVAL_MS,
+  setPollTimer = setInterval,
+  clearPollTimer = clearInterval,
 }) {
   let channel = "stable";
   let availableInfo = null;
+  let pollTimer = null;
   let displayedDownloadPercent = 0;
   let state = { phase: app.isPackaged ? "idle" : "development", channel, version: app.getVersion() };
   const publish = (patch) => {
@@ -108,11 +120,40 @@ export function createDesktopUpdater({
     autoUpdater.allowDowngrade = false;
   };
 
+  async function check() {
+    if (!app.isPackaged) return publish({ phase: "development", error: null });
+    configureFeed();
+    try {
+      await autoUpdater.checkForUpdates();
+      return state;
+    } catch (error) {
+      return state.phase === "failed" ? state : publish({ phase: "failed", error: error.message });
+    }
+  }
+
   return {
     status: () => state,
+    check,
+    startPolling() {
+      if (!app.isPackaged || pollTimer !== null) return false;
+      pollTimer = setPollTimer(() => {
+        // A poll only discovers. An update already offered, downloading, or
+        // staged belongs to the user, so leave it and its progress alone.
+        if (IN_FLIGHT_UPDATE_PHASES.includes(state.phase)) return;
+        void check().catch(() => undefined);
+      }, pollIntervalMs);
+      pollTimer?.unref?.();
+      return true;
+    },
+    stopPolling() {
+      if (pollTimer === null) return false;
+      clearPollTimer(pollTimer);
+      pollTimer = null;
+      return true;
+    },
     setChannel(next) {
       if (next !== "stable" && next !== "preview") throw new Error("Update channel must be stable or preview.");
-      if (["checking", "available", "downloading", "ready"].includes(state.phase)) {
+      if (IN_FLIGHT_UPDATE_PHASES.includes(state.phase)) {
         throw new Error("Finish the current update before changing channels.");
       }
       channel = next;
@@ -125,16 +166,6 @@ export function createDesktopUpdater({
         percent: null,
         error: null,
       });
-    },
-    async check() {
-      if (!app.isPackaged) return publish({ phase: "development", error: null });
-      configureFeed();
-      try {
-        await autoUpdater.checkForUpdates();
-        return state;
-      } catch (error) {
-        return state.phase === "failed" ? state : publish({ phase: "failed", error: error.message });
-      }
     },
     async download() {
       if (!app.isPackaged) throw new Error("Updates are available only in packaged builds.");

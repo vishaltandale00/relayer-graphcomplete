@@ -317,6 +317,11 @@ describe("composer model picker UI contract", () => {
   it("defines a viewport-safe narrow layout and light-mode surface", async () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain(".model-picker-popover{position:fixed;left:12px;right:12px;bottom:72px;width:auto");
-    expect(styles).toContain('html[data-theme="light"] .model-picker-popover{background:#fff');
+    // The popover surface tracks the theme tokens instead of one-off hex.
+    expect(styles).toContain('html[data-theme="light"] .model-picker-popover{background:var(--panel)');
+    expect(styles).toContain("border-radius:12px;background:var(--raised);box-shadow:0 22px 70px rgba(0,0,0,.5)}");
+    // The family switcher no longer outweighs the models it filters.
+    expect(styles).toContain(".model-family-field select{height:30px;max-width:64%");
+    expect(styles).toContain(".model-option-list small{color:var(--faint);font-size:11px}");
   });
 });

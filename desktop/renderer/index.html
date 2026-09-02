@@ -17,23 +17,23 @@
       <div class="provider-setup-heading"><small>Welcome to Relayer</small><h1 id="authTitle">Connect a provider</h1><p id="authDescription">Choose how Relayer can access models. You can add more providers later.</p></div>
       <div class="provider-setup-options" id="providerSetupOptions" aria-label="Provider options"></div>
       <form class="provider-setup-form hidden" id="providerSetupForm" novalidate>
-        <button type="button" class="provider-setup-back" id="providerSetupBack">← All providers</button>
+        <button type="button" class="provider-setup-back" id="providerSetupBack">← Back</button>
         <div id="providerSetupFields"></div>
         <div class="provider-setup-actions">
           <button type="button" class="secondary" id="cancelProviderConnection">Cancel</button>
-          <button type="submit" class="primary" id="connectProvider">Connect and discover models</button>
+          <button type="submit" class="primary" id="connectProvider">Connect</button>
         </div>
       </form>
       <section class="provider-family-step hidden" id="providerFamilyStep" aria-labelledby="providerFamilyTitle">
-        <button type="button" class="provider-setup-back" id="providerFamilyBack">← All providers</button>
+        <button type="button" class="provider-setup-back" id="providerFamilyBack">← Back</button>
         <h2 id="providerFamilyTitle">Choose your default model family</h2>
         <p>Confirm a compatible harness, then choose an existing family or create one with models you select.</p>
         <h3>Harness</h3>
         <div id="onboardingHarnessOptions"></div>
         <h3>Model family</h3>
         <div id="onboardingFamilyOptions"></div>
-        <button type="button" class="secondary wide hidden" id="refreshOnboardingProviderModels">Refresh models and set up defaults</button>
-        <button type="button" class="primary wide" id="finishProviderSetup">Continue to Relayer</button>
+        <button type="button" class="secondary wide hidden" id="refreshOnboardingProviderModels">Refresh models</button>
+        <button type="button" class="primary wide" id="finishProviderSetup">Continue</button>
       </section>
       <div class="auth-status" id="authStatus" role="status" aria-live="polite" tabindex="-1">Checking providers…</div>
     </div>
@@ -67,6 +67,7 @@
       </div>
       <div class="sidebar-footer">
         <button class="footer-button" id="settingsButton" title="Settings">⚙<span>Settings</span></button>
+        <button class="footer-button account-footer-button hidden" id="desktopAccountButton" type="button" title="Account">Sign in</button>
         <button class="update-button hidden" id="updateButton" title="Application update available">↓</button>
       </div>
     </aside>
@@ -194,7 +195,6 @@
         </div>
       </section>
     </main>
-    <button class="desktop-account-corner-control hidden" id="desktopAccountButton" type="button" title="Account">Sign in</button>
   </div>
 
   <dialog class="provider-dialog" id="providerDialog" aria-labelledby="providerDialogTitle">

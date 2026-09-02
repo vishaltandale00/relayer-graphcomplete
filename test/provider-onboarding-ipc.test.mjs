@@ -8,6 +8,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
   const writes = [];
   let currentSettings = structuredClone(savedSettings);
   const modelCatalog = { settingsOpened: vi.fn(), explicitRefresh: vi.fn() };
+  const shell = { openExternal: vi.fn() };
   const settings = {
     read: async () => structuredClone(currentSettings),
     write: async (value) => {
@@ -24,7 +25,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
   registerDesktopIpc({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     dialog: { showOpenDialog: vi.fn() },
-    shell: { openExternal: vi.fn() },
+    shell,
     nativeTheme: {},
     credentials: { account: vi.fn(), login: vi.fn(), logout: vi.fn() },
     modelCatalog,
@@ -50,6 +51,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     reconnect: handlers.get("relayer:provider-reconnect"),
     refreshModels: handlers.get("relayer:model-catalog-refresh"),
     modelCatalog,
+    shell,
     settings,
     readSettings: () => structuredClone(currentSettings),
     writes,
@@ -77,10 +79,13 @@ describe("provider onboarding IPC hard gate", () => {
   });
 
   it("routes reconnect through the same definition identity and opens its managed login", async () => {
-    const { reconnect } = fixture(async () => false);
+    const { reconnect, shell } = fixture(async () => false);
     await expect(reconnect(null, { id: "claude-work" })).resolves.toMatchObject({
       status: "pending", connectionId: "claude-work", providerDefinition: { id: "claude-work" },
     });
+    // Sign-in continues in the browser, so the handoff asks for the browser to
+    // come forward instead of leaving the user in front of an unchanged window.
+    expect(shell.openExternal).toHaveBeenCalledWith("https://login.example.test", { activate: true });
   });
 
   it("routes model-family recovery refresh to the exact connected provider", async () => {

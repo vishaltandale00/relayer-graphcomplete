@@ -232,7 +232,7 @@ describe("desktop account presentation", () => {
     expect(showWorkspace).toHaveBeenCalledOnce();
   });
 
-  it("uses a full onboarding surface and anchors the account control to the app viewport", async () => {
+  it("uses a full onboarding surface and seats the account control in the sidebar footer", async () => {
     const [html, css] = await Promise.all([
       readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
@@ -242,8 +242,9 @@ describe("desktop account presentation", () => {
     expect(html).toContain('<section class="desktop-account-onboarding hidden" id="desktopAccountOnboarding"');
     expect(html).not.toContain('<dialog class="desktop-account-onboarding"');
     expect(html).toContain('id="desktopAccountOnboardingNotNow">Continue without an account</button>');
-    expect(sidebarFooter).not.toContain('id="desktopAccountButton"');
-    expect(html).toContain('class="desktop-account-corner-control hidden" id="desktopAccountButton"');
+    expect(sidebarFooter).toContain('id="desktopAccountButton"');
+    expect(sidebarFooter).toContain('class="footer-button account-footer-button hidden"');
+    expect(html).not.toContain("desktop-account-corner-control");
     const accountPanel = html.slice(html.indexOf('id="accountSettingsPanel"'), html.indexOf('id="providerSettingsPanel"'));
     expect(accountPanel).toContain('id="desktopAccountStatus"');
     expect(accountPanel).toContain('id="desktopAccountSignIn"');
@@ -253,6 +254,13 @@ describe("desktop account presentation", () => {
     expect(accountPanel).not.toContain("desktopAccountChannel");
     expect(accountPanel).not.toContain("Release channel");
     expect(css).toContain(".desktop-account-onboarding{position:fixed;inset:0;");
-    expect(css).toContain(".desktop-account-corner-control{position:fixed;right:16px;bottom:14px;");
+    // Nothing floats over the workspace any more, and the control keeps its
+    // glyph when the sidebar collapses to icons.
+    expect(css).not.toContain("desktop-account-corner-control");
+    expect(css).toContain('.account-footer-button:before{content:"\\25CE"');
+    expect(css).toContain("body.sidebar-collapsed .account-footer-button{font-size:0");
+    expect(css).toContain("body.sidebar-collapsed .account-footer-button:before{font-size:13px}");
+    // Two controls do not fit the 58px collapsed rail side by side.
+    expect(css).toContain("body.sidebar-collapsed .sidebar-footer{flex-direction:column");
   });
 });

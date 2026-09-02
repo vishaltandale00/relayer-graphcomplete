@@ -84,7 +84,7 @@ async function fakeAuth0({ clientId = "desktop-client", tokenHandler } = {}) {
   return { issuer, clientId, requests, privateKey };
 }
 
-async function fixture({ auth0, channel = "stable", portsByChannel, openExternal, now = () => 1_900_000_000_000, timeoutMs = 2_000, beforeCredentialCommit, telemetry, emit } = {}) {
+async function fixture({ auth0, channel = "stable", portsByChannel, openExternal, now = () => 1_900_000_000_000, timeoutMs = 2_000, beforeCredentialCommit, telemetry, emit, presentWindow } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "relayer-account-"));
   directories.push(directory);
   const encrypted = [];
@@ -109,6 +109,7 @@ async function fixture({ auth0, channel = "stable", portsByChannel, openExternal
     beforeCredentialCommit,
     telemetry,
     emit,
+    presentWindow,
   });
   return { directory, service, encrypted };
 }
@@ -207,6 +208,69 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     expect(encrypted.at(-1)).toContain("rotated-refresh-token");
     expect(await readFile(join(directory, "account.json"), "utf8")).not.toContain("rotated-refresh-token");
     await expect(callbackFromLauncher(launchUrl)).rejects.toThrow();
+    await service.close();
+  });
+
+  it("brings Relayer back for every settled callback and leaves a superseded one in the browser", async () => {
+    const auth0 = await fakeAuth0();
+    let launchUrl;
+    const openExternal = async (value) => { launchUrl = value; };
+
+    // Success: the user finished in the browser, so the app comes forward.
+    const succeededPresent = vi.fn();
+    const succeeded = await fixture({ auth0, openExternal, presentWindow: succeededPresent });
+    await succeeded.service.start();
+    await succeeded.service.login();
+    expect(succeededPresent).not.toHaveBeenCalled();
+    expect((await callbackFromLauncher(launchUrl)).status).toBe(200);
+    await expect(succeeded.service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
+    expect(succeededPresent).toHaveBeenCalledOnce();
+    await succeeded.service.close();
+
+    // Cancellation: the error belongs in the app, not in a browser tab.
+    const cancelledPresent = vi.fn();
+    const cancelled = await fixture({ auth0, openExternal, presentWindow: cancelledPresent });
+    await cancelled.service.start();
+    await cancelled.service.login();
+    expect((await cancellationFromLauncher(launchUrl)).status).toBe(400);
+    await expect(cancelled.service.waitForIdle()).resolves.toEqual({ status: "signed-out", channel: "stable" });
+    expect(cancelledPresent).toHaveBeenCalledOnce();
+    await cancelled.service.close();
+
+    // A malformed callback still settles the attempt, so it still returns.
+    const malformedPresent = vi.fn();
+    const malformed = await fixture({ auth0, openExternal, presentWindow: malformedPresent });
+    await malformed.service.start();
+    await malformed.service.login();
+    const malformedCallback = new URL(new URL(launchUrl).searchParams.get("redirect_uri"));
+    expect(await rawCallback(malformedCallback, { path: "/favicon.ico" })).toBe(400);
+    await expect(malformed.service.waitForIdle()).resolves.toMatchObject({ status: "error" });
+    expect(malformedPresent).toHaveBeenCalledOnce();
+    await malformed.service.close();
+
+    // Nothing came back from the browser, so nothing yanks the user out of
+    // whatever they moved on to while the attempt aged out.
+    const timedOutPresent = vi.fn();
+    const timedOut = await fixture({ auth0, openExternal, timeoutMs: 10, presentWindow: timedOutPresent });
+    await timedOut.service.start();
+    await timedOut.service.login();
+    await expect(timedOut.service.waitForIdle()).resolves.toMatchObject({ status: "error" });
+    expect(timedOutPresent).not.toHaveBeenCalled();
+    await timedOut.service.close();
+  });
+
+  it("survives a window that cannot be presented", async () => {
+    const auth0 = await fakeAuth0();
+    let launchUrl;
+    const { service } = await fixture({
+      auth0,
+      openExternal: async (value) => { launchUrl = value; },
+      presentWindow: () => { throw new Error("window is gone"); },
+    });
+    await service.start();
+    await service.login();
+    expect((await callbackFromLauncher(launchUrl)).status).toBe(200);
+    await expect(service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
     await service.close();
   });
 

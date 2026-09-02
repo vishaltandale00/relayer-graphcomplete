@@ -241,7 +241,7 @@ async function prepareFamilyStep(definition, { preserveIntent = false } = {}) {
   $("#providerSetupForm").classList.add("hidden");
   $("#providerFamilyStep").classList.remove("hidden");
   const hasCompatibleHarness = onboardingProjection.harnesses.some((harness) => harness.selectable);
-  $("#providerFamilyBack").textContent = hasCompatibleHarness ? "← All providers" : "← Connect another provider";
+  $("#providerFamilyBack").textContent = hasCompatibleHarness ? "← Back" : "← Add a provider";
   renderOnboardingChoices();
   setStatus(onboardingProjection.blockingReason?.message
     ?? "Choose a compatible harness and explicitly confirm a default family.");

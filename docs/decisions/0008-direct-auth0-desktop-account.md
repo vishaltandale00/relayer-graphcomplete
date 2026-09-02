@@ -45,6 +45,14 @@ Changing the saved update channel invalidates an in-flight login and changes the
 next callback pool and diagnostics; it does not create a second application
 identity or discard a valid account credential.
 
+Sign-in hands the user to the browser and takes them back. The launch asks the
+platform to bring the browser forward rather than relying on an unstated default.
+Once a callback settles the in-flight attempt — verified, cancelled, or malformed
+— main presents the Relayer window, so the outcome lands in the app the user left
+instead of in a spent browser tab. A superseded callback and a login that simply
+times out present nothing; the user is not pulled out of whatever they moved on
+to. Window presentation is a courtesy and can never fail a sign-in.
+
 The renderer receives a closed presentation contract:
 
 - `{status: "signed-out", channel}`
@@ -72,8 +80,14 @@ of projects, chats, and threads and offers both `Sign in` and an explicit
 suppresses later automatic prompts; account or network failure never traps the
 user on this optional step.
 
-After onboarding, a quiet account control is anchored to the bottom-right of the
-application viewport rather than participating in sidebar layout. Its ordinary
+After onboarding, a quiet account control sits in the sidebar footer beside
+Settings, as a peer of the application's other persistent controls. It was
+originally anchored to the bottom-right of the viewport, outside sidebar layout;
+customer feedback reported that a control floating over the workspace read as
+detached from the app, and the floating pill forced the node-context dock to
+reserve a lane it would otherwise collide with. When the sidebar collapses to
+icons the control keeps its glyph and drops its label, like Settings. Its
+ordinary
 label never includes Stable or Preview. While signed out, clicking `Sign in`
 starts the browser flow directly; an existing or uncertain account opens Account
 settings instead. That panel contains only concise account status and the
