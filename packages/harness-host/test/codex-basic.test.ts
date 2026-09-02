@@ -36,278 +36,658 @@ const codexBasicConfiguration: HarnessConfiguration = {
 };
 
 describe("CodexBasicHarness", () => {
-  it("renders V1 after generic guidance and leaves neutral V0 at baseline", () => {
-    const baseline = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
-    const brokerAuthorized = buildLayeredNavigationPrompt({
-      ...runContext(1, "token"),
-      completionBroker: {
-        url: "http://127.0.0.1:43125/api/completions",
-        token: "completion-broker-secret-token-1234567890",
-      },
-    }, "@relayer/graph-client");
-    const neutral = buildLayeredNavigationPrompt(personalPresentationRunContext(false), "@relayer/graph-client");
-    const treatment = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client");
-    const codexProviderPrompt = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client", undefined, false);
 
-    expect(neutral).toBe(baseline);
-    expect(treatment).toContain("Personal graph presentation preferences:");
-    expect(treatment).toContain("Decision-useful center: The user prefers central layers");
-    expect(treatment).toContain("every native child that can author graph content");
-    expect(treatment.indexOf("Graph presentation guidance:")).toBeLessThan(
-      treatment.indexOf("Personal graph presentation preferences:"),
-    );
-    expect(treatment.indexOf("live, user-facing workspace")).toBeLessThan(
-      treatment.indexOf("Personal graph presentation preferences:"),
-    );
-    expect(treatment.indexOf("Personal graph presentation preferences:")).toBeLessThan(
-      treatment.indexOf("Normalized interaction input:"),
-    );
-    expect(codexProviderPrompt).toBe(baseline);
-    expect(baseline).toContain("graph with other live agents");
-    expect(baseline).toContain("live, user-facing workspace");
-    expect(baseline).toContain("await graph.getCurrent()");
-    expect(baseline).toContain("await graph.advanceCurrent(");
-    expect(baseline).toContain("Advancing current does not complete the interaction");
-    expect(baseline).not.toContain("graph.prepareComplete(");
-    expect(baseline).not.toContain("Import complete from");
-    expect(baseline).not.toContain("semantic completion is unavailable");
-    expect(brokerAuthorized).toContain("graph.prepareComplete(invokeAction)");
-    expect(brokerAuthorized).toContain("Import complete from");
-  });
+  it("fails closed before starting Codex when configuration, executable, launcher, model, or admission is invalid", async () => {
+    const cases: ReadonlyArray<readonly [label: string, exercise: () => Promise<void> | void]> = [
+      ["an unsupported implementation version is rejected at construction", () => {
+            expect(() => new CodexBasicHarness({
+              threadId: 1,
+              permissionProfileId: "auto",
+              permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
+              workingDirectory: process.cwd(),
+              configuration: { ...codexBasicConfiguration, implementationVersion: 2 },
+              savedState: { codexThreadId: "codex-thread" },
+            })).toThrow("Unsupported codex.basic implementation version: 2");
+      }],
+      ["non-absolute browser MCP launch paths are rejected before starting Codex", () => {
+            expect(() => new CodexBasicHarness(context("ask"), {
+              browserMcpRuntime: { ...browserMcpRuntime, script: "node_modules/chrome-devtools-mcp.js" },
+            })).toThrow("requires absolute executable and script paths");
+      }],
+      ["an empty browser MCP attachment route is rejected before starting Codex", () => {
+            expect(() => new CodexBasicHarness(context("ask"), {
+              browserMcpRuntime: { ...browserMcpRuntime, connectionArgs: [] },
+            })).toThrow("requires non-empty connection arguments");
+      }],
+      ["a shell-active graph-authoring launcher path is rejected before the turn", async () => {
+            const harness = new CodexBasicHarness(context("auto"), {
+              codexPathOverride: "/managed/codex",
+              graphAuthoringLauncherPath: "/immutable/runtime/$(touch marker)",
+              runAppServerTurn: async () => ({ threadId: "unused", turnId: "unused", status: "completed" }),
+            });
+            await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("launcher must be a shell-safe absolute path");
+      }],
+      ["a missing explicit executable is rejected before submitting a turn", async () => {
+            const runAppServerTurn = vi.fn(async () => ({
+              threadId: "unreachable",
+              turnId: "unreachable",
+              status: "completed" as const,
+            }));
+            const harness = new CodexBasicHarness(context("auto"), { runAppServerTurn });
 
-  it("reuses a native Codex thread only while its pinned presentation version is unchanged", async () => {
-    const submitted: CodexAppServerTurnOptions[] = [];
-    const trace = recordingTrace();
-    const harness = harnessFixture("auto", async (options) => {
-      submitted.push(options);
-      options.onThreadId("thread-1");
-      return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
-    });
+            await expect(harness.complete(runContext(1, "token")))
+              .rejects.toThrow("codex.basic requires an explicit managed Codex executable");
 
-    await harness.complete({ ...personalPresentationRunContext(true), trace: trace.sink });
-    await harness.complete(personalPresentationRunContext(true));
-    await harness.complete(personalPresentationRunContext(false));
+            expect(runAppServerTurn).not.toHaveBeenCalled();
+      }],
+      ["recursive execution fails closed without fresh admission and access", async () => {
+            const runAppServerTurn = vi.fn(async () => ({
+              threadId: "unreachable",
+              turnId: "unreachable",
+              status: "completed" as const,
+            }));
+            const harness = harnessFixture("auto", runAppServerTurn);
 
-    expect(submitted[0]?.threadParams.developerInstructions).toContain("If you are the root agent");
-    expect(submitted[0]?.threadParams.developerInstructions).toContain("only when assigning a native child to author graph content");
-    expect(submitted[0]?.threadParams.developerInstructions).toContain("Never include that block in an unrelated delegate's task");
-    expect(submitted[0]?.threadParams.developerInstructions).toContain("only when that exact rendered block is present in your assigned task");
-    expect(submitted[0]?.threadParams.developerInstructions).toContain("every native child that can author graph content");
-    expect(submitted[0]?.threadParams.developerInstructions).not.toContain("Personal graph presentation preferences:");
-    expect(submitted[0]?.threadParams.developerInstructions).not.toContain("Decision-useful center");
-    expect(submitted[0]?.prompt).toContain("Personal graph presentation preferences:");
-    expect(submitted[0]?.prompt.indexOf("Graph presentation guidance:")).toBeLessThan(
-      submitted[0]!.prompt.indexOf("Personal graph presentation preferences:"),
-    );
-    expect(submitted[0]?.prompt.indexOf("Personal graph presentation preferences:")).toBeLessThan(
-      submitted[0]!.prompt.indexOf("Normalized interaction input:"),
-    );
-    const tracedPrompt = trace.events.find((event) => event.type === "prompt")?.data.text;
-    expect(tracedPrompt).not.toContain("Personal graph presentation preferences:");
-    expect(tracedPrompt).not.toContain("Decision-useful center");
-    expect(submitted[1]?.savedThreadId).toBe("thread-1");
-    expect(submitted[2]?.savedThreadId).toBeUndefined();
-    expect(submitted[2]?.threadParams.developerInstructions).toBeNull();
-  });
+            await expect(harness.complete({
+              ...runContext(2, "child-token"),
+              origin: { kind: "invoke", sourceCompletionId: 1, actionId: 102 },
+            }))
+              .rejects.toThrow("requires an explicitly admitted model and execution-scoped access");
+            expect(runAppServerTurn).not.toHaveBeenCalled();
+      }],
+      ["unsupported secret adapters are rejected before starting Codex", async () => {
+            const runAppServerTurn = vi.fn();
+            const harness = harnessFixture("auto", runAppServerTurn);
 
-  it("rotates a legacy saved Codex thread whose presentation version is unknown", async () => {
-    let submitted: CodexAppServerTurnOptions | undefined;
-    const harness = new CodexBasicHarness({
-      ...context("auto"),
-      savedState: { codexThreadId: "legacy-thread" },
-    }, {
-      codexPathOverride: "/managed/codex",
-      runAppServerTurn: async (options) => {
-        submitted = options;
-        options.onThreadId("replacement-thread");
-        return { threadId: "replacement-thread", turnId: "turn-1", status: "completed" };
-      },
-    });
+            await expect(harness.complete({
+              ...runContext(1, "token"),
+              model: {
+                providerId: "anthropic-work",
+                adapterId: "anthropic-api",
+                modelId: "claude-sonnet-4",
+              },
+              access: {
+                kind: "secret",
+                contract: "secret@1",
+                providerId: "anthropic-work",
+                adapterId: "anthropic-api",
+                adapterImplementationVersion: "1",
+                endpoint: "https://api.anthropic.test",
+                fields: { "api-key": "selected-secret" },
+              },
+            })).rejects.toThrow("codex.basic cannot run provider adapter anthropic-api");
 
-    await harness.complete(runContext(1, "token"));
+            expect(runAppServerTurn).not.toHaveBeenCalled();
+      }],
+      ["a provider model codex.basic cannot execute is rejected before starting a thread", async () => {
+            const runAppServerTurn = vi.fn<NonNullable<CodexBasicDependencies["runAppServerTurn"]>>();
+            const harness = new CodexBasicHarness({
+              threadId: 1,
+              permissionProfileId: "auto",
+              permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
+              workingDirectory: process.cwd(),
+              configuration: codexBasicConfiguration,
+            }, { codexPathOverride: "/managed/codex", runAppServerTurn });
 
-    expect(submitted?.savedThreadId).toBeUndefined();
-    expect(harness.state()).toEqual({
-      codexThreadId: "replacement-thread",
-      codexThreadPersonalPresentationVersionId: null,
-    });
-  });
+            await expect(harness.complete({
+              ...runContext(1, "token"),
+              model: { providerId: "future-provider", modelId: "future-model" },
+            })).rejects.toThrow("codex.basic cannot run provider future-provider");
+            expect(runAppServerTurn).not.toHaveBeenCalled();
+      }],
+    ];
+    expect(cases, "every preflight rejection boundary is covered").toHaveLength(8);
+    for (const [label, exercise] of cases) {
+      try {
+        await exercise();
+      } catch (error) {
+        expect.soft(error, label).toBe(null);
+      }
+    }
+  }, 10_000);
 
-  it("requires an explicit Codex executable before submitting an app-server turn", async () => {
-    const runAppServerTurn = vi.fn(async () => ({
-      threadId: "unreachable",
-      turnId: "unreachable",
-      status: "completed" as const,
-    }));
-    const harness = new CodexBasicHarness(context("auto"), { runAppServerTurn });
-
-    await expect(harness.complete(runContext(1, "token")))
-      .rejects.toThrow("codex.basic requires an explicit managed Codex executable");
-
-    expect(runAppServerTurn).not.toHaveBeenCalled();
-  });
-
-  it("can resolve an explicit managed runtime lazily for internal Eval", async () => {
-    const runAppServerTurn = vi.fn(async (options: CodexAppServerTurnOptions) => {
-      options.onThreadId("eval-thread");
-      return { threadId: "eval-thread", turnId: "turn-1", status: "completed" as const };
-    });
-    const resolveCodexRuntime = vi.fn(async () => ({
-      executable: "/managed/eval/codex",
-      environment: { PATH: "/managed/eval/codex-path:/usr/bin" },
-    }));
-    const harness = new CodexBasicHarness(context("auto"), { runAppServerTurn, resolveCodexRuntime });
-
-    await harness.complete(runContext(1, "token"));
-
-    expect(resolveCodexRuntime).toHaveBeenCalledOnce();
-    expect(runAppServerTurn).toHaveBeenCalledWith(expect.objectContaining({
-      codexPathOverride: "/managed/eval/codex",
-      environment: expect.objectContaining({ PATH: "/managed/eval/codex-path:/usr/bin" }),
-    }));
-  });
-
-  it("does not retain a force-shutdown controller when lazy executable resolution fails", async () => {
-    const harness = new CodexBasicHarness(context("auto"), {
-      resolveCodexRuntime: async () => { throw new Error("managed runtime unavailable"); },
-    });
-
-    await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("managed runtime unavailable");
-
-    expect((harness as unknown as { activeForceShutdowns: Set<AbortController> }).activeForceShutdowns.size).toBe(0);
-  });
-
-  it("force-disposes the active provider turn exactly once", async () => {
-    let submitted: CodexAppServerTurnOptions | undefined;
-    const harness = harnessFixture("auto", (options) => {
-      submitted = options;
-      return new Promise((_resolve, reject) => {
-        options.forceSignal?.addEventListener("abort", () => reject(options.forceSignal?.reason), { once: true });
+  it("resolves the managed runtime lazily, passes packaged overrides, and force-disposes the active turn exactly once", async () => {
+    {
+      const runAppServerTurn = vi.fn(async (options: CodexAppServerTurnOptions) => {
+        options.onThreadId("eval-thread");
+        return { threadId: "eval-thread", turnId: "turn-1", status: "completed" as const };
       });
-    });
+      const resolveCodexRuntime = vi.fn(async () => ({
+        executable: "/managed/eval/codex",
+        environment: { PATH: "/managed/eval/codex-path:/usr/bin" },
+      }));
+      const harness = new CodexBasicHarness(context("auto"), { runAppServerTurn, resolveCodexRuntime });
 
-    const completing = harness.complete(runContext(1, "token"));
-    await vi.waitFor(() => expect(submitted).toBeDefined());
-    harness.forceShutdown();
-    harness.forceShutdown();
+      await harness.complete(runContext(1, "token"));
 
-    await expect(completing).rejects.toThrow("force-disposed");
-    expect(submitted?.forceSignal?.aborted).toBe(true);
-  });
+      expect(resolveCodexRuntime, "the managed runtime is resolved lazily exactly once").toHaveBeenCalledOnce();
+      expect(runAppServerTurn).toHaveBeenCalledWith(expect.objectContaining({
+        codexPathOverride: "/managed/eval/codex",
+        environment: expect.objectContaining({ PATH: "/managed/eval/codex-path:/usr/bin" }),
+      }));
+    }
 
-  it("rejects an unsupported implementation version", () => {
-    expect(() => new CodexBasicHarness({
-      threadId: 1,
-      permissionProfileId: "auto",
-      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
-      workingDirectory: process.cwd(),
-      configuration: { ...codexBasicConfiguration, implementationVersion: 2 },
-      savedState: { codexThreadId: "codex-thread" },
-    })).toThrow("Unsupported codex.basic implementation version: 2");
-  });
+    {
+      const harness = new CodexBasicHarness(context("auto"), {
+        resolveCodexRuntime: async () => { throw new Error("managed runtime unavailable"); },
+      });
 
-  it("rejects non-absolute browser MCP launch paths before starting Codex", () => {
-    expect(() => new CodexBasicHarness(context("ask"), {
-      browserMcpRuntime: { ...browserMcpRuntime, script: "node_modules/chrome-devtools-mcp.js" },
-    })).toThrow("requires absolute executable and script paths");
-  });
+      await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("managed runtime unavailable");
 
-  it("rejects an empty browser MCP attachment route before starting Codex", () => {
-    expect(() => new CodexBasicHarness(context("ask"), {
-      browserMcpRuntime: { ...browserMcpRuntime, connectionArgs: [] },
-    })).toThrow("requires non-empty connection arguments");
-  });
+      expect((harness as unknown as { activeForceShutdowns: Set<AbortController> }).activeForceShutdowns.size, "a failed resolution retains no force-shutdown controller").toBe(0);
+    }
 
-  it("retains a provider thread ID when the first app-server turn fails", async () => {
-    let submitted: CodexAppServerTurnOptions | undefined;
-    const harness = harnessFixture("auto", async (options) => {
-      submitted = options;
-      options.onThreadId("codex-thread-after-start");
-      throw new Error("turn failed");
-    });
-
-    await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("turn failed");
-
-    expect(harness.state()).toEqual({
-      codexThreadId: "codex-thread-after-start",
-      codexThreadPersonalPresentationVersionId: null,
-    });
-    expect(submitted?.prompt).toContain("Relayer graph affordances:");
-    expect(submitted?.prompt).toContain("Each layer should explain its scope as a coherent whole");
-    expect(submitted?.prompt).toContain('Choose "expand" when another layer should deepen one part');
-    expect(submitted?.prompt).toContain('Choose "reference" for supporting evidence or reusable context');
-    expect(submitted?.prompt).toContain("A layer reached as a reference may author only further reference actions");
-    expect(submitted?.prompt).toContain('Choose "invoke" when the useful next step requires a new agent interaction');
-    expect(submitted?.prompt).toContain('choosing "stop" means leaving the node without a further action');
-    expect(submitted?.prompt).toContain("It is not GraphComplete's stopped lifecycle state");
-    expect(submitted?.prompt).toContain("does not stop the interaction");
-    expect(submitted?.prompt).toContain("pass the program through standard input");
-    expect(submitted?.prompt).toContain("never place authored graph code in a --eval argument");
-    expect(submitted?.prompt).toContain("do not create a script in either the project checkout or a temporary directory");
-    expect(submitted?.prompt).toContain('kind: "navigate", relation: "expand", label: "Response"');
-    expect(submitted?.prompt).toContain("must use exactly one supported Relayer icon name");
-    expect(submitted?.prompt).toContain("exactly one NodePlacementObject(node, x, y) per layer node");
-    expect(submitted?.prompt).toContain("Place a one-node layer at (0.5, 0.5)");
-    expect(submitted?.prompt).toContain("independently of the viewport");
-    expect(submitted?.prompt).toContain("square-dashed-kanban");
-    expect(submitted?.prompt).toContain('new NodeObject("info", "Summary", "...", "concept", "summary-node")');
-    expect(submitted?.prompt).not.toContain('new NodeObject("lightbulb"');
-    expect(submitted?.prompt).toContain('new EdgeObject([summaryNode, detailNode], "summary-detail-edge")');
-    expect(submitted?.prompt).toContain('new LayerObject(nodes, edges, layout, "response-layer")');
-    expect(submitted?.prompt).toContain('relation: "expand"');
-    expect(submitted?.prompt).toContain("sourceLayer: layer");
-    expect(submitted?.prompt).toContain('clientKey: "root-response"');
-    expect(submitted?.prompt).toContain("rerun it with the same clientKey values");
-    expect(submitted?.prompt).toContain("An action's clientKey is scoped to its source node");
-    expect(submitted?.prompt).toContain("keep every draft action on the same source node during repair");
-    expect(submitted?.prompt).toContain("Do not add fake navigate or reference actions");
-    expect(submitted?.prompt).toContain("graph.discardLayer(layer)");
-    expect(submitted?.threadParams).toEqual({
-      cwd: process.cwd(),
-      approvalPolicy: "on-request",
-      approvalsReviewer: "auto_review",
-      sandbox: "workspace-write",
-      model: "gpt-test",
-      config: { skip_git_repo_check: true, web_search: "disabled" },
-      developerInstructions: null,
-      serviceName: "relayer_graphcomplete",
-    });
-    expect(submitted?.turnParams).toMatchObject({
-      cwd: process.cwd(),
-      approvalPolicy: "on-request",
-      approvalsReviewer: "auto_review",
-      model: "gpt-test",
-      effort: "medium",
-      sandboxPolicy: {
-        type: "workspaceWrite",
-        writableRoots: [process.cwd()],
-        networkAccess: true,
-      },
-    });
-  });
-
-  it("passes the packaged executable override to the app-server transport", async () => {
-    let submitted: CodexAppServerTurnOptions | undefined;
-    const harness = new CodexBasicHarness(context("auto"), {
-      codexPathOverride: "/Applications/Relayer.app/Contents/Resources/codex",
-      runAppServerTurn: async (options) => {
+    {
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const harness = harnessFixture("auto", (options) => {
         submitted = options;
-        options.onThreadId("codex-thread");
-        return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
-      },
-    });
+        return new Promise((_resolve, reject) => {
+          options.forceSignal?.addEventListener("abort", () => reject(options.forceSignal?.reason), { once: true });
+        });
+      });
 
-    await harness.complete(runContext(1, "token"));
+      const completing = harness.complete(runContext(1, "token"));
+      await vi.waitFor(() => expect(submitted).toBeDefined());
+      harness.forceShutdown();
+      harness.forceShutdown();
 
-    expect(submitted).toMatchObject({
-      codexPathOverride: "/Applications/Relayer.app/Contents/Resources/codex",
-      environment: { RELAYER_GRAPH_TOKEN: "token", RELAYER_NODE_ID: "1" },
-    });
+      await expect(completing, "forceShutdown disposes the active provider turn").rejects.toThrow("force-disposed");
+      expect(submitted?.forceSignal?.aborted, "the force signal reaches the provider turn").toBe(true);
+    }
+
+    {
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const harness = new CodexBasicHarness(context("auto"), {
+        codexPathOverride: "/Applications/Relayer.app/Contents/Resources/codex",
+        runAppServerTurn: async (options) => {
+          submitted = options;
+          options.onThreadId("codex-thread");
+          return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
+        },
+      });
+
+      await harness.complete(runContext(1, "token"));
+
+      expect(submitted, "the packaged executable override reaches the transport").toMatchObject({
+        codexPathOverride: "/Applications/Relayer.app/Contents/Resources/codex",
+        environment: { RELAYER_GRAPH_TOKEN: "token", RELAYER_NODE_ID: "1" },
+      });
+    }
   });
 
-  it("pins the minimal-environment graph-authoring launcher in every authoring prompt", async () => {
-    vi.stubEnv("RELAYER_GRAPH_AUTHORING_NODE", "/stale/raw/node");
-    try {
+  it("reuses threads while the pinned presentation version is unchanged and isolates fresh and recursive threads", async () => {
+
+    {
+      const submitted: CodexAppServerTurnOptions[] = [];
+      const trace = recordingTrace();
+      const harness = harnessFixture("auto", async (options) => {
+        submitted.push(options);
+        options.onThreadId("thread-1");
+        return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
+      });
+
+      await harness.complete({ ...personalPresentationRunContext(true), trace: trace.sink });
+      await harness.complete(personalPresentationRunContext(true));
+      await harness.complete(personalPresentationRunContext(false));
+
+      expect(submitted[0]?.threadParams.developerInstructions).toContain("If you are the root agent");
+      expect(submitted[0]?.threadParams.developerInstructions).toContain("only when assigning a native child to author graph content");
+      expect(submitted[0]?.threadParams.developerInstructions).toContain("Never include that block in an unrelated delegate's task");
+      expect(submitted[0]?.threadParams.developerInstructions).toContain("only when that exact rendered block is present in your assigned task");
+      expect(submitted[0]?.threadParams.developerInstructions).toContain("every native child that can author graph content");
+      expect(submitted[0]?.threadParams.developerInstructions).not.toContain("Personal graph presentation preferences:");
+      expect(submitted[0]?.threadParams.developerInstructions).not.toContain("Decision-useful center");
+      expect(submitted[0]?.prompt).toContain("Personal graph presentation preferences:");
+      expect(submitted[0]?.prompt.indexOf("Graph presentation guidance:")).toBeLessThan(
+        submitted[0]!.prompt.indexOf("Personal graph presentation preferences:"),
+      );
+      expect(submitted[0]?.prompt.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+        submitted[0]!.prompt.indexOf("Normalized interaction input:"),
+      );
+      const tracedPrompt = trace.events.find((event) => event.type === "prompt")?.data.text;
+      expect(tracedPrompt).not.toContain("Personal graph presentation preferences:");
+      expect(tracedPrompt).not.toContain("Decision-useful center");
+      expect(submitted[1]?.savedThreadId, "the thread is reused while the pinned presentation version is unchanged").toBe("thread-1");
+      expect(submitted[2]?.savedThreadId, "a presentation version change rotates the thread").toBeUndefined();
+      expect(submitted[2]?.threadParams.developerInstructions).toBeNull();
+    }
+
+    {
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const harness = new CodexBasicHarness({
+        ...context("auto"),
+        savedState: { codexThreadId: "legacy-thread" },
+      }, {
+        codexPathOverride: "/managed/codex",
+        runAppServerTurn: async (options) => {
+          submitted = options;
+          options.onThreadId("replacement-thread");
+          return { threadId: "replacement-thread", turnId: "turn-1", status: "completed" };
+        },
+      });
+
+      await harness.complete(runContext(1, "token"));
+
+      expect(submitted?.savedThreadId, "an unknown presentation version rotates the legacy thread").toBeUndefined();
+      expect(harness.state(), "rotation records only the replacement thread").toEqual({
+        codexThreadId: "replacement-thread",
+        codexThreadPersonalPresentationVersionId: null,
+      });
+    }
+
+    {
+      const submissions: CodexAppServerTurnOptions[] = [];
+      const harness = harnessFixture("auto", async (options) => {
+        submissions.push(options);
+        options.onThreadId(options.savedThreadId ?? "codex-thread-1");
+        return { threadId: options.savedThreadId ?? "codex-thread-1", turnId: `turn-${submissions.length}`, status: "completed" };
+      });
+
+      await harness.complete({ ...runContext(1, "first-token"), model: { providerId: "codex", modelId: "gpt-first" }, access: codexAccess() });
+      await harness.complete({ ...runContext(2, "second-token"), model: { providerId: "codex", modelId: "gpt-second" }, access: codexAccess() });
+
+      expect(submissions.map(({ environment, savedThreadId }) => [environment.RELAYER_GRAPH_TOKEN, environment.RELAYER_NODE_ID, savedThreadId]), "graph credentials rotate while the same provider thread resumes").toEqual([
+        ["first-token", "1", undefined],
+        ["second-token", "2", "codex-thread-1"],
+      ]);
+      expect(submissions.map(({ threadParams, turnParams }) => [threadParams.model, turnParams.model])).toEqual([
+        ["gpt-first", "gpt-first"],
+        ["gpt-second", "gpt-second"],
+      ]);
+      expect(harness.state()).toEqual({
+        codexThreadId: "codex-thread-1",
+        codexThreadPersonalPresentationVersionId: null,
+      });
+    }
+
+    {
+      const submissions: CodexAppServerTurnOptions[] = [];
+      const configuration = {
+        ...structuredClone(codexBasicConfiguration),
+        settings: {
+          ...structuredClone(codexBasicConfiguration.settings),
+          rootSessionMode: "fresh" as const,
+        },
+      };
+      const harness = new CodexBasicHarness({
+        ...context("auto"),
+        configuration,
+        savedState: {
+          codexThreadId: "stale-provider-thread",
+          codexThreadPersonalPresentationVersionId: null,
+        },
+      }, {
+        codexPathOverride: "/managed/codex",
+        runAppServerTurn: async (options) => {
+          submissions.push(options);
+          const threadId = `fresh-thread-${submissions.length}`;
+          await options.onThreadId(threadId);
+          return { threadId, turnId: `turn-${submissions.length}`, status: "completed" };
+        },
+      });
+
+      await harness.complete(runContext(1, "first-token"));
+      await harness.complete(runContext(2, "second-token"));
+
+      expect(submissions.map(({ savedThreadId }) => savedThreadId), "every human root starts in a fresh provider thread").toEqual([undefined, undefined]);
+      expect(harness.state(), "fresh roots persist no hidden provider context").toEqual({});
+    }
+
+    {
+      const submissions: CodexAppServerTurnOptions[] = [];
+      const harness = new CodexBasicHarness({
+        ...context("auto"),
+        savedState: {
+          codexThreadId: "root-thread",
+          codexThreadPersonalPresentationVersionId: null,
+        },
+      }, {
+        codexPathOverride: "/managed/codex",
+        runAppServerTurn: async (options) => {
+          submissions.push(options);
+          const invocation = submissions.length;
+          const threadId = options.savedThreadId ?? `child-thread-${invocation}`;
+          await options.onThreadId(threadId);
+          await options.onTurnId?.(threadId, `turn-${invocation}`);
+          return { threadId, turnId: `turn-${invocation}`, status: "completed" };
+        },
+      });
+
+      const admitted = (id: number, token: string): HarnessRunContext => ({
+        ...runContext(id, token),
+        origin: { kind: "invoke", sourceCompletionId: 1, actionId: id + 100 },
+        model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-test" },
+        access: codexAccess(),
+      });
+      const first = harness.complete(admitted(2, "child-token-a"));
+      const second = harness.complete(admitted(3, "child-token-b"));
+      await Promise.all([first, second]);
+
+      await expect(first.attached).resolves.toEqual({
+        schemaVersion: 1,
+        provider: "codex",
+        threadId: "child-thread-1",
+        turnId: "turn-1",
+      });
+      await expect(second.attached).resolves.toEqual({
+        schemaVersion: 1,
+        provider: "codex",
+        threadId: "child-thread-2",
+        turnId: "turn-2",
+      });
+      expect(submissions.map(({ savedThreadId, environment }) => [
+        savedThreadId,
+        environment.RELAYER_GRAPH_TOKEN,
+        environment.RELAYER_NODE_ID,
+      ]), "recursive completions start fresh threads without replacing root continuity").toEqual([
+        [undefined, "child-token-a", "2"],
+        [undefined, "child-token-b", "3"],
+      ]);
+      expect(harness.state()).toEqual({
+        codexThreadId: "root-thread",
+        codexThreadPersonalPresentationVersionId: null,
+      });
+
+      await harness.complete(runContext(1, "root-token"));
+      expect(submissions[2]?.savedThreadId, "root turns keep resuming the root thread").toBe("root-thread");
+      expect(harness.state()).toEqual({
+        codexThreadId: "root-thread",
+        codexThreadPersonalPresentationVersionId: null,
+      });
+    }
+
+  }, 15_000);
+
+  it("translates product profiles into Codex submissions and retains thread state across a failed first turn", async () => {
+
+    {
+      const cases = [
+        ["ask", { sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user" }, { type: "workspaceWrite", networkAccess: true }],
+        ["auto", { sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review" }, { type: "workspaceWrite", networkAccess: true }],
+        ["full", { sandbox: "danger-full-access", approvalPolicy: "never" }, { type: "dangerFullAccess" }],
+      ] as const;
+      expect(Object.keys(codexBasicConfiguration.permissionBindings), "only the three product profiles exist").toEqual(["ask", "auto", "full"]);
+      for (const [permissionProfileId, expectedThread, expectedSandbox] of cases) {
+        let submitted: CodexAppServerTurnOptions | undefined;
+        const harness = harnessFixture(permissionProfileId, async (options) => {
+          submitted = options;
+          options.onThreadId("codex-thread");
+          return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
+        });
+
+        await harness.complete(runContext(1, "token"));
+
+        expect(submitted?.threadParams, `${permissionProfileId} translates to the exact thread binding`).toMatchObject(expectedThread);
+        expect(submitted?.sandboxPolicy, `${permissionProfileId} translates to the exact sandbox policy`).toMatchObject(expectedSandbox);
+      }
+    }
+
+    {
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const harness = harnessFixture("auto", async (options) => {
+        submitted = options;
+        options.onThreadId("codex-thread-after-start");
+        throw new Error("turn failed");
+      });
+
+      await expect(harness.complete(runContext(1, "token")), "a failed first turn propagates the turn error").rejects.toThrow("turn failed");
+
+      expect(harness.state(), "the provider thread ID survives a failed first turn").toEqual({
+        codexThreadId: "codex-thread-after-start",
+        codexThreadPersonalPresentationVersionId: null,
+      });
+      expect(submitted?.prompt).toContain("Relayer graph affordances:");
+      expect(submitted?.prompt).toContain("Each layer should explain its scope as a coherent whole");
+      expect(submitted?.prompt).toContain('Choose "expand" when another layer should deepen one part');
+      expect(submitted?.prompt).toContain('Choose "reference" for supporting evidence or reusable context');
+      expect(submitted?.prompt).toContain("A layer reached as a reference may author only further reference actions");
+      expect(submitted?.prompt).toContain('Choose "invoke" when the useful next step requires a new agent interaction');
+      expect(submitted?.prompt).toContain('choosing "stop" means leaving the node without a further action');
+      expect(submitted?.prompt).toContain("It is not GraphComplete's stopped lifecycle state");
+      expect(submitted?.prompt).toContain("does not stop the interaction");
+      expect(submitted?.prompt).toContain("pass the program through standard input");
+      expect(submitted?.prompt).toContain("never place authored graph code in a --eval argument");
+      expect(submitted?.prompt).toContain("do not create a script in either the project checkout or a temporary directory");
+      expect(submitted?.prompt).toContain('kind: "navigate", relation: "expand", label: "Response"');
+      expect(submitted?.prompt).toContain("must use exactly one supported Relayer icon name");
+      expect(submitted?.prompt).toContain("exactly one NodePlacementObject(node, x, y) per layer node");
+      expect(submitted?.prompt).toContain("Place a one-node layer at (0.5, 0.5)");
+      expect(submitted?.prompt).toContain("independently of the viewport");
+      expect(submitted?.prompt).toContain("square-dashed-kanban");
+      expect(submitted?.prompt).toContain('new NodeObject("info", "Summary", "...", "concept", "summary-node")');
+      expect(submitted?.prompt).not.toContain('new NodeObject("lightbulb"');
+      expect(submitted?.prompt).toContain('new EdgeObject([summaryNode, detailNode], "summary-detail-edge")');
+      expect(submitted?.prompt).toContain('new LayerObject(nodes, edges, layout, "response-layer")');
+      expect(submitted?.prompt).toContain('relation: "expand"');
+      expect(submitted?.prompt).toContain("sourceLayer: layer");
+      expect(submitted?.prompt).toContain('clientKey: "root-response"');
+      expect(submitted?.prompt).toContain("rerun it with the same clientKey values");
+      expect(submitted?.prompt).toContain("An action's clientKey is scoped to its source node");
+      expect(submitted?.prompt).toContain("keep every draft action on the same source node during repair");
+      expect(submitted?.prompt).toContain("Do not add fake navigate or reference actions");
+      expect(submitted?.prompt).toContain("graph.discardLayer(layer)");
+      expect(submitted?.threadParams, "the submission carries the exact auto profile thread binding").toEqual({
+        cwd: process.cwd(),
+        approvalPolicy: "on-request",
+        approvalsReviewer: "auto_review",
+        sandbox: "workspace-write",
+        model: "gpt-test",
+        config: { skip_git_repo_check: true, web_search: "disabled" },
+        developerInstructions: null,
+        serviceName: "relayer_graphcomplete",
+      });
+      expect(submitted?.turnParams, "the submission carries the exact turn binding").toMatchObject({
+        cwd: process.cwd(),
+        approvalPolicy: "on-request",
+        approvalsReviewer: "auto_review",
+        model: "gpt-test",
+        effort: "medium",
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          writableRoots: [process.cwd()],
+          networkAccess: true,
+        },
+      });
+    }
+
+    for (const name of ["codex-basic", "codex-basic-high"]) {
+      const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
+      expect(Object.keys(configuration.permissionBindings), `${name} ships exactly the three product profiles`).toEqual(["ask", "auto", "full"]);
+      const cases = [
+        ["ask", { approvalPolicy: "on-request", approvalsReviewer: "user" }],
+        ["auto", { approvalPolicy: "on-request", approvalsReviewer: "auto_review" }],
+        ["full", { approvalPolicy: "never" }],
+      ] as const;
+      for (const [permissionProfileId, nativeApproval] of cases) {
+        let submitted: CodexAppServerTurnOptions | undefined;
+        const harness = new CodexBasicHarness({
+          threadId: 1,
+          permissionProfileId,
+          permissionBinding: configuration.permissionBindings[permissionProfileId]!,
+          workingDirectory: repositoryRoot,
+          configuration,
+        }, {
+          browserMcpRuntime,
+          codexPathOverride: "/managed/codex",
+          runAppServerTurn: async (options) => {
+            submitted = options;
+            options.onThreadId("browser-thread");
+            return { threadId: "browser-thread", turnId: "turn-1", status: "completed" };
+          },
+        });
+
+        await harness.complete({ ...runContext(1, "token"), access: codexAccess() });
+
+        expect(submitted?.threadParams, `${name}/${permissionProfileId} routes browser MCP approval through the profile`).toMatchObject(nativeApproval);
+        if (permissionProfileId === "full") {
+          expect(submitted?.threadParams).not.toHaveProperty("approvalsReviewer");
+        }
+        expect(submitted?.threadParams.config, `${name}/${permissionProfileId} pins the browser MCP server configuration`).toEqual({
+          skip_git_repo_check: true,
+          features: { tool_call_mcp_elicitation: false },
+          mcp_servers: {
+            "chrome-devtools": {
+              command: browserMcpRuntime.executable,
+              args: [browserMcpRuntime.script, ...browserMcpRuntime.connectionArgs],
+              env: { ELECTRON_RUN_AS_NODE: "1" },
+              enabled: true,
+              required: false,
+              startup_timeout_sec: 20,
+              tool_timeout_sec: 20,
+              default_tools_approval_mode: "prompt",
+            },
+          },
+        });
+      }
+    }
+
+    {
+      const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"));
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const harness = new CodexBasicHarness({
+        threadId: 1,
+        permissionProfileId: "auto",
+        permissionBinding: configuration.permissionBindings.auto!,
+        workingDirectory: repositoryRoot,
+        configuration,
+      }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
+        submitted = options;
+        options.onThreadId("selected-model-thread");
+        return { threadId: "selected-model-thread", turnId: "turn-1", status: "completed" };
+      } });
+
+      await harness.complete({
+        ...runContext(1, "token"),
+        model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-picker-selected" },
+        access: codexAccess(),
+      });
+
+      expect(submitted?.threadParams, "the picker-selected root model reaches the thread").toMatchObject({ model: "gpt-picker-selected" });
+      expect(submitted?.turnParams, "the picker-selected root model reaches the turn").toMatchObject({ model: "gpt-picker-selected", effort: "medium" });
+      expect(submitted?.prompt, "native delegation ships with the product configuration").toContain("Codex native subagents are available when useful");
+      expect(configuration.settings).not.toHaveProperty("model");
+      expect(configuration.modelCompatibility?.[0]).not.toHaveProperty("preferredModelId");
+    }
+
+  }, 15_000);
+
+  it("composes the authoring prompt from baseline guidance, presentation preferences, profiles, and launcher pinning", async () => {
+
+    {
+      const baseline = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
+      const brokerAuthorized = buildLayeredNavigationPrompt({
+        ...runContext(1, "token"),
+        completionBroker: {
+          url: "http://127.0.0.1:43125/api/completions",
+          token: "completion-broker-secret-token-1234567890",
+        },
+      }, "@relayer/graph-client");
+      const neutral = buildLayeredNavigationPrompt(personalPresentationRunContext(false), "@relayer/graph-client");
+      const treatment = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client");
+      const codexProviderPrompt = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client", undefined, false);
+
+      expect(neutral, "neutral personal presentation stays at baseline").toBe(baseline);
+      expect(treatment).toContain("Personal graph presentation preferences:");
+      expect(treatment).toContain("Decision-useful center: The user prefers central layers");
+      expect(treatment).toContain("every native child that can author graph content");
+      expect(treatment.indexOf("Graph presentation guidance:")).toBeLessThan(
+        treatment.indexOf("Personal graph presentation preferences:"),
+      );
+      expect(treatment.indexOf("live, user-facing workspace")).toBeLessThan(
+        treatment.indexOf("Personal graph presentation preferences:"),
+      );
+      expect(treatment.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+        treatment.indexOf("Normalized interaction input:"),
+      );
+      expect(codexProviderPrompt, "the Codex-provider prompt stays at baseline").toBe(baseline);
+      expect(baseline).toContain("graph with other live agents");
+      expect(baseline).toContain("live, user-facing workspace");
+      expect(baseline).toContain("await graph.getCurrent()");
+      expect(baseline).toContain("await graph.advanceCurrent(");
+      expect(baseline).toContain("Advancing current does not complete the interaction");
+      expect(baseline).not.toContain("graph.prepareComplete(");
+      expect(baseline).not.toContain("Import complete from");
+      expect(baseline).not.toContain("semantic completion is unavailable");
+      expect(brokerAuthorized, "broker authority unlocks semantic completion").toContain("graph.prepareComplete(invokeAction)");
+      expect(brokerAuthorized).toContain("Import complete from");
+    }
+
+    {
+      const disabledPrompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
+      const prompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client", undefined, true, true);
+      const searchGuidance = prompt.slice(
+        prompt.indexOf("Graph search is available"),
+        prompt.indexOf("Navigation has two meanings:"),
+      );
+
+      expect(disabledPrompt, "search guidance is capability-scoped").not.toContain("Graph search is available");
+      expect(disabledPrompt).not.toContain("await graph.search(request, options)");
+      expect(searchGuidance).toContain("await graph.search(request, options)");
+      expect(searchGuidance).toContain("It is not a provider-native tool or MCP function");
+      expect(searchGuidance).toContain("queryContractVersion: 1");
+      expect(searchGuidance).toContain('target: { scope: "project", id: knownProjectId }');
+      expect(searchGuidance).toContain("Never invent, guess, or discover a target ID");
+      expect(searchGuidance).toContain("The selector chooses a dataset; it is not authority");
+      expect(searchGuidance).toContain("whole-target Content or Layer scans");
+      expect(searchGuidance).toContain("one- or two-relationship MATCH patterns");
+      expect(searchGuidance).toContain("parameters: { anchor: { type: \"string\", value: \"Queue\" }, count: { type: \"integer\", value: \"2\" } }");
+      expect(searchGuidance).toContain("at most 5 rows");
+      expect(searchGuidance).toContain("hard maximum of 8");
+      expect(searchGuidance).toContain("bounded to 16 KiB");
+      expect(searchGuidance).toContain("GraphQueryError values with stable status, code, phase, and path fields");
+      expect(searchGuidance).toContain("never on message text");
+      expect(searchGuidance).toContain("priorLayer?.type !== \"layer\"");
+      expect(searchGuidance).toContain("target: priorLayerId");
+      expect(searchGuidance).toContain("let graph.addAction revalidate visibility");
+      expect(searchGuidance).not.toMatch(/graph\.search\(\{[^}]*\b(?:permit|credential|database|token|authority)\s*:/s);
+    }
+
+    {
+      vi.stubEnv("RELAYER_GRAPH_AUTHORING_NODE", "/stale/raw/node");
+      try {
+        for (const promptProfile of [undefined, "layered-navigation-v1"] as const) {
+          let submittedPrompt = "";
+          let submittedEnvironment: Record<string, string> = {};
+          const harness = new CodexBasicHarness({
+            ...context("auto"),
+            configuration: {
+              ...codexBasicConfiguration,
+              settings: { ...codexBasicConfiguration.settings, ...(promptProfile ? { promptProfile } : {}) },
+            },
+          }, {
+            codexPathOverride: "/managed/codex",
+            graphAuthoringLauncherPath: "/immutable/runtime/graph-authoring-launcher",
+            runAppServerTurn: async (options) => {
+              submittedPrompt = options.prompt;
+              submittedEnvironment = options.environment;
+              options.onThreadId("codex-thread");
+              return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
+            },
+          });
+
+          await harness.complete(runContext(1, "token"));
+
+          expect(submittedPrompt, `${promptProfile ?? "default profile"} pins the minimal-environment launcher`).toContain('Run exactly "/immutable/runtime/graph-authoring-launcher" with no arguments');
+          expect(submittedPrompt).toContain("including the displayed double quotes");
+          expect(submittedPrompt).toContain("shell-native single-quoted here-document");
+          expect(submittedPrompt).toContain("delimited by exactly RELAYER_GRAPH_PROGRAM");
+          expect(submittedPrompt).toContain("do not resolve the launcher or Node.js from PATH");
+          expect(submittedPrompt).toContain("Request Codex sandbox escalation for this exact launcher command");
+          expect(submittedPrompt).toContain("applies its own narrower graph sandbox");
+          expect(submittedPrompt).toContain("the launcher heredoc is the only permitted shell action");
+          expect(submittedPrompt).toContain("Do not run sed, rg, cat, find, or any other inspection command");
+          expect(submittedPrompt).toContain("This restriction applies only to the graph-authoring path");
+          expect(submittedPrompt).toContain("ordinary Codex workspace tools under the configured permission policy");
+          expect(submittedPrompt).toContain("LayerLayoutObject accepts exactly one argument: the placements array");
+          expect(submittedPrompt).toContain("never assign layout.version");
+          expect(submittedEnvironment.RELAYER_GRAPH_AUTHORING_NODE, "the stale ambient launcher environment never reaches the turn").toBeUndefined();
+        }
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    }
+
+    {
       for (const promptProfile of [undefined, "layered-navigation-v1"] as const) {
         let submittedPrompt = "";
         let submittedEnvironment: Record<string, string> = {};
@@ -319,7 +699,6 @@ describe("CodexBasicHarness", () => {
           },
         }, {
           codexPathOverride: "/managed/codex",
-          graphAuthoringLauncherPath: "/immutable/runtime/graph-authoring-launcher",
           runAppServerTurn: async (options) => {
             submittedPrompt = options.prompt;
             submittedEnvironment = options.environment;
@@ -330,608 +709,238 @@ describe("CodexBasicHarness", () => {
 
         await harness.complete(runContext(1, "token"));
 
-        expect(submittedPrompt).toContain('Run exactly "/immutable/runtime/graph-authoring-launcher" with no arguments');
-        expect(submittedPrompt).toContain("including the displayed double quotes");
-        expect(submittedPrompt).toContain("shell-native single-quoted here-document");
+        expect(submittedPrompt, `${promptProfile ?? "default profile"} resolves the default Node executable from PATH`).toContain("Run exactly node --input-type=module");
         expect(submittedPrompt).toContain("delimited by exactly RELAYER_GRAPH_PROGRAM");
-        expect(submittedPrompt).toContain("do not resolve the launcher or Node.js from PATH");
-        expect(submittedPrompt).toContain("Request Codex sandbox escalation for this exact launcher command");
-        expect(submittedPrompt).toContain("applies its own narrower graph sandbox");
-        expect(submittedPrompt).toContain("the launcher heredoc is the only permitted shell action");
-        expect(submittedPrompt).toContain("Do not run sed, rg, cat, find, or any other inspection command");
-        expect(submittedPrompt).toContain("This restriction applies only to the graph-authoring path");
-        expect(submittedPrompt).toContain("ordinary Codex workspace tools under the configured permission policy");
-        expect(submittedPrompt).toContain("LayerLayoutObject accepts exactly one argument: the placements array");
-        expect(submittedPrompt).toContain("never assign layout.version");
-        expect(submittedEnvironment.RELAYER_GRAPH_AUTHORING_NODE).toBeUndefined();
+        expect(submittedPrompt).toContain("do not create a script in either the project checkout or a temporary directory");
+        expect(submittedPrompt).not.toContain("do not resolve Node.js from PATH");
+        expect(submittedEnvironment).not.toHaveProperty("RELAYER_GRAPH_AUTHORING_NODE");
       }
-    } finally {
-      vi.unstubAllEnvs();
     }
-  });
 
-  it("rejects a shell-active graph-authoring launcher path", async () => {
-    const harness = new CodexBasicHarness(context("auto"), {
-      codexPathOverride: "/managed/codex",
-      graphAuthoringLauncherPath: "/immutable/runtime/$(touch marker)",
-      runAppServerTurn: async () => ({ threadId: "unused", turnId: "unused", status: "completed" }),
-    });
-    await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("launcher must be a shell-safe absolute path");
-  });
-
-  it("allows the default graph-authoring Node executable to resolve from PATH", async () => {
-    for (const promptProfile of [undefined, "layered-navigation-v1"] as const) {
+    {
       let submittedPrompt = "";
-      let submittedEnvironment: Record<string, string> = {};
-      const harness = new CodexBasicHarness({
-        ...context("auto"),
-        configuration: {
-          ...codexBasicConfiguration,
-          settings: { ...codexBasicConfiguration.settings, ...(promptProfile ? { promptProfile } : {}) },
-        },
-      }, {
-        codexPathOverride: "/managed/codex",
-        runAppServerTurn: async (options) => {
-          submittedPrompt = options.prompt;
-          submittedEnvironment = options.environment;
-          options.onThreadId("codex-thread");
-          return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
-        },
-      });
-
-      await harness.complete(runContext(1, "token"));
-
-      expect(submittedPrompt).toContain("Run exactly node --input-type=module");
-      expect(submittedPrompt).toContain("delimited by exactly RELAYER_GRAPH_PROGRAM");
-      expect(submittedPrompt).toContain("do not create a script in either the project checkout or a temporary directory");
-      expect(submittedPrompt).not.toContain("do not resolve Node.js from PATH");
-      expect(submittedEnvironment).not.toHaveProperty("RELAYER_GRAPH_AUTHORING_NODE");
-    }
-  });
-
-  it("selects the layered-navigation prompt only for the opt-in profile", async () => {
-    let submittedPrompt = "";
-    const harness = new CodexBasicHarness({
-      threadId: 1,
-      permissionProfileId: "auto",
-      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
-      workingDirectory: process.cwd(),
-      configuration: {
-        ...codexBasicConfiguration,
-        name: "codex-layered-navigation-luna",
-        settings: { ...codexBasicConfiguration.settings, promptProfile: "layered-navigation-v1" },
-      },
-    }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
-      submittedPrompt = options.prompt;
-      options.onThreadId("layered-thread");
-      return { threadId: "layered-thread", turnId: "turn-1", status: "completed" };
-    } });
-
-    await harness.complete(runContext(1, "token"));
-
-    expect(submittedPrompt).toContain('"expand" continues the explanation');
-    expect(submittedPrompt).toContain('"reference" opens supporting evidence');
-    expect(submittedPrompt).toContain("Each layer should explain its scope as a coherent whole");
-    expect(submittedPrompt).toContain('choosing "stop" means leaving the node without a further action');
-    expect(submittedPrompt).toContain("It is not GraphComplete's stopped lifecycle state");
-    expect(submittedPrompt).toContain("Complete the underlying user task in the working directory");
-    expect(submittedPrompt).toContain("Use the harness's ordinary workspace tools and reasoning as needed");
-    expect(submittedPrompt).toContain("the graph is the presentation of the work, not a substitute for doing it");
-    expect(submittedPrompt).toContain("does not by itself complete the underlying user task");
-    expect(submittedPrompt).toContain("Do not submit a plan as though it were completed work");
-    expect(submittedPrompt).toContain("verify that requested workspace effects have actually occurred");
-    expect(submittedPrompt).toContain("A flat answer is valid");
-    expect(submittedPrompt).toContain("Author in whatever order fits the task");
-    expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
-    expect(submittedPrompt).toContain("graph.getNode(1)");
-    expect(submittedPrompt).toContain("graph.getNeighbors(1)");
-    expect(submittedPrompt).toContain("ordinary graph.submit(1) automatically fulfills any lease");
-    expect(submittedPrompt).toContain("There is no separate resolveAction call");
-    expect(submittedPrompt).toContain("Never mention or expose the size justification");
-    expect(submittedPrompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
-    expect(submittedPrompt).toContain("align comparisons deliberately");
-    expect(submittedPrompt).toContain('new NodeObject("info", "Summary", "...", "concept", "summary-node")');
-    expect(submittedPrompt).not.toContain('new NodeObject("lightbulb"');
-    expect(submittedPrompt).toContain('clientKey: "root-response"');
-    expect(submittedPrompt).toContain('clientKey: "node-detail"');
-    expect(submittedPrompt).toContain('clientKey: "node-evidence"');
-    expect(submittedPrompt).toContain('clientKey: "node-follow-up"');
-    expect(submittedPrompt).toContain("rerun it with the same clientKey values");
-    expect(submittedPrompt).toContain("An action's clientKey is scoped to its source node");
-    expect(submittedPrompt).toContain("keep every draft action on the same source node during repair");
-    expect(submittedPrompt).toContain("Do not add fake navigate or reference actions");
-    expect(submittedPrompt).toContain("graph.discardLayer(layer)");
-    expect(submittedPrompt).not.toContain("The required order is:");
-    expect(submittedPrompt).not.toContain("native delegation");
-    expect(submittedPrompt).not.toContain("Codex native subagents");
-  });
-
-  it("appends only the native delegation guidance for the multi-agent profile", async () => {
-    const prompts: string[] = [];
-    const createHarness = (promptProfile: "layered-navigation-v1" | "layered-navigation-multi-agent-v1") => new CodexBasicHarness({
-      threadId: 1,
-      permissionProfileId: "auto",
-      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
-      workingDirectory: process.cwd(),
-      configuration: {
-        ...codexBasicConfiguration,
-        name: `codex-${promptProfile}`,
-        settings: { ...codexBasicConfiguration.settings, promptProfile },
-      },
-    }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
-      prompts.push(options.prompt);
-      options.onThreadId("layered-thread");
-      return { threadId: "layered-thread", turnId: "turn-1", status: "completed" };
-    } });
-
-    await createHarness("layered-navigation-v1").complete(runContext(1, "token"));
-    await createHarness("layered-navigation-multi-agent-v1").complete(runContext(1, "token"));
-
-    const delegationGuidance = "Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.";
-    expect(prompts).toHaveLength(2);
-    expect(prompts[0]).not.toContain("native delegation");
-    expect(prompts[0]).not.toContain("Codex native subagents");
-    expect(prompts[1]).toBe(`${prompts[0]}\n\n${delegationGuidance}`);
-  });
-
-  it("delivers ordered normalized context and child re-read guidance without occurrence authority", async () => {
-    let prompt = "";
-    const harness = harnessFixture("auto", async (options) => {
-      prompt = options.prompt;
-      options.onThreadId("context-thread");
-      return { threadId: "context-thread", turnId: "turn-1", status: "completed" };
-    });
-
-    await harness.complete(attachedRunContext(1, "token"));
-
-    expect(prompt).toContain('"message": "Question"');
-    expect(prompt.indexOf('"title": "First target"')).toBeLessThan(prompt.indexOf('"title": "Second target"'));
-    expect(prompt.indexOf('"first annotation"')).toBeLessThan(prompt.indexOf('"second annotation"'));
-    expect(prompt).toContain("product assigns no semantic precedence");
-    expect(prompt).toContain("including in native child agents");
-    expect(prompt).toContain("graph.getInteractionInput()");
-    expect(prompt).not.toContain("sourceNodeId");
-    expect(prompt).not.toContain("sourceLayerId");
-  });
-
-  it("teaches capability-scoped bounded search and typed references through executable JavaScript", () => {
-    const disabledPrompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
-    const prompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client", undefined, true, true);
-    const searchGuidance = prompt.slice(
-      prompt.indexOf("Graph search is available"),
-      prompt.indexOf("Navigation has two meanings:"),
-    );
-
-    expect(disabledPrompt).not.toContain("Graph search is available");
-    expect(disabledPrompt).not.toContain("await graph.search(request, options)");
-    expect(searchGuidance).toContain("await graph.search(request, options)");
-    expect(searchGuidance).toContain("It is not a provider-native tool or MCP function");
-    expect(searchGuidance).toContain("queryContractVersion: 1");
-    expect(searchGuidance).toContain('target: { scope: "project", id: knownProjectId }');
-    expect(searchGuidance).toContain("Never invent, guess, or discover a target ID");
-    expect(searchGuidance).toContain("The selector chooses a dataset; it is not authority");
-    expect(searchGuidance).toContain("whole-target Content or Layer scans");
-    expect(searchGuidance).toContain("one- or two-relationship MATCH patterns");
-    expect(searchGuidance).toContain("parameters: { anchor: { type: \"string\", value: \"Queue\" }, count: { type: \"integer\", value: \"2\" } }");
-    expect(searchGuidance).toContain("at most 5 rows");
-    expect(searchGuidance).toContain("hard maximum of 8");
-    expect(searchGuidance).toContain("bounded to 16 KiB");
-    expect(searchGuidance).toContain("GraphQueryError values with stable status, code, phase, and path fields");
-    expect(searchGuidance).toContain("never on message text");
-    expect(searchGuidance).toContain("priorLayer?.type !== \"layer\"");
-    expect(searchGuidance).toContain("target: priorLayerId");
-    expect(searchGuidance).toContain("let graph.addAction revalidate visibility");
-    expect(searchGuidance).not.toMatch(/graph\.search\(\{[^}]*\b(?:permit|credential|database|token|authority)\s*:/s);
-  });
-
-  it("uses the picker-selected root model and native delegation in the product configuration", async () => {
-    const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"));
-    let submitted: CodexAppServerTurnOptions | undefined;
-    const harness = new CodexBasicHarness({
-      threadId: 1,
-      permissionProfileId: "auto",
-      permissionBinding: configuration.permissionBindings.auto!,
-      workingDirectory: repositoryRoot,
-      configuration,
-    }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
-      submitted = options;
-      options.onThreadId("selected-model-thread");
-      return { threadId: "selected-model-thread", turnId: "turn-1", status: "completed" };
-    } });
-
-    await harness.complete({
-      ...runContext(1, "token"),
-      model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-picker-selected" },
-      access: codexAccess(),
-    });
-
-    expect(submitted?.threadParams).toMatchObject({ model: "gpt-picker-selected" });
-    expect(submitted?.turnParams).toMatchObject({ model: "gpt-picker-selected", effort: "medium" });
-    expect(submitted?.prompt).toContain("Codex native subagents are available when useful");
-    expect(configuration.settings).not.toHaveProperty("model");
-    expect(configuration.modelCompatibility?.[0]).not.toHaveProperty("preferredModelId");
-  });
-
-  it.each(["codex-basic", "codex-basic-high"])("leaves browser MCP approval routing to each %s product profile", async (name) => {
-    const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
-    expect(Object.keys(configuration.permissionBindings)).toEqual(["ask", "auto", "full"]);
-    const cases = [
-      ["ask", { approvalPolicy: "on-request", approvalsReviewer: "user" }],
-      ["auto", { approvalPolicy: "on-request", approvalsReviewer: "auto_review" }],
-      ["full", { approvalPolicy: "never" }],
-    ] as const;
-    for (const [permissionProfileId, nativeApproval] of cases) {
-      let submitted: CodexAppServerTurnOptions | undefined;
       const harness = new CodexBasicHarness({
         threadId: 1,
-        permissionProfileId,
-        permissionBinding: configuration.permissionBindings[permissionProfileId]!,
-        workingDirectory: repositoryRoot,
-        configuration,
-      }, {
-        browserMcpRuntime,
-        codexPathOverride: "/managed/codex",
-        runAppServerTurn: async (options) => {
-          submitted = options;
-          options.onThreadId("browser-thread");
-          return { threadId: "browser-thread", turnId: "turn-1", status: "completed" };
+        permissionProfileId: "auto",
+        permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
+        workingDirectory: process.cwd(),
+        configuration: {
+          ...codexBasicConfiguration,
+          name: "codex-layered-navigation-luna",
+          settings: { ...codexBasicConfiguration.settings, promptProfile: "layered-navigation-v1" },
         },
-      });
-
-      await harness.complete({ ...runContext(1, "token"), access: codexAccess() });
-
-      expect(submitted?.threadParams).toMatchObject(nativeApproval);
-      if (permissionProfileId === "full") {
-        expect(submitted?.threadParams).not.toHaveProperty("approvalsReviewer");
-      }
-      expect(submitted?.threadParams.config).toEqual({
-        skip_git_repo_check: true,
-        features: { tool_call_mcp_elicitation: false },
-        mcp_servers: {
-          "chrome-devtools": {
-            command: browserMcpRuntime.executable,
-            args: [browserMcpRuntime.script, ...browserMcpRuntime.connectionArgs],
-            env: { ELECTRON_RUN_AS_NODE: "1" },
-            enabled: true,
-            required: false,
-            startup_timeout_sec: 20,
-            tool_timeout_sec: 20,
-            default_tools_approval_mode: "prompt",
-          },
-        },
-      });
-    }
-  });
-
-  it("translates the three product profiles without adding a fixture-only profile", async () => {
-    const cases = [
-      ["ask", { sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user" }, { type: "workspaceWrite", networkAccess: true }],
-      ["auto", { sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review" }, { type: "workspaceWrite", networkAccess: true }],
-      ["full", { sandbox: "danger-full-access", approvalPolicy: "never" }, { type: "dangerFullAccess" }],
-    ] as const;
-    expect(Object.keys(codexBasicConfiguration.permissionBindings)).toEqual(["ask", "auto", "full"]);
-    for (const [permissionProfileId, expectedThread, expectedSandbox] of cases) {
-      let submitted: CodexAppServerTurnOptions | undefined;
-      const harness = harnessFixture(permissionProfileId, async (options) => {
-        submitted = options;
-        options.onThreadId("codex-thread");
-        return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
-      });
+      }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
+        submittedPrompt = options.prompt;
+        options.onThreadId("layered-thread");
+        return { threadId: "layered-thread", turnId: "turn-1", status: "completed" };
+      } });
 
       await harness.complete(runContext(1, "token"));
 
-      expect(submitted?.threadParams).toMatchObject(expectedThread);
-      expect(submitted?.sandboxPolicy).toMatchObject(expectedSandbox);
+      expect(submittedPrompt).toContain('"expand" continues the explanation');
+      expect(submittedPrompt).toContain('"reference" opens supporting evidence');
+      expect(submittedPrompt).toContain("Each layer should explain its scope as a coherent whole");
+      expect(submittedPrompt).toContain('choosing "stop" means leaving the node without a further action');
+      expect(submittedPrompt).toContain("It is not GraphComplete's stopped lifecycle state");
+      expect(submittedPrompt).toContain("Complete the underlying user task in the working directory");
+      expect(submittedPrompt).toContain("Use the harness's ordinary workspace tools and reasoning as needed");
+      expect(submittedPrompt).toContain("the graph is the presentation of the work, not a substitute for doing it");
+      expect(submittedPrompt).toContain("does not by itself complete the underlying user task");
+      expect(submittedPrompt).toContain("Do not submit a plan as though it were completed work");
+      expect(submittedPrompt).toContain("verify that requested workspace effects have actually occurred");
+      expect(submittedPrompt).toContain("A flat answer is valid");
+      expect(submittedPrompt).toContain("Author in whatever order fits the task");
+      expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
+      expect(submittedPrompt).toContain("graph.getNode(1)");
+      expect(submittedPrompt).toContain("graph.getNeighbors(1)");
+      expect(submittedPrompt).toContain("ordinary graph.submit(1) automatically fulfills any lease");
+      expect(submittedPrompt).toContain("There is no separate resolveAction call");
+      expect(submittedPrompt).toContain("Never mention or expose the size justification");
+      expect(submittedPrompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
+      expect(submittedPrompt).toContain("align comparisons deliberately");
+      expect(submittedPrompt).toContain('new NodeObject("info", "Summary", "...", "concept", "summary-node")');
+      expect(submittedPrompt).not.toContain('new NodeObject("lightbulb"');
+      expect(submittedPrompt).toContain('clientKey: "root-response"');
+      expect(submittedPrompt).toContain('clientKey: "node-detail"');
+      expect(submittedPrompt).toContain('clientKey: "node-evidence"');
+      expect(submittedPrompt).toContain('clientKey: "node-follow-up"');
+      expect(submittedPrompt).toContain("rerun it with the same clientKey values");
+      expect(submittedPrompt).toContain("An action's clientKey is scoped to its source node");
+      expect(submittedPrompt).toContain("keep every draft action on the same source node during repair");
+      expect(submittedPrompt).toContain("Do not add fake navigate or reference actions");
+      expect(submittedPrompt).toContain("graph.discardLayer(layer)");
+      expect(submittedPrompt).not.toContain("The required order is:");
+      expect(submittedPrompt).not.toContain("native delegation");
+      expect(submittedPrompt).not.toContain("Codex native subagents");
     }
-  });
 
-  it("rotates graph credentials while resuming the same provider thread", async () => {
-    const submissions: CodexAppServerTurnOptions[] = [];
-    const harness = harnessFixture("auto", async (options) => {
-      submissions.push(options);
-      options.onThreadId(options.savedThreadId ?? "codex-thread-1");
-      return { threadId: options.savedThreadId ?? "codex-thread-1", turnId: `turn-${submissions.length}`, status: "completed" };
-    });
-
-    await harness.complete({ ...runContext(1, "first-token"), model: { providerId: "codex", modelId: "gpt-first" }, access: codexAccess() });
-    await harness.complete({ ...runContext(2, "second-token"), model: { providerId: "codex", modelId: "gpt-second" }, access: codexAccess() });
-
-    expect(submissions.map(({ environment, savedThreadId }) => [environment.RELAYER_GRAPH_TOKEN, environment.RELAYER_NODE_ID, savedThreadId])).toEqual([
-      ["first-token", "1", undefined],
-      ["second-token", "2", "codex-thread-1"],
-    ]);
-    expect(submissions.map(({ threadParams, turnParams }) => [threadParams.model, turnParams.model])).toEqual([
-      ["gpt-first", "gpt-first"],
-      ["gpt-second", "gpt-second"],
-    ]);
-    expect(harness.state()).toEqual({
-      codexThreadId: "codex-thread-1",
-      codexThreadPersonalPresentationVersionId: null,
-    });
-  });
-
-  it("can start every human root in a fresh provider thread without persisting hidden context", async () => {
-    const submissions: CodexAppServerTurnOptions[] = [];
-    const configuration = {
-      ...structuredClone(codexBasicConfiguration),
-      settings: {
-        ...structuredClone(codexBasicConfiguration.settings),
-        rootSessionMode: "fresh" as const,
-      },
-    };
-    const harness = new CodexBasicHarness({
-      ...context("auto"),
-      configuration,
-      savedState: {
-        codexThreadId: "stale-provider-thread",
-        codexThreadPersonalPresentationVersionId: null,
-      },
-    }, {
-      codexPathOverride: "/managed/codex",
-      runAppServerTurn: async (options) => {
-        submissions.push(options);
-        const threadId = `fresh-thread-${submissions.length}`;
-        await options.onThreadId(threadId);
-        return { threadId, turnId: `turn-${submissions.length}`, status: "completed" };
-      },
-    });
-
-    await harness.complete(runContext(1, "first-token"));
-    await harness.complete(runContext(2, "second-token"));
-
-    expect(submissions.map(({ savedThreadId }) => savedThreadId)).toEqual([undefined, undefined]);
-    expect(harness.state()).toEqual({});
-  });
-
-  it("starts recursive semantic completions in fresh Codex threads without replacing root continuity", async () => {
-    const submissions: CodexAppServerTurnOptions[] = [];
-    const harness = new CodexBasicHarness({
-      ...context("auto"),
-      savedState: {
-        codexThreadId: "root-thread",
-        codexThreadPersonalPresentationVersionId: null,
-      },
-    }, {
-      codexPathOverride: "/managed/codex",
-      runAppServerTurn: async (options) => {
-        submissions.push(options);
-        const invocation = submissions.length;
-        const threadId = options.savedThreadId ?? `child-thread-${invocation}`;
-        await options.onThreadId(threadId);
-        await options.onTurnId?.(threadId, `turn-${invocation}`);
-        return { threadId, turnId: `turn-${invocation}`, status: "completed" };
-      },
-    });
-
-    const admitted = (id: number, token: string): HarnessRunContext => ({
-      ...runContext(id, token),
-      origin: { kind: "invoke", sourceCompletionId: 1, actionId: id + 100 },
-      model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-test" },
-      access: codexAccess(),
-    });
-    const first = harness.complete(admitted(2, "child-token-a"));
-    const second = harness.complete(admitted(3, "child-token-b"));
-    await Promise.all([first, second]);
-
-    await expect(first.attached).resolves.toEqual({
-      schemaVersion: 1,
-      provider: "codex",
-      threadId: "child-thread-1",
-      turnId: "turn-1",
-    });
-    await expect(second.attached).resolves.toEqual({
-      schemaVersion: 1,
-      provider: "codex",
-      threadId: "child-thread-2",
-      turnId: "turn-2",
-    });
-    expect(submissions.map(({ savedThreadId, environment }) => [
-      savedThreadId,
-      environment.RELAYER_GRAPH_TOKEN,
-      environment.RELAYER_NODE_ID,
-    ])).toEqual([
-      [undefined, "child-token-a", "2"],
-      [undefined, "child-token-b", "3"],
-    ]);
-    expect(harness.state()).toEqual({
-      codexThreadId: "root-thread",
-      codexThreadPersonalPresentationVersionId: null,
-    });
-
-    await harness.complete(runContext(1, "root-token"));
-    expect(submissions[2]?.savedThreadId).toBe("root-thread");
-    expect(harness.state()).toEqual({
-      codexThreadId: "root-thread",
-      codexThreadPersonalPresentationVersionId: null,
-    });
-  });
-
-  it("fails recursive Codex execution closed without fresh admission and access", async () => {
-    const runAppServerTurn = vi.fn(async () => ({
-      threadId: "unreachable",
-      turnId: "unreachable",
-      status: "completed" as const,
-    }));
-    const harness = harnessFixture("auto", runAppServerTurn);
-
-    await expect(harness.complete({
-      ...runContext(2, "child-token"),
-      origin: { kind: "invoke", sourceCompletionId: 1, actionId: 102 },
-    }))
-      .rejects.toThrow("requires an explicitly admitted model and execution-scoped access");
-    expect(runAppServerTurn).not.toHaveBeenCalled();
-  });
-
-  it("passes only the selected execution-scoped provider secret to Codex", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "ambient-anthropic-secret");
-    vi.stubEnv("CODEX_HOME", "/ambient/codex-home");
-    let submitted: CodexAppServerTurnOptions | undefined;
-    try {
-      const harness = harnessFixture("auto", async (options) => {
-        submitted = options;
-        options.onThreadId("api-thread");
-        return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
-      });
-      await harness.complete({
-        ...runContext(1, "token"),
-        model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
-        access: {
-          kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
-          adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
+    {
+      const prompts: string[] = [];
+      const createHarness = (promptProfile: "layered-navigation-v1" | "layered-navigation-multi-agent-v1") => new CodexBasicHarness({
+        threadId: 1,
+        permissionProfileId: "auto",
+        permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
+        workingDirectory: process.cwd(),
+        configuration: {
+          ...codexBasicConfiguration,
+          name: `codex-${promptProfile}`,
+          settings: { ...codexBasicConfiguration.settings, promptProfile },
         },
+      }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
+        prompts.push(options.prompt);
+        options.onThreadId("layered-thread");
+        return { threadId: "layered-thread", turnId: "turn-1", status: "completed" };
+      } });
+
+      await createHarness("layered-navigation-v1").complete(runContext(1, "token"));
+      await createHarness("layered-navigation-multi-agent-v1").complete(runContext(1, "token"));
+
+      const delegationGuidance = "Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.";
+      expect(prompts).toHaveLength(2);
+      expect(prompts[0]).not.toContain("native delegation");
+      expect(prompts[0]).not.toContain("Codex native subagents");
+      expect(prompts[1], "the multi-agent profile appends only the native delegation guidance").toBe(`${prompts[0]}\n\n${delegationGuidance}`);
+    }
+
+    {
+      let prompt = "";
+      const harness = harnessFixture("auto", async (options) => {
+        prompt = options.prompt;
+        options.onThreadId("context-thread");
+        return { threadId: "context-thread", turnId: "turn-1", status: "completed" };
       });
 
-      expect(submitted?.environment.OPENAI_API_KEY).toBe("selected-secret");
-      expect(submitted?.environment.OPENAI_BASE_URL).toBe("https://api.openai.test/v1");
-      expect(submitted?.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
-      expect(submitted?.environment).not.toHaveProperty("CODEX_HOME");
-      expect(submitted?.threadParams).toMatchObject({
-        modelProvider: "relayer_execution_provider",
-        config: {
-          model_providers: {
-            relayer_execution_provider: {
-              name: "Relayer execution provider",
-              base_url: "https://api.openai.test/v1",
-              env_key: "OPENAI_API_KEY",
-              wire_api: "responses",
-              requires_openai_auth: false,
-              supports_websockets: false,
+      await harness.complete(attachedRunContext(1, "token"));
+
+      expect(prompt).toContain('"message": "Question"');
+      expect(prompt.indexOf('"title": "First target"')).toBeLessThan(prompt.indexOf('"title": "Second target"'));
+      expect(prompt.indexOf('"first annotation"')).toBeLessThan(prompt.indexOf('"second annotation"'));
+      expect(prompt, "occurrence order carries no semantic authority").toContain("product assigns no semantic precedence");
+      expect(prompt).toContain("including in native child agents");
+      expect(prompt).toContain("graph.getInteractionInput()");
+      expect(prompt).not.toContain("sourceNodeId");
+      expect(prompt).not.toContain("sourceLayerId");
+    }
+
+  }, 15_000);
+
+  it("admits only the selected execution-scoped secret and manages the ephemeral auth.json", async () => {
+
+    {
+      vi.stubEnv("ANTHROPIC_API_KEY", "ambient-anthropic-secret");
+      vi.stubEnv("CODEX_HOME", "/ambient/codex-home");
+      let submitted: CodexAppServerTurnOptions | undefined;
+      try {
+        const harness = harnessFixture("auto", async (options) => {
+          submitted = options;
+          options.onThreadId("api-thread");
+          return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
+        });
+        await harness.complete({
+          ...runContext(1, "token"),
+          model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+          access: {
+            kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
+            adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
+          },
+        });
+
+        expect(submitted?.environment.OPENAI_API_KEY, "only the selected execution-scoped secret reaches Codex").toBe("selected-secret");
+        expect(submitted?.environment.OPENAI_BASE_URL).toBe("https://api.openai.test/v1");
+        expect(submitted?.environment, "ambient secrets stay outside the turn environment").not.toHaveProperty("ANTHROPIC_API_KEY");
+        expect(submitted?.environment, "the ambient CODEX_HOME stays outside the turn environment").not.toHaveProperty("CODEX_HOME");
+        expect(submitted?.threadParams).toMatchObject({
+          modelProvider: "relayer_execution_provider",
+          config: {
+            model_providers: {
+              relayer_execution_provider: {
+                name: "Relayer execution provider",
+                base_url: "https://api.openai.test/v1",
+                env_key: "OPENAI_API_KEY",
+                wire_api: "responses",
+                requires_openai_auth: false,
+                supports_websockets: false,
+              },
             },
           },
-        },
-      });
-      expect(JSON.stringify(submitted?.threadParams)).not.toContain("selected-secret");
-      expect(submitted?.codexConfigOverrides).toEqual([
-        'model_provider="relayer_execution_provider"',
-        'model_providers.relayer_execution_provider.name="Relayer execution provider"',
-        'model_providers.relayer_execution_provider.base_url="https://api.openai.test/v1"',
-        'model_providers.relayer_execution_provider.env_key="OPENAI_API_KEY"',
-        'model_providers.relayer_execution_provider.wire_api="responses"',
-        "model_providers.relayer_execution_provider.requires_openai_auth=false",
-        "model_providers.relayer_execution_provider.supports_websockets=false",
-        'shell_environment_policy.inherit="all"',
-        "shell_environment_policy.ignore_default_excludes=true",
-        'shell_environment_policy.filters.OPENAI_API_KEY="exclude"',
-        'shell_environment_policy.filters.OPENAI_BASE_URL="exclude"',
-      ]);
-      expect(JSON.stringify(submitted?.codexConfigOverrides)).not.toContain("selected-secret");
-    } finally {
-      vi.unstubAllEnvs();
+        });
+        expect(JSON.stringify(submitted?.threadParams)).not.toContain("selected-secret");
+        expect(submitted?.codexConfigOverrides).toEqual([
+          'model_provider="relayer_execution_provider"',
+          'model_providers.relayer_execution_provider.name="Relayer execution provider"',
+          'model_providers.relayer_execution_provider.base_url="https://api.openai.test/v1"',
+          'model_providers.relayer_execution_provider.env_key="OPENAI_API_KEY"',
+          'model_providers.relayer_execution_provider.wire_api="responses"',
+          "model_providers.relayer_execution_provider.requires_openai_auth=false",
+          "model_providers.relayer_execution_provider.supports_websockets=false",
+          'shell_environment_policy.inherit="all"',
+          "shell_environment_policy.ignore_default_excludes=true",
+          'shell_environment_policy.filters.OPENAI_API_KEY="exclude"',
+          'shell_environment_policy.filters.OPENAI_BASE_URL="exclude"',
+        ]);
+        expect(JSON.stringify(submitted?.codexConfigOverrides)).not.toContain("selected-secret");
+      } finally {
+        vi.unstubAllEnvs();
+      }
     }
-  });
 
-  it.each(["openrouter", "vercel-ai-router"])("admits %s at the secret-access seam", async (adapterId) => {
-    let submitted: CodexAppServerTurnOptions | undefined;
-    const writeAuthFile = vi.fn(async () => {});
-    const removeAuthFile = vi.fn(async () => {});
-    const harness = new CodexBasicHarness(context("auto"), {
-      runAppServerTurn: async (options) => {
-        submitted = options;
-        options.onThreadId("api-thread");
-        return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
-      },
-      writeCodexApiKeyAuthFile: writeAuthFile,
-      removeCodexApiKeyAuthFile: removeAuthFile,
-    });
-
-    await harness.complete({
-      ...runContext(1, "token"),
-      model: {
-        providerId: `${adapterId}-provider`,
-        adapterId,
-        modelId: "provider/model",
-      },
-      access: {
-        kind: "secret",
-        contract: "secret@1",
-        providerId: `${adapterId}-provider`,
-        adapterId,
-        adapterImplementationVersion: "1",
-        endpoint: "https://provider.test/v1",
-        fields: { "api-key": "selected-secret" },
-        runtime: {
-          runtimeId: "codex", version: "0.147.0", executable: "/managed/codex",
-          environment: { CODEX_HOME: "/isolated/codex-home", RELAYER_CODEX_BINARY: "/managed/codex" },
-        },
-      },
-    });
-
-    expect(submitted?.codexPathOverride).toBe("/managed/codex");
-    expect(submitted?.environment.OPENAI_API_KEY).toBe("selected-secret");
-    expect(submitted?.environment.OPENAI_BASE_URL).toBe("https://provider.test/v1");
-    expect(writeAuthFile).toHaveBeenCalledWith("/isolated/codex-home", "selected-secret");
-    expect(removeAuthFile).toHaveBeenCalledWith("/isolated/codex-home");
-  });
-
-  it("rejects unsupported secret adapters before starting Codex", async () => {
-    const runAppServerTurn = vi.fn();
-    const harness = harnessFixture("auto", runAppServerTurn);
-
-    await expect(harness.complete({
-      ...runContext(1, "token"),
-      model: {
-        providerId: "anthropic-work",
-        adapterId: "anthropic-api",
-        modelId: "claude-sonnet-4",
-      },
-      access: {
-        kind: "secret",
-        contract: "secret@1",
-        providerId: "anthropic-work",
-        adapterId: "anthropic-api",
-        adapterImplementationVersion: "1",
-        endpoint: "https://api.anthropic.test",
-        fields: { "api-key": "selected-secret" },
-      },
-    })).rejects.toThrow("codex.basic cannot run provider adapter anthropic-api");
-
-    expect(runAppServerTurn).not.toHaveBeenCalled();
-  });
-
-  it("uses the managed Codex runtime attached to secret provider access", async () => {
-    let submitted: CodexAppServerTurnOptions | undefined;
-    const writeAuthFile = vi.fn(async () => {});
-    const removeAuthFile = vi.fn(async () => {});
-    const harness = new CodexBasicHarness(context("auto"), {
-      runAppServerTurn: async (options) => {
-        submitted = options;
-        options.onThreadId("api-thread");
-        return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
-      },
-      writeCodexApiKeyAuthFile: writeAuthFile,
-      removeCodexApiKeyAuthFile: removeAuthFile,
-    });
-
-    await harness.complete({
-      ...runContext(1, "token"),
-      model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
-      access: {
-        kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
-        adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
-        runtime: {
-          runtimeId: "codex", version: "0.147.0", executable: "/managed/codex",
-          environment: { CODEX_HOME: "/isolated/codex-home", RELAYER_CODEX_BINARY: "/managed/codex" },
-        },
-      },
-    });
-
-    expect(submitted?.codexPathOverride).toBe("/managed/codex");
-    expect(submitted?.environment.CODEX_HOME).toBe("/isolated/codex-home");
-    expect(writeAuthFile).toHaveBeenCalledWith("/isolated/codex-home", "selected-secret");
-    expect(removeAuthFile).toHaveBeenCalledWith("/isolated/codex-home");
-  });
-
-  it("writes an ephemeral API-key auth.json for the Codex turn and removes it afterward", async () => {
-    const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-home-"));
-    try {
+    for (const adapterId of ["openrouter", "vercel-ai-router"]) {
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const writeAuthFile = vi.fn(async () => {});
+      const removeAuthFile = vi.fn(async () => {});
       const harness = new CodexBasicHarness(context("auto"), {
         runAppServerTurn: async (options) => {
-          const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
-          expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "selected-secret" });
+          submitted = options;
           options.onThreadId("api-thread");
           return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
         },
+        writeCodexApiKeyAuthFile: writeAuthFile,
+        removeCodexApiKeyAuthFile: removeAuthFile,
       });
+
+      await harness.complete({
+        ...runContext(1, "token"),
+        model: {
+          providerId: `${adapterId}-provider`,
+          adapterId,
+          modelId: "provider/model",
+        },
+        access: {
+          kind: "secret",
+          contract: "secret@1",
+          providerId: `${adapterId}-provider`,
+          adapterId,
+          adapterImplementationVersion: "1",
+          endpoint: "https://provider.test/v1",
+          fields: { "api-key": "selected-secret" },
+          runtime: {
+            runtimeId: "codex", version: "0.147.0", executable: "/managed/codex",
+            environment: { CODEX_HOME: "/isolated/codex-home", RELAYER_CODEX_BINARY: "/managed/codex" },
+          },
+        },
+      });
+
+      expect(submitted?.codexPathOverride, `${adapterId} runs the runtime attached to the secret access`).toBe("/managed/codex");
+      expect(submitted?.environment.OPENAI_API_KEY).toBe("selected-secret");
+      expect(submitted?.environment.OPENAI_BASE_URL).toBe("https://provider.test/v1");
+      expect(writeAuthFile, `${adapterId} writes the ephemeral auth file into the isolated CODEX_HOME`).toHaveBeenCalledWith("/isolated/codex-home", "selected-secret");
+      expect(removeAuthFile, `${adapterId} removes the ephemeral auth file after the turn`).toHaveBeenCalledWith("/isolated/codex-home");
+    }
+
+    {
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const writeAuthFile = vi.fn(async () => {});
+      const removeAuthFile = vi.fn(async () => {});
+      const harness = new CodexBasicHarness(context("auto"), {
+        runAppServerTurn: async (options) => {
+          submitted = options;
+          options.onThreadId("api-thread");
+          return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
+        },
+        writeCodexApiKeyAuthFile: writeAuthFile,
+        removeCodexApiKeyAuthFile: removeAuthFile,
+      });
+
       await harness.complete({
         ...runContext(1, "token"),
         model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
@@ -940,518 +949,542 @@ describe("CodexBasicHarness", () => {
           adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
           runtime: {
             runtimeId: "codex", version: "0.147.0", executable: "/managed/codex",
-            environment: { CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: "/managed/codex" },
+            environment: { CODEX_HOME: "/isolated/codex-home", RELAYER_CODEX_BINARY: "/managed/codex" },
           },
         },
       });
-      await expect(readFile(join(codexHome, "auth.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    } finally {
-      await rm(codexHome, { recursive: true, force: true });
-    }
-  });
 
-  it("removes the ephemeral auth.json when the Codex turn fails", async () => {
-    const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-home-"));
-    try {
-      const harness = new CodexBasicHarness(context("auto"), {
-        runAppServerTurn: async () => {
-          const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
-          expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "selected-secret" });
-          throw new Error("codex turn failed");
+      expect(submitted?.codexPathOverride).toBe("/managed/codex");
+      expect(submitted?.environment.CODEX_HOME, "the managed runtime environment reaches the turn").toBe("/isolated/codex-home");
+      expect(writeAuthFile).toHaveBeenCalledWith("/isolated/codex-home", "selected-secret");
+      expect(removeAuthFile).toHaveBeenCalledWith("/isolated/codex-home");
+    }
+
+    {
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const harness = harnessFixture("auto", async (options) => {
+        submitted = options;
+        options.onThreadId("managed-thread");
+        return { threadId: "managed-thread", turnId: "turn-1", status: "completed" };
+      });
+      await harness.complete({
+        ...runContext(1, "authoritative-graph-token"),
+        model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-5.2" },
+        access: {
+          ...codexAccess(),
+          environment: {
+            CODEX_HOME: "/isolated/codex-home",
+            OPENAI_API_KEY: "injected-unrelated-secret",
+            RELAYER_GRAPH_TOKEN: "injected-graph-token",
+            RELAYER_GRAPH_URL: "https://attacker.invalid",
+          },
         },
       });
-      await expect(harness.complete({
-        ...runContext(1, "token"),
-        model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
-        access: {
-          kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
+
+      expect(submitted?.environment.CODEX_HOME).toBe("/isolated/codex-home");
+      expect(submitted?.environment, "managed access admits only Codex runtime keys").not.toHaveProperty("OPENAI_API_KEY");
+      expect(submitted?.environment.RELAYER_GRAPH_TOKEN, "graph authority stays authoritative").toBe("authoritative-graph-token");
+      expect(submitted?.environment.RELAYER_GRAPH_URL, "the graph endpoint stays authoritative").toBe("http://127.0.0.1:43123");
+    }
+
+    {
+      const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-home-"));
+      try {
+        const harness = new CodexBasicHarness(context("auto"), {
+          runAppServerTurn: async (options) => {
+            const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
+            expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "selected-secret" });
+            options.onThreadId("api-thread");
+            return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
+          },
+        });
+        await harness.complete({
+          ...runContext(1, "token"),
+          model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+          access: {
+            kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
+            adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
+            runtime: {
+              runtimeId: "codex", version: "0.147.0", executable: "/managed/codex",
+              environment: { CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: "/managed/codex" },
+            },
+          },
+        });
+        await expect(readFile(join(codexHome, "auth.json"), "utf8"), "the ephemeral auth.json is removed after the turn").rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await rm(codexHome, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-home-"));
+      try {
+        const harness = new CodexBasicHarness(context("auto"), {
+          runAppServerTurn: async () => {
+            const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
+            expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "selected-secret" });
+            throw new Error("codex turn failed");
+          },
+        });
+        await expect(harness.complete({
+          ...runContext(1, "token"),
+          model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+          access: {
+            kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
+            adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
+            runtime: {
+              runtimeId: "codex", version: "0.147.0", executable: "/managed/codex",
+              environment: { CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: "/managed/codex" },
+            },
+          },
+        })).rejects.toThrow("codex turn failed");
+        await expect(readFile(join(codexHome, "auth.json"), "utf8"), "the ephemeral auth.json is removed when the turn fails").rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await rm(codexHome, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-home-"));
+      const firstTurn = deferredTurn();
+      const secondTurn = deferredTurn();
+      let overlappingReads = 0;
+      const runAppServerTurn = async (options: CodexAppServerTurnOptions) => {
+        const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
+        expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "selected-secret" });
+        overlappingReads += 1;
+        if (overlappingReads === 1) {
+          secondTurn.resolve();
+          await firstTurn.promise;
+        } else {
+          await secondTurn.promise;
+          firstTurn.resolve();
+        }
+        options.onThreadId(`api-thread-${overlappingReads}`);
+        return { threadId: `api-thread-${overlappingReads}`, turnId: "turn-1", status: "completed" as const };
+      };
+      try {
+        const access = {
+          kind: "secret" as const, contract: "secret@1" as const, providerId: "openai-work", adapterId: "openai-api",
           adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
           runtime: {
-            runtimeId: "codex", version: "0.147.0", executable: "/managed/codex",
+            runtimeId: "codex" as const, version: "0.147.0", executable: "/managed/codex",
             environment: { CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: "/managed/codex" },
           },
-        },
-      })).rejects.toThrow("codex turn failed");
-      await expect(readFile(join(codexHome, "auth.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    } finally {
-      await rm(codexHome, { recursive: true, force: true });
-    }
-  });
-
-  it("keeps auth.json while overlapping secret turns share a CODEX_HOME", async () => {
-    const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-home-"));
-    const firstTurn = deferredTurn();
-    const secondTurn = deferredTurn();
-    let overlappingReads = 0;
-    const runAppServerTurn = async (options: CodexAppServerTurnOptions) => {
-      const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
-      expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "selected-secret" });
-      overlappingReads += 1;
-      if (overlappingReads === 1) {
-        secondTurn.resolve();
-        await firstTurn.promise;
-      } else {
-        await secondTurn.promise;
+        };
+        const first = new CodexBasicHarness(context("auto"), { runAppServerTurn }).complete({
+          ...runContext(1, "token"),
+          model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+          access,
+        });
+        const second = new CodexBasicHarness(context("auto"), { runAppServerTurn }).complete({
+          ...runContext(2, "token-2"),
+          model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+          access,
+        });
+        await Promise.all([first, second]);
+        expect(overlappingReads, "overlapping turns share the ephemeral auth.json").toBe(2);
+        await expect(readFile(join(codexHome, "auth.json"), "utf8"), "the auth.json is removed only after the last overlapping turn").rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
         firstTurn.resolve();
+        secondTurn.resolve();
+        await rm(codexHome, { recursive: true, force: true });
       }
-      options.onThreadId(`api-thread-${overlappingReads}`);
-      return { threadId: `api-thread-${overlappingReads}`, turnId: "turn-1", status: "completed" as const };
-    };
-    try {
-      const access = {
-        kind: "secret" as const, contract: "secret@1" as const, providerId: "openai-work", adapterId: "openai-api",
-        adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
-        runtime: {
-          runtimeId: "codex" as const, version: "0.147.0", executable: "/managed/codex",
-          environment: { CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: "/managed/codex" },
-        },
+    }
+
+  }, 15_000);
+
+  it("normalizes the app-server event surface and collaboration variants into portable trace spans", async () => {
+
+    {
+      const trace = recordingTrace();
+      const harness = harnessFixture("auto", async (options) => {
+        options.onThreadId("streamed-thread");
+        options.onNotification?.("turn/started", { threadId: "streamed-thread", turn: { id: "turn-1" } });
+        options.onNotification?.("item/completed", { item: { id: "message-1", type: "agentMessage", text: "Answer" } });
+        options.onNotification?.("item/completed", { item: { id: "reasoning-1", type: "reasoning", text: "Checked the result" } });
+        options.onNotification?.("turn/completed", { turn: { id: "turn-1", status: "completed", usage: { inputTokens: 2, outputTokens: 3 } } });
+        return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+      });
+
+      await harness.complete(runContext(1, "token", trace.sink));
+
+      expect(trace.events.map((event) => event.type)).toEqual(expect.arrayContaining([
+        "provider.event", "model.call.started", "message", "reasoning.summary", "usage", "model.call.completed",
+      ]));
+      expect(harness.traceSupport(), "the trace support surface is declared").toMatchObject({ messages: "full", reasoningSummaries: "full", childStreams: "none" });
+    }
+
+    {
+      const notifications = [
+        ["item/started", { item: {
+          id: "spawn-1", type: "collabAgentToolCall", tool: "spawnAgent", status: "inProgress",
+          senderThreadId: "root", receiverThreadIds: ["child-1", "child-2"],
+          prompt: "Inspect OPENAI_API_KEY=secret", model: "gpt-child", reasoningEffort: "high",
+          agentsStates: { "child-1": "pending", "child-2": "pending" },
+        } }],
+        ["item/completed", { item: {
+          id: "spawn-1", type: "collabAgentToolCall", tool: "spawnAgent", status: "completed",
+          senderThreadId: "root", receiverThreadIds: ["child-1", "child-2"],
+          prompt: "Inspect OPENAI_API_KEY=secret", model: "gpt-child", reasoningEffort: "high",
+          agentsStates: {
+            "child-1": { status: "completed", message: "Full child result stays provider-native" },
+            "child-2": "running",
+          },
+        } }],
+        ["item.completed", { item: {
+          id: "send-1", type: "collab_tool_call", tool: "send_input", status: "failed",
+          sender_thread_id: "root", receiver_thread_ids: ["child-1"], delegation_prompt: "Check again",
+        } }],
+        ["item/started", { item: {
+          id: "resume-1", type: "collabToolCall", operation: "resumeAgent", status: "inProgress",
+          senderThreadId: "root", receiverThreadIds: ["child-1"],
+        } }],
+        ["item/completed", { item: {
+          id: "resume-1", type: "collabToolCall", operation: "resumeAgent", status: "completed",
+          senderThreadId: "root", receiverThreadIds: ["child-1"],
+        } }],
+        ["item/completed", { item: {
+          type: "collabAgentToolCall", tool: "wait", status: "completed",
+          senderThreadId: "root", receiverThreadIds: ["child-1", "child-2"],
+        } }],
+        ["item/started", { item: {
+          id: "close-1", type: "collabAgentToolCall", tool: "closeAgent", status: "inProgress",
+          senderThreadId: "root", receiverThreadIds: ["child-1"],
+        } }],
+        ["item/completed", { item: {
+          id: "close-1", type: "collabAgentToolCall", tool: "closeAgent", status: "completed",
+          senderThreadId: "root", receiverThreadIds: ["child-1"],
+        } }],
+        ["item/started", { item: {
+          id: "future-1", type: "collabAgentToolCall", tool: "handoffAgent", status: "inProgress",
+          senderThreadId: "root", receiverThreadIds: ["child-3"],
+        } }],
+        ["item/completed", { item: {
+          id: "future-1", type: "collabAgentToolCall", tool: "handoffAgent", status: "completed",
+          senderThreadId: "root", receiverThreadIds: ["child-3"],
+        } }],
+      ] as const;
+      const trace = recordingTrace();
+      const harness = harnessFixture("auto", async (options) => {
+        options.onThreadId("streamed-thread");
+        for (const [method, params] of notifications) options.onNotification?.(method, params);
+        return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+      });
+
+      await harness.complete(runContext(1, "token", trace.sink));
+
+      expect(trace.events.filter((event) => event.type === "provider.event"), "every collaboration notification stays a raw provider event").toHaveLength(notifications.length);
+      const spawnStarted = trace.events.find((event) => event.type === "tool.call.started" && event.data.providerItemId === "spawn-1");
+      expect(spawnStarted?.data).toMatchObject({
+        itemType: "collaboration_operation",
+        operation: "spawn_agent",
+        senderThreadId: "root",
+        receiverThreadIds: ["child-1", "child-2"],
+        delegationPrompt: "Inspect credential=[redacted]",
+        model: "gpt-child",
+        reasoningEffort: "high",
+        status: "in_progress",
+      });
+      const spawnCompleted = trace.events.find((event) => event.type === "tool.call.completed" && event.data.providerItemId === "spawn-1");
+      expect(spawnCompleted?.data.agentStates).toEqual({
+        "child-1": { status: "completed" },
+        "child-2": "running",
+      });
+      expect(JSON.stringify(spawnCompleted?.data)).not.toContain("Full child result");
+      const recovered = trace.events.filter((event) => event.spanId !== undefined && event.data.providerItemId === "send-1");
+      expect(recovered.map((event) => event.type)).toEqual(["tool.call.started", "tool.call.completed"]);
+      expect(recovered[0]?.data).toMatchObject({ operation: "send_input", missingStart: true, delegationPrompt: "Check again" });
+      expect(trace.events.find((event) => event.type === "span.completed" && event.spanId === recovered[0]?.spanId)?.data).toEqual({ status: "failed", missingStart: true });
+      expect(trace.events.find((event) => event.type === "tool.call.started" && event.data.providerItemId === "resume-1")?.data.operation).toBe("resume_agent");
+      expect(trace.events.find((event) => event.type === "tool.call.started" && event.data.providerItemId === "close-1")?.data.operation).toBe("close_agent");
+      expect(trace.events.find((event) => event.type === "tool.call.started" && event.data.providerItemId === "future-1")?.data).toMatchObject({
+        operation: "unknown",
+        providerOperation: "handoffAgent",
+      });
+      const wait = trace.events.find((event) => event.type === "tool.call.completed" && event.data.missingProviderItemId === true);
+      expect(wait?.spanId).toBeUndefined();
+      expect(wait?.data).toMatchObject({ operation: "wait", receiverThreadIds: ["child-1", "child-2"] });
+      const firstSpawnProviderIndex = trace.events.findIndex((event) => event.type === "provider.event" && event.providerEventId === "spawn-1");
+      const firstSpawnToolIndex = trace.events.findIndex((event) => event.type === "tool.call.started" && event.data.providerItemId === "spawn-1");
+      expect(firstSpawnProviderIndex).toBeLessThan(firstSpawnToolIndex);
+      expect(JSON.stringify(trace.events[firstSpawnProviderIndex]?.data)).not.toContain("secret");
+      expect(trace.openedStreams, "collaboration spans never open child streams").toBe(0);
+    }
+
+    {
+      const trace = recordingTrace();
+      const harness = harnessFixture("auto", async (options) => {
+        options.onThreadId("streamed-thread");
+        options.onNotification?.("item/started", { item: { id: "malformed-1", type: "collabAgentToolCall", tool: { future: true } } });
+        options.onNotification?.("item/completed", { item: { id: "ordinary-1", type: "commandExecution", command: "pwd" } });
+        return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+      });
+
+      await expect(harness.complete(runContext(1, "token", trace.sink)), "malformed collaboration notifications never change completion").resolves.toBeUndefined();
+
+      expect(trace.events.filter((event) => event.type === "provider.event")).toHaveLength(2);
+      expect(trace.events.filter((event) => event.type.startsWith("tool.call"))).toHaveLength(0);
+    }
+
+    {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-codex-collaboration-trace-"));
+      const exportDirectory = join(directory, "exported");
+      try {
+        let nextId = 0;
+        const store = new HarnessTraceStore({
+          directory: join(directory, "spool"),
+          policy: tracePolicy(),
+          createId: () => `trace-object-${++nextId}`,
+        });
+        const harness = harnessFixture("auto", async (options) => {
+          options.onThreadId("streamed-thread");
+          options.onNotification?.("item/started", { item: {
+            id: "spawn-unmatched",
+            type: "collabAgentToolCall",
+            tool: "spawnAgent",
+            status: "inProgress",
+            senderThreadId: "root",
+            receiverThreadIds: ["child-1"],
+            prompt: "Inspect the trace contract",
+          } });
+          options.onNotification?.("turn/completed", { turn: { id: "turn-1", status: "completed" } });
+          return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+        });
+        const active = store.start({
+          threadId: 1,
+          interactionNodeId: 1,
+          productInteractionId: 99,
+          implementation: "codex.basic",
+          configurationName: "codex-multi-agent-layered-navigation",
+          support: harness.traceSupport(),
+        });
+
+        await harness.complete(runContext(1, "token", active.sink));
+        const descriptor = await active.seal("complete");
+        await store.export(99, exportDirectory, {
+          runId: "run-1",
+          executionId: "execution-1",
+          interactionId: "99",
+          harnessConfigurationName: "codex-multi-agent-layered-navigation",
+        });
+        const events = (await readFile(join(exportDirectory, "events.jsonl"), "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as HarnessTraceEvent);
+        const operationStart = events.find((event) => event.type === "span.started" && event.data.providerSpanId === "spawn-unmatched");
+
+        expect(descriptor.status, "the real trace store seals the run complete").toBe("complete");
+        expect(operationStart?.spanId, "the unmatched collaboration span survives to export").toBeDefined();
+        expect(events.find((event) => event.type === "span.completed" && event.spanId === operationStart?.spanId)?.data).toEqual({
+          status: "partial",
+          providerItemId: "spawn-unmatched",
+          reason: "Codex collaboration operation did not report completion",
+        });
+        expect(events.find((event) => event.type === "run.completed")?.data).toEqual({ status: "complete" });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+
+  }, 15_000);
+
+  it("redacts personal presentation, broker authority, and command paths while binding executable authority", async () => {
+
+    {
+      const trace = recordingTrace();
+      let submitted: CodexAppServerTurnOptions | undefined;
+      const harness = harnessFixture("auto", async (options) => {
+        submitted = options;
+        options.onThreadId("broker-thread");
+        return { threadId: "broker-thread", turnId: "turn-1", status: "completed" };
+      });
+      const completionBroker = {
+        url: "http://127.0.0.1:43125/api/completions",
+        token: "completion-broker-secret-token-1234567890",
       };
-      const first = new CodexBasicHarness(context("auto"), { runAppServerTurn }).complete({
-        ...runContext(1, "token"),
-        model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
-        access,
-      });
-      const second = new CodexBasicHarness(context("auto"), { runAppServerTurn }).complete({
-        ...runContext(2, "token-2"),
-        model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
-        access,
-      });
-      await Promise.all([first, second]);
-      expect(overlappingReads).toBe(2);
-      await expect(readFile(join(codexHome, "auth.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    } finally {
-      firstTurn.resolve();
-      secondTurn.resolve();
-      await rm(codexHome, { recursive: true, force: true });
+
+      await harness.complete({ ...runContext(1, "graph-token", trace.sink), completionBroker });
+
+      expect(submitted?.environment.RELAYER_COMPLETE_URL, "broker authority reaches the turn environment").toBe(completionBroker.url);
+      expect(submitted?.environment.RELAYER_COMPLETE_TOKEN).toBe(completionBroker.token);
+      expect(JSON.stringify(trace.events), "the broker URL never enters implementation traces").not.toContain(completionBroker.url);
+      expect(JSON.stringify(trace.events), "the broker token never enters implementation traces").not.toContain(completionBroker.token);
+
+      const unavailableTrace = recordingTrace();
+      await harness.complete(runContext(2, "second-graph-token", unavailableTrace.sink));
+      expect(JSON.stringify(unavailableTrace.events), "an unavailable broker leaves no trace flag").not.toContain("completionBrokerAvailable");
     }
-  });
 
-  it("allows only Codex runtime keys from managed access and preserves graph authority", async () => {
-    let submitted: CodexAppServerTurnOptions | undefined;
-    const harness = harnessFixture("auto", async (options) => {
-      submitted = options;
-      options.onThreadId("managed-thread");
-      return { threadId: "managed-thread", turnId: "turn-1", status: "completed" };
-    });
-    await harness.complete({
-      ...runContext(1, "authoritative-graph-token"),
-      model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-5.2" },
-      access: {
-        ...codexAccess(),
-        environment: {
-          CODEX_HOME: "/isolated/codex-home",
-          OPENAI_API_KEY: "injected-unrelated-secret",
-          RELAYER_GRAPH_TOKEN: "injected-graph-token",
-          RELAYER_GRAPH_URL: "https://attacker.invalid",
-        },
-      },
-    });
-
-    expect(submitted?.environment.CODEX_HOME).toBe("/isolated/codex-home");
-    expect(submitted?.environment).not.toHaveProperty("OPENAI_API_KEY");
-    expect(submitted?.environment.RELAYER_GRAPH_TOKEN).toBe("authoritative-graph-token");
-    expect(submitted?.environment.RELAYER_GRAPH_URL).toBe("http://127.0.0.1:43123");
-  });
-
-  it("passes broker authority without leaking its URL or token into implementation traces", async () => {
-    const trace = recordingTrace();
-    let submitted: CodexAppServerTurnOptions | undefined;
-    const harness = harnessFixture("auto", async (options) => {
-      submitted = options;
-      options.onThreadId("broker-thread");
-      return { threadId: "broker-thread", turnId: "turn-1", status: "completed" };
-    });
-    const completionBroker = {
-      url: "http://127.0.0.1:43125/api/completions",
-      token: "completion-broker-secret-token-1234567890",
-    };
-
-    await harness.complete({ ...runContext(1, "graph-token", trace.sink), completionBroker });
-
-    expect(submitted?.environment.RELAYER_COMPLETE_URL).toBe(completionBroker.url);
-    expect(submitted?.environment.RELAYER_COMPLETE_TOKEN).toBe(completionBroker.token);
-    expect(JSON.stringify(trace.events)).not.toContain(completionBroker.url);
-    expect(JSON.stringify(trace.events)).not.toContain(completionBroker.token);
-
-    const unavailableTrace = recordingTrace();
-    await harness.complete(runContext(2, "second-graph-token", unavailableTrace.sink));
-    expect(JSON.stringify(unavailableTrace.events)).not.toContain("completionBrokerAvailable");
-  });
-
-  it("rejects a provider model that codex.basic cannot execute before starting a thread", async () => {
-    const runAppServerTurn = vi.fn<NonNullable<CodexBasicDependencies["runAppServerTurn"]>>();
-    const harness = new CodexBasicHarness({
-      threadId: 1,
-      permissionProfileId: "auto",
-      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
-      workingDirectory: process.cwd(),
-      configuration: codexBasicConfiguration,
-    }, { codexPathOverride: "/managed/codex", runAppServerTurn });
-
-    await expect(harness.complete({
-      ...runContext(1, "token"),
-      model: { providerId: "future-provider", modelId: "future-model" },
-    })).rejects.toThrow("codex.basic cannot run provider future-provider");
-    expect(runAppServerTurn).not.toHaveBeenCalled();
-  });
-
-  it("normalizes the app-server event surface into the portable trace", async () => {
-    const trace = recordingTrace();
-    const harness = harnessFixture("auto", async (options) => {
-      options.onThreadId("streamed-thread");
-      options.onNotification?.("turn/started", { threadId: "streamed-thread", turn: { id: "turn-1" } });
-      options.onNotification?.("item/completed", { item: { id: "message-1", type: "agentMessage", text: "Answer" } });
-      options.onNotification?.("item/completed", { item: { id: "reasoning-1", type: "reasoning", text: "Checked the result" } });
-      options.onNotification?.("turn/completed", { turn: { id: "turn-1", status: "completed", usage: { inputTokens: 2, outputTokens: 3 } } });
-      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
-    });
-
-    await harness.complete(runContext(1, "token", trace.sink));
-
-    expect(trace.events.map((event) => event.type)).toEqual(expect.arrayContaining([
-      "provider.event", "model.call.started", "message", "reasoning.summary", "usage", "model.call.completed",
-    ]));
-    expect(harness.traceSupport()).toMatchObject({ messages: "full", reasoningSummaries: "full", childStreams: "none" });
-  });
-
-  it("normalizes Codex collaboration variants as root coordination-operation spans", async () => {
-    const notifications = [
-      ["item/started", { item: {
-        id: "spawn-1", type: "collabAgentToolCall", tool: "spawnAgent", status: "inProgress",
-        senderThreadId: "root", receiverThreadIds: ["child-1", "child-2"],
-        prompt: "Inspect OPENAI_API_KEY=secret", model: "gpt-child", reasoningEffort: "high",
-        agentsStates: { "child-1": "pending", "child-2": "pending" },
-      } }],
-      ["item/completed", { item: {
-        id: "spawn-1", type: "collabAgentToolCall", tool: "spawnAgent", status: "completed",
-        senderThreadId: "root", receiverThreadIds: ["child-1", "child-2"],
-        prompt: "Inspect OPENAI_API_KEY=secret", model: "gpt-child", reasoningEffort: "high",
-        agentsStates: {
-          "child-1": { status: "completed", message: "Full child result stays provider-native" },
-          "child-2": "running",
-        },
-      } }],
-      ["item.completed", { item: {
-        id: "send-1", type: "collab_tool_call", tool: "send_input", status: "failed",
-        sender_thread_id: "root", receiver_thread_ids: ["child-1"], delegation_prompt: "Check again",
-      } }],
-      ["item/started", { item: {
-        id: "resume-1", type: "collabToolCall", operation: "resumeAgent", status: "inProgress",
-        senderThreadId: "root", receiverThreadIds: ["child-1"],
-      } }],
-      ["item/completed", { item: {
-        id: "resume-1", type: "collabToolCall", operation: "resumeAgent", status: "completed",
-        senderThreadId: "root", receiverThreadIds: ["child-1"],
-      } }],
-      ["item/completed", { item: {
-        type: "collabAgentToolCall", tool: "wait", status: "completed",
-        senderThreadId: "root", receiverThreadIds: ["child-1", "child-2"],
-      } }],
-      ["item/started", { item: {
-        id: "close-1", type: "collabAgentToolCall", tool: "closeAgent", status: "inProgress",
-        senderThreadId: "root", receiverThreadIds: ["child-1"],
-      } }],
-      ["item/completed", { item: {
-        id: "close-1", type: "collabAgentToolCall", tool: "closeAgent", status: "completed",
-        senderThreadId: "root", receiverThreadIds: ["child-1"],
-      } }],
-      ["item/started", { item: {
-        id: "future-1", type: "collabAgentToolCall", tool: "handoffAgent", status: "inProgress",
-        senderThreadId: "root", receiverThreadIds: ["child-3"],
-      } }],
-      ["item/completed", { item: {
-        id: "future-1", type: "collabAgentToolCall", tool: "handoffAgent", status: "completed",
-        senderThreadId: "root", receiverThreadIds: ["child-3"],
-      } }],
-    ] as const;
-    const trace = recordingTrace();
-    const harness = harnessFixture("auto", async (options) => {
-      options.onThreadId("streamed-thread");
-      for (const [method, params] of notifications) options.onNotification?.(method, params);
-      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
-    });
-
-    await harness.complete(runContext(1, "token", trace.sink));
-
-    expect(trace.events.filter((event) => event.type === "provider.event")).toHaveLength(notifications.length);
-    const spawnStarted = trace.events.find((event) => event.type === "tool.call.started" && event.data.providerItemId === "spawn-1");
-    expect(spawnStarted?.data).toMatchObject({
-      itemType: "collaboration_operation",
-      operation: "spawn_agent",
-      senderThreadId: "root",
-      receiverThreadIds: ["child-1", "child-2"],
-      delegationPrompt: "Inspect credential=[redacted]",
-      model: "gpt-child",
-      reasoningEffort: "high",
-      status: "in_progress",
-    });
-    const spawnCompleted = trace.events.find((event) => event.type === "tool.call.completed" && event.data.providerItemId === "spawn-1");
-    expect(spawnCompleted?.data.agentStates).toEqual({
-      "child-1": { status: "completed" },
-      "child-2": "running",
-    });
-    expect(JSON.stringify(spawnCompleted?.data)).not.toContain("Full child result");
-    const recovered = trace.events.filter((event) => event.spanId !== undefined && event.data.providerItemId === "send-1");
-    expect(recovered.map((event) => event.type)).toEqual(["tool.call.started", "tool.call.completed"]);
-    expect(recovered[0]?.data).toMatchObject({ operation: "send_input", missingStart: true, delegationPrompt: "Check again" });
-    expect(trace.events.find((event) => event.type === "span.completed" && event.spanId === recovered[0]?.spanId)?.data).toEqual({ status: "failed", missingStart: true });
-    expect(trace.events.find((event) => event.type === "tool.call.started" && event.data.providerItemId === "resume-1")?.data.operation).toBe("resume_agent");
-    expect(trace.events.find((event) => event.type === "tool.call.started" && event.data.providerItemId === "close-1")?.data.operation).toBe("close_agent");
-    expect(trace.events.find((event) => event.type === "tool.call.started" && event.data.providerItemId === "future-1")?.data).toMatchObject({
-      operation: "unknown",
-      providerOperation: "handoffAgent",
-    });
-    const wait = trace.events.find((event) => event.type === "tool.call.completed" && event.data.missingProviderItemId === true);
-    expect(wait?.spanId).toBeUndefined();
-    expect(wait?.data).toMatchObject({ operation: "wait", receiverThreadIds: ["child-1", "child-2"] });
-    const firstSpawnProviderIndex = trace.events.findIndex((event) => event.type === "provider.event" && event.providerEventId === "spawn-1");
-    const firstSpawnToolIndex = trace.events.findIndex((event) => event.type === "tool.call.started" && event.data.providerItemId === "spawn-1");
-    expect(firstSpawnProviderIndex).toBeLessThan(firstSpawnToolIndex);
-    expect(JSON.stringify(trace.events[firstSpawnProviderIndex]?.data)).not.toContain("secret");
-    expect(trace.openedStreams).toBe(0);
-  });
-
-  it("redacts propagated personal presentation guidance from Codex collaboration traces", async () => {
-    const trace = recordingTrace();
-    const preferenceDetail = "The user prefers central layers that are immediately decision-useful. Never repeat OPENAI_API_KEY=secret.";
-    const rendered = `Personal graph presentation preferences:\n\nDecision-useful center: ${preferenceDetail}`;
-    const harness = harnessFixture("auto", async (options) => {
-      options.onThreadId("streamed-thread");
-      options.onNotification?.("item/started", { item: {
-        id: "graph-child",
-        type: "collabAgentToolCall",
-        tool: "spawnAgent",
-        status: "inProgress",
-        prompt: `Author graph content.\n\n${rendered}`,
-      } });
-      options.onNotification?.("item/started", { item: {
-        id: "research-child",
-        type: "collabAgentToolCall",
-        tool: "spawnAgent",
-        status: "inProgress",
-        prompt: "Research the implementation without authoring graph content.",
-      } });
-      options.onNotification?.("item/completed", { item: {
-        id: "partial-echo",
-        type: "agentMessage",
-        text: `Applied Decision-useful center. ${preferenceDetail}`,
-      } });
-      options.onNotification?.("item/completed", { item: {
-        id: "unrelated-command",
-        type: "commandExecution",
-        aggregatedOutput: "Decision-useful center",
-      } });
-      options.onNotification?.("item/started", { item: {
-        id: "graph-command",
-        type: "commandExecution",
-        command: "node --input-type=module <<'RELAYER_GRAPH_PROGRAM'\n// Decision-useful center\nawait graph.submit(1);\nRELAYER_GRAPH_PROGRAM",
-        aggregatedOutput: "Decision-useful center",
-      } });
-      options.onNotification?.("item/started", { item: {
-        id: "unrelated-node-heredoc",
-        type: "commandExecution",
-        command: "node --input-type=module <<'NODE'\nconsole.log('Decision-useful center')\nNODE",
-        aggregatedOutput: "Decision-useful center",
-      } });
-      options.onNotification?.("item/agentMessage/delta", {
-        itemId: "agent-delta",
-        delta: "Decision-useful center",
-      });
-      options.onNotification?.("item/commandExecution/outputDelta", {
-        itemId: "graph-command",
-        delta: "Decision-useful center",
-      });
-      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
-    });
-    const baseContext = personalPresentationRunContext(true);
-    const presentation = baseContext.personalPresentation!;
-    const firstLayer = presentation.graph.layers[0]!;
-    const firstNode = firstLayer.nodes[0]!;
-    const context: HarnessRunContext = {
-      ...baseContext,
-      personalPresentation: {
-        ...presentation,
-        graph: {
-          ...presentation.graph,
-          layers: [{
-            ...firstLayer,
-            nodes: [{
-              ...firstNode,
-              title: ` ${firstNode.title} `,
-              detail: ` ${preferenceDetail} `,
-            }],
-          }],
-        },
-      },
-    };
-
-    await harness.complete({ ...context, trace: trace.sink });
-
-    const echoEvents = trace.events.filter((event) => !["unrelated-command", "unrelated-node-heredoc"].includes(event.providerEventId ?? ""));
-    const serializedEchoes = JSON.stringify(echoEvents);
-    expect(serializedEchoes).not.toContain("Decision-useful center");
-    expect(serializedEchoes).not.toContain("The user prefers central layers that are immediately decision-useful.");
-    expect(serializedEchoes).not.toContain("OPENAI_API_KEY");
-    expect(serializedEchoes.match(/\[redacted-personal-presentation\]/g)?.length).toBeGreaterThanOrEqual(3);
-    const unrelatedCommand = trace.events.find((event) => event.type === "provider.event"
-      && event.providerEventId === "unrelated-command");
-    expect(JSON.stringify(unrelatedCommand?.data)).toContain("Decision-useful center");
-    const unrelatedNodeHeredoc = trace.events.find((event) => event.type === "provider.event"
-      && event.providerEventId === "unrelated-node-heredoc");
-    expect(JSON.stringify(unrelatedNodeHeredoc?.data)).toContain("Decision-useful center");
-    const agentDelta = trace.events.find((event) => event.type === "provider.event"
-      && event.data.method === "item/agentMessage/delta");
-    expect(JSON.stringify(agentDelta?.data)).toContain("[redacted-personal-presentation]");
-    expect(JSON.stringify(agentDelta?.data)).not.toContain("Decision-useful center");
-    const commandDelta = trace.events.find((event) => event.type === "provider.event"
-      && event.data.method === "item/commandExecution/outputDelta");
-    expect(JSON.stringify(commandDelta?.data)).toContain("[redacted-personal-presentation]");
-    expect(JSON.stringify(commandDelta?.data)).not.toContain("Decision-useful center");
-    const graphChild = trace.events.find((event) => event.type === "tool.call.started"
-      && event.data.providerItemId === "graph-child");
-    expect(graphChild?.data.delegationPrompt).toContain("[redacted-personal-presentation]");
-    const researchChild = trace.events.find((event) => event.type === "tool.call.started"
-      && event.data.providerItemId === "research-child");
-    expect(researchChild?.data.delegationPrompt).toBe("Research the implementation without authoring graph content.");
-  });
-
-  it("preserves malformed collaboration notifications as raw events without changing completion", async () => {
-    const trace = recordingTrace();
-    const harness = harnessFixture("auto", async (options) => {
-      options.onThreadId("streamed-thread");
-      options.onNotification?.("item/started", { item: { id: "malformed-1", type: "collabAgentToolCall", tool: { future: true } } });
-      options.onNotification?.("item/completed", { item: { id: "ordinary-1", type: "commandExecution", command: "pwd" } });
-      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
-    });
-
-    await expect(harness.complete(runContext(1, "token", trace.sink))).resolves.toBeUndefined();
-
-    expect(trace.events.filter((event) => event.type === "provider.event")).toHaveLength(2);
-    expect(trace.events.filter((event) => event.type.startsWith("tool.call"))).toHaveLength(0);
-  });
-
-  it("binds redacted command actions to the exact pre-redaction absolute executable", async () => {
-    const trace = recordingTrace();
-    const executable = "/private/var/folders/xy/private-token/T/runtime-snapshot/rg";
-    const command = `${executable} -n needle /private/var/folders/xy/private-token/T/runtime-snapshot/graph-client`;
-    const harness = harnessFixture("auto", async (options) => {
-      options.onThreadId("streamed-thread");
-      options.onNotification?.("item/started", { item: {
-        id: "inspection-1",
-        type: "commandExecution",
-        command,
-        commandActions: [{ command, relayerExecutableAuthoritySha256: "provider-forged", relayerCommandWordAuthoritySha256: ["provider-forged"] }],
-      } });
-      options.onNotification?.("item/completed", { item: {
-        id: "inspection-1",
-        type: "commandExecution",
-        command,
-        commandActions: [{ command }],
-      } });
-      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
-    });
-
-    await expect(harness.complete(runContext(1, "token", trace.sink))).resolves.toBeUndefined();
-
-    const events = trace.events.filter((candidate) => candidate.type === "provider.event");
-    expect(events).toHaveLength(2);
-    for (const event of events) {
-      const params = event.data.params as Record<string, unknown>;
-      const item = params.item as Record<string, unknown>;
-      const [action] = item.commandActions as Array<Record<string, unknown>>;
-      expect(action?.command).toBe("/private/var/folders/[redacted]/T/runtime-snapshot/rg -n needle /private/var/folders/[redacted]/T/runtime-snapshot/graph-client");
-      expect(action?.relayerExecutableAuthoritySha256).toBe(createHash("sha256").update(executable).digest("hex"));
-      expect(action?.relayerCommandWordAuthoritySha256).toEqual(command.split(" ").map((word) => (
-        word.startsWith("/") ? createHash("sha256").update(word).digest("hex") : null
-      )));
-      expect(JSON.stringify(event)).not.toContain("private-token");
-      expect(JSON.stringify(event)).not.toContain("provider-forged");
-    }
-  });
-
-  it.each(["quoted", "unquoted"])("binds the %s graph-authoring launcher before trace redaction", async (form) => {
-    const trace = recordingTrace();
-    const launcher = "/private/var/folders/xy/private-token/T/runtime-snapshot/graph-authoring-launcher";
-    const command = `${form === "quoted" ? JSON.stringify(launcher) : launcher} <<'EOF'\nawait graph.submit(1);\nEOF`;
-    const harness = harnessFixture("auto", async (options) => {
-      options.onThreadId("streamed-thread");
-      options.onNotification?.("item/started", { item: {
-        id: "graph-1",
-        type: "commandExecution",
-        command,
-        commandActions: [{ command, relayerGraphAuthoringLauncherSha256: "provider-forged" }],
-      } });
-      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
-    });
-
-    await harness.complete(runContext(1, "token", trace.sink));
-    const event = trace.events.find((candidate) => candidate.type === "provider.event");
-    const item = (event?.data.params as Record<string, unknown>).item as Record<string, unknown>;
-    const [action] = item.commandActions as Array<Record<string, unknown>>;
-    expect(action?.relayerGraphAuthoringLauncherSha256).toBe(createHash("sha256").update(launcher).digest("hex"));
-    expect(JSON.stringify(event)).not.toContain("private-token");
-    expect(JSON.stringify(event)).not.toContain("provider-forged");
-  });
-
-  it("preserves a partial unmatched collaboration span when the real trace store seals the run complete", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-codex-collaboration-trace-"));
-    const exportDirectory = join(directory, "exported");
-    try {
-      let nextId = 0;
-      const store = new HarnessTraceStore({
-        directory: join(directory, "spool"),
-        policy: tracePolicy(),
-        createId: () => `trace-object-${++nextId}`,
-      });
+    {
+      const trace = recordingTrace();
+      const preferenceDetail = "The user prefers central layers that are immediately decision-useful. Never repeat OPENAI_API_KEY=secret.";
+      const rendered = `Personal graph presentation preferences:\n\nDecision-useful center: ${preferenceDetail}`;
       const harness = harnessFixture("auto", async (options) => {
         options.onThreadId("streamed-thread");
         options.onNotification?.("item/started", { item: {
-          id: "spawn-unmatched",
+          id: "graph-child",
           type: "collabAgentToolCall",
           tool: "spawnAgent",
           status: "inProgress",
-          senderThreadId: "root",
-          receiverThreadIds: ["child-1"],
-          prompt: "Inspect the trace contract",
+          prompt: `Author graph content.\n\n${rendered}`,
         } });
-        options.onNotification?.("turn/completed", { turn: { id: "turn-1", status: "completed" } });
+        options.onNotification?.("item/started", { item: {
+          id: "research-child",
+          type: "collabAgentToolCall",
+          tool: "spawnAgent",
+          status: "inProgress",
+          prompt: "Research the implementation without authoring graph content.",
+        } });
+        options.onNotification?.("item/completed", { item: {
+          id: "partial-echo",
+          type: "agentMessage",
+          text: `Applied Decision-useful center. ${preferenceDetail}`,
+        } });
+        options.onNotification?.("item/completed", { item: {
+          id: "unrelated-command",
+          type: "commandExecution",
+          aggregatedOutput: "Decision-useful center",
+        } });
+        options.onNotification?.("item/started", { item: {
+          id: "graph-command",
+          type: "commandExecution",
+          command: "node --input-type=module <<'RELAYER_GRAPH_PROGRAM'\n// Decision-useful center\nawait graph.submit(1);\nRELAYER_GRAPH_PROGRAM",
+          aggregatedOutput: "Decision-useful center",
+        } });
+        options.onNotification?.("item/started", { item: {
+          id: "unrelated-node-heredoc",
+          type: "commandExecution",
+          command: "node --input-type=module <<'NODE'\nconsole.log('Decision-useful center')\nNODE",
+          aggregatedOutput: "Decision-useful center",
+        } });
+        options.onNotification?.("item/agentMessage/delta", {
+          itemId: "agent-delta",
+          delta: "Decision-useful center",
+        });
+        options.onNotification?.("item/commandExecution/outputDelta", {
+          itemId: "graph-command",
+          delta: "Decision-useful center",
+        });
         return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
       });
-      const active = store.start({
-        threadId: 1,
-        interactionNodeId: 1,
-        productInteractionId: 99,
-        implementation: "codex.basic",
-        configurationName: "codex-multi-agent-layered-navigation",
-        support: harness.traceSupport(),
-      });
+      const baseContext = personalPresentationRunContext(true);
+      const presentation = baseContext.personalPresentation!;
+      const firstLayer = presentation.graph.layers[0]!;
+      const firstNode = firstLayer.nodes[0]!;
+      const context: HarnessRunContext = {
+        ...baseContext,
+        personalPresentation: {
+          ...presentation,
+          graph: {
+            ...presentation.graph,
+            layers: [{
+              ...firstLayer,
+              nodes: [{
+                ...firstNode,
+                title: ` ${firstNode.title} `,
+                detail: ` ${preferenceDetail} `,
+              }],
+            }],
+          },
+        },
+      };
 
-      await harness.complete(runContext(1, "token", active.sink));
-      const descriptor = await active.seal("complete");
-      await store.export(99, exportDirectory, {
-        runId: "run-1",
-        executionId: "execution-1",
-        interactionId: "99",
-        harnessConfigurationName: "codex-multi-agent-layered-navigation",
-      });
-      const events = (await readFile(join(exportDirectory, "events.jsonl"), "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as HarnessTraceEvent);
-      const operationStart = events.find((event) => event.type === "span.started" && event.data.providerSpanId === "spawn-unmatched");
+      await harness.complete({ ...context, trace: trace.sink });
 
-      expect(descriptor.status).toBe("complete");
-      expect(operationStart?.spanId).toBeDefined();
-      expect(events.find((event) => event.type === "span.completed" && event.spanId === operationStart?.spanId)?.data).toEqual({
-        status: "partial",
-        providerItemId: "spawn-unmatched",
-        reason: "Codex collaboration operation did not report completion",
-      });
-      expect(events.find((event) => event.type === "run.completed")?.data).toEqual({ status: "complete" });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
+      const echoEvents = trace.events.filter((event) => !["unrelated-command", "unrelated-node-heredoc"].includes(event.providerEventId ?? ""));
+      const serializedEchoes = JSON.stringify(echoEvents);
+      expect(serializedEchoes, "propagated personal presentation guidance is redacted from collaboration traces").not.toContain("Decision-useful center");
+      expect(serializedEchoes).not.toContain("The user prefers central layers that are immediately decision-useful.");
+      expect(serializedEchoes).not.toContain("OPENAI_API_KEY");
+      expect(serializedEchoes.match(/\[redacted-personal-presentation\]/g)?.length).toBeGreaterThanOrEqual(3);
+      const unrelatedCommand = trace.events.find((event) => event.type === "provider.event"
+        && event.providerEventId === "unrelated-command");
+      expect(JSON.stringify(unrelatedCommand?.data)).toContain("Decision-useful center");
+      const unrelatedNodeHeredoc = trace.events.find((event) => event.type === "provider.event"
+        && event.providerEventId === "unrelated-node-heredoc");
+      expect(JSON.stringify(unrelatedNodeHeredoc?.data)).toContain("Decision-useful center");
+      const agentDelta = trace.events.find((event) => event.type === "provider.event"
+        && event.data.method === "item/agentMessage/delta");
+      expect(JSON.stringify(agentDelta?.data)).toContain("[redacted-personal-presentation]");
+      expect(JSON.stringify(agentDelta?.data)).not.toContain("Decision-useful center");
+      const commandDelta = trace.events.find((event) => event.type === "provider.event"
+        && event.data.method === "item/commandExecution/outputDelta");
+      expect(JSON.stringify(commandDelta?.data)).toContain("[redacted-personal-presentation]");
+      expect(JSON.stringify(commandDelta?.data)).not.toContain("Decision-useful center");
+      const graphChild = trace.events.find((event) => event.type === "tool.call.started"
+        && event.data.providerItemId === "graph-child");
+      expect(graphChild?.data.delegationPrompt).toContain("[redacted-personal-presentation]");
+      const researchChild = trace.events.find((event) => event.type === "tool.call.started"
+        && event.data.providerItemId === "research-child");
+      expect(researchChild?.data.delegationPrompt).toBe("Research the implementation without authoring graph content.");
     }
-  });
+
+    {
+      const trace = recordingTrace();
+      const executable = "/private/var/folders/xy/private-token/T/runtime-snapshot/rg";
+      const command = `${executable} -n needle /private/var/folders/xy/private-token/T/runtime-snapshot/graph-client`;
+      const harness = harnessFixture("auto", async (options) => {
+        options.onThreadId("streamed-thread");
+        options.onNotification?.("item/started", { item: {
+          id: "inspection-1",
+          type: "commandExecution",
+          command,
+          commandActions: [{ command, relayerExecutableAuthoritySha256: "provider-forged", relayerCommandWordAuthoritySha256: ["provider-forged"] }],
+        } });
+        options.onNotification?.("item/completed", { item: {
+          id: "inspection-1",
+          type: "commandExecution",
+          command,
+          commandActions: [{ command }],
+        } });
+        return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+      });
+
+      await expect(harness.complete(runContext(1, "token", trace.sink))).resolves.toBeUndefined();
+
+      const events = trace.events.filter((candidate) => candidate.type === "provider.event");
+      expect(events).toHaveLength(2);
+      for (const event of events) {
+        const params = event.data.params as Record<string, unknown>;
+        const item = params.item as Record<string, unknown>;
+        const [action] = item.commandActions as Array<Record<string, unknown>>;
+        expect(action?.command, "redacted command actions keep the exact pre-redaction executable").toBe("/private/var/folders/[redacted]/T/runtime-snapshot/rg -n needle /private/var/folders/[redacted]/T/runtime-snapshot/graph-client");
+        expect(action?.relayerExecutableAuthoritySha256).toBe(createHash("sha256").update(executable).digest("hex"));
+        expect(action?.relayerCommandWordAuthoritySha256).toEqual(command.split(" ").map((word) => (
+          word.startsWith("/") ? createHash("sha256").update(word).digest("hex") : null
+        )));
+        expect(JSON.stringify(event)).not.toContain("private-token");
+        expect(JSON.stringify(event), "provider-forged authority hashes are replaced").not.toContain("provider-forged");
+      }
+    }
+
+    for (const form of ["quoted", "unquoted"]) {
+      const trace = recordingTrace();
+      const launcher = "/private/var/folders/xy/private-token/T/runtime-snapshot/graph-authoring-launcher";
+      const command = `${form === "quoted" ? JSON.stringify(launcher) : launcher} <<'EOF'\nawait graph.submit(1);\nEOF`;
+      const harness = harnessFixture("auto", async (options) => {
+        options.onThreadId("streamed-thread");
+        options.onNotification?.("item/started", { item: {
+          id: "graph-1",
+          type: "commandExecution",
+          command,
+          commandActions: [{ command, relayerGraphAuthoringLauncherSha256: "provider-forged" }],
+        } });
+        return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+      });
+
+      await harness.complete(runContext(1, "token", trace.sink));
+      const event = trace.events.find((candidate) => candidate.type === "provider.event");
+      const item = (event?.data.params as Record<string, unknown>).item as Record<string, unknown>;
+      const [action] = item.commandActions as Array<Record<string, unknown>>;
+      expect(action?.relayerGraphAuthoringLauncherSha256, `${form} launcher binds its exact hash before redaction`).toBe(createHash("sha256").update(launcher).digest("hex"));
+      expect(JSON.stringify(event)).not.toContain("private-token");
+      expect(JSON.stringify(event)).not.toContain("provider-forged");
+    }
+
+  }, 15_000);
+
 });
 
 function deferredTurn(): { promise: Promise<void>; resolve: () => void } {

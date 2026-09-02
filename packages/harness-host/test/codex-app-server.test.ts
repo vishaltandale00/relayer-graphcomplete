@@ -14,710 +14,743 @@ import {
 import type { HarnessApprovalChannel } from "../src/approval-coordinator.js";
 
 describe("Codex app-server transport", () => {
-  it("rejects a missing explicit Codex executable before spawning", async () => {
-    const fake = new FakeCodexProcess(() => undefined);
-    const { codexPathOverride: _codexPathOverride, ...withoutExecutable } = options(fake);
+  it("selects per-platform force signals and terminates the whole Codex process tree with direct-kill fallbacks", () => {
+    const platformSignals = [
+      ["darwin", "SIGUSR2"],
+      ["win32", "SIGKILL"],
+      ["linux", "SIGKILL"],
+    ] as const;
+    expect(platformSignals, "every supported platform is covered").toHaveLength(3);
+    for (const [platform, signal] of platformSignals) {
+      expect(codexForceTerminationSignal(platform), `${platform} uses only the generic ${signal}`).toBe(signal);
+    }
 
-    await expect(runCodexAppServerTurn(withoutExecutable as CodexAppServerTurnOptions))
-      .rejects.toThrow("Codex app-server requires an explicit executable path");
+    const branches: ReadonlyArray<readonly [label: string, run: () => void]> = [
+      ["Windows terminates the complete process tree through taskkill", () => {
+        const child = { pid: 4321, kill: vi.fn() };
+        const killer = new EventEmitter();
+        const spawnTreeKiller = vi.fn(() => killer);
 
-    expect(fake.spawn).toBeUndefined();
-  });
+        forceTerminateCodexProcessTree(child as never, "win32", spawnTreeKiller as never, "C:\\Windows");
 
-  it("uses only platform-supported generic force signals", () => {
-    expect(codexForceTerminationSignal("darwin")).toBe("SIGUSR2");
-    expect(codexForceTerminationSignal("win32")).toBe("SIGKILL");
-    expect(codexForceTerminationSignal("linux")).toBe("SIGKILL");
-  });
-
-  it("uses taskkill to terminate the complete Codex process tree on Windows", () => {
-    const child = { pid: 4321, kill: vi.fn() };
-    const killer = new EventEmitter();
-    const spawnTreeKiller = vi.fn(() => killer);
-
-    forceTerminateCodexProcessTree(child as never, "win32", spawnTreeKiller as never, "C:\\Windows");
-
-    expect(spawnTreeKiller).toHaveBeenCalledWith("C:\\Windows\\System32\\taskkill.exe", ["/pid", "4321", "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    expect(child.kill).not.toHaveBeenCalled();
-  });
-
-  it("signals the complete Codex process group on POSIX", () => {
-    const child = { pid: 4321, kill: vi.fn() };
-    const killProcessGroup = vi.fn();
-
-    forceTerminateCodexProcessTree(child as never, "linux", spawn, undefined, killProcessGroup);
-
-    expect(killProcessGroup).toHaveBeenCalledWith(-4321, "SIGKILL");
-    expect(child.kill).not.toHaveBeenCalled();
-  });
-
-  it("falls back to direct POSIX termination when the process group is unavailable", () => {
-    const child = { pid: 4321, kill: vi.fn() };
-    const killProcessGroup = vi.fn(() => { throw new Error("missing process group"); });
-
-    forceTerminateCodexProcessTree(child as never, "darwin", spawn, undefined, killProcessGroup);
-
-    expect(killProcessGroup).toHaveBeenCalledWith(-4321, "SIGUSR2");
-    expect(child.kill).toHaveBeenCalledWith("SIGUSR2");
-  });
-
-  it("falls back to direct termination if Windows taskkill cannot start", () => {
-    const child = { pid: 4321, kill: vi.fn() };
-    const killer = new EventEmitter();
-
-    forceTerminateCodexProcessTree(child as never, "win32", vi.fn(() => killer) as never);
-    killer.emit("error", new Error("missing taskkill"));
-
-    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
-  });
-
-  it("falls back to direct termination if Windows taskkill exits unsuccessfully", () => {
-    const child = { pid: 4321, kill: vi.fn() };
-    const killer = new EventEmitter();
-
-    forceTerminateCodexProcessTree(child as never, "win32", vi.fn(() => killer) as never);
-    killer.emit("exit", 1);
-
-    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
-  });
-  it.each([
-    [undefined, "thread/start"],
-    ["thread-existing", "thread/resume"],
-  ] as const)("initializes, %s a thread, completes a turn, and shuts down", async (savedThreadId, threadMethod) => {
-    const fake = new FakeCodexProcess((message) => {
-      if (message.method === "initialize") fake.respond(message.id, { userAgent: "codex" });
-      if (message.method === threadMethod) fake.respond(message.id, { thread: { id: savedThreadId ?? "thread-new" } });
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => fake.notify("turn/completed", {
-          threadId: savedThreadId ?? "thread-new",
-          turn: { id: "turn-1", status: "completed", error: null },
-        }));
-      }
-    });
-    const onThreadId = vi.fn();
-    const onTurnId = vi.fn();
-
-    const result = await runCodexAppServerTurn(options(fake, {
-      ...(savedThreadId === undefined ? {} : { savedThreadId }),
-      onThreadId,
-      onTurnId,
-      codexConfigOverrides: ['model_provider="relayer_execution_provider"'],
-    }));
-
-    expect(result).toEqual({ threadId: savedThreadId ?? "thread-new", turnId: "turn-1", status: "completed" });
-    expect(onThreadId).toHaveBeenCalledWith(savedThreadId ?? "thread-new");
-    expect(onTurnId).toHaveBeenCalledWith(savedThreadId ?? "thread-new", "turn-1");
-    expect(fake.messages.map(({ method }) => method).filter(Boolean)).toEqual([
-      "initialize",
-      "initialized",
-      threadMethod,
-      "turn/start",
-    ]);
-    expect(fake.messages[0]).toMatchObject({ params: { capabilities: { experimentalApi: true } } });
-    expect(fake.messages.find(({ method }) => method === threadMethod)?.params).toMatchObject(
-      savedThreadId === undefined ? { cwd: "/workspace" } : { threadId: savedThreadId, cwd: "/workspace" },
-    );
-    expect(fake.messages.find(({ method }) => method === "turn/start")?.params).toMatchObject({
-      threadId: savedThreadId ?? "thread-new",
-      input: [{ type: "text", text: "Build the graph" }],
-    });
-    expect(fake.spawn).toEqual({
-      command: process.execPath,
-      args: ["-c", 'model_provider="relayer_execution_provider"', "app-server", "--listen", "stdio://"],
-    });
-    expect(fake.spawnOptions?.detached).toBe(process.platform !== "win32");
-    expect(fake.killed).toBe(true);
-  });
-
-  it("waits for native thread attachment before starting the turn", async () => {
-    let releaseAttachment: (() => void) | undefined;
-    const attachment = new Promise<void>((resolve) => { releaseAttachment = resolve; });
-    const fake = new FakeCodexProcess((message) => {
-      if (message.method === "initialize") fake.respond(message.id, {});
-      if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1" } });
-        queueMicrotask(() => fake.notify("turn/completed", {
-          threadId: "thread-new",
-          turn: { id: "turn-1", status: "completed", error: null },
-        }));
-      }
-    });
-
-    const running = runCodexAppServerTurn(options(fake, {
-      onThreadId: async () => attachment,
-    }));
-    await vi.waitFor(() => expect(fake.messages.some((request) => request.method === "thread/start")).toBe(true));
-    expect(fake.messages.some((request) => request.method === "turn/start")).toBe(false);
-
-    releaseAttachment?.();
-    await expect(running).resolves.toMatchObject({ threadId: "thread-new", turnId: "turn-1" });
-  });
-
-  it("cancels a stalled thread-attachment fence without starting a turn", async () => {
-    const controller = new AbortController();
-    const fake = new FakeCodexProcess((message) => {
-      if (message.method === "initialize") fake.respond(message.id, {});
-      if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
-    });
-    const running = runCodexAppServerTurn(options(fake, {
-      signal: controller.signal,
-      onThreadId: () => new Promise<void>(() => {}),
-    }));
-    await vi.waitFor(() => expect(fake.messages.some((request) => request.method === "thread/start")).toBe(true));
-
-    controller.abort(new Error("cancel attachment"));
-
-    await expect(running).rejects.toThrow("cancel attachment");
-    expect(fake.messages.some((request) => request.method === "turn/start")).toBe(false);
-    expect(fake.killed).toBe(true);
-  });
-
-  it("bridges a server command approval and never sends acceptForSession", async () => {
-    const onServerRequest = vi.fn();
-    const request = vi.fn(async () => ({
-      requestId: "request-1",
-      decision: "approve_always" as const,
-      actor: "user" as const,
-      decidedAt: "2026-08-20T15:00:00.000Z",
-    }));
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => {
-          fake.notify("item/started", {
-            threadId: "thread-new",
-            turnId: "turn-1",
-            item: { type: "commandExecution", id: "item-1", command: "npm test", cwd: "/workspace", source: "agent" },
-          });
-          fake.serverRequest("provider-1", "item/commandExecution/requestApproval", {
-            threadId: "thread-new",
-            turnId: "turn-1",
-            itemId: "item-1",
-            environmentId: "local",
-            command: "npm test",
-            cwd: "/workspace",
-          });
+        expect(spawnTreeKiller).toHaveBeenCalledWith("C:\\Windows\\System32\\taskkill.exe", ["/pid", "4321", "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
         });
-      }
-      if (message.id === "provider-1" && message.result !== undefined) {
-        queueMicrotask(() => fake.notify("turn/completed", {
-          threadId: "thread-new",
-          turn: { id: "turn-1", status: "completed", error: null },
-        }));
-      }
-    });
+        expect(child.kill).not.toHaveBeenCalled();
+      }],
+      ["POSIX signals the complete process group", () => {
+        const child = { pid: 4321, kill: vi.fn() };
+        const killProcessGroup = vi.fn();
 
-    await runCodexAppServerTurn(options(fake, { approvals: { request }, onServerRequest }));
+        forceTerminateCodexProcessTree(child as never, "linux", spawn, undefined, killProcessGroup);
 
-    expect(request).toHaveBeenCalledOnce();
-    expect(onServerRequest).toHaveBeenCalledWith("item/commandExecution/requestApproval", expect.objectContaining({
-      itemId: "item-1",
-      command: "npm test",
-      cwd: "/workspace",
-    }));
-    const providerResponse = fake.messages.find(({ id }) => id === "provider-1" && "result" in (fake.messages.find(({ id }) => id === "provider-1") ?? {}));
-    expect(providerResponse).toEqual({ id: "provider-1", result: { decision: "accept" } });
-    expect(JSON.stringify(fake.messages)).not.toContain("acceptForSession");
+        expect(killProcessGroup).toHaveBeenCalledWith(-4321, "SIGKILL");
+        expect(child.kill).not.toHaveBeenCalled();
+      }],
+      ["a missing POSIX process group falls back to direct termination", () => {
+        const child = { pid: 4321, kill: vi.fn() };
+        const killProcessGroup = vi.fn(() => { throw new Error("missing process group"); });
+
+        forceTerminateCodexProcessTree(child as never, "darwin", spawn, undefined, killProcessGroup);
+
+        expect(killProcessGroup).toHaveBeenCalledWith(-4321, "SIGUSR2");
+        expect(child.kill).toHaveBeenCalledWith("SIGUSR2");
+      }],
+      ["a Windows taskkill that cannot start falls back to direct termination", () => {
+        const child = { pid: 4321, kill: vi.fn() };
+        const killer = new EventEmitter();
+
+        forceTerminateCodexProcessTree(child as never, "win32", vi.fn(() => killer) as never);
+        killer.emit("error", new Error("missing taskkill"));
+
+        expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+      }],
+      ["an unsuccessful Windows taskkill exit falls back to direct termination", () => {
+        const child = { pid: 4321, kill: vi.fn() };
+        const killer = new EventEmitter();
+
+        forceTerminateCodexProcessTree(child as never, "win32", vi.fn(() => killer) as never);
+        killer.emit("exit", 1);
+
+        expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+      }],
+    ];
+    expect(branches, "every tree-termination branch is covered").toHaveLength(5);
+    for (const [label, run] of branches) {
+      try {
+        run();
+      } catch (error) {
+        expect.soft(error, label).toBe(null);
+      }
+    }
   });
 
-  it("returns pinned Codex MCP denial as Cancel for the exact enclosing tool call", async () => {
-    const request = vi.fn(async () => ({
-      requestId: "request-1",
-      decision: "deny" as const,
-      actor: "user" as const,
-      decidedAt: "2026-08-20T15:00:00.000Z",
-      rationale: "No.",
-    }));
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => {
-          fake.notify("item/started", {
-            threadId: "thread-new",
-            turnId: "turn-1",
-            item: {
-              type: "mcpToolCall",
-              id: "tool-1",
-              server: "chrome-devtools",
-              tool: "evaluate_script",
-              arguments: { pageId: 1, function: "() => document.title" },
-              readOnlyHint: false,
-            },
-          });
-          fake.serverRequest("mcp-provider-1", "item/tool/requestUserInput", {
-            threadId: "thread-new",
-            turnId: "turn-1",
-            itemId: "tool-1",
-            isBlocking: true,
-            questions: [{
-              id: "mcp_tool_call_approval_call-1",
-              header: "Approve app tool call?",
-              question: "Allow chrome-devtools.evaluate_script?",
-              isOther: false,
-              isSecret: false,
-              options: [
-                { label: "Allow", description: "Run the tool and continue." },
-                { label: "Cancel", description: "Cancel this tool call." },
-              ],
-            }],
-          });
-        });
-      }
-      if (message.id === "mcp-provider-1" && message.result !== undefined) {
-        queueMicrotask(() => completeTurn(fake));
-      }
-    });
+  it("validates the executable, starts or resumes the thread, completes the turn, and guards the attachment fence", async () => {
+    {
+      const fake = new FakeCodexProcess(() => undefined);
+      const { codexPathOverride: _codexPathOverride, ...withoutExecutable } = options(fake);
 
-    await runCodexAppServerTurn(options(fake, { approvals: { request } }));
+      await expect(runCodexAppServerTurn(withoutExecutable as CodexAppServerTurnOptions), "a missing explicit executable is rejected before spawning")
+        .rejects.toThrow("Codex app-server requires an explicit executable path");
 
-    expect(request).toHaveBeenCalledOnce();
-    expect(fake.messages).toContainEqual({
-      id: "mcp-provider-1",
-      result: {
-        answers: {
-          "mcp_tool_call_approval_call-1": { answers: ["Cancel"] },
-        },
-      },
-    });
-  });
+      expect(fake.spawn, "nothing is spawned for a missing executable").toBeUndefined();
+    }
 
-  it.each([
-    ["Auto", { approvalPolicy: "on-request", approvalsReviewer: "auto_review" }],
-    ["Full", { approvalPolicy: "never" }],
-  ] as const)("does not invent a Relayer MCP prompt from an event-only %s lifecycle", async (_profile, nativeApproval) => {
-    const request = vi.fn(async () => { throw new Error("unexpected Relayer approval"); });
-    const onServerRequest = vi.fn();
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => {
-          fake.notify("item/started", {
+    const lifecycles = [
+      ["a fresh thread is started", undefined, "thread/start"],
+      ["the saved thread is resumed", "thread-existing", "thread/resume"],
+    ] as const;
+    for (const [label, savedThreadId, threadMethod] of lifecycles) {
+      const fake = new FakeCodexProcess((message) => {
+        if (message.method === "initialize") fake.respond(message.id, { userAgent: "codex" });
+        if (message.method === threadMethod) fake.respond(message.id, { thread: { id: savedThreadId ?? "thread-new" } });
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => fake.notify("turn/completed", {
+            threadId: savedThreadId ?? "thread-new",
+            turn: { id: "turn-1", status: "completed", error: null },
+          }));
+        }
+      });
+      const onThreadId = vi.fn();
+      const onTurnId = vi.fn();
+
+      const result = await runCodexAppServerTurn(options(fake, {
+        ...(savedThreadId === undefined ? {} : { savedThreadId }),
+        onThreadId,
+        onTurnId,
+        codexConfigOverrides: ['model_provider="relayer_execution_provider"'],
+      }));
+
+      expect(result, `${label}: the turn completes with the provider identifiers`).toEqual({
+        threadId: savedThreadId ?? "thread-new", turnId: "turn-1", status: "completed",
+      });
+      expect(onThreadId, `${label}: the thread ID is reported`).toHaveBeenCalledWith(savedThreadId ?? "thread-new");
+      expect(onTurnId, `${label}: the turn ID is reported`).toHaveBeenCalledWith(savedThreadId ?? "thread-new", "turn-1");
+      expect(fake.messages.map(({ method }) => method).filter(Boolean), `${label}: the protocol sequence is exact`).toEqual([
+        "initialize",
+        "initialized",
+        threadMethod,
+        "turn/start",
+      ]);
+      expect(fake.messages[0], `${label}: the experimental API capability is declared`).toMatchObject({
+        params: { capabilities: { experimentalApi: true } },
+      });
+      expect(fake.messages.find(({ method }) => method === threadMethod)?.params, `${label}: the thread params carry only what the provider needs`).toMatchObject(
+        savedThreadId === undefined ? { cwd: "/workspace" } : { threadId: savedThreadId, cwd: "/workspace" },
+      );
+      expect(fake.messages.find(({ method }) => method === "turn/start")?.params, `${label}: the turn carries the prompt`).toMatchObject({
+        threadId: savedThreadId ?? "thread-new",
+        input: [{ type: "text", text: "Build the graph" }],
+      });
+      expect(fake.spawn, `${label}: the spawn command applies the config overrides`).toEqual({
+        command: process.execPath,
+        args: ["-c", 'model_provider="relayer_execution_provider"', "app-server", "--listen", "stdio://"],
+      });
+      expect(fake.spawnOptions?.detached, `${label}: process-group ownership is platform-correct`).toBe(process.platform !== "win32");
+      expect(fake.killed, `${label}: the child is terminated after the turn`).toBe(true);
+    }
+
+    {
+      let releaseAttachment: (() => void) | undefined;
+      const attachment = new Promise<void>((resolve) => { releaseAttachment = resolve; });
+      const fake = new FakeCodexProcess((message) => {
+        if (message.method === "initialize") fake.respond(message.id, {});
+        if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1" } });
+          queueMicrotask(() => fake.notify("turn/completed", {
             threadId: "thread-new",
-            turnId: "turn-1",
-            item: {
-              type: "mcpToolCall",
-              id: "tool-1",
-              server: "chrome-devtools",
-              tool: "evaluate_script",
-              arguments: { function: "() => document.title" },
-              readOnlyHint: false,
-            },
-          });
-          fake.notify("item/completed", {
-            threadId: "thread-new",
-            turnId: "turn-1",
-            item: {
-              type: "mcpToolCall",
-              id: "tool-1",
-              server: "chrome-devtools",
-              tool: "evaluate_script",
-              arguments: { function: "() => document.title" },
-              status: "completed",
-            },
-          });
-          completeTurn(fake);
-        });
-      }
-    });
+            turn: { id: "turn-1", status: "completed", error: null },
+          }));
+        }
+      });
 
-    await runCodexAppServerTurn(options(fake, {
-      approvals: { request },
-      onServerRequest,
-      threadParams: {
+      const running = runCodexAppServerTurn(options(fake, {
+        onThreadId: async () => attachment,
+      }));
+      await vi.waitFor(() => expect(fake.messages.some((request) => request.method === "thread/start")).toBe(true));
+      expect(fake.messages.some((request) => request.method === "turn/start"), "the turn waits for native thread attachment").toBe(false);
+
+      releaseAttachment?.();
+      await expect(running, "the turn starts once attachment settles").resolves.toMatchObject({ threadId: "thread-new", turnId: "turn-1" });
+    }
+
+    {
+      const controller = new AbortController();
+      const fake = new FakeCodexProcess((message) => {
+        if (message.method === "initialize") fake.respond(message.id, {});
+        if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
+      });
+      const running = runCodexAppServerTurn(options(fake, {
+        signal: controller.signal,
+        onThreadId: () => new Promise<void>(() => {}),
+      }));
+      await vi.waitFor(() => expect(fake.messages.some((request) => request.method === "thread/start")).toBe(true));
+
+      controller.abort(new Error("cancel attachment"));
+
+      await expect(running, "a stalled attachment fence is cancelled").rejects.toThrow("cancel attachment");
+      expect(fake.messages.some((request) => request.method === "turn/start"), "cancellation never starts a turn").toBe(false);
+      expect(fake.killed, "the child is terminated after a cancelled fence").toBe(true);
+    }
+  }, 10_000);
+
+  it("bridges command, MCP, and permission approvals to the exact provider response without granting session authority", async () => {
+    {
+      const onServerRequest = vi.fn();
+      const request = vi.fn(async () => ({
+        requestId: "request-1",
+        decision: "approve_always" as const,
+        actor: "user" as const,
+        decidedAt: "2026-08-20T15:00:00.000Z",
+      }));
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => {
+            fake.notify("item/started", {
+              threadId: "thread-new",
+              turnId: "turn-1",
+              item: { type: "commandExecution", id: "item-1", command: "npm test", cwd: "/workspace", source: "agent" },
+            });
+            fake.serverRequest("provider-1", "item/commandExecution/requestApproval", {
+              threadId: "thread-new",
+              turnId: "turn-1",
+              itemId: "item-1",
+              environmentId: "local",
+              command: "npm test",
+              cwd: "/workspace",
+            });
+          });
+        }
+        if (message.id === "provider-1" && message.result !== undefined) {
+          queueMicrotask(() => fake.notify("turn/completed", {
+            threadId: "thread-new",
+            turn: { id: "turn-1", status: "completed", error: null },
+          }));
+        }
+      });
+
+      await runCodexAppServerTurn(options(fake, { approvals: { request }, onServerRequest }));
+
+      expect(request, "the command approval opens exactly one product approval").toHaveBeenCalledOnce();
+      expect(onServerRequest, "the raw server request is surfaced").toHaveBeenCalledWith("item/commandExecution/requestApproval", expect.objectContaining({
+        itemId: "item-1",
+        command: "npm test",
         cwd: "/workspace",
+      }));
+      const providerResponse = fake.messages.find(({ id }) => id === "provider-1" && "result" in (fake.messages.find(({ id }) => id === "provider-1") ?? {}));
+      expect(providerResponse, "the provider receives only the per-request accept").toEqual({ id: "provider-1", result: { decision: "accept" } });
+      expect(JSON.stringify(fake.messages), "approve_always never sends acceptForSession to the provider").not.toContain("acceptForSession");
+    }
+
+    {
+      const request = vi.fn(async () => ({
+        requestId: "request-1",
+        decision: "deny" as const,
+        actor: "user" as const,
+        decidedAt: "2026-08-20T15:00:00.000Z",
+        rationale: "No.",
+      }));
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => {
+            fake.notify("item/started", {
+              threadId: "thread-new",
+              turnId: "turn-1",
+              item: {
+                type: "mcpToolCall",
+                id: "tool-1",
+                server: "chrome-devtools",
+                tool: "evaluate_script",
+                arguments: { pageId: 1, function: "() => document.title" },
+                readOnlyHint: false,
+              },
+            });
+            fake.serverRequest("mcp-provider-1", "item/tool/requestUserInput", {
+              threadId: "thread-new",
+              turnId: "turn-1",
+              itemId: "tool-1",
+              isBlocking: true,
+              questions: [{
+                id: "mcp_tool_call_approval_call-1",
+                header: "Approve app tool call?",
+                question: "Allow chrome-devtools.evaluate_script?",
+                isOther: false,
+                isSecret: false,
+                options: [
+                  { label: "Allow", description: "Run the tool and continue." },
+                  { label: "Cancel", description: "Cancel this tool call." },
+                ],
+              }],
+            });
+          });
+        }
+        if (message.id === "mcp-provider-1" && message.result !== undefined) {
+          queueMicrotask(() => completeTurn(fake));
+        }
+      });
+
+      await runCodexAppServerTurn(options(fake, { approvals: { request } }));
+
+      expect(request, "the pinned MCP denial opens exactly one product approval").toHaveBeenCalledOnce();
+      expect(fake.messages, "the denial answers the exact enclosing tool call with Cancel").toContainEqual({
+        id: "mcp-provider-1",
+        result: {
+          answers: {
+            "mcp_tool_call_approval_call-1": { answers: ["Cancel"] },
+          },
+        },
+      });
+    }
+
+    const eventOnlyLifecycles = [
+      ["Auto", { approvalPolicy: "on-request", approvalsReviewer: "auto_review" }],
+      ["Full", { approvalPolicy: "never" }],
+    ] as const;
+    for (const [profile, nativeApproval] of eventOnlyLifecycles) {
+      const request = vi.fn(async () => { throw new Error("unexpected Relayer approval"); });
+      const onServerRequest = vi.fn();
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => {
+            fake.notify("item/started", {
+              threadId: "thread-new",
+              turnId: "turn-1",
+              item: {
+                type: "mcpToolCall",
+                id: "tool-1",
+                server: "chrome-devtools",
+                tool: "evaluate_script",
+                arguments: { function: "() => document.title" },
+                readOnlyHint: false,
+              },
+            });
+            fake.notify("item/completed", {
+              threadId: "thread-new",
+              turnId: "turn-1",
+              item: {
+                type: "mcpToolCall",
+                id: "tool-1",
+                server: "chrome-devtools",
+                tool: "evaluate_script",
+                arguments: { function: "() => document.title" },
+                status: "completed",
+              },
+            });
+            completeTurn(fake);
+          });
+        }
+      });
+
+      await runCodexAppServerTurn(options(fake, {
+        approvals: { request },
+        onServerRequest,
+        threadParams: {
+          cwd: "/workspace",
+          ...nativeApproval,
+          config: {
+            mcp_servers: {
+              "chrome-devtools": { default_tools_approval_mode: "prompt" },
+            },
+          },
+        },
+      }));
+
+      expect(request, `${profile}: an event-only MCP lifecycle never opens a Relayer approval`).not.toHaveBeenCalled();
+      expect(onServerRequest, `${profile}: an event-only MCP lifecycle never surfaces a server request`).not.toHaveBeenCalled();
+      expect(fake.messages.find(({ method }) => method === "thread/start")?.params, `${profile}: the native approval policy passes through unchanged`).toMatchObject({
         ...nativeApproval,
         config: {
           mcp_servers: {
             "chrome-devtools": { default_tools_approval_mode: "prompt" },
           },
         },
-      },
-    }));
+      });
+    }
 
-    expect(request).not.toHaveBeenCalled();
-    expect(onServerRequest).not.toHaveBeenCalled();
-    expect(fake.messages.find(({ method }) => method === "thread/start")?.params).toMatchObject({
-      ...nativeApproval,
-      config: {
-        mcp_servers: {
-          "chrome-devtools": { default_tools_approval_mode: "prompt" },
-        },
-      },
-    });
-  });
-
-  it("bridges a permission approval without item/started and completes the same turn", async () => {
-    const request = vi.fn(async () => ({
-      requestId: "request-1",
-      decision: "approve_once" as const,
-      actor: "user" as const,
-      decidedAt: "2026-08-20T15:00:00.000Z",
-    }));
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => fake.serverRequest("permission-provider-1", "item/permissions/requestApproval", {
-          threadId: "thread-new",
-          turnId: "turn-1",
-          itemId: "permission-item-1",
-          environmentId: "local",
-          startedAtMs: 1,
-          cwd: "/workspace",
-          reason: "Read a shared dependency",
-          permissions: {
-            network: null,
-            fileSystem: { read: ["/workspace/shared"], write: null },
-          },
-        }));
-      }
-      if (message.id === "permission-provider-1" && message.result !== undefined) {
-        queueMicrotask(() => completeTurn(fake));
-      }
-    });
-
-    const result = await runCodexAppServerTurn(options(fake, { approvals: { request } }));
-
-    expect(result.status).toBe("completed");
-    expect(request).toHaveBeenCalledOnce();
-    expect(fake.messages).toContainEqual({
-      id: "permission-provider-1",
-      result: {
-        permissions: { fileSystem: { read: ["/workspace/shared"], write: null } },
-        scope: "turn",
-      },
-    });
-  });
-
-  it("returns denial to the same turn and handles the safer follow-up request", async () => {
-    const decisions = ["deny", "approve_once"] as const;
-    const request = vi.fn(async () => ({
-      requestId: `request-${request.mock.calls.length}`,
-      decision: decisions[request.mock.calls.length - 1]!,
-      actor: "user" as const,
-      decidedAt: "2026-08-20T15:00:00.000Z",
-    }));
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => sendCommandApproval(fake, "provider-1", "item-1", "npm test"));
-      }
-      if (message.id === "provider-1" && message.result?.decision === "decline") {
-        queueMicrotask(() => sendCommandApproval(fake, "provider-2", "item-2", "npm test -- --runInBand"));
-      }
-      if (message.id === "provider-2" && message.result?.decision === "accept") {
-        queueMicrotask(() => completeTurn(fake));
-      }
-    });
-
-    const result = await runCodexAppServerTurn(options(fake, { approvals: { request } }));
-
-    expect(result.status).toBe("completed");
-    expect(request).toHaveBeenCalledTimes(2);
-    expect(fake.messages).toContainEqual({ id: "provider-1", result: { decision: "decline" } });
-    expect(fake.messages).toContainEqual({ id: "provider-2", result: { decision: "accept" } });
-  });
-
-  it("keeps distinct concurrent provider requests independently addressable", async () => {
-    const pending = new Map<string, (decision: "approve_once" | "deny") => void>();
-    const request: HarnessApprovalChannel["request"] = (input) => new Promise((resolve) => {
-      const command = input.action.kind === "command" ? input.action.command : "";
-      pending.set(command, (decision) => resolve({
-        requestId: `request-${pending.size}`,
-        decision,
-        actor: "user",
+    {
+      const request = vi.fn(async () => ({
+        requestId: "request-1",
+        decision: "approve_once" as const,
+        actor: "user" as const,
         decidedAt: "2026-08-20T15:00:00.000Z",
       }));
-    });
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => {
-          sendCommandApproval(fake, "provider-1", "item-1", "npm test");
-          sendCommandApproval(fake, "provider-2", "item-2", "npm lint");
-        });
-      }
-      const providerResponses = fake.messages.filter(({ id, result }) => (
-        (id === "provider-1" || id === "provider-2") && result !== undefined
-      ));
-      if (providerResponses.length === 2) queueMicrotask(() => completeTurn(fake));
-    });
-
-    const turn = runCodexAppServerTurn(options(fake, { approvals: { request } }));
-    await vi.waitFor(() => expect([...pending.keys()]).toEqual(["npm test", "npm lint"]));
-    pending.get("npm lint")!("deny");
-    await vi.waitFor(() => expect(fake.messages).toContainEqual({ id: "provider-2", result: { decision: "decline" } }));
-    pending.get("npm test")!("approve_once");
-
-    await expect(turn).resolves.toMatchObject({ status: "completed" });
-    expect(fake.messages).toContainEqual({ id: "provider-1", result: { decision: "accept" } });
-  });
-
-  it("aborts a pending provider approval when the child exits", async () => {
-    let approvalSignal: AbortSignal | undefined;
-    const request: HarnessApprovalChannel["request"] = (_input, requestOptions) => new Promise((_resolve, reject) => {
-      approvalSignal = requestOptions?.signal;
-      approvalSignal?.addEventListener("abort", () => reject(approvalSignal?.reason), { once: true });
-    });
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => {
-          sendCommandApproval(fake, "provider-1", "item-1", "npm test");
-          queueMicrotask(() => fake.exit(17, null));
-        });
-      }
-    });
-
-    await expect(runCodexAppServerTurn(options(fake, { approvals: { request } }))).rejects.toThrow("stopped (17)");
-    expect(approvalSignal?.aborted).toBe(true);
-    expect(String(approvalSignal?.reason)).toContain("stopped (17)");
-  });
-
-  it("interrupts the active turn on cancellation", async () => {
-    const controller = new AbortController();
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => controller.abort(new Error("cancelled")));
-      }
-      if (message.method === "turn/interrupt") {
-        fake.respond(message.id, {});
-        queueMicrotask(() => fake.notify("turn/completed", {
-          threadId: "thread-new",
-          turn: { id: "turn-1", status: "interrupted", error: null },
-        }));
-      }
-    });
-
-    const result = await runCodexAppServerTurn(options(fake, { signal: controller.signal }));
-
-    expect(result.status).toBe("interrupted");
-    expect(fake.messages.find(({ method }) => method === "turn/interrupt")).toMatchObject({
-      params: { threadId: "thread-new", turnId: "turn-1" },
-    });
-  });
-
-  it("force-terminates a stuck app-server process without waiting for turn interruption", async () => {
-    const force = new AbortController();
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => force.abort(new Error("force shutdown")));
-      }
-    });
-
-    await expect(runCodexAppServerTurn(options(fake, { forceSignal: force.signal }))).rejects.toThrow("force-closed");
-    expect(fake.signalCode).toBe(codexForceTerminationSignal());
-    expect(fake.messages.some(({ method }) => method === "turn/interrupt")).toBe(false);
-  });
-
-  it("contains hard-kill errors raised from an AbortSignal listener", async () => {
-    const force = new AbortController();
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => force.abort(new Error("force shutdown")));
-      }
-    });
-    fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
-      if (signal === codexForceTerminationSignal()) throw new Error("hard kill unavailable");
-      this.exit(null, signal);
-      return true;
-    });
-
-    await expect(runCodexAppServerTurn(options(fake, { forceSignal: force.signal }))).rejects.toThrow("force-closed");
-    expect(fake.signalCode).toBe("SIGTERM");
-  });
-
-  it("retains force ownership after the turn settles and graceful transport close starts", async () => {
-    const force = new AbortController();
-    const signals: NodeJS.Signals[] = [];
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => completeTurn(fake));
-      }
-    });
-    fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
-      signals.push(signal);
-      if (signal === "SIGTERM") queueMicrotask(() => force.abort(new Error("force during close")));
-      if (signal === codexForceTerminationSignal()) this.exit(null, signal);
-      return true;
-    });
-
-    await expect(runCodexAppServerTurn(options(fake, {
-      forceSignal: force.signal,
-      shutdownGraceMs: 20,
-    }))).resolves.toMatchObject({ status: "completed" });
-
-    expect(signals).toEqual(["SIGTERM", codexForceTerminationSignal()]);
-    expect(fake.signalCode).toBe(codexForceTerminationSignal());
-  });
-
-  it("escalates a fatal transport exactly once when the child ignores SIGTERM", async () => {
-    const signals: NodeJS.Signals[] = [];
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => fake.stdout.write("not-json\n"));
-      }
-    });
-    fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
-      signals.push(signal);
-      if (signal === codexForceTerminationSignal()) this.exit(null, signal);
-      return true;
-    });
-
-    await expect(runCodexAppServerTurn(options(fake, { shutdownGraceMs: 10 }))).rejects.toThrow("malformed JSON");
-
-    expect(signals).toEqual(["SIGTERM", codexForceTerminationSignal()]);
-    expect(fake.signalCode).toBe(codexForceTerminationSignal());
-  });
-
-  it("does not treat a child error as process exit and exhausts bounded escalation", async () => {
-    const signals: NodeJS.Signals[] = [];
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => fake.emit("error", new Error("transport failed while process stayed alive")));
-      }
-    });
-    fake.kill = vi.fn((signal: NodeJS.Signals = "SIGTERM") => {
-      signals.push(signal);
-      return true;
-    });
-
-    await expect(runCodexAppServerTurn(options(fake, { shutdownGraceMs: 5 })))
-      .rejects.toThrow("process did not exit after forced termination");
-
-    expect(signals).toEqual(["SIGTERM", codexForceTerminationSignal(), "SIGKILL"]);
-    expect(fake.exitCode).toBeNull();
-    expect(fake.signalCode).toBeNull();
-  });
-
-  it("settles the exit fence only when the errored child actually exits", async () => {
-    const signals: NodeJS.Signals[] = [];
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => fake.emit("error", new Error("transport failed before exit")));
-      }
-    });
-    fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
-      signals.push(signal);
-      if (signal === codexForceTerminationSignal()) this.exit(null, signal);
-      return true;
-    });
-
-    await expect(runCodexAppServerTurn(options(fake, { shutdownGraceMs: 5 })))
-      .rejects.toThrow("Codex app-server failed: transport failed before exit");
-
-    expect(signals).toEqual(["SIGTERM", codexForceTerminationSignal()]);
-    expect(fake.signalCode).toBe(codexForceTerminationSignal());
-  });
-
-  it("settles the termination fence on close after an unsuccessful spawn without force escalation", async () => {
-    const signals: NodeJS.Signals[] = [];
-    const fake = new FakeCodexProcess(() => undefined);
-    fake.kill = vi.fn((signal: NodeJS.Signals = "SIGTERM") => {
-      signals.push(signal);
-      return false;
-    });
-    const running = runCodexAppServerTurn(options(fake, { shutdownGraceMs: 5 }));
-
-    fake.emit("error", Object.assign(new Error("spawn missing"), { code: "ENOENT" }));
-    queueMicrotask(() => fake.emit("close", -2, null));
-
-    await expect(running).rejects.toMatchObject({
-      message: expect.stringContaining("spawn missing"),
-      cause: expect.objectContaining({ code: "ENOENT" }),
-    });
-    expect(signals).toEqual(["SIGTERM"]);
-  });
-
-  it("preserves a real unsuccessful-spawn ENOENT instead of replacing it with a close timeout", async () => {
-    const missingExecutable = join(tmpdir(), `relayer-missing-codex-${process.pid}-${Date.now()}`);
-    const spawnMissing: CodexAppServerSpawn = () => spawn(missingExecutable, [], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const fake = new FakeCodexProcess(() => undefined);
-
-    await expect(runCodexAppServerTurn(options(fake, {
-      spawnProcess: spawnMissing,
-      shutdownGraceMs: 20,
-    }))).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("fails on malformed JSON and terminates the child", async () => {
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => fake.stdout.write("not-json\n"));
-      }
-    });
-
-    await expect(runCodexAppServerTurn(options(fake))).rejects.toThrow("malformed JSON");
-    expect(fake.killed).toBe(true);
-  });
-
-  it("fails on duplicate in-flight server request IDs", async () => {
-    let keepWaiting!: () => void;
-    const waiting = new Promise<void>((resolve) => { keepWaiting = resolve; });
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => {
-          fake.notify("item/started", {
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => fake.serverRequest("permission-provider-1", "item/permissions/requestApproval", {
             threadId: "thread-new",
             turnId: "turn-1",
-            item: { type: "commandExecution", id: "item-1", command: "npm test", cwd: "/workspace", source: "agent" },
+            itemId: "permission-item-1",
+            environmentId: "local",
+            startedAtMs: 1,
+            cwd: "/workspace",
+            reason: "Read a shared dependency",
+            permissions: {
+              network: null,
+              fileSystem: { read: ["/workspace/shared"], write: null },
+            },
+          }));
+        }
+        if (message.id === "permission-provider-1" && message.result !== undefined) {
+          queueMicrotask(() => completeTurn(fake));
+        }
+      });
+
+      const result = await runCodexAppServerTurn(options(fake, { approvals: { request } }));
+
+      expect(result.status, "a permission approval completes the same turn").toBe("completed");
+      expect(request, "the permission approval opens exactly one product approval").toHaveBeenCalledOnce();
+      expect(fake.messages, "the provider receives the exact turn-scoped grant").toContainEqual({
+        id: "permission-provider-1",
+        result: {
+          permissions: { fileSystem: { read: ["/workspace/shared"], write: null } },
+          scope: "turn",
+        },
+      });
+    }
+
+    {
+      const decisions = ["deny", "approve_once"] as const;
+      const request = vi.fn(async () => ({
+        requestId: `request-${request.mock.calls.length}`,
+        decision: decisions[request.mock.calls.length - 1]!,
+        actor: "user" as const,
+        decidedAt: "2026-08-20T15:00:00.000Z",
+      }));
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => sendCommandApproval(fake, "provider-1", "item-1", "npm test"));
+        }
+        if (message.id === "provider-1" && message.result?.decision === "decline") {
+          queueMicrotask(() => sendCommandApproval(fake, "provider-2", "item-2", "npm test -- --runInBand"));
+        }
+        if (message.id === "provider-2" && message.result?.decision === "accept") {
+          queueMicrotask(() => completeTurn(fake));
+        }
+      });
+
+      const result = await runCodexAppServerTurn(options(fake, { approvals: { request } }));
+
+      expect(result.status, "the turn completes after a denial and a safer follow-up").toBe("completed");
+      expect(request, "the denial and the safer follow-up are decided separately").toHaveBeenCalledTimes(2);
+      expect(fake.messages, "the denial returns to the same turn").toContainEqual({ id: "provider-1", result: { decision: "decline" } });
+      expect(fake.messages, "the safer follow-up is accepted").toContainEqual({ id: "provider-2", result: { decision: "accept" } });
+    }
+
+    {
+      const pending = new Map<string, (decision: "approve_once" | "deny") => void>();
+      const request: HarnessApprovalChannel["request"] = (input) => new Promise((resolve) => {
+        const command = input.action.kind === "command" ? input.action.command : "";
+        pending.set(command, (decision) => resolve({
+          requestId: `request-${pending.size}`,
+          decision,
+          actor: "user",
+          decidedAt: "2026-08-20T15:00:00.000Z",
+        }));
+      });
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => {
+            sendCommandApproval(fake, "provider-1", "item-1", "npm test");
+            sendCommandApproval(fake, "provider-2", "item-2", "npm lint");
           });
-          const params = { threadId: "thread-new", turnId: "turn-1", itemId: "item-1", command: "npm test", cwd: "/workspace" };
-          fake.serverRequest("duplicate", "item/commandExecution/requestApproval", params);
-          fake.serverRequest("duplicate", "item/commandExecution/requestApproval", params);
-        });
-      }
-    });
-    const approvals: HarnessApprovalChannel = {
-      request: async () => { await waiting; throw new Error("unreachable"); },
-    };
+        }
+        const providerResponses = fake.messages.filter(({ id, result }) => (
+          (id === "provider-1" || id === "provider-2") && result !== undefined
+        ));
+        if (providerResponses.length === 2) queueMicrotask(() => completeTurn(fake));
+      });
 
-    await expect(runCodexAppServerTurn(options(fake, { approvals }))).rejects.toThrow("repeated server request ID");
-    keepWaiting();
+      const turn = runCodexAppServerTurn(options(fake, { approvals: { request } }));
+      await vi.waitFor(() => expect([...pending.keys()], "concurrent provider requests arrive independently").toEqual(["npm test", "npm lint"]));
+      pending.get("npm lint")!("deny");
+      await vi.waitFor(() => expect(fake.messages, "the denied request answers first").toContainEqual({ id: "provider-2", result: { decision: "decline" } }));
+      pending.get("npm test")!("approve_once");
+
+      await expect(turn, "the turn completes once every request is answered").resolves.toMatchObject({ status: "completed" });
+      expect(fake.messages, "the approved request answers independently").toContainEqual({ id: "provider-1", result: { decision: "accept" } });
+    }
+  }, 10_000);
+
+  it("fails the turn on protocol violations and child exit while aborting pending approvals", async () => {
+    {
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => fake.stdout.write("not-json\n"));
+        }
+      });
+
+      await expect(runCodexAppServerTurn(options(fake)), "malformed JSON fails the turn").rejects.toThrow("malformed JSON");
+      expect(fake.killed, "the child is terminated after malformed JSON").toBe(true);
+    }
+
+    {
+      let keepWaiting!: () => void;
+      const waiting = new Promise<void>((resolve) => { keepWaiting = resolve; });
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => {
+            fake.notify("item/started", {
+              threadId: "thread-new",
+              turnId: "turn-1",
+              item: { type: "commandExecution", id: "item-1", command: "npm test", cwd: "/workspace", source: "agent" },
+            });
+            const params = { threadId: "thread-new", turnId: "turn-1", itemId: "item-1", command: "npm test", cwd: "/workspace" };
+            fake.serverRequest("duplicate", "item/commandExecution/requestApproval", params);
+            fake.serverRequest("duplicate", "item/commandExecution/requestApproval", params);
+          });
+        }
+      });
+      const approvals: HarnessApprovalChannel = {
+        request: async () => { await waiting; throw new Error("unreachable"); },
+      };
+
+      await expect(runCodexAppServerTurn(options(fake, { approvals })), "duplicate in-flight server request IDs fail the turn")
+        .rejects.toThrow("repeated server request ID");
+      keepWaiting();
+    }
+
+    {
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => fake.exit(17, null));
+        }
+      });
+
+      await expect(runCodexAppServerTurn(options(fake)), "a child exit before turn completion fails the turn").rejects.toThrow("stopped (17)");
+    }
+
+    {
+      let approvalSignal: AbortSignal | undefined;
+      const request: HarnessApprovalChannel["request"] = (_input, requestOptions) => new Promise((_resolve, reject) => {
+        approvalSignal = requestOptions?.signal;
+        approvalSignal?.addEventListener("abort", () => reject(approvalSignal?.reason), { once: true });
+      });
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => {
+            sendCommandApproval(fake, "provider-1", "item-1", "npm test");
+            queueMicrotask(() => fake.exit(17, null));
+          });
+        }
+      });
+
+      await expect(runCodexAppServerTurn(options(fake, { approvals: { request } })), "a child exit fails the turn")
+        .rejects.toThrow("stopped (17)");
+      expect(approvalSignal?.aborted, "the pending provider approval is aborted").toBe(true);
+      expect(String(approvalSignal?.reason), "the approval abort carries the exit reason").toContain("stopped (17)");
+    }
   });
 
-  it("fails when the child exits before the turn completes", async () => {
-    const fake = new FakeCodexProcess((message) => {
-      handshake(fake, message);
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => fake.exit(17, null));
-      }
-    });
+  it("interrupts the active turn on cancellation and force-terminates stuck processes without waiting", async () => {
+    {
+      const controller = new AbortController();
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => controller.abort(new Error("cancelled")));
+        }
+        if (message.method === "turn/interrupt") {
+          fake.respond(message.id, {});
+          queueMicrotask(() => fake.notify("turn/completed", {
+            threadId: "thread-new",
+            turn: { id: "turn-1", status: "interrupted", error: null },
+          }));
+        }
+      });
 
-    await expect(runCodexAppServerTurn(options(fake))).rejects.toThrow("stopped (17)");
-  });
+      const result = await runCodexAppServerTurn(options(fake, { signal: controller.signal }));
+
+      expect(result.status, "cancellation interrupts the active turn").toBe("interrupted");
+      expect(fake.messages.find(({ method }) => method === "turn/interrupt"), "the interrupt names the exact turn").toMatchObject({
+        params: { threadId: "thread-new", turnId: "turn-1" },
+      });
+    }
+
+    {
+      const force = new AbortController();
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => force.abort(new Error("force shutdown")));
+        }
+      });
+
+      await expect(runCodexAppServerTurn(options(fake, { forceSignal: force.signal })), "a stuck process is force-terminated")
+        .rejects.toThrow("force-closed");
+      expect(fake.signalCode, "force termination uses the platform force signal").toBe(codexForceTerminationSignal());
+      expect(fake.messages.some(({ method }) => method === "turn/interrupt"), "force termination never waits for turn interruption").toBe(false);
+    }
+
+    {
+      const force = new AbortController();
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => force.abort(new Error("force shutdown")));
+        }
+      });
+      fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
+        if (signal === codexForceTerminationSignal()) throw new Error("hard kill unavailable");
+        this.exit(null, signal);
+        return true;
+      });
+
+      await expect(runCodexAppServerTurn(options(fake, { forceSignal: force.signal })), "hard-kill errors raised from the AbortSignal listener are contained")
+        .rejects.toThrow("force-closed");
+      expect(fake.signalCode, "the graceful signal still settles the child").toBe("SIGTERM");
+    }
+
+    {
+      const force = new AbortController();
+      const signals: NodeJS.Signals[] = [];
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => completeTurn(fake));
+        }
+      });
+      fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
+        signals.push(signal);
+        if (signal === "SIGTERM") queueMicrotask(() => force.abort(new Error("force during close")));
+        if (signal === codexForceTerminationSignal()) this.exit(null, signal);
+        return true;
+      });
+
+      await expect(runCodexAppServerTurn(options(fake, {
+        forceSignal: force.signal,
+        shutdownGraceMs: 20,
+      })), "the settled turn result survives a force shutdown during graceful close").resolves.toMatchObject({ status: "completed" });
+
+      expect(signals, "force ownership is retained after the turn settles").toEqual(["SIGTERM", codexForceTerminationSignal()]);
+      expect(fake.signalCode, "the force signal settles the child").toBe(codexForceTerminationSignal());
+    }
+  }, 10_000);
+
+  it("escalates termination exactly once per failure and settles fences only on real exit", async () => {
+    {
+      const signals: NodeJS.Signals[] = [];
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => fake.stdout.write("not-json\n"));
+        }
+      });
+      fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
+        signals.push(signal);
+        if (signal === codexForceTerminationSignal()) this.exit(null, signal);
+        return true;
+      });
+
+      await expect(runCodexAppServerTurn(options(fake, { shutdownGraceMs: 10 })), "a fatal transport fails the turn").rejects.toThrow("malformed JSON");
+
+      expect(signals, "a child that ignores SIGTERM is escalated exactly once").toEqual(["SIGTERM", codexForceTerminationSignal()]);
+      expect(fake.signalCode, "the escalated signal settles the child").toBe(codexForceTerminationSignal());
+    }
+
+    {
+      const signals: NodeJS.Signals[] = [];
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => fake.emit("error", new Error("transport failed while process stayed alive")));
+        }
+      });
+      fake.kill = vi.fn((signal: NodeJS.Signals = "SIGTERM") => {
+        signals.push(signal);
+        return true;
+      });
+
+      await expect(runCodexAppServerTurn(options(fake, { shutdownGraceMs: 5 })), "a child error is not treated as process exit")
+        .rejects.toThrow("process did not exit after forced termination");
+
+      expect(signals, "bounded escalation exhausts SIGTERM, the force signal, and SIGKILL").toEqual(["SIGTERM", codexForceTerminationSignal(), "SIGKILL"]);
+      expect(fake.exitCode, "the child never reports an exit code").toBeNull();
+      expect(fake.signalCode, "the child never reports a signal exit").toBeNull();
+    }
+
+    {
+      const signals: NodeJS.Signals[] = [];
+      const fake = new FakeCodexProcess((message) => {
+        handshake(fake, message);
+        if (message.method === "turn/start") {
+          fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+          queueMicrotask(() => fake.emit("error", new Error("transport failed before exit")));
+        }
+      });
+      fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
+        signals.push(signal);
+        if (signal === codexForceTerminationSignal()) this.exit(null, signal);
+        return true;
+      });
+
+      await expect(runCodexAppServerTurn(options(fake, { shutdownGraceMs: 5 })), "the exit fence settles only when the errored child actually exits")
+        .rejects.toThrow("Codex app-server failed: transport failed before exit");
+
+      expect(signals, "the errored child gets the ordinary graceful sequence").toEqual(["SIGTERM", codexForceTerminationSignal()]);
+      expect(fake.signalCode, "the real exit settles the fence").toBe(codexForceTerminationSignal());
+    }
+
+    {
+      const signals: NodeJS.Signals[] = [];
+      const fake = new FakeCodexProcess(() => undefined);
+      fake.kill = vi.fn((signal: NodeJS.Signals = "SIGTERM") => {
+        signals.push(signal);
+        return false;
+      });
+      const running = runCodexAppServerTurn(options(fake, { shutdownGraceMs: 5 }));
+
+      fake.emit("error", Object.assign(new Error("spawn missing"), { code: "ENOENT" }));
+      queueMicrotask(() => fake.emit("close", -2, null));
+
+      await expect(running, "an unsuccessful spawn settles on close without force escalation").rejects.toMatchObject({
+        message: expect.stringContaining("spawn missing"),
+        cause: expect.objectContaining({ code: "ENOENT" }),
+      });
+      expect(signals, "no force signal is spent on an unsuccessful spawn").toEqual(["SIGTERM"]);
+    }
+
+    {
+      const missingExecutable = join(tmpdir(), `relayer-missing-codex-${process.pid}-${Date.now()}`);
+      const spawnMissing: CodexAppServerSpawn = () => spawn(missingExecutable, [], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const fake = new FakeCodexProcess(() => undefined);
+
+      await expect(runCodexAppServerTurn(options(fake, {
+        spawnProcess: spawnMissing,
+        shutdownGraceMs: 20,
+      })), "a real unsuccessful-spawn ENOENT is preserved instead of a close timeout").rejects.toMatchObject({ code: "ENOENT" });
+    }
+  }, 10_000);
 });
 
 class FakeCodexProcess extends EventEmitter {
