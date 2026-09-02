@@ -6,20 +6,21 @@ import {
 } from "../src/icons.js";
 
 describe("Relayer icon vocabulary", () => {
-  it("exports the curated names without duplicates", () => {
-    expect(RELAYER_ICON_NAMES).toContain("compass");
-    expect(new Set(RELAYER_ICON_NAMES).size).toBe(RELAYER_ICON_NAMES.length);
-  });
+  it("curates, normalizes, and confines the icon vocabulary", () => {
+    expect(RELAYER_ICON_NAMES, "curated inventory").toContain("compass");
+    expect(new Set(RELAYER_ICON_NAMES).size, "no duplicate names").toBe(RELAYER_ICON_NAMES.length);
 
-  it("normalizes canonical names and compatibility aliases", () => {
-    expect(resolveRelayerIconName(" Compass ")).toBe("compass");
-    expect(resolveRelayerIconName("CIRCLE_ALERT")).toBe("alert-circle");
-    expect(resolveRelayerIconName("file pen")).toBe("file-edit");
-  });
-
-  it("does not expose Lucide names outside Relayer's vocabulary", () => {
-    expect(resolveRelayerIconName("alarm-clock")).toBeNull();
-    expect(resolveRelayerIconName("constructor")).toBeNull();
-    expect(isSupportedRelayerIcon("🧭")).toBe(false);
+    const resolutions: Array<[label: string, input: string, expected: string | null]> = [
+      ["canonical name with stray casing and whitespace", " Compass ", "compass"],
+      ["compatibility alias CIRCLE_ALERT", "CIRCLE_ALERT", "alert-circle"],
+      ["compatibility alias file pen", "file pen", "file-edit"],
+      ["Lucide name outside the vocabulary", "alarm-clock", null],
+      ["prototype-pollution style name", "constructor", null],
+    ];
+    expect(resolutions, "resolution corpus").toHaveLength(5);
+    for (const [label, input, expected] of resolutions) {
+      expect.soft(resolveRelayerIconName(input), label).toBe(expected);
+    }
+    expect.soft(isSupportedRelayerIcon("🧭"), "emoji is not a supported icon").toBe(false);
   });
 });
