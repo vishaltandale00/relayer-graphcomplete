@@ -20,70 +20,18 @@ const pythonExecutable = process.platform === "darwin"
 const graphClientRoot = join(process.cwd(), "python", "relayer-graph", "src");
 
 describe("Prime Agent workspace boundary", () => {
-  it.runIf(process.platform === "darwin")("admits only the exact managed ipykernel launch shape", async () => {
+  it.runIf(process.platform === "darwin")("admits only the exact managed launch shape and enforces the seatbelt workspace boundary", async () => {
     const workspace = await realpath(await mkdtemp(join(tmpdir(), "relayer-prime-boundary-")));
     const lease = await createPrimeWorkspaceBoundary(workspace, graphClientRoot)({ cwd: workspace, signal: new AbortController().signal });
     try {
-      expect(() => lease.launch({ command: "/bin/sh", args: ["-c", "true"], cwd: workspace, env: process.env })).toThrow("exact Python executable");
-      expect(() => lease.launch({ command: pythonExecutable, args: ["-c", "print('not a kernel')"], cwd: workspace, env: process.env })).toThrow("canonical ipykernel_launcher invocation");
+      expect(() => lease.launch({ command: "/bin/sh", args: ["-c", "true"], cwd: workspace, env: process.env }), "non-Python launch command").toThrow("exact Python executable");
+      expect(() => lease.launch({ command: pythonExecutable, args: ["-c", "print('not a kernel')"], cwd: workspace, env: process.env }), "non-kernel Python invocation").toThrow("canonical ipykernel_launcher invocation");
     } finally {
       await lease.dispose("test-completed");
       await rm(workspace, { recursive: true, force: true });
     }
-  });
 
-  it("uses a minimal environment and removes named cloud and database credentials", () => {
-    const environment = boundedKernelEnvironmentForSecurityProbe({
-      PATH: "/usr/bin", HOME: "/safe/home", RLM_DEPTH: "1",
-      PYTHONPATH: "/host/injection", DYLD_INSERT_LIBRARIES: "/host/injection.dylib",
-      RELAYER_TEST_SECRET: "secret", AWS_ACCESS_KEY_ID: "secret", AWS_PROFILE: "secret",
-      GOOGLE_APPLICATION_CREDENTIALS: "secret", GITHUB_PAT: "secret", DATABASE_URL: "secret",
-    });
-    expect(environment).toEqual({ PATH: "/usr/bin", HOME: "/safe/home", RLM_DEPTH: "1" });
-  });
-
-  it("accepts only Prime-owned unresolved connection files and rejects path tricks", async () => {
-    const workspace = await realpath(await mkdtemp(join(tmpdir(), "relayer-prime-workspace-")));
-    const directory = await realpath(await mkdtemp(join(tmpdir(), "prime-agent-kernel-")));
-    const path = join(directory, "connection.json");
-    const valid = {
-      transport: "tcp", ip: "127.0.0.1", signature_scheme: "hmac-sha256", key: "test-hmac-key",
-      shell_port: 0, iopub_port: 0, stdin_port: 0, control_port: 0, hb_port: 0,
-    };
-    try {
-      await writeFile(path, JSON.stringify(valid), { mode: 0o600 });
-      expect(validateInitialJupyterConnectionForSecurityProbe(path, workspace)).toEqual({ path, directory });
-      await writeFile(path, JSON.stringify({ ...valid, ip: "203.0.113.10" }));
-      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace)).toThrow("unresolved authenticated loopback TCP channels");
-      await writeFile(path, JSON.stringify({ ...valid, hb_port: 43105 }));
-      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace)).toThrow("unresolved authenticated loopback TCP channels");
-      await writeFile(path, JSON.stringify({ ...valid, key: "" }));
-      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace)).toThrow("unresolved authenticated loopback TCP channels");
-      await writeFile(path, "not-json");
-      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace)).toThrow("not valid JSON");
-      await writeFile(path, JSON.stringify(valid));
-      await chmod(path, 0o644);
-      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace)).toThrow("owner-private");
-
-      const symlinkDirectory = await realpath(await mkdtemp(join(tmpdir(), "prime-agent-kernel-")));
-      const symlinkPath = join(symlinkDirectory, "connection.json");
-      await symlink(path, symlinkPath);
-      expect(() => validateInitialJupyterConnectionForSecurityProbe(symlinkPath, workspace)).toThrow("canonical regular file");
-      await rm(symlinkDirectory, { recursive: true, force: true });
-
-      const workspaceRuntime = join(workspace, "prime-agent-kernel-inside");
-      await mkdir(workspaceRuntime, { mode: 0o700 });
-      const workspaceConnection = join(workspaceRuntime, "connection.json");
-      await writeFile(workspaceConnection, JSON.stringify(valid), { mode: 0o600 });
-      expect(() => validateInitialJupyterConnectionForSecurityProbe(workspaceConnection, workspace)).toThrow("private non-workspace Prime runtime");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-
-  it.runIf(process.platform === "darwin")("enforces writes, descendant denial, AF_UNIX denial, and Jupyter loopback", async () => {
-    const workspace = await realpath(await mkdtemp(join(tmpdir(), "relayer prime \"strict-")));
+    const sandboxWorkspace = await realpath(await mkdtemp(join(tmpdir(), "relayer prime \"strict-")));
     const runtime = await realpath(await mkdtemp(join(tmpdir(), "relayer-prime-runtime-")));
     const connectionDirectory = await realpath(await mkdtemp(join(tmpdir(), "prime-agent-kernel-")));
     const connectionPath = join(connectionDirectory, "connection.json");
@@ -93,8 +41,8 @@ describe("Prime Agent workspace boundary", () => {
     };
     await writeFile(connectionPath, JSON.stringify(unresolvedConnection), { mode: 0o600 });
     await mkdir(join(runtime, "tmp"), { recursive: true });
-    const inside = join(workspace, "inside.json");
-    const sibling = join(dirname(workspace), `relayer-prime-sibling-${randomUUID()}`);
+    const inside = join(sandboxWorkspace, "inside.json");
+    const sibling = join(dirname(sandboxWorkspace), `relayer-prime-sibling-${randomUUID()}`);
     const socketPath = `/tmp/relayer-prime-${process.pid}-${randomUUID()}.sock`;
     const unixServer = createServer();
     await new Promise<void>((resolve, reject) => { unixServer.once("error", reject); unixServer.listen(socketPath, resolve); });
@@ -137,36 +85,84 @@ describe("Prime Agent workspace boundary", () => {
       "result['graph_client'] = relayer_graph.__name__",
       "inside.write_text(json.dumps(result, sort_keys=True))",
     ].join("\n");
-    const profile = primeSeatbeltProfileForSecurityProbe(workspace, runtime, graphClientRoot, connectionDirectory);
+    const profile = primeSeatbeltProfileForSecurityProbe(sandboxWorkspace, runtime, graphClientRoot, connectionDirectory);
     const child = spawn(pythonExecutable, [
       "-I", "-c", PRIME_PYTHON_SANDBOX_PROBE_BOOTSTRAP,
       Buffer.from(profile, "utf8").toString("base64"), Buffer.from(program, "utf8").toString("base64"),
     ], {
-      cwd: workspace,
+      cwd: sandboxWorkspace,
       env: boundedKernelEnvironmentForSecurityProbe({ ...process.env, AWS_ACCESS_KEY_ID: "must-not-enter" }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     try {
-      expect(await close(child)).toBe(0);
-      await expect(readFile(inside, "utf8").then((value) => JSON.parse(value))).resolves.toEqual({
+      expect(await close(child), "sandbox probe exit").toBe(0);
+      await expect(readFile(inside, "utf8").then((value) => JSON.parse(value)), "sandboxed behavior matrix").resolves.toEqual({
         double_fork: "denied", exec: "denied", graph_client: "relayer_graph", initial_ports: [0, 0, 0, 0, 0], loopback: "jupyter", secret: "", sibling_write: "denied", unix: "denied",
       });
       const resolved = JSON.parse(await readFile(connectionPath, "utf8"));
-      expect(resolved).toMatchObject({
+      expect(resolved, "connection ports resolved inside the sandbox").toMatchObject({
         shell_port: 43101, iopub_port: 43102, stdin_port: 43103, control_port: 43104, hb_port: 43105,
       });
-      await expect(access(sibling)).rejects.toThrow();
-      expect(profile).toContain("(deny job-creation)");
-      expect(profile).toContain("(deny appleevent-send)");
-      expect(profile).toContain("(deny mach-lookup)");
-      expect(profile).toContain("(deny mach-register)");
+      await expect(access(sibling), "sibling file never created").rejects.toThrow();
+      expect(profile, "job creation denial").toContain("(deny job-creation)");
+      expect(profile, "apple event denial").toContain("(deny appleevent-send)");
+      expect(profile, "mach lookup denial").toContain("(deny mach-lookup)");
+      expect(profile, "mach register denial").toContain("(deny mach-register)");
     } finally {
       await new Promise<void>((resolve) => unixServer.close(() => resolve()));
       await rm(socketPath, { force: true });
       await rm(sibling, { force: true });
-      await rm(workspace, { recursive: true, force: true });
+      await rm(sandboxWorkspace, { recursive: true, force: true });
       await rm(runtime, { recursive: true, force: true });
       await rm(connectionDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("strips ambient credentials from the bounded kernel environment and admits only Prime-owned connection files", async () => {
+    const environment = boundedKernelEnvironmentForSecurityProbe({
+      PATH: "/usr/bin", HOME: "/safe/home", RLM_DEPTH: "1",
+      PYTHONPATH: "/host/injection", DYLD_INSERT_LIBRARIES: "/host/injection.dylib",
+      RELAYER_TEST_SECRET: "secret", AWS_ACCESS_KEY_ID: "secret", AWS_PROFILE: "secret",
+      GOOGLE_APPLICATION_CREDENTIALS: "secret", GITHUB_PAT: "secret", DATABASE_URL: "secret",
+    });
+    expect(environment, "minimal environment without injection or credential variables").toEqual({ PATH: "/usr/bin", HOME: "/safe/home", RLM_DEPTH: "1" });
+
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "relayer-prime-workspace-")));
+    const directory = await realpath(await mkdtemp(join(tmpdir(), "prime-agent-kernel-")));
+    const path = join(directory, "connection.json");
+    const valid = {
+      transport: "tcp", ip: "127.0.0.1", signature_scheme: "hmac-sha256", key: "test-hmac-key",
+      shell_port: 0, iopub_port: 0, stdin_port: 0, control_port: 0, hb_port: 0,
+    };
+    try {
+      await writeFile(path, JSON.stringify(valid), { mode: 0o600 });
+      expect(validateInitialJupyterConnectionForSecurityProbe(path, workspace), "Prime-owned unresolved connection file").toEqual({ path, directory });
+      await writeFile(path, JSON.stringify({ ...valid, ip: "203.0.113.10" }));
+      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace), "non-loopback ip").toThrow("unresolved authenticated loopback TCP channels");
+      await writeFile(path, JSON.stringify({ ...valid, hb_port: 43105 }));
+      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace), "resolved port").toThrow("unresolved authenticated loopback TCP channels");
+      await writeFile(path, JSON.stringify({ ...valid, key: "" }));
+      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace), "missing hmac key").toThrow("unresolved authenticated loopback TCP channels");
+      await writeFile(path, "not-json");
+      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace), "invalid JSON").toThrow("not valid JSON");
+      await writeFile(path, JSON.stringify(valid));
+      await chmod(path, 0o644);
+      expect(() => validateInitialJupyterConnectionForSecurityProbe(path, workspace), "world-readable file").toThrow("owner-private");
+
+      const symlinkDirectory = await realpath(await mkdtemp(join(tmpdir(), "prime-agent-kernel-")));
+      const symlinkPath = join(symlinkDirectory, "connection.json");
+      await symlink(path, symlinkPath);
+      expect(() => validateInitialJupyterConnectionForSecurityProbe(symlinkPath, workspace), "symlinked connection file").toThrow("canonical regular file");
+      await rm(symlinkDirectory, { recursive: true, force: true });
+
+      const workspaceRuntime = join(workspace, "prime-agent-kernel-inside");
+      await mkdir(workspaceRuntime, { mode: 0o700 });
+      const workspaceConnection = join(workspaceRuntime, "connection.json");
+      await writeFile(workspaceConnection, JSON.stringify(valid), { mode: 0o600 });
+      expect(() => validateInitialJupyterConnectionForSecurityProbe(workspaceConnection, workspace), "workspace-resident runtime directory").toThrow("private non-workspace Prime runtime");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
     }
   });
 });

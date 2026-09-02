@@ -39,78 +39,203 @@ function sealFixtureTrace(store: HarnessTraceStore): Promise<unknown> {
 }
 
 describe("HarnessTraceStore", () => {
-  it("rejects unsupported required coverage before a trace starts", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-preflight-"));
-    const spool = join(directory, "spool");
-    const abandoned = join(spool, "abandoned-before-preflight.txt");
-    try {
-      await mkdir(spool, { mode: 0o700 });
-      await writeFile(abandoned, "must be cleaned before teardown completes\n");
-      const store = new HarnessTraceStore({
-        directory: spool,
-        policy: policy({ requiredFeatures: { modelCalls: "full" } }),
-      });
-      expect(() => store.start({
-        threadId: 1,
-        interactionNodeId: 2,
-        productInteractionId: 3,
-        implementation: "fixture.none",
-        configurationName: "fixture-none",
-        support: NO_HARNESS_TRACE_SUPPORT,
-      })).toThrow("before inference");
+  it("validates the spool before startup cleanup and rejects every symlink and ownership escape", async () => {
+    {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-trace-preflight-"));
+      const spool = join(directory, "spool");
+      const abandoned = join(spool, "abandoned-before-preflight.txt");
+      try {
+        await mkdir(spool, { mode: 0o700 });
+        await writeFile(abandoned, "must be cleaned before teardown completes\n");
+        const store = new HarnessTraceStore({
+          directory: spool,
+          policy: policy({ requiredFeatures: { modelCalls: "full" } }),
+        });
+        expect(() => store.start({
+          threadId: 1,
+          interactionNodeId: 2,
+          productInteractionId: 3,
+          implementation: "fixture.none",
+          configurationName: "fixture-none",
+          support: NO_HARNESS_TRACE_SUPPORT,
+        }), "unsupported required coverage rejects before inference").toThrow("before inference");
 
-      await store.close();
-      await expect(readFile(abandoned, "utf8")).rejects.toThrow();
-      await writeFile(join(spool, "post-close-sentinel.txt"), "survives\n");
-      await Promise.resolve();
-      await expect(readFile(join(spool, "post-close-sentinel.txt"), "utf8")).resolves.toBe("survives\n");
-      expect(() => store.start({
-        threadId: 1,
-        interactionNodeId: 2,
-        implementation: "fixture.none",
-        configurationName: "fixture-none",
-        support: NO_HARNESS_TRACE_SUPPORT,
-      })).toThrow("trace store is closed");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
+        await store.close();
+        await expect(readFile(abandoned, "utf8"), "close cleans abandoned entries").rejects.toThrow();
+        await writeFile(join(spool, "post-close-sentinel.txt"), "survives\n");
+        await Promise.resolve();
+        await expect(readFile(join(spool, "post-close-sentinel.txt"), "utf8"), "post-close writes survive teardown").resolves.toBe("survives\n");
+        expect(() => store.start({
+          threadId: 1,
+          interactionNodeId: 2,
+          implementation: "fixture.none",
+          configurationName: "fixture-none",
+          support: NO_HARNESS_TRACE_SUPPORT,
+        }), "closed store rejects new traces").toThrow("trace store is closed");
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-trace-abandoned-spool-"));
+      const spool = join(directory, "spool");
+      try {
+        await mkdir(spool, { mode: 0o700 });
+        await mkdir(join(spool, "abandoned-trace", "attachments"), { recursive: true });
+        await writeFile(join(spool, "abandoned-trace", "events.jsonl"), "partial");
+        await writeFile(join(spool, "abandoned-temporary-file"), "partial");
+        const store = new HarnessTraceStore({ directory: spool, policy: policy(), createId: (() => {
+          let id = 0;
+          return () => `fresh-${++id}`;
+        })() });
+        const active = store.start({
+          threadId: 1,
+          interactionNodeId: 2,
+          productInteractionId: 3,
+          implementation: "fixture.trace",
+          configurationName: "fixture-trace",
+          support: fullSupport,
+        });
+
+        await active.seal("complete");
+
+        await expect(readFile(join(spool, "abandoned-trace", "events.jsonl"), "utf8"), "abandoned trace removed before first seal").rejects.toThrow();
+        await expect(readFile(join(spool, "abandoned-temporary-file"), "utf8"), "abandoned temporary file removed before first seal").rejects.toThrow();
+        expect(JSON.parse(await readFile(join(spool, "fresh-1", "manifest.json"), "utf8")), "fresh trace sealed after cleanup").toMatchObject({ traceId: "fresh-1" });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-root-link-"));
+      const victim = join(directory, "victim");
+      const proof = join(victim, "must-survive.txt");
+      const spool = join(directory, "spool");
+      try {
+        await mkdir(victim, { mode: 0o700 });
+        await writeFile(proof, "preserved\n");
+        await symlink(victim, spool, "dir");
+        const store = new HarnessTraceStore({ directory: spool, policy: policy() });
+
+        await expect(sealFixtureTrace(store), "symlink spool root rejected").rejects.toThrow("must be a real directory");
+        await expect(readFile(proof, "utf8"), "symlink target contents preserved").resolves.toBe("preserved\n");
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-ancestor-link-"));
+      const victimParent = join(directory, "victim-parent");
+      const victimSpool = join(victimParent, "spool");
+      const proof = join(victimSpool, "must-survive.txt");
+      const alias = join(directory, "alias");
+      try {
+        await mkdir(victimSpool, { recursive: true, mode: 0o700 });
+        await chmod(victimSpool, 0o700);
+        await writeFile(proof, "preserved through ancestor\n");
+        await symlink(victimParent, alias, "dir");
+        const store = new HarnessTraceStore({ directory: join(alias, "spool"), policy: policy() });
+
+        await expect(sealFixtureTrace(store), "symlinked spool ancestor rejected").rejects.toThrow("ancestor must not be a symbolic link");
+        await expect(readFile(proof, "utf8"), "victim spool behind ancestor link preserved").resolves.toBe("preserved through ancestor\n");
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-ancestor-race-"));
+      const parent = join(directory, "owned-parent");
+      const detachedParent = join(directory, "detached-parent");
+      const spool = join(parent, "spool");
+      const victimParent = join(directory, "victim-parent");
+      const victimSpool = join(victimParent, "spool");
+      const proof = join(victimSpool, "must-survive.txt");
+      try {
+        await mkdir(spool, { recursive: true, mode: 0o700 });
+        await chmod(spool, 0o700);
+        await writeFile(join(spool, "abandoned.txt"), "old trace\n");
+        await mkdir(victimSpool, { recursive: true, mode: 0o700 });
+        await chmod(victimSpool, 0o700);
+        await writeFile(proof, "race victim preserved\n");
+
+        const store = new HarnessTraceStore({ directory: spool, policy: policy() });
+        // cleanupAbandonedSpool suspends on its first lstat before it can traverse
+        // the user-owned ancestor, making this a deterministic swap at that edge.
+        renameSync(parent, detachedParent);
+        symlinkSync(victimParent, parent, "dir");
+
+        await expect(sealFixtureTrace(store), "ancestor swapped to a symlink during startup fails closed").rejects.toThrow("ancestor must not be a symbolic link");
+        await expect(readFile(proof, "utf8"), "race victim preserved").resolves.toBe("race victim preserved\n");
+        await expect(readFile(join(detachedParent, "spool", "abandoned.txt"), "utf8"), "detached original spool untouched").resolves.toBe("old trace\n");
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+
+    if (process.platform !== "win32") {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-trace-invalid-spool-"));
+      const fileRoot = join(directory, "file-spool");
+      const permissiveRoot = join(directory, "permissive-spool");
+      try {
+        await writeFile(fileRoot, "not a directory\n");
+        await mkdir(permissiveRoot, { mode: 0o700 });
+        await chmod(permissiveRoot, 0o755);
+
+        await expect(sealFixtureTrace(new HarnessTraceStore({ directory: fileRoot, policy: policy() })), "non-directory spool root rejected")
+          .rejects.toThrow("must be a real directory");
+        await expect(sealFixtureTrace(new HarnessTraceStore({ directory: permissiveRoot, policy: policy() })), "permissive spool root rejected")
+          .rejects.toThrow("permissions must be 0700");
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+
+    if (process.platform !== "win32" && process.getuid !== undefined) {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-owner-"));
+      const spool = join(directory, "spool");
+      const actualUid = process.getuid();
+      try {
+        await mkdir(spool, { mode: 0o700 });
+        const getuid = vi.spyOn(process, "getuid").mockReturnValue(actualUid + 1);
+        try {
+          await expect(sealFixtureTrace(new HarnessTraceStore({ directory: spool, policy: policy() })), "spool root owned by another user rejected")
+            .rejects.toThrow("must be owned by the current user");
+        } finally {
+          getuid.mockRestore();
+        }
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-entry-link-"));
+      const spool = join(directory, "spool");
+      const victim = join(directory, "outside.txt");
+      const entry = join(spool, "abandoned-link");
+      try {
+        await mkdir(spool, { mode: 0o700 });
+        await writeFile(victim, "outside survives\n");
+        await symlink(victim, entry, "file");
+        const store = new HarnessTraceStore({ directory: spool, policy: policy(), createId: () => "fresh" });
+
+        await sealFixtureTrace(store);
+
+        await expect(readFile(victim, "utf8"), "abandoned entry symlink target preserved").resolves.toBe("outside survives\n");
+        await expect(readFile(entry, "utf8"), "abandoned entry symlink itself removed").rejects.toThrow();
+        expect(JSON.parse(await readFile(join(spool, "fresh", "manifest.json"), "utf8")), "fresh trace sealed after entry cleanup").toMatchObject({ traceId: "fresh" });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
     }
   });
 
-  it("preserves presentation attribution when trace export fails", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-export-failure-"));
-    const target = join(directory, "existing-target");
-    try {
-      const store = new HarnessTraceStore({ directory: join(directory, "spool"), policy: policy() });
-      await store.start({
-        threadId: 1,
-        interactionNodeId: 2,
-        productInteractionId: 3,
-        personalPresentationVersionId: 90,
-        implementation: "fixture.trace",
-        configurationName: "fixture-trace",
-        support: fullSupport,
-      }).seal("complete");
-      // Only Node 22.22.1 and newer reject a pre-existing destination directory
-      // for errorOnExist copies (nodejs/node#60946). Colliding with a file the
-      // sealed trace must copy fails the export on every supported runtime, so
-      // this case does not depend on the runner's Node patch level.
-      await mkdir(target);
-      await writeFile(join(target, "manifest.json"), "occupied export target\n");
-
-      const error = await store.export(3, target, {
-        runId: "run-1", executionId: "execution-1", interactionId: "3", harnessConfigurationName: "fixture-trace",
-      }).catch((caught: unknown) => caught);
-
-      expect(error).toMatchObject({
-        name: "HarnessTraceExportError",
-        personalPresentationVersionId: 90,
-      });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("seals nested portable events, redacts secrets, and exports exactly once", async () => {
+  it("seals nested portable events, redacts secrets, exports exactly once, and reports failure honestly", async () => {
+    {
     const directory = await mkdtemp(join(tmpdir(), "relayer-trace-store-"));
     const target = join(directory, "exported", "candidate-trace");
     try {
@@ -215,7 +340,7 @@ describe("HarnessTraceStore", () => {
       await expect(active.sink.attach({ name: "native.json", mediaType: "application/json", content: "{}", sensitivity: "normal", native: true, sanitized: true })).rejects.toThrow("disabled");
       const descriptor = await active.seal("complete");
 
-      expect(descriptor).toMatchObject({ status: "complete", eventCount: expect.any(Number), redactionCount: expect.any(Number) });
+      expect(descriptor, "sealed trace descriptor").toMatchObject({ status: "complete", eventCount: expect.any(Number), redactionCount: expect.any(Number) });
       await store.export(3, target, {
         runId: "run-1",
         executionId: "execution-1",
@@ -330,203 +455,75 @@ describe("HarnessTraceStore", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+    }
 
-  it("redacts macOS temporary paths idempotently", () => {
-    const once = redactTraceData("/private/var/folders/xy/private-token/T/project");
-    expect(once).toBe("/private/var/folders/[redacted]/T/project");
-    expect(redactTraceData(once)).toBe(once);
-    const symlinkForm = redactTraceData("/var/folders/xy/private-token/T/project");
-    expect(symlinkForm).toBe("/var/folders/[redacted]/T/project");
-    expect(redactTraceData(symlinkForm)).toBe(symlinkForm);
-  });
+    {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-export-failure-"));
+    const target = join(directory, "existing-target");
+    try {
+      const store = new HarnessTraceStore({ directory: join(directory, "spool"), policy: policy() });
+      await store.start({
+        threadId: 1,
+        interactionNodeId: 2,
+        productInteractionId: 3,
+        personalPresentationVersionId: 90,
+        implementation: "fixture.trace",
+        configurationName: "fixture-trace",
+        support: fullSupport,
+      }).seal("complete");
+      // Only Node 22.22.1 and newer reject a pre-existing destination directory
+      // for errorOnExist copies (nodejs/node#60946). Colliding with a file the
+      // sealed trace must copy fails the export on every supported runtime, so
+      // this case does not depend on the runner's Node patch level.
+      await mkdir(target);
+      await writeFile(join(target, "manifest.json"), "occupied export target\n");
 
-  it("redacts complete and truncated armored OpenPGP private-key blocks idempotently", () => {
-    const complete = [
-      "before",
-      "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-      "Version: OpenPGP.js v6",
-      "",
-      "private-armored-material",
-      "=checksum",
-      "-----END PGP PRIVATE KEY BLOCK-----",
-      "after",
-    ].join("\n");
-    const redactedComplete = redactTraceData(complete);
-    expect(redactedComplete).toBe("before\n[redacted-private-key-block]\nafter");
-    expect(redactedComplete).not.toContain("private-armored-material");
-    expect(redactTraceData(redactedComplete)).toBe(redactedComplete);
+      const error = await store.export(3, target, {
+        runId: "run-1", executionId: "execution-1", interactionId: "3", harnessConfigurationName: "fixture-trace",
+      }).catch((caught: unknown) => caught);
 
-    const truncated = [
-      "prefix",
-      "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-      "truncated-private-armored-material",
-    ].join("\n");
-    const redactedTruncated = redactTraceData(truncated);
-    expect(redactedTruncated).toBe("prefix\n[redacted-private-key-block]");
-    expect(redactedTruncated).not.toContain("truncated-private-armored-material");
-    expect(redactTraceData(redactedTruncated)).toBe(redactedTruncated);
-  });
+      expect(error, "export failure preserves presentation attribution").toMatchObject({
+        name: "HarnessTraceExportError",
+        personalPresentationVersionId: 90,
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+    }
 
-  it("does not redact public or malformed OpenPGP armor", () => {
-    const values = [
-      "-----BEGIN PGP PUBLIC KEY BLOCK-----\npublic-material\n-----END PGP PUBLIC KEY BLOCK-----",
-      "-----BEGIN PGP PRIVATE KEY BLOB-----\nmalformed-private-label\n-----END PGP PRIVATE KEY BLOB-----",
-      "-----BEGIN PGP PRIVATE KEY BLOCK ----\nmalformed-dashes",
-    ];
-    for (const value of values) expect(redactTraceData(value)).toBe(value);
-  });
-
-  it("does not let a mismatched private-key footer terminate redaction", () => {
-    const injectedFooter = [
-      "before",
-      "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-      "private-material-before-injected-footer",
-      "-----END RSA PRIVATE KEY-----",
-      "private-material-after-injected-footer",
-      "-----END PGP PRIVATE KEY BLOCK-----",
-      "after",
-    ].join("\n");
-    const redactedInjectedFooter = redactTraceData(injectedFooter);
-    expect(redactedInjectedFooter).toBe("before\n[redacted-private-key-block]\nafter");
-    expect(redactedInjectedFooter).not.toContain("private-material-before-injected-footer");
-    expect(redactedInjectedFooter).not.toContain("private-material-after-injected-footer");
-    expect(redactTraceData(redactedInjectedFooter)).toBe(redactedInjectedFooter);
-
-    const mismatchedFooterToEof = [
-      "prefix",
-      "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-      "private-material-before-mismatched-footer",
-      "-----END RSA PRIVATE KEY-----",
-      "private-material-after-mismatched-footer",
-    ].join("\n");
-    const redactedToEof = redactTraceData(mismatchedFooterToEof);
-    expect(redactedToEof).toBe("prefix\n[redacted-private-key-block]");
-    expect(redactedToEof).not.toContain("private-material-before-mismatched-footer");
-    expect(redactedToEof).not.toContain("private-material-after-mismatched-footer");
-    expect(redactTraceData(redactedToEof)).toBe(redactedToEof);
-  });
-
-  it("fails closed when nested private-key armor crosses footer order", () => {
-    const crossed = [
-      "before",
-      "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-      "outer-private-material",
-      "-----BEGIN RSA PRIVATE KEY-----",
-      "inner-private-material",
-      "-----END PGP PRIVATE KEY BLOCK-----",
-      "rsa-private-material-after-outer-footer",
-      "-----END RSA PRIVATE KEY-----",
-      "untrusted-suffix-after-crossed-armor",
-    ].join("\n");
-    const redacted = redactTraceData(crossed);
-    expect(redacted).toBe("before\n[redacted-private-key-block]");
-    expect(redacted).not.toContain("outer-private-material");
-    expect(redacted).not.toContain("inner-private-material");
-    expect(redacted).not.toContain("rsa-private-material-after-outer-footer");
-    expect(redacted).not.toContain("untrusted-suffix-after-crossed-armor");
-    expect(redactTraceData(redacted)).toBe(redacted);
-  });
-
-  it("handles properly nested private-key armor in stack order", () => {
-    const nested = [
-      "before",
-      "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-      "outer-private-material-before-inner",
-      "-----BEGIN RSA PRIVATE KEY-----",
-      "inner-private-material",
-      "-----END RSA PRIVATE KEY-----",
-      "outer-private-material-after-inner",
-      "-----END PGP PRIVATE KEY BLOCK-----",
-      "after",
-    ].join("\n");
-    const redacted = redactTraceData(nested);
-    expect(redacted).toBe("before\n[redacted-private-key-block]\nafter");
-    expect(redacted).not.toContain("outer-private-material-before-inner");
-    expect(redacted).not.toContain("inner-private-material");
-    expect(redacted).not.toContain("outer-private-material-after-inner");
-    expect(redactTraceData(redacted)).toBe(redacted);
-  });
-
-  it("fails closed when same-label nested private-key armor remains open", () => {
-    const truncatedNested = [
-      "before",
-      "-----BEGIN RSA PRIVATE KEY-----",
-      "outer-private-material",
-      "-----BEGIN RSA PRIVATE KEY-----",
-      "inner-private-material",
-      "-----END RSA PRIVATE KEY-----",
-      "outer-private-material-after-inner-footer",
-    ].join("\n");
-    const redacted = redactTraceData(truncatedNested);
-    expect(redacted).toBe("before\n[redacted-private-key-block]");
-    expect(redacted).not.toContain("outer-private-material");
-    expect(redacted).not.toContain("inner-private-material");
-    expect(redacted).not.toContain("outer-private-material-after-inner-footer");
-    expect(redactTraceData(redacted)).toBe(redacted);
-  });
-
-  it("preserves exact-footer support for standard private-key armor labels", () => {
-    for (const label of ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "OPENSSH PRIVATE KEY"]) {
-      const source = `before\n-----BEGIN ${label}-----\nprivate-${label}\n-----END ${label}-----\nafter`;
-      const redacted = redactTraceData(source);
-      expect(redacted).toBe("before\n[redacted-private-key-block]\nafter");
-      expect(redacted).not.toContain(`private-${label}`);
-      expect(redactTraceData(redacted)).toBe(redacted);
+    {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-cap-"));
+    try {
+      const store = new HarnessTraceStore({ directory, policy: policy({ maxEventsPerTurn: 2 }) });
+      const active = store.start({
+        threadId: 1,
+        interactionNodeId: 2,
+        implementation: "fixture.trace",
+        configurationName: "fixture-trace",
+        support: fullSupport,
+      });
+      active.sink.emit({ type: "message", data: { text: "discarded by the cap" } });
+      const descriptor = await active.seal("complete");
+      expect(descriptor.truncated, "truncation recorded").toBe(true);
+      expect(descriptor.eventCount, "event cap enforced").toBeLessThanOrEqual(2);
+      expect(descriptor.coverage.messages, "achieved coverage lowered").toBe("summary");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
     }
   });
 
-  it("redacts bare GitHub personal access token formats idempotently", () => {
-    const legacy = ["ghp", "gho", "ghu", "ghs", "ghr"].map((prefix, index) => `${prefix}_${String(index + 1).repeat(36)}`);
-    const fineGrained = `github_pat_${"B".repeat(22)}_${"C".repeat(59)}`;
-    const once = redactTraceData([...legacy, fineGrained].join(" "));
-    expect(once).toBe(Array(legacy.length + 1).fill("[redacted-github-token]").join(" "));
-    expect(redactTraceData(once)).toBe(once);
-    for (const token of legacy) expect(once).not.toContain(token);
-    expect(once).not.toContain(fineGrained);
-  });
-
-  it("does not redact GitHub-like prose or malformed token lengths", () => {
-    const values = [
-      "gho_documentation",
-      `prefixghp_${"A".repeat(36)}`,
-      `ghr_${"A".repeat(36)}_documentation`,
-      `ghu_${"B".repeat(35)}`,
-      `ghs_${"C".repeat(37)}`,
-      `github_pat_${"D".repeat(81)}`,
-      `github_pat_${"E".repeat(83)}`,
-    ];
-    const prose = values.join(" ");
-    expect(redactTraceData(prose)).toBe(prose);
-  });
-
-  it("redacts bare Slack credentials idempotently", () => {
-    const tokens = [
+  it("redacts bare credential tokens and credential-named fields idempotently", () => {
+    const githubLegacy = ["ghp", "gho", "ghu", "ghs", "ghr"].map((prefix, index) => `${prefix}_${String(index + 1).repeat(36)}`);
+    const githubFineGrained = `github_pat_${"B".repeat(22)}_${"C".repeat(59)}`;
+    const slackTokens = [
       `xoxb-${"1".repeat(12)}-${"2".repeat(13)}-${"A".repeat(24)}`,
       `xoxp-${"B".repeat(48)}`,
       `xoxe.xoxp-${"C".repeat(64)}`,
       `xapp-${"D".repeat(48)}`,
       `xwfp-${"E".repeat(48)}`,
     ];
-    const once = redactTraceData(tokens.join(" "));
-    expect(once).toBe(Array(tokens.length).fill("[redacted-slack-token]").join(" "));
-    expect(redactTraceData(once)).toBe(once);
-    for (const token of tokens) expect(once).not.toContain(token);
-  });
-
-  it("does not redact Slack-like prose or malformed token lengths", () => {
-    const values = [
-      "xoxb documentation",
-      `prefixxoxp-${"A".repeat(24)}`,
-      `xoxa-${"B".repeat(9)}`,
-      `xapp-${"D".repeat(9)}`,
-    ];
-    const prose = values.join(" ");
-    expect(redactTraceData(prose)).toBe(prose);
-  });
-
-  it("redacts bare GitLab credentials idempotently", () => {
-    const tokens = [
+    const gitlabTokens = [
       "glpat-0123456789abcdefghij",
       `gloas-${"A".repeat(32)}`,
       `glsoat-${"B".repeat(20)}`,
@@ -536,378 +533,296 @@ describe("HarnessTraceStore", () => {
       `glft-${"F".repeat(20)}`,
       `glwt-${"G".repeat(20)}`,
     ];
-    const once = redactTraceData(tokens.join(" "));
-    expect(once).toBe(Array(tokens.length).fill("[redacted-gitlab-token]").join(" "));
-    expect(redactTraceData(once)).toBe(once);
-    for (const token of tokens) expect(once).not.toContain(token);
-  });
-
-  it("does not redact GitLab-like prose or malformed token lengths", () => {
-    const values = [
-      "glpat-documentation",
-      `prefixglpat-${"A".repeat(20)}`,
-      `glpat-${"B".repeat(19)}`,
-      `glunknown-${"D".repeat(24)}`,
-    ];
-    const prose = values.join(" ");
-    expect(redactTraceData(prose)).toBe(prose);
-  });
-
-  it("redacts bare npm granular access tokens idempotently", () => {
-    const token = `npm_${"A1b2C3".repeat(6)}`;
-    const once = redactTraceData(`observed (${token})`);
-    expect(once).toBe("observed ([redacted-npm-token])");
-    expect(once).not.toContain(token);
-    expect(redactTraceData(once)).toBe(once);
-  });
-
-  it("does not redact npm-like prose or malformed token lengths", () => {
-    const values = [
-      "npm_documentation",
-      `prefixnpm_${"A".repeat(36)}`,
-      `npm_${"B".repeat(35)}`,
-      `npm_${"C".repeat(37)}`,
-      `npm_${"D".repeat(36)}_suffix`,
-    ];
-    const prose = values.join(" ");
-    expect(redactTraceData(prose)).toBe(prose);
-  });
-
-  it("redacts bare live and test Stripe secret credentials idempotently", () => {
-    const keys = [
+    const npmToken = `npm_${"A1b2C3".repeat(6)}`;
+    const stripeKeys = [
       `sk_live_${"A1b2C3".repeat(4)}`,
       `rk_live_${"D4e5F6".repeat(8)}`,
       `sk_test_${"J0k1L2".repeat(4)}`,
       `rk_test_${"G7h8I9".repeat(4)}`,
     ];
-    const once = redactTraceData(keys.join(" "));
-    expect(once).toBe(Array(keys.length).fill("[redacted-stripe-key]").join(" "));
-    expect(redactTraceData(once)).toBe(once);
-    for (const key of keys) expect(once).not.toContain(key);
-  });
-
-  it("does not redact public, prefixed, or malformed Stripe-key shapes", () => {
-    const values = [
-      `pk_live_${"A".repeat(24)}`,
-      `pk_test_${"B".repeat(24)}`,
-      `prefixsk_live_${"C".repeat(24)}`,
-      `sk_live_${"D".repeat(23)}`,
-      `rk_test_${"F".repeat(24)}_suffix`,
-      `sk_testmode_${"G".repeat(24)}`,
-      `rk_sandbox_${"H".repeat(24)}`,
-    ];
-    const prose = values.join(" ");
-    expect(redactTraceData(prose)).toBe(prose);
-  });
-
-  it("redacts standalone Hugging Face access tokens in prose and structured values idempotently", () => {
-    const first = `hf_${"A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7".slice(0, 34)}`;
-    const second = `hf_${"Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3".slice(0, 34)}`;
-    expect(first).toHaveLength(37);
-    expect(second).toHaveLength(37);
-
-    const prose = redactTraceData(`request (${first})`);
-    expect(prose).toBe("request ([redacted-hugging-face-token])");
-    expect(redactTraceData(prose)).toBe(prose);
-
-    expect(redactTraceData({ semanticValue: second, retained: "hf_ documentation" })).toEqual({
-      semanticValue: "[redacted-hugging-face-token]",
-      retained: "hf_ documentation",
-    });
-    const structured = redactTraceData(`semanticValue: ${second}\nretained: public`);
-    expect(structured).toBe("semanticValue: [redacted-hugging-face-token]\nretained: public");
-    expect(redactTraceData(structured)).toBe(structured);
-  });
-
-  it("does not redact Hugging Face near misses, embedded identifiers, or case variants", () => {
-    const validBody = "A".repeat(34);
-    const values = [
-      "hf_ documentation",
-      `hf_${"B".repeat(33)}`,
-      `hf_${"C".repeat(35)}`,
-      `prefixhf_${validBody}`,
-      `hf_${validBody}_suffix`,
-      `HF_${validBody}`,
-      `Hf_${validBody}`,
-      `hf_${"D".repeat(17)}-${"E".repeat(16)}`,
-    ];
-    const prose = values.join(" ");
-    expect(redactTraceData(prose)).toBe(prose);
-  });
-
-  it("redacts standalone Google API keys in prose and structured values idempotently", () => {
-    const first = `AIza${"A1_b-2".repeat(5)}A1_b-`;
-    const second = `AIza${"Z9-y_8".repeat(5)}Z9-y_`;
-    expect(first).toHaveLength(39);
-    expect(second).toHaveLength(39);
-
-    const prose = redactTraceData(`request (${first})`);
-    expect(prose).toBe("request ([redacted-google-api-key])");
-    expect(redactTraceData(prose)).toBe(prose);
-
-    expect(redactTraceData({ semanticValue: second, retained: "AIza documentation" })).toEqual({
-      semanticValue: "[redacted-google-api-key]",
-      retained: "AIza documentation",
-    });
-    const structured = redactTraceData(`semanticValue: ${second}\nretained: public`);
-    expect(structured).toBe("semanticValue: [redacted-google-api-key]\nretained: public");
-  });
-
-  it("does not redact Google-key near misses or embedded identifier fragments", () => {
-    const validBody = "A".repeat(35);
-    const values = [
-      "AIza documentation",
-      `AIza${"B".repeat(34)}`,
-      `AIza${"C".repeat(36)}`,
-      `prefixAIza${validBody}`,
-      `AIza${validBody}_suffix`,
-      `aiza${validBody}`,
-      `AIza${"D".repeat(17)}.${"E".repeat(17)}`,
-    ];
-    const prose = values.join(" ");
-    expect(redactTraceData(prose)).toBe(prose);
-  });
-
-  it("redacts structurally valid standalone JWT access tokens without matching ordinary dotted text", () => {
+    const hfFirst = `hf_${"A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7".slice(0, 34)}`;
+    const hfSecond = `hf_${"Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3".slice(0, 34)}`;
+    expect(hfFirst, "Hugging Face fixture length").toHaveLength(37);
+    expect(hfSecond, "Hugging Face fixture length").toHaveLength(37);
+    const googleFirst = `AIza${"A1_b-2".repeat(5)}A1_b-`;
+    const googleSecond = `AIza${"Z9-y_8".repeat(5)}Z9-y_`;
+    expect(googleFirst, "Google key fixture length").toHaveLength(39);
+    expect(googleSecond, "Google key fixture length").toHaveLength(39);
     const jwt = [
       "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9",
       "eyJzdWIiOiIxMjM0NTY3ODkwIiwic2NvcGUiOiJyZWFkIn0",
       "abcdefghijklmnopqrstuvwxyz012345",
     ].join(".");
-    const once = redactTraceData(`access ${jwt}; retain docs.example.com, alpha.beta.gamma, and not.a.jwt`);
+    const azureSignedUrl = "https://storage.example.test/blob?sv=2025-01-05&sp=r&sig=azure-private-signature%2Bvalue%3D&restype=container";
+    const awsSignedUrl = `https://objects.example.test/item?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=${"a".repeat(64)}&tokenCount=14`;
 
-    expect(once).toBe("access [redacted-jwt]; retain docs.example.com, alpha.beta.gamma, and not.a.jwt");
-    expect(once).not.toContain(jwt);
-    expect(redactTraceData(once)).toBe(once);
-  });
+    const redactRows: readonly { label: string; input: unknown; expected: unknown }[] = [
+      { label: "macOS temporary path", input: "/private/var/folders/xy/private-token/T/project", expected: "/private/var/folders/[redacted]/T/project" },
+      { label: "macOS temporary symlink path", input: "/var/folders/xy/private-token/T/project", expected: "/var/folders/[redacted]/T/project" },
+      { label: "bare GitHub token formats", input: [...githubLegacy, githubFineGrained].join(" "), expected: Array(githubLegacy.length + 1).fill("[redacted-github-token]").join(" ") },
+      { label: "bare Slack credentials", input: slackTokens.join(" "), expected: Array(slackTokens.length).fill("[redacted-slack-token]").join(" ") },
+      { label: "bare GitLab credentials", input: gitlabTokens.join(" "), expected: Array(gitlabTokens.length).fill("[redacted-gitlab-token]").join(" ") },
+      { label: "bare npm granular access token", input: `observed (${npmToken})`, expected: "observed ([redacted-npm-token])" },
+      { label: "bare live and test Stripe secrets", input: stripeKeys.join(" "), expected: Array(stripeKeys.length).fill("[redacted-stripe-key]").join(" ") },
+      { label: "standalone Hugging Face token in prose", input: `request (${hfFirst})`, expected: "request ([redacted-hugging-face-token])" },
+      { label: "standalone Hugging Face token in structured text", input: `semanticValue: ${hfSecond}\nretained: public`, expected: "semanticValue: [redacted-hugging-face-token]\nretained: public" },
+      { label: "Hugging Face structured object value", input: { semanticValue: hfSecond, retained: "hf_ documentation" }, expected: { semanticValue: "[redacted-hugging-face-token]", retained: "hf_ documentation" } },
+      { label: "standalone Google API key in prose", input: `request (${googleFirst})`, expected: "request ([redacted-google-api-key])" },
+      { label: "standalone Google API key in structured text", input: `semanticValue: ${googleSecond}\nretained: public`, expected: "semanticValue: [redacted-google-api-key]\nretained: public" },
+      { label: "Google API key structured object value", input: { semanticValue: googleSecond, retained: "AIza documentation" }, expected: { semanticValue: "[redacted-google-api-key]", retained: "AIza documentation" } },
+      { label: "structurally valid JWT amid dotted text", input: `access ${jwt}; retain docs.example.com, alpha.beta.gamma, and not.a.jwt`, expected: "access [redacted-jwt]; retain docs.example.com, alpha.beta.gamma, and not.a.jwt" },
+      { label: "signed URL query credentials", input: `${azureSignedUrl}\n${awsSignedUrl}`, expected: [
+        "https://storage.example.test/blob?sv=2025-01-05&sp=r&sig=[redacted]&restype=container",
+        "https://objects.example.test/item?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=[redacted]&tokenCount=14",
+      ].join("\n") },
+      { label: "auth object fields", input: {
+        auth: "object-auth-private",
+        nested: { auth: "nested-auth-private" },
+        tokenUsage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+        tokenCount: 14,
+        tokenLimit: 100,
+      }, expected: {
+        auth: "[redacted]",
+        nested: { auth: "[redacted]" },
+        tokenUsage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+        tokenCount: 14,
+        tokenLimit: 100,
+      } },
+      { label: "passphrase object fields", input: {
+        passphrase: "object-passphrase-private",
+        gpgPassphrase: "camel-passphrase-private",
+        passphraseHint: "hint-private",
+        semantic: "preserved-object-sibling",
+      }, expected: {
+        passphrase: "[redacted]",
+        gpgPassphrase: "[redacted]",
+        passphraseHint: "[redacted]",
+        semantic: "preserved-object-sibling",
+      } },
+    ];
+    expect(redactRows, "credential redaction inventory").toHaveLength(17);
+    for (const { label, input, expected } of redactRows) {
+      const once = redactTraceData(input);
+      expect.soft(once, label).toEqual(expected);
+      expect.soft(redactTraceData(once), `${label} idempotency`).toEqual(once);
+    }
 
-  it("treats auth as a credential name while preserving semantic token accounting", () => {
-    expect(redactTraceData({
-      auth: "object-auth-private",
-      nested: { auth: "nested-auth-private" },
-      tokenUsage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
-      tokenCount: 14,
-      tokenLimit: 100,
-    })).toEqual({
-      auth: "[redacted]",
-      nested: { auth: "[redacted]" },
-      tokenUsage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
-      tokenCount: 14,
-      tokenLimit: 100,
-    });
-
-    const structured = redactTraceData("auth: yaml-auth-private\ntokenCount: 14\ntokenUsage:\n  inputTokens: 10");
-    expect(structured).not.toContain("yaml-auth-private");
-    expect(parseYaml(String(structured))).toEqual({ auth: "[redacted]", tokenCount: 14, tokenUsage: { inputTokens: 10 } });
-  });
-
-  it("redacts signed URL query credentials while preserving non-credential parameters", () => {
-    const azure = "https://storage.example.test/blob?sv=2025-01-05&sp=r&sig=azure-private-signature%2Bvalue%3D&restype=container";
-    const aws = `https://objects.example.test/item?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=${"a".repeat(64)}&tokenCount=14`;
-    const once = redactTraceData(`${azure}\n${aws}`);
-
-    expect(once).toBe([
-      "https://storage.example.test/blob?sv=2025-01-05&sp=r&sig=[redacted]&restype=container",
-      "https://objects.example.test/item?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=[redacted]&tokenCount=14",
-    ].join("\n"));
-    expect(once).not.toContain("azure-private-signature");
-    expect(redactTraceData(once)).toBe(once);
-  });
-
-  it("redacts passphrase-named object, structured, and shell fields", () => {
-    const object = redactTraceData({
-      passphrase: "object-passphrase-private",
-      gpgPassphrase: "camel-passphrase-private",
-      passphraseHint: "hint-private",
-      semantic: "preserved-object-sibling",
-    });
-    expect(object).toEqual({
-      passphrase: "[redacted]",
-      gpgPassphrase: "[redacted]",
-      passphraseHint: "[redacted]",
-      semantic: "preserved-object-sibling",
-    });
-
-    const structured = redactTraceData([
+    const structuredPassphrase = redactTraceData([
       'passphrase: "yaml-passphrase-private"',
       "gpg_passphrase: yaml-gpg-passphrase-private",
       "semantic: preserved-yaml-sibling",
     ].join("\n"));
-    expect(structured).not.toContain("yaml-passphrase-private");
-    expect(structured).not.toContain("yaml-gpg-passphrase-private");
-    expect(structured).toContain("semantic: preserved-yaml-sibling");
-    expect(redactTraceData(structured)).toBe(structured);
+    expect(structuredPassphrase, "structured passphrase fields redacted").not.toContain("yaml-passphrase-private");
+    expect(structuredPassphrase, "structured gpg passphrase fields redacted").not.toContain("yaml-gpg-passphrase-private");
+    expect(structuredPassphrase, "structured passphrase sibling preserved").toContain("semantic: preserved-yaml-sibling");
+    expect(redactTraceData(structuredPassphrase), "structured passphrase idempotency").toBe(structuredPassphrase);
 
-    const shell = redactTraceData([
+    const shellPassphrase = redactTraceData([
       "GPG_PASSPHRASE=env-passphrase-private command --safe",
       "export SSH_PASSPHRASE='export-passphrase-private'",
       "semantic=preserved-shell-value",
     ].join("\n"));
-    expect(shell).not.toContain("env-passphrase-private");
-    expect(shell).not.toContain("export-passphrase-private");
-    expect(shell).toContain("semantic=preserved-shell-value");
-    expect(redactTraceData(shell)).toBe(shell);
-  });
+    expect(shellPassphrase, "shell passphrase fields redacted").not.toContain("env-passphrase-private");
+    expect(shellPassphrase, "exported shell passphrase fields redacted").not.toContain("export-passphrase-private");
+    expect(shellPassphrase, "shell passphrase sibling preserved").toContain("semantic=preserved-shell-value");
+    expect(redactTraceData(shellPassphrase), "shell passphrase idempotency").toBe(shellPassphrase);
 
-  it("removes abandoned spool entries before sealing the first trace after startup", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-abandoned-spool-"));
-    const spool = join(directory, "spool");
-    try {
-      await mkdir(spool, { mode: 0o700 });
-      await mkdir(join(spool, "abandoned-trace", "attachments"), { recursive: true });
-      await writeFile(join(spool, "abandoned-trace", "events.jsonl"), "partial");
-      await writeFile(join(spool, "abandoned-temporary-file"), "partial");
-      const store = new HarnessTraceStore({ directory: spool, policy: policy(), createId: (() => {
-        let id = 0;
-        return () => `fresh-${++id}`;
-      })() });
-      const active = store.start({
-        threadId: 1,
-        interactionNodeId: 2,
-        productInteractionId: 3,
-        implementation: "fixture.trace",
-        configurationName: "fixture-trace",
-        support: fullSupport,
-      });
+    const structuredAuth = redactTraceData("auth: yaml-auth-private\ntokenCount: 14\ntokenUsage:\n  inputTokens: 10");
+    expect(structuredAuth, "auth named field redacted in structured text").not.toContain("yaml-auth-private");
+    expect(parseYaml(String(structuredAuth)), "token accounting semantics preserved").toEqual({ auth: "[redacted]", tokenCount: 14, tokenUsage: { inputTokens: 10 } });
 
-      await active.seal("complete");
-
-      await expect(readFile(join(spool, "abandoned-trace", "events.jsonl"), "utf8")).rejects.toThrow();
-      await expect(readFile(join(spool, "abandoned-temporary-file"), "utf8")).rejects.toThrow();
-      expect(JSON.parse(await readFile(join(spool, "fresh-1", "manifest.json"), "utf8"))).toMatchObject({ traceId: "fresh-1" });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
+    const preservedRows: readonly [label: string, text: string][] = [
+      ["GitHub-like prose and malformed token lengths", [
+        "gho_documentation",
+        `prefixghp_${"A".repeat(36)}`,
+        `ghr_${"A".repeat(36)}_documentation`,
+        `ghu_${"B".repeat(35)}`,
+        `ghs_${"C".repeat(37)}`,
+        `github_pat_${"D".repeat(81)}`,
+        `github_pat_${"E".repeat(83)}`,
+      ].join(" ")],
+      ["Slack-like prose and malformed token lengths", [
+        "xoxb documentation",
+        `prefixxoxp-${"A".repeat(24)}`,
+        `xoxa-${"B".repeat(9)}`,
+        `xapp-${"D".repeat(9)}`,
+      ].join(" ")],
+      ["GitLab-like prose and malformed token lengths", [
+        "glpat-documentation",
+        `prefixglpat-${"A".repeat(20)}`,
+        `glpat-${"B".repeat(19)}`,
+        `glunknown-${"D".repeat(24)}`,
+      ].join(" ")],
+      ["npm-like prose and malformed token lengths", [
+        "npm_documentation",
+        `prefixnpm_${"A".repeat(36)}`,
+        `npm_${"B".repeat(35)}`,
+        `npm_${"C".repeat(37)}`,
+        `npm_${"D".repeat(36)}_suffix`,
+      ].join(" ")],
+      ["public, prefixed, and malformed Stripe-key shapes", [
+        `pk_live_${"A".repeat(24)}`,
+        `pk_test_${"B".repeat(24)}`,
+        `prefixsk_live_${"C".repeat(24)}`,
+        `sk_live_${"D".repeat(23)}`,
+        `rk_test_${"F".repeat(24)}_suffix`,
+        `sk_testmode_${"G".repeat(24)}`,
+        `rk_sandbox_${"H".repeat(24)}`,
+      ].join(" ")],
+      ["Hugging Face near misses, embedded identifiers, and case variants", [
+        "hf_ documentation",
+        `hf_${"B".repeat(33)}`,
+        `hf_${"C".repeat(35)}`,
+        `prefixhf_${"A".repeat(34)}`,
+        `hf_${"A".repeat(34)}_suffix`,
+        `HF_${"A".repeat(34)}`,
+        `Hf_${"A".repeat(34)}`,
+        `hf_${"D".repeat(17)}-${"E".repeat(16)}`,
+      ].join(" ")],
+      ["Google-key near misses and embedded identifier fragments", [
+        "AIza documentation",
+        `AIza${"B".repeat(34)}`,
+        `AIza${"C".repeat(36)}`,
+        `prefixAIza${"A".repeat(35)}`,
+        `AIza${"A".repeat(35)}_suffix`,
+        `aiza${"A".repeat(35)}`,
+        `AIza${"D".repeat(17)}.${"E".repeat(17)}`,
+      ].join(" ")],
+    ];
+    expect(preservedRows, "preservation inventory").toHaveLength(7);
+    for (const [label, text] of preservedRows) {
+      expect.soft(redactTraceData(text), label).toBe(text);
     }
   });
 
-  it("rejects a symlink spool root without deleting its target contents", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-root-link-"));
-    const victim = join(directory, "victim");
-    const proof = join(victim, "must-survive.txt");
-    const spool = join(directory, "spool");
-    try {
-      await mkdir(victim, { mode: 0o700 });
-      await writeFile(proof, "preserved\n");
-      await symlink(victim, spool, "dir");
-      const store = new HarnessTraceStore({ directory: spool, policy: policy() });
+  it("fails closed across the private-key armor mutation corpus", () => {
+    const standardLabels = ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "OPENSSH PRIVATE KEY"];
+    const armorRows: readonly { label: string; input: string; expected: string; forbidden: readonly string[] }[] = [
+      {
+        label: "complete PGP private-key block",
+        input: [
+          "before",
+          "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+          "Version: OpenPGP.js v6",
+          "",
+          "private-armored-material",
+          "=checksum",
+          "-----END PGP PRIVATE KEY BLOCK-----",
+          "after",
+        ].join("\n"),
+        expected: "before\n[redacted-private-key-block]\nafter",
+        forbidden: ["private-armored-material"],
+      },
+      {
+        label: "truncated PGP private-key block",
+        input: [
+          "prefix",
+          "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+          "truncated-private-armored-material",
+        ].join("\n"),
+        expected: "prefix\n[redacted-private-key-block]",
+        forbidden: ["truncated-private-armored-material"],
+      },
+      {
+        label: "mismatched private-key footer cannot terminate redaction",
+        input: [
+          "before",
+          "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+          "private-material-before-injected-footer",
+          "-----END RSA PRIVATE KEY-----",
+          "private-material-after-injected-footer",
+          "-----END PGP PRIVATE KEY BLOCK-----",
+          "after",
+        ].join("\n"),
+        expected: "before\n[redacted-private-key-block]\nafter",
+        forbidden: ["private-material-before-injected-footer", "private-material-after-injected-footer"],
+      },
+      {
+        label: "mismatched footer redacts to end of input",
+        input: [
+          "prefix",
+          "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+          "private-material-before-mismatched-footer",
+          "-----END RSA PRIVATE KEY-----",
+          "private-material-after-mismatched-footer",
+        ].join("\n"),
+        expected: "prefix\n[redacted-private-key-block]",
+        forbidden: ["private-material-before-mismatched-footer", "private-material-after-mismatched-footer"],
+      },
+      {
+        label: "crossed nested footer order fails closed",
+        input: [
+          "before",
+          "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+          "outer-private-material",
+          "-----BEGIN RSA PRIVATE KEY-----",
+          "inner-private-material",
+          "-----END PGP PRIVATE KEY BLOCK-----",
+          "rsa-private-material-after-outer-footer",
+          "-----END RSA PRIVATE KEY-----",
+          "untrusted-suffix-after-crossed-armor",
+        ].join("\n"),
+        expected: "before\n[redacted-private-key-block]",
+        forbidden: ["outer-private-material", "inner-private-material", "rsa-private-material-after-outer-footer", "untrusted-suffix-after-crossed-armor"],
+      },
+      {
+        label: "properly nested armor in stack order",
+        input: [
+          "before",
+          "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+          "outer-private-material-before-inner",
+          "-----BEGIN RSA PRIVATE KEY-----",
+          "inner-private-material",
+          "-----END RSA PRIVATE KEY-----",
+          "outer-private-material-after-inner",
+          "-----END PGP PRIVATE KEY BLOCK-----",
+          "after",
+        ].join("\n"),
+        expected: "before\n[redacted-private-key-block]\nafter",
+        forbidden: ["outer-private-material-before-inner", "inner-private-material", "outer-private-material-after-inner"],
+      },
+      {
+        label: "same-label nested armor fails closed while open",
+        input: [
+          "before",
+          "-----BEGIN RSA PRIVATE KEY-----",
+          "outer-private-material",
+          "-----BEGIN RSA PRIVATE KEY-----",
+          "inner-private-material",
+          "-----END RSA PRIVATE KEY-----",
+          "outer-private-material-after-inner-footer",
+        ].join("\n"),
+        expected: "before\n[redacted-private-key-block]",
+        forbidden: ["outer-private-material", "inner-private-material", "outer-private-material-after-inner-footer"],
+      },
+      ...standardLabels.map((label) => ({
+        label: `standard ${label} armor label`,
+        input: `before\n-----BEGIN ${label}-----\nprivate-${label}\n-----END ${label}-----\nafter`,
+        expected: "before\n[redacted-private-key-block]\nafter",
+        forbidden: [`private-${label}`],
+      })),
+    ];
+    expect(armorRows, "private-key armor inventory").toHaveLength(11);
+    for (const { label, input, expected, forbidden } of armorRows) {
+      const redacted = redactTraceData(input);
+      expect.soft(redacted, label).toBe(expected);
+      for (const secret of forbidden) expect.soft(redacted, `${label} hides ${secret}`).not.toContain(secret);
+      expect.soft(redactTraceData(redacted), `${label} idempotency`).toBe(redacted);
+    }
 
-      await expect(sealFixtureTrace(store)).rejects.toThrow("must be a real directory");
-      await expect(readFile(proof, "utf8")).resolves.toBe("preserved\n");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
+    const preservedArmorRows: readonly [label: string, text: string][] = [
+      ["public OpenPGP armor", "-----BEGIN PGP PUBLIC KEY BLOCK-----\npublic-material\n-----END PGP PUBLIC KEY BLOCK-----"],
+      ["malformed private-key armor label", "-----BEGIN PGP PRIVATE KEY BLOB-----\nmalformed-private-label\n-----END PGP PRIVATE KEY BLOB-----"],
+      ["malformed armor dashes", "-----BEGIN PGP PRIVATE KEY BLOCK ----\nmalformed-dashes"],
+    ];
+    expect(preservedArmorRows, "preserved armor inventory").toHaveLength(3);
+    for (const [label, text] of preservedArmorRows) {
+      expect.soft(redactTraceData(text), label).toBe(text);
     }
   });
 
-  it("rejects a symlinked spool ancestor without deleting the resolved victim spool", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-ancestor-link-"));
-    const victimParent = join(directory, "victim-parent");
-    const victimSpool = join(victimParent, "spool");
-    const proof = join(victimSpool, "must-survive.txt");
-    const alias = join(directory, "alias");
-    try {
-      await mkdir(victimSpool, { recursive: true, mode: 0o700 });
-      await chmod(victimSpool, 0o700);
-      await writeFile(proof, "preserved through ancestor\n");
-      await symlink(victimParent, alias, "dir");
-      const store = new HarnessTraceStore({ directory: join(alias, "spool"), policy: policy() });
-
-      await expect(sealFixtureTrace(store)).rejects.toThrow("ancestor must not be a symbolic link");
-      await expect(readFile(proof, "utf8")).resolves.toBe("preserved through ancestor\n");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("fails closed when a real spool ancestor is swapped for a victim symlink during startup", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-ancestor-race-"));
-    const parent = join(directory, "owned-parent");
-    const detachedParent = join(directory, "detached-parent");
-    const spool = join(parent, "spool");
-    const victimParent = join(directory, "victim-parent");
-    const victimSpool = join(victimParent, "spool");
-    const proof = join(victimSpool, "must-survive.txt");
-    try {
-      await mkdir(spool, { recursive: true, mode: 0o700 });
-      await chmod(spool, 0o700);
-      await writeFile(join(spool, "abandoned.txt"), "old trace\n");
-      await mkdir(victimSpool, { recursive: true, mode: 0o700 });
-      await chmod(victimSpool, 0o700);
-      await writeFile(proof, "race victim preserved\n");
-
-      const store = new HarnessTraceStore({ directory: spool, policy: policy() });
-      // cleanupAbandonedSpool suspends on its first lstat before it can traverse
-      // the user-owned ancestor, making this a deterministic swap at that edge.
-      renameSync(parent, detachedParent);
-      symlinkSync(victimParent, parent, "dir");
-
-      await expect(sealFixtureTrace(store)).rejects.toThrow("ancestor must not be a symbolic link");
-      await expect(readFile(proof, "utf8")).resolves.toBe("race victim preserved\n");
-      await expect(readFile(join(detachedParent, "spool", "abandoned.txt"), "utf8")).resolves.toBe("old trace\n");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("rejects non-directory and permissive spool roots", async () => {
-    if (process.platform === "win32") return;
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-invalid-spool-"));
-    const fileRoot = join(directory, "file-spool");
-    const permissiveRoot = join(directory, "permissive-spool");
-    try {
-      await writeFile(fileRoot, "not a directory\n");
-      await mkdir(permissiveRoot, { mode: 0o700 });
-      await chmod(permissiveRoot, 0o755);
-
-      await expect(sealFixtureTrace(new HarnessTraceStore({ directory: fileRoot, policy: policy() })))
-        .rejects.toThrow("must be a real directory");
-      await expect(sealFixtureTrace(new HarnessTraceStore({ directory: permissiveRoot, policy: policy() })))
-        .rejects.toThrow("permissions must be 0700");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("rejects a spool root not owned by the effective user", async () => {
-    if (process.platform === "win32" || process.getuid === undefined) return;
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-owner-"));
-    const spool = join(directory, "spool");
-    const actualUid = process.getuid();
-    try {
-      await mkdir(spool, { mode: 0o700 });
-      const getuid = vi.spyOn(process, "getuid").mockReturnValue(actualUid + 1);
-      try {
-        await expect(sealFixtureTrace(new HarnessTraceStore({ directory: spool, policy: policy() })))
-          .rejects.toThrow("must be owned by the current user");
-      } finally {
-        getuid.mockRestore();
-      }
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("removes an abandoned entry symlink without following its target", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-spool-entry-link-"));
-    const spool = join(directory, "spool");
-    const victim = join(directory, "outside.txt");
-    const entry = join(spool, "abandoned-link");
-    try {
-      await mkdir(spool, { mode: 0o700 });
-      await writeFile(victim, "outside survives\n");
-      await symlink(victim, entry, "file");
-      const store = new HarnessTraceStore({ directory: spool, policy: policy(), createId: () => "fresh" });
-
-      await sealFixtureTrace(store);
-
-      await expect(readFile(victim, "utf8")).resolves.toBe("outside survives\n");
-      await expect(readFile(entry, "utf8")).rejects.toThrow();
-      expect(JSON.parse(await readFile(join(spool, "fresh", "manifest.json"), "utf8"))).toMatchObject({ traceId: "fresh" });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("redacts complete structured credential scalars without removing YAML siblings", () => {
+  it("redacts structured YAML credential shapes and fails closed on ambiguity", () => {
+    {
     const explicitBlockMappings = [
       {
         source: [
@@ -1004,9 +919,9 @@ describe("HarnessTraceStore", () => {
     expect(redacted).toContain("# preserved explicit-key bridge comment");
     expect(redacted).toContain("# preserved nested explicit-key bridge comment");
     expect(redactTraceData(redacted)).toBe(redacted);
-  });
+    }
 
-  it("redacts parser-valid YAML structures using YAML key semantics", () => {
+    {
     const cases = [
       {
         source: String.raw`{"client\x53ecret":{"nested":"json-private"},"name":"json-sibling"}`,
@@ -1069,40 +984,42 @@ sibling: mixed-document-sibling`,
       },
     ];
 
-    for (const { source, secrets, siblings, multipleDocuments } of cases) {
+    expect(cases, "parser-valid YAML inventory").toHaveLength(10);
+    for (const [index, { source, secrets, siblings, multipleDocuments }] of cases.entries()) {
+      const label = `parser-valid YAML case ${index + 1}`;
       if (multipleDocuments) {
-        expect(parseAllDocuments(source).every((document) => document.errors.length === 0)).toBe(true);
+        expect.soft(parseAllDocuments(source).every((document) => document.errors.length === 0), `${label} parses`).toBe(true);
       } else {
-        expect(() => parseYaml(source)).not.toThrow();
+        expect.soft(() => parseYaml(source), `${label} parses`).not.toThrow();
       }
       const redacted = redactTraceData(source);
-      expect(typeof redacted).toBe("string");
+      expect(typeof redacted, `${label} returns text`).toBe("string");
       if (typeof redacted !== "string") throw new Error("Structured trace redaction must return text for text input");
-      for (const secret of secrets) expect(redacted).not.toContain(secret);
-      for (const sibling of siblings) expect(redacted).toContain(sibling);
+      for (const secret of secrets) expect.soft(redacted, `${label} hides ${secret}`).not.toContain(secret);
+      for (const sibling of siblings) expect.soft(redacted, `${label} preserves ${sibling}`).toContain(sibling);
       if (multipleDocuments) {
-        expect(parseAllDocuments(redacted).every((document) => document.errors.length === 0)).toBe(true);
+        expect.soft(parseAllDocuments(redacted).every((document) => document.errors.length === 0), `${label} stays parseable`).toBe(true);
       } else {
-        expect(() => parseYaml(redacted)).not.toThrow();
+        expect.soft(() => parseYaml(redacted), `${label} stays parseable`).not.toThrow();
       }
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redactTraceData(redacted), `${label} idempotency`).toBe(redacted);
     }
-  });
+    }
 
-  it("fails closed when structured redaction budgets are exceeded", () => {
+    {
     const aliasHeavy = Array.from({ length: 65 }, (_, index) => [
       `- semantic: &credentialKey${index} clientSecret`,
       `  ? *credentialKey${index}`,
       `  : private-${index}`,
     ].join("\n")).join("\n");
-    expect(() => parseYaml(aliasHeavy)).not.toThrow();
-    expect(redactTraceData(aliasHeavy)).toBe("[structured content omitted]");
+    expect(() => parseYaml(aliasHeavy), "alias-heavy fixture parses").not.toThrow();
+    expect(redactTraceData(aliasHeavy), "alias-heavy structure fails closed").toBe("[structured content omitted]");
     const oversized = redactTraceData(`semantic: ${"x".repeat(128_001)}`);
-    expect(oversized).toContain("semantic:");
-    expect(oversized).toContain("[content truncated]");
-  });
+    expect(oversized, "oversized benign input keeps semantic key").toContain("semantic:");
+    expect(oversized, "oversized benign input truncated").toContain("[content truncated]");
+    }
 
-  it("fails closed for ambiguous credential-bearing YAML structures", () => {
+    {
     const ambiguous = [
       "payload: &sensitiveValue alias-value-private\nclientSecret: *sensitiveValue\nsibling: alias-value-sibling",
       "# top comment\npayload: &commentedValue top-comment-alias-private\nclientSecret: *commentedValue\nsibling: top-comment-alias-sibling",
@@ -1115,53 +1032,60 @@ sibling: mixed-document-sibling`,
       String.raw`[
 "client\x53ecret": malformed-x-private`,
     ];
-    for (const source of ambiguous) {
+    expect(ambiguous, "ambiguous YAML inventory").toHaveLength(9);
+    for (const [index, source] of ambiguous.entries()) {
+      const label = `ambiguous YAML case ${index + 1}`;
       const redacted = redactTraceData(source);
-      expect(redacted).toBe("[structured content omitted]");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, label).toBe("[structured content omitted]");
+      expect.soft(redactTraceData(redacted), `${label} idempotency`).toBe(redacted);
     }
-  });
+    }
 
-  it("uses bounded YAML key decoding for oversized structured input", () => {
+    {
     for (const key of [String.raw`"client\x53ecret"`, String.raw`"private\U0000004Bey"`]) {
       const credentialBearing = `${key}: ${"x".repeat(128_001)}`;
-      expect(redactTraceData(credentialBearing)).toBe("[structured content omitted]");
+      expect(redactTraceData(credentialBearing), `oversized input with escaped key ${key} fails closed`).toBe("[structured content omitted]");
     }
     const benign = redactTraceData(`semantic: ${"x".repeat(128_001)}`);
-    expect(benign).toContain("semantic:");
-    expect(benign).toContain("[content truncated]");
+    expect(benign, "oversized benign input keeps semantic key").toContain("semantic:");
+    expect(benign, "oversized benign input truncated").toContain("[content truncated]");
     const lateCredential = `payload: &lateValue late-anchored-private\nsemantic: ${"x".repeat(128_001)}\nclientSecret: *lateValue`;
-    expect(redactTraceData(lateCredential)).toBe("[structured content omitted]");
+    expect(redactTraceData(lateCredential), "late credential alias fails closed").toBe("[structured content omitted]");
     const oversizedKey = `"${"a".repeat(1_025)}clientSecret": ${"x".repeat(128_001)}`;
-    expect(redactTraceData(oversizedKey)).toBe("[structured content omitted]");
+    expect(redactTraceData(oversizedKey), "oversized credential key fails closed").toBe("[structured content omitted]");
     const verbatimTagged = `${String.raw`!<tag:yaml.org,2002:str> "client\x53ecret"`}: ${"x".repeat(128_001)}`;
-    expect(redactTraceData(verbatimTagged)).toBe("[structured content omitted]");
+    expect(redactTraceData(verbatimTagged), "verbatim-tagged credential key fails closed").toBe("[structured content omitted]");
     const explicitVerbatimTagged = `${String.raw`? !<tag:yaml.org,2002:str> "client\x53ecret"`}\n: ${"x".repeat(128_001)}`;
-    expect(redactTraceData(explicitVerbatimTagged)).toBe("[structured content omitted]");
-  });
+    expect(redactTraceData(explicitVerbatimTagged), "explicit verbatim-tagged credential key fails closed").toBe("[structured content omitted]");
+    }
 
-  it("uses YAML scalar semantics in malformed mixed-fragment fallback", () => {
-    for (const source of [
+    {
+    const fallbackSources = [
       String.raw`not a YAML collection
 "client\x53ecret": malformed-x-private`,
       String.raw`not a YAML collection
 "private\U0000004Bey": malformed-U-private`,
-    ]) {
+    ];
+    expect(fallbackSources, "malformed fallback inventory").toHaveLength(2);
+    for (const [index, source] of fallbackSources.entries()) {
+      const label = `malformed mixed-fragment fallback ${index + 1}`;
       const redacted = redactTraceData(source);
-      expect(typeof redacted).toBe("string");
+      expect(typeof redacted, `${label} returns text`).toBe("string");
       if (typeof redacted !== "string") throw new Error("Text fallback must return text");
-      expect(redacted).toContain("not a YAML collection");
-      expect(redacted).not.toContain("malformed-x-private");
-      expect(redacted).not.toContain("malformed-U-private");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, `${label} keeps non-YAML prose`).toContain("not a YAML collection");
+      expect.soft(redacted, `${label} hides escaped x secret`).not.toContain("malformed-x-private");
+      expect.soft(redacted, `${label} hides escaped U secret`).not.toContain("malformed-U-private");
+      expect.soft(redactTraceData(redacted), `${label} idempotency`).toBe(redacted);
     }
     const ambiguousSingleQuoted = String.raw`not a YAML collection
 'client''Secret': single-quoted-private`;
-    expect(redactTraceData(ambiguousSingleQuoted)).toBe("[structured content omitted]");
-    expect(redactTraceData("[structured content omitted]")).toBe("[structured content omitted]");
+    expect(redactTraceData(ambiguousSingleQuoted), "ambiguous single-quoted fallback fails closed").toBe("[structured content omitted]");
+    expect(redactTraceData("[structured content omitted]"), "fail-closed marker idempotency").toBe("[structured content omitted]");
+    }
   });
 
-  it("redacts escaped inline assignments and prefixed HTTP transcript headers", () => {
+  it("redacts shell assignments and HTTP transcripts through the escape and utility corpora", () => {
+    {
     const source = [
       String.raw`run env DB_PASSWORD="prefix\"suffix-secret" tool --safe`,
       String.raw`run env DB_PASSWORD=$'prefix\nsuffix-ansi-secret' tool --ansi-safe`,
@@ -1223,9 +1147,9 @@ sibling: mixed-document-sibling`,
       expect(redacted).not.toContain(secret);
     }
     expect(redactTraceData(redacted)).toBe(redacted);
-  });
+    }
 
-  it("fails closed for complex, malformed, and over-budget shell assignment words", () => {
+    {
     const complex = [
       String.raw`run env DB_PASSWORD=$(case value in value) printf '%s' suffix-case-secret;; esac) tool --case-sibling`,
       String.raw`run env DB_PASSWORD=$(cat <<'EOF'
@@ -1241,25 +1165,27 @@ EOF
       String.raw`run env DB_PASSWORD="unterminated-malformed-secret
 later-malformed-secret`,
     ];
-    for (const source of complex) {
+    expect(complex, "complex shell word inventory").toHaveLength(9);
+    for (const [index, source] of complex.entries()) {
+      const label = `complex shell assignment ${index + 1}`;
       const redacted = redactTraceData(source);
-      expect(redacted).toBe("run env credential=[redacted]");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, label).toBe("run env credential=[redacted]");
+      expect.soft(redactTraceData(redacted), `${label} idempotency`).toBe(redacted);
     }
 
     const boundary = `run env DB_PASSWORD=${"x".repeat(16_384)} tool --boundary-sibling`;
     const boundaryRedacted = redactTraceData(boundary);
-    expect(boundaryRedacted).toBe("run env credential=[redacted] tool --boundary-sibling");
-    expect(redactTraceData(boundaryRedacted)).toBe(boundaryRedacted);
+    expect(boundaryRedacted, "at-budget shell word fully redacted").toBe("run env credential=[redacted] tool --boundary-sibling");
+    expect(redactTraceData(boundaryRedacted), "at-budget shell word idempotency").toBe(boundaryRedacted);
 
     const overBudget = `run env DB_PASSWORD=${"x".repeat(16_385)} suffix-over-budget-secret`;
     const overBudgetRedacted = redactTraceData(overBudget);
-    expect(overBudgetRedacted).toBe("run env credential=[redacted]");
-    expect(overBudgetRedacted).not.toContain("suffix-over-budget-secret");
-    expect(redactTraceData(overBudgetRedacted)).toBe(overBudgetRedacted);
-  });
+    expect(overBudgetRedacted, "over-budget shell word fails closed").toBe("run env credential=[redacted]");
+    expect(overBudgetRedacted, "over-budget shell word hides secret").not.toContain("suffix-over-budget-secret");
+    expect(redactTraceData(overBudgetRedacted), "over-budget shell word idempotency").toBe(overBudgetRedacted);
+    }
 
-  it("redacts complete multiline line-start shell assignments before line boundaries", () => {
+    {
     const cases = [
       {
         source: `DB_PASSWORD="prefix
@@ -1282,15 +1208,17 @@ suffix-export-multiline-secret" tool --export-sibling`,
         expected: "export DB_PASSWORD=[redacted] tool --export-sibling",
       },
     ];
-    for (const { source, expected } of cases) {
+    expect(cases, "multiline assignment inventory").toHaveLength(4);
+    for (const [index, { source, expected }] of cases.entries()) {
+      const label = `multiline assignment case ${index + 1}`;
       const redacted = redactTraceData(source);
-      expect(redacted).toBe(expected);
-      expect(redacted).not.toContain("multiline-secret");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, label).toBe(expected);
+      expect.soft(redacted, `${label} hides multiline secret`).not.toContain("multiline-secret");
+      expect.soft(redactTraceData(redacted), `${label} idempotency`).toBe(redacted);
     }
-  });
+    }
 
-  it("redacts append and indexed assignments without crossing an empty assignment line", () => {
+    {
     const cases = [
       {
         source: "DB_PASSWORD+=suffix-bash-append-secret tool --append-sibling",
@@ -1323,43 +1251,43 @@ suffix-export-multiline-secret" tool --export-sibling`,
     ];
     for (const { source, expected } of cases) {
       const redacted = redactTraceData(source);
-      expect(redacted).toBe(expected);
-      expect(redacted).not.toContain("secret");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, source).toBe(expected);
+      expect.soft(redacted, `no leaked secret in ${source.slice(0, 64)}`).not.toContain("secret");
+      expect.soft(redactTraceData(redacted), `idempotency for ${source.slice(0, 64)}`).toBe(redacted);
     }
 
     const emptyThenSibling = "DB_PASSWORD=\nprintf 'next-line-sibling\\n'";
-    expect(redactTraceData(emptyThenSibling)).toBe(emptyThenSibling);
+    expect(redactTraceData(emptyThenSibling), "empty assignment line does not swallow the next line").toBe(emptyThenSibling);
 
     for (const malformed of [
       "DB_PASSWORD[foo[bar]=suffix-malformed-nested-secret\nnext-malformed-sibling",
       `export DB_PASSWORD["unterminated]=suffix-malformed-quoted-secret\nnext-malformed-quoted-sibling`,
     ]) {
       const redacted = redactTraceData(malformed);
-      expect(redacted).not.toContain("secret");
-      expect(redacted).not.toContain("next-malformed");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, `malformed assignment ${malformed.slice(0, 48)} hides secret`).not.toContain("secret");
+      expect.soft(redacted, `malformed assignment ${malformed.slice(0, 48)} fails closed past the line`).not.toContain("next-malformed");
+      expect.soft(redactTraceData(redacted), `malformed assignment ${malformed.slice(0, 48)} idempotency`).toBe(redacted);
     }
 
     const complexReference = `reference=\${DB_PASSWORD[$(printf 1)]} next-reference-sibling`;
-    expect(redactTraceData(complexReference)).toBe(complexReference);
+    expect(redactTraceData(complexReference), "complex parameter reference preserved").toBe(complexReference);
 
     const complexComparison = "if [[ $DB_PASSWORD[$(printf 1)] = expected ]]; then print comparison-sibling; fi";
-    expect(redactTraceData(complexComparison)).toBe(complexComparison);
+    expect(redactTraceData(complexComparison), "complex comparison preserved").toBe(complexComparison);
 
     const complexDisplay = `print -- "$DB_PASSWORD[$(printf 1)] = semantic-display-sibling"`;
-    expect(redactTraceData(complexDisplay)).toBe(complexDisplay);
+    expect(redactTraceData(complexDisplay), "complex display preserved").toBe(complexDisplay);
 
     const quotedReferenceEquals = `print -- "$DB_PASSWORD[$(printf 1)]=semantic-quoted-equals-sibling"`;
-    expect(redactTraceData(quotedReferenceEquals)).toBe(quotedReferenceEquals);
+    expect(redactTraceData(quotedReferenceEquals), "quoted reference equals preserved").toBe(quotedReferenceEquals);
 
     const unquotedReferenceEquals = "print -- $DB_PASSWORD[$(printf 1)]=semantic-unquoted-equals-sibling";
-    expect(redactTraceData(unquotedReferenceEquals)).toBe(unquotedReferenceEquals);
+    expect(redactTraceData(unquotedReferenceEquals), "unquoted reference equals preserved").toBe(unquotedReferenceEquals);
 
     const complexAssignment = "DB_PASSWORD[$(printf 1)]=suffix-complex-assignment-secret\nnext-complex-sibling";
     const complexAssignmentRedacted = redactTraceData(complexAssignment);
-    expect(complexAssignmentRedacted).toBe("DB_PASSWORD=[redacted]");
-    expect(redactTraceData(complexAssignmentRedacted)).toBe(complexAssignmentRedacted);
+    expect(complexAssignmentRedacted, "complex index assignment fails closed").toBe("DB_PASSWORD=[redacted]");
+    expect(redactTraceData(complexAssignmentRedacted), "complex index assignment idempotency").toBe(complexAssignmentRedacted);
 
     for (const { source, expected } of [
       {
@@ -1376,9 +1304,9 @@ suffix-export-multiline-secret" tool --export-sibling`,
       },
     ]) {
       const redacted = redactTraceData(source);
-      expect(redacted).toBe(expected);
-      expect(redacted).not.toContain("secret");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, source).toBe(expected);
+      expect.soft(redacted, `no leaked secret in ${source.slice(0, 64)}`).not.toContain("secret");
+      expect.soft(redactTraceData(redacted), `idempotency for ${source.slice(0, 64)}`).toBe(redacted);
     }
 
     for (const { source, expected } of [
@@ -1404,9 +1332,9 @@ suffix-export-multiline-secret" tool --export-sibling`,
       },
     ]) {
       const redacted = redactTraceData(source);
-      expect(redacted).toBe(expected);
-      expect(redacted).not.toContain("secret");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, source).toBe(expected);
+      expect.soft(redacted, `no leaked secret in ${source.slice(0, 64)}`).not.toContain("secret");
+      expect.soft(redactTraceData(redacted), `idempotency for ${source.slice(0, 64)}`).toBe(redacted);
     }
 
     for (const { source, expected } of [
@@ -1870,9 +1798,9 @@ nv 1DB_PASSWORD=[redacted] /usr/bin/true`,
       },
     ]) {
       const redacted = redactTraceData(source);
-      expect(redacted).toBe(expected);
-      expect(redacted).not.toContain("secret");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, source).toBe(expected);
+      expect.soft(redacted, `no leaked secret in ${source.slice(0, 64)}`).not.toContain("secret");
+      expect.soft(redactTraceData(redacted), `idempotency for ${source.slice(0, 64)}`).toBe(redacted);
     }
 
     const longSafePrefix = Array.from({ length: 96 }, (_, index) => `SAFE_${index}=visible-${index}`).join(" ");
@@ -1888,32 +1816,32 @@ nv 1DB_PASSWORD=[redacted] /usr/bin/true`,
     ]) {
       expect(source.indexOf("DB_PASSWORD")).toBeGreaterThan(1_024);
       const redacted = redactTraceData(source);
-      expect(redacted).toBe(expected);
-      expect(redacted).not.toContain("secret");
-      expect(redactTraceData(redacted)).toBe(redacted);
+      expect.soft(redacted, source).toBe(expected);
+      expect.soft(redacted, `no leaked secret in ${source.slice(0, 64)}`).not.toContain("secret");
+      expect.soft(redactTraceData(redacted), `idempotency for ${source.slice(0, 64)}`).toBe(redacted);
     }
 
     const overBudgetSafePrefix = Array.from({ length: 1_100 }, (_, index) => `SAFE_${index}=visible-${index}`).join(" ");
     const overBudget = `env ${overBudgetSafePrefix} '1DB_PASSWORD=suffix-over-budget-secret' /usr/bin/true; print over-budget-sibling`;
     expect(overBudget.indexOf("1DB_PASSWORD")).toBeGreaterThan(16_384);
     const overBudgetRedacted = redactTraceData(overBudget);
-    expect(overBudgetRedacted).toBe(`env ${overBudgetSafePrefix} 1DB_PASSWORD=[redacted]`);
-    expect(overBudgetRedacted).not.toContain("secret");
-    expect(redactTraceData(overBudgetRedacted)).toBe(overBudgetRedacted);
+    expect(overBudgetRedacted, "over-budget env utility prefix still redacts the credential").toBe(`env ${overBudgetSafePrefix} 1DB_PASSWORD=[redacted]`);
+    expect(overBudgetRedacted, "over-budget env utility hides secret").not.toContain("secret");
+    expect(redactTraceData(overBudgetRedacted), "over-budget env utility idempotency").toBe(overBudgetRedacted);
 
     const overBudgetFakeBoundary = `env ${overBudgetSafePrefix} 'SAFE_FAKE=; env ' 'DB_PASSWORD=suffix-over-budget-fake-boundary-secret' /usr/bin/true; print over-budget-fake-boundary-sibling`;
     const overBudgetFakeBoundaryRedacted = redactTraceData(overBudgetFakeBoundary);
-    expect(overBudgetFakeBoundaryRedacted).toBe(`env ${overBudgetSafePrefix} 'SAFE_FAKE=; env ' DB_PASSWORD=[redacted]`);
-    expect(overBudgetFakeBoundaryRedacted).not.toContain("secret");
-    expect(redactTraceData(overBudgetFakeBoundaryRedacted)).toBe(overBudgetFakeBoundaryRedacted);
+    expect(overBudgetFakeBoundaryRedacted, "over-budget fake boundary still redacts the credential").toBe(`env ${overBudgetSafePrefix} 'SAFE_FAKE=; env ' DB_PASSWORD=[redacted]`);
+    expect(overBudgetFakeBoundaryRedacted, "over-budget fake boundary hides secret").not.toContain("secret");
+    expect(redactTraceData(overBudgetFakeBoundaryRedacted), "over-budget fake boundary idempotency").toBe(overBudgetFakeBoundaryRedacted);
 
     const overBudgetComplexBoundary = `env ${overBudgetSafePrefix} SAFE_COMPLEX="$(case x in x) printf '; env ';; esac)" 'DB_PASSWORD=suffix-over-budget-complex-boundary-secret' /usr/bin/true; print over-budget-complex-boundary-sibling`;
     const overBudgetComplexBoundaryRedacted = redactTraceData(overBudgetComplexBoundary);
-    expect(overBudgetComplexBoundaryRedacted).toBe(`env ${overBudgetSafePrefix} SAFE_COMPLEX="$(case x in x) printf '; env ';; esac)" DB_PASSWORD=[redacted]`);
-    expect(overBudgetComplexBoundaryRedacted).not.toContain("secret");
-    expect(redactTraceData(overBudgetComplexBoundaryRedacted)).toBe(overBudgetComplexBoundaryRedacted);
+    expect(overBudgetComplexBoundaryRedacted, "over-budget complex boundary still redacts the credential").toBe(`env ${overBudgetSafePrefix} SAFE_COMPLEX="$(case x in x) printf '; env ';; esac)" DB_PASSWORD=[redacted]`);
+    expect(overBudgetComplexBoundaryRedacted, "over-budget complex boundary hides secret").not.toContain("secret");
+    expect(redactTraceData(overBudgetComplexBoundaryRedacted), "over-budget complex boundary idempotency").toBe(overBudgetComplexBoundaryRedacted);
 
-    for (const source of [
+    const safeChildArguments = [
       `env -i printf '%s\\n' 'DB_PASSWORD'=semantic-safe-child-argument; print safe-child-later-sibling`,
       `env -P "$(printf /usr/bin)" printf '%s\\n' 'DB_PASSWORD'=semantic-complex-child-argument; print complex-child-later-sibling`,
       `/usr/bin/env '-i' printf '%s\\n' 'DB_PASSWORD=semantic-quoted-child-argument'; print quoted-child-later-sibling`,
@@ -1938,29 +1866,11 @@ nv 1DB_PASSWORD=[redacted] /usr/bin/true`,
       `nice '-n' 5 env printf '%s\\n' 'DB_PASSWORD=semantic-nice-quoted-option-child'; print nice-quoted-option-child-sibling`,
       `caffeinate '-t' 1 env printf '%s\\n' 'DB_PASSWORD=semantic-caffeinate-quoted-option-child'; print caffeinate-quoted-option-child-sibling`,
       `sudo env printf '%s\\n' 'DB_PASSWORD=semantic-unsupported-wrapper-child-argument'`,
-    ]) {
-      expect(redactTraceData(source)).toBe(source);
+    ];
+    expect(safeChildArguments, "semantic child-argument inventory").toHaveLength(24);
+    for (const source of safeChildArguments) {
+      expect.soft(redactTraceData(source), `semantic child argument preserved: ${source.slice(0, 64)}`).toBe(source);
     }
-  });
-
-  it("records truncation and lowers achieved coverage without breaking sealing", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-cap-"));
-    try {
-      const store = new HarnessTraceStore({ directory, policy: policy({ maxEventsPerTurn: 2 }) });
-      const active = store.start({
-        threadId: 1,
-        interactionNodeId: 2,
-        implementation: "fixture.trace",
-        configurationName: "fixture-trace",
-        support: fullSupport,
-      });
-      active.sink.emit({ type: "message", data: { text: "discarded by the cap" } });
-      const descriptor = await active.seal("complete");
-      expect(descriptor.truncated).toBe(true);
-      expect(descriptor.eventCount).toBeLessThanOrEqual(2);
-      expect(descriptor.coverage.messages).toBe("summary");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
     }
   });
 });
