@@ -13,45 +13,34 @@ describe("workspace Relayer icons", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses the curated vocabulary and resolves compatibility aliases", () => {
-    expect(RELAYER_ICON_NAMES).toContain("compass");
-    expect(new Set(RELAYER_ICON_NAMES).size).toBe(RELAYER_ICON_NAMES.length);
-    expect(resolveRelayerIconName("CIRCLE_ALERT")).toBe("alert-circle");
-    expect(relayerIconDescriptor("file code 2")).toMatchObject({
+  it("resolves the curated vocabulary through rendering and fails startup without the vendored renderer", () => {
+    expect(RELAYER_ICON_NAMES, "curated vocabulary").toContain("compass");
+    expect(new Set(RELAYER_ICON_NAMES).size, "unique curated names").toBe(RELAYER_ICON_NAMES.length);
+    expect(resolveRelayerIconName("CIRCLE_ALERT"), "compatibility alias").toBe("alert-circle");
+    expect(relayerIconDescriptor("file code 2"), "canonical descriptor").toMatchObject({
       renderedName: "file-code-2",
       lucideExportName: "FileCode2",
       usesFallback: false,
     });
-  });
-
-  it("has a pinned Lucide drawing for every curated name", () => {
     for (const name of RELAYER_ICON_NAMES) {
-      expect(lucideExports[relayerIconDescriptor(name).lucideExportName], name).toBeDefined();
+      expect(lucideExports[relayerIconDescriptor(name).lucideExportName], `pinned Lucide drawing for ${name}`).toBeDefined();
     }
-  });
 
-  it("uses a deterministic neutral fallback for legacy unknown names", () => {
-    expect(relayerIconDescriptor("🧭")).toEqual({
+    const neutralFallback = {
       canonicalName: null,
       renderedName: "circle",
       lucideExportName: "Circle",
       usesFallback: true,
-    });
-    expect(relayerIconDescriptor("constructor")).toEqual({
-      canonicalName: null,
-      renderedName: "circle",
-      lucideExportName: "Circle",
-      usesFallback: true,
-    });
-  });
+    };
+    expect(relayerIconDescriptor("🧭"), "legacy unknown name fallback").toEqual(neutralFallback);
+    expect(relayerIconDescriptor("constructor"), "prototype-name fallback").toEqual(neutralFallback);
 
-  it("creates the selected Lucide SVG without exposing the full catalog", () => {
     const Compass = Symbol("Compass");
     const Circle = Symbol("Circle");
     const createElement = vi.fn((icon, attributes) => ({ icon, attributes }));
     vi.stubGlobal("lucide", { Compass, Circle, createElement });
 
-    expect(createRelayerIcon("compass", { class: "node-icon" })).toEqual({
+    expect(createRelayerIcon("compass", { class: "node-icon" }), "selected Lucide SVG creation").toEqual({
       icon: Compass,
       attributes: expect.objectContaining({
         class: "node-icon",
@@ -59,12 +48,10 @@ describe("workspace Relayer icons", () => {
         "data-relayer-icon": "compass",
       }),
     });
-    expect(createRelayerIcon("alarm-clock")).toMatchObject({ icon: Circle });
-  });
+    expect(createRelayerIcon("alarm-clock"), "icon outside the stubbed catalog").toMatchObject({ icon: Circle });
 
-  it("fails startup clearly when the vendored renderer is unavailable", () => {
     vi.stubGlobal("lucide", undefined);
-    expect(() => assertRelayerIconRendererReady()).toThrow(
+    expect(() => assertRelayerIconRendererReady(), "startup failure without the vendored renderer").toThrow(
       "The vendored Lucide renderer must load before Relayer icons are created.",
     );
   });

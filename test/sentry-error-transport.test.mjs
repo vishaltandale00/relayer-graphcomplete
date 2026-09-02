@@ -54,16 +54,16 @@ function fixture({ flushResult = true, closeResult = true } = {}) {
 }
 
 describe("Sentry error transport", () => {
-  it("creates a hook-free privacy-disabled client only after gateway admission", async () => {
+  it("admits, maps, scrubs, settles, and delivers one privacy-bounded gateway event end to end", async () => {
     const state = fixture();
-    expect(state.createClient).not.toHaveBeenCalled();
-    await expect(state.transport.enable({ ...projection, dsn: "https://override.test/1" })).rejects.toThrow();
-    expect(state.createClient).not.toHaveBeenCalled();
+    expect(state.createClient, "no client before gateway admission").not.toHaveBeenCalled();
+    await expect(state.transport.enable({ ...projection, dsn: "https://override.test/1" }), "DSN override rejected at admission").rejects.toThrow();
+    expect(state.createClient, "rejected admission never creates a client").not.toHaveBeenCalled();
 
     await state.transport.enable(projection);
 
-    expect(state.createClient).toHaveBeenCalledOnce();
-    expect(state.options).toMatchObject({
+    expect(state.createClient, "one client after admission").toHaveBeenCalledOnce();
+    expect(state.options, "hook-free privacy-disabled client options").toMatchObject({
       dsn: "https://public@example.test/1",
       release: projection.release,
       environment: "preview",
@@ -78,9 +78,9 @@ describe("Sentry error transport", () => {
       skipOpenTelemetrySetup: true,
       registerEsmLoaderHooks: false,
     });
-    expect(state.options).not.toHaveProperty("tracesSampleRate");
-    expect(state.options).not.toHaveProperty("profilesSampleRate");
-    expect(state.options.dataCollection).toEqual({
+    expect(state.options, "no tracing sample rate").not.toHaveProperty("tracesSampleRate");
+    expect(state.options, "no profiling sample rate").not.toHaveProperty("profilesSampleRate");
+    expect(state.options.dataCollection, "SDK data collection fully disabled").toEqual({
       userInfo: false,
       cookies: false,
       httpHeaders: { request: false, response: false },
@@ -92,17 +92,13 @@ describe("Sentry error transport", () => {
       stackFrameVariables: false,
       frameContextLines: 0,
     });
-  });
 
-  it("maps one approved gateway record to one bounded Sentry error event and flushes it", async () => {
-    const state = fixture();
-    await state.transport.enable(projection);
-    await expect(state.transport.send(gatewayEvent)).resolves.toEqual({ delivered: true });
+    await expect(state.transport.send(gatewayEvent), "approved record delivered").resolves.toEqual({ delivered: true });
 
-    expect(state.client.captureEvent).toHaveBeenCalledOnce();
-    expect(state.client.flush).toHaveBeenCalledWith(250);
-    expect(state.accepted).toHaveLength(1);
-    expect(state.accepted[0]).toMatchObject({
+    expect(state.client.captureEvent, "one gateway record becomes one event").toHaveBeenCalledOnce();
+    expect(state.client.flush, "event flushed with the configured timeout").toHaveBeenCalledWith(250);
+    expect(state.accepted, "beforeSend accepted exactly one event").toHaveLength(1);
+    expect(state.accepted[0], "bounded Sentry error event mapping").toMatchObject({
       level: "error",
       user: { id: projection.user.id },
       release: projection.release,
@@ -129,47 +125,36 @@ describe("Sentry error transport", () => {
         }],
       },
     });
-    expect(state.accepted[0]).not.toHaveProperty("request");
-    expect(state.accepted[0]).not.toHaveProperty("breadcrumbs");
-    expect(state.accepted[0]).not.toHaveProperty("extra");
-    expect(state.accepted[0]).not.toHaveProperty("contexts");
-    expect(state.accepted[0]).not.toHaveProperty("server_name");
-  });
+    expect(state.accepted[0], "no request envelope fields").not.toHaveProperty("request");
+    expect(state.accepted[0], "no breadcrumbs").not.toHaveProperty("breadcrumbs");
+    expect(state.accepted[0], "no extra payload").not.toHaveProperty("extra");
+    expect(state.accepted[0], "no contexts").not.toHaveProperty("contexts");
+    expect(state.accepted[0], "no server name").not.toHaveProperty("server_name");
 
-  it("drops SDK or hook mutation at beforeSend and rejects non-gateway input", async () => {
-    const state = fixture();
-    await state.transport.enable(projection);
-    const captured = structuredClone(gatewayEvent);
-    await state.transport.send(captured);
     const prepared = state.accepted[0];
-
-    expect(state.options.beforeSend({ ...prepared, request: { url: "https://secret.test/token" } })).toBeNull();
-    expect(state.options.beforeSend({ ...prepared, breadcrumbs: [{ message: "prompt" }] })).toBeNull();
-    expect(state.options.beforeSend({ ...prepared, user: { ...prepared.user, email: "person@example.test" } })).toBeNull();
-    expect(state.options.beforeSend({ ...prepared, tags: { ...prepared.tags, path: "/Users/person/project" } })).toBeNull();
-    await expect(state.transport.send({ ...captured, prompt: "private" })).rejects.toThrow();
+    expect(state.options.beforeSend({ ...prepared, request: { url: "https://secret.test/token" } }), "request mutation dropped").toBeNull();
+    expect(state.options.beforeSend({ ...prepared, breadcrumbs: [{ message: "prompt" }] }), "breadcrumb mutation dropped").toBeNull();
+    expect(state.options.beforeSend({ ...prepared, user: { ...prepared.user, email: "person@example.test" } }), "user PII mutation dropped").toBeNull();
+    expect(state.options.beforeSend({ ...prepared, tags: { ...prepared.tags, path: "/Users/person/project" } }), "filesystem path tag dropped").toBeNull();
+    const captured = structuredClone(gatewayEvent);
+    await expect(state.transport.send({ ...captured, prompt: "private" }), "non-gateway input rejected").rejects.toThrow();
     await expect(state.transport.send({
       ...captured,
       frames: [{ module: "desktop/main/privacy-sentinel-token.mjs", line: 1, column: 1 }],
-    })).rejects.toThrow();
-  });
+    }), "privacy sentinel frame rejected").rejects.toThrow();
 
-  it("flushes and closes on disable while surfacing delivery failures to the gateway", async () => {
-    const state = fixture({ flushResult: false });
-    await state.transport.enable(projection);
+    const failing = fixture({ flushResult: false });
+    await failing.transport.enable(projection);
+    await expect(failing.transport.send(gatewayEvent), "flush failure surfaced to the gateway").rejects.toThrow("flush");
+    await expect(failing.transport.disable(), "disable reports the failed flush").rejects.toThrow();
+    expect(failing.client.close, "close attempted with the configured timeout").toHaveBeenCalledWith(250);
+    await expect(failing.transport.send(gatewayEvent), "no send after disable").rejects.toThrow("inactive");
 
-    await expect(state.transport.send(gatewayEvent)).rejects.toThrow("flush");
-    await expect(state.transport.disable()).rejects.toThrow();
-    expect(state.client.close).toHaveBeenCalledWith(250);
-    await expect(state.transport.send(gatewayEvent)).rejects.toThrow("inactive");
+    const closeFailing = fixture({ closeResult: false });
+    await closeFailing.transport.enable(projection);
+    await expect(closeFailing.transport.disable(), "failed close reported").rejects.toThrow("disable cleanly");
+    expect(closeFailing.client.close, "close attempted once on disable").toHaveBeenCalledWith(250);
 
-    const closeState = fixture({ closeResult: false });
-    await closeState.transport.enable(projection);
-    await expect(closeState.transport.disable()).rejects.toThrow("disable cleanly");
-    expect(closeState.client.close).toHaveBeenCalledWith(250);
-  });
-
-  it("sends one privacy-bounded envelope through the real SDK transport to a loopback sink", async () => {
     const requests = [];
     const server = createServer((request, response) => {
       const chunks = [];
@@ -192,25 +177,25 @@ describe("Sentry error transport", () => {
 
     try {
       await transport.enable(projection);
-      await expect(transport.send(gatewayEvent)).resolves.toEqual({ delivered: true });
-      await expect(transport.send({ ...gatewayEvent, prompt: "private" })).rejects.toThrow();
+      await expect(transport.send(gatewayEvent), "real SDK delivery to the loopback sink").resolves.toEqual({ delivered: true });
+      await expect(transport.send({ ...gatewayEvent, prompt: "private" }), "private input never reaches the sink").rejects.toThrow();
 
-      expect(requests).toHaveLength(1);
+      expect(requests, "exactly one envelope sent").toHaveLength(1);
       const lines = requests[0].trim().split("\n");
-      expect(lines).toHaveLength(3);
+      expect(lines, "envelope has header, item header, and event").toHaveLength(3);
       const envelopeHeader = JSON.parse(lines[0]);
-      expect(JSON.parse(lines[1])).toMatchObject({ type: "event" });
+      expect(JSON.parse(lines[1]), "event item type").toMatchObject({ type: "event" });
       const sentEvent = JSON.parse(lines[2]);
-      expect(Object.keys(envelopeHeader).sort()).toEqual(["event_id", "sdk", "sent_at"]);
-      expect(envelopeHeader).toMatchObject({
+      expect(Object.keys(envelopeHeader).sort(), "minimal envelope header keys").toEqual(["event_id", "sdk", "sent_at"]);
+      expect(envelopeHeader, "envelope header matches the sent event").toMatchObject({
         event_id: sentEvent.event_id,
         sdk: { name: "sentry.javascript.node", version: "10.72.0" },
       });
-      expect(Object.keys(sentEvent).sort()).toEqual([
+      expect(Object.keys(sentEvent).sort(), "privacy-bounded event keys").toEqual([
         "environment", "event_id", "exception", "level", "release", "tags",
         "timestamp", "user",
       ]);
-      expect(sentEvent).toMatchObject({
+      expect(sentEvent, "loopback event mapping").toMatchObject({
         level: "error",
         user: { id: projection.user.id },
         release: projection.release,
@@ -223,14 +208,14 @@ describe("Sentry error transport", () => {
           architecture: projection.architecture,
         },
       });
-      expect(sentEvent).not.toHaveProperty("platform");
-      expect(sentEvent).not.toHaveProperty("server_name");
-      expect(sentEvent).not.toHaveProperty("contexts");
-      expect(sentEvent).not.toHaveProperty("request");
-      expect(sentEvent).not.toHaveProperty("breadcrumbs");
+      expect(sentEvent, "no platform field").not.toHaveProperty("platform");
+      expect(sentEvent, "no server name").not.toHaveProperty("server_name");
+      expect(sentEvent, "no contexts").not.toHaveProperty("contexts");
+      expect(sentEvent, "no request data").not.toHaveProperty("request");
+      expect(sentEvent, "no breadcrumbs").not.toHaveProperty("breadcrumbs");
     } finally {
       await transport.disable().catch(() => undefined);
       await new Promise((resolve) => server.close(resolve));
     }
-  });
+  }, 15_000);
 });

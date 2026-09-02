@@ -23,94 +23,82 @@ function authoredLayer(placements) {
 }
 
 describe("product workspace graph layout", () => {
-  it("projects authored normalized coordinates into one stable node-padded world plane", () => {
-    const layer = authoredLayer([
+  it("projects authored layouts into one stable, order-independent world plane and fails closed on malformed layouts", () => {
+    expect(GRAPH_WORLD_WIDTH, "world width").toBe(960);
+    expect(GRAPH_WORLD_HEIGHT, "world height").toBe(640);
+
+    const projected = projectLayerNodePositions(authoredLayer([
       { nodeId: 1, x: 0, y: 0 },
       { nodeId: 2, x: 0.5, y: 0.5 },
       { nodeId: 3, x: 1, y: 1 },
-    ]);
-    const projected = projectLayerNodePositions(layer, nodes);
+    ]), nodes);
+    expect(projected.source, "authored source").toBe("authored");
+    expect(projected.positions.get("1"), "top-left normalized corner").toEqual({ x: 114, y: 60 });
+    expect(projected.positions.get("2"), "normalized midpoint").toEqual({ x: 480, y: 298 });
+    expect(projected.positions.get("3"), "bottom-right normalized corner").toEqual({ x: 846, y: 536 });
 
-    expect(projected.source).toBe("authored");
-    expect(projected.positions.get("1")).toEqual({ x: 114, y: 60 });
-    expect(projected.positions.get("2")).toEqual({ x: 480, y: 298 });
-    expect(projected.positions.get("3")).toEqual({ x: 846, y: 536 });
-    expect(GRAPH_WORLD_WIDTH).toBe(960);
-    expect(GRAPH_WORLD_HEIGHT).toBe(640);
-  });
-
-  it("preserves authored alignment and is independent of node and placement order", () => {
-    const placements = [
+    const alignmentPlacements = [
       { nodeId: 1, x: 0.2, y: 0.4 },
       { nodeId: 2, x: 0.5, y: 0.4 },
       { nodeId: 3, x: 0.8, y: 0.4 },
     ];
-    const first = projectLayerNodePositions(authoredLayer(placements), nodes);
+    const first = projectLayerNodePositions(authoredLayer(alignmentPlacements), nodes);
     const second = projectLayerNodePositions(
-      authoredLayer([...placements].reverse()),
+      authoredLayer([...alignmentPlacements].reverse()),
       [...nodes].reverse(),
     );
+    expect([...first.positions], "placement and node order independence").toEqual([...second.positions].reverse());
+    expect(
+      new Set([...first.positions.values()].map((point) => point.y)).size,
+      "authored alignment preserved",
+    ).toBe(1);
 
-    expect([...first.positions]).toEqual([...second.positions].reverse());
-    expect(new Set([...first.positions.values()].map((point) => point.y)).size).toBe(1);
-  });
-
-  it("uses the largest rendered node bounds globally without warping authored relationships", () => {
-    const layer = authoredLayer([
+    const globalBounds = projectLayerNodePositions(authoredLayer([
       { nodeId: 1, x: 0, y: 0 },
       { nodeId: 2, x: 1, y: 1 },
-    ]);
-    const projected = projectLayerNodePositions(layer, [
+    ]), [
       { id: 1, layoutBounds: { halfWidth: 40, top: 20, bottom: 40 } },
       { id: 2, layoutBounds: { halfWidth: 120, top: 35, bottom: 180 } },
     ]);
+    expect(globalBounds.positions.get("1"), "largest global bounds applied to the small node").toEqual({ x: 152, y: 67 });
+    expect(globalBounds.positions.get("2"), "largest global bounds applied to the large node").toEqual({ x: 808, y: 428 });
 
-    expect(projected.positions.get("1")).toEqual({ x: 152, y: 67 });
-    expect(projected.positions.get("2")).toEqual({ x: 808, y: 428 });
-  });
+    const legacyOne = projectLayerNodePositions({ layer: { id: 1 } }, [{ id: "only", layoutBounds: bounds }]);
+    expect(legacyOne.source, "legacy source").toBe("legacy");
+    expect(legacyOne.positions.get("only"), "legacy one-node centering").toEqual({ x: 480, y: 298 });
+    const legacyFirst = projectLayerNodePositions({ layer: { id: 2 } }, nodes);
+    const legacySecond = projectLayerNodePositions({ layer: { id: 2 } }, [...nodes].reverse());
+    expect(Object.fromEntries(legacyFirst.positions), "deterministic legacy placement").toEqual(Object.fromEntries(legacySecond.positions));
+    expect(
+      new Set([...legacyFirst.positions.values()].map(({ x, y }) => `${x}:${y}`)).size,
+      "legacy nodes not collapsed",
+    ).toBe(3);
 
-  it("centers a legacy one-node layer and deterministically places larger legacy layers", () => {
-    const one = projectLayerNodePositions({ layer: { id: 1 } }, [{ id: "only", layoutBounds: bounds }]);
-    expect(one.source).toBe("legacy");
-    expect(one.positions.get("only")).toEqual({ x: 480, y: 298 });
-
-    const first = projectLayerNodePositions({ layer: { id: 2 } }, nodes);
-    const second = projectLayerNodePositions({ layer: { id: 2 } }, [...nodes].reverse());
-    expect(Object.fromEntries(first.positions)).toEqual(Object.fromEntries(second.positions));
-    expect(new Set([...first.positions.values()].map(({ x, y }) => `${x}:${y}`)).size).toBe(3);
-  });
-
-  it("canonicalizes node, edge, and placement order in the view signature", () => {
-    const placements = [
+    const signaturePlacements = [
       { nodeId: 1, x: 0.2, y: 0.4 },
       { nodeId: 2, x: 0.8, y: 0.4 },
     ];
-    const layer = authoredLayer(placements);
-    const reverseLayer = authoredLayer([...placements].reverse());
     const edges = [{ endpoints: [1, 2] }];
+    expect(
+      graphLayoutSignature(authoredLayer(signaturePlacements), [{ id: 1 }, { id: 2 }], edges),
+      "signature canonicalizes node, edge, and placement order",
+    ).toBe(graphLayoutSignature(authoredLayer([...signaturePlacements].reverse()), [{ id: 2 }, { id: 1 }], [{ endpoints: [2, 1] }]));
+    expect(
+      graphLayoutSignature(authoredLayer([{ nodeId: 1, x: 0.3, y: 0.4 }, signaturePlacements[1]]), [{ id: 1 }, { id: 2 }], edges),
+      "signature changes with authored coordinates",
+    ).not.toBe(graphLayoutSignature(authoredLayer(signaturePlacements), [{ id: 1 }, { id: 2 }], edges));
 
-    expect(graphLayoutSignature(layer, [{ id: 1 }, { id: 2 }], edges)).toBe(
-      graphLayoutSignature(reverseLayer, [{ id: 2 }, { id: 1 }], [{ endpoints: [2, 1] }]),
-    );
-    expect(graphLayoutSignature(
-      authoredLayer([{ nodeId: 1, x: 0.3, y: 0.4 }, placements[1]]),
-      [{ id: 1 }, { id: 2 }],
-      edges,
-    )).not.toBe(graphLayoutSignature(layer, [{ id: 1 }, { id: 2 }], edges));
-  });
-
-  it("fails closed for malformed accepted authored layouts instead of using legacy placement", () => {
     expect(() => projectLayerNodePositions(
       authoredLayer([{ nodeId: 1, x: 0.5, y: 0.5 }]),
       [{ id: 1 }, { id: 2 }],
-    )).toThrow("exactly one placement");
+    ), "placement count mismatch").toThrow("exactly one placement");
     expect(() => projectLayerNodePositions(
       authoredLayer([{ nodeId: 1, x: Number.NaN, y: 0.5 }]),
       [{ id: 1 }],
-    )).toThrow("invalid normalized coordinate");
+    ), "invalid normalized coordinate").toThrow("invalid normalized coordinate");
     expect(() => projectLayerNodePositions(
       { layer: { layout: { version: 2, placements: [] } } },
       [{ id: 1 }],
-    )).toThrow("Unsupported accepted graph layout version");
+    ), "unsupported layout version").toThrow("Unsupported accepted graph layout version");
   });
 });

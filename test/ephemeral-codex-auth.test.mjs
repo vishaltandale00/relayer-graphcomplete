@@ -16,14 +16,12 @@ afterEach(async () => {
 });
 
 describe("leftover ephemeral Codex API-key auth", () => {
-  it("recognizes only the secret-turn auth.json shape", () => {
-    expect(isEphemeralCodexApiKeyAuth({ auth_mode: "apikey", OPENAI_API_KEY: "sk-test" })).toBe(true);
-    expect(isEphemeralCodexApiKeyAuth({ tokens: { access_token: "session" } })).toBe(false);
-    expect(isEphemeralCodexApiKeyAuth({ auth_mode: "chatgpt", OPENAI_API_KEY: "sk-test" })).toBe(false);
-    expect(isEphemeralCodexApiKeyAuth("legacy-session")).toBe(false);
-  });
+  it("recognizes the secret-turn auth shape and removes only isolated provider-home leftovers", async () => {
+    expect(isEphemeralCodexApiKeyAuth({ auth_mode: "apikey", OPENAI_API_KEY: "sk-test" }), "secret-turn shape").toBe(true);
+    expect(isEphemeralCodexApiKeyAuth({ tokens: { access_token: "session" } }), "subscription tokens").toBe(false);
+    expect(isEphemeralCodexApiKeyAuth({ auth_mode: "chatgpt", OPENAI_API_KEY: "sk-test" }), "chatgpt mode").toBe(false);
+    expect(isEphemeralCodexApiKeyAuth("legacy-session"), "legacy string session").toBe(false);
 
-  it("removes crash leftovers from isolated provider homes and leaves subscription sessions", async () => {
     const profile = await mkdtemp(join(tmpdir(), "relayer-ephemeral-auth-"));
     directories.push(profile);
     const runtimeRoot = join(profile, "provider-runtimes");
@@ -53,18 +51,18 @@ describe("leftover ephemeral Codex API-key auth", () => {
     await writeFile(join(runtimeRoot, "openai-api", "unrelated.json"), "keep");
 
     const result = await removeLeftoverEphemeralCodexAuthFiles(runtimeRoot);
-    expect(result.failures).toEqual([]);
-    expect([...result.removed].sort()).toEqual(["openai-api", "openrouter"]);
+    expect(result.failures, "no removal failures").toEqual([]);
+    expect([...result.removed].sort(), "removed isolated provider homes").toEqual(["openai-api", "openrouter"]);
 
-    await expect(readFile(join(openaiHome, "auth.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(openrouterHome, "auth.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(legacyHome, "auth.json"), "utf8")).resolves.toContain("must-not-touch-legacy");
-    await expect(readFile(join(subscriptionHome, "auth.json"), "utf8")).resolves.toContain("isolated-subscription");
-    await expect(readFile(join(runtimeRoot, "openai-api", "unrelated.json"), "utf8")).resolves.toBe("keep");
-  });
+    await expect(readFile(join(openaiHome, "auth.json"), "utf8"), "openai leftover removed").rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(openrouterHome, "auth.json"), "utf8"), "openrouter leftover removed").rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(legacyHome, "auth.json"), "utf8"), "legacy home untouched").resolves.toContain("must-not-touch-legacy");
+    await expect(readFile(join(subscriptionHome, "auth.json"), "utf8"), "subscription session untouched").resolves.toContain("isolated-subscription");
+    await expect(readFile(join(runtimeRoot, "openai-api", "unrelated.json"), "utf8"), "unrelated files untouched").resolves.toBe("keep");
 
-  it("treats a missing provider-runtime root as already clean", async () => {
-    await expect(removeLeftoverEphemeralCodexAuthFiles(join(tmpdir(), "relayer-missing-provider-runtimes")))
-      .resolves.toEqual({ removed: [], failures: [] });
+    await expect(
+      removeLeftoverEphemeralCodexAuthFiles(join(tmpdir(), "relayer-missing-provider-runtimes")),
+      "missing provider-runtime root is already clean",
+    ).resolves.toEqual({ removed: [], failures: [] });
   });
 });

@@ -34,10 +34,10 @@ async function runtimeFixture(version = CODEX_BROWSER_MCP_VERSION) {
 }
 
 describe("Codex browser MCP runtime", () => {
-  it("accepts only the exact shipped package and returns absolute Electron-as-Node launch data", async () => {
+  it("accepts only the exact shipped helper and pins it through every desktop package", async () => {
     const fixture = await runtimeFixture();
 
-    await expect(inspectCodexBrowserMcpRuntime(fixture)).resolves.toEqual({
+    await expect(inspectCodexBrowserMcpRuntime(fixture), "exact shipped package accepted").resolves.toEqual({
       available: true,
       executable: fixture.executable,
       script: fixture.script,
@@ -48,41 +48,30 @@ describe("Codex browser MCP runtime", () => {
         "--no-performance-crux",
       ],
     });
-  });
 
-  it("reports a Codex-local unavailable runtime when the packaged helper version drifts", async () => {
-    const fixture = await runtimeFixture("1.8.1");
-
-    await expect(inspectCodexBrowserMcpRuntime(fixture)).resolves.toMatchObject({
+    const drifted = await runtimeFixture("1.8.1");
+    await expect(inspectCodexBrowserMcpRuntime(drifted), "version drift reported Codex-local").resolves.toMatchObject({
       available: false,
       code: "codex_browser_mcp_version_mismatch",
       message: expect.stringContaining(`${CODEX_BROWSER_MCP_PACKAGE}@${CODEX_BROWSER_MCP_VERSION}`),
       diagnostics: { actualVersion: "1.8.1" },
     });
-  });
 
-  it("reports a Codex-local unavailable runtime when the helper is missing", async () => {
-    const fixture = await runtimeFixture();
-    await rm(fixture.script);
-
-    await expect(inspectCodexBrowserMcpRuntime(fixture)).resolves.toMatchObject({
+    const missing = await runtimeFixture();
+    await rm(missing.script);
+    await expect(inspectCodexBrowserMcpRuntime(missing), "missing helper reported Codex-local").resolves.toMatchObject({
       available: false,
       code: "codex_browser_mcp_missing",
       diagnostics: { causeCode: "ENOENT" },
     });
-  });
 
-  it("reports a Codex-local unavailable runtime when the manifest is corrupt", async () => {
-    const fixture = await runtimeFixture();
-    await writeFile(join(fixture.packageRoot, "package.json"), "not json\n");
-
-    await expect(inspectCodexBrowserMcpRuntime(fixture)).resolves.toMatchObject({
+    const corrupt = await runtimeFixture();
+    await writeFile(join(corrupt.packageRoot, "package.json"), "not json\n");
+    await expect(inspectCodexBrowserMcpRuntime(corrupt), "corrupt manifest reported Codex-local").resolves.toMatchObject({
       available: false,
       code: "codex_browser_mcp_invalid_manifest",
     });
-  });
 
-  it("pins and unpacks the helper in product and Eval desktop packages", async () => {
     const previousTarget = process.env.RELAYER_DESKTOP_TARGET;
     let evalBuilderConfig;
     try {
@@ -104,8 +93,8 @@ describe("Codex browser MCP runtime", () => {
     });
     const productConfig = createDesktopBuilderConfig(contract, { argv: ["--dir"] });
 
-    expect(desktopManifest.dependencies[CODEX_BROWSER_MCP_PACKAGE]).toBe(CODEX_BROWSER_MCP_VERSION);
-    expect(productConfig.asarUnpack).toEqual(["node_modules/chrome-devtools-mcp/**/*"]);
-    expect(evalBuilderConfig.asarUnpack).toEqual(["node_modules/chrome-devtools-mcp/**/*"]);
+    expect(desktopManifest.dependencies[CODEX_BROWSER_MCP_PACKAGE], "helper pinned in the desktop manifest").toBe(CODEX_BROWSER_MCP_VERSION);
+    expect(productConfig.asarUnpack, "helper unpacked in the product package").toEqual(["node_modules/chrome-devtools-mcp/**/*"]);
+    expect(evalBuilderConfig.asarUnpack, "helper unpacked in the Eval package").toEqual(["node_modules/chrome-devtools-mcp/**/*"]);
   });
 });

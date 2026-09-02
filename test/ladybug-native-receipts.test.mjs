@@ -30,40 +30,37 @@ function fixtureInventory() {
 }
 
 describe("Ladybug native dependency receipts", () => {
-  it("verifies the frozen inventory and rejects it as release-ready while the binding license is missing", () => {
-    expect(execFileSync(process.execPath, [verifier], { encoding: "utf8" })).toContain("release blockers preserved");
+  it("verifies the frozen inventory and fails closed on every receipt, source, and OpenSSL mutation", () => {
+    expect(execFileSync(process.execPath, [verifier], { encoding: "utf8" }), "frozen inventory verdict")
+      .toContain("release blockers preserved");
     const release = spawnSync(process.execPath, [verifier, "--release-ready"], { encoding: "utf8" });
-    expect(release.status).not.toBe(0);
-    expect(release.stderr).toContain("native receipt is not release-ready");
-  });
+    expect(release.status, "release-ready exit status while the binding license is missing").not.toBe(0);
+    expect(release.stderr, "release blocker reason").toContain("native receipt is not release-ready");
 
-  it("fails closed when a compiled native component loses its notice", () => {
     const { inventory } = fixtureInventory();
     const receipt = JSON.parse(readFileSync(inventory, "utf8"));
     receipt.nativeComponents.find(({ name }) => name === "zstd").licensePath = null;
     writeFileSync(inventory, `${JSON.stringify(receipt, null, 2)}\n`);
-    const result = spawnSync(process.execPath, [verifier, "--inventory", inventory], { encoding: "utf8" });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("zstd has no license notice");
-  });
+    const noticeless = spawnSync(process.execPath, [verifier, "--inventory", inventory], { encoding: "utf8" });
+    expect(noticeless.status, "exit status for a compiled component without its notice").not.toBe(0);
+    expect(noticeless.stderr, "noticeless component named").toContain("zstd has no license notice");
 
-  it("fails closed when the exact source contains an unlisted native subtree", () => {
     const source = temporaryDirectory("ladybug-native-source-");
     mkdirSync(join(source, "src"), { recursive: true });
     mkdirSync(join(source, "lbug-src", "third_party", "surprise-native"), { recursive: true });
-    const result = spawnSync(process.execPath, [verifier, "--source-root", source], { encoding: "utf8" });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("unlisted native subtree");
-  });
+    const unlisted = spawnSync(process.execPath, [verifier, "--source-root", source], { encoding: "utf8" });
+    expect(unlisted.status, "exit status for an unlisted native subtree").not.toBe(0);
+    expect(unlisted.stderr, "unlisted subtree named").toContain("unlisted native subtree");
 
-  it("replays the vendored OpenSSL notice against exact source bytes", () => {
-    const source = temporaryDirectory("openssl-license-source-");
-    cpSync(join(root, "vendor/ladybug/notices/openssl-LICENSE.txt"), join(source, "LICENSE.txt"));
-    expect(execFileSync(process.execPath, [verifier, "--openssl-source-root", source], { encoding: "utf8" }))
-      .toContain("release blockers preserved");
-    writeFileSync(join(source, "LICENSE.txt"), "not OpenSSL 3.5.8\n");
-    const result = spawnSync(process.execPath, [verifier, "--openssl-source-root", source], { encoding: "utf8" });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("OpenSSL source license changed");
+    const opensslSource = temporaryDirectory("openssl-license-source-");
+    cpSync(join(root, "vendor/ladybug/notices/openssl-LICENSE.txt"), join(opensslSource, "LICENSE.txt"));
+    expect(
+      execFileSync(process.execPath, [verifier, "--openssl-source-root", opensslSource], { encoding: "utf8" }),
+      "vendored OpenSSL notice replayed against exact source bytes",
+    ).toContain("release blockers preserved");
+    writeFileSync(join(opensslSource, "LICENSE.txt"), "not OpenSSL 3.5.8\n");
+    const mutatedOpenSSL = spawnSync(process.execPath, [verifier, "--openssl-source-root", opensslSource], { encoding: "utf8" });
+    expect(mutatedOpenSSL.status, "exit status for a changed OpenSSL source license").not.toBe(0);
+    expect(mutatedOpenSSL.stderr, "OpenSSL drift named").toContain("OpenSSL source license changed");
   });
 });

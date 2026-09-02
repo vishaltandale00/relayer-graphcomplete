@@ -40,28 +40,25 @@ const DARWIN_KERNEL_FOR_MACOS = {
   "15.0.0": "24.0.0",
 };
 
-describe("macOS minimum version contract", () => {
-  it("keeps the desktop floor, its Darwin translation, and the Ladybug build floor in agreement", async () => {
+describe("pinned Ladybug source build", () => {
+  it("freezes the source contract, stages reviewed archives byte-exactly, and fails closed on every mutation", async () => {
     const manifest = await loadLadybugSourceManifest();
     const floor = DESKTOP_RELEASE.minimumMacOSVersion;
 
     // The Ladybug source build compiles with -mmacosx-version-min from its own
     // manifest; if that drifts below the product floor the binary silently
     // targets an older OS than the app claims to require.
-    expect(`${manifest.build.minimumMacOSVersion}`).toBe(floor.split(".").slice(0, 2).join("."));
+    expect(`${manifest.build.minimumMacOSVersion}`, "Ladybug build floor matches the desktop floor").toBe(floor.split(".").slice(0, 2).join("."));
 
     // electron-updater gates on the Darwin kernel version, not the macOS one.
+    // Apple's mapping is not a formula (macOS 13.0 is Darwin 22.1, but 14.0 is
+    // Darwin 23.0), so every floor Relayer may adopt is listed explicitly in
+    // DARWIN_KERNEL_FOR_MACOS; moving the floor means adding its pair there.
     expect(DARWIN_KERNEL_FOR_MACOS, `no Darwin kernel recorded for macOS ${floor}`)
       .toHaveProperty(floor);
-    expect(DESKTOP_RELEASE.minimumUpdateSystemVersion).toBe(DARWIN_KERNEL_FOR_MACOS[floor]);
-  });
-});
+    expect(DESKTOP_RELEASE.minimumUpdateSystemVersion, "update gate uses the Darwin translation").toBe(DARWIN_KERNEL_FOR_MACOS[floor]);
 
-describe("pinned Ladybug source build", () => {
-  it("freezes an unpatched binding, embedded core, static OpenSSL, and zero extensions", async () => {
-    const manifest = await loadLadybugSourceManifest();
-
-    expect(manifest).toMatchObject({
+    expect(manifest, "frozen unpatched binding, embedded core, static OpenSSL, zero extensions").toMatchObject({
       core: {
         version: "0.18.0",
         commit: "0cda4fffcebb4a52cc24198462901ad28e2d5b66",
@@ -114,7 +111,7 @@ describe("pinned Ladybug source build", () => {
       outputDirectory: "/tmp/reviewed-ladybug-stage",
       target: "aarch64-apple-darwin",
     });
-    expect(environment).toMatchObject({
+    expect(environment, "offline static cargo environment for Apple Silicon").toMatchObject({
       CARGO_NET_OFFLINE: "true",
       LBUG_BUILD_FROM_SOURCE: "1",
       LBUG_VERSION: "0.18.0",
@@ -123,90 +120,85 @@ describe("pinned Ladybug source build", () => {
       OPENSSL_STATIC: "1",
       OPENSSL_USE_STATIC_LIBS: "TRUE",
     });
-    expect(environment).not.toHaveProperty("LBUG_SHARED");
-    expect(environment).not.toHaveProperty("LBUG_OPENSSL_STATIC_ROOT");
+    expect(environment, "no shared Ladybug linkage").not.toHaveProperty("LBUG_SHARED");
+    expect(environment, "no ambient OpenSSL root").not.toHaveProperty("LBUG_OPENSSL_STATIC_ROOT");
     expect(createLadybugCargoEnvironment({
       manifest,
       outputDirectory: "/tmp/reviewed-ladybug-stage",
       target: "x86_64-pc-windows-msvc",
-    })).toMatchObject({
+    }), "Windows target keeps the pinned library path").toMatchObject({
       LBUG_VERSION: "0.18.0",
       LIBRARY_PATH: "/tmp/reviewed-ladybug-stage/openssl-prefix/lib",
     });
-  });
 
-  it("rejects source cache bytes that do not match the frozen checksums", async () => {
-    const manifest = structuredClone(await loadLadybugSourceManifest());
+    const mutations = [
+      ["a binding patch", (candidate) => { candidate.build.bindingPatch = "local.patch"; }],
+      ["a core patch", (candidate) => { candidate.build.corePatch = "local.patch"; }],
+      ["extensions", (candidate) => { candidate.extensions = ["vector"]; }],
+      ["an online Cargo mode", (candidate) => { candidate.build.cargoNetworkMode = "online"; }],
+      ["a shared Ladybug native mode", (candidate) => { candidate.build.nativeMode = "shared-ladybug-with-static-openssl"; }],
+      ["a dropped environment guard", (candidate) => { candidate.build.environmentMustBeUnset = []; }],
+      ["ladybug-owned link adapter", (candidate) => { candidate.build.platformLinkAdapter.ownership = "ladybug"; }],
+      ["renamed Windows static libraries", (candidate) => { candidate.build.platformLinkAdapter.targets[2].staticLibraries = ["ssl", "crypto"]; }],
+      ["a disabled Windows release target", (candidate) => { candidate.build.targets["x86_64-pc-windows-msvc"].supported = false; }],
+    ];
+    expect(mutations, "manifest mutation inventory").toHaveLength(9);
+    for (const [label, mutate] of mutations) {
+      const candidate = structuredClone(manifest);
+      mutate(candidate);
+      expect(() => validateLadybugSourceManifest(candidate), `manifest rejects ${label}`).toThrow();
+    }
+
+    const cacheManifest = structuredClone(manifest);
     const cacheDirectory = await temporaryDirectory();
-    await writeFile(join(cacheDirectory, manifest.rustBinding.archive), "wrong binding bytes");
-    await writeFile(join(cacheDirectory, manifest.openssl.archive), "wrong OpenSSL bytes");
+    await writeFile(join(cacheDirectory, cacheManifest.rustBinding.archive), "wrong binding bytes");
+    await writeFile(join(cacheDirectory, cacheManifest.openssl.archive), "wrong OpenSSL bytes");
+    await expect(
+      verifyLadybugSourceCache({ cacheDirectory, manifest: cacheManifest }),
+      "source cache bytes must match the frozen checksums",
+    ).rejects.toThrow(/lbug-0\.18\.0\.crate SHA-256 mismatch/u);
 
-    await expect(verifyLadybugSourceCache({ cacheDirectory, manifest })).rejects.toThrow(
-      /lbug-0\.18\.0\.crate SHA-256 mismatch/u,
-    );
-  });
-
-  it("stages reviewed archive bytes without modifying the binding or embedded core", async () => {
     const root = await temporaryDirectory();
-    const cacheDirectory = join(root, "cache");
+    const stagingCacheDirectory = join(root, "cache");
     const fixtureDirectory = join(root, "fixture");
     const outputDirectory = join(root, "output");
     const bindingRoot = join(fixtureDirectory, "lbug-0.18.0");
     const opensslRoot = join(fixtureDirectory, "openssl-3.5.8");
     await mkdir(join(bindingRoot, "lbug-src", "src"), { recursive: true });
     await mkdir(opensslRoot, { recursive: true });
-    await mkdir(cacheDirectory);
+    await mkdir(stagingCacheDirectory);
     await writeFile(join(bindingRoot, "build.rs"), "fn main() {}\n");
     await writeFile(join(bindingRoot, "lbug-src", "CMakeLists.txt"), "project(lbug)\n");
     await writeFile(join(bindingRoot, "lbug-src", "src", "core.cpp"), "// core\n");
     await writeFile(join(opensslRoot, "Configure"), "#!/usr/bin/env perl\n");
 
-    const manifest = structuredClone(await loadLadybugSourceManifest());
-    manifest.core.embeddedTreeSha256 = await digestLadybugSourceTree(join(bindingRoot, "lbug-src"));
-    manifest.rustBinding.buildScriptSha256 = await sha256File(join(bindingRoot, "build.rs"));
+    const stagingManifest = structuredClone(manifest);
+    stagingManifest.core.embeddedTreeSha256 = await digestLadybugSourceTree(join(bindingRoot, "lbug-src"));
+    stagingManifest.rustBinding.buildScriptSha256 = await sha256File(join(bindingRoot, "build.rs"));
     await createTar({
       cwd: fixtureDirectory,
-      file: join(cacheDirectory, manifest.rustBinding.archive),
+      file: join(stagingCacheDirectory, stagingManifest.rustBinding.archive),
       gzip: true,
     }, ["lbug-0.18.0"]);
     await createTar({
       cwd: fixtureDirectory,
-      file: join(cacheDirectory, manifest.openssl.archive),
+      file: join(stagingCacheDirectory, stagingManifest.openssl.archive),
       gzip: true,
     }, ["openssl-3.5.8"]);
-    manifest.rustBinding.sha256 = await sha256File(join(cacheDirectory, manifest.rustBinding.archive));
-    manifest.openssl.sha256 = await sha256File(join(cacheDirectory, manifest.openssl.archive));
+    stagingManifest.rustBinding.sha256 = await sha256File(join(stagingCacheDirectory, stagingManifest.rustBinding.archive));
+    stagingManifest.openssl.sha256 = await sha256File(join(stagingCacheDirectory, stagingManifest.openssl.archive));
 
-    const staged = await stageLadybugSources({ cacheDirectory, outputDirectory, manifest });
-    expect(staged.receipt).toMatchObject({
-      core: { version: "0.18.0", embeddedTreeSha256: manifest.core.embeddedTreeSha256 },
+    const staged = await stageLadybugSources({ cacheDirectory: stagingCacheDirectory, outputDirectory, manifest: stagingManifest });
+    expect(staged.receipt, "staging receipt for reviewed archives").toMatchObject({
+      core: { version: "0.18.0", embeddedTreeSha256: stagingManifest.core.embeddedTreeSha256 },
       rustBinding: { crate: "lbug", version: "0.18.0", patched: false },
-      openssl: { version: "3.5.8", sha256: manifest.openssl.sha256 },
+      openssl: { version: "3.5.8", sha256: stagingManifest.openssl.sha256 },
       extensions: [],
       nativeMode: "fully-static-ladybug-and-openssl",
       distributionLicenseReceiptComplete: false,
     });
-    expect(await readFile(join(staged.bindingDirectory, "build.rs"), "utf8")).toBe("fn main() {}\n");
-    expect(JSON.parse(await readFile(join(outputDirectory, "source-receipt.json"), "utf8")))
+    expect(await readFile(join(staged.bindingDirectory, "build.rs"), "utf8"), "binding staged without modification").toBe("fn main() {}\n");
+    expect(JSON.parse(await readFile(join(outputDirectory, "source-receipt.json"), "utf8")), "persisted source receipt matches")
       .toEqual(staged.receipt);
-  });
-
-  it("rejects a binding patch, a core patch, extensions, or an online Cargo mode", async () => {
-    const original = await loadLadybugSourceManifest();
-    for (const mutate of [
-      (manifest) => { manifest.build.bindingPatch = "local.patch"; },
-      (manifest) => { manifest.build.corePatch = "local.patch"; },
-      (manifest) => { manifest.extensions = ["vector"]; },
-      (manifest) => { manifest.build.cargoNetworkMode = "online"; },
-      (manifest) => { manifest.build.nativeMode = "shared-ladybug-with-static-openssl"; },
-      (manifest) => { manifest.build.environmentMustBeUnset = []; },
-      (manifest) => { manifest.build.platformLinkAdapter.ownership = "ladybug"; },
-      (manifest) => { manifest.build.platformLinkAdapter.targets[2].staticLibraries = ["ssl", "crypto"]; },
-      (manifest) => { manifest.build.targets["x86_64-pc-windows-msvc"].supported = false; },
-    ]) {
-      const manifest = structuredClone(original);
-      mutate(manifest);
-      expect(() => validateLadybugSourceManifest(manifest)).toThrow();
-    }
-  });
+  }, 30_000);
 });

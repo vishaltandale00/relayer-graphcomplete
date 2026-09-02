@@ -39,62 +39,64 @@ describe("Ask-profile video evidence model", () => {
       frameIndex: 12,
       captureStartedAt: 1_001,
       captureCompletedAt: 1_010,
-    }, 1_000)).toBe(true);
+    }, 1_000), "capture started after validation").toBe(true);
     expect(isFreshRecordedPromptFrame({
       frameIndex: 12,
       captureStartedAt: 999,
       captureCompletedAt: 1_010,
-    }, 1_000)).toBe(false);
+    }, 1_000), "capture started before validation").toBe(false);
   });
 
-  it("accepts seven unique screenshot-correlated stable prompt intervals", () => {
-    expect(validateApprovalPromptHoldEvidence(evidenceFixture())).toBe(true);
+  it("accepts seven unique screenshot-correlated stable prompt intervals with adjacent frame windows", () => {
+    expect(validateApprovalPromptHoldEvidence(evidenceFixture()), "seven unique intervals").toBe(true);
+
+    const adjacent = evidenceFixture();
+    const previous = adjacent.holds[0];
+    const next = adjacent.holds[1];
+    next.frameCountAtStart = previous.frameCountAtEnd;
+    next.frameCountAtEnd = next.frameCountAtStart + 25;
+    next.videoStartOffsetMs = previous.videoEndOffsetMs;
+    next.videoEndOffsetMs = next.videoStartOffsetMs + 3_125;
+    expect(validateApprovalPromptHoldEvidence(adjacent), "exclusive adjacent frame intervals").toBe(true);
   });
 
-  it("accepts ordered prompt holds whose exclusive frame intervals are adjacent", () => {
-    const fixture = evidenceFixture();
-    const previous = fixture.holds[0];
-    const adjacent = fixture.holds[1];
-    adjacent.frameCountAtStart = previous.frameCountAtEnd;
-    adjacent.frameCountAtEnd = adjacent.frameCountAtStart + 25;
-    adjacent.videoStartOffsetMs = previous.videoEndOffsetMs;
-    adjacent.videoEndOffsetMs = adjacent.videoStartOffsetMs + 3_125;
-    expect(validateApprovalPromptHoldEvidence(fixture)).toBe(true);
-  });
-
-  it.each([
-    ["a missing hold", (fixture) => fixture.holds.pop()],
-    ["a duplicate request", (fixture) => { fixture.holds[1].requestId = fixture.holds[0].requestId; }],
-    ["too little wall time", (fixture) => { fixture.holds[0].observedMs = 2_999; }],
-    ["too few recorded frames", (fixture) => { fixture.holds[0].frameCountAtEnd = 23; }],
-    ["an interval outside the encoded video", (fixture) => { fixture.holds[5].videoEndOffsetMs = 31_000; }],
-    ["a non-finite duration", (fixture) => { fixture.holds[0].observedMs = Number.NaN; }],
-    ["a non-finite frame counter", (fixture) => { fixture.holds[0].frameCountAtEnd = Number.POSITIVE_INFINITY; }],
-    ["an inconsistent video interval", (fixture) => { fixture.holds[0].videoEndOffsetMs += 1; }],
-    ["video intervals reused across every distinct prompt", (fixture) => {
-      for (const hold of fixture.holds) {
-        hold.videoStartOffsetMs = 0;
-        hold.videoEndOffsetMs = 3_125;
-      }
-    }],
-    ["a duration-preserving video offset tamper", (fixture) => {
-      fixture.holds[1].videoStartOffsetMs += 125;
-      fixture.holds[1].videoEndOffsetMs += 125;
-    }],
-    ["an exact frame interval reused by another prompt", (fixture) => {
-      fixture.holds[1].frameCountAtStart = fixture.holds[0].frameCountAtStart;
-      fixture.holds[1].frameCountAtEnd = fixture.holds[0].frameCountAtEnd;
-    }],
-    ["partially overlapping frame intervals", (fixture) => {
-      fixture.holds[1].frameCountAtStart = fixture.holds[0].frameCountAtEnd - 1;
-      fixture.holds[1].frameCountAtEnd = fixture.holds[1].frameCountAtStart + 25;
-    }],
-    ["chronologically reordered frame intervals", (fixture) => {
-      [fixture.holds[0], fixture.holds[1]] = [fixture.holds[1], fixture.holds[0]];
-    }],
-  ])("rejects %s", (_label, mutate) => {
-    const fixture = evidenceFixture();
-    mutate(fixture);
-    expect(() => validateApprovalPromptHoldEvidence(fixture)).toThrow();
+  it("rejects the complete tampered prompt-hold corpus", () => {
+    const cases = [
+      ["a missing hold", (fixture) => fixture.holds.pop()],
+      ["a duplicate request", (fixture) => { fixture.holds[1].requestId = fixture.holds[0].requestId; }],
+      ["too little wall time", (fixture) => { fixture.holds[0].observedMs = 2_999; }],
+      ["too few recorded frames", (fixture) => { fixture.holds[0].frameCountAtEnd = 23; }],
+      ["an interval outside the encoded video", (fixture) => { fixture.holds[5].videoEndOffsetMs = 31_000; }],
+      ["a non-finite duration", (fixture) => { fixture.holds[0].observedMs = Number.NaN; }],
+      ["a non-finite frame counter", (fixture) => { fixture.holds[0].frameCountAtEnd = Number.POSITIVE_INFINITY; }],
+      ["an inconsistent video interval", (fixture) => { fixture.holds[0].videoEndOffsetMs += 1; }],
+      ["video intervals reused across every distinct prompt", (fixture) => {
+        for (const hold of fixture.holds) {
+          hold.videoStartOffsetMs = 0;
+          hold.videoEndOffsetMs = 3_125;
+        }
+      }],
+      ["a duration-preserving video offset tamper", (fixture) => {
+        fixture.holds[1].videoStartOffsetMs += 125;
+        fixture.holds[1].videoEndOffsetMs += 125;
+      }],
+      ["an exact frame interval reused by another prompt", (fixture) => {
+        fixture.holds[1].frameCountAtStart = fixture.holds[0].frameCountAtStart;
+        fixture.holds[1].frameCountAtEnd = fixture.holds[0].frameCountAtEnd;
+      }],
+      ["partially overlapping frame intervals", (fixture) => {
+        fixture.holds[1].frameCountAtStart = fixture.holds[0].frameCountAtEnd - 1;
+        fixture.holds[1].frameCountAtEnd = fixture.holds[1].frameCountAtStart + 25;
+      }],
+      ["chronologically reordered frame intervals", (fixture) => {
+        [fixture.holds[0], fixture.holds[1]] = [fixture.holds[1], fixture.holds[0]];
+      }],
+    ];
+    expect(cases, "tamper inventory").toHaveLength(13);
+    for (const [label, mutate] of cases) {
+      const fixture = evidenceFixture();
+      mutate(fixture);
+      expect(() => validateApprovalPromptHoldEvidence(fixture), label).toThrow();
+    }
   });
 });

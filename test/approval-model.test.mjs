@@ -49,7 +49,7 @@ function state(approvals, completionStatus = "waiting_for_approval") {
 }
 
 describe("desktop approval model", () => {
-  it("queues only unique normalized requests correlated to a waiting interaction", () => {
+  it("queues, validates, selects, presents, and reveals approvals through one deterministic dock contract", () => {
     const later = receipt({ requestId: "later", createdAt: "2026-08-20T12:01:00Z" });
     const first = receipt({ requestId: "first" });
     const wrongThread = receipt({ requestId: "wrong-thread", threadId: 11 });
@@ -59,39 +59,31 @@ describe("desktop approval model", () => {
     expect(pendingApprovalsForThread(
       state([later, wrongThread, resolved, malformed, first]),
       { id: 10 },
-    ).map(({ request }) => request.requestId)).toEqual(["first", "later"]);
-    expect(pendingApprovalsForThread(state([first], "running"), { id: 10 })).toEqual([]);
-  });
+    ).map(({ request }) => request.requestId), "unique normalized requests ordered by creation").toEqual(["first", "later"]);
+    expect(pendingApprovalsForThread(state([first], "running"), { id: 10 }), "no queue outside a waiting interaction").toEqual([]);
 
-  it("fails closed for duplicate request IDs and unsupported action shapes", () => {
     const duplicate = receipt({ requestId: "duplicate" });
-    expect(pendingApprovalsForThread(state([duplicate, duplicate]), { id: 10 })).toEqual([]);
-    expect(validApprovalRequest(receipt({ action: { kind: "shell", command: "npm test" } }))).toBe(false);
-    expect(validApprovalRequest(receipt({ action: { kind: "file_change", action: "Patch", workingDirectory: "/workspace", affectedFiles: [] } }))).toBe(false);
-    expect(validApprovalRequest(receipt({ action: { kind: "network", action: "Fetch", networkDestination: "" } }))).toBe(false);
-  });
+    expect(pendingApprovalsForThread(state([duplicate, duplicate]), { id: 10 }), "duplicate request IDs fail closed").toEqual([]);
+    expect(validApprovalRequest(receipt({ action: { kind: "shell", command: "npm test" } })), "unsupported action kind").toBe(false);
+    expect(validApprovalRequest(receipt({ action: { kind: "file_change", action: "Patch", workingDirectory: "/workspace", affectedFiles: [] } })), "file change without affected files").toBe(false);
+    expect(validApprovalRequest(receipt({ action: { kind: "network", action: "Fetch", networkDestination: "" } })), "network without destination").toBe(false);
 
-  it("selects and wraps a request queue deterministically", () => {
     const pending = [receipt({ requestId: "a" }), receipt({ requestId: "b" }), receipt({ requestId: "c" })];
-    expect(selectedPendingApproval(pending, "b")?.request.requestId).toBe("b");
-    expect(selectedPendingApproval(pending, "stale")?.request.requestId).toBe("a");
-    expect(approvalQueueTarget(pending, "a", -1)).toBe("c");
-    expect(approvalQueueTarget(pending, "c", 1)).toBe("a");
-    expect(approvalQueueTarget(pending, "b", "first")).toBe("a");
-    expect(approvalQueueTarget(pending, "b", "last")).toBe("c");
-  });
+    expect(selectedPendingApproval(pending, "b")?.request.requestId, "explicit selection").toBe("b");
+    expect(selectedPendingApproval(pending, "stale")?.request.requestId, "stale selection falls back to the queue head").toBe("a");
+    expect(approvalQueueTarget(pending, "a", -1), "queue wraps backwards").toBe("c");
+    expect(approvalQueueTarget(pending, "c", 1), "queue wraps forwards").toBe("a");
+    expect(approvalQueueTarget(pending, "b", "first"), "queue first target").toBe("a");
+    expect(approvalQueueTarget(pending, "b", "last"), "queue last target").toBe("c");
 
-  it("maps queue keyboard commands only when the dock itself owns focus", () => {
-    expect(approvalQueueKeyIntent({ key: "ArrowLeft" }, true)).toBe(-1);
-    expect(approvalQueueKeyIntent({ key: "ArrowRight" }, true)).toBe(1);
-    expect(approvalQueueKeyIntent({ key: "Home" }, true)).toBe("first");
-    expect(approvalQueueKeyIntent({ key: "End" }, true)).toBe("last");
-    expect(approvalQueueKeyIntent({ key: "ArrowRight" }, false)).toBeNull();
-    expect(approvalQueueKeyIntent({ key: "ArrowRight", metaKey: true }, true)).toBeNull();
-  });
+    expect(approvalQueueKeyIntent({ key: "ArrowLeft" }, true), "left arrow maps in focus").toBe(-1);
+    expect(approvalQueueKeyIntent({ key: "ArrowRight" }, true), "right arrow maps in focus").toBe(1);
+    expect(approvalQueueKeyIntent({ key: "Home" }, true), "home maps in focus").toBe("first");
+    expect(approvalQueueKeyIntent({ key: "End" }, true), "end maps in focus").toBe("last");
+    expect(approvalQueueKeyIntent({ key: "ArrowRight" }, false), "keys ignored outside dock focus").toBeNull();
+    expect(approvalQueueKeyIntent({ key: "ArrowRight", metaKey: true }, true), "modified keys ignored").toBeNull();
 
-  it("presents exact normalized actions and terminal receipts", () => {
-    expect(approvalActionPresentation({ kind: "command", command: "npm test", workingDirectory: "/workspace" })).toEqual({
+    expect(approvalActionPresentation({ kind: "command", command: "npm test", workingDirectory: "/workspace" }), "command presentation").toEqual({
       kind: "command",
       label: "Command",
       value: "npm test",
@@ -103,37 +95,34 @@ describe("desktop approval model", () => {
       action: "Apply patch",
       workingDirectory: "/workspace",
       affectedFiles: ["src/a.js"],
-    }).affectedFiles).toEqual(["src/a.js"]);
+    }).affectedFiles, "file change presentation keeps affected files").toEqual(["src/a.js"]);
 
     const always = receipt({ requestId: "always", resolution: { outcome: "approved", decision: "approve_always" } });
     const denied = receipt({ requestId: "denied", resolution: { outcome: "denied" } });
-    expect(approvalResolutionLabel(always)).toBe("Approved for this session");
-    expect(approvalResolutionLabel(denied)).toBe("Denied");
-    expect(resolvedApprovalHistoryForThread(state([denied, always]), { id: 10 })).toHaveLength(2);
-    expect(approvalDockMode([], resolvedApprovalHistoryForThread(state([always]), { id: 10 })))
-      .toBe("history");
-    expect(approvalDockMode([], [])).toBe("hidden");
-    expect(validApprovalDecision("approve_once")).toBe(true);
-    expect(validApprovalDecision("approve_always")).toBe(true);
-    expect(validApprovalDecision("deny")).toBe(true);
-    expect(validApprovalDecision("allow")).toBe(false);
-  });
+    expect(approvalResolutionLabel(always), "approve_always label").toBe("Approved for this session");
+    expect(approvalResolutionLabel(denied), "denied label").toBe("Denied");
+    expect(resolvedApprovalHistoryForThread(state([denied, always]), { id: 10 }), "resolved history for the thread").toHaveLength(2);
+    expect(approvalDockMode([], resolvedApprovalHistoryForThread(state([always]), { id: 10 })), "history dock with only resolved receipts").toBe("history");
+    expect(approvalDockMode([], []), "hidden dock without receipts").toBe("hidden");
+    expect(validApprovalDecision("approve_once"), "approve_once decision").toBe(true);
+    expect(validApprovalDecision("approve_always"), "approve_always decision").toBe(true);
+    expect(validApprovalDecision("deny"), "deny decision").toBe(true);
+    expect(validApprovalDecision("allow"), "unknown decision rejected").toBe(false);
 
-  it("reveals approval history on entry and thread changes without overriding a same-thread collapse", () => {
     expect(shouldRevealApprovalHistory({
       dockMode: "history", wasHidden: true, wasHistoryOnly: false, threadChanged: false,
-    })).toBe(true);
+    }), "reveal when the dock becomes history from hidden").toBe(true);
     expect(shouldRevealApprovalHistory({
       dockMode: "history", wasHidden: false, wasHistoryOnly: false, threadChanged: false,
-    })).toBe(true);
+    }), "reveal when pending receipts just resolved").toBe(true);
     expect(shouldRevealApprovalHistory({
       dockMode: "history", wasHidden: false, wasHistoryOnly: true, threadChanged: true,
-    })).toBe(true);
+    }), "reveal on thread change").toBe(true);
     expect(shouldRevealApprovalHistory({
       dockMode: "history", wasHidden: false, wasHistoryOnly: true, threadChanged: false,
-    })).toBe(false);
+    }), "same-thread collapse is not overridden").toBe(false);
     expect(shouldRevealApprovalHistory({
       dockMode: "pending", wasHidden: true, wasHistoryOnly: false, threadChanged: true,
-    })).toBe(false);
+    }), "pending dock never forces history reveal").toBe(false);
   });
 });

@@ -35,45 +35,36 @@ describe("developer recursion enable path", () => {
     }
   });
 
-  it("leaves every temporal feature off without the developer switch", () => {
-    expect(developerTemporalFeatures({})).toEqual({});
-    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "0" })).toEqual({});
-    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "true" })).toEqual({});
-  });
+  it("enables the whole persisted recursion chain only behind the developer switch and passes it to the graph server", async () => {
+    expect(developerTemporalFeatures({}), "no switch leaves every temporal feature off").toEqual({});
+    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "0" }), "explicit zero leaves features off").toEqual({});
+    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "true" }), "non-canonical truthy value leaves features off").toEqual({});
 
-  it("enables the whole persisted chain recursion depends on", () => {
-    expect(RECURSIVE_TEMPORAL_FEATURES).toEqual({
+    expect(RECURSIVE_TEMPORAL_FEATURES, "persisted chain recursion depends on").toEqual({
       schemaRead: true,
       rootCurrentWrite: true,
       projectionUi: true,
       invokeResolution: true,
       providerRecursion: true,
     });
-    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "1" }))
+    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "1" }), "developer switch returns the exact chain")
       .toBe(RECURSIVE_TEMPORAL_FEATURES);
-  });
 
-  it("passes the enabled chain to the graph server it starts", async () => {
-    const { service, spawned } = spawnedGraphArguments(
-      RECURSIVE_TEMPORAL_FEATURES,
-    );
-
-    await expect(service.start()).rejects.toThrow("startup is not exercised");
-
-    expect(spawned[0]).toEqual(expect.arrayContaining([
+    const enabled = spawnedGraphArguments(RECURSIVE_TEMPORAL_FEATURES);
+    await expect(enabled.service.start(), "enabled chain startup attempt").rejects.toThrow("startup is not exercised");
+    expect(enabled.spawned[0], "enabled chain forwarded to the graph server").toEqual(expect.arrayContaining([
       "--temporal-schema-read",
       "--temporal-root-current-write",
       "--temporal-projection-ui",
       "--temporal-invoke-resolution",
       "--temporal-provider-recursion",
     ]));
-  });
 
-  it("starts the graph server with no temporal switch by default", async () => {
-    const { service, spawned } = spawnedGraphArguments(developerTemporalFeatures({}));
-
-    await expect(service.start()).rejects.toThrow("startup is not exercised");
-
-    expect(spawned[0].filter((argument) => argument.startsWith("--temporal"))).toEqual([]);
+    const defaulted = spawnedGraphArguments(developerTemporalFeatures({}));
+    await expect(defaulted.service.start(), "default startup attempt").rejects.toThrow("startup is not exercised");
+    expect(
+      defaulted.spawned[0].filter((argument) => argument.startsWith("--temporal")),
+      "no temporal switch by default",
+    ).toEqual([]);
   });
 });

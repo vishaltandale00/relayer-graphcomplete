@@ -115,116 +115,108 @@ async function archiveEntrySha256(archivePath, targetPath) {
 }
 
 describe("issue 257 browser harness evidence", () => {
-  it("pins the exact independent configuration and implementation bytes", async () => {
+  it("pins the exact delivered bytes, package contracts, sanitized scope, and live reversible-action proof", async () => {
     const manifest = JSON.parse(await readFile(join(evidenceRoot, "manifest.json"), "utf8"));
-    expect(manifest.integratedSource.snapshotId).toMatch(/^issue-257-browser-harnesses-v\d+$/);
-    expect(Object.keys(manifest.integratedSource.fileSha256).sort())
+
+    expect(manifest.integratedSource.snapshotId, "snapshot identifier shape").toMatch(/^issue-257-browser-harnesses-v\d+$/);
+    expect(Object.keys(manifest.integratedSource.fileSha256).sort(), "digests cover exactly the listed files")
       .toEqual([...manifest.integratedSource.files].sort());
     expect(Object.values(manifest.integratedSource.fileSha256))
       .toEqual(expect.arrayContaining([expect.stringMatching(/^[a-f0-9]{64}$/)]));
-    expect(Object.values(manifest.integratedSource.fileSha256).every((value) => /^[a-f0-9]{64}$/.test(value)))
+    expect(Object.values(manifest.integratedSource.fileSha256).every((value) => /^[a-f0-9]{64}$/.test(value)), "every digest is a sha256 hex")
       .toBe(true);
-    expect(sourceSetSha256(manifest.integratedSource.fileSha256)).toBe(manifest.integratedSource.sha256);
+    expect(sourceSetSha256(manifest.integratedSource.fileSha256), "source set digest matches the manifest").toBe(manifest.integratedSource.sha256);
 
-    const { revision: sourceRevision } = await sourceSnapshot(manifest);
+    const { delivery, revision: sourceRevision } = await sourceSnapshot(manifest);
     const files = {
       ...manifest.harnesses.codex.configurationSha256,
       ...manifest.harnesses.claude.configurationSha256,
       ...manifest.harnesses.prime.configurationSha256,
     };
     await Promise.all(Object.entries(files).map(async ([name, expected]) => {
-      expect(createHash("sha256").update(await integratedHeadBytes(`harnesses/${name}`, sourceRevision)).digest("hex"), name)
+      expect(createHash("sha256").update(await integratedHeadBytes(`harnesses/${name}`, sourceRevision)).digest("hex"), `${name} configuration bytes`)
         .toBe(expected);
     }));
-    expect(createHash("sha256").update(await integratedHeadBytes("desktop/main/services/codex-browser-mcp-runtime.mjs", sourceRevision)).digest("hex"))
+    expect(createHash("sha256").update(await integratedHeadBytes("desktop/main/services/codex-browser-mcp-runtime.mjs", sourceRevision)).digest("hex"), "codex browser runtime source bytes")
       .toBe(manifest.harnesses.codex.browserRuntimeSourceSha256);
-    expect(createHash("sha256").update(await integratedHeadBytes("packages/harness-host/src/implementations/claude-basic-browser.ts", sourceRevision)).digest("hex"))
+    expect(createHash("sha256").update(await integratedHeadBytes("packages/harness-host/src/implementations/claude-basic-browser.ts", sourceRevision)).digest("hex"), "claude browser runtime source bytes")
       .toBe(manifest.harnesses.claude.browserRuntimeSourceSha256);
-    expect(manifest.assemblyMergeBase).toBe("0f8ce7653625884b4bec358fb33ecbb8abf7ab09");
-    expect(await changedSourceFiles(manifest.assemblyMergeBase, sourceRevision))
+    expect(manifest.assemblyMergeBase, "assembly merge base pinned").toBe("0f8ce7653625884b4bec358fb33ecbb8abf7ab09");
+    expect(await changedSourceFiles(manifest.assemblyMergeBase, sourceRevision), "changed source files match the manifest")
       .toEqual([...manifest.integratedSource.files].sort());
-    expect(await sourceFileSha256(manifest.integratedSource.files, sourceRevision))
+    expect(await sourceFileSha256(manifest.integratedSource.files, sourceRevision), "per-file source digests match")
       .toEqual(manifest.integratedSource.fileSha256);
-  });
 
-  it("matches the production Prime and Codex package contracts", async () => {
-    const manifest = JSON.parse(await readFile(join(evidenceRoot, "manifest.json"), "utf8"));
-    const { delivery } = await sourceSnapshot(manifest);
-    if (!delivery) return;
-    const {
-      PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
-      PRIME_AGENT_PACKAGE_SHA256,
-      PRIME_AGENT_PACKAGE_TREE_SHA256,
-      PRIME_AGENT_SOURCE_COMMIT,
-    } = await import("../desktop/main/services/prime-agent-runtime.mjs");
-    const desktopManifest = JSON.parse(await readFile(join(repositoryRoot, "desktop", "package.json"), "utf8"));
-    const primeManifest = JSON.parse(await readFile(join(repositoryRoot, "vendor", "prime-agent", "manifest.json"), "utf8"));
-    const codingAgent = primeManifest.packages.find(({ name }) => name === "@earendil-works/pi-coding-agent");
+    if (delivery) {
+      const {
+        PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
+        PRIME_AGENT_PACKAGE_SHA256,
+        PRIME_AGENT_PACKAGE_TREE_SHA256,
+        PRIME_AGENT_SOURCE_COMMIT,
+      } = await import("../desktop/main/services/prime-agent-runtime.mjs");
+      const desktopManifest = JSON.parse(await readFile(join(repositoryRoot, "desktop", "package.json"), "utf8"));
+      const primeManifest = JSON.parse(await readFile(join(repositoryRoot, "vendor", "prime-agent", "manifest.json"), "utf8"));
+      const codingAgent = primeManifest.packages.find(({ name }) => name === "@earendil-works/pi-coding-agent");
 
-    expect(desktopManifest.dependencies[manifest.harnesses.codex.helper.package])
-      .toBe(manifest.harnesses.codex.helper.version);
-    expect(manifest.harnesses.prime).toMatchObject({
-      sourceCommit: PRIME_AGENT_SOURCE_COMMIT,
-      archiveSha256: PRIME_AGENT_PACKAGE_SHA256["@earendil-works/pi-coding-agent"],
-      runtimeTreeSha256: PRIME_AGENT_PACKAGE_TREE_SHA256["@earendil-works/pi-coding-agent"],
-      targetClosureSha256: PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
-    });
-    expect(codingAgent).toMatchObject({
-      sha256: manifest.harnesses.prime.archiveSha256,
-      treeSha256: manifest.harnesses.prime.runtimeTreeSha256,
-    });
-    const archivePath = join(repositoryRoot, "vendor", "prime-agent", codingAgent.file);
-    await expect(Promise.all([
-      archiveEntrySha256(archivePath, "package/skills/browser/src/browser/__init__.py"),
-      archiveEntrySha256(archivePath, "package/dist/skills/browser/src/browser/__init__.py"),
-    ])).resolves.toEqual([
-      manifest.harnesses.prime.browserHelperSha256,
-      manifest.harnesses.prime.browserHelperSha256,
-    ]);
-  });
+      expect(desktopManifest.dependencies[manifest.harnesses.codex.helper.package], "codex helper pinned in the desktop manifest")
+        .toBe(manifest.harnesses.codex.helper.version);
+      expect(manifest.harnesses.prime, "Prime package contract matches production constants").toMatchObject({
+        sourceCommit: PRIME_AGENT_SOURCE_COMMIT,
+        archiveSha256: PRIME_AGENT_PACKAGE_SHA256["@earendil-works/pi-coding-agent"],
+        runtimeTreeSha256: PRIME_AGENT_PACKAGE_TREE_SHA256["@earendil-works/pi-coding-agent"],
+        targetClosureSha256: PRIME_AGENT_PACKAGED_DEPENDENCY_CLOSURE_SHA256_BY_TARGET,
+      });
+      expect(codingAgent, "vendored Prime coding agent manifest matches").toMatchObject({
+        sha256: manifest.harnesses.prime.archiveSha256,
+        treeSha256: manifest.harnesses.prime.runtimeTreeSha256,
+      });
+      const archivePath = join(repositoryRoot, "vendor", "prime-agent", codingAgent.file);
+      await expect(Promise.all([
+        archiveEntrySha256(archivePath, "package/skills/browser/src/browser/__init__.py"),
+        archiveEntrySha256(archivePath, "package/dist/skills/browser/src/browser/__init__.py"),
+      ]), "Prime browser helper bytes pinned in both archive locations").resolves.toEqual([
+        manifest.harnesses.prime.browserHelperSha256,
+        manifest.harnesses.prime.browserHelperSha256,
+      ]);
+    }
 
-  it("records a sanitized harness-owned scope instead of a product browser contract", async () => {
-    const manifest = JSON.parse(await readFile(join(evidenceRoot, "manifest.json"), "utf8"));
-    expect(Object.values(manifest.privacy)).toEqual(expect.arrayContaining([false]));
-    expect(Object.values(manifest.privacy).every((value) => value === false)).toBe(true);
-    expect(Object.values(manifest.scope).every((value) => value === false)).toBe(true);
-    expect(manifest.profileKind).toBe("dedicated-non-default");
-    expect(manifest.endpointKind).toBe("explicit-loopback-cdp");
-  });
+    expect(Object.values(manifest.privacy), "privacy records contain explicit false entries").toEqual(expect.arrayContaining([false]));
+    expect(Object.values(manifest.privacy).every((value) => value === false), "sanitized harness-owned privacy scope").toBe(true);
+    expect(Object.values(manifest.scope).every((value) => value === false), "no product browser scope claimed").toBe(true);
+    expect(manifest.profileKind, "dedicated non-default profile").toBe("dedicated-non-default");
+    expect(manifest.endpointKind, "explicit loopback CDP endpoint").toBe("explicit-loopback-cdp");
 
-  it("records live observation and a restored reversible action for every delivered harness", async () => {
-    const manifest = JSON.parse(await readFile(join(evidenceRoot, "manifest.json"), "utf8"));
     for (const [name, harness] of Object.entries(manifest.harnesses)) {
-      expect(harness.predecessorLiveProof.preseededMarkerObserved, name).toBe(true);
-      expect(harness.predecessorLiveProof.reversibleActionRestored, name).toBe(true);
+      expect(harness.predecessorLiveProof.preseededMarkerObserved, `${name} live preseeded marker observed`).toBe(true);
+      expect(harness.predecessorLiveProof.reversibleActionRestored, `${name} reversible action restored`).toBe(true);
     }
     const claudeProof = manifest.harnesses.claude.reversibleActionProof;
-    expect(claudeProof).toMatchObject({
+    expect(claudeProof, "Claude reversible action proof pinned").toMatchObject({
       commentUrl: "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5453178329",
       commentBodyPlusLfSha256: "fbf74feacc426a979025b60963008722e9408c245dd1056ddedd4deaa68eaeda",
       receiptPath: "docs/evidence/issue-257-browser-harnesses/claude-live-reversible-action.md",
     });
     const receiptBody = await readFile(join(repositoryRoot, claudeProof.receiptPath), "utf8");
-    expect(createHash("sha256").update(receiptBody).update("\n").digest("hex"))
+    expect(createHash("sha256").update(receiptBody).update("\n").digest("hex"), "receipt body hashes to the pinned comment digest")
       .toBe(claudeProof.commentBodyPlusLfSha256);
     const receiptMatch = receiptBody.match(/```json\n(?<json>[\s\S]+?)\n```/);
-    expect(receiptMatch?.groups?.json).toBeDefined();
+    expect(receiptMatch?.groups?.json, "receipt JSON block present").toBeDefined();
     const receipt = JSON.parse(receiptMatch.groups.json);
-    expect(receipt).toMatchObject({
+    expect(receipt, "receipt records the full reversible-action lifecycle").toMatchObject({
       preseededMarkerObserved: true,
       sdkMcpHandlerInvoked: true,
       reversibleActionObserved: true,
       reversibleActionRestored: true,
       chromeAliveAfterCleanup: true,
     });
-    expect(receipt.initialValueSha256).toBe(receipt.restoredValueSha256);
-    expect(receipt.changedValueSha256).not.toBe(receipt.initialValueSha256);
-    expect(manifest.harnesses.claude.predecessorLiveProof).toMatchObject({
+    expect(receipt.initialValueSha256, "restored value matches the initial value").toBe(receipt.restoredValueSha256);
+    expect(receipt.changedValueSha256, "changed value differs from the initial value").not.toBe(receipt.initialValueSha256);
+    expect(manifest.harnesses.claude.predecessorLiveProof, "manifest proof mirrors the receipt").toMatchObject({
       preseededMarkerObserved: receipt.preseededMarkerObserved,
       sdkMcpHandlerInvoked: receipt.sdkMcpHandlerInvoked,
       reversibleActionObserved: receipt.reversibleActionObserved,
       reversibleActionRestored: receipt.reversibleActionRestored,
       chromeAliveAfterCleanup: receipt.chromeAliveAfterCleanup,
     });
-  });
+  }, 30_000);
 });

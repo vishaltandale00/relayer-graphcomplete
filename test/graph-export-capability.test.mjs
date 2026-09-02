@@ -43,32 +43,30 @@ afterEach(() => {
 });
 
 describe("graph adapter conversation export capability", () => {
-  it("injects the ordinary Desktop preload export capability into the rendered workspace", async () => {
+  it("injects the Desktop preload export only into the interactive workspace, never into Eval review", async () => {
     const exportConversation = vi.fn(async (threadId) => ({ status: "saved", threadId }));
-    const { workspace, workspaceOptions } = await loadGraphAdapter({
+    const interactive = await loadGraphAdapter({
       relayerDesktop: { conversation: { export: exportConversation } },
       relayerEvalReview: undefined,
       review: false,
     });
 
-    expect(workspace.render).toHaveBeenCalledOnce();
-    expect(workspaceOptions.mode).toBe("interactive");
-    await expect(workspaceOptions.onExportConversation(42)).resolves.toEqual({
+    expect(interactive.workspace.render, "interactive render").toHaveBeenCalledOnce();
+    expect(interactive.workspaceOptions.mode, "interactive mode").toBe("interactive");
+    await expect(interactive.workspaceOptions.onExportConversation(42), "export passthrough").resolves.toEqual({
       status: "saved",
       threadId: 42,
     });
-    expect(exportConversation).toHaveBeenCalledWith(42);
-  });
+    expect(exportConversation, "preload export invocation").toHaveBeenCalledWith(42);
 
-  it("renders Eval review without a Desktop preload or an export capability", async () => {
-    const { workspace, workspaceOptions } = await loadGraphAdapter({
+    const review = await loadGraphAdapter({
       relayerDesktop: undefined,
       relayerEvalReview: { context: vi.fn() },
       review: true,
     });
 
-    expect(workspace.render).toHaveBeenCalledOnce();
-    expect(workspaceOptions.mode).toBe("review");
-    expect(workspaceOptions.onExportConversation).toBeNull();
+    expect(review.workspace.render, "review render").toHaveBeenCalledOnce();
+    expect(review.workspaceOptions.mode, "review mode").toBe("review");
+    expect(review.workspaceOptions.onExportConversation, "no export capability in review").toBeNull();
   });
 });

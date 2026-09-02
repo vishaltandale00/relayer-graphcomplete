@@ -76,7 +76,7 @@ describe("desktop approval state integration", () => {
     vi.restoreAllMocks();
   });
 
-  it("loads approval receipts and posts the exact decision route and body", async () => {
+  it("posts one exact decision per receipt and settles state only for the thread that decided", async () => {
     const pending = approvalReceipt();
     const initial = productState({ approval: pending });
     const resolved = productState({
@@ -96,92 +96,85 @@ describe("desktop approval state integration", () => {
     });
     const controller = await loadModules();
     await controller.refreshState(10);
-    expect(controller.appState.approvals).toEqual([pending]);
+    expect(controller.appState.approvals, "receipts loaded from state").toEqual([pending]);
 
     await controller.decideApproval("request-1", "approve_once");
 
-    expect(requestImplementation).toHaveBeenCalledWith(
+    expect(requestImplementation, "exact decision route and body").toHaveBeenCalledWith(
       "/api/threads/10/interactions/20/approvals/request-1/decision",
       { method: "POST", body: JSON.stringify({ decision: "approve_once" }) },
     );
-    expect(controller.appState.approvals[0].resolution?.outcome).toBe("approved");
-    expect(controller.appState.pendingApprovalDecisions).toEqual([]);
-  });
+    expect(controller.appState.approvals[0].resolution?.outcome, "resolution applied to state").toBe("approved");
+    expect(controller.appState.pendingApprovalDecisions, "decision in-flight set cleared").toEqual([]);
 
-  it("prevents duplicate decisions while the first request is in flight", async () => {
     const post = deferred();
-    const pending = approvalReceipt();
+    const guardedPending = approvalReceipt();
     requestImplementation = vi.fn(async (path) => {
       if (path.endsWith("/decision")) return post.promise;
       if (path.startsWith("/api/state?threadId=10")) return productState({ completionStatus: "running" });
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
-    Object.assign(controller.appState, productState({ approval: pending }));
-    controller.viewState.currentThreadId = 10;
+    const guardedController = await loadModules();
+    Object.assign(guardedController.appState, productState({ approval: guardedPending }));
+    guardedController.viewState.currentThreadId = 10;
 
-    const first = controller.decideApproval("request-1", "deny");
-    await vi.waitFor(() => expect(controller.appState.pendingApprovalDecisions).toEqual(["request-1"]));
-    await controller.decideApproval("request-1", "deny");
-    expect(requestImplementation.mock.calls.filter(([path]) => path.endsWith("/decision"))).toHaveLength(1);
-    post.resolve({ approval: pending });
-    await first;
-  });
+    const firstDecision = guardedController.decideApproval("request-1", "deny");
+    await vi.waitFor(() => expect(guardedController.appState.pendingApprovalDecisions, "in-flight decision tracked").toEqual(["request-1"]));
+    await guardedController.decideApproval("request-1", "deny");
+    expect(
+      requestImplementation.mock.calls.filter(([path]) => path.endsWith("/decision")),
+      "duplicate decision suppressed while the first is in flight",
+    ).toHaveLength(1);
+    post.resolve({ approval: guardedPending });
+    await firstDecision;
 
-  it("posts one approval decision even when its presentation cannot redraw", async () => {
-    const pending = approvalReceipt();
-    const resolved = productState({
-      approval: approvalReceipt({ resolution: { outcome: "approved", decision: "approve_once", resolvedAt: "2026-08-20T12:01:00Z" } }),
-      completionStatus: "running",
-    });
+    const redrawPending = approvalReceipt();
     requestImplementation = vi.fn(async (path) => {
       if (path.endsWith("/decision")) return { approval: resolved.approvals[0] };
       if (path.startsWith("/api/state?threadId=10")) return resolved;
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
-    Object.assign(controller.appState, productState({ approval: pending }));
-    controller.viewState.currentThreadId = 10;
+    const redrawController = await loadModules();
+    Object.assign(redrawController.appState, productState({ approval: redrawPending }));
+    redrawController.viewState.currentThreadId = 10;
     renderFailure = new Error("The vendored Lucide renderer must load before Relayer icons are created.");
 
-    await expect(controller.decideApproval("request-1", "approve_once")).resolves.toBeUndefined();
+    await expect(redrawController.decideApproval("request-1", "approve_once"), "decision settles even when presentation cannot redraw").resolves.toBeUndefined();
+    expect(requestImplementation.mock.calls.filter(([path]) => path.endsWith("/decision")), "decision posted exactly once despite redraw failure").toHaveLength(1);
+    expect(redrawController.appState.approvals[0].resolution?.outcome, "resolution applied despite redraw failure").toBe("approved");
+    expect(redrawController.appState.pendingApprovalDecisions, "in-flight set cleared despite redraw failure").toEqual([]);
 
-    expect(requestImplementation.mock.calls.filter(([path]) => path.endsWith("/decision"))).toHaveLength(1);
-    expect(controller.appState.approvals[0].resolution?.outcome).toBe("approved");
-    expect(controller.appState.pendingApprovalDecisions).toEqual([]);
-  });
-
-  it("does not refresh or mutate a newly selected thread after a stale decision resolves", async () => {
-    const post = deferred();
-    const pending = approvalReceipt();
+    const stalePost = deferred();
+    const stalePending = approvalReceipt();
     requestImplementation = vi.fn(async (path) => {
-      if (path.endsWith("/decision")) return post.promise;
+      if (path.endsWith("/decision")) return stalePost.promise;
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
-    Object.assign(controller.appState, productState({ approval: pending }));
-    controller.appState.threads.push({ id: 11, title: "Other thread" });
-    controller.viewState.currentThreadId = 10;
+    const staleController = await loadModules();
+    Object.assign(staleController.appState, productState({ approval: stalePending }));
+    staleController.appState.threads.push({ id: 11, title: "Other thread" });
+    staleController.viewState.currentThreadId = 10;
 
-    const decision = controller.decideApproval("request-1", "approve_always");
-    controller.viewState.currentThreadId = 11;
-    post.resolve({ approval: pending });
-    await decision;
+    const staleDecision = staleController.decideApproval("request-1", "approve_always");
+    staleController.viewState.currentThreadId = 11;
+    stalePost.resolve({ approval: stalePending });
+    await staleDecision;
 
-    expect(requestImplementation.mock.calls.filter(([path]) => path.startsWith("/api/state"))).toEqual([]);
-    expect(controller.viewState.currentThreadId).toBe(11);
-  });
+    expect(
+      requestImplementation.mock.calls.filter(([path]) => path.startsWith("/api/state")),
+      "no state refresh after a stale decision resolves",
+    ).toEqual([]);
+    expect(staleController.viewState.currentThreadId, "newly selected thread untouched by the stale decision").toBe(11);
 
-  it("fails closed before the API call when a request is stale or the decision is unknown", async () => {
     requestImplementation = vi.fn();
-    const controller = await loadModules();
-    Object.assign(controller.appState, productState({ approval: approvalReceipt(), completionStatus: "running" }));
-    controller.viewState.currentThreadId = 10;
+    const closedController = await loadModules();
+    Object.assign(closedController.appState, productState({ approval: approvalReceipt(), completionStatus: "running" }));
+    closedController.viewState.currentThreadId = 10;
 
-    await expect(controller.decideApproval("request-1", "approve_once"))
+    await expect(closedController.decideApproval("request-1", "approve_once"), "stale receipt fails closed")
       .rejects.toMatchObject({ code: "approval_not_actionable" });
-    await expect(controller.decideApproval("request-1", "allow"))
+    await expect(closedController.decideApproval("request-1", "allow"), "unknown decision fails closed")
       .rejects.toThrow("Unsupported approval decision");
-    expect(requestImplementation).not.toHaveBeenCalled();
+    expect(requestImplementation, "fail-closed checks never reach the API").not.toHaveBeenCalled();
   });
 });
