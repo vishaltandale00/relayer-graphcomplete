@@ -16,7 +16,8 @@ use relayer_graph_core::{
     },
 };
 use relayer_graph_server::search_index::{
-    GraphQueryFailure, LadybugSearchIndex, QueryCancellation, SearchTargetReadiness,
+    GraphQueryFailure, GraphQueryResult, LadybugSearchIndex, QueryCancellation,
+    SearchTargetReadiness,
     contract_test_support::{
         endpoint_scan_count, index_from_supergraph, normalization_error, reset_endpoint_scan_count,
     },
@@ -93,34 +94,41 @@ async fn frozen_positive_cases_reproduce_the_contract_results() {
     let (_directory, index) = contract_index();
 
     let positive = fixture("positive.json");
-    let (mut matched, mut mismatched) = (Vec::new(), Vec::new());
+    let (mut matched, mut mismatched, mut overran, mut retried) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
 
     for case in positive["cases"].as_array().expect("cases") {
         let id = case["id"].as_str().expect("id").to_owned();
-        let request = request_for(case);
+        let request = request_json(&request_for(case));
         let authorized = target_of(&case["target"]);
         let permit = QueryReadPermit::for_contract_test(authorized);
         let expected = case["expectedResult"].clone();
-        let outcome = index
-            .query(
-                &permit,
-                &request_json(&request),
-                QueryCancellation::default(),
-            )
-            .await
-            .map(|result| result.outcome);
-        match outcome {
+        let (outcome, retried_once) = query_within_wall_budget(&index, &permit, &request).await;
+        if retried_once {
+            retried.push(id.clone());
+        }
+        match outcome.map(|result| result.outcome) {
             Ok(outcome) if outcome.to_json() == expected => matched.push(id),
             Ok(outcome) => mismatched.push((id, outcome.to_json(), expected)),
+            Err(GraphQueryFailure::Contract(error))
+                if error.code == QueryCode::WallTimeExceeded =>
+            {
+                overran.push((id, error))
+            }
             Err(error) => mismatched.push((id, json!({"error": format!("{error:?}")}), expected)),
         }
     }
 
     eprintln!(
-        "v1 conformance: {} matched, {} mismatched",
+        "v1 conformance: {} matched, {} mismatched, {} overran, {} retried once {retried:?}",
         matched.len(),
-        mismatched.len()
+        mismatched.len(),
+        overran.len(),
+        retried.len()
     );
+    for (id, error) in &overran {
+        eprintln!("  {id}\n    overran  {error:?}");
+    }
     for (id, actual, expected) in &mismatched {
         eprintln!(
             "  {id}\n    expected {}\n    actual   {}",
@@ -128,13 +136,56 @@ async fn frozen_positive_cases_reproduce_the_contract_results() {
             serde_json::to_string(actual).unwrap_or_default()
         );
     }
-    // Every frozen positive case reproduces the contract's exact result.
+    // Every frozen positive case reproduces the contract's exact result. A
+    // semantic mismatch is asserted first so it can never hide behind a
+    // contention message.
     assert_eq!(
         mismatched.len(),
         0,
         "a case the slice admits no longer reproduces the contract"
     );
+    // A wall-time overrun says nothing about the result bytes, so it is
+    // reported as what it is instead of as a semantic mismatch. The budget
+    // itself is proven by the deadline tests below and by the negative corpus;
+    // the error text is printed above so a spurious engine interrupt that
+    // maps to the same code stays visible.
+    assert!(
+        overran.is_empty(),
+        "wall-time budget exceeded twice for {:?}: runner contention, not query semantics",
+        overran.iter().map(|(id, _)| id).collect::<Vec<_>>()
+    );
     assert_eq!(matched.len(), 20, "matched: {matched:?}");
+}
+
+/// Runs one frozen case, retrying once when the only failure is the 250 ms
+/// product wall-time budget, and reports whether the retry happened. The
+/// corpus runs its queries back to back while sibling tests share the
+/// four-vCPU CI runner, and the two-hop traversal cases sit close enough to
+/// that budget that a scheduling stall tips them over. One retry clears a
+/// transient stall; a query that needs more than the budget on a quiet worker
+/// still fails on the second attempt. The second attempt queues behind the
+/// interrupted first job on the store's single worker, so it sees slightly
+/// less than the full budget: that biases toward a reported overrun, never
+/// toward a false pass.
+async fn query_within_wall_budget(
+    index: &LadybugSearchIndex,
+    permit: &QueryReadPermit,
+    request: &[u8],
+) -> (Result<GraphQueryResult, GraphQueryFailure>, bool) {
+    let first = index
+        .query(permit, request, QueryCancellation::default())
+        .await;
+    match first {
+        Err(GraphQueryFailure::Contract(ref error))
+            if error.code == QueryCode::WallTimeExceeded =>
+        {
+            let second = index
+                .query(permit, request, QueryCancellation::default())
+                .await;
+            (second, true)
+        }
+        other => (other, false),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -206,14 +257,12 @@ async fn frozen_issue_354_hardening_corpus_conforms_through_real_ladybug() {
     let permit = QueryReadPermit::for_contract_test(target);
 
     for case in corpus["positiveCases"].as_array().expect("positiveCases") {
-        let outcome = index
-            .query(
-                &permit,
-                &request_json(&request_for(case)),
-                QueryCancellation::default(),
-            )
-            .await
-            .unwrap_or_else(|error| panic!("{}: {error:?}", case["id"]));
+        let (outcome, retried_once) =
+            query_within_wall_budget(&index, &permit, &request_json(&request_for(case))).await;
+        if retried_once {
+            eprintln!("{}: retried once", case["id"]);
+        }
+        let outcome = outcome.unwrap_or_else(|error| panic!("{}: {error:?}", case["id"]));
         assert_eq!(
             outcome.outcome.to_json(),
             case["expectedResult"],

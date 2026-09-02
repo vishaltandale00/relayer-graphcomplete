@@ -121,7 +121,10 @@ acceleration, never evidence.
 Vitest worker policy lives in `vitest.config.js`, not in the chapter
 runner: the isolated project runs with file-level workers and the
 process-bound files run one at a time after it. The chapter must not pin
-`--maxWorkers`, and a deterministic test enforces that. Sharding the
+`--maxWorkers`, and a deterministic test enforces that. The same file sets
+the portfolio-wide 15 s per-test timeout: tests that spawn the Rust runtime
+or a harness host regularly exceed Vitest's 5 s default once three workers
+share the 4-vCPU runner, and a test that needs longer still sets its own. Sharding the
 portfolio across two runners was measured against this arrangement and lost
 — a single parallel runner finished the full portfolio in 1.9 minutes
 against 2.7 for a two-runner serial split, at half the runner cost — so the

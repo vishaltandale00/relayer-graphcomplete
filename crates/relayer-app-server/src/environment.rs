@@ -5339,9 +5339,28 @@ mod tests {
                 command.env("RELAYER_ESCAPE_MARKER", &marker);
             },
         );
-        assert!(matches!(result, Ok(_) | Err(GitRunError::OutputTooLarge)));
-        assert!(started.elapsed() < Duration::from_secs(1));
-        for _ in 0..100 {
+        // Reaching `OutputTooLarge` needs sixty-four 4 KiB writes from the
+        // escaped child inside the 500 ms bound. `Timeout` means the fixture
+        // leader was not reaped within that bound, which on a contended runner
+        // happens when `sh` and `perl` start slowly; the leader exits right
+        // after its fork, so write speed decides `Ok` against `OutputTooLarge`
+        // and never `Timeout`. Either way the parent bounded the run and moved
+        // on, which is the contract here.
+        // The marker check below is what proves the descendant lost its
+        // writable capture storage.
+        assert!(matches!(
+            result,
+            Ok(_) | Err(GitRunError::OutputTooLarge) | Err(GitRunError::Timeout(_))
+        ));
+        // Hang guard: the escaped writer never closes its pipe, so a parent
+        // that waited on it would never return. The guard proves the parent
+        // moved on and does not need to be tight to do so; the `Timeout` path
+        // alone spends the 500 ms bound plus reader and cleanup time.
+        assert!(started.elapsed() < Duration::from_secs(5));
+        // The escaped writer is a starved child on a busy machine; give it
+        // generous time to observe its closed pipe. The loop returns as soon
+        // as the marker appears, so a passing run never waits this long.
+        for _ in 0..1000 {
             if marker.exists() {
                 break;
             }
@@ -5349,7 +5368,7 @@ mod tests {
         }
         assert!(
             marker.exists(),
-            "escaped writer never observed its closed pipe"
+            "escaped writer never observed its closed pipe (or the fixture never reached its fork before the bound)"
         );
     }
 
