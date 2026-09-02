@@ -17,6 +17,20 @@ function centered(node) {
   return new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]);
 }
 
+function visualNodeDetailsRequested(context) {
+  return context.personalPresentation?.graph.layers.some(({ nodes }) => (
+    nodes.some(({ title }) => title === "Authored visual Node Details")
+  )) === true;
+}
+
+function authorVisualNodeDetail(node, componentId, markup) {
+  node.detailAuthoring.setComponent(
+    componentId,
+    markup,
+    css`section { display: grid; gap: 0.5rem; } h2, p { margin: 0; }`,
+  );
+}
+
 /** Production-seam fixture shared by recursive runtime and Eval Desktop integration tests. */
 export function recursiveCompleteFixtureFactory(
   observed,
@@ -48,6 +62,13 @@ async function runRecursiveFixture(context, signal, observed, brokerUrl) {
   if (context.inputGraph.detail === RECURSIVE_FIXTURE_CHILD_TASK) {
     const current = await graph.getCurrent();
     const finding = new NodeObject("info", "Delegated finding", "The child did its own half.", "concept", "finding");
+    if (visualNodeDetailsRequested(context)) {
+      authorVisualNodeDetail(
+        finding,
+        "delegated-finding",
+        html`<section><h2>Delegated finding</h2><p>The child did its own half.</p></section>`,
+      );
+    }
     await graph.submitNode(finding);
     const layer = new LayerObject([finding], [], centered(finding), "child-layer");
     await graph.submitLayer(layer);
@@ -67,14 +88,11 @@ async function runRecursiveFixture(context, signal, observed, brokerUrl) {
   const current = await graph.getCurrent();
   observed.parentStartRevision = current.headRevision;
   const plan = new NodeObject("box", "Plan", "Split the work in half.", "concept", "plan");
-  const visualNodeDetailsRequested = context.personalPresentation?.graph.layers.some(({ nodes }) => (
-    nodes.some(({ title }) => title === "Authored visual Node Details")
-  )) === true;
-  if (visualNodeDetailsRequested) {
-    plan.detailAuthoring.setComponent(
+  if (visualNodeDetailsRequested(context)) {
+    authorVisualNodeDetail(
+      plan,
       "plan-summary",
       html`<section><h2>Plan</h2><p>Split the work in half.</p></section>`,
-      css`section { display: grid; gap: 0.5rem; } h2, p { margin: 0; }`,
     );
   }
   await graph.submitNode(plan);

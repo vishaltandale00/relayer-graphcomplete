@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
+  AUTHORED_VISUAL_NODE_DETAILS_PREFERENCE,
   H3_PACKAGE_MANAGER,
   H3_AUTONOMOUS_FIX_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
@@ -21,9 +22,11 @@ import {
   graphMemorySearchQuery,
   taskSystemFixtureFactory,
 } from "@relayer/eval-runner";
+import { css, html, NodeObject } from "@relayer/graph-client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  acceptedTopologyNodes,
   EvalService,
   evalCases,
   resolveEvalCasePrompts,
@@ -40,6 +43,8 @@ import {
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { recursiveCompleteFixtureFactory } from "./support/recursive-complete-fixture.mjs";
 import { lantern2x2FixtureFactory } from "./support/lantern-2x2-fixture.mjs";
+import { renderPersonalPresentationGuidance } from "../packages/harness-host/src/implementations/personal-presentation-guidance.ts";
+import { buildAcceptedReviewTopology } from "../desktop/eval-main/simulated-user-judge.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const services = [];
@@ -177,21 +182,123 @@ describe("Relayer Eval application service", () => {
     expect(checks.filter((check) => !check.passed)).toEqual([]);
   });
 
-  it("requires authored visual output only from the V3 treatment", () => {
+  it("requires authored visual output on every V3 treatment node", () => {
     const plainOutput = { rootLayer: { nodes: [{ title: "Plain" }] } };
-    const visualOutput = { rootLayer: { nodes: [{ title: "Visual", authoredDetail: {
-      version: 1,
-      components: [{ id: "main", html: "<p>Visual</p>", css: "p {}" }],
-      mounts: [],
-      assets: [],
-      integritySha256: "a".repeat(64),
-    } }] } };
+    const compiledNode = new NodeObject("layout-template", "Visual", "Fallback", "concept", "visual-check");
+    compiledNode.detailAuthoring.setComponent(
+      "main",
+      html`<section><p>Visual</p></section>`,
+      css`section { display: grid; } p { margin: 0; }`,
+    );
+    const compiledDetail = compiledNode.detailAuthoring.checkpoint();
+    const visualOutput = { rootLayer: { nodes: [
+      { title: "First visual", authoredDetail: compiledDetail },
+      { title: "Second visual", authoredDetail: compiledDetail },
+    ] } };
+    const partialVisualOutput = { rootLayer: { nodes: [
+      { title: "Visual", authoredDetail: compiledDetail },
+      { title: "Plain" },
+    ] } };
     const malformedOutput = { rootLayer: { nodes: [{ title: "Malformed", authoredDetail: { version: 1 } }] } };
     expect(visualNodeDetailCheck(plainOutput, "personal-presentation-v2").passed).toBe(true);
     expect(visualNodeDetailCheck(visualOutput, "personal-presentation-v2").passed).toBe(false);
     expect(visualNodeDetailCheck(plainOutput, "personal-presentation-v3").passed).toBe(false);
+    expect(visualNodeDetailCheck(partialVisualOutput, "personal-presentation-v3").passed).toBe(false);
     expect(visualNodeDetailCheck(malformedOutput, "personal-presentation-v3").passed).toBe(false);
     expect(visualNodeDetailCheck(visualOutput, "personal-presentation-v3").passed).toBe(true);
+    const acceptedClosure = acceptedTopologyNodes({ layers: [
+      { nodes: [{ id: 1, title: "Root", authoredDetail: compiledDetail }] },
+      { nodes: [{ id: 2, title: "Nested" }] },
+      { nodes: [{ id: 1, title: "Root", authoredDetail: compiledDetail }] },
+    ] });
+    expect(acceptedClosure).toHaveLength(2);
+    expect(visualNodeDetailCheck(
+      { rootLayer: { nodes: acceptedClosure } },
+      "personal-presentation-v3",
+    ).passed).toBe(false);
+  });
+
+  it("preserves authored details through accepted descendant loading", async () => {
+    const compiledNode = new NodeObject("layout-template", "Root", "Fallback", "concept", "root-visual");
+    compiledNode.detailAuthoring.setComponent("main", html`<p>Root visual</p>`, css`p { margin: 0; }`);
+    const authoredDetail = compiledNode.detailAuthoring.checkpoint();
+    const layers = new Map([
+      ["10", {
+        layer: { id: 10, nodes: [1], edges: [], state: "accepted" },
+        nodes: [{ id: 1, title: "Root", detail: "Fallback", authoredDetail, state: "accepted" }],
+        edges: [],
+        actions: [{ id: 11, sourceNodeId: 1, kind: "navigate", relation: "expand", targetLayerId: 20, state: "accepted" }],
+      }],
+      ["20", {
+        layer: { id: 20, nodes: [2], edges: [], state: "accepted" },
+        nodes: [{ id: 2, title: "Plain descendant", detail: "Plain", state: "accepted" }],
+        edges: [],
+        actions: [],
+      }],
+    ]);
+    const topology = await buildAcceptedReviewTopology({
+      turnId: 1,
+      rootLayerId: 10,
+      loadLayer: async (layerId) => layers.get(String(layerId)),
+    });
+    const nodes = acceptedTopologyNodes(topology);
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0].authoredDetail).toEqual(authoredDetail);
+    expect(visualNodeDetailCheck(
+      { rootLayer: { nodes } },
+      "personal-presentation-v3",
+    ).passed).toBe(false);
+  });
+
+  it("fails a plain semantic child under V3", () => {
+    const checks = recursiveCompleteChecks({
+      harnessConfiguration: {
+        implementation: "fixture.task-system",
+        complete: { agentAuthored: true },
+        settings: { personalPresentationVersion: "personal-presentation-v3" },
+      },
+      harnessConfigurationDigest: "sha256:config",
+      turns: [{ candidateTrace: { completionBrokerAvailable: true } }],
+      semanticChildren: [{
+        sourceInteractionId: 1,
+        sourceActionId: 2,
+        interactionId: 3,
+        graphNodeId: 4,
+        acceptedNodes: [{ id: 5, title: "Plain child", detail: "Plain" }],
+        projectionObservations: [],
+      }],
+    });
+    expect(checks.find(({ name }) => (
+      name === "agent-authored-complete:child-3:visual-node-detail:authored-output"
+    ))?.passed).toBe(false);
+  });
+
+  it("renders the complete V3 Node Detail recipe without losing executable guidance", () => {
+    const rendered = renderPersonalPresentationGuidance({
+      attachment: { interactionNodeId: 1, versionInteractionNodeId: 3, rootLayerId: 4 },
+      graph: {
+        nodeId: 3,
+        rootLayerId: 4,
+        rootAction: { id: 5, sourceNodeId: 3, kind: "navigate", relation: "expand", label: "Profile", targetLayerId: 4, state: "accepted" },
+        layers: [{
+          layer: { id: 4, nodes: [6], edges: [], state: "accepted" },
+          nodes: [{
+            id: 6,
+            kind: "presentation-preference",
+            icon: "layout-template",
+            title: "Authored visual Node Details",
+            detail: AUTHORED_VISUAL_NODE_DETAILS_PREFERENCE,
+            state: "accepted",
+          }],
+          edges: [],
+          actions: [],
+        }],
+      },
+    });
+    expect(rendered).toContain(AUTHORED_VISUAL_NODE_DETAILS_PREFERENCE);
+    for (const fragment of ["html", "css", "detailCapability", "setComponent", "checkpointNodeDetail", "submitNode", "graph.addAction"]) {
+      expect(rendered).toContain(fragment);
+    }
   });
 
   it("rejects discontinuous child projections and duplicate trace scope markers", async () => {

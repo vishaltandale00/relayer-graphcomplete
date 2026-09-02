@@ -1965,7 +1965,7 @@ const PERSONAL_PRESENTATION_V3_NODES: &[PersonalPresentationNodeDefinition] = &[
         kind: "presentation-preference",
         icon: "layout-template",
         title: "Authored visual Node Details",
-        detail: "When a node's detail benefits from visual presentation, author a compiled visual Node Detail through the node detail authoring API instead of plain Markdown: structured HTML with authored CSS layout, placed visual assets, and capability controls such as links, invokes, inputs, expands, and references. Keep the authored page self-contained, keyboard operable, and accessible, and let authored actions live inside the detail page rather than a separate action tray.",
+        detail: "Author a compiled visual Node Detail for every node you create; do not leave any authored node on plain Markdown alone. Import the exported html, css, and detailCapability helpers. At minimum, call node.detailAuthoring.setComponent(\"main\", html`<section><h2>Summary</h2><p>Details</p></section>`, css`section { display: grid; gap: 0.75rem; }`), await graph.checkpointNodeDetail(node), and then await graph.submitNode(node). When a node has actions, create each stable action object with its sourceLayer before checkpointing, bind that same object in the page with the matching detailCapability helper, and pass it to graph.addAction after submitting the layer. Keep every authored page self-contained, keyboard operable, and accessible. Mount every action belonging to the node inside its detail page, and place visual assets when they improve the presentation.",
     },
 ];
 
@@ -3611,6 +3611,11 @@ mod tests {
             v3.closure.layers[0].nodes[3]
                 .detail
                 .contains("compiled visual Node Detail")
+        );
+        assert!(
+            v3.closure.layers[0].nodes[3]
+                .detail
+                .contains("for every node you create")
         );
         assert!(
             v2.closure.layers[0].nodes[2]

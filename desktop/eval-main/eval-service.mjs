@@ -563,7 +563,8 @@ function sameJson(left, right) {
 }
 
 export function visualNodeDetailCheck(output, personalPresentationVersion) {
-  const authoredNodes = output.rootLayer.nodes.filter((node) => node.authoredDetail !== undefined);
+  const nodes = output.rootLayer.nodes;
+  const authoredNodes = nodes.filter((node) => node.authoredDetail !== undefined);
   const compiledNodes = authoredNodes.filter(({ authoredDetail }) => (
     authoredDetail?.version === 1
     && Array.isArray(authoredDetail.components)
@@ -580,14 +581,30 @@ export function visualNodeDetailCheck(output, personalPresentationVersion) {
   const treatment = personalPresentationVersion === "personal-presentation-v3";
   return {
     name: "visual-node-detail:authored-output",
-    passed: treatment ? compiledNodes.length > 0 : authoredNodes.length === 0,
+    passed: treatment ? nodes.length > 0 && compiledNodes.length === nodes.length : authoredNodes.length === 0,
     detail: treatment
-      ? `The V3 treatment must accept at least one compiled visual Node Detail; observed ${compiledNodes.length} valid package${compiledNodes.length === 1 ? "" : "s"} across ${authoredNodes.length} authored node${authoredNodes.length === 1 ? "" : "s"}.`
+      ? `The V3 treatment must accept a compiled visual Node Detail for every accepted node; observed ${compiledNodes.length} valid package${compiledNodes.length === 1 ? "" : "s"} across ${nodes.length} node${nodes.length === 1 ? "" : "s"}.`
       : `The pre-#404 V2 control must retain plain node details; observed ${authoredNodes.length} authored visual Node Detail${authoredNodes.length === 1 ? "" : "s"}.`,
   };
 }
 
-export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = true } = {}) {
+export function acceptedTopologyNodes(topology) {
+  const nodes = new Map();
+  for (const layer of topology?.layers || []) {
+    for (const node of layer.nodes || []) {
+      const id = String(node.id ?? "");
+      if (id === "") throw new Error("Accepted visual Node Detail scope contains a node without identity.");
+      const existing = nodes.get(id);
+      if (existing !== undefined && canonicalJson(existing) !== canonicalJson(node)) {
+        throw new Error(`Accepted visual Node Detail scope contains conflicting snapshots for node ${id}.`);
+      }
+      nodes.set(id, node);
+    }
+  }
+  return [...nodes.values()];
+}
+
+export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = false } = {}) {
   const enabled = execution.harnessConfiguration?.complete?.agentAuthored === true;
   const root = execution.turns[0];
   const children = execution.semanticChildren || [];
@@ -635,6 +652,19 @@ export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = t
     )),
     detail: "Every semantic child must have a complete portable candidate trace that records nested completion-broker authority.",
   });
+  const personalPresentationVersion = execution.harnessConfiguration?.settings?.personalPresentationVersion;
+  if ((personalPresentationVersion === "personal-presentation-v2"
+    || personalPresentationVersion === "personal-presentation-v3") && children.length > 0) {
+    for (const child of children) {
+      checks.push({
+        ...visualNodeDetailCheck(
+          { rootLayer: { nodes: child.acceptedNodes || [] } },
+          personalPresentationVersion,
+        ),
+        name: `agent-authored-complete:child-${child.interactionId}:visual-node-detail:authored-output`,
+      });
+    }
+  }
   return checks;
 }
 
@@ -2229,13 +2259,30 @@ export class EvalService {
             })));
           }
           if (definition.requiredChecks?.includes("visual-node-detail")) {
-            turnChecks.push({
-              ...visualNodeDetailCheck(
-                interaction.completionOutput,
-                execution.harnessConfiguration?.settings?.personalPresentationVersion,
-              ),
-              name: `${checkPrefix}:visual-node-detail:authored-output`,
-            });
+            try {
+              const topology = await this.acceptedTopologyBuilder({
+                turnId: interaction.id,
+                rootLayerId: interaction.completionOutput.rootLayer.layer.id,
+                loadLayer: (layerId) => this.#productRequest(
+                  `/api/threads/${encodeURIComponent(executedTurn.thread.id)}`
+                    + `/interactions/${encodeURIComponent(interaction.id)}`
+                    + `/layers/${encodeURIComponent(layerId)}`,
+                ),
+              });
+              turnChecks.push({
+                ...visualNodeDetailCheck(
+                  { rootLayer: { nodes: acceptedTopologyNodes(topology) } },
+                  execution.harnessConfiguration?.settings?.personalPresentationVersion,
+                ),
+                name: `${checkPrefix}:visual-node-detail:authored-output`,
+              });
+            } catch (error) {
+              turnChecks.push({
+                name: `${checkPrefix}:visual-node-detail:authored-output`,
+                passed: false,
+                detail: error instanceof Error ? error.message : String(error),
+              });
+            }
           }
           if (projectCaseIds.has(definition.id)) {
             try {
@@ -2300,7 +2347,7 @@ export class EvalService {
       }
       if (definition.requiredChecks?.includes("agent-authored-complete")) {
         checks.push(...recursiveCompleteChecks(execution, {
-          requireChildWhenEnabled: definition.id !== RECURSIVE_GRAPH_MEMORY_CASE_ID,
+          requireChildWhenEnabled: false,
         }));
       }
       execution.checks = checks;
@@ -2673,6 +2720,19 @@ export class EvalService {
           if (!child) throw new Error(`Semantic child ${invocation.resultInteractionId} disappeared.`);
           await this.#backfillCurrentProjection(execution, child);
           await this.#captureCandidateTrace(execution, child);
+          let acceptedNodes = [];
+          if (child.completionStatus === "accepted" && child.completionOutput?.rootLayer?.layer?.id) {
+            const topology = await this.acceptedTopologyBuilder({
+              turnId: child.id,
+              rootLayerId: child.completionOutput.rootLayer.layer.id,
+              loadLayer: (layerId) => this.#productRequest(
+                `/api/threads/${encodeURIComponent(threadId)}`
+                  + `/interactions/${encodeURIComponent(child.id)}`
+                  + `/layers/${encodeURIComponent(layerId)}`,
+              ),
+            });
+            acceptedNodes = acceptedTopologyNodes(topology);
+          }
           semanticChildren.push({
             threadId,
             sourceInteractionId: invocation.sourceInteractionId,
@@ -2685,7 +2745,9 @@ export class EvalService {
               id: node.id,
               title: node.title,
               detail: node.detail,
+              ...(node.authoredDetail === undefined ? {} : { authoredDetail: node.authoredDetail }),
             }))),
+            acceptedNodes: copy(acceptedNodes),
             resultCompletionStatus: invocation.resultCompletionStatus,
             execution: copy(invocation.execution || null),
             candidateTrace: copy(execution.candidateTraceCaptures?.[String(child.id)] || disabledCandidateTrace()),

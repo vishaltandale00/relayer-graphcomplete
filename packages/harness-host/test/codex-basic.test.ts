@@ -47,12 +47,25 @@ describe("CodexBasicHarness", () => {
     }, "@relayer/graph-client");
     const neutral = buildLayeredNavigationPrompt(personalPresentationRunContext(false), "@relayer/graph-client");
     const treatment = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client");
+    const visualTreatment = buildLayeredNavigationPrompt(personalPresentationRunContext(
+      true,
+      "Author a compiled visual Node Detail for every node you create. Call node.detailAuthoring.setComponent before graph.checkpointNodeDetail(node).",
+    ), "@relayer/graph-client");
     const codexProviderPrompt = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client", undefined, false);
 
     expect(neutral).toBe(baseline);
     expect(treatment).toContain("Personal graph presentation preferences:");
     expect(treatment).toContain("Decision-useful center: The user prefers central layers");
     expect(treatment).toContain("every native child that can author graph content");
+    expect(treatment).not.toContain("for every node you create");
+    expect(visualTreatment).toContain("for every node you create");
+    expect(visualTreatment).toContain("node.detailAuthoring.setComponent");
+    expect(visualTreatment.indexOf("Graph presentation guidance:")).toBeLessThan(
+      visualTreatment.indexOf("for every node you create"),
+    );
+    expect(visualTreatment.indexOf("for every node you create")).toBeLessThan(
+      visualTreatment.indexOf("Normalized interaction input:"),
+    );
     expect(treatment.indexOf("Graph presentation guidance:")).toBeLessThan(
       treatment.indexOf("Personal graph presentation preferences:"),
     );
@@ -68,6 +81,7 @@ describe("CodexBasicHarness", () => {
     expect(baseline).toContain("await graph.getCurrent()");
     expect(baseline).toContain("await graph.advanceCurrent(");
     expect(baseline).toContain("Advancing current does not complete the interaction");
+    expect(baseline).not.toContain("Do not author HTML, CSS, colors, dimensions, or style fields");
     expect(baseline).not.toContain("graph.prepareComplete(");
     expect(baseline).not.toContain("Import complete from");
     expect(baseline).not.toContain("semantic completion is unavailable");
@@ -1497,7 +1511,10 @@ function runContext(id: number, token: string, trace: HarnessTraceSink = createN
   };
 }
 
-function personalPresentationRunContext(preference: boolean): HarnessRunContext {
+function personalPresentationRunContext(
+  preference: boolean,
+  preferenceDetail = "The user prefers central layers that are immediately decision-useful.",
+): HarnessRunContext {
   const context = runContext(1, "token");
   const versionInteractionNodeId = preference ? 90 : 100;
   const rootLayerId = versionInteractionNodeId + 1;
@@ -1516,7 +1533,7 @@ function personalPresentationRunContext(preference: boolean): HarnessRunContext 
             kind: preference ? "presentation-preference" : "personal-presentation-manifest",
             icon: preference ? "compass" : "settings",
             title: preference ? "Decision-useful center" : "Neutral personal presentation",
-            detail: preference ? "The user prefers central layers that are immediately decision-useful." : "No additional guidance.",
+            detail: preference ? preferenceDetail : "No additional guidance.",
             state: "accepted",
           }],
           edges: [],
