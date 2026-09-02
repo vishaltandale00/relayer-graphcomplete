@@ -45,7 +45,7 @@ function fixture() {
 }
 
 describe("workspace navigation presentation", () => {
-  it("captures stable identity from the renderer layer path", () => {
+  it("derives entry identity, destination labels, and deep links from the view", () => {
     const entry = navigationEntryFromView({
       threadId: 7,
       turnId: 2,
@@ -55,8 +55,7 @@ describe("workspace navigation presentation", () => {
       ],
       selectedNodeId: 11,
     });
-
-    expect(entry).toEqual({
+    expect(entry, "the view maps to a string-normalized entry").toEqual({
       threadId: "7",
       turnId: "2",
       navigationPath: [
@@ -66,14 +65,11 @@ describe("workspace navigation presentation", () => {
       selectedNodeId: "11",
       temporalCurrent: null,
     });
-    expect(navigationEntryKey(entry)).toBe('['
-      + '"7","2",[["100",null],["101","501"]]]');
-    expect(descendantLayerIdentities(entry)).toEqual([
-      { threadId: "7", turnId: "2", layerId: "101" },
-    ]);
-  });
+    expect(navigationEntryKey(entry), "the entry key pins path identity")
+      .toBe('["7","2",[["100",null],["101","501"]]]');
+    expect(descendantLayerIdentities(entry), "descendant identities exclude the root layer")
+      .toEqual([{ threadId: "7", turnId: "2", layerId: "101" }]);
 
-  it("derives concise destination labels without storing presentation copy in entries", () => {
     const { detail, interaction } = fixture();
     const metadata = navigationDestinationMetadata({
       thread: detail.thread,
@@ -81,28 +77,27 @@ describe("workspace navigation presentation", () => {
       interactions: detail.interactions,
       layerPath: [{ layerId: 100, label: "Response" }, { layerId: 101, label: "Architecture" }],
     });
-    expect(metadata).toEqual({
+    expect(metadata, "destination metadata is derived, not stored").toEqual({
       threadTitle: "Navigation history",
       turnNumber: 2,
       layerLabel: "Architecture",
     });
-    expect(navigationDestinationLabel("back", metadata))
+    expect(navigationDestinationLabel("back", metadata), "back labels name the destination")
       .toBe("Back to Navigation history · Turn 2 · Architecture");
-    expect(navigationDestinationLabel("forward", null)).toBe("Forward");
-  });
+    expect(navigationDestinationLabel("forward", null), "forward survives missing metadata")
+      .toBe("Forward");
 
-  it("rewrites both thread and interaction deep-link identity", () => {
     const url = workspaceUrlForPresentation(
       "http://127.0.0.1:43123/?threadId=old&interactionId=before&review=1",
       { threadId: 7, turnId: 2 },
     );
-    expect(url.searchParams.get("threadId")).toBe("7");
-    expect(url.searchParams.get("interactionId")).toBe("2");
-    expect(url.searchParams.get("review")).toBe("1");
+    expect(url.searchParams.get("threadId"), "deep links rewrite the thread").toBe("7");
+    expect(url.searchParams.get("interactionId"), "deep links rewrite the interaction").toBe("2");
+    expect(url.searchParams.get("review"), "unrelated query parameters survive").toBe("1");
   });
 
-  it("resolves and validates an authored descendant path through the accepted cache", async () => {
-    const { child, detail } = fixture();
+  it("resolves authored navigation presentations through the accepted cache and fails whole", async () => {
+    const { child, detail, root } = fixture();
     const loadThread = vi.fn(async () => detail);
     const loadLayer = vi.fn(async () => child);
     const layerCache = createAcceptedLayerCache();
@@ -118,22 +113,20 @@ describe("workspace navigation presentation", () => {
 
     const first = await resolveNavigationPresentation(entry, { loadThread, loadLayer, layerCache });
     const second = await resolveNavigationPresentation(entry, { loadThread, loadLayer, layerCache });
+    expect(first.layer, "the descendant layer resolves").toBe(child);
+    expect(first.layer.layer.layout, "resolved layers keep their layout").toEqual(child.layer.layout);
+    expect(first.layerPath.map(({ label }) => label), "labels follow the authored path")
+      .toEqual(["Response", "Architecture"]);
+    expect(first.entry.selectedNodeId, "selection rides along normalized").toBe("11");
+    expect(first.actionInvocations, "action invocations accompany the presentation")
+      .toEqual(detail.actionInvocations);
+    expect(first.approvals, "approvals accompany the presentation").toEqual(detail.approvals);
+    expect(second.layer, "the accepted cache serves the repeat resolution").toBe(child);
+    expect(second.layer.layer.layout, "cached layers keep their layout").toEqual(child.layer.layout);
+    expect(loadThread, "thread detail is refetched per resolution").toHaveBeenCalledTimes(2);
+    expect(loadLayer, "the accepted layer is fetched once").toHaveBeenCalledTimes(1);
 
-    expect(first.layer).toBe(child);
-    expect(first.layer.layer.layout).toEqual(child.layer.layout);
-    expect(first.layerPath.map(({ label }) => label)).toEqual(["Response", "Architecture"]);
-    expect(first.entry.selectedNodeId).toBe("11");
-    expect(first.actionInvocations).toEqual(detail.actionInvocations);
-    expect(first.approvals).toEqual(detail.approvals);
-    expect(second.layer).toBe(child);
-    expect(second.layer.layer.layout).toEqual(child.layer.layout);
-    expect(loadThread).toHaveBeenCalledTimes(2);
-    expect(loadLayer).toHaveBeenCalledTimes(1);
-  });
-
-  it("uses the current accepted root when an earlier pending entry had no layer path", async () => {
-    const { detail, root } = fixture();
-    const result = await resolveNavigationPresentation({
+    const pathless = await resolveNavigationPresentation({
       threadId: 7,
       turnId: 2,
       navigationPath: [],
@@ -142,13 +135,10 @@ describe("workspace navigation presentation", () => {
       loadThread: async () => detail,
       loadLayer: async () => { throw new Error("unexpected descendant load"); },
     });
+    expect(pathless.layer, "a pathless entry lands on the current accepted root").toBe(root);
+    expect(pathless.entry.navigationPath, "the root path is authored on resolution")
+      .toEqual([{ layerId: "100", viaActionId: null }]);
 
-    expect(result.layer).toBe(root);
-    expect(result.entry.navigationPath).toEqual([{ layerId: "100", viaActionId: null }]);
-  });
-
-  it("restores a retained temporal current when terminal work has no final output", async () => {
-    const { detail, root } = fixture();
     const stoppedDetail = {
       ...detail,
       interactions: detail.interactions.map((interaction) => (
@@ -157,7 +147,7 @@ describe("workspace navigation presentation", () => {
           : interaction
       )),
     };
-    const result = await resolveNavigationPresentation({
+    const temporal = await resolveNavigationPresentation({
       threadId: 7,
       turnId: 2,
       navigationPath: [{ layerId: 100, viaActionId: null }],
@@ -167,69 +157,42 @@ describe("workspace navigation presentation", () => {
       loadThread: async () => stoppedDetail,
       loadLayer: async () => root,
     });
+    expect(temporal.layer, "terminal work restores its retained temporal current").toBe(root);
+    expect(temporal.entry.temporalCurrent, "the temporal follow intent survives normalization")
+      .toEqual({ completionId: "42", revision: 2, mode: "pinned" });
 
-    expect(result.layer).toBe(root);
-    expect(result.entry.temporalCurrent).toEqual({
-      completionId: "42",
-      revision: 2,
-      mode: "pinned",
-    });
-  });
-
-  it("fails without returning a partial presentation for missing turns, paths, or nodes", async () => {
-    const { child, detail } = fixture();
     const options = {
       loadThread: async () => detail,
       loadLayer: async () => child,
     };
-    await expect(resolveNavigationPresentation({
-      threadId: 7,
-      turnId: 99,
-      navigationPath: [],
-      selectedNodeId: null,
-    }, options)).rejects.toThrow("turn is unavailable");
-    await expect(resolveNavigationPresentation({
-      threadId: 7,
-      turnId: 2,
-      navigationPath: [{ layerId: 999, viaActionId: null }],
-      selectedNodeId: null,
-    }, options)).rejects.toThrow("layer path is no longer available");
-    await expect(resolveNavigationPresentation({
-      threadId: 7,
-      turnId: 2,
-      navigationPath: [{ layerId: 100, viaActionId: null }],
-      selectedNodeId: 99,
-    }, options)).rejects.toThrow("node is unavailable");
-  });
+    const rejections = [
+      ["a missing turn rejects whole", { threadId: 7, turnId: 99, navigationPath: [], selectedNodeId: null }, "turn is unavailable"],
+      ["a missing path layer rejects whole", { threadId: 7, turnId: 2, navigationPath: [{ layerId: 999, viaActionId: null }], selectedNodeId: null }, "layer path is no longer available"],
+      ["a missing selection rejects whole", { threadId: 7, turnId: 2, navigationPath: [{ layerId: 100, viaActionId: null }], selectedNodeId: 99 }, "node is unavailable"],
+    ];
+    expect(rejections, "rejection corpus").toHaveLength(3);
+    for (const [label, requested, message] of rejections) {
+      await expect(resolveNavigationPresentation(requested, options), label)
+        .rejects.toThrow(message);
+    }
 
-  it("rejects a mismatched descendant response without poisoning the accepted cache", async () => {
-    const { child, detail } = fixture();
-    const layerCache = createAcceptedLayerCache();
-    const loadLayer = vi.fn()
+    const poisonedCache = createAcceptedLayerCache();
+    const mismatchedLoad = vi.fn()
       .mockResolvedValueOnce({ ...child, layer: { id: 999 } })
       .mockResolvedValueOnce(child);
-    const entry = {
-      threadId: 7,
-      turnId: 2,
-      navigationPath: [
-        { layerId: 100, viaActionId: null },
-        { layerId: 101, viaActionId: 501 },
-      ],
-      selectedNodeId: null,
-    };
-
     await expect(resolveNavigationPresentation(entry, {
       loadThread: async () => detail,
-      loadLayer,
-      layerCache,
-    })).rejects.toThrow("did not match requested layer");
-    expect(layerCache.size).toBe(0);
+      loadLayer: mismatchedLoad,
+      layerCache: poisonedCache,
+    }), "a mismatched descendant response rejects").rejects.toThrow("did not match requested layer");
+    expect(poisonedCache.size, "mismatched responses never poison the accepted cache").toBe(0);
     await expect(resolveNavigationPresentation(entry, {
       loadThread: async () => detail,
-      loadLayer,
-      layerCache,
-    })).resolves.toMatchObject({ layer: child });
-    expect(loadLayer).toHaveBeenCalledTimes(2);
-    expect(validateResolvedLayer({ layerId: 101 }, child)).toBe(child);
+      loadLayer: mismatchedLoad,
+      layerCache: poisonedCache,
+    }), "the next resolution recovers cleanly").resolves.toMatchObject({ layer: child });
+    expect(mismatchedLoad, "recovery refetches the descendant").toHaveBeenCalledTimes(2);
+    expect(validateResolvedLayer({ layerId: 101 }, child), "matching layers validate")
+      .toBe(child);
   });
 });

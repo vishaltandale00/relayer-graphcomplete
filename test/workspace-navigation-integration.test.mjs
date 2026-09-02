@@ -96,9 +96,23 @@ describe("workspace navigation integration", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps accepted product status while rendering its succeeded temporal current", async () => {
+  it("loads accepted temporal results and submits follow-ups through tutorial and occurrence gates", async () => {
     const root = rootLayer(101, 11);
     const turn = { ...interaction(1, 10, root), graphNodeId: 901 };
+    const followup = {
+      id: 2,
+      threadId: 10,
+      sequence: 2,
+      text: "A follow-up",
+      completionStatus: "submitted",
+    };
+    const annotationTurn = {
+      id: 3,
+      threadId: 10,
+      sequence: 3,
+      text: "",
+      completionStatus: "submitted",
+    };
     const state = productState([{ id: 10, title: "Accepted temporal result" }], [turn]);
     state.currentProjection = {
       cursor: 1,
@@ -114,22 +128,95 @@ describe("workspace navigation integration", () => {
         temporalFeatures: { projectionUi: true },
       }],
     };
-    requestImplementation = vi.fn(async (path) => {
-      if (path.startsWith("/api/state?threadId=10")) return state;
+    let submissions = 0;
+    let stateReads = 0;
+    const contexts = [{
+      target: { nodeId: 11, sourceInteractionNodeId: 901, sourceLayerId: 101 },
+      annotations: ["Use this node"],
+    }];
+    requestImplementation = vi.fn(async (path, options) => {
+      if (path.startsWith("/api/state?threadId=10")) {
+        stateReads += 1;
+        const interactions = [turn];
+        if (submissions >= 1) interactions.push(followup);
+        if (submissions >= 2) interactions.push(annotationTurn);
+        return { ...state, interactions };
+      }
       if (path.endsWith("/interactions/1/layers/101")) return root;
+      if (path === "/api/threads/10/interactions") {
+        const body = JSON.parse(options.body);
+        if (submissions === 0) {
+          expect(options.method, "the follow-up posts").toBe("POST");
+          expect(body, "the follow-up payload carries the composed model selection").toEqual({
+            text: "A follow-up",
+            inputId: expect.any(String),
+            contexts: [],
+            contextConfirmationIds: [],
+            modelSelection: { providerId: "openai", modelId: "gpt-5" },
+          });
+        } else {
+          expect(options.method, "the annotation-only follow-up posts").toBe("POST");
+          expect(body, "the annotation-only payload keeps stable occurrence identity").toEqual({
+            text: "",
+            inputId: expect.any(String),
+            contexts,
+            contextConfirmationIds: [],
+            modelSelection: { providerId: "openai", modelId: "gpt-5" },
+          });
+        }
+        submissions += 1;
+        return submissions === 1 ? followup : annotationTurn;
+      }
       throw new Error(`Unexpected request: ${path}`);
     });
     const controller = await loadModules();
 
     await controller.loadThread(10);
+    expect(controller.appState.status, "the accepted product status survives the temporal render")
+      .toBe("accepted");
+    expect(controller.appState.temporalLifecycle, "the succeeded temporal current renders")
+      .toBe("succeeded");
+    expect(controller.appState.visibleLayer, "the temporal layer is visible").toBe(root);
+    expect(controller.appState.nodes.map(({ id }) => id), "the temporal nodes render")
+      .toEqual([11]);
 
-    expect(controller.appState.status).toBe("accepted");
-    expect(controller.appState.temporalLifecycle).toBe("succeeded");
-    expect(controller.appState.visibleLayer).toBe(root);
-    expect(controller.appState.nodes.map(({ id }) => id)).toEqual([11]);
-  });
+    const completionPersistence = deferred();
+    tutorialFollowupSubmitted = vi.fn(() => completionPersistence.promise);
+    const readsBeforeFollowup = stateReads;
+    const submitting = controller.submitInteraction(
+      "A follow-up",
+      { providerId: "openai", modelId: "gpt-5" },
+    );
+    await vi.waitFor(() => expect(
+      tutorialFollowupSubmitted,
+      "the tutorial observes the submitted follow-up",
+    ).toHaveBeenCalledOnce());
+    expect(tutorialFollowupSubmitted, "the tutorial receives the follow-up identity")
+      .toHaveBeenCalledWith({ threadId: 10, interactionId: 2 });
+    expect(stateReads, "no refresh happens before tutorial persistence settles")
+      .toBe(readsBeforeFollowup);
+    expect(controller.viewState.currentInteractionId, "the cursor holds until persistence settles")
+      .toBe(1);
 
-  it("restores thread, turn, path, numeric node selection, and deep-link URL", async () => {
+    completionPersistence.resolve(true);
+    await expect(submitting, "the submission resolves once persistence settles")
+      .resolves.toEqual(followup);
+    expect(stateReads, "persistence settlement refreshes exactly once")
+      .toBe(readsBeforeFollowup + 1);
+    expect(controller.viewState.currentInteractionId, "the cursor follows the submitted follow-up")
+      .toBe(2);
+
+    tutorialFollowupSubmitted = vi.fn();
+    await expect(controller.submitInteraction(
+      "",
+      { providerId: "openai", modelId: "gpt-5" },
+      contexts,
+    ), "annotation-only submissions resolve").resolves.toEqual(annotationTurn);
+    expect(controller.viewState.currentInteractionId, "the cursor follows the annotation-only turn")
+      .toBe(3);
+  }, 20_000);
+
+  it("restores history destinations and lets the newest intent win over slow restorations", async () => {
     const layer1 = rootLayer(101, 11);
     const layer2 = rootLayer(201, 21);
     const turn1 = interaction(1, 10, layer1);
@@ -144,158 +231,152 @@ describe("workspace navigation integration", () => {
       }
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
+    const restored = await loadModules();
 
-    await controller.loadThread(10);
-    controller.replaceCurrentSelection(11);
-    await controller.loadThread(20);
-    await controller.navigateHistory(-1);
+    await restored.loadThread(10);
+    restored.replaceCurrentSelection(11);
+    await restored.loadThread(20);
+    await restored.navigateHistory(-1);
+    expect(restored.viewState, "Back restores thread, turn, and numeric node selection")
+      .toMatchObject({
+        currentThreadId: 10,
+        currentInteractionId: 1,
+        selectedNodeId: "11",
+      });
+    expect(restored.viewState.layerPath.map(({ layerId }) => layerId),
+      "the restored path is the root layer").toEqual([101]);
+    expect(globalThis.location.searchParams.get("threadId"), "the deep link follows the thread")
+      .toBe("10");
+    expect(globalThis.location.searchParams.get("interactionId"), "the deep link follows the turn")
+      .toBe("1");
+    expect(restored.getNavigationHistory(), "the cursor can only go forward again")
+      .toMatchObject({
+        canGoBack: false,
+        canGoForward: true,
+        forwardChangesTurn: true,
+        pendingDirection: null,
+      });
 
-    expect(controller.viewState).toMatchObject({
-      currentThreadId: 10,
-      currentInteractionId: 1,
-      selectedNodeId: "11",
-    });
-    expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101]);
-    expect(globalThis.location.searchParams.get("threadId")).toBe("10");
-    expect(globalThis.location.searchParams.get("interactionId")).toBe("1");
-    expect(controller.getNavigationHistory()).toMatchObject({
-      canGoBack: false,
-      canGoForward: true,
-      forwardChangesTurn: true,
-      pendingDirection: null,
-    });
-  });
-
-  it("waits for tutorial completion persistence before refreshing to the submitted follow-up", async () => {
-    const root = rootLayer(101, 11);
-    const source = interaction(1, 10, root);
-    const followup = {
-      id: 2,
-      threadId: 10,
-      sequence: 2,
-      text: "A follow-up",
-      completionStatus: "submitted",
-    };
-    const beforeSubmit = productState([{ id: 10, title: "Tutorial" }], [source]);
-    const afterSubmit = productState([{ id: 10, title: "Tutorial" }], [source, followup]);
-    const completionPersistence = deferred();
-    let submitted = false;
-    let stateReads = 0;
-    requestImplementation = vi.fn(async (path, options) => {
-      if (path.startsWith("/api/state?threadId=10")) {
-        stateReads += 1;
-        return submitted ? afterSubmit : beforeSubmit;
-      }
-      if (path === "/api/threads/10/interactions") {
-        expect(options.method).toBe("POST");
-        expect(JSON.parse(options.body)).toEqual({
-          text: "A follow-up",
-          inputId: expect.any(String),
-          contexts: [],
-          contextConfirmationIds: [],
-          modelSelection: { providerId: "openai", modelId: "gpt-5" },
-        });
-        submitted = true;
-        return followup;
-      }
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    tutorialFollowupSubmitted = vi.fn(() => completionPersistence.promise);
-
-    const submitting = controller.submitInteraction(
-      "A follow-up",
-      { providerId: "openai", modelId: "gpt-5" },
-    );
-    await vi.waitFor(() => expect(tutorialFollowupSubmitted).toHaveBeenCalledOnce());
-
-    expect(tutorialFollowupSubmitted).toHaveBeenCalledWith({ threadId: 10, interactionId: 2 });
-    expect(stateReads).toBe(1);
-    expect(controller.viewState.currentInteractionId).toBe(1);
-
-    completionPersistence.resolve(true);
-    await expect(submitting).resolves.toEqual(followup);
-    expect(stateReads).toBe(2);
-    expect(controller.viewState.currentInteractionId).toBe(2);
-  });
-
-  it("submits annotation-only context with stable occurrence identity", async () => {
-    const source = { ...interaction(1, 10, rootLayer(101, 11)), graphNodeId: 31 };
-    const followup = {
-      id: 2,
-      threadId: 10,
-      sequence: 2,
-      text: "",
-      completionStatus: "submitted",
-    };
-    const beforeSubmit = productState([{ id: 10, title: "Context" }], [source]);
-    const afterSubmit = productState([{ id: 10, title: "Context" }], [source, followup]);
-    let submitted = false;
-    const contexts = [{
-      target: { nodeId: 11, sourceInteractionNodeId: 31, sourceLayerId: 101 },
-      annotations: ["Use this node"],
-    }];
-    requestImplementation = vi.fn(async (path, options) => {
-      if (path.startsWith("/api/state?threadId=10")) return submitted ? afterSubmit : beforeSubmit;
-      if (path === "/api/threads/10/interactions") {
-        expect(options.method).toBe("POST");
-        expect(JSON.parse(options.body)).toEqual({
-          text: "",
-          inputId: expect.any(String),
-          contexts,
-          contextConfirmationIds: [],
-          modelSelection: { providerId: "openai", modelId: "gpt-5" },
-        });
-        submitted = true;
-        return followup;
-      }
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-
-    await expect(controller.submitInteraction(
-      "",
-      { providerId: "openai", modelId: "gpt-5" },
-      contexts,
-    )).resolves.toEqual(followup);
-    expect(controller.viewState.currentInteractionId).toBe(2);
-  });
-
-  it("lets a newer turn choice cancel a slower history restoration", async () => {
-    const layer1 = rootLayer(101, 11);
-    const layer2 = rootLayer(201, 21);
-    const turn1 = interaction(1, 10, layer1);
     const turn2a = interaction(2, 20, layer2, 1);
     const turn2b = interaction(3, 20, layer2, 2);
-    const state1 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn1]);
-    const state2 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn2a, turn2b]);
-    const restore = deferred();
+    const supersededState2 = productState(
+      [{ id: 10, title: "First" }, { id: 20, title: "Second" }],
+      [turn2a, turn2b],
+    );
+    const restoreQueue = [];
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) return state1;
+      if (path.startsWith("/api/state?threadId=20")) return supersededState2;
+      if (path === "/api/threads/10") {
+        const pending = deferred();
+        restoreQueue.push(pending);
+        return pending.promise;
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const racing = await loadModules();
+    await racing.loadThread(10);
+    await racing.loadThread(20);
+
+    const beforeCommit = vi.fn();
+    const pending = racing.navigateHistory(-1, { beforeCommit });
+    await vi.waitFor(() => expect(
+      racing.getNavigationHistory().pendingDirection,
+      "Back shows as pending while its destination loads",
+    ).toBe("back"));
+    racing.selectTurnById(2);
+    expect(racing.getNavigationHistory().pendingDirection,
+      "a newer turn choice clears the pending direction").toBeNull();
+    restoreQueue[0].resolve({ thread: state1.threads[0], interactions: [turn1], actionInvocations: [] });
+    await expect(pending, "the slower history restoration is superseded")
+      .rejects.toMatchObject({ code: "navigation_superseded" });
+    expect(beforeCommit, "superseded restorations never commit").not.toHaveBeenCalled();
+    expect(racing.viewState, "the newer turn choice owns the view")
+      .toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
+
+    const cancelRestore = deferred();
     requestImplementation = vi.fn(async (path) => {
       if (path.startsWith("/api/state?threadId=10")) return state1;
       if (path.startsWith("/api/state?threadId=20")) return state2;
-      if (path === "/api/threads/10") return restore.promise;
+      if (path === "/api/threads/10") return cancelRestore.promise;
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    await controller.loadThread(20);
+    const cancelling = await loadModules();
+    await cancelling.loadThread(10);
+    await cancelling.loadThread(20);
+    const pendingCancel = cancelling.navigateHistory(-1);
+    await vi.waitFor(() => expect(
+      cancelling.getNavigationHistory().pendingDirection,
+      "Back shows as pending while its destination loads",
+    ).toBe("back"));
+    const beforeCancelRenders = rendered;
+    cancelling.cancelNavigationHistory();
+    expect(rendered, "shell focus cancellation renders nothing").toBe(beforeCancelRenders);
+    cancelRestore.resolve({ thread: state1.threads[0], interactions: [turn1], actionInvocations: [] });
+    await expect(pendingCancel, "cancelled restorations are superseded")
+      .rejects.toMatchObject({ code: "navigation_superseded" });
+    expect(rendered, "the late restoration renders nothing either").toBe(beforeCancelRenders);
+    expect(cancelling.viewState, "the view stays with the newest selection")
+      .toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
 
-    const beforeCommit = vi.fn();
-    const pending = controller.navigateHistory(-1, { beforeCommit });
-    await vi.waitFor(() => expect(controller.getNavigationHistory().pendingDirection).toBe("back"));
-    controller.selectTurnById(2);
-    expect(controller.getNavigationHistory().pendingDirection).toBeNull();
-    restore.resolve({ thread: state1.threads[0], interactions: [turn1], actionInvocations: [] });
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) return state1;
+      if (path.startsWith("/api/state?threadId=20")) return state2;
+      if (path === "/api/threads/10") {
+        return { thread: state1.threads[0], interactions: [turn1], actionInvocations: [] };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const rollback = await loadModules();
+    await rollback.loadThread(10);
+    await rollback.loadThread(20);
+    throwOnRender = rendered + 2;
+    const beforeFailedCommit = vi.fn();
+    await expect(rollback.navigateHistory(-1, { beforeCommit: beforeFailedCommit }),
+      "an application failure rejects the navigation").rejects.toThrow("injected render failure");
+    expect(beforeFailedCommit, "failed applications never commit").not.toHaveBeenCalled();
+    expect(rollback.viewState, "the presentation rolls back to the previous view")
+      .toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
+    expect(rollback.getNavigationHistory(), "the cursor does not advance on failure")
+      .toMatchObject({
+        canGoBack: true,
+        canGoForward: false,
+        pendingDirection: null,
+      });
 
-    await expect(pending).rejects.toMatchObject({ code: "navigation_superseded" });
-    expect(beforeCommit).not.toHaveBeenCalled();
-    expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
-  });
+    const navRoot = rootLayer(101, 11);
+    navRoot.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
+    const child = rootLayer(102, 12);
+    const navTurn = interaction(1, 10, navRoot);
+    const navState = productState([{ id: 10, title: "First" }], [navTurn]);
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) return navState;
+      if (path === "/api/threads/10") {
+        return { thread: navState.threads[0], interactions: [navTurn], actionInvocations: [] };
+      }
+      if (path.endsWith("/layers/102")) return child;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const reuse = await loadModules();
+    await reuse.loadThread(10);
+    await reuse.navigateLayer(102, {
+      action: navRoot.actions[0],
+      sourceNode: navRoot.nodes[0],
+    });
+    await reuse.navigateLayer(101, { restore: true, pathIndex: 0 });
+    expect(reuse.getNavigationHistory(), "descendant navigation stays inside the turn")
+      .toMatchObject({
+        canGoBack: true,
+        backChangesTurn: false,
+      });
+    await reuse.navigateHistory(-1);
+    expect(reuse.appState.visibleLayer.layer.id, "Back restores the direct descendant")
+      .toBe(102);
+    expect(requestImplementation.mock.calls.filter(([path]) => path.endsWith("/layers/102")),
+      "the descendant layer is reused, not refetched").toHaveLength(1);
+  }, 20_000);
 
-  it("opens a resolved invoke across threads at its root and delegates Back to workspace history", async () => {
+  it("navigates resolved invokes across threads and yields to newer selections and intents", async () => {
     const sourceLayer = rootLayer(101, 11);
     const action = { id: 501, kind: "invoke", sourceNodeId: 11, targetLayerId: 201 };
     sourceLayer.actions = [action];
@@ -348,45 +429,55 @@ describe("workspace navigation integration", () => {
 
     await expect(controller.navigateResolvedInvoke(action, {
       beforeCommit: beforeInvokeCommit,
-    })).resolves.toBe(true);
-    expect(beforeInvokeCommit).toHaveBeenCalledOnce();
-    expect(controller.viewState).toMatchObject({
-      currentThreadId: 20,
-      currentInteractionId: 2,
-      selectedNodeId: null,
-    });
-    expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([201]);
-    expect(controller.getNavigationHistory().canGoBack).toBe(true);
-    expect(controller.appState.actionInvocations).toEqual([acceptedInvocation]);
+    }), "a resolved invoke opens its destination").resolves.toBe(true);
+    expect(beforeInvokeCommit, "the invoke commits through beforeCommit").toHaveBeenCalledOnce();
+    expect(controller.viewState, "the invoke lands at the destination turn without selection")
+      .toMatchObject({
+        currentThreadId: 20,
+        currentInteractionId: 2,
+        selectedNodeId: null,
+      });
+    expect(controller.viewState.layerPath.map(({ layerId }) => layerId),
+      "the destination opens at its root layer").toEqual([201]);
+    expect(controller.getNavigationHistory().canGoBack, "the invoke is history-navigable")
+      .toBe(true);
+    expect(controller.appState.actionInvocations, "the destination owns its accepted invocation")
+      .toEqual([acceptedInvocation]);
 
     const beforeHistoryCommit = vi.fn();
     await controller.navigateHistory("back", { beforeCommit: beforeHistoryCommit });
-    expect(beforeHistoryCommit).toHaveBeenCalledOnce();
-    expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
-    expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101]);
-    expect(controller.appState.actionInvocations).toEqual([acceptedInvocation]);
+    expect(beforeHistoryCommit, "Back commits through beforeCommit").toHaveBeenCalledOnce();
+    expect(controller.viewState, "Back returns to the invoke source")
+      .toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
+    expect(controller.viewState.layerPath.map(({ layerId }) => layerId),
+      "Back restores the source root layer").toEqual([101]);
+    expect(controller.appState.actionInvocations, "Back keeps the destination's invocation state")
+      .toEqual([acceptedInvocation]);
 
     await controller.navigateHistory("forward");
-    expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
-    expect(controller.appState.actionInvocations).toEqual([acceptedInvocation]);
+    expect(controller.viewState, "Forward replays the invoke destination")
+      .toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
+    expect(controller.appState.actionInvocations, "Forward keeps the accepted invocation")
+      .toEqual([acceptedInvocation]);
 
     await controller.navigateHistory("back");
     await controller.navigateHistory("forward");
-    expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
-    expect(controller.appState.actionInvocations).toHaveLength(1);
-    expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("accepted");
-  });
+    expect(controller.viewState, "repeated Back/Forward stays stable")
+      .toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
+    expect(controller.appState.actionInvocations, "invocation state survives history replays")
+      .toHaveLength(1);
+    expect(controller.appState.actionInvocations[0].resultCompletionStatus,
+      "the invocation stays accepted").toBe("accepted");
 
-  it("does not apply a resolved invoke destination after a newer thread selection wins", async () => {
-    const sourceLayer = rootLayer(101, 11);
-    const action = { id: 501, kind: "invoke", sourceNodeId: 11, targetLayerId: 201 };
-    sourceLayer.actions = [action];
-    const source = interaction(1, 10, sourceLayer);
+    const threadSupersededLayer = rootLayer(101, 11);
+    const threadSupersededAction = { id: 501, kind: "invoke", sourceNodeId: 11, targetLayerId: 201 };
+    threadSupersededLayer.actions = [threadSupersededAction];
+    const threadSupersededSource = interaction(1, 10, threadSupersededLayer);
     const other = interaction(3, 30, rootLayer(301, 31));
     const destinationRead = deferred();
     requestImplementation = vi.fn(async (path) => {
       if (path.startsWith("/api/state?threadId=10")) {
-        return productState([{ id: 10, title: "Source" }, { id: 30, title: "Other" }], [source]);
+        return productState([{ id: 10, title: "Source" }, { id: 30, title: "Other" }], [threadSupersededSource]);
       }
       if (path.startsWith("/api/state?threadId=30")) {
         return productState([{ id: 10, title: "Source" }, { id: 30, title: "Other" }], [other]);
@@ -394,10 +485,10 @@ describe("workspace navigation integration", () => {
       if (path.endsWith("/actions/501/destination")) return destinationRead.promise;
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    const pending = controller.navigateResolvedInvoke(action);
-    await controller.loadThread(30);
+    const threadRacing = await loadModules();
+    await threadRacing.loadThread(10);
+    const pendingThreadInvoke = threadRacing.navigateResolvedInvoke(threadSupersededAction);
+    await threadRacing.loadThread(30);
     destinationRead.resolve({
       actionId: 501,
       actionKind: "invoke",
@@ -406,43 +497,46 @@ describe("workspace navigation integration", () => {
       interactionId: 2,
       rootLayerId: 201,
     });
+    await expect(pendingThreadInvoke, "a newer thread selection beats the invoke destination")
+      .resolves.toBe(false);
+    expect(threadRacing.viewState, "the newer thread owns the view")
+      .toMatchObject({ currentThreadId: 30, currentInteractionId: 3 });
 
-    await expect(pending).resolves.toBe(false);
-    expect(controller.viewState).toMatchObject({ currentThreadId: 30, currentInteractionId: 3 });
-  });
-
-  it("does not apply a resolved invoke destination after a newer node selection wins", async () => {
-    const sourceLayer = rootLayer(101, 11);
-    sourceLayer.nodes.push({ id: 12, title: "Node 12" });
-    const action = { id: 501, kind: "invoke", sourceNodeId: 11, targetLayerId: 201 };
-    sourceLayer.actions = [action];
-    const source = interaction(1, 10, sourceLayer);
-    const destination = interaction(2, 20, rootLayer(201, 21));
-    const destinationRead = deferred();
+    const nodeSupersededLayer = rootLayer(101, 11);
+    nodeSupersededLayer.nodes.push({ id: 12, title: "Node 12" });
+    const nodeSupersededAction = { id: 501, kind: "invoke", sourceNodeId: 11, targetLayerId: 201 };
+    nodeSupersededLayer.actions = [nodeSupersededAction];
+    const nodeSupersededSource = interaction(1, 10, nodeSupersededLayer);
+    const nodeDestination = interaction(2, 20, rootLayer(201, 21));
+    const nodeDestinationRead = deferred();
     requestImplementation = vi.fn(async (path) => {
       if (path.startsWith("/api/state?threadId=10")) {
-        return productState([{ id: 10, title: "Source" }, { id: 20, title: "Result" }], [source]);
+        return productState([{ id: 10, title: "Source" }, { id: 20, title: "Result" }], [nodeSupersededSource]);
       }
-      if (path.endsWith("/actions/501/destination")) return destinationRead.promise;
+      if (path.endsWith("/actions/501/destination")) return nodeDestinationRead.promise;
       if (path === "/api/threads/20") {
         return {
           thread: { id: 20, title: "Result" },
-          interactions: [destination],
+          interactions: [nodeDestination],
           actionInvocations: [],
         };
       }
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    controller.replaceCurrentSelection(11);
-    const beforeCommit = vi.fn();
+    const nodeRacing = await loadModules();
+    await nodeRacing.loadThread(10);
+    nodeRacing.replaceCurrentSelection(11);
+    const beforeNodeCommit = vi.fn();
 
-    const pending = controller.navigateResolvedInvoke(action, { beforeCommit });
-    expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(true);
-    controller.replaceCurrentSelection(12);
-    expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(false);
-    destinationRead.resolve({
+    const pendingNodeInvoke = nodeRacing.navigateResolvedInvoke(nodeSupersededAction, {
+      beforeCommit: beforeNodeCommit,
+    });
+    expect(nodeRacing.getNavigationHistory().pendingResolvedInvokeNavigation,
+      "the pending invoke navigation is visible while resolving").toBe(true);
+    nodeRacing.replaceCurrentSelection(12);
+    expect(nodeRacing.getNavigationHistory().pendingResolvedInvokeNavigation,
+      "a newer node selection cancels the pending invoke").toBe(false);
+    nodeDestinationRead.resolve({
       actionId: 501,
       actionKind: "invoke",
       targetLayerId: 201,
@@ -450,43 +544,45 @@ describe("workspace navigation integration", () => {
       interactionId: 2,
       rootLayerId: 201,
     });
+    await expect(pendingNodeInvoke, "the destination is dropped for the newer selection")
+      .resolves.toBe(false);
+    expect(beforeNodeCommit, "superseded invokes never commit").not.toHaveBeenCalled();
+    expect(nodeRacing.viewState, "the newer selection owns the view")
+      .toMatchObject({
+        currentThreadId: 10,
+        currentInteractionId: 1,
+        selectedNodeId: 12,
+      });
+    expect(requestImplementation, "the superseded destination thread is never loaded")
+      .not.toHaveBeenCalledWith("/api/threads/20");
 
-    await expect(pending).resolves.toBe(false);
-    expect(beforeCommit).not.toHaveBeenCalled();
-    expect(controller.viewState).toMatchObject({
-      currentThreadId: 10,
-      currentInteractionId: 1,
-      selectedNodeId: 12,
-    });
-    expect(requestImplementation).not.toHaveBeenCalledWith("/api/threads/20");
-  });
-
-  it("lets a newer Back intent cancel a pending resolved invoke navigation", async () => {
-    const previous = interaction(1, 5, rootLayer(51, 6));
-    const sourceLayer = rootLayer(101, 11);
-    const action = { id: 501, kind: "invoke", sourceNodeId: 11, targetLayerId: 201 };
-    sourceLayer.actions = [action];
-    const source = interaction(2, 10, sourceLayer);
-    const threads = [{ id: 5, title: "Previous" }, { id: 10, title: "Source" }];
-    const destinationRead = deferred();
+    const backPrevious = interaction(1, 5, rootLayer(51, 6));
+    const backSourceLayer = rootLayer(101, 11);
+    const backAction = { id: 501, kind: "invoke", sourceNodeId: 11, targetLayerId: 201 };
+    backSourceLayer.actions = [backAction];
+    const backSource = interaction(2, 10, backSourceLayer);
+    const backThreads = [{ id: 5, title: "Previous" }, { id: 10, title: "Source" }];
+    const backDestinationRead = deferred();
     requestImplementation = vi.fn(async (path) => {
-      if (path.startsWith("/api/state?threadId=5")) return productState(threads, [previous]);
-      if (path.startsWith("/api/state?threadId=10")) return productState(threads, [source]);
-      if (path.endsWith("/actions/501/destination")) return destinationRead.promise;
+      if (path.startsWith("/api/state?threadId=5")) return productState(backThreads, [backPrevious]);
+      if (path.startsWith("/api/state?threadId=10")) return productState(backThreads, [backSource]);
+      if (path.endsWith("/actions/501/destination")) return backDestinationRead.promise;
       if (path === "/api/threads/5") {
-        return { thread: threads[0], interactions: [previous], actionInvocations: [] };
+        return { thread: backThreads[0], interactions: [backPrevious], actionInvocations: [] };
       }
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
-    await controller.loadThread(5);
-    await controller.loadThread(10);
+    const backRacing = await loadModules();
+    await backRacing.loadThread(5);
+    await backRacing.loadThread(10);
 
-    const pendingInvoke = controller.navigateResolvedInvoke(action);
-    expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(true);
-    const pendingBack = controller.navigateHistory("back");
-    await expect(pendingBack).resolves.toMatchObject({ threadId: "5", turnId: "1" });
-    destinationRead.resolve({
+    const pendingBackInvoke = backRacing.navigateResolvedInvoke(backAction);
+    expect(backRacing.getNavigationHistory().pendingResolvedInvokeNavigation,
+      "the invoke navigation is pending while its destination resolves").toBe(true);
+    const pendingBackIntent = backRacing.navigateHistory("back");
+    await expect(pendingBackIntent, "a newer Back intent resolves first")
+      .resolves.toMatchObject({ threadId: "5", turnId: "1" });
+    backDestinationRead.resolve({
       actionId: 501,
       actionKind: "invoke",
       targetLayerId: 201,
@@ -494,117 +590,233 @@ describe("workspace navigation integration", () => {
       interactionId: 3,
       rootLayerId: 201,
     });
+    await expect(pendingBackInvoke, "the Back intent cancels the pending invoke")
+      .resolves.toBe(false);
+    expect(backRacing.getNavigationHistory().pendingResolvedInvokeNavigation,
+      "no invoke navigation remains pending").toBe(false);
+    expect(backRacing.viewState, "Back owns the view")
+      .toMatchObject({ currentThreadId: 5, currentInteractionId: 1 });
+  }, 20_000);
 
-    await expect(pendingInvoke).resolves.toBe(false);
-    expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(false);
-    expect(controller.viewState).toMatchObject({ currentThreadId: 5, currentInteractionId: 1 });
-  });
-
-  it("cancels a pending restoration without re-rendering when the shell takes focus", async () => {
-    const turn1 = interaction(1, 10, rootLayer(101, 11));
-    const turn2 = interaction(2, 20, rootLayer(201, 21));
-    const state1 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn1]);
-    const state2 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn2]);
-    const restore = deferred();
-    requestImplementation = vi.fn(async (path) => {
-      if (path.startsWith("/api/state?threadId=10")) return state1;
-      if (path.startsWith("/api/state?threadId=20")) return state2;
-      if (path === "/api/threads/10") return restore.promise;
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    await controller.loadThread(20);
-    const pending = controller.navigateHistory(-1);
-    await vi.waitFor(() => expect(controller.getNavigationHistory().pendingDirection).toBe("back"));
-    const beforeCancelRenders = rendered;
-
-    controller.cancelNavigationHistory();
-    expect(rendered).toBe(beforeCancelRenders);
-    restore.resolve({ thread: state1.threads[0], interactions: [turn1], actionInvocations: [] });
-
-    await expect(pending).rejects.toMatchObject({ code: "navigation_superseded" });
-    expect(rendered).toBe(beforeCancelRenders);
-    expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
-  });
-
-  it("discards a stale poll that resolves after direct descendant navigation", async () => {
-    const root = rootLayer(101, 11);
-    root.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
-    const child = rootLayer(102, 12);
-    const turn = interaction(1, 10, root);
-    const state = productState([{ id: 10, title: "First" }], [turn]);
+  it("keeps visible layers fresh without letting stale reads clobber newer navigation", async () => {
+    const pollRoot = rootLayer(101, 11);
+    pollRoot.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
+    const pollChild = rootLayer(102, 12);
+    const pollTurn = interaction(1, 10, pollRoot);
+    const pollState = productState([{ id: 10, title: "First" }], [pollTurn]);
     const staleRefresh = deferred();
-    let stateReads = 0;
+    let pollStateReads = 0;
     requestImplementation = vi.fn(async (path) => {
       if (path.startsWith("/api/state?threadId=10")) {
-        stateReads += 1;
-        return stateReads === 1 ? state : staleRefresh.promise;
+        pollStateReads += 1;
+        return pollStateReads === 1 ? pollState : staleRefresh.promise;
       }
-      if (path.endsWith("/layers/102")) return child;
+      if (path.endsWith("/layers/102")) return pollChild;
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    const polling = controller.refreshState(10);
-    await controller.navigateLayer(102, {
-      action: root.actions[0],
-      sourceNode: root.nodes[0],
+    const pollController = await loadModules();
+    await pollController.loadThread(10);
+    const polling = pollController.refreshState(10);
+    await pollController.navigateLayer(102, {
+      action: pollRoot.actions[0],
+      sourceNode: pollRoot.nodes[0],
     });
-    staleRefresh.resolve(state);
+    staleRefresh.resolve(pollState);
+    await expect(polling, "a stale poll discards itself after descendant navigation")
+      .resolves.toBe(false);
+    expect(pollController.appState.visibleLayer.layer.id, "the descendant stays visible")
+      .toBe(102);
+    expect(pollController.viewState.layerPath.map(({ layerId }) => layerId),
+      "the descendant path survives the stale poll").toEqual([101, 102]);
 
-    await expect(polling).resolves.toBe(false);
-    expect(controller.appState.visibleLayer.layer.id).toBe(102);
-    expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101, 102]);
-  });
-
-  it("refreshes an already-open nested invoke when a project-visible lease resolves", async () => {
-    const root = rootLayer(101, 11);
-    root.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
+    const leaseRoot = rootLayer(101, 11);
+    leaseRoot.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
     const staleChild = rootLayer(102, 12);
     staleChild.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: null }];
     const canonicalChild = rootLayer(102, 12);
     canonicalChild.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: 303 }];
-    const turn = interaction(1, 10, root);
-    const initial = productState([{ id: 10, title: "Source" }], [turn]);
-    const resolved = productState([{ id: 10, title: "Source" }], [turn]);
-    resolved.actionInvocations = [{
+    const leaseTurn = interaction(1, 10, leaseRoot);
+    const leaseInitial = productState([{ id: 10, title: "Source" }], [leaseTurn]);
+    const leaseResolved = productState([{ id: 10, title: "Source" }], [leaseTurn]);
+    leaseResolved.actionInvocations = [{
       sourceInteractionId: 99,
       actionId: 777,
       resultInteractionId: 100,
     }];
-    let stateReads = 0;
-    let layerReads = 0;
+    let leaseStateReads = 0;
+    let leaseLayerReads = 0;
     requestImplementation = vi.fn(async (path) => {
       if (path.startsWith("/api/state?threadId=10")) {
-        stateReads += 1;
-        return stateReads === 1 ? initial : resolved;
+        leaseStateReads += 1;
+        return leaseStateReads === 1 ? leaseInitial : leaseResolved;
       }
       if (path.endsWith("/layers/102")) {
-        layerReads += 1;
-        return layerReads === 1 ? staleChild : canonicalChild;
+        leaseLayerReads += 1;
+        return leaseLayerReads === 1 ? staleChild : canonicalChild;
       }
       throw new Error(`Unexpected request: ${path}`);
     });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    await controller.navigateLayer(102, {
-      action: root.actions[0],
-      sourceNode: root.nodes[0],
+    const leaseController = await loadModules();
+    await leaseController.loadThread(10);
+    await leaseController.navigateLayer(102, {
+      action: leaseRoot.actions[0],
+      sourceNode: leaseRoot.nodes[0],
     });
-    expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
+    expect(leaseController.appState.visibleLayer.actions[0].targetLayerId,
+      "the nested invoke starts unresolved").toBeNull();
 
-    await controller.refreshState(10);
+    await leaseController.refreshState(10);
+    expect(leaseController.appState.visibleLayer.actions[0],
+      "a project-visible lease resolution refreshes the open nested invoke")
+      .toMatchObject({ id: 777, kind: "invoke", targetLayerId: 303 });
+    expect(leaseLayerReads, "the refresh refetches the visible nested layer").toBe(2);
 
-    expect(controller.appState.visibleLayer.actions[0]).toMatchObject({
-      id: 777,
-      kind: "invoke",
-      targetLayerId: 303,
+    const clobberRoot = rootLayer(101, 11);
+    clobberRoot.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
+    const clobberChild = rootLayer(102, 12);
+    clobberChild.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: null }];
+    const canonicalChildRead = deferred();
+    const clobberSource = interaction(1, 10, clobberRoot);
+    const clobberOther = interaction(2, 20, rootLayer(201, 21));
+    const clobberInitial = productState(
+      [{ id: 10, title: "Source" }, { id: 20, title: "Other" }],
+      [clobberSource],
+    );
+    const clobberResolvedState = productState(
+      [{ id: 10, title: "Source" }, { id: 20, title: "Other" }],
+      [clobberSource],
+    );
+    clobberResolvedState.actionInvocations = [{
+      sourceInteractionId: 99,
+      actionId: 777,
+      resultInteractionId: 100,
+    }];
+    let clobberSourceReads = 0;
+    let clobberLayerReads = 0;
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) {
+        clobberSourceReads += 1;
+        return clobberSourceReads === 1 ? clobberInitial : clobberResolvedState;
+      }
+      if (path.startsWith("/api/state?threadId=20")) {
+        return productState([{ id: 10, title: "Source" }, { id: 20, title: "Other" }], [clobberOther]);
+      }
+      if (path.endsWith("/layers/102")) {
+        clobberLayerReads += 1;
+        return clobberLayerReads === 1 ? clobberChild : canonicalChildRead.promise;
+      }
+      throw new Error(`Unexpected request: ${path}`);
     });
-    expect(layerReads).toBe(2);
-  });
+    const clobberController = await loadModules();
+    await clobberController.loadThread(10);
+    await clobberController.navigateLayer(102, {
+      action: clobberRoot.actions[0],
+      sourceNode: clobberRoot.nodes[0],
+    });
+    const slowRefresh = clobberController.refreshState(10);
+    await vi.waitFor(() => expect(clobberLayerReads, "the refresh refetches the nested layer").toBe(2));
+    expect(clobberController.viewState, "the source thread is still visible")
+      .toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
+    expect(clobberController.viewState.layerPath.map(({ layerId }) => layerId),
+      "the nested path is still open").toEqual([101, 102]);
+    expect(clobberController.appState.visibleLayer, "the stale child layer is visible")
+      .toBe(clobberChild);
+    expect(clobberController.appState.visibleLayer.actions[0].targetLayerId,
+      "the nested invoke is still unresolved").toBeNull();
 
-  it("keeps polling an open reused source while its project-visible invoke runs elsewhere", async () => {
+    await clobberController.loadThread(20);
+    canonicalChildRead.resolve({
+      ...clobberChild,
+      actions: [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: 303 }],
+    });
+    await expect(slowRefresh, "the slow nested refresh yields to the newer thread")
+      .resolves.toBe(false);
+    expect(clobberController.viewState, "the newer thread selection survives the slow refresh")
+      .toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
+    expect(clobberController.appState.visibleLayer.layer.id, "the new thread's layer is visible")
+      .toBe(201);
+
+    const backPollTurn1 = interaction(1, 10, rootLayer(101, 11));
+    const runningTurn = {
+      id: 2,
+      threadId: 20,
+      sequence: 1,
+      text: "Running turn",
+      completionStatus: "running",
+      completionOutput: null,
+    };
+    const acceptedTurn = interaction(2, 20, rootLayer(201, 21));
+    const backPollState1 = productState(
+      [{ id: 10, title: "First" }, { id: 20, title: "Second" }],
+      [backPollTurn1],
+    );
+    const runningState = productState(backPollState1.threads, [runningTurn]);
+    const acceptedState = productState(backPollState1.threads, [acceptedTurn]);
+    const sourcePoll = deferred();
+    const backRestore = deferred();
+    let thread20Reads = 0;
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) return backPollState1;
+      if (path.startsWith("/api/state?threadId=20")) {
+        thread20Reads += 1;
+        return thread20Reads === 1 ? runningState : sourcePoll.promise;
+      }
+      if (path === "/api/threads/10") return backRestore.promise;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const backPollController = await loadModules();
+    await backPollController.loadThread(10);
+    await backPollController.loadThread(20);
+    const inFlightPoll = backPollController.refreshState(20);
+    const pendingBack = backPollController.navigateHistory(-1);
+
+    sourcePoll.resolve(acceptedState);
+    await expect(inFlightPoll, "the in-flight source poll yields to Back").resolves.toBe(false);
+    backRestore.resolve({
+      thread: backPollState1.threads[0],
+      interactions: [backPollTurn1],
+      actionInvocations: [],
+    });
+    await expect(pendingBack, "Back wins over the source poll")
+      .resolves.toMatchObject({ threadId: "10", turnId: "1" });
+    expect(backPollController.viewState, "Back owns the view despite the poll")
+      .toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
+
+    const abaRoot = rootLayer(101, 11);
+    abaRoot.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
+    const abaChild = rootLayer(102, 12);
+    const abaTurn1 = interaction(1, 10, abaRoot, 1);
+    const abaTurn2 = interaction(2, 10, rootLayer(201, 21), 2);
+    const abaState = productState([{ id: 10, title: "First" }], [abaTurn1, abaTurn2]);
+    const abaLayerRequest = deferred();
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) return abaState;
+      if (path.endsWith("/layers/102")) return abaLayerRequest.promise;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const abaController = await loadModules(
+      "http://127.0.0.1:43123/?threadId=10&interactionId=1",
+    );
+    await abaController.loadThread(10);
+    abaController.selectTurnById(1);
+    const pendingLayer = abaController.navigateLayer(102, {
+      action: abaRoot.actions[0],
+      sourceNode: abaRoot.nodes[0],
+    });
+    abaController.selectTurnById(2);
+    abaController.selectTurnById(1);
+    abaLayerRequest.resolve(abaChild);
+    await expect(pendingLayer, "the ABA sequence settles the stale layer navigation silently")
+      .resolves.toBeUndefined();
+    expect(abaController.viewState.currentInteractionId, "the explicit turn choice survives")
+      .toBe(1);
+    expect(abaController.appState.visibleLayer.layer.id, "the stale layer response is rejected")
+      .toBe(101);
+    expect(abaController.viewState.layerPath.map(({ layerId }) => layerId),
+      "the layer path resets to the root").toEqual([101]);
+  }, 20_000);
+
+  it("arbitrates scheduled polling around invoke lifecycles and explicit turn choices", async () => {
     vi.useFakeTimers();
     try {
       const staleRoot = rootLayer(101, 11);
@@ -640,26 +852,23 @@ describe("workspace navigation integration", () => {
       const controller = await loadModules();
 
       await controller.loadThread(10);
-      expect(controller.appState.interactions).toHaveLength(1);
-      expect(controller.appState.interactions[0].id).toBe(1);
-      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
+      expect(controller.appState.interactions, "the reused source loads its turn").toHaveLength(1);
+      expect(controller.appState.interactions[0].id, "the loaded turn is current").toBe(1);
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId,
+        "the invoke starts unresolved").toBeNull();
 
       await vi.advanceTimersByTimeAsync(500);
-
-      expect(controller.appState.visibleLayer.actions[0]).toMatchObject({
-        id: 777,
-        kind: "invoke",
-        targetLayerId: 303,
-      });
-      expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("accepted");
-      expect(stateReads).toBe(2);
-      expect(layerReads).toBe(2);
+      expect(controller.appState.visibleLayer.actions[0],
+        "polling resolves the reused source invoke while it runs elsewhere")
+        .toMatchObject({ id: 777, kind: "invoke", targetLayerId: 303 });
+      expect(controller.appState.actionInvocations[0].resultCompletionStatus,
+        "the invocation settles to accepted").toBe("accepted");
+      expect(stateReads, "one poll refreshes state").toBe(2);
+      expect(layerReads, "one poll refreshes the visible layer").toBe(2);
     } finally {
       vi.useRealTimers();
     }
-  });
 
-  it("retries an imported thread until its server projection is fresh", async () => {
     vi.useFakeTimers();
     try {
       const turn = interaction(1, 10, rootLayer(101, 11));
@@ -679,54 +888,53 @@ describe("workspace navigation integration", () => {
       const controller = await loadModules();
 
       await controller.loadThread(10);
-      expect(stateReads).toBe(1);
-      expect(controller.appState.interactions[0].projectionFresh).toBe(false);
+      expect(stateReads, "the import loads once").toBe(1);
+      expect(controller.appState.interactions[0].projectionFresh,
+        "the imported projection starts stale").toBe(false);
 
       await vi.advanceTimersByTimeAsync(500);
-
-      expect(stateReads).toBe(2);
-      expect(controller.appState.interactions[0].projectionFresh).toBe(true);
-      expect(vi.getTimerCount()).toBe(0);
+      expect(stateReads, "the stale import retries until fresh").toBe(2);
+      expect(controller.appState.interactions[0].projectionFresh,
+        "the retry lands on the fresh projection").toBe(true);
+      expect(vi.getTimerCount(), "fresh projections stop retrying").toBe(0);
     } finally {
       vi.useRealTimers();
     }
-  });
 
-  it("retries a project-visible submitted invocation through the same source action", async () => {
     vi.useFakeTimers();
     try {
-      const root = rootLayer(101, 11);
-      const action = {
+      const retryRoot = rootLayer(101, 11);
+      const retryAction = {
         id: 777,
         kind: "invoke",
         sourceNodeId: 11,
         targetLayerId: null,
         interactionText: "Resume the leased result",
       };
-      root.actions = [action];
-      const source = interaction(1, 10, root);
-      const submitted = productState([{ id: 10, title: "Recovery source" }], [source]);
+      retryRoot.actions = [retryAction];
+      const retrySource = interaction(1, 10, retryRoot);
+      const submitted = productState([{ id: 10, title: "Recovery source" }], [retrySource]);
       submitted.actionInvocations = [{
         sourceInteractionId: 99,
         actionId: 777,
         resultInteractionId: 100,
         resultCompletionStatus: "submitted",
       }];
-      const running = productState([{ id: 10, title: "Recovery source" }], [source]);
-      running.actionInvocations = [{
+      const retryRunning = productState([{ id: 10, title: "Recovery source" }], [retrySource]);
+      retryRunning.actionInvocations = [{
         ...submitted.actionInvocations[0],
         resultCompletionStatus: "running",
       }];
       let retried = false;
       requestImplementation = vi.fn(async (path, options) => {
-        if (path.startsWith("/api/state?threadId=10")) return retried ? running : submitted;
-        if (path.endsWith("/layers/101")) return root;
+        if (path.startsWith("/api/state?threadId=10")) return retried ? retryRunning : submitted;
+        if (path.endsWith("/layers/101")) return retryRoot;
         if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
-          expect(options).toEqual({ method: "POST" });
+          expect(options, "the retry posts").toEqual({ method: "POST" });
           retried = true;
           return {
             created: false,
-            invocation: running.actionInvocations[0],
+            invocation: retryRunning.actionInvocations[0],
             interaction: { id: 100, threadId: 20, completionStatus: "running" },
           };
         }
@@ -735,378 +943,196 @@ describe("workspace navigation integration", () => {
       const controller = await loadModules();
 
       await controller.loadThread(10);
-      await controller.invokeAction(action);
-
-      expect(retried).toBe(true);
-      expect(requestImplementation).toHaveBeenCalledWith(
-        "/api/threads/10/interactions/1/actions/777/invoke",
-        { method: "POST" },
-      );
-      expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("running");
-      expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
+      await controller.invokeAction(retryAction);
+      expect(retried, "a project-visible submitted invocation retries through invoke").toBe(true);
+      expect(requestImplementation, "the retry reuses the same source action")
+        .toHaveBeenCalledWith("/api/threads/10/interactions/1/actions/777/invoke", { method: "POST" });
+      expect(controller.appState.actionInvocations[0].resultCompletionStatus,
+        "the retry lands on the running invocation").toBe("running");
+      expect(controller.viewState, "the retry stays on the source turn")
+        .toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
     } finally {
       vi.useRealTimers();
     }
-  });
 
-  it.each([
-    ["submitted", false, 1],
-    ["running", true, 100],
-  ])("advances the invoke tutorial only for a non-retryable %s result", async (
-    resultCompletionStatus,
-    shouldAdvance,
-    expectedInteractionId,
-  ) => {
-    vi.useFakeTimers();
-    try {
-      const root = rootLayer(101, 11);
-      const action = {
-        id: 777,
-        kind: "invoke",
-        sourceNodeId: 11,
-        targetLayerId: null,
-        interactionText: "Explore this node",
-      };
-      root.actions = [action];
-      const source = interaction(1, 10, root);
-      const result = {
-        id: 100,
-        threadId: 10,
-        completionStatus: resultCompletionStatus,
-      };
-      const beforeInvoke = productState([{ id: 10, title: "Tutorial" }], [source]);
-      const afterInvoke = productState([{ id: 10, title: "Tutorial" }], [source, result]);
-      afterInvoke.actionInvocations = [{
-        sourceInteractionId: 1,
-        actionId: 777,
-        resultInteractionId: 100,
-        resultCompletionStatus,
-      }];
-      let invoked = false;
-      requestImplementation = vi.fn(async (path, options) => {
-        if (path.startsWith("/api/state?threadId=10")) return invoked ? afterInvoke : beforeInvoke;
-        if (path.endsWith("/layers/101")) return root;
-        if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
-          expect(options).toEqual({ method: "POST" });
-          invoked = true;
-          return {
-            created: true,
-            invocation: afterInvoke.actionInvocations[0],
-            interaction: result,
-          };
-        }
-        throw new Error(`Unexpected request: ${path}`);
-      });
-      const controller = await loadModules();
-
-      await controller.loadThread(10);
-      await controller.invokeAction(action);
-
-      expect(tutorialActionSucceeded).toHaveBeenCalledTimes(shouldAdvance ? 1 : 0);
-      expect(controller.viewState.currentInteractionId).toBe(expectedInteractionId);
-      expect(controller.appState.actionInvocations[0].resultCompletionStatus)
-        .toBe(resultCompletionStatus);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it.each(["failed", "stopped"])(
-    "does not poll an unresolved shared action after its remote result is %s",
-    async (resultCompletionStatus) => {
+    const tutorialCases = [
+      ["submitted", false, 1],
+      ["running", true, 100],
+    ];
+    expect(tutorialCases, "tutorial advancement inventory").toHaveLength(2);
+    for (const [resultCompletionStatus, shouldAdvance, expectedInteractionId] of tutorialCases) {
       vi.useFakeTimers();
       try {
-        const staleRoot = rootLayer(101, 11);
-        staleRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: null }];
-        const source = interaction(1, 10, staleRoot);
-        const state = productState([{ id: 10, title: "Reused source" }], [source]);
-        state.actionInvocations = [{
+        const tutorialRoot = rootLayer(101, 11);
+        const tutorialAction = {
+          id: 777,
+          kind: "invoke",
+          sourceNodeId: 11,
+          targetLayerId: null,
+          interactionText: "Explore this node",
+        };
+        tutorialRoot.actions = [tutorialAction];
+        const tutorialSource = interaction(1, 10, tutorialRoot);
+        const result = {
+          id: 100,
+          threadId: 10,
+          completionStatus: resultCompletionStatus,
+        };
+        const beforeInvoke = productState([{ id: 10, title: "Tutorial" }], [tutorialSource]);
+        const afterInvoke = productState([{ id: 10, title: "Tutorial" }], [tutorialSource, result]);
+        afterInvoke.actionInvocations = [{
+          sourceInteractionId: 1,
+          actionId: 777,
+          resultInteractionId: 100,
+          resultCompletionStatus,
+        }];
+        let invoked = false;
+        requestImplementation = vi.fn(async (path, options) => {
+          if (path.startsWith("/api/state?threadId=10")) return invoked ? afterInvoke : beforeInvoke;
+          if (path.endsWith("/layers/101")) return tutorialRoot;
+          if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
+            expect(options, "the tutorial invoke posts").toEqual({ method: "POST" });
+            invoked = true;
+            return {
+              created: true,
+              invocation: afterInvoke.actionInvocations[0],
+              interaction: result,
+            };
+          }
+          throw new Error(`Unexpected request: ${path}`);
+        });
+        const controller = await loadModules();
+
+        await controller.loadThread(10);
+        await controller.invokeAction(tutorialAction);
+        expect(tutorialActionSucceeded,
+          `the invoke tutorial advances only for a non-retryable ${resultCompletionStatus} result`)
+          .toHaveBeenCalledTimes(shouldAdvance ? 1 : 0);
+        expect(controller.viewState.currentInteractionId,
+          `the ${resultCompletionStatus} result places the cursor`).toBe(expectedInteractionId);
+        expect(controller.appState.actionInvocations[0].resultCompletionStatus,
+          `the ${resultCompletionStatus} invocation status settles`).toBe(resultCompletionStatus);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    const terminalCases = ["failed", "stopped"];
+    expect(terminalCases, "terminal outcome inventory").toHaveLength(2);
+    for (const resultCompletionStatus of terminalCases) {
+      vi.useFakeTimers();
+      try {
+        const terminalRoot = rootLayer(101, 11);
+        terminalRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: null }];
+        const terminalSource = interaction(1, 10, terminalRoot);
+        const terminalState = productState([{ id: 10, title: "Reused source" }], [terminalSource]);
+        terminalState.actionInvocations = [{
           sourceInteractionId: 99,
           actionId: 777,
           resultInteractionId: 100,
           resultCompletionStatus,
         }];
         requestImplementation = vi.fn(async (path) => {
-          if (path.startsWith("/api/state?threadId=10")) return state;
+          if (path.startsWith("/api/state?threadId=10")) return terminalState;
           throw new Error(`Unexpected request: ${path}`);
         });
         const controller = await loadModules();
 
         await controller.loadThread(10);
         await vi.advanceTimersByTimeAsync(1_500);
-
-        expect(requestImplementation).toHaveBeenCalledTimes(1);
-        expect(controller.appState.actionInvocations).toEqual(state.actionInvocations);
-        expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
+        expect(requestImplementation,
+          `a ${resultCompletionStatus} remote result stops polling`).toHaveBeenCalledTimes(1);
+        expect(controller.appState.actionInvocations,
+          `the ${resultCompletionStatus} invocation stays untouched`)
+          .toEqual(terminalState.actionInvocations);
+        expect(controller.appState.visibleLayer.actions[0].targetLayerId,
+          `the ${resultCompletionStatus} action stays unresolved`).toBeNull();
       } finally {
         vi.useRealTimers();
       }
-    },
-  );
+    }
 
-  it("retries a one-shot canonical root failure after the result is already terminal", async () => {
     vi.useFakeTimers();
     try {
-      const staleRoot = rootLayer(101, 11);
-      staleRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: null }];
-      const canonicalRoot = rootLayer(101, 11);
-      canonicalRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: 303 }];
-      const source = interaction(1, 10, staleRoot);
-      const state = productState([{ id: 10, title: "Source" }], [source]);
-      state.actionInvocations = [{ sourceInteractionId: 1, actionId: 777, resultInteractionId: 2 }];
-      let layerReads = 0;
+      const oneShotStaleRoot = rootLayer(101, 11);
+      oneShotStaleRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: null }];
+      const oneShotCanonicalRoot = rootLayer(101, 11);
+      oneShotCanonicalRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: 303 }];
+      const oneShotSource = interaction(1, 10, oneShotStaleRoot);
+      const oneShotState = productState([{ id: 10, title: "Source" }], [oneShotSource]);
+      oneShotState.actionInvocations = [{ sourceInteractionId: 1, actionId: 777, resultInteractionId: 2 }];
+      let oneShotLayerReads = 0;
       requestImplementation = vi.fn(async (path) => {
-        if (path.startsWith("/api/state?threadId=10")) return state;
+        if (path.startsWith("/api/state?threadId=10")) return oneShotState;
         if (path.endsWith("/layers/101")) {
-          layerReads += 1;
-          if (layerReads === 1) throw new Error("one-shot graph read failure");
-          return canonicalRoot;
+          oneShotLayerReads += 1;
+          if (oneShotLayerReads === 1) throw new Error("one-shot graph read failure");
+          return oneShotCanonicalRoot;
         }
         throw new Error(`Unexpected request: ${path}`);
       });
       const controller = await loadModules();
 
       await controller.loadThread(10);
-      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId,
+        "the failed canonical read leaves the action unresolved").toBeNull();
       await vi.advanceTimersByTimeAsync(500);
-
-      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBe(303);
-      expect(layerReads).toBe(2);
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId,
+        "the one-shot canonical root failure retries after the terminal result").toBe(303);
+      expect(oneShotLayerReads, "the retry refetches the root layer").toBe(2);
     } finally {
       vi.useRealTimers();
     }
-  });
 
-  it("retries a one-shot canonical nested-layer failure after the result is terminal", async () => {
     vi.useFakeTimers();
     try {
-      const root = rootLayer(101, 11);
-      root.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
-      const staleChild = rootLayer(102, 12);
-      staleChild.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: null }];
-      const canonicalChild = rootLayer(102, 12);
-      canonicalChild.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: 303 }];
-      const source = interaction(1, 10, root);
-      const initial = productState([{ id: 10, title: "Source" }], [source]);
-      const resolved = productState([{ id: 10, title: "Source" }], [source]);
-      resolved.actionInvocations = [{ sourceInteractionId: 1, actionId: 777, resultInteractionId: 2 }];
-      let stateReads = 0;
-      let layerReads = 0;
+      const nestedRoot = rootLayer(101, 11);
+      nestedRoot.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
+      const nestedStaleChild = rootLayer(102, 12);
+      nestedStaleChild.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: null }];
+      const nestedCanonicalChild = rootLayer(102, 12);
+      nestedCanonicalChild.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: 303 }];
+      const nestedSource = interaction(1, 10, nestedRoot);
+      const nestedInitial = productState([{ id: 10, title: "Source" }], [nestedSource]);
+      const nestedResolved = productState([{ id: 10, title: "Source" }], [nestedSource]);
+      nestedResolved.actionInvocations = [{ sourceInteractionId: 1, actionId: 777, resultInteractionId: 2 }];
+      let nestedStateReads = 0;
+      let nestedLayerReads = 0;
       requestImplementation = vi.fn(async (path) => {
         if (path.startsWith("/api/state?threadId=10")) {
-          stateReads += 1;
-          return stateReads === 1 ? initial : resolved;
+          nestedStateReads += 1;
+          return nestedStateReads === 1 ? nestedInitial : nestedResolved;
         }
         if (path.endsWith("/layers/102")) {
-          layerReads += 1;
-          if (layerReads === 1) return staleChild;
-          if (layerReads === 2) throw new Error("one-shot nested graph read failure");
-          return canonicalChild;
+          nestedLayerReads += 1;
+          if (nestedLayerReads === 1) return nestedStaleChild;
+          if (nestedLayerReads === 2) throw new Error("one-shot nested graph read failure");
+          return nestedCanonicalChild;
         }
         throw new Error(`Unexpected request: ${path}`);
       });
       const controller = await loadModules();
       await controller.loadThread(10);
-      await controller.navigateLayer(102, { action: root.actions[0], sourceNode: root.nodes[0] });
+      await controller.navigateLayer(102, {
+        action: nestedRoot.actions[0],
+        sourceNode: nestedRoot.nodes[0],
+      });
 
       await controller.refreshState(10);
-      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId,
+        "the failed nested read leaves the action unresolved").toBeNull();
       await vi.advanceTimersByTimeAsync(500);
-
-      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBe(303);
-      expect(layerReads).toBe(3);
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId,
+        "the one-shot nested failure retries after the terminal result").toBe(303);
+      expect(nestedLayerReads, "the retry refetches the nested layer").toBe(3);
     } finally {
       vi.useRealTimers();
     }
-  });
 
-  it("does not let a slow nested invoke refresh clobber a newer thread selection", async () => {
-    const root = rootLayer(101, 11);
-    root.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
-    const child = rootLayer(102, 12);
-    child.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: null }];
-    const canonicalChildRead = deferred();
-    const source = interaction(1, 10, root);
-    const other = interaction(2, 20, rootLayer(201, 21));
-    const sourceInitial = productState([{ id: 10, title: "Source" }, { id: 20, title: "Other" }], [source]);
-    const sourceResolved = productState([{ id: 10, title: "Source" }, { id: 20, title: "Other" }], [source]);
-    sourceResolved.actionInvocations = [{ sourceInteractionId: 99, actionId: 777, resultInteractionId: 100 }];
-    let sourceReads = 0;
-    let layerReads = 0;
-    requestImplementation = vi.fn(async (path) => {
-      if (path.startsWith("/api/state?threadId=10")) {
-        sourceReads += 1;
-        return sourceReads === 1 ? sourceInitial : sourceResolved;
-      }
-      if (path.startsWith("/api/state?threadId=20")) {
-        return productState([{ id: 10, title: "Source" }, { id: 20, title: "Other" }], [other]);
-      }
-      if (path.endsWith("/layers/102")) {
-        layerReads += 1;
-        return layerReads === 1 ? child : canonicalChildRead.promise;
-      }
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    await controller.navigateLayer(102, { action: root.actions[0], sourceNode: root.nodes[0] });
-    const staleRefresh = controller.refreshState(10);
-    await vi.waitFor(() => expect(layerReads).toBe(2));
-    expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
-    expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101, 102]);
-    expect(controller.appState.visibleLayer).toBe(child);
-    expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
-
-    await controller.loadThread(20);
-    canonicalChildRead.resolve({
-      ...child,
-      actions: [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: 303 }],
-    });
-
-    await expect(staleRefresh).resolves.toBe(false);
-    expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
-    expect(controller.appState.visibleLayer.layer.id).toBe(201);
-  });
-
-  it("reuses a descendant loaded by direct navigation when Back restores it", async () => {
-    const root = rootLayer(101, 11);
-    root.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
-    const child = rootLayer(102, 12);
-    const turn = interaction(1, 10, root);
-    const state = productState([{ id: 10, title: "First" }], [turn]);
-    requestImplementation = vi.fn(async (path) => {
-      if (path.startsWith("/api/state?threadId=10")) return state;
-      if (path === "/api/threads/10") {
-        return { thread: state.threads[0], interactions: [turn], actionInvocations: [] };
-      }
-      if (path.endsWith("/layers/102")) return child;
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    await controller.navigateLayer(102, {
-      action: root.actions[0],
-      sourceNode: root.nodes[0],
-    });
-    await controller.navigateLayer(101, { restore: true, pathIndex: 0 });
-    expect(controller.getNavigationHistory()).toMatchObject({
-      canGoBack: true,
-      backChangesTurn: false,
-    });
-    await controller.navigateHistory(-1);
-
-    expect(controller.appState.visibleLayer.layer.id).toBe(102);
-    expect(requestImplementation.mock.calls.filter(([path]) => path.endsWith("/layers/102")))
-      .toHaveLength(1);
-  });
-
-  it("rolls back the presentation without advancing the cursor when application fails", async () => {
-    const turn1 = interaction(1, 10, rootLayer(101, 11));
-    const turn2 = interaction(2, 20, rootLayer(201, 21));
-    const state1 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn1]);
-    const state2 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn2]);
-    requestImplementation = vi.fn(async (path) => {
-      if (path.startsWith("/api/state?threadId=10")) return state1;
-      if (path.startsWith("/api/state?threadId=20")) return state2;
-      if (path === "/api/threads/10") {
-        return { thread: state1.threads[0], interactions: [turn1], actionInvocations: [] };
-      }
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    await controller.loadThread(20);
-    throwOnRender = rendered + 2;
-    const beforeCommit = vi.fn();
-
-    await expect(controller.navigateHistory(-1, { beforeCommit }))
-      .rejects.toThrow("injected render failure");
-    expect(beforeCommit).not.toHaveBeenCalled();
-
-    expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
-    expect(controller.getNavigationHistory()).toMatchObject({
-      canGoBack: true,
-      canGoForward: false,
-      pendingDirection: null,
-    });
-  });
-
-  it("lets Back win over a source poll that was already in flight", async () => {
-    const turn1 = interaction(1, 10, rootLayer(101, 11));
-    const runningTurn = {
-      id: 2,
-      threadId: 20,
-      sequence: 1,
-      text: "Running turn",
-      completionStatus: "running",
-      completionOutput: null,
-    };
-    const acceptedTurn = interaction(2, 20, rootLayer(201, 21));
-    const state1 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn1]);
-    const runningState = productState(state1.threads, [runningTurn]);
-    const acceptedState = productState(state1.threads, [acceptedTurn]);
-    const sourcePoll = deferred();
-    const restore = deferred();
-    let thread20Reads = 0;
-    requestImplementation = vi.fn(async (path) => {
-      if (path.startsWith("/api/state?threadId=10")) return state1;
-      if (path.startsWith("/api/state?threadId=20")) {
-        thread20Reads += 1;
-        return thread20Reads === 1 ? runningState : sourcePoll.promise;
-      }
-      if (path === "/api/threads/10") return restore.promise;
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const controller = await loadModules();
-    await controller.loadThread(10);
-    await controller.loadThread(20);
-    const polling = controller.refreshState(20);
-    const pendingBack = controller.navigateHistory(-1);
-
-    sourcePoll.resolve(acceptedState);
-    await expect(polling).resolves.toBe(false);
-    restore.resolve({ thread: state1.threads[0], interactions: [turn1], actionInvocations: [] });
-    await expect(pendingBack).resolves.toMatchObject({ threadId: "10", turnId: "1" });
-    expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
-  });
-
-  it("rejects an old layer response after a turn-away-and-back ABA sequence", async () => {
-    const root = rootLayer(101, 11);
-    root.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
-    const child = rootLayer(102, 12);
-    const turn1 = interaction(1, 10, root, 1);
-    const turn2 = interaction(2, 10, rootLayer(201, 21), 2);
-    const state = productState([{ id: 10, title: "First" }], [turn1, turn2]);
-    const layerRequest = deferred();
-    requestImplementation = vi.fn(async (path) => {
-      if (path.startsWith("/api/state?threadId=10")) return state;
-      if (path.endsWith("/layers/102")) return layerRequest.promise;
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const controller = await loadModules(
-      "http://127.0.0.1:43123/?threadId=10&interactionId=1",
-    );
-    await controller.loadThread(10);
-    controller.selectTurnById(1);
-    const pendingLayer = controller.navigateLayer(102, {
-      action: root.actions[0],
-      sourceNode: root.nodes[0],
-    });
-    controller.selectTurnById(2);
-    controller.selectTurnById(1);
-    layerRequest.resolve(child);
-
-    await expect(pendingLayer).resolves.toBeUndefined();
-    expect(controller.viewState.currentInteractionId).toBe(1);
-    expect(controller.appState.visibleLayer.layer.id).toBe(101);
-    expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101]);
-  });
-
-  it("keeps an explicit turn choice when an earlier scheduled poll resolves later", async () => {
     vi.useFakeTimers();
     try {
       const acceptedTurn = interaction(1, 10, rootLayer(101, 11), 1);
-      const runningTurn = {
+      const explicitRunningTurn = {
         id: 2,
         threadId: 10,
         sequence: 2,
@@ -1115,7 +1141,7 @@ describe("workspace navigation integration", () => {
         completionOutput: null,
       };
       const threads = [{ id: 10, title: "First" }];
-      const initialState = productState(threads, [acceptedTurn, runningTurn]);
+      const initialState = productState(threads, [acceptedTurn, explicitRunningTurn]);
       const staleState = productState(threads, [acceptedTurn]);
       const stalePoll = deferred();
       let stateReads = 0;
@@ -1136,35 +1162,34 @@ describe("workspace navigation integration", () => {
       };
       controller.selectTurnById(1);
       renderObserver = null;
-      expect(timersDuringExplicitRender).toBe(0);
+      expect(timersDuringExplicitRender,
+        "an explicit turn choice schedules no poll of its own").toBe(0);
 
       await vi.advanceTimersByTimeAsync(500);
-      expect(stateReads).toBe(2);
+      expect(stateReads, "the scheduled poll fires once").toBe(2);
 
       controller.selectTurnById(2);
       stalePoll.resolve(staleState);
       await vi.advanceTimersByTimeAsync(0);
-
-      expect(controller.viewState).toMatchObject({
-        currentThreadId: 10,
-        currentInteractionId: 2,
-      });
+      expect(controller.viewState, "the explicit turn choice survives the stale poll")
+        .toMatchObject({
+          currentThreadId: 10,
+          currentInteractionId: 2,
+        });
       await vi.advanceTimersByTimeAsync(499);
-      expect(stateReads).toBe(2);
+      expect(stateReads, "the stale poll does not reschedule early").toBe(2);
       await vi.advanceTimersByTimeAsync(1);
-      expect(stateReads).toBe(3);
+      expect(stateReads, "polling resumes on its normal cadence").toBe(3);
     } finally {
       vi.useRealTimers();
     }
-  });
 
-  it("resumes pending polling after descendant navigation supersedes an in-flight poll", async () => {
     vi.useFakeTimers();
     try {
-      const root = rootLayer(101, 11);
-      root.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
-      const child = rootLayer(102, 12);
-      const runningTurn = {
+      const resumeRoot = rootLayer(101, 11);
+      resumeRoot.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
+      const resumeChild = rootLayer(102, 12);
+      const resumeRunningTurn = {
         id: 1,
         threadId: 10,
         sequence: 1,
@@ -1172,52 +1197,51 @@ describe("workspace navigation integration", () => {
         completionStatus: "running",
         completionOutput: null,
       };
-      const acceptedTurn = interaction(2, 10, root, 2);
+      const resumeAcceptedTurn = interaction(2, 10, resumeRoot, 2);
       const threads = [{ id: 10, title: "First" }];
-      const state = productState(threads, [runningTurn, acceptedTurn]);
-      const stalePoll = deferred();
-      const layerRequest = deferred();
+      const resumeState = productState(threads, [resumeRunningTurn, resumeAcceptedTurn]);
+      const resumeStalePoll = deferred();
+      const resumeLayerRequest = deferred();
       let stateReads = 0;
       requestImplementation = vi.fn(async (path) => {
         if (path.startsWith("/api/state?threadId=10")) {
           stateReads += 1;
-          if (stateReads === 2) return stalePoll.promise;
-          return state;
+          if (stateReads === 2) return resumeStalePoll.promise;
+          return resumeState;
         }
-        if (path.endsWith("/layers/102")) return layerRequest.promise;
+        if (path.endsWith("/layers/102")) return resumeLayerRequest.promise;
         throw new Error(`Unexpected request: ${path}`);
       });
       const controller = await loadModules();
       await controller.loadThread(10);
       await vi.advanceTimersByTimeAsync(500);
-      expect(stateReads).toBe(2);
+      expect(stateReads, "the running turn polls").toBe(2);
 
       const pendingLayer = controller.navigateLayer(102, {
-        action: root.actions[0],
-        sourceNode: root.nodes[0],
+        action: resumeRoot.actions[0],
+        sourceNode: resumeRoot.nodes[0],
       });
-      layerRequest.resolve(child);
+      resumeLayerRequest.resolve(resumeChild);
       await pendingLayer;
-      stalePoll.resolve(state);
+      resumeStalePoll.resolve(resumeState);
       await vi.advanceTimersByTimeAsync(0);
-
-      expect(controller.appState.visibleLayer.layer.id).toBe(102);
-      expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101, 102]);
+      expect(controller.appState.visibleLayer.layer.id, "descendant navigation wins the race")
+        .toBe(102);
+      expect(controller.viewState.layerPath.map(({ layerId }) => layerId),
+        "the descendant path commits").toEqual([101, 102]);
       await vi.advanceTimersByTimeAsync(499);
-      expect(stateReads).toBe(2);
+      expect(stateReads, "the superseded poll does not reschedule early").toBe(2);
       await vi.advanceTimersByTimeAsync(1);
-      expect(stateReads).toBe(3);
+      expect(stateReads, "polling resumes after the superseded poll").toBe(3);
     } finally {
       vi.useRealTimers();
     }
-  });
 
-  it("does not restart source polling from a stale overlapping history transition", async () => {
     vi.useFakeTimers();
     try {
-      const turn1 = interaction(1, 10, rootLayer(101, 11));
-      const turn2 = interaction(2, 20, rootLayer(201, 21));
-      const runningTurn = {
+      const overlapTurn1 = interaction(1, 10, rootLayer(101, 11));
+      const overlapTurn2 = interaction(2, 20, rootLayer(201, 21));
+      const overlapRunningTurn = {
         id: 3,
         threadId: 30,
         sequence: 1,
@@ -1231,9 +1255,9 @@ describe("workspace navigation integration", () => {
         { id: 30, title: "Third" },
       ];
       const states = new Map([
-        ["10", productState(threads, [turn1])],
-        ["20", productState(threads, [turn2])],
-        ["30", productState(threads, [runningTurn])],
+        ["10", productState(threads, [overlapTurn1])],
+        ["20", productState(threads, [overlapTurn2])],
+        ["30", productState(threads, [overlapRunningTurn])],
       ]);
       const restoreFirst = deferred();
       const restoreSecond = deferred();
@@ -1251,17 +1275,19 @@ describe("workspace navigation integration", () => {
 
       const stale = controller.navigateHistory(-1);
       const latest = controller.navigateHistory(-2);
-      restoreSecond.resolve({ thread: threads[1], interactions: [turn2], actionInvocations: [] });
-      await expect(stale).rejects.toMatchObject({ code: "navigation_superseded" });
+      restoreSecond.resolve({ thread: threads[1], interactions: [overlapTurn2], actionInvocations: [] });
+      await expect(stale, "the stale overlapping transition is superseded")
+        .rejects.toMatchObject({ code: "navigation_superseded" });
       await vi.advanceTimersByTimeAsync(600);
-      expect(requestImplementation.mock.calls.filter(([path]) => path.startsWith("/api/state?threadId=30")))
-        .toHaveLength(1);
-      restoreFirst.resolve({ thread: threads[0], interactions: [turn1], actionInvocations: [] });
+      expect(requestImplementation.mock.calls.filter(([path]) => path.startsWith("/api/state?threadId=30")),
+        "the stale transition never restarts source polling").toHaveLength(1);
+      restoreFirst.resolve({ thread: threads[0], interactions: [overlapTurn1], actionInvocations: [] });
 
-      await expect(latest).resolves.toMatchObject({ threadId: "10", turnId: "1" });
-      expect(controller.viewState.currentThreadId).toBe(10);
+      await expect(latest, "the latest transition still lands")
+        .resolves.toMatchObject({ threadId: "10", turnId: "1" });
+      expect(controller.viewState.currentThreadId, "the newest intent owns the view").toBe(10);
     } finally {
       vi.useRealTimers();
     }
-  });
+  }, 30_000);
 });

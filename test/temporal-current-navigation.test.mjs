@@ -14,8 +14,8 @@ const event = {
 };
 
 describe("temporal current navigation", () => {
-  it("replaces the followed pointer without adding history and drops absent selection", () => {
-    const result = reconcileCurrentProjection({
+  it("reconciles the temporal current pointer across follow, pin, gap, and stale events", () => {
+    const followed = reconcileCurrentProjection({
       completionId: 7,
       revision: 1,
       lifecycle: "active",
@@ -25,15 +25,13 @@ describe("temporal current navigation", () => {
       visibleTarget: { kind: "layer", completionId: 7, layerId: 11 },
       selectedNodeId: 2,
     }, event);
-    expect(result.kind).toBe("followed");
-    expect(result.history).toBe("replace");
-    expect(result.view.visibleTarget.layerId).toBe(12);
-    expect(result.view.selectedNodeId).toBeNull();
-  });
+    expect(followed.kind, "followed pointer advances in place").toBe("followed");
+    expect(followed.history, "followed pointer replaces history instead of pushing").toBe("replace");
+    expect(followed.view.visibleTarget.layerId, "followed pointer tracks the current layer").toBe(12);
+    expect(followed.view.selectedNodeId, "selection absent from the new layer is dropped").toBeNull();
 
-  it("updates pointer truth without displacing an explicitly pinned view", () => {
     const pinned = { kind: "layer", completionId: 7, layerId: 9 };
-    const result = reconcileCurrentProjection({
+    const pinnedResult = reconcileCurrentProjection({
       completionId: 7,
       revision: 1,
       lifecycle: "active",
@@ -43,15 +41,15 @@ describe("temporal current navigation", () => {
       visibleTarget: pinned,
       selectedNodeId: 2,
     }, event);
-    expect(result.kind).toBe("pinned");
-    expect(result.history).toBe("unchanged");
-    expect(result.view.visibleTarget).toBe(pinned);
-    expect(result.view.currentLayerId).toBe(12);
-  });
+    expect(pinnedResult.kind, "pinned view is not displaced by pointer truth").toBe("pinned");
+    expect(pinnedResult.history, "pinned view leaves history unchanged").toBe("unchanged");
+    expect(pinnedResult.view.visibleTarget, "pinned layer target is retained").toBe(pinned);
+    expect(pinnedResult.view.currentLayerId, "pointer truth still updates under a pin").toBe(12);
 
-  it("requests resync for a predecessor gap and ignores duplicate revisions", () => {
     const view = { completionId: 7, revision: 1 };
-    expect(reconcileCurrentProjection(view, { ...event, previousRevision: 0 }).kind).toBe("resync");
-    expect(reconcileCurrentProjection(view, { ...event, revision: 1 }).kind).toBe("stale");
+    expect(reconcileCurrentProjection(view, { ...event, previousRevision: 0 }).kind,
+      "predecessor gap requests a resync").toBe("resync");
+    expect(reconcileCurrentProjection(view, { ...event, revision: 1 }).kind,
+      "duplicate revision is ignored as stale").toBe("stale");
   });
 });

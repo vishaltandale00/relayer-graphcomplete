@@ -42,8 +42,8 @@ function fixture() {
 }
 
 describe("product workspace breadcrumb", () => {
-  it("shows only the parent-child path established by navigate actions", () => {
-    const { interaction, state, thread } = fixture();
+  it("builds graph ancestry only from navigate actions and restores authored labels", async () => {
+    const { interaction, rootLayer, state, thread } = fixture();
     let layerPath = rootLayerPath(interaction);
     layerPath = appendLayerPath(layerPath, {
       id: 501,
@@ -72,45 +72,18 @@ describe("product workspace breadcrumb", () => {
       selectedNodeId: 12,
       evalContext: null,
     });
+    expect(items.map((item) => item.label), "breadcrumb shows only the navigate-action path")
+      .toEqual(["Response", "Architecture", "API"]);
+    expect(items.filter((item) => item.interactive).map((item) => item.label),
+      "the current leaf is not interactive").toEqual(["Response", "Architecture"]);
+    expect(items.at(-1), "the leaf carries the visible layer identity")
+      .toMatchObject({ kind: "layer", current: true, layerId: 102 });
+    expect(items.map((item) => item.icon), "each crumb keeps its source icon")
+      .toEqual(["messages-square", "network", "code"]);
 
-    expect(items.map((item) => item.label)).toEqual([
-      "Response",
-      "Architecture",
-      "API",
-    ]);
-    expect(items.filter((item) => item.interactive).map((item) => item.label)).toEqual([
-      "Response",
-      "Architecture",
-    ]);
-    expect(items.at(-1)).toMatchObject({ kind: "layer", current: true, layerId: 102 });
-    expect(items.map((item) => item.icon)).toEqual([
-      "messages-square",
-      "network",
-      "code",
-    ]);
-  });
-
-  it("accepts only the latest navigation request from the unchanged source layer", () => {
-    const coordinator = createLayerNavigationCoordinator();
-    const context = {
-      threadId: 7,
-      interactionId: 2,
-      layerId: 100,
-      layerPath: [{ layerId: 100, label: "Response" }],
-    };
-    const first = coordinator.begin(context);
-    const second = coordinator.begin(context);
-
-    expect(coordinator.isCurrent(first, context)).toBe(false);
-    expect(coordinator.isCurrent(second, context)).toBe(true);
-    expect(coordinator.isCurrent(second, { ...context, layerId: 101 })).toBe(false);
-    expect(second.layerPath).not.toBe(context.layerPath);
-  });
-
-  it("does not mix product scope, turn history, or node selection into graph ancestry", () => {
-    const { interaction, state, thread } = fixture();
-    const items = workspaceBreadcrumbItems(state, thread, {
-      layerPath: rootLayerPath(interaction),
+    const fresh = fixture();
+    const evalOnly = workspaceBreadcrumbItems(fresh.state, fresh.thread, {
+      layerPath: rootLayerPath(fresh.interaction),
       selectedNodeId: null,
       evalContext: {
         cases: [{
@@ -121,28 +94,22 @@ describe("product workspace breadcrumb", () => {
         }],
       },
     });
+    expect(evalOnly.map(({ kind, label }) => ({ kind, label })),
+      "product scope, turn history, and node selection never join graph ancestry")
+      .toEqual([{ kind: "layer", label: "Response" }]);
 
-    expect(items.map(({ kind, label }) => ({ kind, label }))).toEqual([
-      { kind: "layer", label: "Response" },
-    ]);
-  });
-
-  it("preserves a matching deep path and resets an unrelated visible layer", () => {
-    const { interaction, rootLayer } = fixture();
     const deepPath = appendLayerPath(rootLayerPath(interaction), {
       id: 501,
       kind: "navigate",
       sourceNodeId: 10,
       targetLayerId: 101,
     }, { id: 10, title: "Architecture" });
+    expect(layerPathForVisibleLayer(deepPath, interaction, { layer: { id: 101 } }),
+      "a matching visible layer keeps the deep path").toEqual(deepPath);
+    expect(layerPathForVisibleLayer(deepPath, interaction, rootLayer),
+      "an unrelated visible layer resets to the root path").toEqual(rootLayerPath(interaction));
+    expect(deepPath.slice(0, 1), "the root path prefixes every deep path").toEqual(rootLayerPath(interaction));
 
-    expect(layerPathForVisibleLayer(deepPath, interaction, { layer: { id: 101 } })).toEqual(deepPath);
-    expect(layerPathForVisibleLayer(deepPath, interaction, rootLayer)).toEqual(rootLayerPath(interaction));
-    expect(deepPath.slice(0, 1)).toEqual(rootLayerPath(interaction));
-  });
-
-  it("rebuilds authored labels when Eval history restores a deep layer", async () => {
-    const { interaction, rootLayer } = fixture();
     const architecture = rootLayer.nodes[0];
     rootLayer.actions = [{
       id: 501,
@@ -162,34 +129,50 @@ describe("product workspace breadcrumb", () => {
     };
     const grandchildLayer = { layer: { id: 102 }, nodes: [], actions: [] };
     const layers = new Map([[101, childLayer], [102, grandchildLayer]]);
-
     const restored = await restoreLayerPath(interaction, [
       { layerId: 100, viaActionId: null },
       { layerId: 101, viaActionId: 501 },
       { layerId: 102, viaActionId: 502 },
     ], async (layerId) => layers.get(layerId));
+    expect(restored.layer, "Eval restoration lands on the deepest restored layer").toBe(grandchildLayer);
+    expect(restored.layerPath.map((entry) => entry.label),
+      "Eval restoration rebuilds authored labels").toEqual(["Response", "Architecture", "API"]);
 
-    expect(restored.layer).toBe(grandchildLayer);
-    expect(restored.layerPath.map((entry) => entry.label)).toEqual([
-      "Response",
-      "Architecture",
-      "API",
-    ]);
+    const coordinator = createLayerNavigationCoordinator();
+    const context = {
+      threadId: 7,
+      interactionId: 2,
+      layerId: 100,
+      layerPath: [{ layerId: 100, label: "Response" }],
+    };
+    const first = coordinator.begin(context);
+    const second = coordinator.begin(context);
+    expect(coordinator.isCurrent(first, context), "a superseded navigation request is stale").toBe(false);
+    expect(coordinator.isCurrent(second, context), "the latest request from the same source layer wins").toBe(true);
+    expect(coordinator.isCurrent(second, { ...context, layerId: 101 }),
+      "a request from a different source layer is rejected").toBe(false);
+    expect(second.layerPath, "the coordinator clones the path instead of sharing it").not.toBe(context.layerPath);
   });
 
-  it("renders one shared, accessible breadcrumb host", () => {
+  it("renders one shared, accessible breadcrumb host inside the graph column", async () => {
     const markup = productWorkspaceMarkup();
-    expect(markup).toContain('id="workspaceBreadcrumb"');
-    expect(markup).toContain('aria-label="Graph layer path"');
-    expect(markup.indexOf('class="graph-column"')).toBeLessThan(markup.indexOf('id="workspaceBreadcrumb"'));
-    expect(markup.indexOf('id="workspaceBreadcrumb"')).toBeLessThan(markup.indexOf('id="graphStage"'));
-  });
+    expect(markup, "a single breadcrumb host exists").toContain('id="workspaceBreadcrumb"');
+    expect(markup, "the breadcrumb host is labelled as the graph layer path")
+      .toContain('aria-label="Graph layer path"');
+    expect(markup.indexOf('class="graph-column"'), "the host lives inside the graph column")
+      .toBeLessThan(markup.indexOf('id="workspaceBreadcrumb"'));
+    expect(markup.indexOf('id="workspaceBreadcrumb"'), "the host precedes the graph stage")
+      .toBeLessThan(markup.indexOf('id="graphStage"'));
 
-  it("keeps the rounded interaction inset and breadcrumb inside the graph column", async () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
-
-    expect(styles).toContain(".interaction-banner{grid-column:1;grid-row:2;margin:8px 0 12px 12px;");
-    expect(styles).toContain(".thread-workspace{grid-column:1 / -1;grid-row:3;display:grid;grid-template-columns:minmax(0,1fr) var(--inspector);column-gap:12px;");
-    expect(styles).toContain(".workspace-breadcrumb{min-height:40px;flex:none;display:flex;align-items:center;justify-content:flex-start;");
+    expect(styles, "interaction banner keeps its rounded inset").toContain(
+      ".interaction-banner{grid-column:1;grid-row:2;margin:8px 0 12px 12px;",
+    );
+    expect(styles, "the workspace grid reserves the inspector column").toContain(
+      ".thread-workspace{grid-column:1 / -1;grid-row:3;display:grid;grid-template-columns:minmax(0,1fr) var(--inspector);column-gap:12px;",
+    );
+    expect(styles, "the breadcrumb row keeps its fixed height and alignment").toContain(
+      ".workspace-breadcrumb{min-height:40px;flex:none;display:flex;align-items:center;justify-content:flex-start;",
+    );
   });
 });
