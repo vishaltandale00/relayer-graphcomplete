@@ -5,6 +5,10 @@ inputs:
   lane:
     description: Stable lane name used only for timing evidence.
     required: true
+  sccache-mode:
+    description: sccache GitHub-cache access mode for this lane.
+    required: false
+    default: READ_WRITE
 
 outputs:
   rustc-release:
@@ -77,7 +81,7 @@ runs:
       env:
         SCCACHE_CLIENT_SIDE: "1"
         SCCACHE_GHA_ENABLED: "true"
-        SCCACHE_GHA_RW_MODE: READ_WRITE
+        SCCACHE_GHA_RW_MODE: ${{ inputs.sccache-mode }}
         SCCACHE_GHA_VERSION: ${{ steps.identity.outputs.cache-version }}
         SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
       run: |

@@ -152,6 +152,184 @@ independently recover the hit/miss/error breakdown from the completed job.
 ([post-merge run](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33465911128),
 [GitHub cache usage and rate limits](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#usage-limits-and-eviction-policy))
 
+## Post-#392 parallel-lane observations
+
+PR #392 replaced the serial Rust chapter with four isolated lanes
+(`rust-clippy`, `rust-tests`, `rust-crash`, `rust-runtime`) sharing one
+toolchain-bound sccache namespace (`relayer-rust-parallel-line-tables-v1`),
+removed the duplicate serial full gate in favor of the versioned verification
+portfolio, and passes runtime binaries to Vitest through a verified workflow
+artifact.
+
+Measured hosted runs (job start to completion, GitHub timestamps):
+
+| Run | Context | Clippy | Tests | Crash | Runtime | Vitest | Whole workflow |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [PR #392 final](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33483636709) (new namespace, effectively cold) | full-mode PR | 12m29s | 13m19s | 14m30s | 12m07s | 3m29s | about 16m46s |
+| [first `main` push after merge](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33485024514) (trusted cold seed) | full portfolio | 18m40s | 20m11s | 21m44s | 20m13s | 3m14s | about 24m26s |
+
+The PR run is the first consumption of the parallel namespace, so its lanes
+seeded and cross-read each other instead of reusing trusted objects; the
+`main` push is the first trusted writer. Both are cold comparisons for the new
+namespace, not the steady-state warm target. The next real changed-head PR
+after the trusted seed is the admission comparison required by
+`docs/agents/ci.md`.
+
+The PR run's lane artifacts recorded the expected cold-namespace consequence:
+47–59% cache-hit rates dominated by C/C++ objects, Rust hit rates of 16–25%,
+and 457–567 cache write errors per lane. The write errors are four lanes
+compiling and storing the same compiler objects concurrently; the losing write
+for an identical key is harmless because the winning lane stored the same
+content-addressed object. Steady-state warm runs only recompile changed units,
+so duplicate writes collapse to the lanes that share each changed unit.
+Average cache write latency was 0.18–0.71s and read hits 0.07–0.23s. No read
+errors were observed. Write errors remain nonfatal by backend contract; they
+are recorded per lane in the 14-day sccache statistics artifacts.
+
+Vitest no longer compiles Rust. Its job downloaded the 255 MB runtime artifact
+(both server binaries with the `line-tables-only` profile), verified its
+identity fields, installed the binaries into `target/debug`, and ran every
+selected test freshly in about 3m15s.
+
+`--timings` reports now upload from the Clippy, default-test, and runtime
+lanes (harvested from each lane's target directory; the crash lane executes
+through the repository npm script, which cannot inject Cargo flags, so it
+records step durations only). Use the reports to identify repeated compilation
+units before any further feature/profile consolidation.
+
+The first warm PR run after the trusted seed ([33493873593](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33493873593),
+full mode, about 15m36s end to end; Clippy 9m27s, tests 12m44s, crash 12m17s,
+runtime 10m58s) still recorded 50–60% hit rates and 437–535 write errors per
+lane. The trusted seed itself ([33485024514](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33485024514))
+had 0% Rust hits and 856–1029 write errors per lane, so it stored only a
+fraction of the compiled objects (2,359 main-scoped sccache entries after the
+seed). The self-perpetuating pattern: four lanes cold-miss the same units,
+each stores the winning write for an identical key and fails the other three,
+and every unit that never stored is re-missed and re-raced on the next run.
+One mitigation is now in place: the runtime lane is read-only. Its unique
+outputs are uncachable binary links and its shareable units are identical to
+the default-test lane's, so it no longer races the seeding lanes; the
+default-test, Clippy (rmeta graph), and crash (crash-feature graph) lanes
+remain the writers.
+
+The first run with the read-only runtime lane ([33495979365](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33495979365),
+about 12m20s end to end) shows convergence beginning:
+
+| Lane | Hit rate before / after | Write errors before / after |
+| --- | --- | --- |
+| rust-clippy | 55.0% / 64.0% | 493 / 384 |
+| rust-tests | 50.6% / 69.8% | 535 / 293 |
+| rust-crash | 59.9% / 73.6% | 437 / 258 |
+| rust-runtime | 58.3% / 64.7% | 466 / 451 (stores refused, 0.000s write time) |
+
+The runtime lane's "write errors" are its rejected stores counted by sccache
+in read-only mode; its average cache write is 0.000s, so it performs no cache
+I/O and creates no entries. Lane durations fell to Clippy 7m31s, runtime
+7m55s, tests 9m22s, and crash 10m19s.
+
+The next two runs confirmed the convergence ([33497316910](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33497316910)
+failed one pre-existing timing flake in `product_persistence_flow.rs` that was
+fixed separately; [33498832402](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33498832402)
+passed end to end in about 11 minutes): hit rates reached 83.0% clippy, 83.5%
+tests, 80.3% crash, and 78.7% runtime (Rust-only hits 60–65%), while writer
+write errors fell to 167–236. The read-only runtime lane reports its refused
+stores with 0.000s average write time throughout. Remaining misses are
+dominated by the per-run changed units and the Ladybug build-script graph
+identified by the timing reports.
+
+### What the first hosted timing reports show
+
+The `--timings` artifacts from the warm PR run (33493873593) identify the
+critical unit in every lane: the `lbug` build-script execution (the bundled
+Ladybug source build forced by `LBUG_BUILD_FROM_SOURCE = "1"`).
+
+| Lane | Wall | lbug build-script unit | Share of wall |
+| --- | --- | --- | --- |
+| rust-clippy | 555.6s | 479.6s | 86% |
+| rust-tests | 709.4s | 513.2s | 72% |
+| rust-runtime | 612.2s | 475.7s | 78% |
+
+The next largest units are the workspace crates themselves (about 100–114s
+each for the app-server and graph-server test builds) and their test-binary
+links. Two consequences follow: further feature/profile consolidation of the
+workspace crate invocations can save at most a few minutes per lane, while
+anything that shortens or cache-shares the Ladybug source build attacks the
+majority of every lane's wall time. Investigation of the lbug unit found that the bundled CMake build already
+auto-detects sccache on `PATH` and uses it as the C/C++ compiler launcher,
+but the lanes' per-lane `CARGO_TARGET_DIR` values put generated build headers
+at different absolute paths per lane. C/C++ cache keys hash preprocessed
+source, including those absolute line-marker paths, so every lane maintained
+its own fragment of the Ladybug object cache while sccache's Rust keys (which
+omit `--out-dir`) were unaffected. Because every lane runs on its own fresh
+runner, the lanes now share one `CARGO_TARGET_DIR` path; the identical path
+makes the generated-header paths match across lanes and runs, letting the
+Ladybug objects compile once and be read by all lanes. Candidate directions
+that remain unvalidated: `SCCACHE_BASEDIRS` normalization if other volatile
+paths appear, and whether the reviewed prebuilt-library path from the Issue
+#261 qualification can be reused without weakening its provenance guarantees.
+
+One premise to monitor: the Ladybug CMakeLists prefers `ccache` and only falls
+back to `sccache`. GitHub's Ubuntu images currently ship neither, so CMake
+finds the sccache binary installed by the pinned action. If a future runner
+image adds ccache, the launcher silently switches to a runner-local cache and
+the cross-run Ladybug benefit disappears without changing correctness.
+
+### Warm result after the unified target directory
+
+The first warm run on the unified path ([33517115657](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33517115657),
+about 11m20s end to end; Clippy 7m04s, runtime 6m24s, tests 8m35s, crash
+10m49s) reached 88–91% C/C++ hit rates in every lane with the object cache
+genuinely shared across lanes. The lbug unit nonetheless held at 244–328s per
+lane. The honest accounting: the unification removed the per-lane key
+fragmentation (per-lane C/C++ misses fell from 281–480 to a stable 116–150),
+which protects every future cache reseed from paying four full Ladybug C++
+compiles, but the remaining lbug wall is bounded by a per-run miss tail and
+CMake configure/archive overhead rather than by cache sharing. The prime
+suspect for the stable miss tail is CMake's configure-time feature probes,
+whose scratch-directory sources carry volatile absolute paths; confirming that
+would need `SCCACHE_LOG`-level debugging on a hosted run. The next material
+levers are therefore the crash-lane cadence staging and any reduction of the
+configure/probe cost, not further cache-key work.
+
+### Local sccache experiment on the Ladybug build
+
+To test whether the per-lane Ladybug floor was compile cost or cache overhead,
+the pinned sccache 0.17.0 was run locally against `cargo build -p lbug` with
+CI-parity settings (`CARGO_INCREMENTAL=0`, `line-tables-only` dev profile,
+`RUSTC_WRAPPER=sccache`):
+
+| Run | Wall | Requests | C/C++ hits | C/C++ misses |
+| --- | --- | --- | --- | --- |
+| 1, cold cache | 249s | 1125 | 0 | 1062 |
+| 2, fresh target dir, same cache | 43s | 1125 | 1054 (99.25%) | 8 |
+
+Two conclusions follow. First, the Ladybug CMake build is effectively fully
+cacheable through sccache when paths are stable; the cold 249s matches the
+hosted per-lane Ladybug unit (244–328s), so the hosted lanes are paying close
+to the cold compile cost shape despite their 88–91% C/C++ hit rates. Second,
+the hosted floor is therefore dominated by cache overhead rather than
+compilation: roughly 1,000 cache reads at the observed 0.07–0.23s each, CMake
+reconfiguration and its configure-time probes, the residual miss tail, and the
+final archive step, all on four cores. Cache-key work cannot reduce that floor
+further. The remaining candidate with material headroom is building the pinned
+Ladybug source once in a trusted job and restoring the resulting static
+library through a source-hash-keyed cache entry (`LBUG_LIBRARY_DIR` +
+`LBUG_INCLUDE_DIR` are supported by the crate build script); that keeps the
+reviewed bundled source as the build input and every test fresh, but it
+changes the "compile from source in every lane" property and needs an explicit
+decision before implementation.
+
+Decision (approved 2026-09-01): implemented as the `Prebuilt Ladybug native
+library` job. It builds `cargo build -p lbug` once per run, strips debug info
+(1.8 GB to ~440 MB in local measurement), and serves the bundle to every Rust
+lane through an identity-verified workflow artifact plus a trusted-push cache
+keyed on platform, rustc release, and `Cargo.lock` digest. Lanes verify the
+bundle before linking and fail open to the source build when it is missing or
+rejected, so the change cannot weaken verification. Local equivalence proof:
+the default, crash-feature, and query-conformance suites all pass against the
+externally linked bundle (one load-induced wall-time-budget flake reproduced
+green in isolation).
+
 ## Ranked next options
 
 ### 1. Keep sccache admitted in Rust, then verify the trusted-main consumer

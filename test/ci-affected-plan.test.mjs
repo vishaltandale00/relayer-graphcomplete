@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
@@ -35,9 +35,16 @@ function fullPlanWithoutDiff() {
   );
 }
 
-describe("affected-module plan v1", () => {
+// Each case spawns the planner as a subprocess, and the full-plan cases also
+// run cargo metadata; the default 5s per-test budget races CI runner load.
+describe("affected-module plan v1", { timeout: 30_000 }, () => {
   test("is a checked-in versioned contract", () => {
-    expect(JSON.parse(readFileSync(configPath, "utf8")).version).toBe(1);
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    expect(config.version).toBe(1);
+    expect(config.rustCrashPackages).toEqual([
+      "relayer-graph-core",
+      "relayer-graph-server",
+    ]);
   });
 
   test("full integration mode does not depend on a diff base", () => {
@@ -93,6 +100,33 @@ describe("affected-module plan v1", () => {
       expect.arrayContaining(["packages", "test"]),
     );
     expect(result.chapters.packaging).toBe(false);
+  });
+
+  test("keeps crash reconciliation fresh for graph-crate changes and their dependents", () => {
+    expect(plan("crates/relayer-graph-core/src/graph.rs").rustCrash).toBe(true);
+    expect(plan("crates/relayer-graph-server/src/main.rs").rustCrash).toBe(
+      true,
+    );
+    // Telemetry changes flow into graph-server through the dependency
+    // closure, so the crash portfolio stays fresh for them too.
+    expect(
+      plan("crates/relayer-telemetry-capability/src/lib.rs").rustCrash,
+    ).toBe(true);
+  });
+
+  test("skips the crash lane for app-server-only changes it does not exercise", () => {
+    const result = plan("crates/relayer-app-server/src/main.rs");
+
+    expect(result.mode).toBe("affected");
+    expect(result.rustPackages).toEqual(
+      expect.arrayContaining(["relayer-app-server"]),
+    );
+    expect(result.chapters.rust).toBe(true);
+    // The crash command compiles and runs no app-server code; app-server
+    // interrupted-execution recovery stays owned by its ordinary tests.
+    // Build dependencies join rustPackages for Clippy, but crash selection
+    // keys on the reverse closure, so they do not trigger the crash lane.
+    expect(result.rustCrash).toBe(false);
   });
 
   test("selects local Rust dependencies that Clippy lints through a changed package", () => {
@@ -267,6 +301,234 @@ describe("affected-module plan v1", () => {
 
     expect(result.mode).toBe("full");
     expect(result.reasons.join(" ")).toContain("deleted test path");
+  });
+
+  test("maps CI-tested scripts to their owning Vitest checkpoints", () => {
+    const result = plan("scripts/recursive-live-run-model.mjs");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.vitestFiles).toEqual([
+      "test/recursive-live-run-model.test.mjs",
+    ]);
+  });
+
+  test("maps Ladybug source preparation through Vitest and packaging owners", () => {
+    const result = plan("scripts/prepare-ladybug-source.mjs");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.chapters.packaging).toBe(true);
+    expect(result.vitestFiles).toEqual(
+      expect.arrayContaining([
+        "test/ladybug-packaged-lifecycle.test.mjs",
+        "test/ladybug-source-build.test.mjs",
+      ]),
+    );
+  });
+
+  test("maps the frozen query specification into the graph-core Rust closure", () => {
+    const result = plan("docs/graph-query-v1.md");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.rust).toBe(true);
+    expect(result.rustPackages).toEqual(
+      expect.arrayContaining(["relayer-graph-core"]),
+    );
+    expect(result.rustCrash).toBe(true);
+  });
+
+  test("maps the error catalog to the generated-code and Python consumers", () => {
+    const result = plan("docs/graph-query-v1-errors.json");
+
+    expect(result.mode).toBe("affected");
+    // The catalog feeds generate-query-errors --check in the graph-client
+    // workspace check and the Python client tests; it is not a Rust input.
+    expect(result.chapters.typescript).toBe(true);
+    expect(result.chapters.python).toBe(true);
+    expect(result.chapters.rust).toBe(false);
+    expect(result.npmWorkspaces).toContain("@relayer/graph-client");
+  });
+
+  test("maps the release runbook to the desktop-shell checkpoint that reads it", () => {
+    const result = plan("docs/desktop-release-operations.md");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.vitestFiles).toEqual(["test/desktop-shell.test.mjs"]);
+  });
+
+  test("maps the provider-UX evidence scripts to a checkpoint runnable in CI", () => {
+    // Their media-capture flow needs macOS tools and skips on Ubuntu, but the
+    // owning test also parses both scripts, and that checkpoint runs on every
+    // CI platform.
+    for (const changedFile of [
+      "scripts/provider-ux-evidence-browser.mjs",
+      "scripts/capture-provider-ux-video.mjs",
+    ]) {
+      const result = plan(changedFile);
+
+      expect(result.mode).toBe("affected");
+      expect(result.chapters.vitest).toBe(true);
+      expect(result.vitestFiles).toEqual([
+        "test/provider-electron-evidence.test.mjs",
+      ]);
+    }
+  });
+
+  test("crash selection never fires without the Rust chapter", () => {
+    // The lbug-prebuilt job runs when rust, rust_runtime, or rust_crash is
+    // set; the crash lane depends on it. If rust_crash could ever be true
+    // while chapters.rust is false, the crash boundary lane would vanish
+    // from CI with nothing red, so the implication is pinned here.
+    for (const owner of JSON.parse(readFileSync(configPath, "utf8"))
+      .rustOwners) {
+      if (!owner.prefix) continue;
+      const result = plan(`${owner.prefix}src/lib.rs`);
+      if (result.rustCrash) {
+        expect(result.chapters.rust, owner.prefix).toBe(true);
+      }
+    }
+  });
+
+  test("maps the live-run template and entry point to their model checkpoint", () => {
+    for (const changedFile of [
+      "live-run.example.json",
+      "scripts/run-recursive-live-run.mjs",
+    ]) {
+      const result = plan(changedFile);
+
+      expect(result.mode).toBe("affected");
+      expect(result.chapters.vitest).toBe(true);
+      expect(result.vitestFiles).toEqual([
+        "test/recursive-live-run-model.test.mjs",
+      ]);
+    }
+  });
+
+  test("maps Ladybug source preparation through the receipt authority too", () => {
+    const result = plan("scripts/prepare-ladybug-source.mjs");
+
+    expect(result.chapters.receipts).toBe(true);
+    expect(result.vitestFiles).toEqual(
+      expect.arrayContaining(["test/ladybug-native-receipts.test.mjs"]),
+    );
+  });
+
+  test("guards every exempted path declaration against drift", () => {
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    const exempted = [...config.chapterOwners, ...config.scriptOwners].filter(
+      (owner) => owner.exact && (owner.chapters ?? []).length === 0,
+    );
+    expect(exempted.length).toBeGreaterThan(20);
+
+    // CI contract tests necessarily name mapped paths; they are not product
+    // consumers of them.
+    const ciContractTests = new Set([
+      "ci-affected-plan.test.mjs",
+      "ci-chapter-runner.test.mjs",
+      "ci-required-check.test.mjs",
+      "ci-runtime-artifact.test.mjs",
+      "ci-verification-portfolio.test.mjs",
+    ]);
+    // Scan the top-level suite and the workspace test roots the planner
+    // knows about; substring matching cannot see paths assembled with join()
+    // or new URL(), so a missed reference is possible but the roots cover
+    // the mapped consumers.
+    const corpusRoots = [
+      join(repositoryRoot, "test"),
+      join(repositoryRoot, "packages", "eval-runner", "test"),
+      join(repositoryRoot, "packages", "graph-client", "test"),
+      join(repositoryRoot, "packages", "harness-host", "test"),
+    ];
+    const testCorpus = corpusRoots
+      .flatMap((root) =>
+        existsSync(root)
+          ? readdirSync(root).map((name) => join(root, name))
+          : [],
+      )
+      .filter(
+        (filePath) =>
+          /\.(test|spec)\.[cm]?[jt]sx?$/.test(filePath) &&
+          !ciContractTests.has(basename(filePath)),
+      )
+      .map((filePath) => readFileSync(filePath, "utf8"))
+      .join("\n");
+
+    // Verified references that do not consume the repository file in CI.
+    // Each one must keep matching, or the guard fails and the exemption
+    // needs a fresh review.
+    const verifiedReferences = {
+      ".gitignore":
+        "evidence-capture-integrity.test.mjs writes a temp-directory .gitignore fixture",
+      LICENSE:
+        "ladybug-native-receipts.test.mjs matches OpenSSL LICENSE.txt fixture names only",
+    };
+
+    for (const owner of exempted) {
+      expect(existsSync(join(repositoryRoot, owner.exact))).toBe(true);
+      const referenced = testCorpus.includes(owner.exact);
+      if (owner.exact in verifiedReferences) {
+        expect(
+          referenced,
+          `${owner.exact}: verified reference disappeared, re-review the exemption`,
+        ).toBe(true);
+        continue;
+      }
+      expect(
+        referenced,
+        `${owner.exact}: a test now references this exempted path, give it that checkpoint`,
+      ).toBe(false);
+    }
+    for (const owner of [...config.chapterOwners, ...config.scriptOwners]) {
+      if (!owner.prefix || (owner.chapters ?? []).length > 0) continue;
+      expect(existsSync(join(repositoryRoot, owner.prefix))).toBe(true);
+      expect(testCorpus.includes(owner.prefix)).toBe(false);
+    }
+  });
+
+  test("maps documentation-only and manual-driver paths to no chapter", () => {
+    for (const changedFile of [
+      "LICENSE",
+      ".gitignore",
+      "docs/research/intra-pr-ci-cache.md",
+      "scripts/test-desktop-first-message.mjs",
+    ]) {
+      const result = plan(changedFile);
+
+      expect(result.mode).toBe("affected");
+      expect(Object.values(result.chapters).some(Boolean)).toBe(false);
+    }
+  });
+
+  test("keeps .gitattributes on every checkpoint that reads it", () => {
+    const result = plan(".gitattributes");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    // prime-agent-packaging checks the harness/python eol pins; the ladybug
+    // lifecycle test runs git check-attr over the receipt-input paths and is
+    // the checkpoint that actually verifies the ladybug LF pins.
+    expect(result.vitestFiles).toEqual([
+      "test/ladybug-packaged-lifecycle.test.mjs",
+      "test/prime-agent-packaging.test.mjs",
+    ]);
+  });
+
+  test("keeps single-file owners exact instead of prefix-matched", () => {
+    const result = plan("docs/graph-query-v1.mdx");
+
+    expect(result.mode).toBe("full");
+    expect(result.reasons.join(" ")).toContain("docs/graph-query-v1.mdx");
+  });
+
+  test("keeps CI-tooling scripts on the full portfolio", () => {
+    const result = plan("scripts/check-node-version.mjs");
+
+    expect(result.mode).toBe("full");
+    expect(result.reasons.join(" ")).toContain(
+      "scripts/check-node-version.mjs",
+    );
   });
 
   test.each([

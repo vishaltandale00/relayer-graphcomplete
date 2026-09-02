@@ -13,6 +13,7 @@ import {
 } from "./providers/provider-adapter-registry.mjs";
 import { createProviderComposition } from "./providers/provider-composition.mjs";
 import { createProviderDiagnosticsLog } from "./providers/provider-diagnostics-log.mjs";
+import { removeLeftoverEphemeralCodexAuthFiles } from "./providers/ephemeral-codex-auth.mjs";
 import { createProviderRuntimeStateRemover } from "./providers/provider-runtime-state.mjs";
 import {
   createEncryptedCredentialStore,
@@ -60,6 +61,7 @@ import {
   DESKTOP_UPDATE_BASE_URL,
   packagedDesktopReleaseMetadata,
 } from "../shared/release-metadata.mjs";
+import { developmentTelemetryPackageMetadata } from "../shared/telemetry-release.mjs";
 import { nativeBinaryName } from "../shared/target.mjs";
 import {
   activeProviderRuntimeRequirements,
@@ -79,6 +81,12 @@ const metadataPath = app.isPackaged ? join(app.getAppPath(), "package.json") : j
 const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
 const packagedRelease = packagedDesktopReleaseMetadata(metadata);
 const releaseArtifact = packagedRelease !== null;
+// Electron's app.getVersion() is unreliable for the unsigned development app: with no
+// package.json at the app path it falls back to a value that is not valid semver on
+// Linux ("0.0"), which the managed-runtime and updater code reject. Use the product
+// version declared in package.json for development builds; packaged releases keep the
+// sealed app version.
+const desktopVersion = app.isPackaged ? app.getVersion() : (metadata.version || app.getVersion());
 app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
@@ -286,10 +294,14 @@ if (primaryInstance) {
   });
 
   const updater = createDesktopUpdater({
-    autoUpdater: electronUpdater.autoUpdater,
+    // The platform auto-updater is only used by packaged release artifacts. Reading
+    // electron-updater's lazy `autoUpdater` getter eagerly constructs the per-platform
+    // updater, and the Linux AppImageUpdater rejects the unsigned dev version at
+    // construction. Development builds never touch the updater, so skip constructing it.
+    autoUpdater: app.isPackaged && releaseArtifact ? electronUpdater.autoUpdater : null,
     app: {
       get isPackaged() { return app.isPackaged && releaseArtifact; },
-      getVersion: () => app.getVersion(),
+      getVersion: () => desktopVersion,
     },
     updateBaseUrl,
     prefetchRuntimeUpdate: async (info) => {
@@ -372,15 +384,13 @@ if (primaryInstance) {
     appearance = saved.appearance === "light" ? "light" : "dark";
     nativeTheme.themeSource = appearance;
     const channel = resolveUpdateChannel(saved.updateChannel);
-    const telemetryPackageMetadata = app.isPackaged ? metadata : {
-      version: app.getVersion(),
-      relayerArtifactMode: "development",
-      relayerProductName: "Relayer Dev",
-    };
+    const telemetryPackageMetadata = app.isPackaged
+      ? metadata
+      : developmentTelemetryPackageMetadata(desktopVersion);
     authenticatedErrorReporting = await initializeDesktopAuthenticatedErrorReporting({
       userDataPath,
       packageMetadata: telemetryPackageMetadata,
-      appVersion: app.getVersion(),
+      appVersion: desktopVersion,
       platform: process.platform,
       architecture: process.arch,
       currentUpdateChannel: releaseArtifact ? channel : "development",
@@ -391,7 +401,7 @@ if (primaryInstance) {
     accountService = createAccountService(channel);
     if (channel === "preview") updater.setChannel("preview");
     void accountService.start().catch((error) => console.error("Optional desktop account initialization failed:", error));
-    const activation = await managedRuntimeInstaller.activatePendingAppUpdate(app.getVersion());
+    const activation = await managedRuntimeInstaller.activatePendingAppUpdate(desktopVersion);
     if (activation.failures.length) {
       console.error("Managed runtime update activation failed:", new AggregateError(
         activation.failures.map(({ error }) => error),
@@ -407,6 +417,15 @@ if (primaryInstance) {
         "One or more retired managed runtimes could not be removed.",
       ));
     }
+    // SIGKILL during a secret Codex turn skips harness-host finally and can
+    // leave plaintext API-key auth.json under an isolated provider home.
+    const leftoverAuth = await removeLeftoverEphemeralCodexAuthFiles(providerRuntimeRoot);
+    if (leftoverAuth.failures.length) {
+      console.error("Leftover Codex API-key auth cleanup failed:", new AggregateError(
+        leftoverAuth.failures.map(({ error }) => error),
+        "One or more leftover Codex API-key auth files could not be removed.",
+      ));
+    }
     const runtimeSession = await graphRuntime.start();
     productServer = new RelayerAppServerService({
       userDataDirectory: userDataPath,
@@ -417,7 +436,7 @@ if (primaryInstance) {
       defaultHarnessConfiguration,
       allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-"),
       exportProducer: {
-        desktopVersion: app.getVersion(),
+        desktopVersion,
         buildCommit: metadata.relayerReleaseSourceCommit || "development",
         platform: process.platform,
         architecture: process.arch,

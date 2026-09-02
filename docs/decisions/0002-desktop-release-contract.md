@@ -26,6 +26,7 @@ The signed-candidate workflow may be run manually from `main` without changing t
 - Preview and Stable cannot be installed side by side, while `Relayer Dev` can coexist with either.
 - A Preview user cannot downgrade to an older Stable version. Stable promotion therefore follows a successful Preview canary and uses monotonically increasing numeric versions.
 - macOS 13.2-or-older and Windows Arm support require separate release decisions and validation.
+- `linux-x64` is a development-only host for the unsigned `Relayer Dev` and `Relayer Eval` builds and their managed Codex/Claude runtimes. It is deliberately not a signed release target, so packaging, signing, and the update feeds stay macOS and Windows x64. Prime Agent remains unavailable on Linux, as on Windows.
 - Intel macOS is built and canaried on GitHub's `macos-15-intel` runner while that hosted x64 environment remains available; a physical Intel Mac remains the strongest final hardware check.
 - Windows Stable promotion requires an interactive-session canary proving installer signature, installation, visible application launch, Preview discovery, installation, and signed relaunch into the exact candidate.
 - A target with incomplete signing authority remains disabled. It does not block another target. Preview needs proven signing; Stable additionally needs target canary evidence.

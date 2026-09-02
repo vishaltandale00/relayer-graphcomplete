@@ -27,11 +27,19 @@ manual.
 Tests are always invoked for the current source snapshot. Cache entries contain
 dependency and compilation artifacts only; they are untrusted acceleration and
 never verification evidence. Rust Clippy, default tests, crash reconciliation,
-and runtime builds use separate `CARGO_TARGET_DIR` values and converge through
-the existing `Rust checks and fresh tests` aggregate. Their isolated runners
-share one toolchain-bound, content-addressed sccache namespace:
-same-repository pull requests and
-repository branch pushes may read and write compiler objects. Fork pull
+and runtime builds converge through the existing `Rust checks and fresh tests`
+aggregate. Every lane executes on its own fresh runner, so all lanes use one
+shared `CARGO_TARGET_DIR` path: identical paths keep sccache cache keys stable
+across lanes, which matters for the Ladybug CMake build whose generated-header
+paths would otherwise fragment the C/C++ object cache per lane. Their isolated
+runners share one toolchain-bound, content-addressed sccache namespace. The Clippy,
+default-test, and crash lanes read and write compiler objects; the runtime
+lane reads only while the writer lanes run. Its unique outputs are uncachable
+binary links, and its shareable units are identical to the default-test
+lane's, so reading without writing removes duplicate-write collisions with the
+lanes that seed those objects. On runtime-only plans no writer lane exists, so
+the runtime lane writes to keep the namespace from going cold. Same-repository pull requests and repository branch pushes may store
+compiler objects through the writing lanes. Fork pull
 requests do not run sccache and receive no compiler-cache credentials; they
 compile directly with `rustc`. GitHub's ref scoping lets pull requests inherit a
 compatible trusted branch baseline without allowing `main`, integration
@@ -62,6 +70,30 @@ their presence is not a verification claim. A cache or telemetry failure must
 not make the stable required `check` fail when the same source compiles and
 tests successfully without acceleration.
 
+The Ladybug native library is built once per run by the `Prebuilt Ladybug
+native library` job whenever any Rust lane runs. It compiles the pinned
+bundled source (`cargo build -p lbug`), strips debug info from the static
+archive, and packages the library with the headers the external-link path
+needs. The bundle is uploaded as a one-day artifact and saved to the Actions
+cache on trusted pushes with a key over the runner platform, rustc release,
+and `Cargo.lock` digest. Each Rust lane downloads the bundle and runs
+`scripts/ci/lbug-artifact.mjs verify`, which re-checks the platform, rustc
+release, `Cargo.lock` digest, pinned lbug version, and the library SHA-256
+before exporting `LBUG_LIBRARY_DIR`/`LBUG_INCLUDE_DIR`. A missing or rejected
+bundle fails open to the in-lane source build, and the lanes keep running on
+their own source builds even if the producing job fails: their gates re-derive
+from the plan and quick results, never from the acceleration job. The bundle
+records the commit that built it for provenance, but equality keys on the
+pinned source, the resolved lbug feature set, and the toolchain, because the
+bundled source cannot change without a `Cargo.lock` change. The manifest also
+carries a digest over every packaged file plus the library size, so a
+truncated include tree or a failed debug strip is rejected before any lane
+links. One accepted cost: while the bundle cache keeps hitting, the lanes no
+longer repopulate the Ladybug objects in sccache, so a later fallback to the
+source build pays a cold CMake compile until it re-stores them. Tests still
+compile and run freshly against whichever library they link; the bundle is
+acceleration, never evidence.
+
 The selected default-feature `relayer-app-server` and
 `relayer-graph-server` binaries are built once in the runtime lane. Its workflow
 artifact is retained for one day and binds the exact workflow commit, runner
@@ -71,8 +103,30 @@ all fields and installs only those authenticated bytes into `target/debug`.
 This removes independent Vitest Rust compilation without caching any test
 result; every mapped Vitest test still runs freshly.
 
+The Clippy, default-test, and runtime lanes append `--timings` to their
+direct Cargo invocations when the workflow gives them a
+`RELAYER_CARGO_TIMINGS_DIR`, then harvest the report Cargo writes into the
+lane's target directory (`cargo-timings/cargo-timing.html`). Each lane
+uploads the harvested reports as a non-gating 14-day artifact beside its
+sccache statistics; a harvest failure cannot fail the lane. The crash lane executes its command through the
+repository npm script, which cannot inject Cargo flags, so it records step
+durations but no timing report. Timing reports expose compilation units,
+features, critical path, and concurrency; they are measurement evidence, not
+verification evidence.
+
 Job summaries record Node setup/npm-cache status and elapsed time, Rust-cache
 status and restore time, chapter duration, and the first actionable failure.
+
+The crash-reconciliation lane selects on the checked-in
+`rustCrashPackages` list (`relayer-graph-core` and `relayer-graph-server`)
+intersected with the affected crates' reverse-dependency closure, plus every
+full-portfolio run. Forward build dependencies are excluded: they join the
+affected package list because Clippy lints them, but the crash command never
+compiles or executes them. `relayer-app-server` is likewise deliberately
+excluded: the crash command compiles and executes no app-server code, and
+app-server interrupted-execution recovery remains owned by its ordinary Rust
+tests. See `docs/research/crash-verification-cadence.md` for the staged
+narrowing plan.
 
 The checked-in v1 map is `scripts/ci/affected-modules.v1.json`. Rust selection
 includes reverse dependents and their local build dependencies; npm reverse
@@ -86,3 +140,31 @@ Source-module changes conservatively run the complete fresh Vitest portfolio;
 the planner narrows their compilation, typecheck, packaging, and non-Vitest
 chapters. This keeps product and authority boundaries intact when a new test is
 added outside an older component-specific list.
+
+Explicitly owned paths may select no chapter at all. Repository metadata
+(`LICENSE`, `.gitignore`, `CONTRIBUTING.md`, `ROADMAP.md`, `CONTEXT.md`),
+process documentation (`docs/research/`, `docs/postmortems/`, specification
+notes), and manual desktop/evidence driver scripts have no CI consumer, so a
+change that touches only those paths still runs planning, the quick
+deterministic checks, and the stable `check` aggregator, and nothing else.
+Executable seams that cannot run their full flow in CI keep deterministic
+substitutes instead: `live-run.example.json` and the paid live-run entry
+point resolve through the live-run model checkpoint, the provider-UX evidence
+scripts and the ask-profile capture entry point parse through
+platform-portable syntax checkpoints, and the ask-profile shell launcher
+passes `sh -n`. Two documentation paths are different:
+`docs/desktop-release-operations.md` is read by the desktop-shell checkpoint,
+and `.gitattributes` is read by the byte-stability and Ladybug receipt-input
+checkpoints, so both select their owning Vitest tests. `scripts/clean-dist.mjs` also
+selects no extra chapter, but the always-running quick chapter executes it as
+the portfolio's `clean-dist` authority, so every plan verifies it. Each such
+mapping is an explicit ownership declaration in the v1 map; unknown and
+unmapped paths still fail open to the full portfolio. Scripts that Vitest imports or reads keep their
+owning test files, and `scripts/prepare-ladybug-source.mjs` additionally
+selects packaging because the pinned Ladybug build consumes it and receipts
+because the native-receipt authority imports its hashing helpers.
+`docs/graph-query-v1.md` is a compile-time input of the graph-core query
+contract tests, so it selects the Rust closure of `relayer-graph-core`.
+`docs/graph-query-v1-errors.json` is the source of the generated
+query-error code and the Python client contract, so it selects the
+`@relayer/graph-client` workspace closure and the Python chapter.

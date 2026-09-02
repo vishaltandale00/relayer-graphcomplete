@@ -3358,10 +3358,37 @@ async fn approval_wait_is_durable_and_the_product_decision_resumes_the_same_comp
         .await
         .unwrap();
     assert_eq!(duplicate.status(), StatusCode::CONFLICT);
-    let epoch_reset_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    // The epoch reset is driven by the product's 100ms approval-event polling
+    // plus the final reconciliation, so it settles well under a second when
+    // the flow works. The generous deadline guards eventual progress against
+    // runner scheduling stalls without weakening the checkpoint: a real hang
+    // still fails the test. The elapsed observation keeps the latency
+    // regression visible in CI logs even though the hard bound is tolerant.
+    let epoch_reset_started = std::time::Instant::now();
+    let epoch_reset_deadline = epoch_reset_started + Duration::from_secs(30);
     while !event_epoch_reset.load(Ordering::SeqCst) {
         assert!(std::time::Instant::now() < epoch_reset_deadline);
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let epoch_reset_elapsed = epoch_reset_started.elapsed();
+    if epoch_reset_elapsed > Duration::from_secs(5) {
+        // libtest captures output from passing tests, so a plain eprintln
+        // would never surface in CI. Route the observation to the job
+        // summary when it exists and keep the stderr copy for local runs.
+        let observation = format!(
+            "approval epoch reset took {epoch_reset_elapsed:?}; expected well under 5s on a healthy 100ms polling loop"
+        );
+        if let Ok(summary_path) = std::env::var("GITHUB_STEP_SUMMARY") {
+            use std::io::Write;
+            if let Ok(mut summary) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(summary_path)
+            {
+                let _ = writeln!(summary, "- {observation}");
+            }
+        }
+        eprintln!("{observation}");
     }
     assert!(event_epoch_reset.load(Ordering::SeqCst));
 

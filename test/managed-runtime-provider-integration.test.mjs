@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { createProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-contract.mjs";
 import { ProviderDefinitionService } from "../desktop/main/providers/provider-definition-service.mjs";
@@ -64,24 +67,42 @@ function fixture({ prepareRuntime = async () => ({ runtimeId: "codex" }), discov
 }
 
 describe("managed runtime provider Connect boundary", () => {
-  it("keeps API provider access secret-only while the Codex factory supplies its managed runtime", async () => {
+  it.each(["openai-api", "openrouter", "vercel-ai-router"])(
+    "carries %s runtime access through the broker into Codex with ephemeral auth.json",
+    async (adapterId) => {
     let submitted;
+    const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-int-"));
+    const providerId = `${adapterId}-work`;
     const definition = {
-      id: "openai-work", adapterId: "openai-api", label: "OpenAI Work",
-      endpoint: "https://api.openai.test/v1", accessContract: "secret@1", credentialReference: "provider:openai-work",
+      id: providerId, adapterId, label: `${adapterId} Work`,
+      endpoint: "https://api.provider.test/v1", accessContract: "secret@1", credentialReference: `provider:${providerId}`,
       lifecycleState: "active", removedAt: null,
     };
     const adapter = productionProviderAdapterRegistry.create(definition, {
-      fetch: vi.fn(), secrets: { "api-key": "secret" },
+      fetch: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: [{
+            id: "gpt-test",
+            type: "language",
+            architecture: { output_modalities: ["text"] },
+            top_provider: { context_length: 128_000, max_completion_tokens: 8_192 },
+            context_window: 128_000,
+            max_tokens: 8_192,
+          }],
+        }),
+      })),
+      secrets: { "api-key": "secret" },
     });
     const broker = createProviderExecutionAccessBroker(async () => ({
       definition,
-      descriptor: productionProviderAdapterRegistry.get("openai-api"),
+      descriptor: productionProviderAdapterRegistry.get(adapterId),
       runtime: adapter,
       release: async () => {},
     }));
     const acquired = await broker.acquire(
-      { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-test" },
+      { providerId, adapterId, modelId: "gpt-test" },
       ["secret@1"],
       new AbortController().signal,
     );
@@ -96,19 +117,21 @@ describe("managed runtime provider Connect boundary", () => {
     }, {
       runAppServerTurn: async (options) => {
         submitted = options;
+        const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
+        expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "secret" });
         options.onThreadId("thread-1");
         return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
       },
       resolveCodexRuntime: async () => ({
         executable: "/managed/codex",
-        environment: { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: "/managed/codex" },
+        environment: { CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: "/managed/codex" },
       }),
     });
     const inputGraph = { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" };
     await harness.complete({
       origin: { kind: "root" },
       inputGraph, interactionInput: { interaction: inputGraph, contexts: [] },
-      model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-test" },
+      model: { providerId, adapterId, modelId: "gpt-test" },
       access: acquired.access,
       graph: { interactionNodeId: 1, acquireCapability: () => ({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }) },
       approvals: { request: async () => { throw new Error("unused"); } },
@@ -117,8 +140,11 @@ describe("managed runtime provider Connect boundary", () => {
 
     expect(acquired.access).not.toHaveProperty("runtime");
     expect(submitted.codexPathOverride).toBe("/managed/codex");
-    expect(submitted.environment.CODEX_HOME).toBe("/isolated/codex");
+    expect(submitted.environment.CODEX_HOME).toBe(codexHome);
+    expect(submitted.environment.OPENAI_API_KEY).toBe("secret");
+    await expect(readFile(join(codexHome, "auth.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await acquired.release();
+    await rm(codexHome, { recursive: true, force: true });
   });
 
   it("finishes managed runtime preparation before provider authentication or discovery", async () => {

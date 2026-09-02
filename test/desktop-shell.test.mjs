@@ -237,6 +237,9 @@ describe("desktop skeleton", () => {
     expect(desktopMain.match(/issueErrorCapability,/gu)).toHaveLength(2);
     expect(desktopMain).toContain("authenticatedErrorReporting?.issueCapability({ component, processGeneration }) ?? null");
     expect(desktopMain).toContain("createDesktopAccountTelemetry");
+    expect(desktopMain).toContain("developmentTelemetryPackageMetadata(desktopVersion)");
+    expect(desktopMain).toContain("appVersion: desktopVersion");
+    expect(desktopMain).toContain("removeLeftoverEphemeralCodexAuthFiles(providerRuntimeRoot)");
     expect(desktopMain).toContain("graphRuntime.refreshErrorCapability()");
     expect(desktopMain).toContain("productServer?.refreshErrorCapability()");
     expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');
@@ -1268,7 +1271,11 @@ describe("desktop skeleton", () => {
         queueMicrotask(() => child.stdout.write(`${JSON.stringify({ ready: true, url: "http://127.0.0.1:43126" })}\n`));
         return child;
       },
-      shutdownTimeoutMs: 10,
+      // The shutdown budget must be large enough for the SIGTERM-then-SIGKILL
+      // escalation to run before the deadline is consumed, while still fitting
+      // inside the test's outer settlement window. The previous 10ms budget
+      // raced runner scheduling latency and intermittently skipped SIGTERM.
+      shutdownTimeoutMs: 120,
     });
     const lateCleanupError = new Error("late cleanup failed after shutdown deadline");
     const lifecycle = [];
@@ -1294,7 +1301,7 @@ describe("desktop skeleton", () => {
           (error) => ({ status: "rejected", error }),
         ),
         new Promise((resolve) => {
-          closeTimeout = setTimeout(() => resolve({ status: "timed out" }), 250);
+          closeTimeout = setTimeout(() => resolve({ status: "timed out" }), 500);
         }),
       ]);
       clearTimeout(closeTimeout);
@@ -1518,9 +1525,11 @@ describe("desktop skeleton", () => {
       exitCode: null,
       signalCode: null,
       kill: vi.fn(function kill(signal) {
-        this.signalCode = signal;
-        this.emit("exit", null, signal);
-        this.emit("close", null, signal);
+        if (signal === "SIGKILL") {
+          this.signalCode = signal;
+          this.emit("exit", null, signal);
+          this.emit("close", null, signal);
+        }
         return true;
       }),
     });
@@ -1533,7 +1542,10 @@ describe("desktop skeleton", () => {
         queueMicrotask(() => child.stdout.write(`${JSON.stringify({ ready: true, url: "http://127.0.0.1:43130" })}\n`));
         return child;
       },
-      shutdownTimeoutMs: 10,
+      // A zero shutdown budget makes the deadline-consumed shutdown path
+      // deterministic: the child is killed with SIGKILL immediately instead
+      // of racing a 10ms grace period against runner scheduling latency.
+      shutdownTimeoutMs: 0,
     });
     const lateGracefulError = new Error("graceful host close rejected after force close");
 

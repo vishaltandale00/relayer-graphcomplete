@@ -41,6 +41,34 @@ describe("Eval harness configuration availability", () => {
     }).key).toBe("macos-arm64");
   });
 
+  it("resolves linux-x64 as a development-only unpackaged Eval host", () => {
+    expect(evalRuntimeTarget({
+      isPackaged: false,
+      environment: {},
+      platform: "linux",
+      architecture: "x64",
+    })).toMatchObject({ key: "linux-x64", platform: "linux", architecture: "x64" });
+    expect(evalRuntimeTarget({
+      isPackaged: false,
+      environment: { RELAYER_DESKTOP_TARGET: "linux-x64" },
+      platform: "darwin",
+      architecture: "arm64",
+    }).key).toBe("linux-x64");
+    expect(() => evalRuntimeTarget({
+      isPackaged: true,
+      environment: { RELAYER_DESKTOP_TARGET: "linux-x64" },
+      platform: "linux",
+      architecture: "x64",
+    })).toThrow("Unsupported Relayer Desktop target: linux-x64.");
+  });
+
+  it("records the package.json product version on unpackaged Eval exports", async () => {
+    const evalMain = await readFile(new URL("../desktop/eval-main/index.mjs", import.meta.url), "utf8");
+    expect(evalMain).toContain("const desktopVersion = app.isPackaged ? app.getVersion() : (metadata.version || app.getVersion());");
+    expect(evalMain).toContain("desktopVersion,");
+    expect(evalMain).not.toContain("desktopVersion: app.getVersion()");
+  });
+
   it("includes Prime configurations when the development package is available", () => {
     const packageAvailable = vi.fn(() => true);
 
@@ -133,7 +161,7 @@ describe("Eval harness configuration availability", () => {
   });
 
   it("keeps baseline harnesses but omits graph-search experiments off Apple Silicon", () => {
-    for (const targetKey of ["macos-x64", "windows-x64"]) {
+    for (const targetKey of ["macos-x64", "windows-x64", "linux-x64"]) {
       const available = names(evalHarnessConfigurationPaths({
         harnessDirectory: "/tmp/harnesses",
         isPackaged: false,
@@ -241,6 +269,12 @@ describe("Eval harness configuration availability", () => {
     expect(codexBasic.get("codex-basic")?.settings).toMatchObject({
       promptProfile: "layered-navigation-multi-agent-v1",
     });
+    expect(codexBasic.get("codex-basic")?.modelRules?.allow.map(({ adapterId }) => adapterId)).toEqual([
+      "codex-subscription",
+      "openai-api",
+      "openrouter",
+      "vercel-ai-router",
+    ]);
     expect(evalPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] }');
     expect(evalPackaging).toContain('"main/managed-runtimes/**/*"');
     expect(evalPackaging).toContain('"main/credentials/**/*"');

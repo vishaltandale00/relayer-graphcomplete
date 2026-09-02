@@ -3,5 +3,8 @@
 # than the `=0.18.0` pin the #261 qualification gate actually certified. Forcing
 # the source build makes it compile the reviewed core bundled inside the pinned
 # crate, with no network access. See docs/evidence/issue-261-ladybug-qualification.md.
+# CI Rust lanes may instead link a bundle that CI itself built from this same
+# pinned source (LBUG_LIBRARY_DIR/LBUG_INCLUDE_DIR, see docs/agents/ci.md); that
+# path is checked before the download path and never fetches upstream releases.
 [env]
 LBUG_BUILD_FROM_SOURCE = "1"

@@ -286,8 +286,13 @@ describe("CI workflow contract", () => {
       const run = job.steps.find((step) => step.name.startsWith("Run "));
       expect(setup.uses).toBe("./.github/actions/setup-rust-compilation");
       expect(setup.with.lane).toBe(lane);
+      // Every lane runs on its own fresh runner, so the lanes share one
+      // target-directory path without any filesystem overlap. The identical
+      // path keeps sccache keys stable across lanes, which matters for the
+      // Ladybug CMake build whose generated-header paths would otherwise
+      // fragment the C/C++ cache per lane.
       expect(run.env.CARGO_TARGET_DIR).toBe(
-        `\${{ runner.temp }}/cargo-target-${lane}`,
+        "\${{ runner.temp }}/cargo-target",
       );
       expect(run.env.CARGO_INCREMENTAL).toBe("0");
       expect(run.env.CARGO_PROFILE_DEV_DEBUG).toBe("line-tables-only");
@@ -299,6 +304,39 @@ describe("CI workflow contract", () => {
         "${{ steps.rust-setup.outputs.cache-version }}",
       );
     }
+    for (const cargoLane of ["rust-clippy", "rust-tests", "rust-runtime"]) {
+      const run = workflow.jobs[cargoLane].steps.find((step) =>
+        step.name.startsWith("Run "),
+      );
+      expect(run.env.RELAYER_CARGO_TIMINGS_DIR).toBe(
+        `\${{ runner.temp }}/cargo-timings-${cargoLane}`,
+      );
+    }
+    for (const writerLane of ["rust-clippy", "rust-tests", "rust-crash"]) {
+      const run = workflow.jobs[writerLane].steps.find((step) =>
+        step.name.startsWith("Run "),
+      );
+      expect(run.env.SCCACHE_GHA_RW_MODE).toBe("READ_WRITE");
+      expect(workflow.jobs[writerLane].steps.find((step) => step.id === "rust-setup").with["sccache-mode"]).toBeUndefined();
+    }
+    // The runtime lane only builds uncachable binary links on top of units
+    // seeded by the default-test lane, so it reads without writing while the
+    // writer lanes run. On runtime-only plans no writer lane exists, so it
+    // writes to keep the namespace from going cold.
+    const conditionalRuntimeMode =
+      "${{ needs.plan.outputs.rust == 'true' && 'READ_ONLY' || 'READ_WRITE' }}";
+    const runtimeRun = workflow.jobs["rust-runtime"].steps.find((step) =>
+      step.name.startsWith("Run "),
+    );
+    expect(runtimeRun.env.SCCACHE_GHA_RW_MODE).toBe(conditionalRuntimeMode);
+    expect(
+      workflow.jobs["rust-runtime"].steps.find((step) => step.id === "rust-setup")
+        .with["sccache-mode"],
+    ).toBe(conditionalRuntimeMode);
+    expect(
+      workflow.jobs["rust-crash"].steps.find((step) => step.name.startsWith("Run ")).env
+        .RELAYER_CARGO_TIMINGS_DIR,
+    ).toBeUndefined();
     expect(workflow.jobs.rust.needs).toEqual(
       expect.arrayContaining([
         "plan",
@@ -321,6 +359,14 @@ describe("CI workflow contract", () => {
         "utf8",
       ),
     );
+    // The writer lanes rely on the composite action defaulting to read-write;
+    // a silent default change would stop seeding without tripping the
+    // per-lane env pins above.
+    expect(rustSetup.inputs["sccache-mode"].default).toBe("READ_WRITE");
+    expect(
+      rustSetup.runs.steps.find((step) => step.id === "sccache-start").env
+        .SCCACHE_GHA_RW_MODE,
+    ).toBe("${{ inputs.sccache-mode }}");
     const sccache = rustSetup.runs.steps.find(
       (step) => step.id === "sccache-setup",
     );
@@ -364,6 +410,17 @@ describe("CI workflow contract", () => {
     expect(upload["continue-on-error"]).toBe(true);
     expect(upload.with["if-no-files-found"]).toBe("ignore");
     expect(upload.with["retention-days"]).toBe(14);
+    const timingsUpload = rustReport.runs.steps.find(
+      (step) => step.name === "Upload Cargo timing report",
+    );
+    expect(timingsUpload.uses).toBe(upload.uses);
+    expect(timingsUpload.if).toBe("${{ always() }}");
+    expect(timingsUpload["continue-on-error"]).toBe(true);
+    expect(timingsUpload.with["if-no-files-found"]).toBe("ignore");
+    expect(timingsUpload.with["retention-days"]).toBe(14);
+    expect(timingsUpload.with.path).toBe(
+      "${{ runner.temp }}/cargo-timings-${{ inputs.lane }}",
+    );
   });
 
   test("verifies the exact Rust runtime artifact before executing the fresh Vitest portfolio", () => {
@@ -394,6 +451,10 @@ describe("CI workflow contract", () => {
     expect(download.uses).toMatch(/^actions\/download-artifact@[0-9a-f]{40}$/);
     expect(upload.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
     expect(download.with.name).toBe(upload.with.name);
+    // Artifacts are immutable per workflow run; overwrite lets "re-run all
+    // jobs" replace the first attempt's bytes while a stable name keeps
+    // partial re-runs able to download the original upload.
+    expect(upload.with.overwrite).toBe(true);
     for (const identity of [
       "--source-commit",
       "--platform",
@@ -402,6 +463,12 @@ describe("CI workflow contract", () => {
     ]) {
       expect(verify.run).toContain(identity);
     }
+    // The seal step must read the binaries from the same target directory
+    // the lanes build into; a drift here fails late (ENOENT) without this pin.
+    const seal = workflow.jobs["rust-runtime"].steps.find(
+      (step) => step.name === "Seal selected Rust runtime",
+    );
+    expect(seal.run).toContain('--target-dir "$RUNNER_TEMP/cargo-target/debug"');
     expect(
       steps.some(
         (step) =>
@@ -415,6 +482,79 @@ describe("CI workflow contract", () => {
         "utf8",
       ),
     ).not.toContain('run("Build selected Vitest Rust runtime"');
+  });
+
+  test("builds the Ladybug library once and verifies it before every Rust lane links it", () => {
+    const job = workflow.jobs["lbug-prebuilt"];
+    expect(job.if).toBe(
+      "${{ needs.quick.result == 'success' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true' || needs.plan.outputs.rust_crash == 'true') }}",
+    );
+    expect(
+      job.steps.find((step) => step.id === "rust-setup").uses,
+    ).toBe("./.github/actions/setup-rust-compilation");
+    const restore = job.steps.find((step) => step.id === "lbug-cache");
+    expect(restore.uses).toMatch(/^actions\/cache\/restore@/);
+    expect(restore.if).toBeUndefined();
+    const build = job.steps.find(
+      (step) => step.name === "Build Ladybug from the pinned bundled source",
+    );
+    expect(build.if).toBe("${{ steps.lbug-cache.outputs.cache-hit != 'true' }}");
+    expect(build.run).toContain("cargo build -p lbug");
+    expect(build.run).toContain("scripts/ci/lbug-artifact.mjs create");
+    const upload = job.steps.find(
+      (step) => step.name === "Upload prebuilt Ladybug library",
+    );
+    expect(upload.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
+    expect(upload.with.overwrite).toBe(true);
+    const save = job.steps.find(
+      (step) => step.name === "Save trusted prebuilt Ladybug bundle",
+    );
+    expect(save.if).toContain("github.event_name == 'push'");
+    expect(save.with.key).toBe("${{ steps.lbug-cache.outputs.cache-primary-key }}");
+    // The job that does the steady-state C++ compiling stays visible to the
+    // cache-evidence chain like every other compiling lane.
+    const report = job.steps.find(
+      (step) => step.name === "Report Ladybug build compiler cache",
+    );
+    expect(report.if).toBe("${{ always() }}");
+    expect(report["continue-on-error"]).toBe(true);
+    expect(report.with.lane).toBe("lbug-prebuilt");
+    expect(build.run).toContain("--timings");
+    expect(build.env.RELAYER_CARGO_TIMINGS_DIR).toBe(
+      "${{ runner.temp }}/cargo-timings-lbug-prebuilt",
+    );
+
+    for (const lane of [
+      "rust-clippy",
+      "rust-tests",
+      "rust-crash",
+      "rust-runtime",
+    ]) {
+      const laneJob = workflow.jobs[lane];
+      expect(laneJob.needs).toContain("lbug-prebuilt");
+      // A failed acceleration job must never skip the lanes into a red
+      // aggregate: the gates re-derive from plan/quick results only, and the
+      // lanes' download/verify steps fail open to the source build.
+      expect(laneJob.if).toBe(
+        lane === "rust-crash"
+          ? "${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}"
+          : lane === "rust-runtime"
+            ? "${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_runtime == 'true' }}"
+            : "${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}",
+      );
+      const download = laneJob.steps.find(
+        (step) => step.name === "Download prebuilt Ladybug library",
+      );
+      const verify = laneJob.steps.find(
+        (step) => step.name === "Verify and install prebuilt Ladybug library",
+      );
+      // Fail-open: a missing or rejected bundle falls back to the source build.
+      expect(download["continue-on-error"]).toBe(true);
+      expect(verify["continue-on-error"]).toBe(true);
+      expect(download.with.name).toBe(upload.with.name);
+      expect(verify.run).toContain("scripts/ci/lbug-artifact.mjs verify");
+      expect(verify.run).toContain('--github-env "$GITHUB_ENV"');
+    }
   });
 
   test("preserves PR parent history for complete Vitest evidence checks", () => {

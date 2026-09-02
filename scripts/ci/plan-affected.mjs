@@ -187,6 +187,10 @@ function matches(path, rule) {
   );
 }
 
+function ownerMatches(owner, path) {
+  return matches(path, owner);
+}
+
 function allTrueChapters() {
   return Object.fromEntries(allChapterNames.map((chapter) => [chapter, true]));
 }
@@ -214,6 +218,11 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
   if (forcedMode === "full") {
     return fullPlan(repository, config, changedFiles, [
       "Full verification required by workflow mode",
+    ]);
+  }
+  if (!Array.isArray(config.rustCrashPackages)) {
+    return fullPlan(repository, config, changedFiles, [
+      "rustCrashPackages missing from the affected-module map",
     ]);
   }
 
@@ -244,7 +253,7 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
 
     let mapped = false;
     for (const owner of config.rustOwners) {
-      if (path.startsWith(owner.prefix)) {
+      if (ownerMatches(owner, path)) {
         rustRoots.add(owner.package);
         chapters.rust = true;
         for (const testPath of owner.vitestFiles ?? [])
@@ -255,7 +264,7 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
       }
     }
     for (const owner of config.npmOwners) {
-      if (path.startsWith(owner.prefix)) {
+      if (ownerMatches(owner, path)) {
         npmRoots.add(owner.package);
         chapters.typescript = true;
         chapters.packaging ||= owner.packaging === true;
@@ -328,10 +337,8 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
   }
 
   const rustGraph = localRustGraph(repository);
-  const rustPackages = dependencyClosure(
-    rustGraph,
-    reverseClosure(rustGraph, rustRoots),
-  );
+  const rustReverseClosure = reverseClosure(rustGraph, rustRoots);
+  const rustPackages = dependencyClosure(rustGraph, rustReverseClosure);
   const runtimeRustPackages = new Set(vitestRustPackages);
   for (const packageName of rustPackages) {
     if (config.vitestRustRuntime.fullPortfolio.includes(packageName))
@@ -349,12 +356,12 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
     vitestFiles: [...vitestFiles].sort(),
     vitestRustPackages: [...vitestRustPackages].sort(),
     runtimeRustPackages: [...runtimeRustPackages].sort(),
-    rustCrash: rustPackages.some((name) =>
-      new Set([
-        "relayer-graph-core",
-        "relayer-graph-server",
-        "relayer-app-server",
-      ]).has(name),
+    // Crash selection keys on the reverse closure alone: forward build
+    // dependencies enter rustPackages because Clippy lints them, but a
+    // dependent-only change alters no graph source the crash command
+    // exercises.
+    rustCrash: rustReverseClosure.some((name) =>
+      config.rustCrashPackages.includes(name),
     ),
     rootTypeScript,
     chapters,

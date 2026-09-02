@@ -67,6 +67,8 @@ describe("deep calibration candidate cases", () => {
       seededTree: expect.stringMatching(/^[a-f0-9]{40}$/),
     });
     expect(await readFile(join(workspaceDirectory, "README.md"), "utf8")).toContain("JSON Explorer");
+    expect(await readFile(join(workspaceDirectory, ".git/config"), "utf8")).toMatch(/\[commit\][\s\S]*gpgsign = false/);
+    expect(await readFile(join(workspaceDirectory, ".git/config"), "utf8")).toMatch(/fsmonitor = false/);
   });
 
   it("fails an untouched baseline without confusing verifier completion with qualification", async () => {

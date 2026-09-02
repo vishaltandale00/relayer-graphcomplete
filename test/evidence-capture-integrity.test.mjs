@@ -5,7 +5,7 @@ import { chmodSync, closeSync, copyFileSync, existsSync, linkSync, lstatSync, mk
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { basename, delimiter, dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Writable } from "node:stream";
 import {
   authenticateSealedMachOPayload,
@@ -2477,5 +2477,32 @@ describe("evidence capture integrity", () => {
       ...inspectionAuthority,
       requireCommandCompletions: true,
     })).toThrow("has no matching validated completion");
+  });
+
+  it("keeps the ask-profile capture entry point parseable without Electron", () => {
+    // The entry point imports electron, so CI cannot execute it; a module
+    // parse still catches syntax and import-list regressions on every
+    // platform, which the text-token checks cannot.
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--check"],
+      {
+        input: readFileSync(
+          new URL("../scripts/capture-ask-profile-evidence.mjs", import.meta.url),
+        ),
+        encoding: "utf8",
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it("syntax-checks the ask-profile shell launcher on every platform", () => {
+    const result = spawnSync("/bin/sh", [
+      "-n",
+      fileURLToPath(
+        new URL("../scripts/launch-ask-profile-evidence.sh", import.meta.url),
+      ),
+    ], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
   });
 });

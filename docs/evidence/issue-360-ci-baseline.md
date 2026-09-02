@@ -76,3 +76,21 @@ comparison. Record its sccache hits, misses, errors, Rust chapter duration, and
 repository cache usage here. Expansion beyond the Rust job requires at least
 five minutes of net Rust compilation savings, no required-job regression, and
 no trusted-cache eviction or thrashing.
+
+## Parallel-lane baseline after PR #392
+
+PR #392 split the Rust chapter into four parallel lanes with isolated target
+directories and one shared sccache namespace, removed the duplicate serial full
+gate, and passed runtime binaries to Vitest through a verified artifact.
+Observed hosted durations (job start to completion):
+
+| Run | Context | Slowest Rust lane | Vitest job | Whole workflow |
+| --- | --- | --- | --- | --- |
+| [33483636709](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33483636709) | full-mode PR, first parallel-namespace consumption | crash 14m30s | 3m29s | about 16m46s |
+| [33485024514](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/33485024514) | first trusted `main` seed of the parallel namespace | crash 21m44s | 3m14s | about 24m26s |
+
+Both runs are cold for the new namespace; their lane sccache artifacts recorded
+457–567 write errors per lane from concurrent duplicate object stores and no
+read errors. The warm changed-head comparison required by the admission rule is
+the next ordinary PR after the trusted seed. These are measurements, not the
+Issue #360 targets.
