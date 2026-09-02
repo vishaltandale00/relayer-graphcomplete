@@ -20,54 +20,62 @@ function presentation(nodes: ResolvedPersonalPresentation["graph"]["layers"][num
 }
 
 describe("personal presentation guidance", () => {
-  it("renders neutral V0 without changing baseline prompt content", () => {
-    const neutral = presentation([{
-      id: 93,
-      kind: "personal-presentation-manifest",
-      icon: "settings",
-      title: "Neutral personal presentation",
-      detail: "This control version adds no personal presentation guidance.",
-      state: "accepted",
-    }]);
-
-    expect(renderPersonalPresentationGuidance(neutral)).toBe("");
-  });
-
-  it("renders accepted preference nodes in canonical layer and node order", () => {
-    const guidance = renderPersonalPresentationGuidance(presentation([
-      {
-        id: 93,
-        kind: "presentation-preference",
-        icon: "compass",
-        title: "Decision-useful center",
-        detail: "The user prefers central layers that are immediately decision-useful. Foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations.",
-        state: "accepted",
-      },
-      {
-        id: 94,
-        kind: "presentation-preference",
-        icon: "layers",
-        title: "Adaptive progressive disclosure",
-        detail: "Reveal additional information according to its value to understanding. Keep information central when it is necessary to understand the response without navigating. Use graph actions when supporting evidence, implementation detail, or secondary context would materially improve understanding or help the user proceed. Do not add branches that merely repeat or decorate the central explanation.",
-        state: "accepted",
-      },
-      {
-        id: 95,
-        kind: "presentation-preference",
-        icon: "workflow",
-        title: "Visible working state",
-        detail: "For work that will not finish immediately, prefer establishing a useful current early and advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress even when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates.",
-        state: "accepted",
-      },
-    ]));
-
-    expect(guidance).toBe(`Personal graph presentation preferences:
+  it("renders accepted presentation nodes in canonical layer and node order", () => {
+    const canonicalPreferenceGuidance = `Personal graph presentation preferences:
 
 Decision-useful center: The user prefers central layers that are immediately decision-useful. Foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations.
 
 Adaptive progressive disclosure: Reveal additional information according to its value to understanding. Keep information central when it is necessary to understand the response without navigating. Use graph actions when supporting evidence, implementation detail, or secondary context would materially improve understanding or help the user proceed. Do not add branches that merely repeat or decorate the central explanation.
 
-Visible working state: For work that will not finish immediately, prefer establishing a useful current early and advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress even when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates.`);
+Visible working state: For work that will not finish immediately, prefer establishing a useful current early and advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress even when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates.`;
+    const cases = [
+      ["neutral V0 manifest adds no guidance", presentation([{
+        id: 93,
+        kind: "personal-presentation-manifest",
+        icon: "settings",
+        title: "Neutral personal presentation",
+        detail: "This control version adds no personal presentation guidance.",
+        state: "accepted",
+      }]), (guidance: string) => expect(guidance).toBe("")],
+      ["accepted preferences render in canonical order", presentation([
+        {
+          id: 93,
+          kind: "presentation-preference",
+          icon: "compass",
+          title: "Decision-useful center",
+          detail: "The user prefers central layers that are immediately decision-useful. Foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations.",
+          state: "accepted",
+        },
+        {
+          id: 94,
+          kind: "presentation-preference",
+          icon: "layers",
+          title: "Adaptive progressive disclosure",
+          detail: "Reveal additional information according to its value to understanding. Keep information central when it is necessary to understand the response without navigating. Use graph actions when supporting evidence, implementation detail, or secondary context would materially improve understanding or help the user proceed. Do not add branches that merely repeat or decorate the central explanation.",
+          state: "accepted",
+        },
+        {
+          id: 95,
+          kind: "presentation-preference",
+          icon: "workflow",
+          title: "Visible working state",
+          detail: "For work that will not finish immediately, prefer establishing a useful current early and advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress even when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates.",
+          state: "accepted",
+        },
+      ]), (guidance: string) => expect(guidance).toBe(canonicalPreferenceGuidance)],
+      ["whitespace canonicalizes without harness-owned validity rules", presentation([{
+        id: 93,
+        kind: "presentation-preference",
+        icon: "compass",
+        title: " Summary ",
+        detail: " Show a summary. ",
+        state: "accepted",
+      }]), (guidance: string) => expect(guidance).toContain("Summary: Show a summary.")],
+    ] as const;
+    expect(cases, "rendering case inventory").toHaveLength(3);
+    for (const [label, resolved, check] of cases) {
+      expect.soft(() => check(renderPersonalPresentationGuidance(resolved)), label).not.toThrow();
+    }
   });
 
   it("fails closed when the attachment and resolved graph disagree", () => {
@@ -78,18 +86,5 @@ Visible working state: For work that will not finish immediately, prefer establi
     };
 
     expect(() => renderPersonalPresentationGuidance(invalid)).toThrow("root layer");
-  });
-
-  it("canonicalizes whitespace without adding harness-owned graph validity rules", () => {
-    const padded = presentation([{
-      id: 93,
-      kind: "presentation-preference",
-      icon: "compass",
-      title: " Summary ",
-      detail: " Show a summary. ",
-      state: "accepted",
-    }]);
-
-    expect(renderPersonalPresentationGuidance(padded)).toContain("Summary: Show a summary.");
   });
 });
