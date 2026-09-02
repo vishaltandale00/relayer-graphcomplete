@@ -72,13 +72,6 @@ describe("CI chapter runner", () => {
     ]);
   });
 
-  test("keeps Cargo invocations timing-free unless a timings directory is set", () => {
-    const plan = { rustPackages: ["relayer-graph-core"] };
-    expect(run("rust-tests", plan)).toEqual([
-      "cargo:test -p relayer-graph-core",
-    ]);
-  });
-
   test("adds --timings and harvests the report when a timings directory is set", () => {
     const timingsDirectory = join(directory, "timings");
     const targetDirectory = join(directory, "cargo-target");

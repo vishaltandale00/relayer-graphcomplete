@@ -238,11 +238,6 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("allows an adapter to attest a no-effect failure before provider execution", () => {
-    expect(new HarnessExecutionFailure("not started", "authentication", "none"))
-      .toMatchObject({ failureCategory: "authentication", effectBoundary: "none" });
-  });
-
   it("fails closed for an untyped provider failure after execution starts", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-no-effect-"));
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")

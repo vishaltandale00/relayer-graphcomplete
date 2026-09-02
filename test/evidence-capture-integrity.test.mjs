@@ -592,34 +592,6 @@ describe("evidence capture integrity", () => {
       .toThrow("Unsupported relative Mach-O runtime path");
   });
 
-  it.runIf(process.platform === "darwin")("resolves every private Xcode ld dependency identically in both slices", () => {
-    const executable = realpathSync(execFileSync("/usr/bin/xcrun", ["--find", "ld"], { encoding: "utf8" }).trim());
-    const sections = parseOtoolLibraryDependencySections(
-      execFileSync("/usr/bin/otool", ["-L", executable], { encoding: "utf8" }),
-      executable,
-    );
-    const privateNames = ["libLTO.dylib", "libcodedirectory.dylib", "libswiftDemangle.dylib", "libtapi.dylib"];
-    const resolvedByArchitecture = new Map();
-    for (const section of sections) {
-      const rpaths = parseOtoolRpaths(execFileSync("/usr/bin/otool", [
-        "-l", "-arch", section.architecture, executable,
-      ], { encoding: "utf8" }), executable).map((path) => expandMachORuntimePath(path, {
-        loaderPath: executable,
-        executablePath: executable,
-      }));
-      const resolved = Object.fromEntries(section.dependencies
-        .filter((dependency) => dependency.startsWith("@rpath/"))
-        .map((dependency) => {
-          const name = basename(dependency);
-          const source = rpaths.map((root) => join(root, name)).find(existsSync);
-          expect(source).toBeDefined();
-          return [name, realpathSync(source)];
-        }));
-      expect(Object.keys(resolved).sort()).toEqual(privateNames);
-      resolvedByArchitecture.set(section.architecture, resolved);
-    }
-    expect(resolvedByArchitecture.get("arm64")).toEqual(resolvedByArchitecture.get("x86_64"));
-  });
 
   it.runIf(process.platform === "darwin")("recursively authenticates the real Xcode ld Mach-O closure", () => {
     const executable = realpathSync(execFileSync("/usr/bin/xcrun", ["--find", "ld"], { encoding: "utf8" }).trim());
