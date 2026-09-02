@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("Desktop Eval graph-search ablation", () => {
-  it("catalogs one query-v1 treatment beside the search-disabled baseline for every available provider", async () => {
+  it("flows the query-v1 preset from catalog through rendered controls into a platform-gated createRun", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-search-ablation-"));
     directories.push(dataDirectory);
     const service = await new EvalService({
@@ -37,7 +37,7 @@ describe("Desktop Eval graph-search ablation", () => {
     }).open();
 
     const catalog = service.catalog();
-    expect(catalog.ablations).toEqual([{
+    expect(catalog.ablations, "one query-v1 treatment beside the search-disabled baseline per provider").toEqual([{
       id: "graph-search-query-v1",
       name: "Graph search · query-v1",
       description: expect.stringContaining("same graph-memory case"),
@@ -48,35 +48,12 @@ describe("Desktop Eval graph-search ablation", () => {
         { provider: "Prime Agent", control: "prime-agent-basic", treatment: "prime-agent-basic-graph-search" },
       ],
     }]);
-    expect(catalog.harnessConfigurations.find(({ name }) => name === "codex-basic-graph-search")).toMatchObject({
+    expect(catalog.harnessConfigurations.find(({ name }) => name === "codex-basic-graph-search"),
+      "treatment configuration keeps baseline identity with query authority").toMatchObject({
       implementation: "codex.basic",
       graphCapabilityProfile: { search: "query-v1" },
     });
-  });
 
-  it("rejects a crafted query-v1 run when an unsupported target loads the treatment directly", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-search-platform-gate-"));
-    directories.push(dataDirectory);
-    const service = await new EvalService({
-      stateFile: join(dataDirectory, "runs.json"),
-      productSession: { url: "http://127.0.0.1:1", controlToken: "unused" },
-      configurationPaths: [
-        join(repositoryRoot, "harnesses", "codex-basic.yaml"),
-        join(repositoryRoot, "harnesses", "codex-basic-graph-search.yaml"),
-      ],
-      platform: "win32",
-      targetKey: "windows-x64",
-    }).open();
-
-    await expect(service.createRun({
-      testCaseIds: ["graph-memory.prior-accepted-reference"],
-      harnessConfigurationNames: ["codex-basic", "codex-basic-graph-search"],
-      judgeConfigurationName: "deterministic-graph-contract",
-    })).rejects.toThrow("qualified only for macOS Apple Silicon");
-    expect(service.listRuns()).toEqual([]);
-  });
-
-  it("turns the preset into the exact case by all control and treatment arms", () => {
     const selection = selectionForAblation({
       cases: [{ id: "graph-memory.prior-accepted-reference" }],
       judges: [{ id: "deterministic-graph-contract" }],
@@ -89,8 +66,7 @@ describe("Desktop Eval graph-search ablation", () => {
         ],
       }],
     }, "graph-search-query-v1");
-
-    expect(selection).toEqual({
+    expect(selection, "preset becomes the exact case by every control and treatment arm").toEqual({
       testCaseIds: ["graph-memory.prior-accepted-reference"],
       harnessConfigurationNames: [
         "codex-basic",
@@ -100,10 +76,8 @@ describe("Desktop Eval graph-search ablation", () => {
       ],
       judgeConfigurationName: "deterministic-graph-contract",
     });
-  });
 
-  it("clicks the rendered preset and passes the exact selection to createRun", async () => {
-    const catalog = {
+    const presetCatalog = {
       cases: [{ id: "graph-memory.prior-accepted-reference" }, { id: "unrelated-case" }],
       judges: [{ id: "deterministic-graph-contract" }, { id: "simulated-user" }],
       ablations: [{
@@ -132,13 +106,13 @@ describe("Desktop Eval graph-search ablation", () => {
     };
     const root = controlRoot(preset, controls);
     let applied;
-    const createRun = vi.fn(async (selection) => ({ id: "run-1", selection }));
+    const createRun = vi.fn(async (runSelection) => ({ id: "run-1", selection: runSelection }));
 
-    bindAblationControls(root, catalog, (selection) => { applied = selection; });
+    bindAblationControls(root, presetCatalog, (presetSelection) => { applied = presetSelection; });
     preset.onclick();
     const created = await createRunFromControls(root, { createRun });
 
-    expect(applied).toEqual(selectionFromControls(root));
+    expect(applied, "clicking the preset applies exactly the rendered controls").toEqual(selectionFromControls(root));
     const expectedSelection = {
       testCaseIds: ["graph-memory.prior-accepted-reference"],
       harnessConfigurationNames: [
@@ -151,8 +125,27 @@ describe("Desktop Eval graph-search ablation", () => {
       ],
       judgeConfigurationName: "deterministic-graph-contract",
     };
-    expect(createRun).toHaveBeenCalledExactlyOnceWith(expectedSelection);
-    expect(created).toEqual({ id: "run-1", selection: expectedSelection });
+    expect(createRun, "createRun receives the exact preset selection").toHaveBeenCalledExactlyOnceWith(expectedSelection);
+    expect(created, "created run echoes the selection").toEqual({ id: "run-1", selection: expectedSelection });
+
+    const gatedDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-search-platform-gate-"));
+    directories.push(gatedDirectory);
+    const gatedService = await new EvalService({
+      stateFile: join(gatedDirectory, "runs.json"),
+      productSession: { url: "http://127.0.0.1:1", controlToken: "unused" },
+      configurationPaths: [
+        join(repositoryRoot, "harnesses", "codex-basic.yaml"),
+        join(repositoryRoot, "harnesses", "codex-basic-graph-search.yaml"),
+      ],
+      platform: "win32",
+      targetKey: "windows-x64",
+    }).open();
+    await expect(gatedService.createRun({
+      testCaseIds: ["graph-memory.prior-accepted-reference"],
+      harnessConfigurationNames: ["codex-basic", "codex-basic-graph-search"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    }), "unsupported targets cannot run the crafted treatment").rejects.toThrow("qualified only for macOS Apple Silicon");
+    expect(gatedService.listRuns(), "gated runs are never persisted").toEqual([]);
   });
 });
 

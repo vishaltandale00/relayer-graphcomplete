@@ -85,38 +85,33 @@ function fixture() {
 }
 
 describe("judge analysis view model", () => {
-  it("keeps chronological turns and represents partial, missing, and skipped subjects literally", () => {
+  it("keeps chronological turns, literal subject coverage, scoped evidence, and the active imported judge", () => {
     const analysis = buildJudgeAnalysis(fixture(), "execution-1");
-    expect(analysis.turns.map((turn) => turn.interactionId)).toEqual(["11", "12"]);
-    expect(analysis.turns.map((turn) => turn.position)).toEqual([0, 1]);
-    expect(analysis.turns[0].state).toBe("partial");
-    expect(analysis.turns[0].reviewed).toBe(false);
-    expect(analysis.turns[0].layers.map((layer) => layer.layerId)).toEqual(["layer-a", "layer-b"]);
-    expect(analysis.turns[0].layers[0].nodes[0].reviewed).toBe(true);
-    expect(analysis.turns[0].layers[0].nodes[1].reviewed).toBe(false);
-    expect(analysis.turns[0].layers[0].nodes[1].actions[0].reviewed).toBe(false);
-    expect(analysis.turns[0].layers[0].nodes[1].actions[0].relation).toBe("reference");
-    expect(analysis.turns[1]).toMatchObject({ state: "skipped", stateReason: "Workspace was dirty." });
-  });
+    expect(analysis.turns.map((turn) => turn.interactionId), "chronological turn order").toEqual(["11", "12"]);
+    expect(analysis.turns.map((turn) => turn.position), "turn positions").toEqual([0, 1]);
+    expect(analysis.turns[0].state, "partial review stays partial").toBe("partial");
+    expect(analysis.turns[0].reviewed, "partial review is not complete").toBe(false);
+    expect(analysis.turns[0].layers.map((layer) => layer.layerId), "inventory layers survive").toEqual(["layer-a", "layer-b"]);
+    expect(analysis.turns[0].layers[0].nodes[0].reviewed, "reviewed node is marked").toBe(true);
+    expect(analysis.turns[0].layers[0].nodes[1].reviewed, "missing node stays unreviewed").toBe(false);
+    expect(analysis.turns[0].layers[0].nodes[1].actions[0].reviewed, "missing action stays unreviewed").toBe(false);
+    expect(analysis.turns[0].layers[0].nodes[1].actions[0].relation, "action relation survives").toBe("reference");
+    expect(analysis.turns[1], "deterministically failed turn is skipped with its reason")
+      .toMatchObject({ state: "skipped", stateReason: "Workspace was dirty." });
 
-  it("filters evidence to the selected subject while retaining a lazy all-turn inventory", () => {
-    const turn = buildJudgeAnalysis(fixture(), "execution-1").turns[0];
+    const turn = analysis.turns[0];
     const node = subjectForSelection(turn, { kind: "node", layerId: "layer-a", nodeId: "node-1" });
-    expect(node.evidenceIds).toEqual(["shot-layer", "shot-node"]);
-    expect(turn.allEvidenceIds).toEqual(["shot-layer", "shot-node", "shot-unused"]);
-    expect(evidenceIdsForReview(node.review)).toEqual(["shot-layer", "shot-node"]);
-  });
+    expect(node.evidenceIds, "evidence is filtered to the selected subject").toEqual(["shot-layer", "shot-node"]);
+    expect(turn.allEvidenceIds, "all-turn inventory remains lazily available").toEqual(["shot-layer", "shot-node", "shot-unused"]);
+    expect(evidenceIdsForReview(node.review), "review evidence matches the subject scope").toEqual(["shot-layer", "shot-node"]);
 
-  it("does not turn null or missing criterion scores into zero", () => {
-    expect(scoreForRatings({ cohesion: 4, presentation: null })).toBe(4);
-    expect(scoreForRatings({ cohesion: null })).toBeNull();
-    expect(scoreForRatings(null)).toBeNull();
-  });
+    expect(scoreForRatings({ cohesion: 4, presentation: null }), "a null criterion does not zero the score").toBe(4);
+    expect(scoreForRatings({ cohesion: null }), "all-null ratings stay null").toBeNull();
+    expect(scoreForRatings(null), "missing ratings stay null").toBeNull();
 
-  it("shows the active imported judge instead of a stale prior result", () => {
     const run = fixture();
-    const turn = run.executions[0].turns.find((candidate) => candidate.interactionId === 11);
-    turn.deterministicJudge = {
+    const judgedTurn = run.executions[0].turns.find((candidate) => candidate.interactionId === 11);
+    judgedTurn.deterministicJudge = {
       status: "completed",
       passed: true,
       provenance: { sourceSha256: "sha256:owner-export" },
@@ -124,15 +119,15 @@ describe("judge analysis view model", () => {
     };
     run.judgeConfigurationName = "deterministic-graph-contract";
     let selected = buildJudgeAnalysis(run, "execution-1").turns[0];
-    expect(selected.result).toBe(turn.deterministicJudge);
-    expect(selected.provenance.sourceSha256).toBe("sha256:owner-export");
+    expect(selected.result, "active imported judge wins over stale results").toBe(judgedTurn.deterministicJudge);
+    expect(selected.provenance.sourceSha256, "imported judge keeps its provenance").toBe("sha256:owner-export");
 
     run.judgeConfigurationName = "simulated-user";
     selected = buildJudgeAnalysis(run, "execution-1").turns[0];
-    expect(selected.result.id).toBe("judge-1");
+    expect(selected.result.id, "switching back restores the simulated-user result").toBe("judge-1");
   });
 
-  it("projects recursive score and semantic vectors while keeping historical reviews readable", () => {
+  it("projects recursive v2 and v6 reviews with scores, semantics, histories, and criterion judgments", () => {
     const run = fixture();
     const turn = run.executions[0].turns.find((candidate) => candidate.interactionId === 11);
     turn.judgeResults = [{
@@ -187,27 +182,23 @@ describe("judge analysis view model", () => {
     }];
 
     const recursive = buildJudgeAnalysis(run, "execution-1").turns[0];
-    expect(recursive.recursive).toBe(true);
-    expect(recursive.layers.map((layer) => layer.layerId)).toEqual(["child", "root"]);
-    expect(recursive.layers[1].review).toMatchObject({ ratings: { coverage: 3 }, summary: "Root compression." });
-    expect(recursive.layers[1].review.nodeScores).toHaveLength(8);
-    expect(recursive.layers[1].review.nodeSemantics[0].effectOnLayer).toBe("Compressed the child.");
-    expect(recursive.review.rootLayerResult.layerId).toBe("root");
-    expect(recursive.layers[1].nodes[0].review).toMatchObject({
+    expect(recursive.recursive, "v2 review is recognized as recursive").toBe(true);
+    expect(recursive.layers.map((layer) => layer.layerId), "child layers stay readable beside the root").toEqual(["child", "root"]);
+    expect(recursive.layers[1].review, "historical layer review survives").toMatchObject({ ratings: { coverage: 3 }, summary: "Root compression." });
+    expect(recursive.layers[1].review.nodeScores, "sparse node score vectors survive").toHaveLength(8);
+    expect(recursive.layers[1].review.nodeSemantics[0].effectOnLayer, "node semantics survive").toBe("Compressed the child.");
+    expect(recursive.review.rootLayerResult.layerId, "root layer result is projected").toBe("root");
+    expect(recursive.layers[1].nodes[0].review, "node scores are projected").toMatchObject({
       ratings: { content: 4, actionAllocation: 3, actionDelivery: 4, recursiveQuality: 3 },
       summary: "Compressed the child.",
     });
-    expect(recursive.layers[1].nodes[0].actions[0].review.summary).toContain("Delivered.");
-    expect(recursive.layers[1].nodes[0].review.missingActionOpportunities[0]).toMatchObject({
+    expect(recursive.layers[1].nodes[0].actions[0].review.summary, "action delivery survives").toContain("Delivered.");
+    expect(recursive.layers[1].nodes[0].review.missingActionOpportunities[0], "missing action opportunities survive").toMatchObject({
       importance: "material",
       unansweredQuestion: "How does the repair work?",
     });
-    expect(recursive.layers[1].nodes[0].evidenceIds).toContain("shot-missing-action");
-  });
+    expect(recursive.layers[1].nodes[0].evidenceIds, "opportunity evidence joins node evidence").toContain("shot-missing-action");
 
-  it("projects v6 input-action criterion judgments and their screenshots", () => {
-    const run = fixture();
-    const turn = run.executions[0].turns.find((candidate) => candidate.interactionId === 11);
     const judgment = (score, reason, evidence) => ({ score, reason, evidence });
     turn.judgeResults = [{
       id: "recursive-input-judge",
@@ -253,7 +244,7 @@ describe("judge analysis view model", () => {
     }];
 
     const action = buildJudgeAnalysis(run, "execution-1").turns[0].layers[0].nodes[0].actions[0];
-    expect(action.review).toMatchObject({
+    expect(action.review, "v6 input-action criterion judgments are projected").toMatchObject({
       ratings: { prompt_answerability: 7, option_set_quality: 8, control_fit: 6 },
       criterionJudgments: {
         prompt_answerability: { reason: "One concrete question." },
@@ -261,6 +252,6 @@ describe("judge analysis view model", () => {
         control_fit: { reason: "Free text fits." },
       },
     });
-    expect(action.evidenceIds).toEqual(["shot-input", "shot-prompt", "shot-options", "shot-control"]);
+    expect(action.evidenceIds, "criterion screenshots join action evidence").toEqual(["shot-input", "shot-prompt", "shot-options", "shot-control"]);
   });
 });

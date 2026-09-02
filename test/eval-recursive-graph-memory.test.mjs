@@ -126,118 +126,111 @@ async function gradeFixture(mutate = () => {}) {
   });
 }
 
+const failedChecks = (grade) => grade.turns.flatMap((turn) => turn.checks).filter((check) => !check.passed);
+const checkPassed = (grade, turnIndex, name) => (
+  grade.turns[turnIndex].checks.find((check) => check.name === name)?.passed
+);
+
 describe("recursive graph-memory Eval evidence", () => {
-  it("requires each follow-up to search and retain every required prior root plus one final semantic child", async () => {
-    const grade = await gradeFixture();
-    const failed = grade.turns.flatMap((turn) => turn.checks).filter((check) => !check.passed);
-    expect(failed, JSON.stringify(failed, null, 2)).toEqual([]);
-    expect(grade.turns[2].evidence).toMatchObject({
+  it("accepts clean search-and-retain evidence across capability cells and declared safe variants", async () => {
+    const baseline = await gradeFixture();
+    expect(failedChecks(baseline), JSON.stringify(failedChecks(baseline), null, 2)).toEqual([]);
+    expect(baseline.turns[2].evidence, "final turn names its searches and required prior roots").toMatchObject({
       successfulSearchCount: 2,
       searchedLayerIds: [101, 102],
       requiredPriorRoots: [101, 102],
     });
-    expect(grade.turns).toHaveLength(3);
-  });
+    expect(baseline.turns, "every turn is graded").toHaveLength(3);
 
-  it("rejects unbounded, unrelated, or post-reference searches", async () => {
-    const excessiveBudget = await gradeFixture(({ events }) => { events[1][0].budget.resultRows = 6; });
-    expect(excessiveBudget.turns[1].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(false);
-
-    const unrelatedTopic = await gradeFixture(({ events }) => {
-      events[2][1].parameters.topic.value = "Unrelated launch note";
-    });
-    expect(unrelatedTopic.turns[2].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(false);
-
-    const lateSearch = await gradeFixture(({ events }) => { events[2][1].sequence = 34; });
-    expect(lateSearch.turns[2].checks.find(({ name }) => name === "search-reference-submit-order")?.passed).toBe(false);
-
-    const extraSearch = await gradeFixture(({ events }) => {
-      events[2].splice(2, 0, search(31.5, "Unrelated launch note", 999));
-    });
-    expect(extraSearch.turns[2].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(false);
-  });
-
-  it("rejects unaudited references, action mismatches, and extra semantic children", async () => {
-    const wrongReference = await gradeFixture(({ events }) => { events[2][3].recordId = 999; });
-    expect(wrongReference.turns[2].checks.find(({ name }) => name === "prior-work-references")?.passed).toBe(false);
-
-    const wrongInvoke = await gradeFixture(({ execution }) => { execution.semanticChildren[0].sourceActionId = 999; });
-    expect(wrongInvoke.turns[2].checks.find(({ name }) => name === "final-child-attached")?.passed).toBe(false);
-
-    const extraChild = await gradeFixture(({ execution }) => {
-      execution.semanticChildren.push({ sourceInteractionId: 3, sourceActionId: 999, rootLayerId: 999, acceptedRootNodes: [] });
-    });
-    expect(extraChild.turns[2].checks.find(({ name }) => name === "final-child-attached")?.passed).toBe(false);
-  });
-
-  it.each([
-    { search: "disabled", agentAuthored: false },
-    { search: "query-v1", agentAuthored: false },
-    { search: "disabled", agentAuthored: true },
-    { search: "query-v1", agentAuthored: true },
-  ])("grades capability-conditional mechanics for search=$search recursion=$agentAuthored", async ({ search: searchMode, agentAuthored }) => {
-    const grade = await gradeFixture(({ outputs, events, execution }) => {
-      execution.harnessConfiguration = {
-        graphCapabilityProfile: { search: searchMode },
-        complete: { agentAuthored },
-      };
-      execution.turns.forEach((turn) => {
-        turn.candidateTrace.completionBrokerAvailable = agentAuthored;
-      });
-      if (searchMode === "disabled") {
-        for (const turnEvents of events) {
-          for (let index = turnEvents.length - 1; index >= 0; index -= 1) {
-            if (turnEvents[index].path === "/api/graph/search") turnEvents.splice(index, 1);
+    const capabilityCells = [
+      ["search-disabled recursion-disabled", "disabled", false],
+      ["search-query-v1 recursion-disabled", "query-v1", false],
+      ["search-disabled recursion-enabled", "disabled", true],
+      ["search-query-v1 recursion-enabled", "query-v1", true],
+    ];
+    expect(capabilityCells, "capability 2x2 inventory").toHaveLength(4);
+    for (const [label, searchMode, agentAuthored] of capabilityCells) {
+      const grade = await gradeFixture(({ outputs, events, execution }) => {
+        execution.harnessConfiguration = {
+          graphCapabilityProfile: { search: searchMode },
+          complete: { agentAuthored },
+        };
+        execution.turns.forEach((turn) => {
+          turn.candidateTrace.completionBrokerAvailable = agentAuthored;
+        });
+        if (searchMode === "disabled") {
+          for (const turnEvents of events) {
+            for (let index = turnEvents.length - 1; index >= 0; index -= 1) {
+              if (turnEvents[index].path === "/api/graph/search") turnEvents.splice(index, 1);
+            }
           }
         }
-      }
-      if (!agentAuthored) {
+        if (!agentAuthored) {
+          execution.semanticChildren = [];
+          const invoke = outputs[2].rootLayer.actions.find((action) => action.kind === "invoke");
+          invoke.targetLayerId = null;
+        }
+      });
+      const failures = failedChecks(grade);
+      expect(failures, `${label}: ${JSON.stringify(failures, null, 2)}`).toEqual([]);
+    }
+
+    const acceptedVariants = [
+      ["server-default row budget when the query omits an override", ({ events }) => {
+        delete events[1][0].budget;
+        delete events[2][0].budget;
+        delete events[2][1].budget;
+      }],
+      ["final optional graph-query semicolon", ({ events }) => {
+        events[1][0].query += ";  ";
+        events[2][0].query += ";";
+        events[2][1].query += ";";
+      }],
+      ["zero recorded children in a recursion-enabled cell", ({ execution }) => {
         execution.semanticChildren = [];
-        const invoke = outputs[2].rootLayer.actions.find((action) => action.kind === "invoke");
-        invoke.targetLayerId = null;
-      }
-    });
-
-    const failed = grade.turns.flatMap((turn) => turn.checks).filter((check) => !check.passed);
-    expect(failed, JSON.stringify(failed, null, 2)).toEqual([]);
-  });
-
-  it("allows recursion-enabled cells to record zero children while failing a resolved invoke in recursion-off", async () => {
-    const noChild = await gradeFixture(({ execution }) => {
+      }],
+    ];
+    expect(acceptedVariants, "accepted variant inventory").toHaveLength(3);
+    for (const [label, mutate] of acceptedVariants) {
+      const grade = await gradeFixture(mutate);
+      const failures = failedChecks(grade);
+      expect(failures, `${label}: ${JSON.stringify(failures, null, 2)}`).toEqual([]);
+    }
+    const observational = await gradeFixture(({ execution }) => {
       execution.semanticChildren = [];
     });
-    expect(noChild.turns[2].checks.find(({ name }) => name === "semantic-child-observation")?.passed).toBe(true);
-
-    const resolvedWithoutAuthority = await gradeFixture(({ execution }) => {
-      execution.harnessConfiguration.complete.agentAuthored = false;
-      execution.turns.forEach((turn) => { turn.candidateTrace.completionBrokerAvailable = false; });
-      execution.semanticChildren = [];
-    });
-    expect(resolvedWithoutAuthority.turns[2].checks.find(({ name }) => name === "recursion-disabled-no-resolved-invoke")?.passed).toBe(false);
+    expect(checkPassed(observational, 2, "semantic-child-observation"),
+      "recursion-enabled cells may observe zero children").toBe(true);
   });
 
-  it("accepts the safe server-default row budget when the natural query omits an override", async () => {
-    const grade = await gradeFixture(({ events }) => {
-      delete events[1][0].budget;
-      delete events[2][0].budget;
-      delete events[2][1].budget;
-    });
-    expect(grade.turns[1].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(true);
-    expect(grade.turns[2].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(true);
-  });
-
-  it("accepts only a final optional graph-query semicolon", async () => {
-    const finalSemicolon = await gradeFixture(({ events }) => {
-      events[1][0].query += ";  ";
-      events[2][0].query += ";";
-      events[2][1].query += ";";
-    });
-    expect(finalSemicolon.turns[1].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(true);
-    expect(finalSemicolon.turns[2].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(true);
-
-    const nonFinalSemicolon = await gradeFixture(({ events }) => {
-      events[1][0].query += "; LIMIT 1";
-    });
-    expect(nonFinalSemicolon.turns[1].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(false);
+  it("rejects the full search, reference, and recursion-authority mutation corpus", async () => {
+    const cases = [
+      ["unbounded search budget", ({ events }) => { events[1][0].budget.resultRows = 6; }, 1, "prior-work-search"],
+      ["unrelated search topic", ({ events }) => {
+        events[2][1].parameters.topic.value = "Unrelated launch note";
+      }, 2, "prior-work-search"],
+      ["search after the referencing action", ({ events }) => { events[2][1].sequence = 34; }, 2, "search-reference-submit-order"],
+      ["extra unrelated search", ({ events }) => {
+        events[2].splice(2, 0, search(31.5, "Unrelated launch note", 999));
+      }, 2, "prior-work-search"],
+      ["non-final query semicolon", ({ events }) => { events[1][0].query += "; LIMIT 1"; }, 1, "prior-work-search"],
+      ["unaudited prior-work reference", ({ events }) => { events[2][3].recordId = 999; }, 2, "prior-work-references"],
+      ["invoke action detached from the observed child", ({ execution }) => {
+        execution.semanticChildren[0].sourceActionId = 999;
+      }, 2, "final-child-attached"],
+      ["extra semantic child", ({ execution }) => {
+        execution.semanticChildren.push({ sourceInteractionId: 3, sourceActionId: 999, rootLayerId: 999, acceptedRootNodes: [] });
+      }, 2, "final-child-attached"],
+      ["resolved invoke while recursion is off", ({ execution }) => {
+        execution.harnessConfiguration.complete.agentAuthored = false;
+        execution.turns.forEach((turn) => { turn.candidateTrace.completionBrokerAvailable = false; });
+        execution.semanticChildren = [];
+      }, 2, "recursion-disabled-no-resolved-invoke"],
+    ];
+    expect(cases, "mutation corpus inventory").toHaveLength(9);
+    for (const [label, mutate, turnIndex, checkName] of cases) {
+      const grade = await gradeFixture(mutate);
+      expect.soft(checkPassed(grade, turnIndex, checkName), `${label} must fail ${checkName}`).toBe(false);
+    }
   });
 });

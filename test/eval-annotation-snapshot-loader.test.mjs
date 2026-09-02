@@ -8,9 +8,9 @@ const session = {
 };
 
 describe("Eval atomic annotation snapshot loader", () => {
-  it("loads all threads in one request and revokes its one-shot session", async () => {
+  it("loads every thread in one request through a one-shot session and revokes that session even when the snapshot fails", async () => {
     const calls = [];
-    const fetchImpl = vi.fn(async (url, options) => {
+    const healthyFetch = vi.fn(async (url, options) => {
       calls.push({ path: new URL(url).pathname, ...options });
       if (options.method === "POST" && new URL(url).pathname === "/api/annotations/snapshot") {
         return response(200, { kind: "relayer_eval_annotation_snapshot_set", threads: [] });
@@ -23,21 +23,19 @@ describe("Eval atomic annotation snapshot loader", () => {
       token: "snapshot-token",
       authorId: "local:test",
       authorDisplayName: "Test",
-      fetchImpl,
+      fetchImpl: healthyFetch,
     });
-    expect(calls.map(({ path, method }) => [method, path])).toEqual([
+    expect(calls.map(({ path, method }) => [method, path]), "create, snapshot, revoke in order").toEqual([
       ["POST", "/api/internal/annotation-sessions"],
       ["POST", "/api/annotations/snapshot"],
       ["DELETE", "/api/internal/annotation-sessions"],
     ]);
-    expect(JSON.parse(calls[1].body)).toEqual({ threadIds: [41, 42] });
-    expect(calls[1].headers.Cookie).toContain("relayer_annotation=snapshot-token");
-  });
+    expect(JSON.parse(calls[1].body), "one atomic snapshot request for every thread").toEqual({ threadIds: [41, 42] });
+    expect(calls[1].headers.Cookie, "snapshot request uses the one-shot annotation session").toContain("relayer_annotation=snapshot-token");
 
-  it("revokes the session even when the atomic snapshot fails", async () => {
-    const methods = [];
-    const fetchImpl = vi.fn(async (url, options) => {
-      methods.push(options.method);
+    const failingMethods = [];
+    const failingFetch = vi.fn(async (url, options) => {
+      failingMethods.push(options.method);
       if (new URL(url).pathname === "/api/annotations/snapshot") {
         return response(500, { error: "snapshot failed" });
       }
@@ -49,9 +47,9 @@ describe("Eval atomic annotation snapshot loader", () => {
       token: "snapshot-token",
       authorId: "local:test",
       authorDisplayName: "Test",
-      fetchImpl,
-    })).rejects.toThrow("snapshot failed");
-    expect(methods).toEqual(["POST", "POST", "DELETE"]);
+      fetchImpl: failingFetch,
+    }), "snapshot failure surfaces the backend error").rejects.toThrow("snapshot failed");
+    expect(failingMethods, "failed snapshot still revokes its one-shot session").toEqual(["POST", "POST", "DELETE"]);
   });
 });
 

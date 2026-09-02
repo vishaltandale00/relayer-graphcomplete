@@ -71,7 +71,7 @@ afterEach(async () => {
 });
 
 describe("Relayer Eval application service", () => {
-  it("restarts semantic-child settling when a late invocation changes the observed snapshot", () => {
+  it("settles semantic-child discovery through bounded quiet windows and validates recursive Complete evidence", async () => {
     const discoveryDeadline = 5_000;
     let observation = semanticChildDiscoveryObservation({
       signature: "first-running",
@@ -92,7 +92,7 @@ describe("Relayer Eval application service", () => {
       signature: "first-settled",
       now: 5_099,
       discoveryDeadline,
-    }).stable).toBe(false);
+    }).stable, "settled observations stay unstable until the quiet window closes").toBe(false);
 
     observation = semanticChildDiscoveryObservation({
       previousSignature: observation.signature,
@@ -101,32 +101,29 @@ describe("Relayer Eval application service", () => {
       now: 5_200,
       discoveryDeadline,
     });
-    expect(observation).toMatchObject({ stable: false, stableSince: 5_200 });
+    expect(observation, "a late invocation restarts settling").toMatchObject({ stable: false, stableSince: 5_200 });
     expect(semanticChildDiscoveryObservation({
       previousSignature: observation.signature,
       stableSince: observation.stableSince,
       signature: observation.signature,
       now: 10_199,
       discoveryDeadline,
-    }).stable).toBe(false);
+    }).stable, "restarted settling holds until its own window closes").toBe(false);
     expect(semanticChildDiscoveryObservation({
       previousSignature: observation.signature,
       stableSince: observation.stableSince,
       signature: observation.signature,
       now: 10_200,
       discoveryDeadline,
-    }).stable).toBe(true);
-  });
+    }).stable, "the restarted window closes at the deadline").toBe(true);
 
-  it("keeps recursion-off discovery open through the same bounded quiet window", () => {
-    const discoveryDeadline = 5_000;
     const empty = semanticChildDiscoveryObservation({
       signature: "[]",
       stableSince: 0,
       now: 0,
       discoveryDeadline,
     });
-    expect(empty.stable).toBe(false);
+    expect(empty.stable, "recursion-off discovery starts open").toBe(false);
     const unauthorizedLateInvocation = semanticChildDiscoveryObservation({
       previousSignature: empty.signature,
       stableSince: empty.stableSince,
@@ -134,50 +131,46 @@ describe("Relayer Eval application service", () => {
       now: 4_999,
       discoveryDeadline,
     });
-    expect(unauthorizedLateInvocation).toMatchObject({ stable: false, stableSince: 4_999 });
+    expect(unauthorizedLateInvocation, "an unauthorized late invocation restarts the same bounded window")
+      .toMatchObject({ stable: false, stableSince: 4_999 });
     expect(semanticChildDiscoveryObservation({
       previousSignature: unauthorizedLateInvocation.signature,
       stableSince: unauthorizedLateInvocation.stableSince,
       signature: unauthorizedLateInvocation.signature,
       now: 9_998,
       discoveryDeadline,
-    }).stable).toBe(false);
+    }).stable, "recursion-off settling holds until its window closes").toBe(false);
     expect(semanticChildDiscoveryObservation({
       previousSignature: unauthorizedLateInvocation.signature,
       stableSince: unauthorizedLateInvocation.stableSince,
       signature: unauthorizedLateInvocation.signature,
       now: 9_999,
       discoveryDeadline,
-    }).stable).toBe(true);
-  });
+    }).stable, "recursion-off discovery closes through the same bounded window").toBe(true);
 
-  it("does not add a child-discovery delay when Complete is not part of the harness contract", () => {
     expect([
       semanticChildDiscoveryIsBounded({ complete: { agentAuthored: true } }),
       semanticChildDiscoveryIsBounded({ complete: { agentAuthored: false } }),
       semanticChildDiscoveryIsBounded({}),
-    ]).toEqual([true, true, false]);
+    ], "discovery is bounded exactly when Complete is part of the harness contract").toEqual([true, true, false]);
     expect(semanticChildDiscoveryObservation({
       signature: "[]",
       stableSince: 0,
       now: 0,
       discoveryDeadline: 5_000,
       boundedObservation: false,
-    }).stable).toBe(true);
-  });
+    }).stable, "unbounded contracts add no child-discovery delay").toBe(true);
 
-  it("records zero child use without failing a recursion-enabled observational cell", () => {
-    const checks = recursiveCompleteChecks({
+    const observationalChecks = recursiveCompleteChecks({
       harnessConfiguration: { implementation: "codex.basic", complete: { agentAuthored: true } },
       harnessConfigurationDigest: "sha256:config",
       turns: [{ candidateTrace: { completionBrokerAvailable: true } }],
       semanticChildren: [],
     }, { requireChildWhenEnabled: false });
-    expect(checks.filter((check) => !check.passed)).toEqual([]);
-  });
+    expect(observationalChecks.filter((check) => !check.passed),
+      "zero child use never fails a recursion-enabled observational cell").toEqual([]);
 
-  it("rejects discontinuous child projections and duplicate trace scope markers", async () => {
-    const checks = recursiveCompleteChecks({
+    const discontinuousChecks = recursiveCompleteChecks({
       harnessConfiguration: { implementation: "fixture.task-system", complete: { agentAuthored: true } },
       harnessConfigurationDigest: "sha256:config",
       turns: [{ candidateTrace: { completionBrokerAvailable: true } }],
@@ -198,7 +191,8 @@ describe("Relayer Eval application service", () => {
         candidateTrace: { status: "complete", completionBrokerAvailable: true },
       }],
     });
-    expect(checks.find(({ name }) => name.endsWith(":child-terminal"))?.passed).toBe(false);
+    expect(discontinuousChecks.find(({ name }) => name.endsWith(":child-terminal"))?.passed,
+      "discontinuous child projections fail the child-terminal check").toBe(false);
 
     const directory = await mkdtemp(join(tmpdir(), "relayer-eval-trace-scope-test-"));
     directories.push(directory);
@@ -207,7 +201,6 @@ describe("Relayer Eval application service", () => {
       JSON.stringify({ type: "execution.scope", data: { completionBrokerAvailable: true } }),
       "",
     ].join("\n"));
-    await writeFile(join(directory, "events.jsonl"), eventsBytes);
     const digest = `sha256:${createHash("sha256").update(eventsBytes).digest("hex")}`;
     const descriptor = {
       status: "complete",
@@ -230,20 +223,22 @@ describe("Relayer Eval application service", () => {
       achievedCoverage: {},
       artifacts: { events: { ref: "events.jsonl", sha256: digest, byteLength: eventsBytes.byteLength, eventCount: 2 } },
     }));
+    await writeFile(join(directory, "events.jsonl"), eventsBytes);
     await expect(validateCandidateTrace(
       directory,
       descriptor,
       { id: 3, graphNodeId: 4 },
       { runId: "run-1" },
       { requireComplete: true },
-    )).rejects.toThrow("exactly one valid broker-scope marker");
+    ), "duplicate broker-scope markers invalidate the trace").rejects.toThrow("exactly one valid broker-scope marker");
   });
 
-  it("requires explicit root and recursive-child authorization before queuing the live Codex pair", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-live-authorization-test-"));
-    directories.push(dataDirectory);
-    const evalService = await new EvalService({
-      stateFile: join(dataDirectory, "test-runs.json"),
+  it("enforces recursive comparison admission before executing the Complete pair and Lantern quartet live", async () => {
+    // Admission gates: no live pair or quartet runs without exact shape and explicit authorization.
+    const admissionDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-live-authorization-test-"));
+    directories.push(admissionDirectory);
+    const admissionService = await new EvalService({
+      stateFile: join(admissionDirectory, "test-runs.json"),
       productSession: {
         origin: "http://127.0.0.1:1",
         cookie: { name: "unused", value: "unused" },
@@ -253,23 +248,51 @@ describe("Relayer Eval application service", () => {
         join(repositoryRoot, "harnesses", "codex-eval-complete-enabled.yaml"),
       ],
     }).open();
-
-    await expect(evalService.createRun({
+    await expect(admissionService.createRun({
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
         "codex-eval-complete-disabled",
         "codex-eval-complete-enabled",
       ],
       judgeConfigurationName: "deterministic-graph-contract",
-    })).rejects.toThrow("requires explicit confirmation");
-    expect(evalService.listRuns()).toEqual([]);
-  });
+    }), "the live Codex pair requires explicit confirmation").rejects.toThrow("requires explicit confirmation");
+    expect(admissionService.listRuns(), "unauthorized pairs are never queued").toEqual([]);
 
-  it("admits the recursive graph-memory case only with its normalized quartet and explicit live authorization", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-memory-authorization-test-"));
-    directories.push(dataDirectory);
-    const evalService = await new EvalService({
-      stateFile: join(dataDirectory, "test-runs.json"),
+    const driftDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-authority-drift-test-"));
+    directories.push(driftDirectory);
+    const driftedDisabledPath = join(driftDirectory, "codex-eval-complete-disabled.yaml");
+    const driftedEnabledPath = join(driftDirectory, "codex-eval-complete-enabled.yaml");
+    await writeFile(driftedDisabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-disabled",
+      true,
+      "personal-presentation-v1",
+    ));
+    await writeFile(driftedEnabledPath, recursiveComparisonConfiguration(
+      "codex-eval-complete-enabled",
+      true,
+      "personal-presentation-v2",
+    ));
+    const driftService = await new EvalService({
+      stateFile: join(driftDirectory, "test-runs.json"),
+      productSession: {
+        origin: "http://127.0.0.1:1",
+        cookie: { name: "unused", value: "unused" },
+      },
+      configurationPaths: [driftedDisabledPath, driftedEnabledPath],
+    }).open();
+    await expect(driftService.createRun({
+      testCaseIds: ["empty-project.recursive-complete.comparison"],
+      harnessConfigurationNames: [
+        "codex-eval-complete-disabled",
+        "codex-eval-complete-enabled",
+      ],
+      judgeConfigurationName: "deterministic-graph-contract",
+    }), "an off cell granting Complete authority is rejected").rejects.toThrow("approved V1/off and V2/on experience pair");
+
+    const quartetAdmissionDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-memory-authorization-test-"));
+    directories.push(quartetAdmissionDirectory);
+    const quartetAdmissionService = await new EvalService({
+      stateFile: join(quartetAdmissionDirectory, "test-runs.json"),
       productSession: {
         origin: "http://127.0.0.1:1",
         cookie: { name: "unused", value: "unused" },
@@ -282,7 +305,7 @@ describe("Relayer Eval application service", () => {
       ].map((name) => join(repositoryRoot, "harnesses", `${name}.yaml`)),
       targetKey: "macos-arm64",
     }).open();
-    const selection = {
+    const quartetSelection = {
       testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
       harnessConfigurationNames: [
         "codex-eval-lantern-search-disabled-recursion-disabled",
@@ -292,212 +315,38 @@ describe("Relayer Eval application service", () => {
       ],
       judgeConfigurationName: "deterministic-graph-contract",
     };
-
-    await expect(evalService.createRun({
-      ...selection,
-      harnessConfigurationNames: [...selection.harnessConfigurationNames].reverse(),
+    await expect(quartetAdmissionService.createRun({
+      ...quartetSelection,
+      harnessConfigurationNames: [...quartetSelection.harnessConfigurationNames].reverse(),
       liveAuthorization: {
         confirmed: true,
         credentialReference: "connected-product-provider",
         rootProviderExecutions: 12,
         agentAuthoredChildren: true,
       },
-    })).rejects.toThrow("exact ordered Codex quartet");
-    await expect(evalService.createRun(selection)).rejects.toThrow(
+    }), "the quartet must stay in its normalized order").rejects.toThrow("exact ordered Codex quartet");
+    await expect(quartetAdmissionService.createRun(quartetSelection),
+      "the quartet requires explicit live authorization").rejects.toThrow(
       "requires explicit authorization for 12 live roots and additional model-controlled agent-authored child execution",
     );
-    await expect(evalService.createRun({
-      ...selection,
+    await expect(quartetAdmissionService.createRun({
+      ...quartetSelection,
       liveAuthorization: {
         confirmed: true,
         credentialReference: "connected-product-provider",
         rootProviderExecutions: 11,
         agentAuthoredChildren: true,
       },
-    })).rejects.toThrow("requires explicit authorization for 12 live roots and additional model-controlled agent-authored child execution");
-    expect(evalService.listRuns()).toEqual([]);
-  });
+    }), "under-declared root counts are rejected").rejects.toThrow(
+      "requires explicit authorization for 12 live roots and additional model-controlled agent-authored child execution",
+    );
+    expect(quartetAdmissionService.listRuns(), "unauthorized quartets are never queued").toEqual([]);
 
-  it("executes the exact Lantern quartet through one production product/Eval seam", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-lantern-quartet-test-"));
-    directories.push(dataDirectory);
-    const names = [
-      "codex-eval-lantern-search-disabled-recursion-disabled",
-      "codex-eval-lantern-search-query-v1-recursion-disabled",
-      "codex-eval-lantern-search-disabled-recursion-enabled",
-      "codex-eval-lantern-search-query-v1-recursion-enabled",
-    ];
-    const configurationPaths = names.map((name) => join(repositoryRoot, "harnesses", `${name}.yaml`));
-    const observed = {
-      childCompletionIds: [],
-      modelCatalogEnsures: [],
-      revokedChildCapabilityProbes: [],
-    };
-    const runtime = new GraphCompleteRuntimeService({
-      userDataDirectory: dataDirectory,
-      graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-      configurationPaths,
-      additionalImplementations: {
-        "codex.basic": lantern2x2FixtureFactory(observed),
-      },
-      acquireProviderExecution: async () => ({
-        definition: { id: "codex", adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
-        descriptor: { adapterId: "codex-subscription", accessContract: "managed-runtime@1", implementationVersion: "1" },
-        runtime: { async executionAccess() { return { kind: "managed-runtime", environment: {} }; } },
-        async release() {},
-      }),
-      candidateTrace: {
-        directory: join(dataDirectory, "eval-data", "candidate-trace-spool"),
-        policy: {
-          mode: "required",
-          requiredFeatures: {},
-          includeNativeArtifacts: false,
-          maxBytesPerTurn: 1_000_000,
-          maxEventsPerTurn: 1_000,
-        },
-      },
-      temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
-    });
-    services.push(runtime);
-    const product = new RelayerAppServerService({
-      userDataDirectory: dataDirectory,
-      binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
-      webDirectory: join(repositoryRoot, "desktop", "renderer"),
-      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
-      runtimeSession: await runtime.start(),
-      defaultHarnessConfiguration: names[0],
-      allowHarnessOverride: true,
-    });
-    services.push(product);
-    const productSession = await product.start();
-    await product.publishProviderCatalog({
-      providerId: "codex",
-      label: "Fixture provider",
-      connected: true,
-      models: [{
-        id: "fixture-model",
-        label: "Fixture model",
-        order: 0,
-        visible: true,
-        available: true,
-        providerDefault: true,
-        metadata: {},
-      }],
-      systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
-    });
-    await productRequest(productSession, "/api/model-families", {
-      method: "POST",
-      body: JSON.stringify({
-        name: "Fixture models",
-        enabled: true,
-        members: [{ providerId: "codex", modelId: "fixture-model" }],
-      }),
-    });
-    const evalService = await new EvalService({
-      stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
-      productSession,
-      configurationPaths,
-      candidateTraceExporter: (interactionId, targetDirectory, correlation) => (
-        runtime.exportCandidateTrace(interactionId, targetDirectory, correlation)
-      ),
-      candidateTraceRequired: true,
-      targetKey: "macos-arm64",
-      ensureModelCatalog: async (harnessConfigurationName) => {
-        observed.modelCatalogEnsures.push(harnessConfigurationName);
-      },
-    }).open();
-
-    const created = await evalService.createRun({
-      testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
-      harnessConfigurationNames: names,
-      judgeConfigurationName: "deterministic-graph-contract",
-      liveAuthorization: {
-        confirmed: true,
-        credentialReference: "connected-product-provider",
-        rootProviderExecutions: 12,
-        agentAuthoredChildren: true,
-      },
-    });
-    const completed = await waitForCompletedRun(evalService, created.id, 60_000);
-
-    expect(completed.status, JSON.stringify(completed.executions.map((execution) => ({
-      harness: execution.harnessConfigurationName,
-      status: execution.status,
-      error: execution.error,
-      checks: execution.checks.filter((check) => !check.passed),
-    })), null, 2)).toBe("passed");
-    expect(completed.comparison).toMatchObject({
-      kind: "graph-search-recursion-2x2",
-      passed: true,
-      check: { name: "graph-search-recursion:controlled-2x2", passed: true },
-    });
-    expect(completed.executions.map(({ harnessConfigurationName }) => harnessConfigurationName)).toEqual(names);
-    expect(new Set(completed.executions.flatMap(({ threadIds }) => threadIds).map(String)).size).toBe(4);
-    expect(completed.executions.every(({ turns }) => turns.length === 3)).toBe(true);
-    expect(completed.executions.slice(1).every(({ modelResolution }) => (
-      JSON.stringify(modelResolution) === JSON.stringify(completed.executions[0].modelResolution)
-    ))).toBe(true);
-    expect(observed.modelCatalogEnsures).toEqual([names[0]]);
-    expect(completed.executions.slice(1).every(({ pinnedModelResolution }) => (
-      JSON.stringify(pinnedModelResolution) === JSON.stringify(completed.executions[0].modelResolution)
-    ))).toBe(true);
-    expect(completed.executions.map(({ semanticChildren }) => semanticChildren.length)).toEqual([0, 0, 1, 1]);
-    expect(observed.childCompletionIds).toHaveLength(2);
-    expect(completed.executions.every(({ outcomeGrade }) => (
-      outcomeGrade.reviewRequired === true && outcomeGrade.qualified === null
-    ))).toBe(true);
-    expect(completed.executions.every(({ threadIds }) => threadIds.length === 1)).toBe(true);
-    expect(completed.executions.every((execution) => (
-      evalService.reviewContext(execution.id).cases[0].threadIds.length === 1
-    ))).toBe(true);
-    expect(observed.revokedChildCapabilityProbes).toHaveLength(2);
-    for (const probe of observed.revokedChildCapabilityProbes) {
-      await expect(probe()).rejects.toMatchObject({
-        status: 401,
-        code: "invalid_capability",
-      });
-    }
-  }, 90_000);
-
-  it("rejects a recursive comparison whose exact off cell grants Complete authority", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-authority-drift-test-"));
-    directories.push(dataDirectory);
-    const disabledPath = join(dataDirectory, "codex-eval-complete-disabled.yaml");
-    const enabledPath = join(dataDirectory, "codex-eval-complete-enabled.yaml");
-    await writeFile(disabledPath, recursiveComparisonConfiguration(
-      "codex-eval-complete-disabled",
-      true,
-      "personal-presentation-v1",
-    ));
-    await writeFile(enabledPath, recursiveComparisonConfiguration(
-      "codex-eval-complete-enabled",
-      true,
-      "personal-presentation-v2",
-    ));
-    const evalService = await new EvalService({
-      stateFile: join(dataDirectory, "test-runs.json"),
-      productSession: {
-        origin: "http://127.0.0.1:1",
-        cookie: { name: "unused", value: "unused" },
-      },
-      configurationPaths: [disabledPath, enabledPath],
-    }).open();
-
-    await expect(evalService.createRun({
-      testCaseIds: ["empty-project.recursive-complete.comparison"],
-      harnessConfigurationNames: [
-        "codex-eval-complete-disabled",
-        "codex-eval-complete-enabled",
-      ],
-      judgeConfigurationName: "deterministic-graph-contract",
-    })).rejects.toThrow("approved V1/off and V2/on experience pair");
-  });
-
-  it("runs an authority-isolated agent-authored Complete pair and preserves child evidence outside human turns", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-test-"));
-    directories.push(dataDirectory);
-    const disabledPath = join(dataDirectory, "codex-eval-complete-disabled.yaml");
-    const enabledPath = join(dataDirectory, "codex-eval-complete-enabled.yaml");
+    // Live authority-isolated Complete pair.
+    const pairDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-test-"));
+    directories.push(pairDirectory);
+    const disabledPath = join(pairDirectory, "codex-eval-complete-disabled.yaml");
+    const enabledPath = join(pairDirectory, "codex-eval-complete-enabled.yaml");
     await writeFile(disabledPath, recursiveComparisonConfiguration(
       "codex-eval-complete-disabled",
       false,
@@ -510,8 +359,8 @@ describe("Relayer Eval application service", () => {
     ));
     const observed = { fireAndForget: true, childDelayMs: 100 };
     const recursiveFactory = recursiveCompleteFixtureFactory(observed);
-    const runtime = new GraphCompleteRuntimeService({
-      userDataDirectory: dataDirectory,
+    const pairRuntime = new GraphCompleteRuntimeService({
+      userDataDirectory: pairDirectory,
       graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
       configurationPaths: [disabledPath, enabledPath],
       temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
@@ -529,7 +378,7 @@ describe("Relayer Eval application service", () => {
         async release() {},
       }),
       candidateTrace: {
-        directory: join(dataDirectory, "eval-data", "candidate-trace-spool"),
+        directory: join(pairDirectory, "eval-data", "candidate-trace-spool"),
         policy: {
           mode: "required",
           requiredFeatures: {},
@@ -539,19 +388,19 @@ describe("Relayer Eval application service", () => {
         },
       },
     });
-    services.push(runtime);
-    const product = new RelayerAppServerService({
-      userDataDirectory: dataDirectory,
+    services.push(pairRuntime);
+    const pairProduct = new RelayerAppServerService({
+      userDataDirectory: pairDirectory,
       binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
       webDirectory: join(repositoryRoot, "desktop", "renderer"),
       permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
-      runtimeSession: await runtime.start(),
+      runtimeSession: await pairRuntime.start(),
       defaultHarnessConfiguration: "codex-eval-complete-disabled",
       allowHarnessOverride: true,
     });
-    services.push(product);
-    const productSession = await product.start();
-    await product.publishProviderCatalog({
+    services.push(pairProduct);
+    const pairSession = await pairProduct.start();
+    await pairProduct.publishProviderCatalog({
       providerId: "codex",
       label: "Fixture provider",
       connected: true,
@@ -566,7 +415,7 @@ describe("Relayer Eval application service", () => {
       }],
       systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
     });
-    await productRequest(productSession, "/api/model-families", {
+    await productRequest(pairSession, "/api/model-families", {
       method: "POST",
       body: JSON.stringify({
         name: "Fixture models",
@@ -574,26 +423,26 @@ describe("Relayer Eval application service", () => {
         members: [{ providerId: "codex", modelId: "fixture-model" }],
       }),
     });
-    const evalService = await new EvalService({
-      stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
-      productSession,
+    const pairEvalService = await new EvalService({
+      stateFile: join(pairDirectory, "eval-data", "test-runs.json"),
+      productSession: pairSession,
       configurationPaths: [disabledPath, enabledPath],
       candidateTraceExporter: (interactionId, targetDirectory, correlation) => (
-        runtime.exportCandidateTrace(interactionId, targetDirectory, correlation)
+        pairRuntime.exportCandidateTrace(interactionId, targetDirectory, correlation)
       ),
       candidateTraceRequired: true,
     }).open();
 
-    await expect(evalService.createRun({
+    await expect(pairEvalService.createRun({
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
         "codex-eval-complete-enabled",
         "codex-eval-complete-disabled",
       ],
       judgeConfigurationName: "deterministic-graph-contract",
-    })).rejects.toThrow("exact ordered Codex pair");
+    }), "the live pair keeps its exact order").rejects.toThrow("exact ordered Codex pair");
 
-    const created = await evalService.createRun({
+    const pairCreated = await pairEvalService.createRun({
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
         "codex-eval-complete-disabled",
@@ -601,10 +450,10 @@ describe("Relayer Eval application service", () => {
       ],
       judgeConfigurationName: "deterministic-graph-contract",
     });
-    const completed = await waitForCompletedRun(evalService, created.id, 20_000);
-    expect(completed.status, JSON.stringify({
+    const pairCompleted = await waitForCompletedRun(pairEvalService, pairCreated.id, 20_000);
+    expect(pairCompleted.status, JSON.stringify({
       observed,
-      executions: completed.executions.map((execution) => ({
+      executions: pairCompleted.executions.map((execution) => ({
         harnessConfigurationName: execution.harnessConfigurationName,
         status: execution.status,
         error: execution.error,
@@ -617,28 +466,28 @@ describe("Relayer Eval application service", () => {
         semanticChildren: execution.semanticChildren,
       })),
     }, null, 2)).toBe("passed");
-    const control = completed.executions.find((execution) => execution.harnessConfigurationName.endsWith("disabled"));
-    const treatment = completed.executions.find((execution) => execution.harnessConfigurationName.endsWith("enabled"));
-    expect(completed.comparison).toMatchObject({
+    const control = pairCompleted.executions.find((execution) => execution.harnessConfigurationName.endsWith("disabled"));
+    const treatment = pairCompleted.executions.find((execution) => execution.harnessConfigurationName.endsWith("enabled"));
+    expect(pairCompleted.comparison, "the pair comparison check passes").toMatchObject({
       kind: "agent-authored-complete-pair",
       passed: true,
       check: { name: "agent-authored-complete:controlled-pair", passed: true },
     });
-    expect(treatment.modelResolution).toEqual(control.modelResolution);
-    expect(control.turns).toHaveLength(1);
-    expect(control.turns[0].candidateTrace).toMatchObject({
+    expect(treatment.modelResolution, "treatment pins the control's model").toEqual(control.modelResolution);
+    expect(control.turns, "control runs one turn").toHaveLength(1);
+    expect(control.turns[0].candidateTrace, "control trace lacks broker authority").toMatchObject({
       status: "complete",
       completionBrokerAvailable: false,
     });
-    expect(control.semanticChildren).toEqual([]);
-    expect(treatment.turns).toHaveLength(1);
-    expect(treatment.turns[0].candidateTrace).toMatchObject({
+    expect(control.semanticChildren, "control records no semantic children").toEqual([]);
+    expect(treatment.turns, "treatment runs one turn").toHaveLength(1);
+    expect(treatment.turns[0].candidateTrace, "treatment trace carries broker authority").toMatchObject({
       status: "complete",
       completionBrokerAvailable: true,
     });
-    expect(treatment.semanticChildren).toHaveLength(1);
-    expect(observed.fireAndForgetStarted).toBe(true);
-    expect(treatment.semanticChildren[0]).toMatchObject({
+    expect(treatment.semanticChildren, "treatment evidence lives outside human turns").toHaveLength(1);
+    expect(observed.fireAndForgetStarted, "child invocation is fire-and-forget").toBe(true);
+    expect(treatment.semanticChildren[0], "child settles with its own trace").toMatchObject({
       status: "accepted",
       candidateTrace: { status: "complete", completionBrokerAvailable: true },
       execution: {
@@ -650,289 +499,194 @@ describe("Relayer Eval application service", () => {
         safeReason: null,
       },
     });
-    expect(treatment.semanticChildren[0].projectionObservations.map(({ lifecycle }) => lifecycle))
-      .toEqual(expect.arrayContaining(["active", "succeeded"]));
-    const childTrace = await evalService.candidateTraceContext(
+    expect(treatment.semanticChildren[0].projectionObservations.map(({ lifecycle }) => lifecycle),
+      "child projections pass through active and succeeded").toEqual(expect.arrayContaining(["active", "succeeded"]));
+    const childTrace = await pairEvalService.candidateTraceContext(
       treatment.id,
       treatment.semanticChildren[0].interactionId,
     );
-    expect(childTrace.manifest).toMatchObject({
+    expect(childTrace.manifest, "child trace manifest is correlated to the execution").toMatchObject({
       format: "relayer-harness-trace-v1",
       correlation: { executionId: treatment.id },
     });
-    expect(childTrace.events.map(({ type }) => type)).toContain("execution.scope");
-  }, 30_000);
+    expect(childTrace.events.map(({ type }) => type), "child trace records its scope").toContain("execution.scope");
 
-  it("catalogs graph memory as a harness-neutral natural two-turn case", () => {
+    // Live Lantern quartet.
+    const quartetDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-lantern-quartet-test-"));
+    directories.push(quartetDirectory);
+    const names = [
+      "codex-eval-lantern-search-disabled-recursion-disabled",
+      "codex-eval-lantern-search-query-v1-recursion-disabled",
+      "codex-eval-lantern-search-disabled-recursion-enabled",
+      "codex-eval-lantern-search-query-v1-recursion-enabled",
+    ];
+    const configurationPaths = names.map((name) => join(repositoryRoot, "harnesses", `${name}.yaml`));
+    const lanternObserved = {
+      childCompletionIds: [],
+      modelCatalogEnsures: [],
+      revokedChildCapabilityProbes: [],
+    };
+    const quartetRuntime = new GraphCompleteRuntimeService({
+      userDataDirectory: quartetDirectory,
+      graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
+      configurationPaths,
+      additionalImplementations: {
+        "codex.basic": lantern2x2FixtureFactory(lanternObserved),
+      },
+      acquireProviderExecution: async () => ({
+        definition: { id: "codex", adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
+        descriptor: { adapterId: "codex-subscription", accessContract: "managed-runtime@1", implementationVersion: "1" },
+        runtime: { async executionAccess() { return { kind: "managed-runtime", environment: {} }; } },
+        async release() {},
+      }),
+      candidateTrace: {
+        directory: join(quartetDirectory, "eval-data", "candidate-trace-spool"),
+        policy: {
+          mode: "required",
+          requiredFeatures: {},
+          includeNativeArtifacts: false,
+          maxBytesPerTurn: 1_000_000,
+          maxEventsPerTurn: 1_000,
+        },
+      },
+      temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
+    });
+    services.push(quartetRuntime);
+    const quartetProduct = new RelayerAppServerService({
+      userDataDirectory: quartetDirectory,
+      binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
+      webDirectory: join(repositoryRoot, "desktop", "renderer"),
+      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
+      runtimeSession: await quartetRuntime.start(),
+      defaultHarnessConfiguration: names[0],
+      allowHarnessOverride: true,
+    });
+    services.push(quartetProduct);
+    const quartetSession = await quartetProduct.start();
+    await quartetProduct.publishProviderCatalog({
+      providerId: "codex",
+      label: "Fixture provider",
+      connected: true,
+      models: [{
+        id: "fixture-model",
+        label: "Fixture model",
+        order: 0,
+        visible: true,
+        available: true,
+        providerDefault: true,
+        metadata: {},
+      }],
+      systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
+    });
+    await productRequest(quartetSession, "/api/model-families", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Fixture models",
+        enabled: true,
+        members: [{ providerId: "codex", modelId: "fixture-model" }],
+      }),
+    });
+    const quartetEvalService = await new EvalService({
+      stateFile: join(quartetDirectory, "eval-data", "test-runs.json"),
+      productSession: quartetSession,
+      configurationPaths,
+      candidateTraceExporter: (interactionId, targetDirectory, correlation) => (
+        quartetRuntime.exportCandidateTrace(interactionId, targetDirectory, correlation)
+      ),
+      candidateTraceRequired: true,
+      targetKey: "macos-arm64",
+      ensureModelCatalog: async (harnessConfigurationName) => {
+        lanternObserved.modelCatalogEnsures.push(harnessConfigurationName);
+      },
+    }).open();
+
+    const quartetCreated = await quartetEvalService.createRun({
+      testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
+      harnessConfigurationNames: names,
+      judgeConfigurationName: "deterministic-graph-contract",
+      liveAuthorization: {
+        confirmed: true,
+        credentialReference: "connected-product-provider",
+        rootProviderExecutions: 12,
+        agentAuthoredChildren: true,
+      },
+    });
+    const quartetCompleted = await waitForCompletedRun(quartetEvalService, quartetCreated.id, 60_000);
+
+    expect(quartetCompleted.status, JSON.stringify(quartetCompleted.executions.map((execution) => ({
+      harness: execution.harnessConfigurationName,
+      status: execution.status,
+      error: execution.error,
+      checks: execution.checks.filter((check) => !check.passed),
+    })), null, 2)).toBe("passed");
+    expect(quartetCompleted.comparison, "the controlled 2x2 comparison passes").toMatchObject({
+      kind: "graph-search-recursion-2x2",
+      passed: true,
+      check: { name: "graph-search-recursion:controlled-2x2", passed: true },
+    });
+    expect(quartetCompleted.executions.map(({ harnessConfigurationName }) => harnessConfigurationName),
+      "every quartet cell executes in order").toEqual(names);
+    expect(new Set(quartetCompleted.executions.flatMap(({ threadIds }) => threadIds).map(String)).size,
+      "each cell owns its product thread").toBe(4);
+    expect(quartetCompleted.executions.every(({ turns }) => turns.length === 3), "every cell runs three turns").toBe(true);
+    expect(quartetCompleted.executions.slice(1).every(({ modelResolution }) => (
+      JSON.stringify(modelResolution) === JSON.stringify(quartetCompleted.executions[0].modelResolution)
+    )), "later cells resolve the same model").toBe(true);
+    expect(lanternObserved.modelCatalogEnsures, "the model catalog is ensured once for the first cell").toEqual([names[0]]);
+    expect(quartetCompleted.executions.slice(1).every(({ pinnedModelResolution }) => (
+      JSON.stringify(pinnedModelResolution) === JSON.stringify(quartetCompleted.executions[0].modelResolution)
+    )), "later cells pin the first cell's model").toBe(true);
+    expect(quartetCompleted.executions.map(({ semanticChildren }) => semanticChildren.length),
+      "only recursion-enabled cells observe children").toEqual([0, 0, 1, 1]);
+    expect(lanternObserved.childCompletionIds, "both recursive cells invoke children").toHaveLength(2);
+    expect(quartetCompleted.executions.every(({ outcomeGrade }) => (
+      outcomeGrade.reviewRequired === true && outcomeGrade.qualified === null
+    )), "outcomes stay human-reviewable").toBe(true);
+    expect(quartetCompleted.executions.every(({ threadIds }) => threadIds.length === 1), "cells keep one thread").toBe(true);
+    expect(quartetCompleted.executions.every((execution) => (
+      quartetEvalService.reviewContext(execution.id).cases[0].threadIds.length === 1
+    )), "review contexts expose the single thread").toBe(true);
+    expect(lanternObserved.revokedChildCapabilityProbes, "child capabilities are revoked after settling").toHaveLength(2);
+    for (const probe of lanternObserved.revokedChildCapabilityProbes) {
+      await expect(probe(), "revoked child capabilities cannot be replayed").rejects.toMatchObject({
+        status: 401,
+        code: "invalid_capability",
+      });
+    }
+  }, 180_000);
+
+  it("retains graph evidence and reviewable threads across case × harness executions on one product server", async () => {
+    // Graph memory is cataloged as a harness-neutral natural two-turn case.
     const definition = evalCases.find((candidate) => candidate.id === graphMemoryEvalCaseId);
     const firstRun = resolveEvalCasePrompts(definition, "run-alpha");
     const secondRun = resolveEvalCasePrompts(definition, "run-beta");
-
-    expect(definition).toMatchObject({
+    expect(definition, "case identity stays harness-neutral").toMatchObject({
       name: "Graph memory · prior accepted reference",
       description: expect.stringContaining("prior accepted layer"),
       defaultSelected: false,
     });
-    expect(firstRun).toEqual(graphMemoryEvalPrompts("run-alpha"));
-    expect(firstRun).toHaveLength(2);
-    expect(firstRun.join("\n")).not.toContain("GRAPH_MEMORY_ANCHOR:");
-    expect(firstRun[1]).toBe("Find your earlier Freshness acknowledged explanation and link the original as supporting context in a concise follow-up. Do not recreate or paraphrase it.");
-    expect(firstRun[1]).not.toMatch(/graph search|graph\.search|query|parameter|budget|layer|accepted|hard-code|\bID\b/i);
-    expect(secondRun).toEqual(firstRun);
-    expect(JSON.stringify(definition)).not.toContain("fixture.graph-memory");
-    expect(JSON.stringify(definition)).not.toContain("codex.basic");
-  });
+    expect(firstRun, "resolved prompts match the canonical pair").toEqual(graphMemoryEvalPrompts("run-alpha"));
+    expect(firstRun, "the case is exactly two turns").toHaveLength(2);
+    expect(firstRun.join("\n"), "no anchor markers leak into prompts").not.toContain("GRAPH_MEMORY_ANCHOR:");
+    expect(firstRun[1], "the follow-up stays natural").toBe("Find your earlier Freshness acknowledged explanation and link the original as supporting context in a concise follow-up. Do not recreate or paraphrase it.");
+    expect(firstRun[1], "the follow-up never leaks search mechanics").not.toMatch(/graph search|graph\.search|query|parameter|budget|layer|accepted|hard-code|\bID\b/i);
+    expect(secondRun, "prompts are stable across runs").toEqual(firstRun);
+    expect(JSON.stringify(definition), "the definition never names the fixture harness").not.toContain("fixture.graph-memory");
+    expect(JSON.stringify(definition), "the definition never names an implementation").not.toContain("codex.basic");
 
-  it("retains graph-memory search and reference evidence in one product thread", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-graph-memory-app-test-"));
-    directories.push(dataDirectory);
-    const configurationPath = join(repositoryRoot, "harnesses", "fixture-graph-memory.yaml");
-    const runtime = new GraphCompleteRuntimeService({
-      userDataDirectory: dataDirectory,
-      graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-      configurationPaths: [configurationPath],
-      additionalImplementations: { "fixture.graph-memory": graphMemoryFixtureFactory },
-      candidateTrace: {
-        directory: join(dataDirectory, "eval-data", "candidate-trace-spool"),
-        policy: {
-          mode: "required",
-          requiredFeatures: { prompt: "full", messages: "full" },
-          includeNativeArtifacts: false,
-          maxBytesPerTurn: 1_000_000,
-          maxEventsPerTurn: 1_000,
-        },
-      },
-    });
-    services.push(runtime);
-    const runtimeSession = await runtime.start();
-    expect(runtime.graphOperationRecorder).not.toBeNull();
-    expect(runtimeSession.graphUrl).toBe(runtime.graphOperationRecorder.url);
-    const product = new RelayerAppServerService({
-      userDataDirectory: dataDirectory,
-      binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
-      webDirectory: join(repositoryRoot, "desktop", "renderer"),
-      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
-      runtimeSession,
-      defaultHarnessConfiguration: "fixture-graph-memory",
-      allowHarnessOverride: true,
-    });
-    services.push(product);
-    const productSession = await product.start();
-    const evalService = await new EvalService({
-      stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
-      productSession,
-      configurationPaths: [configurationPath],
-      platform: "darwin",
-      targetKey: "macos-arm64",
-      candidateTraceExporter: (interactionId, targetDirectory, correlation) => runtime.exportCandidateTrace(interactionId, targetDirectory, correlation),
-      candidateTraceRequired: true,
-    }).open();
-
-    expect(evalService.catalog()).toMatchObject({
-      cases: expect.arrayContaining([expect.objectContaining({ id: graphMemoryEvalCaseId })]),
-      harnessConfigurations: expect.arrayContaining([expect.objectContaining({
-        name: "fixture-graph-memory",
-        implementation: "fixture.graph-memory",
-      })]),
-    });
-    const created = await evalService.createRun({
-      testCaseIds: [graphMemoryEvalCaseId],
-      harnessConfigurationNames: ["fixture-graph-memory"],
-      judgeConfigurationName: "deterministic-graph-contract",
-    });
-    const completed = await waitForCompletedRun(evalService, created.id, 20_000);
-    const execution = completed.executions[0];
-
-    expect(completed.status).toBe("passed");
-    expect(execution.threadIds).toHaveLength(1);
-    expect(execution.turns).toHaveLength(2);
-    expect(execution.turns.every((turn) => !turn.prompt.includes("GRAPH_MEMORY_ANCHOR:"))).toBe(true);
-    expect(execution.turns[1].deterministicChecks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: expect.stringContaining("search-returned-prior-root"), passed: true }),
-      expect.objectContaining({ name: expect.stringContaining("draft-decoy-hidden"), passed: true }),
-      expect.objectContaining({ name: expect.stringContaining("typed-reference-target"), passed: true }),
-      expect.objectContaining({ name: expect.stringContaining("ack-search-submit-order"), passed: true }),
-    ]));
-    expect(execution.turns[1].caseEvidence).toMatchObject({
-      searchedLayerIds: [execution.turns[0].rootLayerId],
-      referenceActionId: expect.any(Number),
-    });
-    expect(execution.turns[1].caseEvidence).not.toHaveProperty("anchor");
-    const secondTrace = await evalService.candidateTraceContext(
-      execution.id,
-      execution.turns[1].interactionId,
-    );
-    expect(secondTrace.graphOperationsEvidence).toMatchObject({
-      status: "complete",
-      error: null,
-      descriptor: {
-        format: "relayer-graph-operations-v1",
-        truncated: false,
-      },
-    });
-    expect(secondTrace.graphOperations).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        path: "/api/graph/search",
-        queryContractVersion: 1,
-        query: graphMemorySearchQuery,
-        parameters: graphMemorySearchParameters,
-        budget: graphMemorySearchBudget,
-        status: 200,
-        searchLayerIds: [execution.turns[0].rootLayerId],
-        resultTruncated: false,
-        sequence: expect.any(Number),
-      }),
-    ]));
-    const firstRoot = execution.turns[0].rootLayerId;
-    const secondRoot = execution.turns[1].rootLayerId;
-    const detail = await productRequest(productSession, `/api/threads/${execution.threadIds[0]}`);
-    expect(detail.interactions).toHaveLength(2);
-    expect(detail.interactions.every((interaction) => interaction.completionStatus === "accepted")).toBe(true);
-    const secondLayer = await productRequest(
-      productSession,
-      `/api/threads/${execution.threadIds[0]}/interactions/${detail.interactions[1].id}/layers/${secondRoot}`,
-    );
-    expect(secondLayer.actions).toEqual(expect.arrayContaining([expect.objectContaining({
-      kind: "navigate",
-      relation: "reference",
-      sourceLayerId: secondRoot,
-      targetLayerId: firstRoot,
-      state: "accepted",
-    })]));
-    expect(evalService.reviewContext(execution.id).cases).toEqual([expect.objectContaining({
-      id: graphMemoryEvalCaseId,
-      threads: [{ id: execution.threadIds[0], name: "Graph memory · prior accepted reference" }],
-    })]);
-
-    const secondCreated = await evalService.createRun({
-      testCaseIds: [graphMemoryEvalCaseId],
-      harnessConfigurationNames: ["fixture-graph-memory"],
-      judgeConfigurationName: "deterministic-graph-contract",
-    });
-    const secondCompleted = await waitForCompletedRun(evalService, secondCreated.id, 20_000);
-    const secondExecution = secondCompleted.executions[0];
-    expect(secondCompleted.status).toBe("passed");
-    expect(secondExecution.threadIds).toHaveLength(1);
-    expect(secondExecution.threadIds[0]).not.toBe(execution.threadIds[0]);
-    expect(secondExecution.turns[0].rootLayerId).not.toBe(firstRoot);
-    expect(secondExecution.turns[1].caseEvidence).toMatchObject({
-      searchedLayerIds: [secondExecution.turns[0].rootLayerId],
-      referenceActionId: expect.any(Number),
-    });
-    expect(secondExecution.turns[1].caseEvidence.searchedLayerIds).not.toContain(firstRoot);
-
-    let launderedTurns = 0;
-    const launderedEvalService = await new EvalService({
-      stateFile: join(dataDirectory, "eval-data", "laundered-test-runs.json"),
-      productSession,
-      configurationPaths: [configurationPath],
-      platform: "darwin",
-      targetKey: "macos-arm64",
-      candidateTraceExporter: async (interactionId, targetDirectory, correlation) => {
-        const descriptor = await runtime.exportCandidateTrace(interactionId, targetDirectory, correlation);
-        launderedTurns += 1;
-        if (launderedTurns !== 2) return descriptor;
-        const rewritten = await rewriteGraphOperations(targetDirectory, (operations) => {
-          const search = operations.find((event) => event.path === "/api/graph/search");
-          search.query = "MATCH (l:Layer) RETURN l AS layer ORDER BY layer ASC";
-        });
-        return {
-          ...descriptor,
-          graphOperations: { ...descriptor.graphOperations, ...rewritten.descriptor },
-        };
-      },
-      candidateTraceRequired: true,
-    }).open();
-    const launderedRun = await launderedEvalService.createRun({
-      testCaseIds: [graphMemoryEvalCaseId],
-      harnessConfigurationNames: ["fixture-graph-memory"],
-      judgeConfigurationName: "deterministic-graph-contract",
-    });
-    const launderedCompleted = await waitForCompletedRun(launderedEvalService, launderedRun.id, 20_000);
-    expect(launderedCompleted.status).toBe("failed");
-    expect(launderedCompleted.executions[0].turns[1].deterministicChecks).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        name: expect.stringContaining("search-request-contract"),
-        passed: false,
-      }),
-    ]));
-
-    let exportedTurns = 0;
-    let tamperedGraphOperationsPath;
-    const corruptedEvalService = await new EvalService({
-      stateFile: join(dataDirectory, "eval-data", "corrupted-test-runs.json"),
-      productSession,
-      configurationPaths: [configurationPath],
-      platform: "darwin",
-      targetKey: "macos-arm64",
-      candidateTraceExporter: async (interactionId, targetDirectory, correlation) => {
-        const descriptor = await runtime.exportCandidateTrace(interactionId, targetDirectory, correlation);
-        exportedTurns += 1;
-        if (exportedTurns !== 2) return descriptor;
-        const rewritten = await rewriteGraphOperations(targetDirectory, (operations) => {
-          operations[0].interactionNodeId += 10_000;
-        });
-        tamperedGraphOperationsPath = rewritten.path;
-        return {
-          ...descriptor,
-          graphOperations: {
-            ...descriptor.graphOperations,
-            ...rewritten.descriptor,
-          },
-        };
-      },
-      candidateTraceRequired: true,
-    }).open();
-    const corruptedRun = await corruptedEvalService.createRun({
-      testCaseIds: [graphMemoryEvalCaseId],
-      harnessConfigurationNames: ["fixture-graph-memory"],
-      judgeConfigurationName: "deterministic-graph-contract",
-    });
-    const corruptedCompleted = await waitForCompletedRun(corruptedEvalService, corruptedRun.id, 20_000);
-    const corruptedExecution = corruptedCompleted.executions[0];
-    expect(corruptedCompleted.status).toBe("failed");
-    expect(corruptedExecution.promotable).toBe(false);
-    expect(corruptedExecution.turns.flatMap((turn) => turn.deterministicChecks)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        name: expect.stringContaining("case-evidence"),
-        passed: false,
-        detail: "Candidate trace graph-operation ledger contains an invalid receipt.",
-      }),
-    ]));
-    const corruptedTrace = await corruptedEvalService.candidateTraceContext(
-      corruptedExecution.id,
-      corruptedExecution.turns[1].interactionId,
-    );
-    expect(corruptedTrace.graphOperations).toEqual([]);
-    expect(corruptedTrace.graphOperationsEvidence).toMatchObject({
-      status: "invalid",
-      error: "Candidate trace graph-operation ledger contains an invalid receipt.",
-    });
-
-    await writeFile(tamperedGraphOperationsPath, Buffer.concat([
-      await readFile(tamperedGraphOperationsPath),
-      Buffer.from("tampered\n"),
-    ]));
-    const digestCorruptedTrace = await corruptedEvalService.candidateTraceContext(
-      corruptedExecution.id,
-      corruptedExecution.turns[1].interactionId,
-    );
-    expect(digestCorruptedTrace.graphOperations).toEqual([]);
-    expect(digestCorruptedTrace.graphOperationsEvidence).toMatchObject({
-      status: "invalid",
-      error: "Candidate trace graph-operation ledger failed digest validation.",
-    });
-  }, 30_000);
-
-  it("runs case × harness executions through the product server and preserves reviewable threads", async () => {
+    // One shared runtime and product server carry both fixture harnesses.
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-app-test-"));
     directories.push(dataDirectory);
-    const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
+    const graphMemoryConfigurationPath = join(repositoryRoot, "harnesses", "fixture-graph-memory.yaml");
+    const taskSystemConfigurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
     const runtime = new GraphCompleteRuntimeService({
       userDataDirectory: dataDirectory,
       graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-      configurationPaths: [configurationPath],
-      additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
+      configurationPaths: [graphMemoryConfigurationPath, taskSystemConfigurationPath],
+      additionalImplementations: {
+        "fixture.graph-memory": graphMemoryFixtureFactory,
+        "fixture.task-system": taskSystemFixtureFactory,
+      },
       candidateTrace: {
         directory: join(dataDirectory, "eval-data", "candidate-trace-spool"),
         policy: {
@@ -946,6 +700,8 @@ describe("Relayer Eval application service", () => {
     });
     services.push(runtime);
     const runtimeSession = await runtime.start();
+    expect(runtime.graphOperationRecorder, "graph operation recording is active").not.toBeNull();
+    expect(runtimeSession.graphUrl, "the product session uses the recorder URL").toBe(runtime.graphOperationRecorder.url);
     const product = new RelayerAppServerService({
       userDataDirectory: dataDirectory,
       binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
@@ -963,7 +719,9 @@ describe("Relayer Eval application service", () => {
     const evalService = await new EvalService({
       stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
       productSession,
-      configurationPaths: [configurationPath],
+      configurationPaths: [graphMemoryConfigurationPath, taskSystemConfigurationPath],
+      platform: "darwin",
+      targetKey: "macos-arm64",
       candidateTraceExporter: (interactionId, targetDirectory, correlation) => runtime.exportCandidateTrace(interactionId, targetDirectory, correlation),
       candidateTraceRequired: true,
       conversationImportEnabled: true,
@@ -1019,9 +777,204 @@ describe("Relayer Eval application service", () => {
             : []),
         ];
       },
-      platform: "darwin",
     }).open();
 
+    expect(evalService.catalog(), "catalog exposes the graph-memory case and harness").toMatchObject({
+      cases: expect.arrayContaining([expect.objectContaining({ id: graphMemoryEvalCaseId })]),
+      harnessConfigurations: expect.arrayContaining([expect.objectContaining({
+        name: "fixture-graph-memory",
+        implementation: "fixture.graph-memory",
+      })]),
+    });
+    const created = await evalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const completed = await waitForCompletedRun(evalService, created.id, 20_000);
+    const execution = completed.executions[0];
+
+    expect(completed.status, "graph memory passes").toBe("passed");
+    expect(execution.threadIds, "one product thread per execution").toHaveLength(1);
+    expect(execution.turns, "the natural case runs two turns").toHaveLength(2);
+    expect(execution.turns.every((turn) => !turn.prompt.includes("GRAPH_MEMORY_ANCHOR:")), "no anchor leaks into executed prompts").toBe(true);
+    expect(execution.turns[1].deterministicChecks, "turn two keeps its search and reference evidence").toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: expect.stringContaining("search-returned-prior-root"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("draft-decoy-hidden"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("typed-reference-target"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("ack-search-submit-order"), passed: true }),
+    ]));
+    expect(execution.turns[1].caseEvidence, "case evidence references the prior root without anchors").toMatchObject({
+      searchedLayerIds: [execution.turns[0].rootLayerId],
+      referenceActionId: expect.any(Number),
+    });
+    expect(execution.turns[1].caseEvidence, "anchors never enter case evidence").not.toHaveProperty("anchor");
+    const secondTrace = await evalService.candidateTraceContext(
+      execution.id,
+      execution.turns[1].interactionId,
+    );
+    expect(secondTrace.graphOperationsEvidence, "graph-operation evidence is complete").toMatchObject({
+      status: "complete",
+      error: null,
+      descriptor: {
+        format: "relayer-graph-operations-v1",
+        truncated: false,
+      },
+    });
+    expect(secondTrace.graphOperations, "the exact search contract is recorded").toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "/api/graph/search",
+        queryContractVersion: 1,
+        query: graphMemorySearchQuery,
+        parameters: graphMemorySearchParameters,
+        budget: graphMemorySearchBudget,
+        status: 200,
+        searchLayerIds: [execution.turns[0].rootLayerId],
+        resultTruncated: false,
+        sequence: expect.any(Number),
+      }),
+    ]));
+    const firstRoot = execution.turns[0].rootLayerId;
+    const secondRoot = execution.turns[1].rootLayerId;
+    const detail = await productRequest(productSession, `/api/threads/${execution.threadIds[0]}`);
+    expect(detail.interactions, "both turns land in the product thread").toHaveLength(2);
+    expect(detail.interactions.every((interaction) => interaction.completionStatus === "accepted"), "both turns are accepted").toBe(true);
+    const secondLayer = await productRequest(
+      productSession,
+      `/api/threads/${execution.threadIds[0]}/interactions/${detail.interactions[1].id}/layers/${secondRoot}`,
+    );
+    expect(secondLayer.actions, "the reference action links back to the prior root").toEqual(expect.arrayContaining([expect.objectContaining({
+      kind: "navigate",
+      relation: "reference",
+      sourceLayerId: secondRoot,
+      targetLayerId: firstRoot,
+      state: "accepted",
+    })]));
+    expect(evalService.reviewContext(execution.id).cases, "review context names the graph-memory thread").toEqual([expect.objectContaining({
+      id: graphMemoryEvalCaseId,
+      threads: [{ id: execution.threadIds[0], name: "Graph memory · prior accepted reference" }],
+    })]);
+
+    const secondCreated = await evalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const secondCompleted = await waitForCompletedRun(evalService, secondCreated.id, 20_000);
+    const secondExecution = secondCompleted.executions[0];
+    expect(secondCompleted.status, "the rerun passes").toBe("passed");
+    expect(secondExecution.threadIds, "the rerun owns its own thread").toHaveLength(1);
+    expect(secondExecution.threadIds[0], "the rerun never reuses the first thread").not.toBe(execution.threadIds[0]);
+    expect(secondExecution.turns[0].rootLayerId, "the rerun roots fresh graph state").not.toBe(firstRoot);
+    expect(secondExecution.turns[1].caseEvidence, "the rerun evidence references its own prior root").toMatchObject({
+      searchedLayerIds: [secondExecution.turns[0].rootLayerId],
+      referenceActionId: expect.any(Number),
+    });
+    expect(secondExecution.turns[1].caseEvidence.searchedLayerIds, "the rerun never references the first run's root").not.toContain(firstRoot);
+
+    let launderedTurns = 0;
+    const launderedEvalService = await new EvalService({
+      stateFile: join(dataDirectory, "eval-data", "laundered-test-runs.json"),
+      productSession,
+      configurationPaths: [graphMemoryConfigurationPath],
+      platform: "darwin",
+      targetKey: "macos-arm64",
+      candidateTraceExporter: async (interactionId, targetDirectory, correlation) => {
+        const descriptor = await runtime.exportCandidateTrace(interactionId, targetDirectory, correlation);
+        launderedTurns += 1;
+        if (launderedTurns !== 2) return descriptor;
+        const rewritten = await rewriteGraphOperations(targetDirectory, (operations) => {
+          const search = operations.find((event) => event.path === "/api/graph/search");
+          search.query = "MATCH (l:Layer) RETURN l AS layer ORDER BY layer ASC";
+        });
+        return {
+          ...descriptor,
+          graphOperations: { ...descriptor.graphOperations, ...rewritten.descriptor },
+        };
+      },
+      candidateTraceRequired: true,
+    }).open();
+    const launderedRun = await launderedEvalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const launderedCompleted = await waitForCompletedRun(launderedEvalService, launderedRun.id, 20_000);
+    expect(launderedCompleted.status, "laundered search queries fail the run").toBe("failed");
+    expect(launderedCompleted.executions[0].turns[1].deterministicChecks, "the search contract check names the failure").toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: expect.stringContaining("search-request-contract"),
+        passed: false,
+      }),
+    ]));
+
+    let exportedTurns = 0;
+    let tamperedGraphOperationsPath;
+    const corruptedEvalService = await new EvalService({
+      stateFile: join(dataDirectory, "eval-data", "corrupted-test-runs.json"),
+      productSession,
+      configurationPaths: [graphMemoryConfigurationPath],
+      platform: "darwin",
+      targetKey: "macos-arm64",
+      candidateTraceExporter: async (interactionId, targetDirectory, correlation) => {
+        const descriptor = await runtime.exportCandidateTrace(interactionId, targetDirectory, correlation);
+        exportedTurns += 1;
+        if (exportedTurns !== 2) return descriptor;
+        const rewritten = await rewriteGraphOperations(targetDirectory, (operations) => {
+          operations[0].interactionNodeId += 10_000;
+        });
+        tamperedGraphOperationsPath = rewritten.path;
+        return {
+          ...descriptor,
+          graphOperations: {
+            ...descriptor.graphOperations,
+            ...rewritten.descriptor,
+          },
+        };
+      },
+      candidateTraceRequired: true,
+    }).open();
+    const corruptedRun = await corruptedEvalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const corruptedCompleted = await waitForCompletedRun(corruptedEvalService, corruptedRun.id, 20_000);
+    const corruptedExecution = corruptedCompleted.executions[0];
+    expect(corruptedCompleted.status, "tampered receipts fail the run").toBe("failed");
+    expect(corruptedExecution.promotable, "tampered executions are never promotable").toBe(false);
+    expect(corruptedExecution.turns.flatMap((turn) => turn.deterministicChecks), "the case-evidence check names the invalid receipt").toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: expect.stringContaining("case-evidence"),
+        passed: false,
+        detail: "Candidate trace graph-operation ledger contains an invalid receipt.",
+      }),
+    ]));
+    const corruptedTrace = await corruptedEvalService.candidateTraceContext(
+      corruptedExecution.id,
+      corruptedExecution.turns[1].interactionId,
+    );
+    expect(corruptedTrace.graphOperations, "invalid ledgers expose no operations").toEqual([]);
+    expect(corruptedTrace.graphOperationsEvidence, "invalid ledger evidence is explicit").toMatchObject({
+      status: "invalid",
+      error: "Candidate trace graph-operation ledger contains an invalid receipt.",
+    });
+
+    await writeFile(tamperedGraphOperationsPath, Buffer.concat([
+      await readFile(tamperedGraphOperationsPath),
+      Buffer.from("tampered\n"),
+    ]));
+    const digestCorruptedTrace = await corruptedEvalService.candidateTraceContext(
+      corruptedExecution.id,
+      corruptedExecution.turns[1].interactionId,
+    );
+    expect(digestCorruptedTrace.graphOperations, "digest-tampered ledgers expose no operations").toEqual([]);
+    expect(digestCorruptedTrace.graphOperationsEvidence, "digest failures are explicit").toMatchObject({
+      status: "invalid",
+      error: "Candidate trace graph-operation ledger failed digest validation.",
+    });
+
+    // Case × harness executions through the same product server.
     const productModelRequired = await fetch(new URL("/api/threads", productSession.origin), {
       method: "POST",
       headers: {
@@ -1033,72 +986,72 @@ describe("Relayer Eval application service", () => {
         harnessId: "fixture-task-system",
       }),
     });
-    expect(productModelRequired.status).toBe(422);
-    expect((await productModelRequired.json()).code).toBe("model_selection_required");
+    expect(productModelRequired.status, "product threads still require model selection").toBe(422);
+    expect((await productModelRequired.json()).code, "the product names the missing selection").toBe("model_selection_required");
 
-    const created = await evalService.createRun({
+    const matrixCreated = await evalService.createRun({
       testCaseIds: ["empty-project.task-system.two-turn", "empty-project.task-system.single-turn", "empty-project.hierarchical-overview.single-turn"],
       harnessConfigurationNames: ["fixture-task-system"],
       judgeConfigurationName: "deterministic-graph-contract",
     });
-    const completed = await waitForCompletedRun(evalService, created.id);
-    expect(completed.status).toBe("passed");
-    expect(completed.summary).toMatchObject({ passed: 3, total: 3 });
-    expect(completed.executions).toHaveLength(3);
-    expect(completed.executions.every((execution) => execution.threadIds.length === 1)).toBe(true);
-    expect(completed.executions.find((execution) => execution.testCaseId.endsWith("two-turn")).turns).toHaveLength(2);
-    expect(completed.executions.every((execution) => execution.promotable)).toBe(true);
-    expect(completed.executions.flatMap((execution) => execution.turns).every((turn) => (
+    const matrixCompleted = await waitForCompletedRun(evalService, matrixCreated.id);
+    expect(matrixCompleted.status, "the case × harness matrix passes").toBe("passed");
+    expect(matrixCompleted.summary, "every execution passes").toMatchObject({ passed: 3, total: 3 });
+    expect(matrixCompleted.executions, "one execution per case").toHaveLength(3);
+    expect(matrixCompleted.executions.every((matrixExecution) => matrixExecution.threadIds.length === 1), "each execution owns one thread").toBe(true);
+    expect(matrixCompleted.executions.find((matrixExecution) => matrixExecution.testCaseId.endsWith("two-turn")).turns, "the two-turn case runs two turns").toHaveLength(2);
+    expect(matrixCompleted.executions.every((matrixExecution) => matrixExecution.promotable), "matrix executions stay promotable").toBe(true);
+    expect(matrixCompleted.executions.flatMap((matrixExecution) => matrixExecution.turns).every((turn) => (
       turn.candidateTrace.status === "complete"
       && Number.isSafeInteger(turn.candidateTrace.personalPresentationVersionId)
       && turn.candidateTrace.ref.endsWith("candidate-trace/manifest.json")
       && turn.candidateTrace.sha256.startsWith("sha256:")
-    ))).toBe(true);
+    )), "every turn carries a complete candidate trace").toBe(true);
 
-    const selected = completed.executions[0];
+    const selected = matrixCompleted.executions[0];
     const selectedTrace = await evalService.candidateTraceContext(selected.id, selected.turns[0].interactionId);
-    expect(selectedTrace.manifest).toMatchObject({
+    expect(selectedTrace.manifest, "trace manifests correlate run and execution").toMatchObject({
       format: "relayer-harness-trace-v1",
       personalPresentationVersionId: selected.turns[0].candidateTrace.personalPresentationVersionId,
-      correlation: { runId: completed.id, executionId: selected.id },
+      correlation: { runId: matrixCompleted.id, executionId: selected.id },
     });
-    expect(JSON.stringify(selectedTrace.manifest)).not.toContain("Decision-useful center");
-    expect(selectedTrace.events.map((event) => event.type)).toEqual(expect.arrayContaining(["prompt", "message", "run.completed"]));
-    const bundle = JSON.parse(await readFile(join(dataDirectory, "eval-data", completed.bundleRef), "utf8"));
-    expect(bundle.run.executions[0].turns[0].candidateTrace).toMatchObject({
+    expect(JSON.stringify(selectedTrace.manifest), "manifests never leak product copy").not.toContain("Decision-useful center");
+    expect(selectedTrace.events.map((event) => event.type), "traces keep prompt, message, and completion events").toEqual(expect.arrayContaining(["prompt", "message", "run.completed"]));
+    const bundle = JSON.parse(await readFile(join(dataDirectory, "eval-data", matrixCompleted.bundleRef), "utf8"));
+    expect(bundle.run.executions[0].turns[0].candidateTrace, "bundles persist trace descriptors").toMatchObject({
       status: "complete",
       format: "relayer-harness-trace-v1",
       personalPresentationVersionId: selected.turns[0].candidateTrace.personalPresentationVersionId,
       ref: selected.turns[0].candidateTrace.ref,
     });
     const context = evalService.reviewContext(selected.id);
-    expect(context).toMatchObject({
-      runId: completed.id,
+    expect(context, "review contexts are read-only").toMatchObject({
+      runId: matrixCompleted.id,
       harnessConfigurationName: "fixture-task-system",
       selectedExecutionId: selected.id,
       readOnly: true,
     });
-    expect(context.cases).toHaveLength(3);
-    expect(context.cases.every((testCase) => testCase.threadIds.length === 1)).toBe(true);
-    expect(context.cases.map((testCase) => testCase.threads)).toEqual([
-      [{ id: completed.executions[0].threadIds[0], name: "Task system · two turns" }],
-      [{ id: completed.executions[1].threadIds[0], name: "Task system · one turn" }],
-      [{ id: completed.executions[2].threadIds[0], name: "Hierarchical overview · one turn" }],
+    expect(context.cases, "review contexts expose every case").toHaveLength(3);
+    expect(context.cases.every((testCase) => testCase.threadIds.length === 1), "review cases keep one thread").toBe(true);
+    expect(context.cases.map((testCase) => testCase.threads), "review threads carry case names").toEqual([
+      [{ id: matrixCompleted.executions[0].threadIds[0], name: "Task system · two turns" }],
+      [{ id: matrixCompleted.executions[1].threadIds[0], name: "Task system · one turn" }],
+      [{ id: matrixCompleted.executions[2].threadIds[0], name: "Hierarchical overview · one turn" }],
     ]);
 
-    const detail = await productRequest(productSession, `/api/threads/${selected.threadIds[0]}`);
-    expect(detail.interactions[0].completionStatus).toBe("accepted");
-    const output = detail.interactions[0].completionOutput;
+    const selectedDetail = await productRequest(productSession, `/api/threads/${selected.threadIds[0]}`);
+    expect(selectedDetail.interactions[0].completionStatus, "product interactions stay accepted").toBe("accepted");
+    const output = selectedDetail.interactions[0].completionOutput;
     const layer = await productRequest(
       productSession,
-      `/api/threads/${selected.threadIds[0]}/interactions/${detail.interactions[0].id}/layers/${output.rootLayer.layer.id}`,
+      `/api/threads/${selected.threadIds[0]}/interactions/${selectedDetail.interactions[0].id}/layers/${output.rootLayer.layer.id}`,
     );
-    expect(layer.nodes.map((node) => node.title)).toEqual([
+    expect(layer.nodes.map((node) => node.title), "the task-system layer keeps its nodes").toEqual([
       "Incoming queue",
       "Two-worker pool",
       "Results store",
     ]);
-    expect(layer.actions).toEqual([
+    expect(layer.actions, "the layer keeps its expand and invoke actions").toEqual([
       expect.objectContaining({
         sourceNodeId: layer.nodes[0].id,
         sourceLayerId: layer.layer.id,
@@ -1116,9 +1069,9 @@ describe("Relayer Eval application service", () => {
     ]);
     const childLayer = await productRequest(
       productSession,
-      `/api/threads/${selected.threadIds[0]}/interactions/${detail.interactions[0].id}/layers/${layer.actions[0].targetLayerId}`,
+      `/api/threads/${selected.threadIds[0]}/interactions/${selectedDetail.interactions[0].id}/layers/${layer.actions[0].targetLayerId}`,
     );
-    expect(childLayer.nodes.map((node) => node.title)).toEqual(["Waiting tasks", "Next claim"]);
+    expect(childLayer.nodes.map((node) => node.title), "expand actions reach their child layer").toEqual(["Waiting tasks", "Next claim"]);
 
     const h3Created = await evalService.createRun({
       testCaseIds: [H3_PROJECT_CASE_ID],
@@ -1126,12 +1079,12 @@ describe("Relayer Eval application service", () => {
       judgeConfigurationName: "deterministic-graph-contract",
     });
     const h3Completed = await waitForCompletedRun(evalService, h3Created.id);
-    expect(h3Completed.executions[0].error).toBeNull();
-    expect(h3Completed.status).toBe("passed");
-    expect(h3Completed.executions).toHaveLength(1);
+    expect(h3Completed.executions[0].error, "the H3 project case runs without error").toBeNull();
+    expect(h3Completed.status, "the H3 project case passes").toBe("passed");
+    expect(h3Completed.executions, "one H3 execution").toHaveLength(1);
     const h3Execution = h3Completed.executions[0];
-    expect(h3Execution.threadIds).toHaveLength(3);
-    expect(h3Execution.turns.map((turn) => [turn.threadDefinitionId, turn.threadTurnIndex])).toEqual([
+    expect(h3Execution.threadIds, "the H3 case owns three threads").toHaveLength(3);
+    expect(h3Execution.turns.map((turn) => [turn.threadDefinitionId, turn.threadTurnIndex]), "H3 turns stay ordered per thread").toEqual([
       ["architecture", 0],
       ["architecture", 1],
       ["diagnosis", 0],
@@ -1139,32 +1092,32 @@ describe("Relayer Eval application service", () => {
       ["implementation", 0],
       ["implementation", 1],
     ]);
-    expect(h3Execution.turns).toHaveLength(6);
-    expect(h3Execution.turns.map((turn) => turn.permissionProfileId)).toEqual([
+    expect(h3Execution.turns, "the H3 case runs six turns").toHaveLength(6);
+    expect(h3Execution.turns.map((turn) => turn.permissionProfileId), "every H3 turn runs under the auto profile").toEqual([
       "auto", "auto", "auto", "auto", "auto", "auto",
     ]);
-    expect(h3Execution.turns.every((turn) => turn.effectiveExecutionDigest.startsWith("sha256:"))).toBe(true);
+    expect(h3Execution.turns.every((turn) => turn.effectiveExecutionDigest.startsWith("sha256:")), "turns carry execution digests").toBe(true);
     expect(h3Execution.turns.every((turn) => (
       turn.effectivePermissionReceipt.permissionProfileId === "auto"
       && turn.effectivePermissionReceipt.unconfinedHostAccess === false
-    ))).toBe(true);
+    )), "permission receipts stay confined").toBe(true);
     expect(evalService.reviewContext(h3Execution.id).cases.find((testCase) => (
       testCase.id === H3_PROJECT_CASE_ID
-    )).threads).toEqual([
+    )).threads, "H3 review threads keep their names").toEqual([
       { id: h3Execution.threadIds[0], name: "Architecture question" },
       { id: h3Execution.threadIds[1], name: "Read-only bug diagnosis" },
       { id: h3Execution.threadIds[2], name: "Implement and commit the repair" },
     ]);
-    expect(workspaceGrades).toEqual(["question", "question", "diagnosis", "diagnosis", "implementation"]);
-    expect(acceptedTopologyGrades).toHaveLength(6);
-    expect(acceptedTopologyGrades.filter((grade) => grade.requireGrandchild)).toHaveLength(0);
-    expect(acceptedTopologyGrades.every((grade) => grade.layerCount === 2)).toBe(true);
+    expect(workspaceGrades, "workspace grading follows the case phases").toEqual(["question", "question", "diagnosis", "diagnosis", "implementation"]);
+    expect(acceptedTopologyGrades, "every turn loads its accepted topology").toHaveLength(6);
+    expect(acceptedTopologyGrades.filter((grade) => grade.requireGrandchild), "the fixture never requires grandchildren").toHaveLength(0);
+    expect(acceptedTopologyGrades.every((grade) => grade.layerCount === 2), "fixture topologies keep two layers").toBe(true);
     const h3Threads = await Promise.all(h3Execution.threadIds.map((threadId) => (
       productRequest(productSession, `/api/threads/${threadId}`)
     )));
-    expect(new Set(h3Threads.map((threadDetail) => threadDetail.thread.projectId)).size).toBe(1);
-    expect(h3Threads.every((threadDetail) => threadDetail.interactions.length === 2)).toBe(true);
-    expect(h3Threads.map((threadDetail) => threadDetail.thread.permissionProfileId)).toEqual(["auto", "auto", "auto"]);
+    expect(new Set(h3Threads.map((threadDetail) => threadDetail.thread.projectId)).size, "H3 threads share one project").toBe(1);
+    expect(h3Threads.every((threadDetail) => threadDetail.interactions.length === 2), "each H3 thread keeps two interactions").toBe(true);
+    expect(h3Threads.map((threadDetail) => threadDetail.thread.permissionProfileId), "H3 threads keep the auto profile").toEqual(["auto", "auto", "auto"]);
 
     const autonomousCreated = await evalService.createRun({
       testCaseIds: [H3_AUTONOMOUS_FIX_CASE_ID, H3_AUTONOMOUS_INVESTIGATION_CASE_ID],
@@ -1172,20 +1125,20 @@ describe("Relayer Eval application service", () => {
       judgeConfigurationName: "deterministic-graph-contract",
     });
     const autonomousCompleted = await waitForCompletedRun(evalService, autonomousCreated.id);
-    expect(autonomousCompleted.executions).toHaveLength(2);
-    expect(autonomousCompleted.executions.every((execution) => execution.lifecycle.status === "complete")).toBe(true);
-    expect(autonomousCompleted.executions.every((execution) => execution.turns.length === 1)).toBe(true);
-    expect(autonomousCompleted.executions.every((execution) => execution.caseSnapshotDigest.startsWith("sha256:"))).toBe(true);
-    expect(autonomousCompleted.executions.every((execution) => execution.caseSnapshot.artifacts.reference.sealedPath === undefined)).toBe(true);
-    expect(autonomousCompleted.executions.every((execution) => execution.outcomeGrade.status === "partial")).toBe(true);
-    expect(autonomousCompleted.executions.map((execution) => execution.outcomeGrade.qualified)).toEqual([null, null]);
-    expect(autonomousCompleted.executions.every((execution) => execution.outcomeGrade.score === null)).toBe(true);
-    expect(autonomousCompleted.executions.map((execution) => execution.outcomeGrade.mandatoryGates.map((gate) => gate.gateId))).toEqual([
+    expect(autonomousCompleted.executions, "both autonomous cases execute").toHaveLength(2);
+    expect(autonomousCompleted.executions.every((autonomousExecution) => autonomousExecution.lifecycle.status === "complete"), "autonomous lifecycles complete").toBe(true);
+    expect(autonomousCompleted.executions.every((autonomousExecution) => autonomousExecution.turns.length === 1), "autonomous cases run one turn").toBe(true);
+    expect(autonomousCompleted.executions.every((autonomousExecution) => autonomousExecution.caseSnapshotDigest.startsWith("sha256:")), "case snapshots stay digested").toBe(true);
+    expect(autonomousCompleted.executions.every((autonomousExecution) => autonomousExecution.caseSnapshot.artifacts.reference.sealedPath === undefined), "no sealed reference paths leak").toBe(true);
+    expect(autonomousCompleted.executions.every((autonomousExecution) => autonomousExecution.outcomeGrade.status === "partial"), "autonomous outcomes stay partial pending review").toBe(true);
+    expect(autonomousCompleted.executions.map((autonomousExecution) => autonomousExecution.outcomeGrade.qualified), "autonomous qualification stays undecided").toEqual([null, null]);
+    expect(autonomousCompleted.executions.every((autonomousExecution) => autonomousExecution.outcomeGrade.score === null), "autonomous outcomes carry no score").toBe(true);
+    expect(autonomousCompleted.executions.map((autonomousExecution) => autonomousExecution.outcomeGrade.mandatoryGates.map((gate) => gate.gateId)), "each case keeps its mandatory gates").toEqual([
       ["functional-behavior", "regression-safety", "scoped-clean-commit"],
       ["read-only-workspace", "independent-reproduction"],
     ]);
-    expect(autonomousCompleted.executions.every((execution) => execution.presentationGrade.status === "unjudged")).toBe(true);
-  }, 20_000);
+    expect(autonomousCompleted.executions.every((autonomousExecution) => autonomousExecution.presentationGrade.status === "unjudged"), "autonomous presentation stays unjudged").toBe(true);
+  }, 120_000);
 });
 
 async function waitForCompletedRun(evalService, runId, timeoutMs = 10_000) {
@@ -1219,6 +1172,7 @@ async function productRequest(session, path, init = {}) {
   if (!response.ok) throw new Error(JSON.stringify(value));
   return value;
 }
+
 async function rewriteGraphOperations(targetDirectory, mutate) {
   const path = join(targetDirectory, "graph-operations.jsonl");
   const operations = (await readFile(path, "utf8"))

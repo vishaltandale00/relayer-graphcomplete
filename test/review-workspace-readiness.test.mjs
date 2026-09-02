@@ -14,11 +14,12 @@ afterEach(() => {
 });
 
 describe("automated review workspace readiness", () => {
-  it("waits for the exact navigation readiness signal beyond the legacy five-second window", async () => {
+  it("completes the readiness handshake only for the exact signal the preload emits after adapter registration", async () => {
     vi.useFakeTimers();
     const ipc = new EventEmitter();
+    const readyUrl = "http://127.0.0.1:43123/?threadId=7&interactionId=41&review=1&reviewSession=token-1";
     const webContents = Object.assign(new EventEmitter(), {
-      getURL: () => "http://127.0.0.1:43123/?threadId=7&interactionId=41&review=1&reviewSession=token-1",
+      getURL: () => readyUrl,
     });
     const window = Object.assign(new EventEmitter(), {
       isDestroyed: () => false,
@@ -53,7 +54,10 @@ describe("automated review workspace readiness", () => {
       navigationToken: "token-1",
     });
     await Promise.resolve();
-    expect(await Promise.race([ready.then(() => "ready"), Promise.resolve("waiting")])).toBe("waiting");
+    expect(
+      await Promise.race([ready.then(() => "ready"), Promise.resolve("waiting")]),
+      "signals beyond the legacy five-second window and from foreign senders or wrong turns stay waiting",
+    ).toBe("waiting");
 
     ipc.emit(REVIEW_WORKSPACE_READY_CHANNEL, { sender: webContents }, {
       executionId: "execution-1",
@@ -62,17 +66,15 @@ describe("automated review workspace readiness", () => {
       navigationToken: "token-1",
     });
 
-    await expect(ready).resolves.toEqual({
+    await expect(ready, "exact readiness signal resolves").resolves.toEqual({
       executionId: "execution-1",
       threadId: "7",
       turnId: "41",
       navigationToken: "token-1",
     });
-    expect(window.loadURL).toHaveBeenCalledWith(webContents.getURL());
-    expect(ipc.listenerCount(REVIEW_WORKSPACE_READY_CHANNEL)).toBe(0);
-  });
+    expect(window.loadURL, "ready workspace reloads the review URL").toHaveBeenCalledWith(webContents.getURL());
+    expect(ipc.listenerCount(REVIEW_WORKSPACE_READY_CHANNEL), "ready listener is removed").toBe(0);
 
-  it("emits exact navigation readiness only after the presentation adapter is registered", async () => {
     const source = await readFile(new URL("../desktop/preload/eval-review.cjs", import.meta.url), "utf8");
     const sent = [];
     let reviewApi;
@@ -87,7 +89,7 @@ describe("automated review workspace readiness", () => {
         return {
           contextBridge: {
             exposeInMainWorld: (name, value) => {
-              expect(name).toBe("relayerEvalReview");
+              expect(name, "preload exposes the review bridge").toBe("relayerEvalReview");
               reviewApi = value;
             },
           },
@@ -95,12 +97,11 @@ describe("automated review workspace readiness", () => {
         };
       },
       process: { argv: ["--relayer-eval-execution=execution-1"] },
-      location: {
-        href: "http://127.0.0.1:43123/?threadId=7&interactionId=41&review=1&reviewSession=token-1",
-      },
+      location: { href: readyUrl },
       URL,
     });
 
+    expect(sent, "no readiness is emitted before the presentation adapter exists").toEqual([]);
     reviewApi.registerPresentationAdapter({
       snapshot: () => ({ threadId: "7", turnId: "41" }),
       capturePlan: () => {},
@@ -110,7 +111,7 @@ describe("automated review workspace readiness", () => {
       history: () => {},
     });
 
-    expect(sent).toEqual([[
+    expect(sent, "adapter registration emits the exact readiness signal").toEqual([[
       REVIEW_WORKSPACE_READY_CHANNEL,
       {
         executionId: "execution-1",

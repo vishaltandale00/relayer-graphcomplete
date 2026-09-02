@@ -11,31 +11,29 @@ import {
 } from "../desktop/eval-renderer/run-model.js";
 
 describe("Eval dashboard run presentation", () => {
-  it("filters judge choices against selected case requirements", () => {
+  it("gates run construction on judge compatibility, recursive isolation, and explicit paid authorization", () => {
     const cases = [{
       id: "input-roundtrip",
       requiredJudgeConfigurationIds: ["simulated-user"],
     }, { id: "ordinary" }];
-    expect(judgeConfigurationCompatibleWithCases(cases, ["ordinary"], "deterministic"))
-      .toBe(true);
-    expect(judgeConfigurationCompatibleWithCases(cases, ["input-roundtrip"], "deterministic"))
-      .toBe(false);
-    expect(judgeConfigurationCompatibleWithCases(cases, ["input-roundtrip"], "simulated-user"))
-      .toBe(true);
-  });
+    expect(judgeConfigurationCompatibleWithCases(cases, ["ordinary"], "deterministic"),
+      "ordinary cases accept any judge").toBe(true);
+    expect(judgeConfigurationCompatibleWithCases(cases, ["input-roundtrip"], "deterministic"),
+      "required judges are enforced").toBe(false);
+    expect(judgeConfigurationCompatibleWithCases(cases, ["input-roundtrip"], "simulated-user"),
+      "required judges stay compatible").toBe(true);
 
-  it("isolates the recursive pair and requires an explicit paid child-aware authorization", () => {
     expect(isolateRecursiveCompleteSelection(
       ["empty-project.task-system.single-turn", "empty-project.recursive-complete.comparison"],
       ["fixture-task-system"],
-    )).toEqual({
+    ), "recursive pair isolates from ordinary harnesses").toEqual({
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
         "codex-eval-complete-disabled",
         "codex-eval-complete-enabled",
       ],
     });
-    const selection = {
+    const pairSelection = {
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
         "codex-eval-complete-disabled",
@@ -43,12 +41,13 @@ describe("Eval dashboard run presentation", () => {
       ],
       judgeConfigurationName: "deterministic-graph-contract",
     };
-    expect(authorizeRecursiveCompleteSelection(selection, () => false)).toBeNull();
-    expect(authorizeRecursiveCompleteSelection(selection, (message) => {
-      expect(message).toContain("additional agent-authored child execution");
+    expect(authorizeRecursiveCompleteSelection(pairSelection, () => false),
+      "declined authorization blocks the recursive pair").toBeNull();
+    expect(authorizeRecursiveCompleteSelection(pairSelection, (message) => {
+      expect(message, "authorization names the paid child execution").toContain("additional agent-authored child execution");
       return true;
-    })).toEqual({
-      ...selection,
+    }), "confirmed authorization carries live credentials").toEqual({
+      ...pairSelection,
       liveAuthorization: {
         confirmed: true,
         credentialReference: "connected-product-provider",
@@ -56,9 +55,7 @@ describe("Eval dashboard run presentation", () => {
         agentAuthoredChildren: true,
       },
     });
-  });
 
-  it("isolates the four-cell recursive graph-memory experiment and authorizes twelve roots plus model-controlled children", () => {
     const quartet = [
       "codex-eval-lantern-search-disabled-recursion-disabled",
       "codex-eval-lantern-search-query-v1-recursion-disabled",
@@ -69,21 +66,21 @@ describe("Eval dashboard run presentation", () => {
       ["empty-project.task-system.single-turn", "empty-project.recursive-graph-memory.launch-readiness"],
       ["codex-basic"],
       quartet.map((name) => ({ name })),
-    )).toEqual({
+    ), "four-cell experiment isolates into its quartet").toEqual({
       testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
       harnessConfigurationNames: quartet,
     });
-    const selection = {
+    const quartetSelection = {
       testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
       harnessConfigurationNames: quartet,
       judgeConfigurationName: "deterministic-graph-contract",
     };
-    expect(authorizeRecursiveCompleteSelection(selection, (message) => {
-      expect(message).toContain("twelve paid/live Codex root turns");
-      expect(message).toContain("additional model-controlled paid child executions");
+    expect(authorizeRecursiveCompleteSelection(quartetSelection, (message) => {
+      expect(message, "authorization names the twelve paid roots").toContain("twelve paid/live Codex root turns");
+      expect(message, "authorization names model-controlled children").toContain("additional model-controlled paid child executions");
       return true;
-    })).toEqual({
-      ...selection,
+    }), "quartet authorization covers twelve roots and children").toEqual({
+      ...quartetSelection,
       liveAuthorization: {
         confirmed: true,
         credentialReference: "connected-product-provider",
@@ -91,80 +88,102 @@ describe("Eval dashboard run presentation", () => {
         agentAuthoredChildren: true,
       },
     });
-
     expect(isolateRecursiveCompleteSelection(
       ["empty-project.recursive-graph-memory.launch-readiness"],
       [],
       quartet.slice(0, 3).map((name) => ({ name })),
-    )).toEqual({
+    ), "incomplete quartets isolate to nothing").toEqual({
       testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
       harnessConfigurationNames: [],
     });
-  });
 
-  it("presents imported runs as external conversation review", () => {
-    expect(runPanelCopy({ kind: "imported-conversation" })).toEqual({
-      title: "Conversation review",
-      description: "Open the immutable external conversation in the read-only production workspace or review its eligible judge results.",
-    });
-  });
-
-  it("retains case and harness language for local matrix runs", () => {
-    expect(runPanelCopy({ kind: "local-eval" })).toEqual({
-      title: "Test cases",
-      description: "Open the judge review or the read-only production workspace for one case × harness execution.",
-    });
-  });
-
-  it("enables annotation export only for durable terminal execution coverage", () => {
     const run = { bundleRef: "runs/run-1/bundle.json" };
     const execution = {
       status: "passed",
       threadIds: [41],
       turns: [{ threadId: 41, interactionId: 51, status: "accepted" }],
     };
-    expect(annotatedExecutionExportable(run, execution)).toBe(true);
-    expect(annotatedExecutionExportable({ bundleRef: null }, execution)).toBe(false);
-    expect(annotatedExecutionExportable(run, { ...execution, status: "running" })).toBe(false);
-    expect(annotatedExecutionExportable(run, {
-      ...execution,
-      turns: [{ threadId: 41, interactionId: 51, status: "submitted" }],
-    })).toBe(false);
-    expect(annotatedExecutionExportable(run, {
-      ...execution,
-      threadIds: [41, 42],
-    })).toBe(false);
+    const exportability = [
+      ["durable terminal coverage is exportable", run, execution, true],
+      ["missing bundle blocks export", { bundleRef: null }, execution, false],
+      ["running executions block export", run, { ...execution, status: "running" }, false],
+      ["nonterminal turns block export", run, {
+        ...execution,
+        turns: [{ threadId: 41, interactionId: 51, status: "submitted" }],
+      }, false],
+      ["uncovered threads block export", run, { ...execution, threadIds: [41, 42] }, false],
+    ];
+    expect(exportability, "annotation export eligibility corpus").toHaveLength(5);
+    for (const [label, exportRun, exportExecution, eligible] of exportability) {
+      expect(annotatedExecutionExportable(exportRun, exportExecution), label).toBe(eligible);
+    }
   });
 
-  it("projects lifecycle, outcome, and presentation independently", () => {
-    const cell = projectExecutionCell({ kind: "local-eval" }, {
+  it("projects run copy and execution cells independently across lifecycle states", () => {
+    expect(runPanelCopy({ kind: "imported-conversation" }), "imported runs read as conversation review").toEqual({
+      title: "Conversation review",
+      description: "Open the immutable external conversation in the read-only production workspace or review its eligible judge results.",
+    });
+    expect(runPanelCopy({ kind: "local-eval" }), "local matrix runs keep case and harness language").toEqual({
+      title: "Test cases",
+      description: "Open the judge review or the read-only production workspace for one case × harness execution.",
+    });
+
+    expect(projectExecutionCell({ kind: "local-eval" }, {
       id: "execution-1",
       status: "failed",
       lifecycle: { status: "complete", durationMs: 12_000 },
       outcomeGrade: { status: "complete", qualified: false, score: 72 },
       presentationGrade: { status: "complete", applicable: true, score: 3.25 },
-    });
-    expect(cell).toMatchObject({
+    }), "lifecycle, outcome, and presentation project independently").toMatchObject({
       lifecycle: { status: "complete", label: "Complete", durationMs: 12_000 },
       substance: { status: "complete", label: "72", score: 72, qualified: false },
       presentation: { status: "complete", label: "3.3", score: 3.25, applicable: true },
     });
-  });
 
-  it("shows vanilla presentation as not applicable and preserves unjudged as nonzero", () => {
     expect(projectExecutionCell({}, {
       id: "vanilla",
       lifecycle: { status: "complete" },
       outcomeGrade: { status: "unjudged", score: null, qualified: null },
       presentationGrade: { status: "not_applicable", score: null },
-    })).toMatchObject({
+    }), "vanilla presentation is N/A while unjudged substance stays non-numeric").toMatchObject({
       substance: { label: "Unjudged", score: null },
       presentation: { label: "N/A", score: null, applicable: false },
     });
+
+    expect(projectExecutionCell({}, {
+      status: "queued",
+      outcomeGrade: { status: "pending", score: null },
+      presentationGrade: { status: "pending", applicable: true, score: null },
+    }), "queued phase stays separate from grade status").toMatchObject({
+      lifecycle: { status: "queued" },
+      substance: { label: "Pending" },
+      presentation: { label: "Pending" },
+    });
+    expect(projectExecutionCell({}, {
+      status: "error",
+      outcomeGrade: { status: "failed", score: null },
+      presentationGrade: { status: "unjudged", applicable: true, score: null },
+    }), "failed phase stays separate from unjudged presentation").toMatchObject({
+      lifecycle: { status: "failed" },
+      substance: { label: "Failed" },
+      presentation: { label: "Unjudged" },
+    });
+
+    expect(projectExecutionCell({}, {
+      status: "passed",
+      presentationGrade: {
+        status: "partial",
+        score: null,
+        comparability: { status: "incompatible", contractIds: ["v5", "v6"], reason: "Changed rubric." },
+      },
+    }), "incompatible rubrics are labeled instead of scored").toMatchObject({
+      presentation: { status: "partial", score: null, label: "Non-comparable rubric versions" },
+    });
   });
 
-  it("keeps Lantern mechanism checks separate from human outcome qualification", () => {
-    const execution = {
+  it("projects dossiers with substance, presentation, mechanism, and recursion kept apart", () => {
+    const lanternExecution = {
       id: "lantern",
       lifecycle: { status: "complete" },
       checks: [{ name: "graph-search-disabled", passed: true, detail: "No search was observed." }],
@@ -177,10 +196,12 @@ describe("Eval dashboard run presentation", () => {
       },
       presentationGrade: { status: "unjudged", applicable: true, score: null },
     };
-    expect(projectExecutionCell({ kind: "local-eval" }, execution)).toMatchObject({
+    expect(projectExecutionCell({ kind: "local-eval" }, lanternExecution),
+      "mechanism checks never manufacture human qualification").toMatchObject({
       substance: { label: "Human review", qualified: null, score: null },
     });
-    expect(projectExecutionDossier({ kind: "local-eval" }, execution)).toMatchObject({
+    expect(projectExecutionDossier({ kind: "local-eval" }, lanternExecution),
+      "dossier keeps mechanism checks beside human criteria").toMatchObject({
       substance: {
         gates: [],
         criteria: [{ id: "prior-retention" }],
@@ -189,43 +210,7 @@ describe("Eval dashboard run presentation", () => {
         checks: [{ id: "graph-search-disabled", passed: true, detail: "No search was observed." }],
       },
     });
-  });
 
-  it("keeps queued and failed execution phases separate from grade status", () => {
-    expect(projectExecutionCell({}, {
-      status: "queued",
-      outcomeGrade: { status: "pending", score: null },
-      presentationGrade: { status: "pending", applicable: true, score: null },
-    })).toMatchObject({
-      lifecycle: { status: "queued" },
-      substance: { label: "Pending" },
-      presentation: { label: "Pending" },
-    });
-    expect(projectExecutionCell({}, {
-      status: "error",
-      outcomeGrade: { status: "failed", score: null },
-      presentationGrade: { status: "unjudged", applicable: true, score: null },
-    })).toMatchObject({
-      lifecycle: { status: "failed" },
-      substance: { label: "Failed" },
-      presentation: { label: "Unjudged" },
-    });
-  });
-
-  it("labels an incompatible presentation-rubric projection instead of showing a score", () => {
-    expect(projectExecutionCell({}, {
-      status: "passed",
-      presentationGrade: {
-        status: "partial",
-        score: null,
-        comparability: { status: "incompatible", contractIds: ["v5", "v6"], reason: "Changed rubric." },
-      },
-    })).toMatchObject({
-      presentation: { status: "partial", score: null, label: "Non-comparable rubric versions" },
-    });
-  });
-
-  it("projects a complete execution dossier with evidence and action eligibility", () => {
     const run = { kind: "local-eval", bundleRef: "runs/run-1/bundle.json" };
     const execution = {
       id: "execution-1",
@@ -272,7 +257,7 @@ describe("Eval dashboard run presentation", () => {
       threadIds: [41],
       turns: [{ threadId: 41, interactionId: 51, status: "accepted", candidateTrace: { status: "complete" }, judgeResults: [{ status: "completed" }] }],
     };
-    expect(projectExecutionDossier(run, execution)).toMatchObject({
+    expect(projectExecutionDossier(run, execution), "complete dossier carries every projection and action eligibility").toMatchObject({
       case: { name: "Fresh feature", prompt: "Add saved filters.", repository: "example/repo", commit: "abc123" },
       harness: { name: "codex-basic", implementation: "codex.basic", digest: "sha256:harness" },
       substance: {
@@ -297,10 +282,8 @@ describe("Eval dashboard run presentation", () => {
       },
       actions: { traceable: true, judgeReviewable: true, workspaceReviewable: true, annotationExportable: true },
     });
-  });
 
-  it("projects legacy executions without manufacturing numeric scores", () => {
-    const dossier = projectExecutionDossier({ kind: "local-eval" }, {
+    const legacy = projectExecutionDossier({ kind: "local-eval" }, {
       id: "legacy",
       testCaseId: "legacy-case",
       status: "failed",
@@ -311,18 +294,16 @@ describe("Eval dashboard run presentation", () => {
       ],
       turns: [{ prompt: "Fix it." }],
     });
-    expect(dossier.lifecycle.status).toBe("complete");
-    expect(dossier.substance).toMatchObject({ score: null, label: "1/2 checks", qualified: false });
-    expect(dossier.substance.gates.map((gate) => [gate.id, gate.passed])).toEqual([
+    expect(legacy.lifecycle.status, "legacy executions still complete their lifecycle").toBe("complete");
+    expect(legacy.substance, "legacy checks never become numeric scores").toMatchObject({ score: null, label: "1/2 checks", qualified: false });
+    expect(legacy.substance.gates.map((gate) => [gate.id, gate.passed]), "legacy checks stay ordered").toEqual([
       ["build", true],
       ["tests", false],
     ]);
-    expect(dossier.case.prompt).toBe("Fix it.");
-    expect(dossier.presentation).toMatchObject({ score: null, label: "Unjudged" });
-  });
+    expect(legacy.case.prompt, "legacy prompt survives").toBe("Fix it.");
+    expect(legacy.presentation, "legacy presentation stays unjudged").toMatchObject({ score: null, label: "Unjudged" });
 
-  it("projects agent-authored Complete authority and semantic child evidence separately from human turns", () => {
-    const dossier = projectExecutionDossier({ kind: "local-eval" }, {
+    const recursive = projectExecutionDossier({ kind: "local-eval" }, {
       id: "recursive",
       testCaseId: "empty-project.recursive-complete.comparison",
       harnessConfiguration: {
@@ -343,7 +324,7 @@ describe("Eval dashboard run presentation", () => {
         projectionObservations: [{ revision: 0 }, { revision: 1 }],
       }],
     });
-    expect(dossier.recursiveComplete).toEqual({
+    expect(recursive.recursiveComplete, "agent-authored authority and child evidence project separately").toEqual({
       declared: true,
       configured: true,
       brokerAvailable: true,
@@ -357,6 +338,6 @@ describe("Eval dashboard run presentation", () => {
         projectionCount: 2,
       }],
     });
-    expect(dossier.actions.traceable).toBe(true);
+    expect(recursive.actions.traceable, "recursive children remain traceable").toBe(true);
   });
 });

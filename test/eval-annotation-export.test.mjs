@@ -15,57 +15,86 @@ afterEach(async () => {
 });
 
 describe("immutable annotated execution exports", () => {
-  it("creates a new hashed point-in-time artifact without rewriting an older export", async () => {
+  it("gates eligibility and coverage before snapshotting, then hashes each changed history into a new point-in-time artifact", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-annotation-export-"));
     temporaryDirectories.push(directory);
     const stateFile = join(directory, "test-runs.json");
     let revisions = [{ revision: 1, comment: "First", rating: null, state: "active" }];
+    let snapshotCalls = 0;
+    let coverageMismatch = false;
     let capture = 0;
     const service = new EvalService({
       stateFile,
       productSession: {},
       configurationPaths: [],
-      annotationSnapshotLoader: async (threadIds) => ({
-        schemaVersion: 1,
-        kind: "relayer_eval_annotation_snapshot_set",
-        exportedAt: `capture-${capture += 1}`,
-        annotationsSha256: `sha256:history-${revisions.length}`,
-        threads: threadIds.map((threadId) => ({
-          threadId,
-          annotations: [{ id: 9, threadId, revisions: structuredClone(revisions) }],
-        })),
-      }),
+      annotationSnapshotLoader: async (threadIds) => {
+        snapshotCalls += 1;
+        if (coverageMismatch) {
+          return {
+            schemaVersion: 1,
+            kind: "relayer_eval_annotation_snapshot_set",
+            annotationsSha256: "sha256:history",
+            threads: [{ threadId: 999, annotations: [] }],
+          };
+        }
+        return {
+          schemaVersion: 1,
+          kind: "relayer_eval_annotation_snapshot_set",
+          exportedAt: `capture-${capture += 1}`,
+          annotationsSha256: `sha256:history-${revisions.length}`,
+          threads: threadIds.map((threadId) => ({
+            threadId,
+            annotations: [{ id: 9, threadId, revisions: structuredClone(revisions) }],
+          })),
+        };
+      },
     });
     service.runs = [{
       id: "run-1",
       bundleRef: "runs/run-1/bundle.json",
       executions: [{
         id: "execution-1",
-        status: "passed",
+        status: "running",
         threadIds: [41],
         turns: [{
           threadId: 41,
           interactionId: 51,
           graphNodeId: 61,
           rootLayerId: 71,
-          status: "accepted",
+          status: "submitted",
         }],
       }],
     }];
-    await writeRunBundle(stateFile, service.runs[0]);
 
+    await expect(service.exportAnnotatedExecution("execution-1"), "nonterminal executions are rejected")
+      .rejects.toThrow("terminal execution");
+    service.runs[0].executions[0].status = "passed";
+    service.runs[0].executions[0].turns[0].status = "accepted";
+    service.runs[0].bundleRef = null;
+    await expect(service.exportAnnotatedExecution("execution-1"), "incomplete executions are rejected")
+      .rejects.toThrow("durable source run bundle");
+    expect(snapshotCalls, "ineligible exports never reach the snapshot loader").toBe(0);
+
+    service.runs[0].bundleRef = "runs/run-1/bundle.json";
+    await writeRunBundle(stateFile, service.runs[0]);
+    coverageMismatch = true;
+    await expect(service.exportAnnotatedExecution("execution-1"), "snapshot coverage must exactly match execution threads")
+      .rejects.toThrow("unexpected or duplicate thread");
+
+    coverageMismatch = false;
     const first = await service.exportAnnotatedExecution("execution-1");
     const firstFile = join(dirname(stateFile), ...first.bundleRef.split("/"));
     const firstBytes = await readFile(firstFile, "utf8");
     const firstBundle = JSON.parse(firstBytes);
-    expect(firstBundle).toMatchObject({
+    expect(firstBundle, "annotated bundle keeps fixed graph references").toMatchObject({
       kind: "relayer_eval_annotated_execution_bundle",
       sourceRunBundleRef: "runs/run-1/bundle.json",
       fixedGraphReferences: [{ threadId: 41, interactionId: 51, rootLayerId: 71 }],
     });
-    expect(firstBundle.integritySha256).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(firstBundle.integritySha256, "bundle integrity digest").toMatch(/^sha256:[a-f0-9]{64}$/);
     const identicalHistory = await service.exportAnnotatedExecution("execution-1");
-    expect(identicalHistory.annotationMaterialSha256).toBe(first.annotationMaterialSha256);
+    expect(identicalHistory.annotationMaterialSha256, "identical history reuses the same annotation material")
+      .toBe(first.annotationMaterialSha256);
 
     revisions = [...revisions, {
       revision: 2,
@@ -74,75 +103,16 @@ describe("immutable annotated execution exports", () => {
       state: "active",
     }];
     const second = await service.exportAnnotatedExecution("execution-1");
-    expect(second.bundleRef).not.toBe(first.bundleRef);
-    expect(second.annotationMaterialSha256).not.toBe(first.annotationMaterialSha256);
-    expect(await readFile(firstFile, "utf8")).toBe(firstBytes);
+    expect(second.bundleRef, "changed history creates a new artifact").not.toBe(first.bundleRef);
+    expect(second.annotationMaterialSha256, "changed history changes the annotation material digest")
+      .not.toBe(first.annotationMaterialSha256);
+    expect(await readFile(firstFile, "utf8"), "older export is never rewritten").toBe(firstBytes);
     const secondBundle = JSON.parse(await readFile(
       join(dirname(stateFile), ...second.bundleRef.split("/")),
       "utf8",
     ));
-    expect(secondBundle.annotationSnapshot.threads[0].annotations[0].revisions).toHaveLength(2);
-  });
-
-  it("fails closed when snapshot coverage does not exactly match execution threads", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-annotation-export-"));
-    temporaryDirectories.push(directory);
-    const service = new EvalService({
-      stateFile: join(directory, "test-runs.json"),
-      productSession: {},
-      configurationPaths: [],
-      annotationSnapshotLoader: async () => ({
-        schemaVersion: 1,
-        kind: "relayer_eval_annotation_snapshot_set",
-        annotationsSha256: "sha256:history",
-        threads: [{ threadId: 999, annotations: [] }],
-      }),
-    });
-    service.runs = [{
-      id: "run-1",
-      bundleRef: "runs/run-1/bundle.json",
-      executions: [{
-        id: "execution-1",
-        status: "passed",
-        threadIds: [41],
-        turns: [{ threadId: 41, interactionId: 51, status: "accepted" }],
-      }],
-    }];
-    await writeRunBundle(service.stateFile, service.runs[0]);
-    await expect(service.exportAnnotatedExecution("execution-1"))
-      .rejects.toThrow("unexpected or duplicate thread");
-  });
-
-  it("rejects nonterminal, incomplete, and non-durable executions before snapshotting", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-annotation-export-"));
-    temporaryDirectories.push(directory);
-    let snapshotCalls = 0;
-    const service = new EvalService({
-      stateFile: join(directory, "test-runs.json"),
-      productSession: {},
-      configurationPaths: [],
-      annotationSnapshotLoader: async () => {
-        snapshotCalls += 1;
-        return { threads: [] };
-      },
-    });
-    service.runs = [{
-      id: "run-1",
-      bundleRef: null,
-      executions: [{
-        id: "execution-1",
-        status: "running",
-        threadIds: [41],
-        turns: [{ threadId: 41, interactionId: 51, status: "submitted" }],
-      }],
-    }];
-    await expect(service.exportAnnotatedExecution("execution-1"))
-      .rejects.toThrow("terminal execution");
-    service.runs[0].executions[0].status = "passed";
-    service.runs[0].executions[0].turns[0].status = "accepted";
-    await expect(service.exportAnnotatedExecution("execution-1"))
-      .rejects.toThrow("durable source run bundle");
-    expect(snapshotCalls).toBe(0);
+    expect(secondBundle.annotationSnapshot.threads[0].annotations[0].revisions, "new artifact carries the edited history")
+      .toHaveLength(2);
   });
 });
 

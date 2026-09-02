@@ -65,8 +65,14 @@ function fakeElectron(commands) {
   return { ipc, webContents, captures };
 }
 
+async function reviewDirectory(prefix = "relayer-review-session-") {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  directories.push(directory);
+  return directory;
+}
+
 describe("ReviewSession", () => {
-  it("requires server-enforced read-only authority on a local production review URL", async () => {
+  it("requires server-enforced read-only authority and reconciles revision, input-draft, and operator state", async () => {
     const electron = fakeElectron({ snapshot: async () => reviewState() });
     expect(() => new ReviewSession({
       executionId: "execution-1",
@@ -74,60 +80,49 @@ describe("ReviewSession", () => {
       webContents: electron.webContents,
       artifactDirectory: "/unused",
       ipc: electron.ipc,
-    })).toThrow("server-enforced read-only authority");
+    }), "read-only authority is server-enforced").toThrow("server-enforced read-only authority");
 
     electron.webContents.getURL = () => "https://example.com/?review=1";
-    const session = new ReviewSession({
+    const remoteSession = new ReviewSession({
       executionId: "execution-1",
       readOnly: true,
       webContents: electron.webContents,
       artifactDirectory: "/unused",
       ipc: electron.ipc,
     });
-    await expect(session.open()).rejects.toThrow("local production review workspace");
-  });
+    await expect(remoteSession.open(), "review workspaces must be local production URLs")
+      .rejects.toThrow("local production review workspace");
 
-  it("folds the live read-only input-draft revision into every presentation revision", async () => {
-    const electron = fakeElectron({ snapshot: async () => reviewState() });
+    const localElectron = fakeElectron({ snapshot: async () => reviewState() });
     let inputDraftRevision = 3;
-    const session = new ReviewSession({
+    const draftSession = new ReviewSession({
       executionId: "execution-1",
       readOnly: true,
-      webContents: electron.webContents,
+      webContents: localElectron.webContents,
       artifactDirectory: "/unused",
-      ipc: electron.ipc,
+      ipc: localElectron.ipc,
       loadInputDraftRevision: vi.fn(async () => inputDraftRevision),
     });
-
-    expect((await session.open()).threadRevision).toBe(
-      "thread:thread-1:revision:1:server-input-draft:3",
-    );
+    expect((await draftSession.open()).threadRevision, "open folds the live input-draft revision")
+      .toBe("thread:thread-1:revision:1:server-input-draft:3");
     inputDraftRevision = 4;
-    expect((await session.state()).threadRevision).toBe(
-      "thread:thread-1:revision:1:server-input-draft:4",
-    );
-  });
+    expect((await draftSession.state()).threadRevision, "every later state refolds the live draft revision")
+      .toBe("thread:thread-1:revision:1:server-input-draft:4");
 
-  it("uses a stable no-draft revision for imported read-only threads", async () => {
-    const electron = fakeElectron({ snapshot: async () => reviewState() });
-    const session = new ReviewSession({
+    const importedElectron = fakeElectron({ snapshot: async () => reviewState() });
+    const importedSession = new ReviewSession({
       executionId: "execution-1",
       readOnly: true,
-      webContents: electron.webContents,
+      webContents: importedElectron.webContents,
       artifactDirectory: "/unused",
-      ipc: electron.ipc,
+      ipc: importedElectron.ipc,
       loadInputDraftRevision: vi.fn(async () => null),
     });
+    expect((await importedSession.open()).threadRevision, "imported threads use a stable no-draft revision")
+      .toBe("thread:thread-1:revision:1:server-input-draft:none");
+    expect((await importedSession.state()).threadRevision, "the no-draft revision stays stable")
+      .toBe("thread:thread-1:revision:1:server-input-draft:none");
 
-    expect((await session.open()).threadRevision).toBe(
-      "thread:thread-1:revision:1:server-input-draft:none",
-    );
-    expect((await session.state()).threadRevision).toBe(
-      "thread:thread-1:revision:1:server-input-draft:none",
-    );
-  });
-
-  it("enables operator Send only when the production renderer confirms committed input state", async () => {
     const updateInputOperatorState = vi.fn(async ({ committed }) => reviewState({
       controls: [{
         elementRef: "send-interaction",
@@ -135,38 +130,41 @@ describe("ReviewSession", () => {
         disabled: !committed,
       }],
     }));
-    const electron = fakeElectron({
+    const operatorElectron = fakeElectron({
       snapshot: async () => reviewState(),
       updateInputOperatorState,
     });
-    const session = new ReviewSession({
+    const operatorSession = new ReviewSession({
       executionId: "execution-1",
       readOnly: true,
-      webContents: electron.webContents,
+      webContents: operatorElectron.webContents,
       artifactDirectory: "/unused",
-      ipc: electron.ipc,
+      ipc: operatorElectron.ipc,
     });
-    await session.open();
+    await operatorSession.open();
 
-    await expect(session.setInputOperatorCommitted(true)).resolves.toMatchObject({
-      controls: [{ elementRef: "send-interaction", disabled: false }],
-    });
-    await expect(session.setInputOperatorCommitted(false)).resolves.toMatchObject({
-      controls: [{ elementRef: "send-interaction", disabled: true }],
-    });
-    expect(updateInputOperatorState).toHaveBeenNthCalledWith(1, { committed: true });
-    expect(updateInputOperatorState).toHaveBeenNthCalledWith(2, { committed: false });
+    await expect(operatorSession.setInputOperatorCommitted(true), "committed input enables operator Send")
+      .resolves.toMatchObject({
+        controls: [{ elementRef: "send-interaction", disabled: false }],
+      });
+    await expect(operatorSession.setInputOperatorCommitted(false), "uncommitted input disables operator Send")
+      .resolves.toMatchObject({
+        controls: [{ elementRef: "send-interaction", disabled: true }],
+      });
+    expect(updateInputOperatorState, "the renderer receives each commissioned state").toHaveBeenNthCalledWith(1, { committed: true });
+    expect(updateInputOperatorState, "the renderer receives each commissioned state").toHaveBeenNthCalledWith(2, { committed: false });
 
     updateInputOperatorState.mockResolvedValueOnce(reviewState({
       controls: [{ elementRef: "send-interaction", kind: "input-operator-send", disabled: true }],
     }));
-    await expect(session.setInputOperatorCommitted(true))
+    await expect(operatorSession.setInputOperatorCommitted(true),
+      "operator Send requires the renderer to confirm the committed state")
       .rejects.toThrow("did not reflect the commissioned input state");
   });
 
-  it("captures viewport and full-element tiles with immutable state and content digests", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
-    directories.push(directory);
+  it("captures viewport and full-element tiles with immutable digests and restores contested captures", async () => {
+    // Stable capture: viewport and multi-tile element captures persist digests and files.
+    const directory = await reviewDirectory();
     const state = reviewState({
       selectedNodeId: "node-7",
       activatedActionId: "action-4",
@@ -218,8 +216,8 @@ describe("ReviewSession", () => {
       label: "Initial layer",
     });
     const viewport = viewportResult.screenshot;
-    expect(viewportResult.ok).toBe(true);
-    expect(viewport).toMatchObject({
+    expect(viewportResult.ok, "viewport capture succeeds").toBe(true);
+    expect(viewport, "viewport metadata carries the immutable review state").toMatchObject({
       executionId: "execution-1",
       threadId: "thread-1",
       threadRevision: "thread:thread-1:revision:1",
@@ -234,42 +232,40 @@ describe("ReviewSession", () => {
       captureTarget: { kind: "viewport" },
       tileCount: 1,
     });
-    expect(viewport.contentDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(viewport.contentDigest, "viewport content digest").toMatch(/^sha256:[a-f0-9]{64}$/);
 
     const full = (await session.screenshot({
       target: { kind: "element", elementRef: "node-detail" },
       mode: "full",
       label: "Complete node detail",
     })).screenshot;
-    expect(full.tileCount).toBe(3);
-    expect(full.tiles.map((tile) => tile.index)).toEqual([0, 1, 2]);
-    expect(full.tiles.every((tile) => /^sha256:[a-f0-9]{64}$/.test(tile.contentDigest))).toBe(true);
-    expect(restoredCapture).toBe(true);
-    expect(electron.captures).toHaveLength(4);
-    expect(await readdir(join(directory, full.screenshotId))).toEqual([
+    expect(full.tileCount, "full element capture tiles every row").toBe(3);
+    expect(full.tiles.map((tile) => tile.index), "tiles stay ordered").toEqual([0, 1, 2]);
+    expect(full.tiles.every((tile) => /^sha256:[a-f0-9]{64}$/.test(tile.contentDigest)), "every tile carries a content digest").toBe(true);
+    expect(restoredCapture, "capture restores the presentation").toBe(true);
+    expect(electron.captures, "one capture per tile").toHaveLength(4);
+    expect(await readdir(join(directory, full.screenshotId)), "artifact directory holds metadata and tiles").toEqual([
       "metadata.json",
       `${full.screenshotId}-001.png`,
       `${full.screenshotId}-002.png`,
       `${full.screenshotId}-003.png`,
     ]);
-    expect(JSON.parse(await readFile(join(directory, full.screenshotId, "metadata.json"), "utf8")))
-      .toMatchObject({ contentDigest: full.contentDigest, tileCount: 3 });
-  });
+    expect(JSON.parse(await readFile(join(directory, full.screenshotId, "metadata.json"), "utf8")),
+      "metadata matches the captured digest").toMatchObject({ contentDigest: full.contentDigest, tileCount: 3 });
 
-  it("restores an element capture when presentation changes and permits a retry", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
-    directories.push(directory);
-    let state = reviewState({ selectedNodeId: "node-1" });
+    // Drifted capture: presentation changes mid-plan, the session restores and allows a retry.
+    const driftDirectory = await reviewDirectory();
+    let driftState = reviewState({ selectedNodeId: "node-1" });
     let captureActive = false;
     let capturePlans = 0;
     let restorations = 0;
-    const electron = fakeElectron({
-      snapshot: async () => state,
+    const driftElectron = fakeElectron({
+      snapshot: async () => driftState,
       capturePlan: async ({ target, mode }) => {
         if (captureActive) throw new Error("A review capture is already active.");
         captureActive = true;
         capturePlans += 1;
-        if (capturePlans === 1) state = reviewState({ selectedNodeId: "node-2" });
+        if (capturePlans === 1) driftState = reviewState({ selectedNodeId: "node-2" });
         return {
           target,
           mode,
@@ -286,37 +282,36 @@ describe("ReviewSession", () => {
         restorations += 1;
       },
     });
-    const session = new ReviewSession({
+    const driftSession = new ReviewSession({
       executionId: "execution-1",
       readOnly: true,
-      webContents: electron.webContents,
-      artifactDirectory: directory,
-      ipc: electron.ipc,
+      webContents: driftElectron.webContents,
+      artifactDirectory: driftDirectory,
+      ipc: driftElectron.ipc,
     });
-    await session.open();
+    await driftSession.open();
 
-    await expect(session.screenshot({
+    await expect(driftSession.screenshot({
       target: { kind: "element", elementRef: "node-detail" },
       label: "unstable selection",
-    })).rejects.toThrow("changed presentation while preparing the screenshot");
-    expect(captureActive).toBe(false);
-    expect(restorations).toBe(1);
-    expect(electron.captures).toHaveLength(0);
+    }), "presentation drift during planning rejects the capture")
+      .rejects.toThrow("changed presentation while preparing the screenshot");
+    expect(captureActive, "drifted capture releases its lock").toBe(false);
+    expect(restorations, "drifted capture restores once").toBe(1);
+    expect(driftElectron.captures, "drifted capture takes no tiles").toHaveLength(0);
 
-    await expect(session.screenshot({
+    await expect(driftSession.screenshot({
       target: { kind: "element", elementRef: "node-detail" },
       label: "stable retry",
-    })).resolves.toMatchObject({ ok: true, screenshot: { selectedNodeId: "node-2" } });
-    expect(captureActive).toBe(false);
-    expect(restorations).toBe(2);
-    expect(electron.captures).toHaveLength(1);
-  });
+    }), "the retry captures the settled presentation").resolves.toMatchObject({ ok: true, screenshot: { selectedNodeId: "node-2" } });
+    expect(captureActive, "retry releases its lock").toBe(false);
+    expect(restorations, "retry restores again").toBe(2);
+    expect(driftElectron.captures, "retry captures its tile").toHaveLength(1);
 
-  it("does not restore an element capture owned by an overlapping request", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
-    directories.push(directory);
-    let captureActive = false;
-    let restorations = 0;
+    // Contested capture: an overlapping request must not restore the winner's presentation.
+    const contestDirectory = await reviewDirectory();
+    let contestActive = false;
+    let contestRestorations = 0;
     let releaseFirstPlan;
     let markFirstPlanActive;
     const firstPlanActive = new Promise((resolve) => { markFirstPlanActive = resolve; });
@@ -327,50 +322,51 @@ describe("ReviewSession", () => {
       clip: { x: 20, y: 40, width: 300, height: 200 },
       tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
     };
-    const electron = fakeElectron({
+    const contestElectron = fakeElectron({
       snapshot: async () => reviewState({ selectedNodeId: "node-2" }),
       capturePlan: async () => {
-        if (captureActive) throw new Error("A review capture is already active.");
-        captureActive = true;
+        if (contestActive) throw new Error("A review capture is already active.");
+        contestActive = true;
         markFirstPlanActive();
         await firstPlanRelease;
         return plan;
       },
       prepareCaptureTile: async ({ index }) => ({ index, clip: plan.clip }),
       restoreCapture: async () => {
-        captureActive = false;
-        restorations += 1;
+        contestActive = false;
+        contestRestorations += 1;
       },
     });
-    const session = new ReviewSession({
+    const contestSession = new ReviewSession({
       executionId: "execution-1",
       readOnly: true,
-      webContents: electron.webContents,
-      artifactDirectory: directory,
-      ipc: electron.ipc,
+      webContents: contestElectron.webContents,
+      artifactDirectory: contestDirectory,
+      ipc: contestElectron.ipc,
     });
-    await session.open();
+    await contestSession.open();
 
-    const first = session.screenshot({
+    const first = contestSession.screenshot({
       target: { kind: "element", elementRef: "node-detail" },
       label: "winning capture",
     });
     await firstPlanActive;
-    await expect(session.screenshot({
+    await expect(contestSession.screenshot({
       target: { kind: "element", elementRef: "node-detail" },
       label: "overlapping capture",
-    })).rejects.toThrow("A review capture is already active");
-    expect(captureActive).toBe(true);
-    expect(restorations).toBe(0);
+    }), "overlapping capture requests are rejected").rejects.toThrow("A review capture is already active");
+    expect(contestActive, "the winner keeps its capture lock").toBe(true);
+    expect(contestRestorations, "the loser never restores the winner's presentation").toBe(0);
 
     releaseFirstPlan();
-    await expect(first).resolves.toMatchObject({ ok: true });
-    expect(captureActive).toBe(false);
-    expect(restorations).toBe(1);
-    expect(electron.captures).toHaveLength(1);
+    await expect(first, "the winning capture completes").resolves.toMatchObject({ ok: true });
+    expect(contestActive, "the winner releases its lock when done").toBe(false);
+    expect(contestRestorations, "the winner restores exactly once").toBe(1);
+    expect(contestElectron.captures, "only the winner captures").toHaveLength(1);
   });
 
-  it("activates only current controls and delegates arbitrary signed history deltas to the workspace", async () => {
+  it("activates current controls, delegates signed history deltas, and grounds multi-layer capture targets", async () => {
+    // Control activation and history delegation.
     let state = reviewState({
       controls: [{
         elementRef: "node-node-7",
@@ -437,12 +433,13 @@ describe("ReviewSession", () => {
       commandTimeoutMs: 100,
     });
     await session.open();
-    await expect(session.interact({ elementRef: "missing-control", activate: true })).rejects.toThrow("Unknown or invisible");
+    await expect(session.interact({ elementRef: "missing-control", activate: true }),
+      "unknown controls are rejected").rejects.toThrow("Unknown or invisible");
     await session.interact({ elementRef: "node-node-7", activate: true });
     await session.interact({ elementRef: "action-action-4", activate: true });
 
-    expect((await session.history({ delta: -2 })).state.selectedNodeId).toBeNull();
-    expect((await session.history({ delta: 2 })).state).toMatchObject({
+    expect((await session.history({ delta: -2 })).state.selectedNodeId, "negative deltas rewind the workspace").toBeNull();
+    expect((await session.history({ delta: 2 })).state, "positive deltas replay the workspace").toMatchObject({
       layerId: "layer-2",
       activatedActionId: "action-4",
       navigationPath: [
@@ -450,121 +447,19 @@ describe("ReviewSession", () => {
         { layerId: "layer-2", viaActionId: "action-4" },
       ],
     });
-    await expect(session.history({ delta: 0 })).rejects.toThrow("non-zero signed integer");
-    await expect(session.history({ delta: 1 })).rejects.toThrow("outside the workspace history");
-    expect(historyDeltas).toEqual([-2, 2, 1]);
-    expect(session.trace().map((entry) => entry.type)).toEqual([
+    await expect(session.history({ delta: 0 }), "zero deltas are invalid").rejects.toThrow("non-zero signed integer");
+    await expect(session.history({ delta: 1 }), "out-of-range deltas surface the workspace error").rejects.toThrow("outside the workspace history");
+    expect(historyDeltas, "every signed delta reaches the workspace exactly once").toEqual([-2, 2, 1]);
+    expect(session.trace().map((entry) => entry.type), "the session trace records each command").toEqual([
       "session-opened",
       "interact",
       "interact",
       "history",
       "history",
     ]);
-  });
 
-  it("captures the root-child-grandchild fixture without reactivating selection or over-rewinding history", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-grounding-review-"));
-    directories.push(directory);
-    const stack = [];
-    const historyDeltas = [];
-    const nodeControl = (nodeId) => ({
-      elementRef: `node-${nodeId}`,
-      name: `Node ${nodeId}`,
-      role: "button",
-      disabled: false,
-      kind: "node",
-      actionId: null,
-    });
-    const actionControl = (actionId) => ({
-      elementRef: `action-${actionId}`,
-      name: `Action ${actionId}`,
-      role: "button",
-      disabled: false,
-      kind: "navigate-action",
-      actionId,
-    });
-    let state = reviewState({ controls: [nodeControl("2")] });
-    const select = (nodeId) => {
-      const actionId = state.layerId === "layer-1" && nodeId === "2" ? "11"
-        : state.layerId === "layer-2" && nodeId === "3" ? "21"
-          : null;
-      state = { ...state, selectedNodeId: nodeId, controls: actionId ? [actionControl(actionId)] : [] };
-    };
-    const navigate = (actionId) => {
-      stack.push(structuredClone(state));
-      const child = actionId === "11"
-        ? { layerId: "layer-2", nodeId: "3" }
-        : { layerId: "layer-3", nodeId: "4" };
-      state = reviewState({
-        layerId: child.layerId,
-        selectedNodeId: null,
-        activatedActionId: actionId,
-        navigationPath: [
-          ...state.navigationPath,
-          { layerId: child.layerId, viaActionId: actionId },
-        ],
-        controls: [nodeControl(child.nodeId)],
-      });
-    };
-    const electron = fakeElectron({
-      snapshot: async () => state,
-      activate: async ({ elementRef }) => {
-        if (elementRef.startsWith("node-")) select(elementRef.slice(5));
-        else navigate(elementRef.slice(7));
-        return state;
-      },
-      history: async ({ delta }) => {
-        historyDeltas.push(delta);
-        for (let count = 0; count < -delta; count += 1) state = stack.pop();
-        return state;
-      },
-      capturePlan: async () => ({
-        clip: { x: 0, y: 0, width: 320, height: 200 },
-        tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
-      }),
-      prepareCaptureTile: async ({ index }) => ({
-        index,
-        clip: { x: 0, y: 0, width: 320, height: 200 },
-      }),
-      restoreCapture: async () => state,
-    });
-    const session = new ReviewSession({
-      executionId: "execution-1",
-      readOnly: true,
-      webContents: electron.webContents,
-      artifactDirectory: directory,
-      ipc: electron.ipc,
-      commandTimeoutMs: 100,
-    });
-    await session.open();
-
-    const captures = await captureGroundingTargets(session, [
-      { layerId: "layer-1", nodeIds: ["2"], path: [] },
-      {
-        layerId: "layer-2",
-        nodeIds: ["3"],
-        path: [{ sourceNodeId: "2", actionId: "11" }],
-      },
-      {
-        layerId: "layer-3",
-        nodeIds: ["4"],
-        path: [
-          { sourceNodeId: "2", actionId: "11" },
-          { sourceNodeId: "3", actionId: "21" },
-        ],
-      },
-    ]);
-
-    expect(captures).toHaveLength(3);
-    expect(historyDeltas).toEqual([-1, -2]);
-    expect(session.trace().filter((entry) => entry.elementRef === "node-2")).toHaveLength(1);
-    expect((await session.state()).navigationPath).toEqual([
-      { layerId: "layer-1", viaActionId: null },
-    ]);
-  });
-
-  it("treats a resolved invoke as Eval navigation when it changes interaction at the same layer id", async () => {
-    let state = reviewState({
+    // Resolved invokes that change interaction are Eval navigation.
+    let invokeState = reviewState({
       controls: [{
         elementRef: "action-action-4",
         name: "Open completed result",
@@ -574,65 +469,61 @@ describe("ReviewSession", () => {
         actionId: "action-4",
       }],
     });
-    const electron = fakeElectron({
-      snapshot: async () => state,
+    const invokeElectron = fakeElectron({
+      snapshot: async () => invokeState,
       activate: async () => {
-        state = reviewState({
+        invokeState = reviewState({
           threadId: "thread-2",
           turnId: "turn-2",
           layerId: "layer-1",
           activatedActionId: "action-4",
         });
-        return state;
+        return invokeState;
       },
     });
-    const session = new ReviewSession({
+    const invokeSession = new ReviewSession({
       executionId: "execution-1",
       readOnly: true,
-      webContents: electron.webContents,
+      webContents: invokeElectron.webContents,
       artifactDirectory: "/unused",
-      ipc: electron.ipc,
+      ipc: invokeElectron.ipc,
       commandTimeoutMs: 100,
     });
-    await session.open();
-
-    await expect(session.interact({
+    await invokeSession.open();
+    await expect(invokeSession.interact({
       elementRef: "action-action-4",
       activate: true,
-    })).resolves.toMatchObject({
+    }), "a resolved invoke changing interaction at the same layer is navigation").resolves.toMatchObject({
       ok: true,
       state: { turnId: "turn-2", layerId: "layer-1" },
     });
-    expect(session.trace().at(-1).state.threadId).toBe("thread-2");
-  });
+    expect(invokeSession.trace().at(-1).state.threadId, "the trace records the navigated thread").toBe("thread-2");
 
-  it("rejects a history command whose returned state is not the committed visible state", async () => {
-    const state = reviewState();
-    const electron = fakeElectron({
-      snapshot: async () => state,
+    // History results must match the committed visible state.
+    const committedState = reviewState();
+    const staleElectron = fakeElectron({
+      snapshot: async () => committedState,
       history: async () => reviewState({
         layerId: "layer-2",
         navigationPath: [{ layerId: "layer-2", viaActionId: null }],
       }),
     });
-    const session = new ReviewSession({
+    const staleSession = new ReviewSession({
       executionId: "execution-1",
       readOnly: true,
-      webContents: electron.webContents,
+      webContents: staleElectron.webContents,
       artifactDirectory: "/unused",
-      ipc: electron.ipc,
+      ipc: staleElectron.ipc,
       commandTimeoutMs: 100,
     });
-    await session.open();
+    await staleSession.open();
+    await expect(staleSession.history({ delta: -1 }),
+      "history commands must return the committed visible state")
+      .rejects.toThrow("did not restore the requested review history state");
+    expect(staleSession.trace().map((entry) => entry.type), "rejected history leaves no trace entry").toEqual(["session-opened"]);
 
-    await expect(session.history({ delta: -1 })).rejects.toThrow(
-      "did not restore the requested review history state",
-    );
-    expect(session.trace().map((entry) => entry.type)).toEqual(["session-opened"]);
-  });
-
-  it("accepts direct and history navigation to durable turns without an accepted layer", async () => {
-    let state = reviewState({
+    // Layerless durable turns are navigable directly and through history.
+    let layerlessState = reviewState({
       controls: [{
         elementRef: "turn-running",
         name: "Turn 2",
@@ -649,33 +540,133 @@ describe("ReviewSession", () => {
       selectedNodeId: null,
       controls: [],
     });
-    const electron = fakeElectron({
-      snapshot: async () => state,
-      activate: async () => { state = layerless(); return state; },
-      history: async () => { state = layerless(); return state; },
+    const layerlessElectron = fakeElectron({
+      snapshot: async () => layerlessState,
+      activate: async () => { layerlessState = layerless(); return layerlessState; },
+      history: async () => { layerlessState = layerless(); return layerlessState; },
     });
-    const session = new ReviewSession({
+    const layerlessSession = new ReviewSession({
       executionId: "execution-1",
       readOnly: true,
-      webContents: electron.webContents,
+      webContents: layerlessElectron.webContents,
       artifactDirectory: "/unused",
-      ipc: electron.ipc,
+      ipc: layerlessElectron.ipc,
       commandTimeoutMs: 100,
     });
-    await session.open();
-
-    await expect(session.interact({
+    await layerlessSession.open();
+    await expect(layerlessSession.interact({
       elementRef: "turn-running",
       activate: true,
-    })).resolves.toMatchObject({ state: { turnId: "turn-running", layerId: null } });
-    state = reviewState();
-    await expect(session.history({ delta: -1 })).resolves.toMatchObject({
-      state: { turnId: "turn-running", layerId: null, navigationPath: [] },
+    }), "direct navigation to a durable layerless turn").resolves.toMatchObject({ state: { turnId: "turn-running", layerId: null } });
+    layerlessState = reviewState();
+    await expect(layerlessSession.history({ delta: -1 }), "history navigation to a durable layerless turn")
+      .resolves.toMatchObject({
+        state: { turnId: "turn-running", layerId: null, navigationPath: [] },
+      });
+
+    // Grounding captures the root-child-grandchild fixture efficiently.
+    const groundingDirectory = await reviewDirectory("relayer-grounding-review-");
+    const stack = [];
+    const groundingHistoryDeltas = [];
+    const nodeControl = (nodeId) => ({
+      elementRef: `node-${nodeId}`,
+      name: `Node ${nodeId}`,
+      role: "button",
+      disabled: false,
+      kind: "node",
+      actionId: null,
     });
+    const actionControl = (actionId) => ({
+      elementRef: `action-${actionId}`,
+      name: `Action ${actionId}`,
+      role: "button",
+      disabled: false,
+      kind: "navigate-action",
+      actionId,
+    });
+    let groundingState = reviewState({ controls: [nodeControl("2")] });
+    const select = (nodeId) => {
+      const actionId = groundingState.layerId === "layer-1" && nodeId === "2" ? "11"
+        : groundingState.layerId === "layer-2" && nodeId === "3" ? "21"
+          : null;
+      groundingState = { ...groundingState, selectedNodeId: nodeId, controls: actionId ? [actionControl(actionId)] : [] };
+    };
+    const navigate = (actionId) => {
+      stack.push(structuredClone(groundingState));
+      const child = actionId === "11"
+        ? { layerId: "layer-2", nodeId: "3" }
+        : { layerId: "layer-3", nodeId: "4" };
+      groundingState = reviewState({
+        layerId: child.layerId,
+        selectedNodeId: null,
+        activatedActionId: actionId,
+        navigationPath: [
+          ...groundingState.navigationPath,
+          { layerId: child.layerId, viaActionId: actionId },
+        ],
+        controls: [nodeControl(child.nodeId)],
+      });
+    };
+    const groundingElectron = fakeElectron({
+      snapshot: async () => groundingState,
+      activate: async ({ elementRef }) => {
+        if (elementRef.startsWith("node-")) select(elementRef.slice(5));
+        else navigate(elementRef.slice(7));
+        return groundingState;
+      },
+      history: async ({ delta }) => {
+        groundingHistoryDeltas.push(delta);
+        for (let count = 0; count < -delta; count += 1) groundingState = stack.pop();
+        return groundingState;
+      },
+      capturePlan: async () => ({
+        clip: { x: 0, y: 0, width: 320, height: 200 },
+        tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
+      }),
+      prepareCaptureTile: async ({ index }) => ({
+        index,
+        clip: { x: 0, y: 0, width: 320, height: 200 },
+      }),
+      restoreCapture: async () => groundingState,
+    });
+    const groundingSession = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: groundingElectron.webContents,
+      artifactDirectory: groundingDirectory,
+      ipc: groundingElectron.ipc,
+      commandTimeoutMs: 100,
+    });
+    await groundingSession.open();
+
+    const captures = await captureGroundingTargets(groundingSession, [
+      { layerId: "layer-1", nodeIds: ["2"], path: [] },
+      {
+        layerId: "layer-2",
+        nodeIds: ["3"],
+        path: [{ sourceNodeId: "2", actionId: "11" }],
+      },
+      {
+        layerId: "layer-3",
+        nodeIds: ["4"],
+        path: [
+          { sourceNodeId: "2", actionId: "11" },
+          { sourceNodeId: "3", actionId: "21" },
+        ],
+      },
+    ]);
+
+    expect(captures, "every grounding target is captured").toHaveLength(3);
+    expect(groundingHistoryDeltas, "rewinds are batched without over-rewinding").toEqual([-1, -2]);
+    expect(groundingSession.trace().filter((entry) => entry.elementRef === "node-2"),
+      "selections are never reactivated").toHaveLength(1);
+    expect((await groundingSession.state()).navigationPath, "grounding returns to the root layer").toEqual([
+      { layerId: "layer-1", viaActionId: null },
+    ]);
   });
 });
 
-describe("review presentation capture synchronization", () => {
+describe("review presentation adapter", () => {
   const presentation = (selectedNodeId = null) => ({
     threadId: "thread-1",
     turnId: "turn-1",
@@ -684,9 +675,10 @@ describe("review presentation capture synchronization", () => {
     navigationPath: [{ layerId: "layer-1", viaActionId: null }],
   });
 
-  it("waits for two renderer frames before planning a capture", async () => {
+  it("synchronizes capture, activation, and history to committed presentation state", async () => {
+    // Capture planning waits for two renderer frames.
     let frames = 0;
-    const adapter = createReviewPresentationAdapter({
+    const frameAdapter = createReviewPresentationAdapter({
       executionId: "execution-1",
       getPresentationState: () => presentation("node-2"),
       navigateHistory: async () => {},
@@ -699,15 +691,49 @@ describe("review presentation capture synchronization", () => {
         getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
       },
     });
-
-    await expect(adapter.capturePlan({
+    await expect(frameAdapter.capturePlan({
       target: { kind: "viewport" },
       mode: "visible",
-    })).resolves.toMatchObject({ clip: { width: 1200, height: 800 } });
-    expect(frames).toBe(2);
-  });
+    }), "viewport planning settles after renderer frames").resolves.toMatchObject({ clip: { width: 1200, height: 800 } });
+    expect(frames, "planning waits for exactly two frames").toBe(2);
 
-  it("reveals an off-screen input action before planning its full capture", async () => {
+    // Node activation waits for the selected presentation to change.
+    let activationCurrent = presentation();
+    let activationFrames = 0;
+    const activationAttributes = new Map([["aria-label", "Open Worker 2"], ["role", "button"]]);
+    const activationButton = {
+      dataset: { reviewRef: "node-2", reviewKind: "node", node: "node-2" },
+      isConnected: true,
+      hidden: false,
+      disabled: false,
+      textContent: "Worker 2",
+      matches: () => true,
+      getAttribute: (key) => activationAttributes.get(key) ?? null,
+      getBoundingClientRect: () => ({ left: 10, top: 10, right: 100, bottom: 40, width: 90, height: 30 }),
+      click: () => {},
+    };
+    const activationAdapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => activationCurrent,
+      navigateHistory: async () => {},
+      root: { querySelectorAll: () => [activationButton] },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => {
+          activationFrames += 1;
+          if (activationFrames === 3) activationCurrent = presentation("node-2");
+          callback();
+        },
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+    await expect(activationAdapter.activate({ elementRef: "node-2", operation: "activate" }),
+      "node activation completes only once the selection changes").resolves.toMatchObject({ selectedNodeId: "node-2" });
+    expect(activationFrames, "activation waits for the changed presentation").toBe(3);
+
+    // Off-screen input actions are revealed before full capture planning.
     let revealed = false;
     const scrollIntoView = vi.fn(() => { revealed = true; });
     const inputAction = {
@@ -727,14 +753,13 @@ describe("review presentation capture synchronization", () => {
         : { x: 20, y: 720, left: 20, top: 720, right: 340, bottom: 840, width: 320, height: 120 },
       scrollIntoView,
     };
-    const root = {
-      querySelectorAll: (selector) => selector === "[data-review-capture]" ? [inputAction] : [],
-    };
-    const adapter = createReviewPresentationAdapter({
+    const revealAdapter = createReviewPresentationAdapter({
       executionId: "execution-1",
       getPresentationState: () => presentation("node-2"),
       navigateHistory: async () => {},
-      root,
+      root: {
+        querySelectorAll: (selector) => selector === "[data-review-capture]" ? [inputAction] : [],
+      },
       windowObject: {
         innerWidth: 1200,
         innerHeight: 600,
@@ -743,19 +768,17 @@ describe("review presentation capture synchronization", () => {
         getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
       },
     });
-
-    await expect(adapter.capturePlan({
+    await expect(revealAdapter.capturePlan({
       target: { kind: "element", elementRef: "input-action-41-10-13" },
       mode: "full",
-    })).resolves.toMatchObject({
+    }), "revealed input actions plan from their on-screen position").resolves.toMatchObject({
       clip: { x: 20, y: 420, width: 320, height: 120 },
       tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
     });
-    expect(scrollIntoView).toHaveBeenCalledOnce();
-    await adapter.restoreCapture();
-  });
+    expect(scrollIntoView, "off-screen actions are revealed exactly once").toHaveBeenCalledOnce();
+    await revealAdapter.restoreCapture();
 
-  it("tiles the scrolling inspector content so a full node-detail capture reaches lower content", async () => {
+    // Scrolling inspector content tiles so full captures reach lower content.
     const outerInspector = {
       dataset: {},
       scrollTop: 0,
@@ -778,7 +801,7 @@ describe("review presentation capture synchronization", () => {
       getAttribute: (key) => key === "aria-label" ? "Selected node detail content" : null,
       getBoundingClientRect: () => ({ x: 860, y: 100, left: 860, top: 100, right: 1180, bottom: 300, width: 320, height: 200 }),
     };
-    const adapter = createReviewPresentationAdapter({
+    const tileAdapter = createReviewPresentationAdapter({
       executionId: "execution-1",
       getPresentationState: () => presentation("node-2"),
       navigateHistory: async () => {},
@@ -793,61 +816,19 @@ describe("review presentation capture synchronization", () => {
         getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
       },
     });
-
-    const plan = await adapter.capturePlan({
+    const tilePlan = await tileAdapter.capturePlan({
       target: { kind: "element", elementRef: "node-detail" },
       mode: "full",
     });
-    expect(plan.tiles.map(({ scrollY }) => scrollY)).toEqual([0, 200, 400]);
-    await adapter.prepareCaptureTile(plan.tiles[2]);
-    expect(inspectorContent.scrollTop).toBe(400);
-    expect(outerInspector.scrollTop).toBe(0);
-    await adapter.restoreCapture();
-    expect(inspectorContent.scrollTop).toBe(0);
-  });
+    expect(tilePlan.tiles.map(({ scrollY }) => scrollY), "tiles cover the scrolling content").toEqual([0, 200, 400]);
+    await tileAdapter.prepareCaptureTile(tilePlan.tiles[2]);
+    expect(inspectorContent.scrollTop, "tile preparation scrolls the inner content").toBe(400);
+    expect(outerInspector.scrollTop, "the outer inspector never scrolls").toBe(0);
+    await tileAdapter.restoreCapture();
+    expect(inspectorContent.scrollTop, "restoration resets the scroll position").toBe(0);
 
-  it("does not complete node activation before the selected presentation changes", async () => {
-    let current = presentation();
-    let frames = 0;
-    const attributes = new Map([["aria-label", "Open Worker 2"], ["role", "button"]]);
-    const button = {
-      dataset: { reviewRef: "node-2", reviewKind: "node", node: "node-2" },
-      isConnected: true,
-      hidden: false,
-      disabled: false,
-      textContent: "Worker 2",
-      matches: () => true,
-      getAttribute: (key) => attributes.get(key) ?? null,
-      getBoundingClientRect: () => ({ left: 10, top: 10, right: 100, bottom: 40, width: 90, height: 30 }),
-      click: () => {},
-    };
-    const adapter = createReviewPresentationAdapter({
-      executionId: "execution-1",
-      getPresentationState: () => current,
-      navigateHistory: async () => {},
-      root: { querySelectorAll: () => [button] },
-      windowObject: {
-        innerWidth: 1200,
-        innerHeight: 800,
-        devicePixelRatio: 2,
-        requestAnimationFrame: (callback) => {
-          frames += 1;
-          if (frames === 3) current = presentation("node-2");
-          callback();
-        },
-        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
-      },
-    });
-
-    await expect(adapter.activate({ elementRef: "node-2", operation: "activate" }))
-      .resolves.toMatchObject({ selectedNodeId: "node-2" });
-    expect(frames).toBe(3);
-  });
-});
-
-describe("review presentation history", () => {
-  it("waits for workspace navigation and snapshots the committed presentation", async () => {
-    let presentation = {
+    // History navigation snapshots the committed presentation.
+    let historyPresentation = {
       threadId: "thread-1",
       turnId: "turn-2",
       layerId: "layer-2",
@@ -858,68 +839,65 @@ describe("review presentation history", () => {
       ],
     };
     const navigateHistory = vi.fn(async (delta) => {
-      expect(delta).toBe(-3);
-      presentation = {
+      expect(delta, "workspace receives the signed delta").toBe(-3);
+      historyPresentation = {
         threadId: "thread-1",
         turnId: "turn-1",
         layerId: "layer-1",
         selectedNodeId: "node-1",
         navigationPath: [{ layerId: "layer-1", viaActionId: null }],
       };
-      return presentation;
+      return historyPresentation;
     });
-    const root = { querySelectorAll: () => [] };
-    const windowObject = {
-      innerWidth: 1200,
-      innerHeight: 800,
-      devicePixelRatio: 2,
-      requestAnimationFrame: (callback) => callback(),
-      getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
-    };
-    const adapter = createReviewPresentationAdapter({
+    const historyAdapter = createReviewPresentationAdapter({
       executionId: "execution-1",
-      getPresentationState: () => presentation,
+      getPresentationState: () => historyPresentation,
       navigateHistory,
-      root,
-      windowObject,
+      root: { querySelectorAll: () => [] },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => callback(),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
     });
+    await expect(historyAdapter.history({ delta: 0 }), "zero deltas are invalid").rejects.toThrow("non-zero signed integer");
+    await expect(historyAdapter.history({ delta: -3 }), "history snapshots the committed presentation")
+      .resolves.toMatchObject({
+        executionId: "execution-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        layerId: "layer-1",
+        selectedNodeId: "node-1",
+        navigationPath: [{ layerId: "layer-1", viaActionId: null }],
+      });
+    expect(navigateHistory, "the workspace navigates exactly once").toHaveBeenCalledOnce();
 
-    await expect(adapter.history({ delta: 0 })).rejects.toThrow("non-zero signed integer");
-    await expect(adapter.history({ delta: -3 })).resolves.toMatchObject({
-      executionId: "execution-1",
-      threadId: "thread-1",
-      turnId: "turn-1",
-      layerId: "layer-1",
-      selectedNodeId: "node-1",
-      navigationPath: [{ layerId: "layer-1", viaActionId: null }],
-    });
-    expect(navigateHistory).toHaveBeenCalledOnce();
-  });
-
-  it("waits for a visible history button to finish async restoration", async () => {
-    let presentation = {
+    // Visible history buttons complete through their async restoration.
+    let buttonPresentation = {
       threadId: "thread-2",
       turnId: "turn-2",
       layerId: "layer-2",
       selectedNodeId: null,
       navigationPath: [{ layerId: "layer-2", viaActionId: null }],
     };
-    const attributes = new Map([
+    const buttonAttributes = new Map([
       ["aria-label", "Back to Thread 1"],
       ["role", "button"],
     ]);
-    const button = {
+    const historyButton = {
       dataset: { reviewRef: "history-back", reviewKind: "history" },
       isConnected: true,
       hidden: false,
       disabled: false,
       textContent: "Back",
       matches: () => true,
-      getAttribute: (key) => attributes.get(key) ?? null,
+      getAttribute: (key) => buttonAttributes.get(key) ?? null,
       getBoundingClientRect: () => ({ left: 10, top: 10, right: 40, bottom: 40, width: 30, height: 30 }),
       click: () => {
         const completion = new Promise((resolve) => setTimeout(() => {
-          presentation = {
+          buttonPresentation = {
             threadId: "thread-1",
             turnId: "turn-1",
             layerId: null,
@@ -928,14 +906,14 @@ describe("review presentation history", () => {
           };
           resolve();
         }, 5));
-        setControlActivationCompletion(button, completion);
+        setControlActivationCompletion(historyButton, completion);
       },
     };
-    const adapter = createReviewPresentationAdapter({
+    const buttonAdapter = createReviewPresentationAdapter({
       executionId: "execution-1",
-      getPresentationState: () => presentation,
+      getPresentationState: () => buttonPresentation,
       navigateHistory: async () => {},
-      root: { querySelectorAll: () => [button] },
+      root: { querySelectorAll: () => [historyButton] },
       windowObject: {
         innerWidth: 1200,
         innerHeight: 800,
@@ -944,20 +922,18 @@ describe("review presentation history", () => {
         getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
       },
     });
-
-    await expect(adapter.activate({
+    await expect(buttonAdapter.activate({
       elementRef: "history-back",
       operation: "activate",
-    })).resolves.toMatchObject({
+    }), "visible history buttons wait for their async restoration").resolves.toMatchObject({
       threadId: "thread-1",
       turnId: "turn-1",
       layerId: null,
       navigationPath: [],
     });
-  });
 
-  it("uses definitive visible-history completion beyond the old animation-frame budget", async () => {
-    let presentation = {
+    // Definitive completion beats the old animation-frame budget.
+    let budgetPresentation = {
       threadId: "thread-2",
       turnId: "turn-2",
       layerId: "layer-2",
@@ -965,22 +941,22 @@ describe("review presentation history", () => {
       navigationPath: [{ layerId: "layer-2", viaActionId: null }],
     };
     let transitionFrames = 0;
-    const attributes = new Map([["aria-label", "Back to Thread 1"], ["role", "button"]]);
-    const button = {
+    const budgetAttributes = new Map([["aria-label", "Back to Thread 1"], ["role", "button"]]);
+    const budgetButton = {
       dataset: { reviewRef: "history-back", reviewKind: "history" },
       isConnected: true,
       hidden: false,
       disabled: false,
       textContent: "Back",
       matches: () => true,
-      getAttribute: (key) => attributes.get(key) ?? null,
+      getAttribute: (key) => budgetAttributes.get(key) ?? null,
       getBoundingClientRect: () => ({ left: 10, top: 10, right: 40, bottom: 40, width: 30, height: 30 }),
       click: () => {
         const completion = new Promise((resolve) => {
           const advance = () => {
             transitionFrames += 1;
             if (transitionFrames <= 140) return queueMicrotask(advance);
-            presentation = {
+            budgetPresentation = {
               threadId: "thread-1",
               turnId: "turn-1",
               layerId: null,
@@ -991,14 +967,14 @@ describe("review presentation history", () => {
           };
           queueMicrotask(advance);
         });
-        setControlActivationCompletion(button, completion);
+        setControlActivationCompletion(budgetButton, completion);
       },
     };
-    const adapter = createReviewPresentationAdapter({
+    const budgetAdapter = createReviewPresentationAdapter({
       executionId: "execution-1",
-      getPresentationState: () => presentation,
+      getPresentationState: () => budgetPresentation,
       navigateHistory: async () => {},
-      root: { querySelectorAll: () => [button] },
+      root: { querySelectorAll: () => [budgetButton] },
       windowObject: {
         innerWidth: 1200,
         innerHeight: 800,
@@ -1007,41 +983,39 @@ describe("review presentation history", () => {
         getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
       },
     });
-
-    await expect(adapter.activate({
+    await expect(budgetAdapter.activate({
       elementRef: "history-back",
       operation: "activate",
-    })).resolves.toMatchObject({
+    }), "definitive completion wins beyond the old frame budget").resolves.toMatchObject({
       threadId: "thread-1",
       turnId: "turn-1",
       layerId: null,
     });
-    expect(transitionFrames).toBe(141);
-  });
+    expect(transitionFrames, "the long transition ran to completion").toBe(141);
 
-  it("waits for an async thread switch to expose one complete layerless presentation", async () => {
-    let presentation = {
+    // Thread switches settle on one complete layerless presentation.
+    let switchPresentation = {
       threadId: "thread-1",
       turnId: "turn-1",
       layerId: "layer-1",
       selectedNodeId: null,
       navigationPath: [{ layerId: "layer-1", viaActionId: null }],
     };
-    const attributes = new Map([
+    const switchAttributes = new Map([
       ["aria-label", "Open Thread 2"],
       ["role", "button"],
     ]);
-    const button = {
+    const switchButton = {
       dataset: { reviewRef: "thread-2", reviewKind: "thread" },
       isConnected: true,
       hidden: false,
       disabled: false,
       textContent: "Thread 2",
       matches: () => true,
-      getAttribute: (key) => attributes.get(key) ?? null,
+      getAttribute: (key) => switchAttributes.get(key) ?? null,
       getBoundingClientRect: () => ({ left: 10, top: 10, right: 100, bottom: 40, width: 90, height: 30 }),
       click: () => {
-        presentation = {
+        switchPresentation = {
           threadId: "thread-2",
           turnId: null,
           layerId: "layer-1",
@@ -1049,7 +1023,7 @@ describe("review presentation history", () => {
           navigationPath: [{ layerId: "layer-1", viaActionId: null }],
         };
         setTimeout(() => {
-          presentation = {
+          switchPresentation = {
             threadId: "thread-2",
             turnId: "turn-running",
             layerId: null,
@@ -1059,11 +1033,11 @@ describe("review presentation history", () => {
         }, 5);
       },
     };
-    const adapter = createReviewPresentationAdapter({
+    const switchAdapter = createReviewPresentationAdapter({
       executionId: "execution-1",
-      getPresentationState: () => presentation,
+      getPresentationState: () => switchPresentation,
       navigateHistory: async () => {},
-      root: { querySelectorAll: () => [button] },
+      root: { querySelectorAll: () => [switchButton] },
       windowObject: {
         innerWidth: 1200,
         innerHeight: 800,
@@ -1072,20 +1046,18 @@ describe("review presentation history", () => {
         getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
       },
     });
-
-    await expect(adapter.activate({
+    await expect(switchAdapter.activate({
       elementRef: "thread-2",
       operation: "activate",
-    })).resolves.toMatchObject({
+    }), "thread switches wait for one complete layerless presentation").resolves.toMatchObject({
       threadId: "thread-2",
       turnId: "turn-running",
       layerId: null,
       selectedNodeId: null,
       navigationPath: [],
     });
-  });
 
-  it("canonicalizes numeric paths and keeps visible and tool history action metadata identical", async () => {
+    // Numeric paths canonicalize identically for visible and tool history.
     const rootPresentation = () => ({
       threadId: 10,
       turnId: 1,
@@ -1103,30 +1075,30 @@ describe("review presentation history", () => {
         { layerId: 101, viaActionId: 501 },
       ],
     });
-    let presentation = rootPresentation();
-    const attributes = new Map([["aria-label", "Forward to child"], ["role", "button"]]);
-    const button = {
+    let canonicalPresentation = rootPresentation();
+    const canonicalAttributes = new Map([["aria-label", "Forward to child"], ["role", "button"]]);
+    const canonicalButton = {
       dataset: { reviewRef: "history-forward", reviewKind: "history" },
       isConnected: true,
       hidden: false,
       disabled: false,
       textContent: "Forward",
       matches: () => true,
-      getAttribute: (key) => attributes.get(key) ?? null,
+      getAttribute: (key) => canonicalAttributes.get(key) ?? null,
       getBoundingClientRect: () => ({ left: 10, top: 10, right: 40, bottom: 40, width: 30, height: 30 }),
       click: () => {
-        presentation = deepPresentation();
-        setControlActivationCompletion(button, Promise.resolve());
+        canonicalPresentation = deepPresentation();
+        setControlActivationCompletion(canonicalButton, Promise.resolve());
       },
     };
-    const adapter = createReviewPresentationAdapter({
+    const canonicalAdapter = createReviewPresentationAdapter({
       executionId: "execution-1",
-      getPresentationState: () => presentation,
+      getPresentationState: () => canonicalPresentation,
       navigateHistory: async () => {
-        presentation = deepPresentation();
-        return presentation;
+        canonicalPresentation = deepPresentation();
+        return canonicalPresentation;
       },
-      root: { querySelectorAll: () => [button] },
+      root: { querySelectorAll: () => [canonicalButton] },
       windowObject: {
         innerWidth: 1200,
         innerHeight: 800,
@@ -1135,59 +1107,51 @@ describe("review presentation history", () => {
         getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
       },
     });
-
-    const visible = await adapter.activate({
+    const visible = await canonicalAdapter.activate({
       elementRef: "history-forward",
       operation: "activate",
     });
-    presentation = rootPresentation();
-    adapter.snapshot();
-    const tool = await adapter.history({ delta: 1 });
-
-    expect(visible.navigationPath).toEqual([
+    canonicalPresentation = rootPresentation();
+    canonicalAdapter.snapshot();
+    const tool = await canonicalAdapter.history({ delta: 1 });
+    expect(visible.navigationPath, "visible history canonicalizes numeric paths").toEqual([
       { layerId: "100", viaActionId: null },
       { layerId: "101", viaActionId: "501" },
     ]);
-    expect(visible.activatedActionId).toBe("501");
-    expect(tool.activatedActionId).toBe("501");
-    expect(tool.navigationPath).toEqual(visible.navigationPath);
-  });
-});
+    expect(visible.activatedActionId, "visible history records the via-action").toBe("501");
+    expect(tool.activatedActionId, "tool history records the via-action").toBe("501");
+    expect(tool.navigationPath, "visible and tool history metadata stay identical").toEqual(visible.navigationPath);
 
-describe("review presentation visibility", () => {
-  function element({ connected = true, hidden = false, name = "Open node", disabled = false } = {}) {
-    const attributes = new Map([["aria-label", name]]);
-    return {
-      isConnected: connected,
-      hidden,
-      disabled,
-      textContent: "",
-      matches: () => true,
-      getAttribute: (key) => attributes.get(key) ?? null,
-      getBoundingClientRect: () => ({ left: 20, top: 20, right: 120, bottom: 60, width: 100, height: 40 }),
+    // Visibility predicates and capture regions.
+    const element = ({ connected = true, hidden = false, name = "Open node", disabled = false } = {}) => {
+      const attributes = new Map([["aria-label", name]]);
+      return {
+        isConnected: connected,
+        hidden,
+        disabled,
+        textContent: "",
+        matches: () => true,
+        getAttribute: (key) => attributes.get(key) ?? null,
+        getBoundingClientRect: () => ({ left: 20, top: 20, right: 120, bottom: 60, width: 100, height: 40 }),
+      };
     };
-  }
-  const windowObject = {
-    innerWidth: 800,
-    innerHeight: 600,
-    getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
-  };
+    const predicateWindow = {
+      innerWidth: 800,
+      innerHeight: 600,
+      getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+    };
+    expect(isVisibleElement(element(), predicateWindow), "on-screen elements are visible").toBe(true);
+    expect(accessibleControlName(element()), "accessible names come from aria-label").toBe("Open node");
+    expect(isAccessibleControl(element(), predicateWindow), "named visible elements are controls").toBe(true);
+    expect(isAccessibleControl(element({ name: "" }), predicateWindow), "unnamed elements are not controls").toBe(false);
+    expect(isVisibleElement(element({ hidden: true }), predicateWindow), "hidden elements are not visible").toBe(false);
 
-  it("requires an on-screen element with an accessible name", () => {
-    expect(isVisibleElement(element(), windowObject)).toBe(true);
-    expect(accessibleControlName(element())).toBe("Open node");
-    expect(isAccessibleControl(element(), windowObject)).toBe(true);
-    expect(isAccessibleControl(element({ name: "" }), windowObject)).toBe(false);
-    expect(isVisibleElement(element({ hidden: true }), windowObject)).toBe(false);
-  });
-
-  it("exposes visible capture-region refs without treating them as controls", () => {
     const region = element({ name: "Selected node detail" });
     region.dataset = { reviewCapture: "node-detail" };
     region.matches = () => false;
     region.getAttribute = (key) => key === "aria-label" ? "Selected node detail" : key === "role" ? "region" : null;
-    const root = { querySelectorAll: () => [region] };
-    expect(visibleCaptureRegions(root, windowObject)).toEqual([{
+    const regionRoot = { querySelectorAll: () => [region] };
+    expect(visibleCaptureRegions(regionRoot, predicateWindow), "capture regions expose their refs").toEqual([{
       elementRef: "node-detail",
       name: "Selected node detail",
       role: "region",
@@ -1195,6 +1159,6 @@ describe("review presentation visibility", () => {
       kind: "capture-region",
       actionId: null,
     }]);
-    expect(isAccessibleControl(region, windowObject)).toBe(false);
+    expect(isAccessibleControl(region, predicateWindow), "capture regions are never controls").toBe(false);
   });
 });

@@ -28,7 +28,7 @@ describe("judge screenshot artifact loader", () => {
       screenshotId: "shot-1",
     });
 
-    expect(loaded).toMatchObject({
+    expect(loaded, "declared tiles load with their digest-verified bytes").toMatchObject({
       screenshotId: "shot-1",
       metadata: { executionId: "execution-1", tileCount: 1 },
       tiles: [{
@@ -37,46 +37,42 @@ describe("judge screenshot artifact loader", () => {
         dataUrl: `data:image/png;base64,${png.toString("base64")}`,
       }],
     });
-  });
 
-  it("rejects invalid execution, judge-result, and undeclared screenshot identities", async () => {
-    const fixture = await createFixture();
     const request = { stateFile: fixture.stateFile, executionId: "execution-1", judgeResultId: "judge-1", screenshotId: "shot-1" };
+    const identityCases = [
+      ["unknown execution identity", { ...request, executionId: "execution-other" }, "Unknown or ambiguous Eval execution"],
+      ["unknown judge-result identity", { ...request, judgeResultId: "judge-other" }, "Unknown or ambiguous judge result"],
+      ["undeclared screenshot identity", { ...request, screenshotId: "shot-other" }, "Screenshot is not declared"],
+    ];
+    expect(identityCases, "identity rejection corpus").toHaveLength(3);
+    for (const [label, identity, message] of identityCases) {
+      await expect(loadJudgeScreenshotArtifact(identity), label).rejects.toThrow(message);
+    }
 
-    await expect(loadJudgeScreenshotArtifact({ ...request, executionId: "execution-other" }))
-      .rejects.toThrow("Unknown or ambiguous Eval execution");
-    await expect(loadJudgeScreenshotArtifact({ ...request, judgeResultId: "judge-other" }))
-      .rejects.toThrow("Unknown or ambiguous judge result");
-    await expect(loadJudgeScreenshotArtifact({ ...request, screenshotId: "shot-other" }))
-      .rejects.toThrow("Screenshot is not declared");
-  });
-
-  it("rejects artifact paths outside the selected local run root", async () => {
-    const fixture = await createFixture({ artifactDirectory: join(tmpdir(), "outside-eval-run") });
-
+    const escaped = await createFixture({ artifactDirectory: join(tmpdir(), "outside-eval-run") });
     await expect(loadJudgeScreenshotArtifact({
-      stateFile: fixture.stateFile,
+      stateFile: escaped.stateFile,
       executionId: "execution-1",
       judgeResultId: "judge-1",
       screenshotId: "shot-1",
-    })).rejects.toThrow("Judge artifact directory escapes its authorized root");
-  });
+    }), "artifact paths outside the selected local run root are rejected")
+      .rejects.toThrow("Judge artifact directory escapes its authorized root");
 
-  it("rejects symbolic links, non-PNG tiles, and immutable digest mismatches", async () => {
     const linked = await createFixture();
     const actualTile = join(linked.screenshotDirectory, "actual.png");
     await writeFile(actualTile, png);
     await rm(linked.tilePath);
     await symlink(actualTile, linked.tilePath);
-    await expect(loadFixture(linked)).rejects.toThrow("must not use symbolic links");
+    await expect(loadFixture(linked), "symbolic-linked tiles are rejected").rejects.toThrow("must not use symbolic links");
 
     const nonPng = await createFixture();
     await writeFile(nonPng.tilePath, "not a png");
-    await expect(loadFixture(nonPng)).rejects.toThrow("is not a PNG");
+    await expect(loadFixture(nonPng), "non-PNG tiles are rejected").rejects.toThrow("is not a PNG");
 
     const mismatched = await createFixture();
     await writeFile(mismatched.tilePath, Buffer.concat([png, Buffer.from("changed")]));
-    await expect(loadFixture(mismatched)).rejects.toThrow("digest does not match immutable metadata");
+    await expect(loadFixture(mismatched), "digest mismatches against immutable metadata are rejected")
+      .rejects.toThrow("digest does not match immutable metadata");
   });
 });
 
