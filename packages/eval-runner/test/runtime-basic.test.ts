@@ -56,14 +56,14 @@ function navigationOutput(actions: CompletionOutput["rootLayer"]["actions"] = []
 }
 
 describe("first runtime evaluation", () => {
-  it("configures an absolute Python client path for kernels launched from temporary directories", () => {
+  it("exposes a deterministic fixture evaluation contract", () => {
+    // Checkpoint: kernels launched from temporary directories get an absolute Python client path.
     const paths = basicEvalPythonPath("existing-python-path").split(delimiter);
     expect(isAbsolute(paths[0]!)).toBe(true);
     expect(paths[0]).toMatch(/python[/\\]relayer-graph[/\\]src$/);
     expect(paths[1]).toBe("existing-python-path");
-  });
 
-  it("selects a standalone permission profile supported by the harness", () => {
+    // Checkpoint: the standalone permission profile must be unambiguous for the harness.
     expect(selectStandalonePermissionProfile(taskSystemFixtureConfiguration)).toBe("auto");
     expect(selectStandalonePermissionProfile({
       ...taskSystemFixtureConfiguration,
@@ -74,9 +74,8 @@ describe("first runtime evaluation", () => {
       ...taskSystemFixtureConfiguration,
       permissionBindings: { ask: {}, full: {} },
     })).toThrow("need Auto or one unambiguous permission profile");
-  });
 
-  it("recognizes equivalent concurrency language and gives the judge endpoint-resolvable node IDs", () => {
+    // Checkpoint: equivalent concurrency language is recognized and the judge sees endpoint-resolvable ids.
     const concurrency = basicEvalFacts.find((fact) => fact.id === "two-active-limit")!;
     expect(concurrency.patterns.some((pattern) => pattern.test("allowing up to two tasks to run at the same time"))).toBe(true);
     expect(concurrency.patterns.some((pattern) => pattern.test("While both workers are busy: no new task starts."))).toBe(true);
@@ -123,9 +122,8 @@ describe("first runtime evaluation", () => {
     expect(checks.find((check) => check.name === "accepted-closure")?.passed).toBe(false);
     expect(checks.some((check) => check.name.startsWith("fact:"))).toBe(false);
     expect(checkBasicFacts(mismatched).some((check) => check.name.startsWith("fact:"))).toBe(true);
-  });
 
-  it("distinguishes a node-level child-layer action from the required response action", () => {
+    // Checkpoint: node-level child-layer actions stay distinct from the required response action.
     const output = navigationOutput();
     expect(checkNodeNavigation(output)).toEqual([
       expect.objectContaining({ name: "node-navigation", passed: false }),
@@ -221,212 +219,268 @@ describe("first runtime evaluation", () => {
     })).toBeUndefined();
   });
 
-  it("rejects hostile audit-proxy targets without contacting either upstream or the requested origin", async () => {
-    let upstreamRequests = 0;
-    let hostileRequests = 0;
-    const upstream = await listenServer(() => { upstreamRequests += 1; });
-    const hostile = await listenServer(() => { hostileRequests += 1; });
-    const proxy = await startGraphAuditProxy(upstream.url);
-    try {
-      const absoluteStatus = await rawHttpRequest(proxy.url, `${hostile.url}/api/graph/nodes`);
-      const schemeRelativeStatus = await rawHttpRequest(proxy.url, `//127.0.0.1:${new URL(hostile.url).port}/api/graph/nodes`);
-      expect(absoluteStatus).toBe(400);
-      expect(schemeRelativeStatus).toBe(400);
-      expect(upstreamRequests).toBe(0);
-      expect(hostileRequests).toBe(0);
-      expect(proxy.events()).toEqual([]);
-    } finally {
-      await proxy.close();
-      await upstream.close();
-      await hostile.close();
-    }
-  });
-
-  it("bounds audit-proxy shutdown while an active upstream request never responds", async () => {
-    let markUpstreamReached!: () => void;
-    const upstreamReached = new Promise<void>((resolveReached) => { markUpstreamReached = resolveReached; });
-    const upstream = await listenServer(() => {
-      markUpstreamReached();
-      return false;
-    });
-    const proxy = await startGraphAuditProxy(upstream.url, 25);
-    const pendingResponse = rawHttpRequest(proxy.url, "/api/graph/nodes").catch(() => 0);
-    await upstreamReached;
-    const startedAt = Date.now();
-    try {
-      await proxy.close();
-      expect(Date.now() - startedAt).toBeLessThan(500);
-      await pendingResponse;
-    } finally {
-      await upstream.close();
-    }
-  });
-
-  it("removes runtime state after forced shutdown settles even when graceful disposal remains stalled", async () => {
-    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-stalled-dispose-"));
-    temporary.push(outputDirectory);
-    let runtimeDirectory: string | undefined;
-    let releaseDispose!: () => void;
-    let markDisposeStarted!: () => void;
-    let markDisposeFinished!: () => void;
-    const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
-    const disposeStarted = new Promise<void>((resolveStarted) => { markDisposeStarted = resolveStarted; });
-    const disposeFinished = new Promise<void>((resolveFinished) => { markDisposeFinished = resolveFinished; });
-    const stalledFactory: HarnessFactory = async (context) => {
-      runtimeDirectory = context.workingDirectory;
-      const fixture = await taskSystemFixtureFactory(context);
-      return {
-        complete: (runContext, signal) => fixture.complete(runContext, signal),
-        state: () => fixture.state(),
-        async dispose() {
-          markDisposeStarted();
-          await disposeGate;
-          markDisposeFinished();
-        },
-      };
-    };
-
-    const evaluation = runBasicRuntimeEval({
-      outputDirectory,
-      execution: fixtureExecution(),
-      implementations: { "fixture.task-system": stalledFactory },
-      harnessCloseGraceMs: 25,
-    });
-    await disposeStarted;
-    const shutdownStartedAt = Date.now();
-
-    try {
-      await expect(evaluation).rejects.toThrow("Harness host did not close within 25ms and was forcibly disconnected");
-
-      expect(Date.now() - shutdownStartedAt).toBeLessThan(1_000);
-      expect(runtimeDirectory).toBeDefined();
-      await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
-    } finally {
-      releaseDispose();
-      await disposeFinished;
-    }
-  });
-
-  it("retains runtime state when forced shutdown cannot establish disconnection", async () => {
-    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-failed-force-close-"));
-    temporary.push(outputDirectory);
-    let runtimeDirectory: string | undefined;
-    let releaseDispose!: () => void;
-    let markDisposeFinished!: () => void;
-    const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
-    const disposeFinished = new Promise<void>((resolveFinished) => { markDisposeFinished = resolveFinished; });
-    const failedForceFactory: HarnessFactory = async (context) => {
-      runtimeDirectory = context.workingDirectory;
-      const fixture = await taskSystemFixtureFactory(context);
-      return {
-        complete: (runContext, signal) => fixture.complete(runContext, signal),
-        state: () => fixture.state(),
-        forceShutdown() { throw new Error("forced provider interruption failed"); },
-        async dispose() {
-          await disposeGate;
-          markDisposeFinished();
-        },
-      };
-    };
-
-    const evaluation = runBasicRuntimeEval({
-      outputDirectory,
-      execution: fixtureExecution(),
-      implementations: { "fixture.task-system": failedForceFactory },
-      harnessCloseGraceMs: 25,
-    });
-    try {
-      await expect(evaluation).rejects.toThrow("Harness host did not force-close cleanly");
-      expect(runtimeDirectory).toBeDefined();
-      await expect(stat(runtimeDirectory!)).resolves.toBeDefined();
-    } finally {
-      releaseDispose();
-      await disposeFinished;
-      if (runtimeDirectory !== undefined) {
-        await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
+  it("isolates audit-proxy targets and bounds proxy shutdown", async () => {
+    // Checkpoint: hostile absolute and scheme-relative targets are rejected without touching either server.
+    {
+      let upstreamRequests = 0;
+      let hostileRequests = 0;
+      const upstream = await listenServer(() => { upstreamRequests += 1; });
+      const hostile = await listenServer(() => { hostileRequests += 1; });
+      const proxy = await startGraphAuditProxy(upstream.url);
+      try {
+        const absoluteStatus = await rawHttpRequest(proxy.url, `${hostile.url}/api/graph/nodes`);
+        const schemeRelativeStatus = await rawHttpRequest(proxy.url, `//127.0.0.1:${new URL(hostile.url).port}/api/graph/nodes`);
+        expect(absoluteStatus).toBe(400);
+        expect(schemeRelativeStatus).toBe(400);
+        expect(upstreamRequests).toBe(0);
+        expect(hostileRequests).toBe(0);
+        expect(proxy.events()).toEqual([]);
+      } finally {
+        await proxy.close();
+        await upstream.close();
+        await hostile.close();
       }
     }
-  });
 
-  it("allows a slow successful harness disposal to finish within the configured grace period", async () => {
-    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-slow-dispose-"));
-    temporary.push(outputDirectory);
-    let disposed = false;
-    const slowFactory: HarnessFactory = async (context) => {
-      const fixture = await taskSystemFixtureFactory(context);
-      return {
-        complete: (runContext, signal) => fixture.complete(runContext, signal),
-        state: () => fixture.state(),
-        async dispose() {
-          await new Promise((resolveDispose) => setTimeout(resolveDispose, 40));
-          disposed = true;
+    // Checkpoint: shutdown stays bounded while an active upstream request never responds.
+    {
+      let markUpstreamReached!: () => void;
+      const upstreamReached = new Promise<void>((resolveReached) => { markUpstreamReached = resolveReached; });
+      const upstream = await listenServer(() => {
+        markUpstreamReached();
+        return false;
+      });
+      const proxy = await startGraphAuditProxy(upstream.url, 25);
+      const pendingResponse = rawHttpRequest(proxy.url, "/api/graph/nodes").catch(() => 0);
+      await upstreamReached;
+      const startedAt = Date.now();
+      try {
+        await proxy.close();
+        expect(Date.now() - startedAt).toBeLessThan(500);
+        await pendingResponse;
+      } finally {
+        await upstream.close();
+      }
+    }
+  }, 10_000);
+
+  it("enforces runtime state authority across shutdown outcomes", async () => {
+    // Checkpoint: forced shutdown removes state once settled, even when graceful disposal stalls.
+    {
+      const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-stalled-dispose-"));
+      temporary.push(outputDirectory);
+      let runtimeDirectory: string | undefined;
+      let releaseDispose!: () => void;
+      let markDisposeStarted!: () => void;
+      let markDisposeFinished!: () => void;
+      const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+      const disposeStarted = new Promise<void>((resolveStarted) => { markDisposeStarted = resolveStarted; });
+      const disposeFinished = new Promise<void>((resolveFinished) => { markDisposeFinished = resolveFinished; });
+      const stalledFactory: HarnessFactory = async (context) => {
+        runtimeDirectory = context.workingDirectory;
+        const fixture = await taskSystemFixtureFactory(context);
+        return {
+          complete: (runContext, signal) => fixture.complete(runContext, signal),
+          state: () => fixture.state(),
+          async dispose() {
+            markDisposeStarted();
+            await disposeGate;
+            markDisposeFinished();
+          },
+        };
+      };
+
+      const evaluation = runBasicRuntimeEval({
+        outputDirectory,
+        execution: fixtureExecution(),
+        implementations: { "fixture.task-system": stalledFactory },
+        harnessCloseGraceMs: 25,
+      });
+      await disposeStarted;
+      const shutdownStartedAt = Date.now();
+
+      try {
+        await expect(evaluation).rejects.toThrow("Harness host did not close within 25ms and was forcibly disconnected");
+
+        expect(Date.now() - shutdownStartedAt).toBeLessThan(1_000);
+        expect(runtimeDirectory).toBeDefined();
+        await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
+      } finally {
+        releaseDispose();
+        await disposeFinished;
+      }
+    }
+
+    // Checkpoint: failed forced disconnection retains the runtime state.
+    {
+      const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-failed-force-close-"));
+      temporary.push(outputDirectory);
+      let runtimeDirectory: string | undefined;
+      let releaseDispose!: () => void;
+      let markDisposeFinished!: () => void;
+      const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+      const disposeFinished = new Promise<void>((resolveFinished) => { markDisposeFinished = resolveFinished; });
+      const failedForceFactory: HarnessFactory = async (context) => {
+        runtimeDirectory = context.workingDirectory;
+        const fixture = await taskSystemFixtureFactory(context);
+        return {
+          complete: (runContext, signal) => fixture.complete(runContext, signal),
+          state: () => fixture.state(),
+          forceShutdown() { throw new Error("forced provider interruption failed"); },
+          async dispose() {
+            await disposeGate;
+            markDisposeFinished();
+          },
+        };
+      };
+
+      const evaluation = runBasicRuntimeEval({
+        outputDirectory,
+        execution: fixtureExecution(),
+        implementations: { "fixture.task-system": failedForceFactory },
+        harnessCloseGraceMs: 25,
+      });
+      try {
+        await expect(evaluation).rejects.toThrow("Harness host did not force-close cleanly");
+        expect(runtimeDirectory).toBeDefined();
+        await expect(stat(runtimeDirectory!)).resolves.toBeDefined();
+      } finally {
+        releaseDispose();
+        await disposeFinished;
+        if (runtimeDirectory !== undefined) {
+          await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
+        }
+      }
+    }
+
+    // Checkpoint: a slow successful disposal still completes inside the configured grace.
+    {
+      const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-slow-dispose-"));
+      temporary.push(outputDirectory);
+      let disposed = false;
+      const slowFactory: HarnessFactory = async (context) => {
+        const fixture = await taskSystemFixtureFactory(context);
+        return {
+          complete: (runContext, signal) => fixture.complete(runContext, signal),
+          state: () => fixture.state(),
+          async dispose() {
+            await new Promise((resolveDispose) => setTimeout(resolveDispose, 40));
+            disposed = true;
+          },
+        };
+      };
+
+      const artifact = await runBasicRuntimeEval({
+        outputDirectory,
+        execution: fixtureExecution(),
+        implementations: { "fixture.task-system": slowFactory },
+        harnessCloseGraceMs: 250,
+      });
+
+      expect(artifact.passed).toBe(true);
+      expect(disposed).toBe(true);
+    }
+  }, 20_000);
+
+  it("runs the fixture session end-to-end and pins the managed judge executable", async () => {
+    // Checkpoint: two interactions flow through one live harness object and both graphs persist.
+    {
+      const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-test-")); temporary.push(outputDirectory);
+      const execution = fixtureExecution();
+      const artifact = await runBasicRuntimeEval({ outputDirectory, execution, implementations });
+      expect(artifact.passed).toBe(true);
+      expect(artifact.execution).toEqual(execution);
+      expect(artifact.turns).toHaveLength(2);
+      expect(artifact.turns.map((turn) => turn.output.nodeId)).toEqual(artifact.turns.map((turn) => turn.interactionNodeId));
+      expect(artifact.turns.every((turn) => turn.output.rootLayer.nodes.length === 3)).toBe(true);
+      expect(artifact.turns.every((turn) => turn.output.rootLayer.edges.length === 2)).toBe(true);
+      expect(artifact.turns.every((turn) => turn.output.rootLayer.layer.layout?.version === 1)).toBe(true);
+      expect(artifact.turns.every((turn) => turn.output.rootLayer.layer.layout?.placements.length === 3)).toBe(true);
+      expect(artifact.turns.every((turn) => turn.checks.every((check) => check.passed))).toBe(true);
+      expect(artifact.turns.every((turn) => checkBasicFacts(turn.output).every((check) => check.passed))).toBe(true);
+      expect(artifact.sessionChecks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "single-harness-object", passed: true }),
+        expect.objectContaining({ name: "distinct-interaction-capabilities", passed: true }),
+        expect.objectContaining({ name: "revoked-interaction-capabilities", passed: true }),
+      ]));
+      const directory = executionDirectory(outputDirectory, execution);
+      expect(JSON.parse(await readFile(join(directory, "result.json"), "utf8"))).toMatchObject({
+        schemaVersion: 3,
+        execution: {
+          testRunId: "fixture-run",
+          testCaseId: basicEvalCaseId,
+          harnessConfigurationName: "fixture-task-system",
+          harnessConfiguration: taskSystemFixtureConfiguration,
+          harnessConfigurationDigest: execution.harnessConfigurationDigest,
+        },
+        passed: true,
+        turns: [{ passed: true }, { passed: true }],
+      });
+      expect(await readFile(join(directory, "index.html"), "utf8")).toContain("Incoming queue");
+      const unsafe = {
+        ...artifact,
+        turns: artifact.turns.map((turn, turnIndex) => turnIndex === 0 ? {
+          ...turn,
+          prompt: '<img src=x onerror="alert(1)">',
+          output: {
+            ...turn.output,
+            rootLayer: {
+              ...turn.output.rootLayer,
+              nodes: turn.output.rootLayer.nodes.map((node, nodeIndex) => nodeIndex === 0 ? { ...node, title: '<img src=x onerror="alert(2)">' } : node),
+            },
+          },
+        } : turn),
+      };
+      const html = renderArtifact(unsafe);
+      expect(html).not.toContain('<img src=x onerror="alert');
+      expect(html).toContain("title.textContent=node.title");
+      expect(html).toContain("110+placement.x*740");
+    }
+
+    // Checkpoint: every structured judge turn starts with the explicit managed Codex executable.
+    {
+      const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-managed-judge-")); temporary.push(outputDirectory);
+      const execution = {
+        ...fixtureExecution(),
+        judgeConfiguration: { name: "codex-structured" as const },
+      };
+      const starts: { codexPathOverride: string | undefined; workingDirectory: string | undefined }[] = [];
+      const judgeThreadFactory: BasicJudgeThreadFactory = {
+        start(codexOptions, threadOptions) {
+          starts.push({
+            codexPathOverride: codexOptions.codexPathOverride,
+            workingDirectory: threadOptions.workingDirectory,
+          });
+          return {
+            async run() {
+              return {
+                finalResponse: JSON.stringify({
+                  factIds: basicEvalFacts.map(({ id }) => id),
+                  graphUseful: true,
+                  detailsUseful: true,
+                  problems: [],
+                  verdict: "pass",
+                }),
+              };
+            },
+          };
         },
       };
-    };
 
-    const artifact = await runBasicRuntimeEval({
-      outputDirectory,
-      execution: fixtureExecution(),
-      implementations: { "fixture.task-system": slowFactory },
-      harnessCloseGraceMs: 250,
-    });
+      const artifact = await runBasicRuntimeEval({
+        outputDirectory,
+        execution,
+        implementations,
+        judgeCodexPathOverride: "/managed/codex/bin/codex",
+        judgeThreadFactory,
+      });
 
-    expect(artifact.passed).toBe(true);
-    expect(disposed).toBe(true);
-  });
-
-  it("runs two interactions through one live harness object and saves both fixture graphs", async () => {
-    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-test-")); temporary.push(outputDirectory);
-    const execution = fixtureExecution();
-    const artifact = await runBasicRuntimeEval({ outputDirectory, execution, implementations });
-    expect(artifact.passed).toBe(true);
-    expect(artifact.execution).toEqual(execution);
-    expect(artifact.turns).toHaveLength(2);
-    expect(artifact.turns.map((turn) => turn.output.nodeId)).toEqual(artifact.turns.map((turn) => turn.interactionNodeId));
-    expect(artifact.turns.every((turn) => turn.output.rootLayer.nodes.length === 3)).toBe(true);
-    expect(artifact.turns.every((turn) => turn.output.rootLayer.edges.length === 2)).toBe(true);
-    expect(artifact.turns.every((turn) => turn.output.rootLayer.layer.layout?.version === 1)).toBe(true);
-    expect(artifact.turns.every((turn) => turn.output.rootLayer.layer.layout?.placements.length === 3)).toBe(true);
-    expect(artifact.turns.every((turn) => turn.checks.every((check) => check.passed))).toBe(true);
-    expect(artifact.turns.every((turn) => checkBasicFacts(turn.output).every((check) => check.passed))).toBe(true);
-    expect(artifact.sessionChecks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "single-harness-object", passed: true }),
-      expect.objectContaining({ name: "distinct-interaction-capabilities", passed: true }),
-      expect.objectContaining({ name: "revoked-interaction-capabilities", passed: true }),
-    ]));
-    const directory = executionDirectory(outputDirectory, execution);
-    expect(JSON.parse(await readFile(join(directory, "result.json"), "utf8"))).toMatchObject({
-      schemaVersion: 3,
-      execution: {
-        testRunId: "fixture-run",
-        testCaseId: basicEvalCaseId,
-        harnessConfigurationName: "fixture-task-system",
-        harnessConfiguration: taskSystemFixtureConfiguration,
-        harnessConfigurationDigest: execution.harnessConfigurationDigest,
-      },
-      passed: true,
-      turns: [{ passed: true }, { passed: true }],
-    });
-    expect(await readFile(join(directory, "index.html"), "utf8")).toContain("Incoming queue");
-    const unsafe = {
-      ...artifact,
-      turns: artifact.turns.map((turn, turnIndex) => turnIndex === 0 ? {
-        ...turn,
-        prompt: '<img src=x onerror="alert(1)">',
-        output: {
-          ...turn.output,
-          rootLayer: {
-            ...turn.output.rootLayer,
-            nodes: turn.output.rootLayer.nodes.map((node, nodeIndex) => nodeIndex === 0 ? { ...node, title: '<img src=x onerror="alert(2)">' } : node),
-          },
-        },
-      } : turn),
-    };
-    const html = renderArtifact(unsafe);
-    expect(html).not.toContain('<img src=x onerror="alert');
-    expect(html).toContain("title.textContent=node.title");
-    expect(html).toContain("110+placement.x*740");
-  }, 15_000);
+      expect(artifact.passed).toBe(true);
+      expect(starts).toHaveLength(2);
+      expect(starts.every(({ codexPathOverride }) => codexPathOverride === "/managed/codex/bin/codex")).toBe(true);
+      expect(starts.every(({ workingDirectory }) => typeof workingDirectory === "string")).toBe(true);
+    }
+  }, 30_000);
 
   it("proves prior accepted graph search and typed reference reuse across two capabilities in one session", async () => {
     const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-graph-memory-"));
@@ -698,93 +752,54 @@ describe("first runtime evaluation", () => {
       ]));
     }
   }, 30_000);
-
-  it("uses the explicit managed Codex executable for every structured judge turn", async () => {
-    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-managed-judge-")); temporary.push(outputDirectory);
-    const execution = {
-      ...fixtureExecution(),
-      judgeConfiguration: { name: "codex-structured" as const },
-    };
-    const starts: { codexPathOverride: string | undefined; workingDirectory: string | undefined }[] = [];
-    const judgeThreadFactory: BasicJudgeThreadFactory = {
-      start(codexOptions, threadOptions) {
-        starts.push({
-          codexPathOverride: codexOptions.codexPathOverride,
-          workingDirectory: threadOptions.workingDirectory,
-        });
-        return {
-          async run() {
-            return {
-              finalResponse: JSON.stringify({
-                factIds: basicEvalFacts.map(({ id }) => id),
-                graphUseful: true,
-                detailsUseful: true,
-                problems: [],
-                verdict: "pass",
-              }),
-            };
-          },
-        };
+  it("fails closed for unusable graph servers", async () => {
+    const recipes = [
+      {
+        label: "unexecutable binary reports a controlled startup failure",
+        file: "not-executable",
+        content: "not a binary",
+        mode: 0o644,
+        options: {},
+        error: "Graph server could not start",
       },
-    };
-
-    const artifact = await runBasicRuntimeEval({
-      outputDirectory,
-      execution,
-      implementations,
-      judgeCodexPathOverride: "/managed/codex/bin/codex",
-      judgeThreadFactory,
-    });
-
-    expect(artifact.passed).toBe(true);
-    expect(starts).toHaveLength(2);
-    expect(starts.every(({ codexPathOverride }) => codexPathOverride === "/managed/codex/bin/codex")).toBe(true);
-    expect(starts.every(({ workingDirectory }) => typeof workingDirectory === "string")).toBe(true);
-  });
-
-  it("reports a controlled failure when the graph server cannot be executed", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-eval-spawn-error-")); temporary.push(directory);
-    const executable = join(directory, "not-executable");
-    await writeFile(executable, "not a binary", "utf8");
-    await chmod(executable, 0o644);
-
-    await expect(runBasicRuntimeEval({
-      outputDirectory: join(directory, "output"),
-      execution: fixtureExecution(),
-      implementations,
-      serverBinary: executable,
-    })).rejects.toThrow("Graph server could not start");
-  });
-
-  it("times out and terminates a graph process that never becomes ready", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-eval-timeout-")); temporary.push(directory);
-    const executable = join(directory, "stalled-server");
-    await writeFile(executable, "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nsetInterval(() => {}, 30_000);\n", "utf8");
-    await chmod(executable, 0o755);
-
-    await expect(runBasicRuntimeEval({
-      outputDirectory: join(directory, "output"),
-      execution: fixtureExecution(),
-      implementations,
-      serverBinary: executable,
-      serverReadyTimeoutMs: 300,
-    })).rejects.toThrow("did not become ready");
-  });
-
-  it("terminates a graph process that emits invalid readiness output", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-eval-invalid-ready-")); temporary.push(directory);
-    const executable = join(directory, "invalid-server");
-    await writeFile(executable, "#!/usr/bin/env node\nprocess.stdout.write('not-json\\n');\nsetInterval(() => {}, 30_000);\n", "utf8");
-    await chmod(executable, 0o755);
-
-    await expect(runBasicRuntimeEval({
-      outputDirectory: join(directory, "output"),
-      execution: fixtureExecution(),
-      implementations,
-      serverBinary: executable,
-    })).rejects.toThrow("Unexpected token");
-  });
+      {
+        label: "a server that never becomes ready is terminated at the deadline",
+        file: "stalled-server",
+        content: "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nsetInterval(() => {}, 30_000);\n",
+        mode: 0o755,
+        options: { serverReadyTimeoutMs: 300 },
+        error: "did not become ready",
+      },
+      {
+        label: "invalid readiness output terminates the process",
+        file: "invalid-server",
+        content: "#!/usr/bin/env node\nprocess.stdout.write('not-json\\n');\nsetInterval(() => {}, 30_000);\n",
+        mode: 0o755,
+        options: {},
+        error: "Unexpected token",
+      },
+    ];
+    expect(recipes, "fail-closed corpus").toHaveLength(3);
+    for (const recipe of recipes) {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-eval-server-failure-"));
+      temporary.push(directory);
+      const serverBinary = join(directory, recipe.file);
+      await writeFile(serverBinary, recipe.content, "utf8");
+      await chmod(serverBinary, recipe.mode);
+      await expect(
+        runBasicRuntimeEval({
+          outputDirectory: join(directory, "output"),
+          execution: fixtureExecution(),
+          implementations,
+          serverBinary,
+          ...recipe.options,
+        }),
+        recipe.label,
+      ).rejects.toThrow(recipe.error);
+    }
+  }, 30_000);
 });
+
 
 async function listenServer(onRequest: () => boolean | void): Promise<{ readonly url: string; readonly close: () => Promise<void> }> {
   const server = createServer((_request, response) => {
