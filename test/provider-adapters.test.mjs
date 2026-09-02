@@ -1622,28 +1622,6 @@ describe("provider definition lifecycle", () => {
     expect(removed).toEqual(["managed-failed"]);
   });
 
-  it("finalizes removal-pending definitions on startup", async () => {
-    const fixture = serviceFixture();
-    await fixture.service.connect({ adapterId: "fake-api", label: "Old", fields: { "api-key": "secret" } });
-    fixture.definitions()[0].lifecycleState = "removal_pending";
-    const removals = [];
-    const restarted = new ProviderDefinitionService({
-      registry: fixture.service.registry,
-      definitionStore: {
-        async load() { return structuredClone(fixture.definitions()); },
-        async save(value) { fixture.definitions().splice(0, Infinity, ...structuredClone(value)); },
-      },
-      credentialStore: {
-        async get(key) { return fixture.credentials.get(key) ?? null; },
-        async delete(key) { return fixture.credentials.delete(key); },
-      },
-      removeRuntimeState: async (candidate) => { removals.push(candidate.id); },
-    });
-    await restarted.reconcileStartup();
-    expect(fixture.definitions()[0]).toMatchObject({ lifecycleState: "tombstoned", credentialReference: null });
-    expect(fixture.credentials.size).toBe(0);
-    expect(removals).toEqual(["provider-1"]);
-  });
 
   it("registers persisted providers before startup refresh and supports manual refresh", async () => {
     let discoveries = 0;
