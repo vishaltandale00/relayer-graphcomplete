@@ -192,8 +192,8 @@ export function providerDefinitionsMarkup(definitions, defaults = {}, descriptor
     const canReconnect = canLogout && status.lifecycle === "unavailable";
     const canRecoverFamily = ["refresh_models", "repair_execution"].includes(status.recovery);
     const recoveryLabel = status.recovery === "repair_execution"
-      ? "Repair execution configurations"
-      : "Refresh models and set up defaults";
+      ? "Repair"
+      : "Refresh models";
     return `<article class="provider-definition-card ${escapeHtmlAttribute(status.lifecycle)}" data-provider-definition="${escapeHtmlAttribute(definition.id)}">
       <div class="provider-definition-heading"><div class="provider-definition-identity">${providerLogoMarkup(definition.adapterId)}<div class="provider-definition-copy"><h3>${escapeHtml(definition.label)}</h3><span>${escapeHtml(definition.adapterLabel ?? definition.adapterId)}</span></div></div><span class="provider-status ${status.usable ? "connected" : "unavailable"}">${escapeHtml(status.label)}</span></div>
       <dl><div><dt>Endpoint</dt><dd>${escapeHtml(definition.endpoint ?? "Managed by subscription")}</dd></div><div><dt>Access</dt><dd>${escapeHtml(definition.accessContract ?? "Managed")}</dd></div></dl>

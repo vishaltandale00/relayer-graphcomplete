@@ -40,6 +40,7 @@ function element() {
 function fixture() {
   const elements = {
     accountButton: element(),
+    accountLabel: element(),
     onboarding: { ...element(), classList: classList("hidden") },
     onboardingChannel: element(),
     onboardingStatus: element(),
@@ -92,7 +93,7 @@ describe("desktop account presentation", () => {
 
     expect(elements.onboarding.classList.contains("hidden")).toBe(false);
     expect(showWorkspace).not.toHaveBeenCalled();
-    expect(elements.accountButton.textContent).toBe("Sign in");
+    expect(elements.accountLabel.textContent).toBe("Sign in");
     expect(elements.onboardingStatus.textContent).toContain("privacy-filtered error reports");
 
     elements.onboardingNotNow.onclick();
@@ -128,7 +129,7 @@ describe("desktop account presentation", () => {
       accessToken: "secret",
     });
 
-    expect(elements.accountButton.textContent).toBe("Account");
+    expect(elements.accountLabel.textContent).toBe("Account");
     expect(elements.settingsStatus.textContent).toBe("Signed in");
     expect(elements.settingsLogout.classList.contains("hidden")).toBe(false);
     expect(elements.settingsSignIn.classList.contains("hidden")).toBe(true);
@@ -150,7 +151,7 @@ describe("desktop account presentation", () => {
     });
   });
 
-  it("starts sign-in directly from the bottom-right control and opens settings only for an existing account", async () => {
+  it("starts sign-in directly from the sidebar-footer control and opens settings only for an existing account", async () => {
     const { controller, elements, openSettings, api, changed } = fixture();
     await controller.start();
 
@@ -184,7 +185,7 @@ describe("desktop account presentation", () => {
     elements.settingsSignIn.onclick();
 
     expect(api.login).toHaveBeenCalledOnce();
-    expect(elements.accountButton.textContent).toBe("Signing in…");
+    expect(elements.accountLabel.textContent).toBe("Signing in…");
     expect(elements.accountButton.disabled).toBe(true);
     expect(elements.onboardingSignIn.disabled).toBe(true);
     expect(elements.settingsSignIn.disabled).toBe(true);
@@ -257,9 +258,15 @@ describe("desktop account presentation", () => {
     // Nothing floats over the workspace any more, and the control keeps its
     // glyph when the sidebar collapses to icons.
     expect(css).not.toContain("desktop-account-corner-control");
-    expect(css).toContain('.account-footer-button:before{content:"\\25CE"');
-    expect(css).toContain("body.sidebar-collapsed .account-footer-button{font-size:0");
-    expect(css).toContain("body.sidebar-collapsed .account-footer-button:before{font-size:13px}");
+    // A drawn person mark in the sidebar's stroked-SVG idiom, not a glyph.
+    expect(css).toContain(".account-footer-button svg{width:16px;height:16px");
+    expect(css).toContain("stroke:currentColor");
+    expect(css).not.toContain("account-footer-button:before");
+    // The label collapses through the rule every other footer control uses,
+    // leaving the mark visible on the icon-only rail.
+    expect(sidebarFooter).toContain('<span id="desktopAccountLabel">Sign in</span>');
+    expect(sidebarFooter).toContain("<svg viewBox=\"0 0 20 20\"");
+    expect(css).toContain("body.sidebar-collapsed .footer-button span");
     // Two controls do not fit the 58px collapsed rail side by side.
     expect(css).toContain("body.sidebar-collapsed .sidebar-footer{flex-direction:column");
   });

@@ -102,7 +102,7 @@ export function createDesktopAccountController({ api, elements, storage, openSet
     current = normalizeDesktopAccountState(value);
     const copy = presentation(current);
     const directSignIn = current.status === "signed-out" || current.status === "error";
-    elements.accountButton.textContent = copy.accountButton;
+    (elements.accountLabel ?? elements.accountButton).textContent = copy.accountButton;
     elements.accountButton.setAttribute("aria-label", directSignIn
       ? "Sign in to Relayer."
       : `${copy.accountButton}. Open Account settings.`);
@@ -200,6 +200,7 @@ function accountElements() {
   const byId = (id) => document.getElementById(id);
   return {
     accountButton: byId("desktopAccountButton"),
+    accountLabel: byId("desktopAccountLabel"),
     onboarding: byId("desktopAccountOnboarding"),
     onboardingChannel: byId("desktopAccountOnboardingChannel"),
     onboardingStatus: byId("desktopAccountOnboardingStatus"),

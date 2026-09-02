@@ -27,7 +27,7 @@ describe("provider onboarding renderer state", () => {
         code: "provider_no_eligible_execution_models",
         message: "No supported text models are available.",
       },
-    })).toEqual({ kind: "refresh_models", label: "Refresh models and set up defaults" });
+    })).toEqual({ kind: "refresh_models", label: "Refresh models" });
     expect(providerOnboardingRecoveryAction({
       blockingReason: { code: "harness_unavailable", message: "Install the harness." },
     })).toBeNull();
@@ -36,7 +36,7 @@ describe("provider onboarding renderer state", () => {
         code: "provider_no_available_execution_configurations",
         message: "No execution configuration is ready.",
       },
-    })).toEqual({ kind: "repair_execution", label: "Repair execution configurations" });
+    })).toEqual({ kind: "repair_execution", label: "Repair" });
   });
 
   it("rejects an out-of-order projection and binds recovery to the rendered provider", () => {
