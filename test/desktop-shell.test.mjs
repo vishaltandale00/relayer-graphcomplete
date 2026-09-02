@@ -1951,6 +1951,70 @@ describe("desktop skeleton", () => {
     expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
   });
 
+  it("polls for updates on a schedule without disturbing one already in flight", async () => {
+    const pollUpdater = ({ isPackaged = true } = {}) => {
+      const autoUpdater = Object.assign(new EventEmitter(), {
+        checkForUpdates: vi.fn(async () => undefined),
+        downloadUpdate: vi.fn(async () => undefined),
+        setFeedURL: vi.fn(),
+        quitAndInstall: vi.fn(),
+      });
+      let scheduled = null;
+      const setPollTimer = vi.fn((callback, interval) => {
+        scheduled = { callback, interval, cleared: false };
+        return scheduled;
+      });
+      const clearPollTimer = vi.fn((timer) => { timer.cleared = true; });
+      const updater = createDesktopUpdater({
+        autoUpdater,
+        app: { isPackaged, getVersion: () => "0.2.0" },
+        emit: vi.fn(),
+        updateBaseUrl: DESKTOP_UPDATE_BASE_URL,
+        pollIntervalMs: 1_000,
+        setPollTimer,
+        clearPollTimer,
+      });
+      return { autoUpdater, updater, setPollTimer, clearPollTimer, tick: () => scheduled?.callback(), scheduled: () => scheduled };
+    };
+
+    const development = pollUpdater({ isPackaged: false });
+    expect(development.updater.startPolling()).toBe(false);
+    expect(development.setPollTimer).not.toHaveBeenCalled();
+
+    const packaged = pollUpdater();
+    expect(packaged.updater.startPolling()).toBe(true);
+    expect(packaged.scheduled().interval).toBe(1_000);
+    // Starting twice must not stack a second timer on the first.
+    expect(packaged.updater.startPolling()).toBe(false);
+    expect(packaged.setPollTimer).toHaveBeenCalledOnce();
+
+    await packaged.tick();
+    expect(packaged.autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+
+    // Every phase where the update is already the user's business is skipped,
+    // and a poll never resets the progress the user is watching.
+    for (const [event, payload] of [
+      ["checking-for-update", undefined],
+      ["update-available", { version: "0.2.1" }],
+      ["download-progress", { percent: 42 }],
+      ["update-downloaded", { version: "0.2.1" }],
+    ]) {
+      packaged.autoUpdater.emit(event, payload);
+      await packaged.tick();
+      expect(packaged.autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+    }
+    expect(packaged.updater.status()).toMatchObject({ phase: "ready", percent: 100 });
+
+    // A failure is not in flight, so the next poll retries it.
+    packaged.autoUpdater.emit("error", new Error("offline"));
+    await packaged.tick();
+    expect(packaged.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2);
+
+    expect(packaged.updater.stopPolling()).toBe(true);
+    expect(packaged.clearPollTimer).toHaveBeenCalledOnce();
+    expect(packaged.updater.stopPolling()).toBe(false);
+  });
+
   it("suppresses macOS updates below the manifest's Darwin kernel floor", async () => {
     const updateInfo = { version: "0.3.0", minimumSystemVersion: "22.4.0" };
     const unsupportedHosts = [

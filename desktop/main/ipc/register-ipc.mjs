@@ -1,5 +1,10 @@
 import { inspectFolder } from "../services/folder-service.mjs";
 
+// Sign-in continues in the browser, so the browser has to come forward.
+// Relying on the platform default left users looking at an unchanged
+// Relayer window while the real next step sat behind it.
+const BROWSER_HANDOFF = Object.freeze({ activate: true });
+
 const MAX_COMPOSER_DRAFT_BYTES = 1024 * 1024;
 const MAX_FOLLOWUP_DRAFTS = 256;
 
@@ -67,7 +72,7 @@ export function registerDesktopIpc({
     ipcMain.handle("relayer:account-read", () => credentials.account());
     ipcMain.handle("relayer:account-login", async () => {
       const result = await credentials.login();
-      if (result?.authUrl) await shell.openExternal(result.authUrl);
+      if (result?.authUrl) await shell.openExternal(result.authUrl, BROWSER_HANDOFF);
       return result?.authUrl
         ? { status: "pending", loginId: result?.loginId ?? null }
         : result;
@@ -95,7 +100,7 @@ export function registerDesktopIpc({
   ipcMain.handle("relayer:provider-connect", async (_event, input) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const result = await providerDefinitions.connect(input);
-    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl);
+    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl, BROWSER_HANDOFF);
     getWindow()?.webContents.send("relayer:providers-changed", {
       kind: result.status === "connected" ? "connected" : "connection_pending",
       providerId: result.providerDefinition.id,
@@ -130,7 +135,7 @@ export function registerDesktopIpc({
   ipcMain.handle("relayer:provider-reconnect", async (_event, { id }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const result = await providerDefinitions.reconnect(id);
-    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl);
+    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl, BROWSER_HANDOFF);
     getWindow()?.webContents.send("relayer:providers-changed", {
       kind: "reconnect_pending",
       providerId: result.providerDefinition.id,

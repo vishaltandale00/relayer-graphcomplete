@@ -823,7 +823,7 @@ interface CompletionTerminalError extends Error {
 <ul>
 <li>The final onboarding offer explains that privacy-filtered error reports may use a pseudonymous Auth0 subject.</li>
 <li><strong>Sign in</strong> opens the browser flow. <strong>Continue without an account</strong> durably suppresses later automatic offers.</li>
-<li>The bottom-right <strong>Sign in</strong> control starts the browser flow directly while signed out.</li>
+<li>The sidebar-footer <strong>Sign in</strong> control starts the browser flow directly while signed out.</li>
 <li>For an existing account, the same control opens a minimal Account panel with status and the applicable action.</li>
 <li>Signed-out, signing-in, uncertain, error, offline, cancellation, and refresh failure never gate local product use.</li>
 <li>Logout disables the current telemetry generation and clears the encrypted local refresh credential before best-effort Auth0 revocation. It does not sign the browser out.</li>
@@ -894,7 +894,7 @@ type InteractionModelBinding = {
 <li><strong>ACC-005:</strong> The renderer never receives codes, state, PKCE material, tokens, Auth0 configuration, email, profile data, network authority, or the telemetry generation.</li>
 <li><strong>ACC-006:</strong> Refresh rotation and logout cannot resurrect stale credentials after generation invalidation.</li>
 <li><strong>ACC-007:</strong> Optional account sign-in is a dedicated onboarding step after provider setup and before projects, chats, threads, or the desktop workspace are revealed. Sign in and Continue without an account both resolve the step, and account failure cannot trap local use.</li>
-<li><strong>ACC-008:</strong> The bottom-right control starts sign-in directly while signed out and opens minimal settings for an existing account. Account UX never shows Stable or Preview.</li>
+<li><strong>ACC-008:</strong> The sidebar-footer control, beside Settings, starts sign-in directly while signed out and opens minimal settings for an existing account. Account UX never shows Stable or Preview.</li>
 <li><strong>TEL-001:</strong> Electron main alone owns Sentry admission, identity, queueing, SDK configuration, and transport.</li>
 <li><strong>TEL-002:</strong> Only a verified account generation reports. Main derives the stable domain-separated pseudonym and callers cannot supply identity.</li>
 <li><strong>TEL-003:</strong> The final event contains only approved fields. Forbidden privacy fixtures fail before transport and queue persistence.</li>
@@ -1208,7 +1208,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <p><strong>Acceptance:</strong> Restart preserves the last accepted graph without corruption.</p>
 </section>
 <h3>8.1 Saved threads and navigation</h3>
-<p>The left sidebar contains New Thread, Chats, and Projects. Chats contains no-folder chats. Projects contains saved thread entries. The footer contains a Settings icon. It also contains a Download update icon when an update is available.</p>
+<p>The left sidebar contains New Thread, Chats, and Projects. Chats contains no-folder chats. Projects contains saved thread entries. The footer contains a Settings control and the Account control. It also contains a Download update icon when an update is available.</p>
 <p>The sidebar is a compact list. It is not a recursive graph tree. A child conversation can become a saved sidebar entry. The sidebar does not show its full ancestry. Graph breadcrumbs show this ancestry.</p>
 <p>The header shows the current thread title, scope, and backward/forward turn controls. The composer remains the place to send, stop, and attach context. There is no separate <code>active run</code> dashboard.</p>
 <h3>8.2 Local persistence and restart recovery</h3>
@@ -1252,7 +1252,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <h3>10.2 Desktop application updates</h3>
 <p>Signed desktop updates are essential V1 distribution infrastructure.</p>
 <ol>
-<li>The app checks a configured HTTPS release channel for a signed manifest.</li>
+<li>The app checks a configured HTTPS release channel for a signed manifest. It checks shortly after launch and again on a recurring background schedule. A session left open past a release still discovers it. A scheduled check is skipped while a check, offer, download, or staged install is already in flight.</li>
 <li>It compares version and schema compatibility without blocking the user.</li>
 <li>It downloads in the background and verifies hash and publisher signature.</li>
 <li>When an update is available, a small highlighted circular download icon appears at the bottom-right of the sidebar. No version number or update label is permanently shown.</li>

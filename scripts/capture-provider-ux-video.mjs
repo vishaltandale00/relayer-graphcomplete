@@ -302,21 +302,24 @@ async function recordBrowserFlow(url, directory, profile) {
       await waitFor("!document.querySelector('#appShell').classList.contains('hidden') && !document.body.classList.contains('desktop-account-pending')", "desktop application");
       await evaluate(`(() => {
         const control = document.querySelector('#desktopAccountButton');
-        const rect = control.getBoundingClientRect();
         const style = getComputedStyle(control);
-        const rightGap = window.innerWidth - rect.right;
-        const bottomGap = window.innerHeight - rect.bottom;
-        if (style.position !== 'fixed' || Math.abs(rightGap - 16) > 1 || Math.abs(bottomGap - 14) > 1) {
-          throw new Error('Account control is not anchored to the viewport bottom-right corner.');
+        if (!control.closest('.sidebar-footer')) {
+          throw new Error('Account control is not seated in the sidebar footer.');
         }
-        if (control.closest('.sidebar') || /preview|stable/i.test(control.textContent)) {
-          throw new Error('Everyday account control leaked sidebar or release-channel presentation.');
+        if (style.position === 'fixed') {
+          throw new Error('Account control still floats over the workspace.');
+        }
+        if (!document.querySelector('.sidebar-footer #settingsButton')) {
+          throw new Error('Account control did not join Settings in the sidebar footer.');
+        }
+        if (/preview|stable/i.test(control.textContent)) {
+          throw new Error('Everyday account control leaked release-channel presentation.');
         }
         return true;
       })()`);
-      await caption("4 · Start Relayer sign-in directly from the bottom-right control");
+      await caption("4 · Start Relayer sign-in directly from the sidebar footer control");
       await click("#desktopAccountButton");
-      await waitFor("window.__providerEvidence.accountLoginCalls === 1 && document.querySelector('#desktopAccountButton').textContent === 'Signing in…'", "direct bottom-right account sign-in");
+      await waitFor("window.__providerEvidence.accountLoginCalls === 1 && document.querySelector('#desktopAccountButton').textContent === 'Signing in…'", "direct sidebar-footer account sign-in");
       await click('[data-model-picker="new"] [data-model-picker-trigger]');
       await waitFor(`(() => {
         const picker = document.querySelector('[data-model-picker="new"]');
