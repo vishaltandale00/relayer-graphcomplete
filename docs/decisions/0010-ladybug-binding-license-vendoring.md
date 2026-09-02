@@ -44,8 +44,9 @@ added so a missing or mutated binding notice fails verification.
 
 Packaging bundles `vendor/ladybug/notices/` to `notices/ladybug` and asserts the bundle after
 packing: the main desktop package verifies every inventoried notice is present with its pinned
-digest and that no unlisted file shipped, and the Eval package runs a notices-only afterPack
-hook (it carries the compiled Ladybug graph server but not the Prime Agent runtime). The PRD
+digest and that no unlisted file shipped, and the Eval package runs the same shared bundle check
+with Prime Agent verification scoped out (it carries the compiled Ladybug graph server but not
+the Prime Agent runtime). The PRD
 already promises the build "verifies that the .app contains … licenses", so bundling is not a
 new product decision; it needs the `afterPack` check to make the promise true.
 

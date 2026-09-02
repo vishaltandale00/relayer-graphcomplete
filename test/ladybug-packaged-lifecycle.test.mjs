@@ -120,6 +120,31 @@ describe("Ladybug packaged lifecycle qualification", () => {
       verifyNativeReceipts: async () => nativeReceipt,
     })).resolves.toEqual({ manifest, nativeReceipt });
   });
+  it("rejects incomplete or malformed distribution-license receipts in the real gate", async () => {
+    const complete = { licenseReceipt: { completeForDistribution: true } };
+    const clean = { releaseBlockers: [] };
+    // Only a literal `true` counts as complete; a truthy stand-in must not pass.
+    for (const completeForDistribution of [false, "true"]) {
+      await expect(requireLadybugDistributionLicenseReady({
+        loadSourceManifest: async () => ({ licenseReceipt: { completeForDistribution } }),
+        verifyNativeReceipts: async () => clean,
+      })).rejects.toThrow("not release-ready: source complete=false; native blockers=none.");
+    }
+    await expect(requireLadybugDistributionLicenseReady({
+      loadSourceManifest: async () => complete,
+      verifyNativeReceipts: async () => ({ releaseBlockers: ["lbug-binding-missing-upstream-license-file"] }),
+    })).rejects.toThrow("source complete=true; native blockers=lbug-binding-missing-upstream-license-file.");
+    // A receipt without a blocker list is not a receipt; it must not read as clean.
+    await expect(requireLadybugDistributionLicenseReady({
+      loadSourceManifest: async () => complete,
+      verifyNativeReceipts: async () => ({}),
+    })).rejects.toThrow("native blockers=invalid-native-license-receipt.");
+    // A verifier failure propagates unchanged instead of being swallowed.
+    await expect(requireLadybugDistributionLicenseReady({
+      loadSourceManifest: async () => complete,
+      verifyNativeReceipts: async () => { throw new Error("license notice changed: ladybug-binding-LICENSE"); },
+    })).rejects.toThrow("license notice changed: ladybug-binding-LICENSE");
+  });
   function minimalPe({
     machine = 0x8664,
     imports = ["KERNEL32.dll"],
