@@ -26,8 +26,8 @@ import { RecursivePresentationReviewStore } from "../src/simulated-user/recursiv
 import type { LayerReview, NodeReview, TurnReview } from "../src/simulated-user/contracts.js";
 
 describe("simulated-user Codex judge runner", () => {
-  it("guides legacy judges through required input-action coverage", () => {
-    const inventory = inventoryReviewSubjects({
+  it("builds rubric-driven judge prompts for legacy, recursive, and judge-only reruns", () => {
+    const inputInventory = inventoryReviewSubjects({
       turnId: "turn-input",
       rootLayerId: "layer-input",
       layers: [{
@@ -44,70 +44,78 @@ describe("simulated-user Codex judge runner", () => {
       }],
     });
 
-    const prompt = buildSimulatedUserJudgePrompt("Prepare the deployment.", SIMULATED_USER_RUBRIC_V1, inventory);
-    expect(prompt).toContain("every visible navigate, invoke, or input action");
-    expect(prompt).toContain("prompt answerability, option-set quality, and control fit");
-    expect(prompt).toContain("structure.input");
-  });
+    const legacyPrompt = buildSimulatedUserJudgePrompt("Prepare the deployment.", SIMULATED_USER_RUBRIC_V1, inputInventory);
+    expect(legacyPrompt, "legacy judges are guided through required input-action coverage").toContain("every visible navigate, invoke, or input action");
+    expect(legacyPrompt, "legacy judges name the input-action quality criteria").toContain("prompt answerability, option-set quality, and control fit");
+    expect(legacyPrompt, "legacy judges see the structure.input disclosure").toContain("structure.input");
 
-  it("requires first-class artifact-grounded findings for materially absent actions", () => {
-    const inventory = inventoryReviewSubjects({
+    const flatInventory = inventoryReviewSubjects({
       turnId: "turn-1",
       rootLayerId: "layer-1",
       layers: [{ id: "layer-1", nodeIds: ["node-1"], actions: [] }],
     });
-    const prompt = buildRecursivePresentationJudgePrompt(
+    const recursivePrompt = buildRecursivePresentationJudgePrompt(
       "Explain the completed repair.",
       GRAPH_PRESENTATION_RUBRIC_V11,
-      inventory,
+      flatInventory,
       undefined,
       true,
     );
 
-    expect(prompt).toContain("A flat graph does not escape recursive judgment");
-    expect(prompt).toContain("missingActionOpportunity");
-    expect(prompt).toContain("distinct unanswered user question");
-    expect(prompt).toContain("Generic requests for more detail");
-    expect(prompt).toContain("caps final recursive_coherence, navigation_value, and presentation_quality at 6");
-    expect(prompt).toContain("Read-only shell and filesystem inspection are available");
-    expect(prompt).toContain("what would a user reasonably want to inspect next");
-    expect(prompt).toContain("what would a user reasonably want to do next");
-    expect(prompt).toContain("Do not impose a minimum number of actions");
-    expect(prompt).toContain("a visually arbitrary row, line, ring, or hub");
-    expect(prompt).toContain("Embedded screenshots and image banners are not currently supported");
-    expect(prompt).toContain("This is the human-experience judge, not the function or task-outcome judge");
-    expect(prompt).toContain("can neither earn nor remove human-experience credit");
-    expect(prompt).toContain("deserves little relationship_clarity credit");
-    expect(prompt).toContain("Never lower the ceiling for artifact defects");
-    expect(prompt).toContain("Score polish as a separate basic rendered-integrity dimension");
-    expect(prompt).toContain("A default renderer may be polished while the graph remains semantically weak");
-    expect(prompt).toContain("Never use polish to raise or offset content");
-    expect(prompt).toContain("erase polish-only observations from the evidence");
-    expect(prompt).toContain("A clean textual handoff split across static cards earns no semantic or interactive credit merely for polish");
-    expect(prompt).toContain("Do not treat adjacency or reading order as relational evidence");
-    expect(prompt).toContain("Two or more material missing opportunities cap all three at 4");
-    expect(prompt).toContain("expand, reference, invoke, input, and stop");
-    expect(prompt).toContain("before any answer is committed");
-    expect(prompt).toContain("input-action-<presentingInteractionNodeId>-<presentingLayerId>-<actionId>");
-    expect(prompt).not.toContain("`input-action-<actionId>`");
-    expect(prompt).toContain("never end the turn immediately after reviewNode");
-    expect(prompt).toContain("asking for what the artifact already states");
-    expect(prompt).toContain("asking to dodge a judgment the node should have made");
-    expect(prompt).toContain("fragmenting one decision into a separate question per node");
-    expect(prompt).toContain("Necessity is an allocation counterweight, not an input-action quality score");
-    expect(prompt).toContain("single-select choices are mutually exclusive");
-    expect(prompt).toContain("multi-select choices are distinct and non-overlapping");
-    expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria.option_set_quality.description).toContain(
-      "Single-select options should be mutually exclusive",
-    );
-    expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria.option_set_quality.description).toContain(
-      "multi-select options should be distinct and non-overlapping",
-    );
-    expect(prompt).not.toContain("Shell, filesystem, web, network, graph mutation, and invoke execution are unavailable");
-  });
+    const required = [
+      "A flat graph does not escape recursive judgment",
+      "missingActionOpportunity",
+      "distinct unanswered user question",
+      "Generic requests for more detail",
+      "caps final recursive_coherence, navigation_value, and presentation_quality at 6",
+      "Read-only shell and filesystem inspection are available",
+      "what would a user reasonably want to inspect next",
+      "what would a user reasonably want to do next",
+      "Do not impose a minimum number of actions",
+      "a visually arbitrary row, line, ring, or hub",
+      "Embedded screenshots and image banners are not currently supported",
+      "This is the human-experience judge, not the function or task-outcome judge",
+      "can neither earn nor remove human-experience credit",
+      "deserves little relationship_clarity credit",
+      "Never lower the ceiling for artifact defects",
+      "Score polish as a separate basic rendered-integrity dimension",
+      "A default renderer may be polished while the graph remains semantically weak",
+      "Never use polish to raise or offset content",
+      "erase polish-only observations from the evidence",
+      "A clean textual handoff split across static cards earns no semantic or interactive credit merely for polish",
+      "Do not treat adjacency or reading order as relational evidence",
+      "Two or more material missing opportunities cap all three at 4",
+      "expand, reference, invoke, input, and stop",
+      "before any answer is committed",
+      "input-action-<presentingInteractionNodeId>-<presentingLayerId>-<actionId>",
+      "never end the turn immediately after reviewNode",
+      "asking for what the artifact already states",
+      "asking to dodge a judgment the node should have made",
+      "fragmenting one decision into a separate question per node",
+      "Necessity is an allocation counterweight, not an input-action quality score",
+      "single-select choices are mutually exclusive",
+      "multi-select choices are distinct and non-overlapping",
+    ] as const;
+    const forbidden = [
+      "`input-action-<actionId>`",
+      "Shell, filesystem, web, network, graph mutation, and invoke execution are unavailable",
+    ] as const;
+    for (const phrase of required) {
+      expect.soft(recursivePrompt, `recursive prompt requires first-class artifact-grounded findings: ${phrase}`).toContain(phrase);
+    }
+    for (const phrase of forbidden) {
+      expect.soft(recursivePrompt, `recursive prompt must not contain: ${phrase}`).not.toContain(phrase);
+    }
+    expect(
+      GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria.option_set_quality.description,
+      "the option-set quality criterion pins single-select exclusivity",
+    ).toContain("Single-select options should be mutually exclusive");
+    expect(
+      GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria.option_set_quality.description,
+      "the option-set quality criterion pins multi-select distinctness",
+    ).toContain("multi-select options should be distinct and non-overlapping");
 
-  it("keeps judge-only rerun instructions immutable when no input operator is available", () => {
-    const inventory = inventoryReviewSubjects({
+    const occurrenceInventory = inventoryReviewSubjects({
       turnId: "turn-input",
       rootLayerId: "layer-input",
       layers: [{
@@ -125,21 +133,21 @@ describe("simulated-user Codex judge runner", () => {
       }],
     });
 
-    const prompt = buildRecursivePresentationJudgePrompt(
+    const judgeOnlyPrompt = buildRecursivePresentationJudgePrompt(
       "Prepare the deployment.",
       GRAPH_PRESENTATION_RUBRIC_V11,
-      inventory,
+      occurrenceInventory,
       undefined,
       false,
     );
-    expect(prompt).toContain("No input operator is available for this judge-only rerun");
-    expect(prompt).toContain("remain immutable");
-    expect(prompt).not.toContain("provide one valid answer per action");
-    expect(prompt).not.toContain("activate `send-interaction`");
-    expect(prompt).not.toContain("commissions the answers");
+    expect(judgeOnlyPrompt, "judge-only reruns are announced").toContain("No input operator is available for this judge-only rerun");
+    expect(judgeOnlyPrompt, "judge-only rerun instructions keep prior answers immutable").toContain("remain immutable");
+    for (const phrase of ["provide one valid answer per action", "activate `send-interaction`", "commissions the answers"] as const) {
+      expect(judgeOnlyPrompt, `judge-only reruns must not offer input-operator instructions: ${phrase}`).not.toContain(phrase);
+    }
   });
 
-  it("starts a locked-down injected Codex thread and records an immutable audit artifact", async () => {
+  it("runs a locked-down judge thread and records an immutable audit artifact", async () => {
     const store = finalizedStore();
     let startRequest: JudgeThreadStartRequest | undefined;
     const factory: JudgeThreadFactory = {
@@ -192,7 +200,7 @@ describe("simulated-user Codex judge runner", () => {
       mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
     });
 
-    expect(startRequest?.threadOptions).toMatchObject({
+    expect(startRequest?.threadOptions, "the judge thread is sandboxed read-only and offline").toMatchObject({
       model: "gpt-test",
       modelReasoningEffort: "high",
       sandboxMode: "read-only",
@@ -201,15 +209,15 @@ describe("simulated-user Codex judge runner", () => {
       webSearchMode: "disabled",
       additionalDirectories: [],
     });
-    expect(startRequest?.codexOptions.env).toEqual({
+    expect(startRequest?.codexOptions.env, "only allowlisted variables and the MCP token reach the judge").toEqual({
       HOME: "/Users/test",
       PATH: "/usr/bin",
       [SIMULATED_USER_MCP_TOKEN_ENV]: "test-token-with-at-least-24-characters",
     });
-    expect(startRequest?.codexOptions.codexPathOverride).toBe("/managed/codex");
-    expect(startRequest?.codexOptions.env).not.toHaveProperty("OPENAI_API_KEY");
-    expect(startRequest?.codexOptions.env).not.toHaveProperty("RELAYER_GRAPH_TOKEN");
-    expect(startRequest?.codexOptions.config).toMatchObject({
+    expect(startRequest?.codexOptions.codexPathOverride, "the managed Codex path is honored").toBe("/managed/codex");
+    expect(startRequest?.codexOptions.env, "API keys never reach the judge").not.toHaveProperty("OPENAI_API_KEY");
+    expect(startRequest?.codexOptions.env, "graph tokens never reach the judge").not.toHaveProperty("RELAYER_GRAPH_TOKEN");
+    expect(startRequest?.codexOptions.config, "the judge config exposes only the single review MCP server").toMatchObject({
       features: {
         apps: false,
         browser_use: false,
@@ -228,7 +236,7 @@ describe("simulated-user Codex judge runner", () => {
         },
       },
     });
-    expect(result).toMatchObject({
+    expect(result, "the audit artifact is a versioned, execution-bound record").toMatchObject({
       schemaVersion: 1,
       executionId: "execution-1",
       judge: { model: "gpt-test", modelReasoningEffort: "high" },
@@ -246,61 +254,20 @@ describe("simulated-user Codex judge runner", () => {
         shellAccess: true,
       },
     });
-    expect(result.prompt.text).toContain("Original user request:\nExplain the architecture.");
-    expect(result.prompt.text).toContain("root and expansion layers have no different rules");
-    expect(result.prompt.text).toContain("Do not regrade the reference destination node by node");
-    expect(result.prompt.text).toContain("Need is independent of execution");
-    expect(result.prompt.text).not.toContain(process.cwd());
-    expect(result.prompt.text).not.toContain('"baseRevision": "base-commit"');
-    expect(result.prompt.text).toContain("Changed src/file.ts and verified the focused suite.");
-    expect(result.prompt.text).toContain("The rubric is the contract");
-    expect(result.codexTrace).toEqual([{ id: "message-1", type: "agent_message", text: "Review submitted." }]);
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.codexTrace)).toBe(true);
-    expect(Object.isFrozen(result.codexTrace[0])).toBe(true);
-    expect(Object.isFrozen(result.review)).toBe(true);
-  });
+    expect(result.prompt.text, "the prompt carries the original request").toContain("Original user request:\nExplain the architecture.");
+    expect(result.prompt.text, "the prompt applies one recursive layer policy").toContain("root and expansion layers have no different rules");
+    expect(result.prompt.text, "the prompt forbids regrading reference destinations").toContain("Do not regrade the reference destination node by node");
+    expect(result.prompt.text, "the prompt separates need from execution").toContain("Need is independent of execution");
+    expect(result.prompt.text, "the prompt never leaks the working directory").not.toContain(process.cwd());
+    expect(result.prompt.text, "the prompt never leaks raw artifact revision data").not.toContain('"baseRevision": "base-commit"');
+    expect(result.prompt.text, "the prompt carries the bounded artifact evidence").toContain("Changed src/file.ts and verified the focused suite.");
+    expect(result.prompt.text, "the prompt binds the rubric as the contract").toContain("The rubric is the contract");
+    expect(result.codexTrace, "the trace is the exact judge message list").toEqual([{ id: "message-1", type: "agent_message", text: "Review submitted." }]);
+    expect(Object.isFrozen(result), "the audit artifact is immutable").toBe(true);
+    expect(Object.isFrozen(result.codexTrace), "the trace is immutable").toBe(true);
+    expect(Object.isFrozen(result.codexTrace[0]), "trace items are immutable").toBe(true);
+    expect(Object.isFrozen(result.review), "the review record is immutable").toBe(true);
 
-  it("allows read-only shell evidence while rejecting file, web, and non-review MCP activity", () => {
-    const forbidden: ThreadItem[] = [
-      { id: "file", type: "file_change", changes: [{ path: "x", kind: "add" }], status: "completed" },
-      { id: "web", type: "web_search", query: "anything" },
-      { id: "mcp", type: "mcp_tool_call", server: "other", tool: "read", arguments: {}, status: "completed" },
-    ];
-    for (const item of forbidden) expect(() => assertReviewOnlyCodexTrace([item])).toThrow(/forbidden/i);
-
-    expect(() => assertReviewOnlyCodexTrace([{
-      id: "shell",
-      type: "command_execution",
-      command: "git diff --stat HEAD^",
-      aggregated_output: "src/file.ts | 2 ++",
-      exit_code: 0,
-      status: "completed",
-    }])).not.toThrow();
-
-    expect(() => assertReviewOnlyCodexTrace([{
-      id: "allowed",
-      type: "mcp_tool_call",
-      server: SIMULATED_USER_MCP_SERVER_NAME,
-      tool: "screenshot",
-      arguments: {},
-      status: "completed",
-    }])).not.toThrow();
-  });
-
-  it("uses a strict environment allowlist", () => {
-    expect(sanitizeJudgeEnvironment({
-      HOME: "/home/test",
-      PATH: "/bin",
-      OPENAI_API_KEY: "secret",
-      RELAYER_GRAPH_URL: "http://graph",
-      RELAYER_GRAPH_TOKEN: "graph-secret",
-      AWS_SECRET_ACCESS_KEY: "cloud-secret",
-    })).toEqual({ HOME: "/home/test", PATH: "/bin" });
-    expect(() => sanitizeJudgeEnvironment({}, { OPENAI_API_KEY: "secret" })).toThrow("not allowlisted");
-  });
-
-  it("defaults recursive stores to the v11 rubric while legacy stores remain on v1", async () => {
     const inventory = inventoryReviewSubjects({
       turnId: "turn-recursive",
       rootLayerId: "layer-recursive",
@@ -308,7 +275,7 @@ describe("simulated-user Codex judge runner", () => {
     });
     const recursiveStore = new RecursivePresentationReviewStore({ inventory });
     let capturedPrompt = "";
-    const factory: JudgeThreadFactory = {
+    const captureFactory: JudgeThreadFactory = {
       start() {
         return {
           id: "recursive-default",
@@ -327,59 +294,78 @@ describe("simulated-user Codex judge runner", () => {
       controller: unusedController(),
       reviewStore: recursiveStore,
       workingDirectory: process.cwd(),
-      threadFactory: factory,
+      threadFactory: captureFactory,
       mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
-    })).rejects.toThrow("stop after prompt capture");
+    }), "the prompt capture factory stops the run").rejects.toThrow("stop after prompt capture");
 
-    expect(capturedPrompt).toContain("Graph-presentation rubric (graph-presentation-rubric-v11)");
-    expect(capturedPrompt).toContain('"contractId": "recursive-presentation-judge-v6"');
-    expect(capturedPrompt).toContain("No input operator is available for this judge-only rerun");
-    expect(capturedPrompt).not.toContain("provide one valid answer per action");
+    expect(capturedPrompt, "recursive stores default to the v11 rubric").toContain("Graph-presentation rubric (graph-presentation-rubric-v11)");
+    expect(capturedPrompt, "recursive stores use the v6 judgment contract").toContain('"contractId": "recursive-presentation-judge-v6"');
+    expect(capturedPrompt, "a recursive store without an operator is a judge-only rerun").toContain("No input operator is available for this judge-only rerun");
+    expect(capturedPrompt, "judge-only reruns never offer answer instructions").not.toContain("provide one valid answer per action");
   });
 
-  it("rejects a historical rubric at the recursive v6 runner boundary before inference", async () => {
+  it("gates traces, environment, and rubric pairing before inference", async () => {
+    const forbiddenItems: readonly [label: string, item: ThreadItem][] = [
+      ["file changes", { id: "file", type: "file_change", changes: [{ path: "x", kind: "add" }], status: "completed" }],
+      ["web search", { id: "web", type: "web_search", query: "anything" }],
+      ["non-review MCP activity", { id: "mcp", type: "mcp_tool_call", server: "other", tool: "read", arguments: {}, status: "completed" }],
+    ];
+    for (const [label, item] of forbiddenItems) {
+      expect(() => assertReviewOnlyCodexTrace([item]), `${label} are forbidden in a review-only trace`).toThrow(/forbidden/i);
+    }
+    expect(() => assertReviewOnlyCodexTrace([{
+      id: "shell",
+      type: "command_execution",
+      command: "git diff --stat HEAD^",
+      aggregated_output: "src/file.ts | 2 ++",
+      exit_code: 0,
+      status: "completed",
+    }]), "read-only shell evidence is allowed").not.toThrow();
+    expect(() => assertReviewOnlyCodexTrace([{
+      id: "allowed",
+      type: "mcp_tool_call",
+      server: SIMULATED_USER_MCP_SERVER_NAME,
+      tool: "screenshot",
+      arguments: {},
+      status: "completed",
+    }]), "the review MCP server's own tools are allowed").not.toThrow();
+
+    expect(sanitizeJudgeEnvironment({
+      HOME: "/home/test",
+      PATH: "/bin",
+      OPENAI_API_KEY: "secret",
+      RELAYER_GRAPH_URL: "http://graph",
+      RELAYER_GRAPH_TOKEN: "graph-secret",
+      AWS_SECRET_ACCESS_KEY: "cloud-secret",
+    }), "the judge environment keeps a strict allowlist").toEqual({ HOME: "/home/test", PATH: "/bin" });
+    expect(
+      () => sanitizeJudgeEnvironment({}, { OPENAI_API_KEY: "secret" }),
+      "adding a non-allowlisted variable is rejected",
+    ).toThrow("not allowlisted");
+
     const inventory = inventoryReviewSubjects({
       turnId: "turn-recursive",
       rootLayerId: "layer-recursive",
       layers: [{ id: "layer-recursive", nodeIds: ["node-recursive"], actions: [] }],
     });
-    const start = vi.fn<JudgeThreadFactory["start"]>();
-
-    await expect(runSimulatedUserJudge({
-      executionId: "execution-recursive",
-      originalRequest: "Review the response.",
-      configuration: {
-        model: "gpt-test",
-        modelReasoningEffort: "high",
-        rubric: GRAPH_PRESENTATION_RUBRIC_V10,
-      },
-      controller: unusedController(),
-      reviewStore: new RecursivePresentationReviewStore({ inventory }),
-      workingDirectory: process.cwd(),
-      threadFactory: { start },
-      mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
-    })).rejects.toThrow("Recursive presentation contract v6 requires graph-presentation-rubric-v11");
-    expect(start).not.toHaveBeenCalled();
-  });
-
-  it("rejects the v11 recursive rubric with a legacy review store before inference", async () => {
-    const start = vi.fn<JudgeThreadFactory["start"]>();
-
-    await expect(runSimulatedUserJudge({
-      executionId: "execution-legacy",
-      originalRequest: "Review the response.",
-      configuration: {
-        model: "gpt-test",
-        modelReasoningEffort: "high",
-        rubric: GRAPH_PRESENTATION_RUBRIC_V11,
-      },
-      controller: unusedController(),
-      reviewStore: finalizedStore(),
-      workingDirectory: process.cwd(),
-      threadFactory: { start },
-      mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
-    })).rejects.toThrow("graph-presentation-rubric-v11 requires recursive presentation contract v6");
-    expect(start).not.toHaveBeenCalled();
+    const mismatches: readonly [label: string, rubric: typeof GRAPH_PRESENTATION_RUBRIC_V10 | typeof GRAPH_PRESENTATION_RUBRIC_V11, store: () => unknown, message: string][] = [
+      ["a historical rubric at the recursive v6 boundary", GRAPH_PRESENTATION_RUBRIC_V10, () => new RecursivePresentationReviewStore({ inventory }), "Recursive presentation contract v6 requires graph-presentation-rubric-v11"],
+      ["the v11 recursive rubric with a legacy review store", GRAPH_PRESENTATION_RUBRIC_V11, () => finalizedStore(), "graph-presentation-rubric-v11 requires recursive presentation contract v6"],
+    ];
+    for (const [label, rubric, createStore, message] of mismatches) {
+      const start = vi.fn<JudgeThreadFactory["start"]>();
+      await expect(runSimulatedUserJudge({
+        executionId: "execution-mismatch",
+        originalRequest: "Review the response.",
+        configuration: { model: "gpt-test", modelReasoningEffort: "high", rubric },
+        controller: unusedController(),
+        reviewStore: createStore() as never,
+        workingDirectory: process.cwd(),
+        threadFactory: { start },
+        mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
+      }), `${label} is rejected before inference`).rejects.toThrow(message);
+      expect(start, `${label} never starts a Codex thread`).not.toHaveBeenCalled();
+    }
   });
 });
 

@@ -21,29 +21,30 @@ afterEach(async () => {
 });
 
 describe("simulated-user MCP server", () => {
-  it("binds to loopback, requires its bearer token, and exposes exactly six review tools", async () => {
+  it("binds to loopback with bearer auth and serves the six-tool exploration surface", async () => {
     const server = await startServer();
-    expect(server.endpoint).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+    expect(server.endpoint, "the server binds to loopback on the MCP route").toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
 
     const unauthorized = await fetch(server.endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
     });
-    expect(unauthorized.status).toBe(401);
-    expect(unauthorized.headers.get("www-authenticate")).toBe("Bearer");
+    expect(unauthorized.status, "requests without the bearer token are rejected").toBe(401);
+    expect(unauthorized.headers.get("www-authenticate"), "the rejection advertises bearer auth").toBe("Bearer");
 
     const { client, transport } = await connectClient(server);
     const tools = await client.listTools();
-    expect(tools.tools.map(({ name }) => name)).toEqual(SIMULATED_USER_MCP_TOOL_NAMES);
-    expect(tools.tools.every((tool) => !["shell", "openLayer", "scroll"].includes(tool.name))).toBe(true);
-    expect(tools.tools.find(({ name }) => name === "reviewNode")?.description).toContain(
+    expect(tools.tools.map(({ name }) => name), "exactly the six review tools are exposed").toEqual(SIMULATED_USER_MCP_TOOL_NAMES);
+    expect(
+      tools.tools.every((tool) => !["shell", "openLayer", "scroll"].includes(tool.name)),
+      "no shell or navigation tools are exposed",
+    ).toBe(true);
+    expect(tools.tools.find(({ name }) => name === "reviewNode")?.description, "reviewNode documents input-action coverage").toContain(
       "input-action criteria and structure.input",
     );
     await transport.close();
-  });
 
-  it("returns image tiles while tracing only structured screenshot metadata", async () => {
     const screenshot = vi.fn<ReviewSessionController["screenshot"]>(async () => ({
       output: {
         ok: true,
@@ -69,61 +70,54 @@ describe("simulated-user MCP server", () => {
       },
       images: [{ mimeType: "image/png", data: Buffer.from("image").toString("base64") }],
     }));
-    const server = await startServer({ screenshot });
-    const { client, transport } = await connectClient(server);
-    const result = await client.callTool({
+    const screenshotServer = await startServer({ screenshot });
+    const screenshotClient = await connectClient(screenshotServer);
+    const result = await screenshotClient.client.callTool({
       name: "screenshot",
       arguments: { target: { kind: "viewport" }, mode: "visible", label: "First impression" },
     }, CallToolResultSchema);
 
-    expect(result.isError).not.toBe(true);
-    expect(Array.isArray(result.content)).toBe(true);
-    expect((result.content as { readonly type: string }[]).map(({ type }) => type)).toEqual(["text", "image"]);
-    expect(result.structuredContent).toMatchObject({ ok: true, screenshot: { screenshotId: "shot-1" } });
-    expect(server.trace()).toMatchObject([{ sequence: 1, tool: "screenshot", status: "completed" }]);
-    expect(JSON.stringify(server.trace())).not.toContain(Buffer.from("image").toString("base64"));
-    await transport.close();
-  });
+    expect(result.isError, "the screenshot succeeds").not.toBe(true);
+    expect(Array.isArray(result.content), "screenshot content is a block list").toBe(true);
+    expect(
+      (result.content as { readonly type: string }[]).map(({ type }) => type),
+      "the screenshot returns text metadata plus image tiles",
+    ).toEqual(["text", "image"]);
+    expect(result.structuredContent, "structured content carries the screenshot metadata").toMatchObject({
+      ok: true,
+      screenshot: { screenshotId: "shot-1" },
+    });
+    expect(screenshotServer.trace(), "the trace records only the completed tool call").toMatchObject([
+      { sequence: 1, tool: "screenshot", status: "completed" },
+    ]);
+    expect(
+      JSON.stringify(screenshotServer.trace()),
+      "image bytes never enter the tool trace",
+    ).not.toContain(Buffer.from("image").toString("base64"));
+    await screenshotClient.transport.close();
 
-  it("routes incremental review writes through the injected store", async () => {
-    const reviewLayer = vi.fn(() => ({ revision: 1 }));
-    const server = await startServer(undefined, { reviewLayer });
-    const { client, transport } = await connectClient(server);
-    const review = validLayerReview();
-    const result = await client.callTool({ name: "reviewLayer", arguments: { review } });
-
-    expect(result.structuredContent).toEqual({ ok: true, disposition: "created", layerId: "layer-1" });
-    expect(reviewLayer).toHaveBeenCalledWith(review);
-    expect(server.trace()).toMatchObject([{ tool: "reviewLayer", status: "completed" }]);
-    await transport.close();
-  });
-
-  it("returns contract-shaped exploration failures and records them in the tool trace", async () => {
-    const server = await startServer({
+    const failingServer = await startServer({
       interact: async () => { throw new Error("Unknown or invisible review control: missing"); },
       history: async () => { throw new Error("History delta -1 is outside the review session history."); },
     });
-    const { client, transport } = await connectClient(server);
-
-    const interact = await client.callTool({ name: "interact", arguments: { elementRef: "missing", activate: true } });
-    expect(interact.structuredContent).toMatchObject({
+    const failingClient = await connectClient(failingServer);
+    const interact = await failingClient.client.callTool({ name: "interact", arguments: { elementRef: "missing", activate: true } });
+    expect(interact.structuredContent, "an unknown element is a contract-shaped interact failure").toMatchObject({
       ok: false,
       error: { kind: "tool_error", tool: "interact", code: "unknown_element" },
     });
-    const history = await client.callTool({ name: "history", arguments: { delta: -1 } });
-    expect(history.structuredContent).toMatchObject({
+    const history = await failingClient.client.callTool({ name: "history", arguments: { delta: -1 } });
+    expect(history.structuredContent, "an out-of-range delta is a contract-shaped history failure").toMatchObject({
       ok: false,
       error: { kind: "tool_error", tool: "history", code: "history_out_of_range" },
     });
-    expect(server.trace().map(({ tool, status }) => `${tool}:${status}`)).toEqual([
+    expect(failingServer.trace().map(({ tool, status }) => `${tool}:${status}`), "exploration failures are traced").toEqual([
       "interact:failed",
       "history:failed",
     ]);
-    await transport.close();
-  });
+    await failingClient.transport.close();
 
-  it("extends interact with text, one-key, and possibly-empty key-set values without adding a write tool", async () => {
-    const interact = vi.fn(async (input) => ({
+    const inputInteract = vi.fn(async (input) => ({
       ok: true as const,
       state: {
         turnId: "turn-1",
@@ -134,41 +128,61 @@ describe("simulated-user MCP server", () => {
       },
       operator: { operation: "input_commit" },
     }));
-    const server = await startServer({ interact });
-    const { client, transport } = await connectClient(server);
-
+    const inputServer = await startServer({ interact: inputInteract });
+    const inputClient = await connectClient(inputServer);
     for (const value of [
       { text: "Friday" },
       { selectedKey: "preview" },
       { selectedKeys: ["unit", "electron"] },
       { selectedKeys: [] },
     ]) {
-      const result = await client.callTool({ name: "interact", arguments: { elementRef: "input-action-41-52-9", value } });
-      expect(result.structuredContent).toMatchObject({ ok: true, operator: { operation: "input_commit" } });
+      const inputResult = await inputClient.client.callTool({ name: "interact", arguments: { elementRef: "input-action-41-52-9", value } });
+      expect(inputResult.structuredContent, `interact accepts the ${JSON.stringify(value)} value`).toMatchObject({
+        ok: true,
+        operator: { operation: "input_commit" },
+      });
     }
-    expect(interact.mock.calls.map(([input]) => input.value)).toEqual([
+    expect(inputInteract.mock.calls.map(([input]) => input.value), "every value shape is forwarded unchanged").toEqual([
       { text: "Friday" },
       { selectedKey: "preview" },
       { selectedKeys: ["unit", "electron"] },
       { selectedKeys: [] },
     ]);
-    expect((await client.listTools()).tools.map(({ name }) => name)).not.toContain("answer");
-    await transport.close();
+    expect(
+      (await inputClient.client.listTools()).tools.map(({ name }) => name),
+      "input answers flow through interact, never a separate write tool",
+    ).not.toContain("answer");
+    await inputClient.transport.close();
   });
 
-  it("rejects unjustified null ratings without mutating the store and accepts a justified retry", async () => {
+  it("routes review writes through validation and coverage recovery", async () => {
     const reviewLayer = vi.fn(() => ({ revision: 1 }));
     const server = await startServer(undefined, { reviewLayer });
     const { client, transport } = await connectClient(server);
+    const review = validLayerReview();
+    const result = await client.callTool({ name: "reviewLayer", arguments: { review } });
+
+    expect(result.structuredContent, "a valid review is routed to the injected store").toEqual({
+      ok: true,
+      disposition: "created",
+      layerId: "layer-1",
+    });
+    expect(reviewLayer, "the store receives the exact review payload").toHaveBeenCalledWith(review);
+    expect(server.trace(), "the completed write is traced").toMatchObject([{ tool: "reviewLayer", status: "completed" }]);
+    await transport.close();
+
+    const nullRatingStore = vi.fn(() => ({ revision: 1 }));
+    const nullRatingServer = await startServer(undefined, { reviewLayer: nullRatingStore });
+    const nullRatingClient = await connectClient(nullRatingServer);
     const baseReview = validLayerReview();
     const invalidReview: LayerReview = {
       ...baseReview,
       ratings: { ...baseReview.ratings, purpose_clarity: null },
     };
 
-    const rejected = await client.callTool({ name: "reviewLayer", arguments: { review: invalidReview } });
-    expect(rejected.isError).toBe(true);
-    expect(rejected.structuredContent).toMatchObject({
+    const rejected = await nullRatingClient.client.callTool({ name: "reviewLayer", arguments: { review: invalidReview } });
+    expect(rejected.isError, "an unjustified null rating is rejected").toBe(true);
+    expect(rejected.structuredContent, "the rejection names the unjustified null rating").toMatchObject({
       ok: false,
       error: {
         kind: "review_validation_error",
@@ -179,9 +193,9 @@ describe("simulated-user MCP server", () => {
         }],
       },
     });
-    expect(reviewLayer).not.toHaveBeenCalled();
+    expect(nullRatingStore, "a rejected review never mutates the store").not.toHaveBeenCalled();
 
-    const accepted = await client.callTool({
+    const accepted = await nullRatingClient.client.callTool({
       name: "reviewLayer",
       arguments: {
         review: {
@@ -190,30 +204,28 @@ describe("simulated-user MCP server", () => {
         },
       },
     });
-    expect(accepted.isError).not.toBe(true);
-    expect(reviewLayer).toHaveBeenCalledTimes(1);
-    expect(server.trace().map(({ status }) => status)).toEqual(["failed", "completed"]);
-    await transport.close();
-  });
+    expect(accepted.isError, "a justified null rating is accepted on retry").not.toBe(true);
+    expect(nullRatingStore, "the justified retry reaches the store exactly once").toHaveBeenCalledTimes(1);
+    expect(nullRatingServer.trace().map(({ status }) => status), "the trace records the failed then completed retry").toEqual(["failed", "completed"]);
+    await nullRatingClient.transport.close();
 
-  it("keeps an incomplete submit recoverable and finalizes after exact coverage is supplied", async () => {
     const inventory = inventoryReviewSubjects({
       turnId: "turn-1",
       rootLayerId: "layer-1",
       layers: [{ id: "layer-1", nodeIds: ["node-1"], actions: [] }],
     });
     const reviewStore = new IncrementalReviewStore<LayerReview, NodeReview, TurnReview>({ inventory });
-    const server = await startSimulatedUserReviewMcpServer({
+    const coverageServer = await startSimulatedUserReviewMcpServer({
       controller: unusedController(),
       reviewStore,
       bearerToken: "test-token-with-at-least-24-characters",
     });
-    openServers.push(server);
-    const { client, transport } = await connectClient(server);
+    openServers.push(coverageServer);
+    const coverageClient = await connectClient(coverageServer);
 
-    const rejected = await client.callTool({ name: "submitReview", arguments: { review: validTurnReview() } });
-    expect(rejected.isError).toBe(true);
-    expect(rejected.structuredContent).toMatchObject({
+    const incomplete = await coverageClient.client.callTool({ name: "submitReview", arguments: { review: validTurnReview() } });
+    expect(incomplete.isError, "an incomplete submit is rejected").toBe(true);
+    expect(incomplete.structuredContent, "the rejection lists the exact missing subjects").toMatchObject({
       ok: false,
       error: {
         issues: [{ code: "incomplete_coverage" }],
@@ -223,24 +235,28 @@ describe("simulated-user MCP server", () => {
         ],
       },
     });
-    expect(reviewStore.finalizedResult()).toBeUndefined();
+    expect(reviewStore.finalizedResult(), "an incomplete submit leaves the store recoverable").toBeUndefined();
 
-    await client.callTool({ name: "reviewLayer", arguments: { review: validLayerReview() } });
-    await client.callTool({ name: "reviewNode", arguments: { review: validNodeReview() } });
-    const accepted = await client.callTool({ name: "submitReview", arguments: { review: validTurnReview() } });
+    await coverageClient.client.callTool({ name: "reviewLayer", arguments: { review: validLayerReview() } });
+    await coverageClient.client.callTool({ name: "reviewNode", arguments: { review: validNodeReview() } });
+    const complete = await coverageClient.client.callTool({ name: "submitReview", arguments: { review: validTurnReview() } });
 
-    expect(accepted.structuredContent).toEqual({ ok: true, finalized: true, turnId: "turn-1" });
-    expect(reviewStore.finalizedResult()?.coverage.complete).toBe(true);
-    expect(server.trace().map(({ tool, status }) => `${tool}:${status}`)).toEqual([
+    expect(complete.structuredContent, "the retry after exact coverage finalizes").toEqual({
+      ok: true,
+      finalized: true,
+      turnId: "turn-1",
+    });
+    expect(reviewStore.finalizedResult()?.coverage.complete, "the store records complete coverage").toBe(true);
+    expect(coverageServer.trace().map(({ tool, status }) => `${tool}:${status}`), "the recovery path is fully traced").toEqual([
       "submitReview:failed",
       "reviewLayer:completed",
       "reviewNode:completed",
       "submitReview:completed",
     ]);
-    await transport.close();
+    await coverageClient.transport.close();
   });
 
-  it("accepts and persists a first-class missing action opportunity through the recursive review tool", async () => {
+  it("accepts recursive missing-action and input-action judgments through the review tool", async () => {
     const inventory = inventoryReviewSubjects({
       turnId: "turn-1",
       rootLayerId: "layer-1",
@@ -307,16 +323,17 @@ describe("simulated-user MCP server", () => {
       } },
     });
 
-    expect(result.structuredContent).toMatchObject({ ok: true, nodeId: "node-1" });
-    expect(reviewStore.snapshot().nodes[0]?.history.current.missingActionOpportunities).toEqual([expect.objectContaining({
+    expect(result.structuredContent, "a missing-action opportunity is accepted").toMatchObject({ ok: true, nodeId: "node-1" });
+    expect(
+      reviewStore.snapshot().nodes[0]?.history.current.missingActionOpportunities,
+      "the opportunity is persisted in the recursive store",
+    ).toEqual([expect.objectContaining({
       preferredChoice: "input",
       importance: "material",
     })]);
     await transport.close();
-  });
 
-  it("accepts and requires three immutable input-action judgments in recursive contract v6", async () => {
-    const inventory = inventoryReviewSubjects({
+    const inputInventory = inventoryReviewSubjects({
       turnId: "turn-input",
       rootLayerId: "layer-input",
       layers: [{
@@ -332,17 +349,17 @@ describe("simulated-user MCP server", () => {
         }],
       }],
     });
-    const reviewStore = new RecursivePresentationReviewStore({ inventory });
+    const inputStore = new RecursivePresentationReviewStore({ inventory: inputInventory });
     const recordInputRatings = vi.fn()
       .mockRejectedValueOnce(new Error("durable receipt unavailable"))
       .mockResolvedValue(undefined);
-    const server = await startSimulatedUserReviewMcpServer({
+    const inputServer = await startSimulatedUserReviewMcpServer({
       controller: { ...unusedController(), recordInputRatings },
-      reviewStore,
+      reviewStore: inputStore,
       bearerToken: "test-token-with-at-least-24-characters",
     });
-    openServers.push(server);
-    const { client, transport } = await connectClient(server);
+    openServers.push(inputServer);
+    const inputClient = await connectClient(inputServer);
     const judgment = (reason: string) => ({ score: 7, reason, evidence: ["shot-input"] });
     const action = {
       actionId: "action-input",
@@ -420,26 +437,26 @@ describe("simulated-user MCP server", () => {
       findings: [],
     };
 
-    const failedCommission = await client.callTool({ name: "reviewNode", arguments: { review } });
-    expect(failedCommission.isError).toBe(true);
-    expect(recordInputRatings).toHaveBeenNthCalledWith(1, { review, revision: 1 });
-    expect(reviewStore.snapshot().nodes).toEqual([]);
+    const failedCommission = await inputClient.client.callTool({ name: "reviewNode", arguments: { review } });
+    expect(failedCommission.isError, "a failed durable input-rating receipt fails the commission").toBe(true);
+    expect(recordInputRatings, "the receipt is commissioned with the review and revision").toHaveBeenNthCalledWith(1, { review, revision: 1 });
+    expect(inputStore.snapshot().nodes, "a failed receipt persists nothing").toEqual([]);
 
-    const accepted = await client.callTool({ name: "reviewNode", arguments: { review } });
-    expect(accepted.structuredContent).toMatchObject({ ok: true, nodeId: "node-input" });
-    expect(recordInputRatings).toHaveBeenNthCalledWith(2, { review, revision: 1 });
-    expect(reviewStore.snapshot()).toMatchObject({
+    const acceptedInput = await inputClient.client.callTool({ name: "reviewNode", arguments: { review } });
+    expect(acceptedInput.structuredContent, "the retry with a durable receipt is accepted").toMatchObject({ ok: true, nodeId: "node-input" });
+    expect(recordInputRatings, "the retry commissions the receipt again").toHaveBeenNthCalledWith(2, { review, revision: 1 });
+    expect(inputStore.snapshot(), "the v6 contract persists the immutable input-action judgments").toMatchObject({
       schemaVersion: 6,
       contractId: "recursive-presentation-judge-v6",
       nodes: [{ history: { current: { actions: [{ inputActionJudgments: action.inputActionJudgments }] } } }],
     });
 
-    const rejected = await client.callTool({
+    const missingJudgments = await inputClient.client.callTool({
       name: "reviewNode",
       arguments: { review: { ...review, actions: [{ ...action, inputActionJudgments: undefined }] } },
     });
-    expect(rejected.isError).toBe(true);
-    await transport.close();
+    expect(missingJudgments.isError, "input-action judgments are required in recursive contract v6").toBe(true);
+    await inputClient.transport.close();
   });
 });
 

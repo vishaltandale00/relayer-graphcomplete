@@ -202,9 +202,64 @@ function makeStore(): IncrementalReviewStore {
   });
 }
 
+function completeLowerReviews(store: IncrementalReviewStore): void {
+  store.reviewLayer(rootLayerReview);
+  store.reviewLayer(childLayerReview);
+  store.reviewNode(rootNodeReview("shot-child"));
+  store.reviewNode(childNodeReview);
+}
+
 describe("screenshot evidence validation", () => {
-  it("binds an unanswered input-action rating to its immutable selected source node", () => {
-    const inventory = inventoryReviewSubjects({
+  it("binds review evidence to immutable screenshot state", () => {
+    const accepted = makeStore();
+    completeLowerReviews(accepted);
+    const result = accepted.submitReview(turnReview);
+    expect(result.finalized, "matching layer, selected-node, traversed-action, and representative evidence finalize").toBe(true);
+    expect(result.coverage.complete, "complete evidence yields complete coverage").toBe(true);
+
+    const mismatched = makeStore();
+    mismatched.reviewNode(rootNodeReview("shot-child"));
+    expect(
+      () => mismatched.reviewNode(rootNodeReview("shot-bad-path")),
+      "a navigate destination whose immutable path does not contain the action is rejected",
+    ).toThrow(ScreenshotEvidenceValidationError);
+    try {
+      mismatched.reviewNode(rootNodeReview("shot-bad-path"));
+    } catch (error) {
+      expect((error as ScreenshotEvidenceValidationError).issues, "the mismatch names the screenshot and evidence path").toEqual([
+        expect.objectContaining({
+          code: "navigation_path_mismatch",
+          screenshotId: "shot-bad-path",
+          path: ["actions", 0, "evidence", "destination", 0],
+        }),
+      ]);
+    }
+    expect(mismatched.snapshot().nodes[0]!.history, "a rejected destination review leaves the prior revision intact").toMatchObject({
+      currentRevision: 1,
+    });
+
+    const unknown = makeStore();
+    expect(
+      () => unknown.reviewLayer({
+        ...rootLayerReview,
+        evidence: { viewport: ["missing-shot", "shot-other-turn"] },
+      }),
+      "unknown evidence and screenshots bound to a different turn are rejected",
+    ).toThrow(ScreenshotEvidenceValidationError);
+    try {
+      unknown.reviewLayer({
+        ...rootLayerReview,
+        evidence: { viewport: ["missing-shot", "shot-other-turn"] },
+      });
+    } catch (error) {
+      expect(
+        (error as ScreenshotEvidenceValidationError).issues.map(({ code }) => code),
+        "each invalid screenshot is reported with its exact code",
+      ).toEqual(["unknown_evidence", "screenshot_state_mismatch"]);
+    }
+    expect(unknown.snapshot().layers, "a rejected layer review mutates nothing").toEqual([]);
+
+    const inputInventory = inventoryReviewSubjects({
       turnId: "turn-1",
       rootLayerId: "layer-root",
       layers: [{
@@ -225,8 +280,8 @@ describe("screenshot evidence validation", () => {
       screenshot("shot-input", "layer-root", "node-root", { target: "element", mode: "full" }),
       screenshot("shot-other", "layer-root", "node-other", { target: "element", mode: "full" }),
     ];
-    const store = new IncrementalReviewStore({
-      inventory,
+    const inputStore = new IncrementalReviewStore({
+      inventory: inputInventory,
       validateEvidence: createScreenshotEvidenceValidator({
         executionId: "execution-1",
         threadId: "thread-1",
@@ -242,7 +297,7 @@ describe("screenshot evidence validation", () => {
       summary: "The unanswered text question is well formed.",
       findings: [],
     };
-    const review: NodeReview = {
+    const inputReview: NodeReview = {
       nodeId: "node-root",
       layerId: "layer-root",
       evidence: { context: ["shot-root"], detail: ["shot-input"] },
@@ -261,80 +316,30 @@ describe("screenshot evidence validation", () => {
       findings: [],
     };
 
-    expect(store.reviewNode(review).revision).toBe(1);
-    expect(() => store.reviewNode({
-      ...review,
+    expect(
+      inputStore.reviewNode(inputReview).revision,
+      "an input-action rating bound to its selected source node is accepted",
+    ).toBe(1);
+    expect(() => inputStore.reviewNode({
+      ...inputReview,
       actions: [{ ...inputActionReview, evidence: { source: ["shot-other"] } }],
-    })).toThrow("Action action-input source evidence must show node node-root in layer layer-root");
+    }), "an input-action rating must be bound to its immutable selected source node").toThrow(
+      "Action action-input source evidence must show node node-root in layer layer-root",
+    );
   });
 
-  it("accepts matching layer, selected-node, traversed-action, and representative turn evidence", () => {
-    const store = makeStore();
-    store.reviewLayer(rootLayerReview);
-    store.reviewLayer(childLayerReview);
-    store.reviewNode(rootNodeReview("shot-child"));
-    store.reviewNode(childNodeReview);
-
-    const result = store.submitReview(turnReview);
-    expect(result.finalized).toBe(true);
-    expect(result.coverage.complete).toBe(true);
-  });
-
-  it("rejects a navigate destination whose immutable path does not contain the action", () => {
-    const store = makeStore();
-    store.reviewNode(rootNodeReview("shot-child"));
-
-    expect(() => store.reviewNode(rootNodeReview("shot-bad-path"))).toThrow(ScreenshotEvidenceValidationError);
-    try {
-      store.reviewNode(rootNodeReview("shot-bad-path"));
-    } catch (error) {
-      expect((error as ScreenshotEvidenceValidationError).issues).toEqual([
-        expect.objectContaining({
-          code: "navigation_path_mismatch",
-          screenshotId: "shot-bad-path",
-          path: ["actions", 0, "evidence", "destination", 0],
-        }),
-      ]);
-    }
-    expect(store.snapshot().nodes[0]!.history).toMatchObject({ currentRevision: 1 });
-  });
-
-  it("rejects unknown evidence and screenshots bound to a different turn", () => {
-    const store = makeStore();
-    expect(() => store.reviewLayer({
-      ...rootLayerReview,
-      evidence: { viewport: ["missing-shot", "shot-other-turn"] },
-    })).toThrow(ScreenshotEvidenceValidationError);
-    try {
-      store.reviewLayer({
-        ...rootLayerReview,
-        evidence: { viewport: ["missing-shot", "shot-other-turn"] },
-      });
-    } catch (error) {
-      expect((error as ScreenshotEvidenceValidationError).issues.map(({ code }) => code)).toEqual([
-        "unknown_evidence",
-        "screenshot_state_mismatch",
-      ]);
-    }
-    expect(store.snapshot().layers).toEqual([]);
-  });
-
-  it("rejects overall evidence that was not cited by a completed lower-subject review", () => {
-    const store = makeStore();
-    store.reviewLayer(rootLayerReview);
-    store.reviewLayer(childLayerReview);
-    store.reviewNode(rootNodeReview("shot-child"));
-    store.reviewNode(childNodeReview);
-
-    expect(() => store.submitReview({
+  it("requires turn evidence to cite completed lower reviews unless explicitly allowlisted", () => {
+    const uncited = makeStore();
+    completeLowerReviews(uncited);
+    expect(() => uncited.submitReview({
       ...turnReview,
       evidence: { representative: ["shot-bad-path"] },
-    })).toThrow("Turn evidence must include at least one screenshot used by a completed current-turn lower-subject review");
-    expect(store.finalizedResult()).toBeUndefined();
-  });
+    }), "overall evidence must be cited by a completed lower-subject review").toThrow(
+      "Turn evidence must include at least one screenshot used by a completed current-turn lower-subject review",
+    );
+    expect(uncited.finalizedResult(), "an uncited turn submit finalizes nothing").toBeUndefined();
 
-  it("allows explicitly allowlisted prior-turn evidence only for the overall follow-up review", () => {
-    const inventory = inventoryReviewSubjects({
+    const comparisonInventory = inventoryReviewSubjects({
       turnId: "turn-1",
       rootLayerId: "layer-root",
       layers: [{ id: "layer-root", nodeIds: ["node-root"], actions: [] }],
@@ -344,8 +349,8 @@ describe("screenshot evidence validation", () => {
       screenshot("shot-root-detail", "layer-root", "node-root", { target: "element", mode: "full" }),
       screenshot("shot-previous-turn", "layer-root", null, { turnId: "turn-0" }),
     ].map((shot) => [shot.screenshotId, shot]));
-    const store = new IncrementalReviewStore({
-      inventory,
+    const comparison = new IncrementalReviewStore({
+      inventory: comparisonInventory,
       validateEvidence: createScreenshotEvidenceValidator({
         executionId: "execution-1",
         threadId: "thread-1",
@@ -355,12 +360,12 @@ describe("screenshot evidence validation", () => {
       }),
     });
 
-    expect(() => store.reviewLayer({
+    expect(() => comparison.reviewLayer({
       ...rootLayerReview,
       evidence: { viewport: ["shot-previous-turn"] },
-    })).toThrow("different execution, thread, or turn state");
-    store.reviewLayer(rootLayerReview);
-    store.reviewNode({
+    }), "prior-turn evidence stays forbidden for lower-subject reviews").toThrow("different execution, thread, or turn state");
+    comparison.reviewLayer(rootLayerReview);
+    comparison.reviewNode({
       ...childNodeReview,
       nodeId: "node-root",
       layerId: "layer-root",
@@ -368,7 +373,7 @@ describe("screenshot evidence validation", () => {
       structure: { ...childNodeReview.structure, evidence: ["shot-root-detail"] },
     });
 
-    const result = store.submitReview({
+    const followUp = comparison.submitReview({
       ...turnReview,
       evidence: { representative: ["shot-root", "shot-previous-turn"] },
       structure: { ...turnReview.structure, evidence: ["shot-root"] },
@@ -379,19 +384,15 @@ describe("screenshot evidence validation", () => {
         evidence: ["shot-root", "shot-previous-turn"],
       }],
     });
-    expect(result.finalized).toBe(true);
-  });
+    expect(followUp.finalized, "allowlisted prior-turn evidence is accepted for the overall follow-up review").toBe(true);
 
-  it("requires current-turn lower-review evidence even when comparison turns are allowlisted", () => {
-    const store = makeStore();
-    store.reviewLayer(rootLayerReview);
-    store.reviewLayer(childLayerReview);
-    store.reviewNode(rootNodeReview("shot-child"));
-    store.reviewNode(childNodeReview);
-
-    expect(() => store.submitReview({
+    const stillCurrent = makeStore();
+    completeLowerReviews(stillCurrent);
+    expect(() => stillCurrent.submitReview({
       ...turnReview,
       evidence: { representative: ["shot-other-turn"] },
-    })).toThrow("at least one screenshot used by a completed current-turn lower-subject review");
+    }), "comparison turn allowlists never replace current-turn lower-review evidence").toThrow(
+      "at least one screenshot used by a completed current-turn lower-subject review",
+    );
   });
 });

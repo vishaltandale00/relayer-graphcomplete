@@ -17,7 +17,7 @@ const high: HarnessConfiguration = {
 };
 
 describe("test run expansion", () => {
-  it("expands harness-agnostic cases across independently selected configurations", () => {
+  it("expands harness-agnostic cases across independently selected configurations and rejects unresolved names", () => {
     const executions = expandTestRun({
       testRunId: "run-123",
       testCaseIds: ["case-a", "case-b"],
@@ -25,24 +25,30 @@ describe("test run expansion", () => {
       judgeConfiguration: { name: "judge-v1", threshold: 0.8 },
     }, new Map([[medium.name, medium], [high.name, high]]));
 
-    expect(executions.map(({ testRunId, testCaseId, harnessConfigurationName }) => [testRunId, testCaseId, harnessConfigurationName])).toEqual([
+    expect(
+      executions.map(({ testRunId, testCaseId, harnessConfigurationName }) => [testRunId, testCaseId, harnessConfigurationName]),
+      "every case expands across every selected configuration",
+    ).toEqual([
       ["run-123", "case-a", "codex-basic"],
       ["run-123", "case-a", "codex-basic-high"],
       ["run-123", "case-b", "codex-basic"],
       ["run-123", "case-b", "codex-basic-high"],
     ]);
-    expect(executions[0]!.harnessConfiguration).toEqual(medium);
-    expect(executions[0]!.harnessConfiguration).not.toBe(medium);
-    expect(executions[0]!.harnessConfigurationDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(executions[0]!.harnessConfigurationDigest).not.toBe(executions[1]!.harnessConfigurationDigest);
-  });
+    expect(executions[0]!.harnessConfiguration, "each execution binds the resolved configuration").toEqual(medium);
+    expect(executions[0]!.harnessConfiguration, "the bound configuration is a copy, not the selected object").not.toBe(medium);
+    expect(executions[0]!.harnessConfigurationDigest, "each bound configuration is digested").toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(
+      executions[0]!.harnessConfigurationDigest,
+      "independently selected configurations digest differently",
+    ).not.toBe(executions[1]!.harnessConfigurationDigest);
 
-  it("rejects a selected name that was not resolved at the runner boundary", () => {
     expect(() => expandTestRun({
       testRunId: "run-123",
       testCaseIds: ["case-a"],
       harnessConfigurationNames: ["missing"],
       judgeConfiguration: { name: "none" },
-    }, new Map())).toThrow("Unknown harness configuration: missing");
+    }, new Map()), "a selected name that was never resolved fails at the runner boundary").toThrow(
+      "Unknown harness configuration: missing",
+    );
   });
 });

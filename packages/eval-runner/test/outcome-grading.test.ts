@@ -10,8 +10,8 @@ import {
 } from "../src/index.js";
 
 describe("task-outcome grading", () => {
-  it("keeps mandatory qualification independent from the weighted rubric score", () => {
-    const result = buildTaskOutcomeGrade({
+  it("grades outcomes from mandatory receipts and rubric weights without mixing the two authorities", () => {
+    const blocked = buildTaskOutcomeGrade({
       status: "completed",
       mandatoryGates: [{
         schemaVersion: 1,
@@ -28,32 +28,11 @@ describe("task-outcome grading", () => {
         { criterionId: "quality", rating: 2, weight: 1, rationale: "Material weakness.", evidenceRefs: [] },
       ],
     });
+    expect(blocked.qualified, "a failed mandatory gate blocks qualification").toBe(false);
+    expect(blocked.score, "the weighted rubric score is still recorded").toBe(3.5);
+    expect(Object.isFrozen(blocked), "outcome grades are immutable").toBe(true);
 
-    expect(result.qualified).toBe(false);
-    expect(result.score).toBe(3.5);
-    expect(Object.isFrozen(result)).toBe(true);
-  });
-
-  it("projects deterministic checks into mandatory receipts without inventing a score", () => {
-    const result = projectDeterministicChecksToOutcome([
-      { name: "workspace:hidden behavior", passed: true, detail: "Passed." },
-      { name: "workspace:clean", passed: true, detail: "Clean." },
-    ]);
-
-    expect(result).toMatchObject({ status: "completed", qualified: true, score: null });
-    expect(result.mandatoryGates.map((gate) => gate.gateId)).toEqual([
-      "workspace:hidden-behavior",
-      "workspace:clean",
-    ]);
-    expect(projectDeterministicChecksToOutcome([])).toMatchObject({
-      status: "unjudged",
-      qualified: null,
-      score: null,
-    });
-  });
-
-  it("leaves qualification undetermined while semantic rubric grading is partial", () => {
-    const result = buildTaskOutcomeGrade({
+    const partial = buildTaskOutcomeGrade({
       status: "partial",
       mandatoryGates: [{
         schemaVersion: 1,
@@ -73,12 +52,13 @@ describe("task-outcome grading", () => {
         evidenceRefs: [],
       }],
     });
+    expect(partial, "qualification stays undetermined while semantic grading is partial").toMatchObject({
+      status: "partial",
+      qualified: null,
+      score: null,
+    });
 
-    expect(result).toMatchObject({ status: "partial", qualified: null, score: null });
-  });
-
-  it("does not confuse verifier infrastructure failure with a failed candidate gate", () => {
-    const result = buildTaskOutcomeGrade({
+    const crashedVerifier = buildTaskOutcomeGrade({
       status: "completed",
       mandatoryGates: [{
         schemaVersion: 1,
@@ -91,7 +71,10 @@ describe("task-outcome grading", () => {
         evidenceRefs: [],
       }],
     });
-    expect(result.qualified).toBe(false);
+    expect(
+      crashedVerifier.qualified,
+      "verifier infrastructure failure blocks qualification without masquerading as a failed candidate gate",
+    ).toBe(false);
     expect(() => buildTaskOutcomeGrade({
       status: "completed",
       mandatoryGates: [{
@@ -104,12 +87,31 @@ describe("task-outcome grading", () => {
         detail: "Invalid receipt.",
         evidenceRefs: [],
       }],
-    })).toThrow("must use a null result");
+    }), "an infrastructure failure must use a null result, never a false gate").toThrow("must use a null result");
+
+    const projected = projectDeterministicChecksToOutcome([
+      { name: "workspace:hidden behavior", passed: true, detail: "Passed." },
+      { name: "workspace:clean", passed: true, detail: "Clean." },
+    ]);
+    expect(projected, "deterministic checks project into mandatory receipts without inventing a score").toMatchObject({
+      status: "completed",
+      qualified: true,
+      score: null,
+    });
+    expect(projected.mandatoryGates.map((gate) => gate.gateId), "projected gate identities").toEqual([
+      "workspace:hidden-behavior",
+      "workspace:clean",
+    ]);
+    expect(projectDeterministicChecksToOutcome([]), "no checks means no judgment").toMatchObject({
+      status: "unjudged",
+      qualified: null,
+      score: null,
+    });
   });
 });
 
 describe("graph-presentation grading", () => {
-  it("normalizes decay mass across present depths and divides it within each depth", () => {
+  it("normalizes decay mass across depths, then combines comprehension, ceilings, and recursion", () => {
     const layers = [
       layer("root", 0, [4, 4]),
       layer("child-a", 1, [2, 2]),
@@ -119,7 +121,7 @@ describe("graph-presentation grading", () => {
     const aggregation = aggregatePresentationLayers(layers);
 
     // Depth masses at decay .5 are 1, .5, .25 => 4/7, 2/7, 1/7.
-    expect(aggregation).toEqual([
+    expect(aggregation, "decay mass is normalized across present depths and divided within each depth").toEqual([
       expect.objectContaining({ layerId: "root", score: 4, assignedWeight: 0.571429 }),
       expect.objectContaining({ layerId: "child-a", score: 2, assignedWeight: 0.142857 }),
       expect.objectContaining({ layerId: "child-b", score: 4, assignedWeight: 0.142857 }),
@@ -127,32 +129,29 @@ describe("graph-presentation grading", () => {
     ]);
 
     const result = buildGraphPresentationGrade({ status: "completed", layers });
-    expect(result.score).toBeCloseTo(23 / 7, 5);
-    expect(result.worstLayer).toEqual({ layerId: "grandchild", depth: 2, score: 1 });
-    expect(result.hasMateriallyMisleadingLayer).toBe(true);
-  });
+    expect(result.score, "the aggregate is the depth-weighted layer score").toBeCloseTo(23 / 7, 5);
+    expect(result.worstLayer, "the worst layer is surfaced").toEqual({ layerId: "grandchild", depth: 2, score: 1 });
+    expect(result.hasMateriallyMisleadingLayer, "materially misleading layers are flagged").toBe(true);
 
-  it("renormalizes assessable layer weights while preserving assigned depth weights", () => {
-    const aggregation = aggregatePresentationLayers([
+    const renormalized = aggregatePresentationLayers([
       layer("root", 0, [4]),
       layer("child", 1, [null]),
     ]);
-    expect(aggregation).toEqual([
+    expect(renormalized, "assessable layer weights renormalize while assigned depth weights stay pinned").toEqual([
       expect.objectContaining({ layerId: "root", assignedWeight: 0.666667, aggregateWeight: 1 }),
       expect.objectContaining({ layerId: "child", score: null, assignedWeight: 0.333333, aggregateWeight: 0 }),
     ]);
-  });
 
-  it("represents vanilla harness presentation as not applicable, never as zero", () => {
-    expect(buildGraphPresentationGrade({ status: "not_applicable" })).toMatchObject({
+    expect(
+      buildGraphPresentationGrade({ status: "not_applicable" }),
+      "vanilla harness presentation is not applicable, never zero",
+    ).toMatchObject({
       status: "not_applicable",
       score: null,
       worstLayer: null,
       hasMateriallyMisleadingLayer: false,
     });
-  });
 
-  it("combines turn comprehension with recursive layer and node quality, then applies omissions", () => {
     const polishedButIncomplete = buildGraphPresentationGrade({
       status: "completed",
       comprehensionRatings: [2],
@@ -162,8 +161,7 @@ describe("graph-presentation grading", () => {
         nodes: [node("status", [4, 4, 2, 4]), node("checks", [4, 4, 3, 4])],
       }],
     });
-
-    expect(polishedButIncomplete).toMatchObject({
+    expect(polishedButIncomplete, "turn comprehension and ceilings constrain polished rendering").toMatchObject({
       comprehensionScore: 2,
       renderedScore: 3.8875,
       rawScore: 2.660625,
@@ -177,11 +175,9 @@ describe("graph-presentation grading", () => {
       scoreCeilings: [4],
       layers: [{ ...layer("root", 0, [4, 4, 4, 4]), nodes: [node("handoff", [4, 4, 4, 4])] }],
     });
-    expect(conciseComplete.score).toBe(4);
-  });
+    expect(conciseComplete.score, "a concise complete graph keeps its full score").toBe(4);
 
-  it("uses the LLM-authored final turn rating without reaggregating descendant vectors", () => {
-    const result = buildRecursiveGraphPresentationGrade({
+    const recursive = buildRecursiveGraphPresentationGrade({
       status: "completed",
       presentationRatings: [3],
       comprehensionRatings: [4],
@@ -189,8 +185,7 @@ describe("graph-presentation grading", () => {
       rootLayerResultIds: ["root"],
       layers: [layer("root", 0, [1]), layer("deep", 4, [1])],
     });
-
-    expect(result).toMatchObject({
+    expect(recursive, "the LLM-authored final turn rating is used without reaggregating descendant vectors").toMatchObject({
       score: 3,
       rawScore: 3,
       comprehensionScore: 4,

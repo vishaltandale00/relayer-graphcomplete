@@ -22,17 +22,15 @@ import {
 } from "../src/simulated-user/rubric.js";
 
 describe("simulated-user judge contracts", () => {
-  it("pins exactly the six PRD tools in contract version one", () => {
-    expect(SIMULATED_USER_JUDGE_CONTRACT_V1).toEqual({
+  it("pins exactly the six PRD tools and the typed review-evidence shapes of contract version one", () => {
+    expect(SIMULATED_USER_JUDGE_CONTRACT_V1, "contract v1 is pinned to the six PRD tools").toEqual({
       schemaVersion: 1,
       contractId: "simulated-user-tools-v1",
       toolNames: ["screenshot", "interact", "history", "reviewLayer", "reviewNode", "submitReview"],
       elementReferencesAreEvidence: false,
       submitAcceptsLayerOrNodeReviews: false,
     });
-  });
 
-  it("binds screenshot evidence to immutable review state and tiled content", () => {
     const screenshot: ScreenshotMetadata = {
       schemaVersion: 1,
       screenshotId: "shot-21",
@@ -57,12 +55,12 @@ describe("simulated-user judge contracts", () => {
       ],
       contentDigest: `sha256:${"c".repeat(64)}`,
     };
+    expect(
+      screenshot.navigationPath.at(-1),
+      "screenshot evidence ends at the immutable navigation destination",
+    ).toEqual({ layerId: "layer-child", viaActionId: "action-6" });
+    expect(screenshot.tiles, "screenshot tiles match the declared tile count").toHaveLength(screenshot.tileCount);
 
-    expect(screenshot.navigationPath.at(-1)).toEqual({ layerId: "layer-child", viaActionId: "action-6" });
-    expect(screenshot.tiles).toHaveLength(screenshot.tileCount);
-  });
-
-  it("models layer and node review evidence separately from ratings", () => {
     const layer: LayerReview = {
       layerId: "layer-8",
       evidence: { viewport: ["shot-16"] },
@@ -110,49 +108,45 @@ describe("simulated-user judge contracts", () => {
         evidence: ["shot-17"],
       }],
     };
-
-    expect(layer.evidence.viewport).toEqual(["shot-16"]);
-    expect(node.actions[0]?.kind).toBe("navigate");
+    expect(layer.evidence.viewport, "layer evidence is carried separately from ratings").toEqual(["shot-16"]);
+    expect(node.actions[0]?.kind, "node action evidence is carried separately from ratings").toBe("navigate");
   });
 });
 
 describe("recursive simulated-user rubric", () => {
-  it("applies one layer schema recursively without root or child distinctions", () => {
-    expect(DEFAULT_SIMULATED_USER_RUBRIC).toBe(SIMULATED_USER_RUBRIC_V1);
-    expect(SIMULATED_USER_RUBRIC_V1.layerPolicy).toEqual({
+  it("applies one recursive layer schema with literal criteria for every review subject", () => {
+    expect(DEFAULT_SIMULATED_USER_RUBRIC, "the default rubric is v1").toBe(SIMULATED_USER_RUBRIC_V1);
+    expect(SIMULATED_USER_RUBRIC_V1.layerPolicy, "one layer schema applies recursively without root/child distinction").toEqual({
       recursive: true,
       rootChildDistinction: false,
       nodeCount: "qualitative_context_only",
       automaticNodeCountThresholds: false,
     });
-    expect(getRubricCriterionKeys("layer")).toEqual([
+    expect(getRubricCriterionKeys("layer"), "layer criteria").toEqual([
       "purpose_clarity",
       "cohesion",
       "visual_organization",
       "relationship_clarity",
       "coverage",
     ]);
-  });
-
-  it("declares the literal criteria for every review subject", () => {
-    expect(getRubricCriterionKeys("node")).toEqual([
+    expect(getRubricCriterionKeys("node"), "node criteria").toEqual([
       "layer_fit",
       "title_detail_alignment",
       "substance",
       "detail_presentation",
     ]);
-    expect(getRubricCriterionKeys("navigate_action")).toEqual([
+    expect(getRubricCriterionKeys("navigate_action"), "navigate-action criteria").toEqual([
       "placement",
       "label_expectation",
       "destination_delivery",
       "added_value",
     ]);
-    expect(getRubricCriterionKeys("invoke_action")).toEqual([
+    expect(getRubricCriterionKeys("invoke_action"), "invoke-action criteria").toEqual([
       "placement",
       "label_expectation",
       "apparent_value",
     ]);
-    expect(getRubricCriterionKeys("turn")).toEqual([
+    expect(getRubricCriterionKeys("turn"), "turn criteria").toEqual([
       "answer_quality",
       "recursive_coherence",
       "navigation_value",
@@ -161,122 +155,120 @@ describe("recursive simulated-user rubric", () => {
     ]);
   });
 
-  it("defines artifact-grounded recursive presentation guidance in v3", () => {
-    expect(GRAPH_PRESENTATION_RUBRIC_V3.rubricVersion).toBe("graph-presentation-rubric-v3");
-    expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.node.criteria.substance.label).toBe("Explanatory value");
-    expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn.criteria.answer_quality.description)
-      .toContain("Inspect the artifact");
-    expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn.criteria.recursive_coherence.description)
-      .toContain("At every node");
-  });
-
-  it("versions the bottom-up semantic LayerResult contract independently", () => {
-    expect(GRAPH_PRESENTATION_RUBRIC_V4.rubricVersion).toBe("graph-presentation-rubric-v4");
-    expect(GRAPH_PRESENTATION_RUBRIC_V4.recursiveJudgment).toMatchObject({
-      contractId: "recursive-presentation-judge-v2",
-      fixedNodeCapacity: 8,
-      finalTurnInput: ["original_request", "artifact_evidence", "root_layer_result"],
-      arithmeticCompression: false,
-    });
-  });
-
-  it("versions missing-action-aware recursive judgment independently", () => {
-    expect(GRAPH_PRESENTATION_RUBRIC_V5.rubricVersion).toBe("graph-presentation-rubric-v5");
-    expect(GRAPH_PRESENTATION_RUBRIC_V5.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
-    expect(GRAPH_PRESENTATION_RUBRIC_V5.subjects.turn.criteria.recursive_coherence.description)
-      .toContain("first-class missing-action opportunity");
-  });
-
-  it("makes interaction choices and relational layout explicit in v6 without changing the recursive data contract", () => {
-    expect(GRAPH_PRESENTATION_RUBRIC_V6.rubricVersion).toBe("graph-presentation-rubric-v6");
-    expect(GRAPH_PRESENTATION_RUBRIC_V6.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
-    expect(GRAPH_PRESENTATION_RUBRIC_V6.subjects.layer.criteria.relationship_clarity.description)
-      .toContain("arbitrary row or line");
-    expect(GRAPH_PRESENTATION_RUBRIC_V6.subjects.turn.criteria.navigation_value.description)
-      .toContain("there is no required action count");
-    expect(GRAPH_PRESENTATION_RUBRIC_V6.subjects.turn.criteria.presentation_quality.description)
-      .toContain("Do not require media capabilities");
-  });
-
-  it("separates human experience from task outcome and anchors weak relationship layouts in v7", () => {
-    expect(GRAPH_PRESENTATION_RUBRIC_V7.rubricVersion).toBe("graph-presentation-rubric-v7");
-    expect(GRAPH_PRESENTATION_RUBRIC_V7.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
-    expect(GRAPH_PRESENTATION_RUBRIC_V7.subjects.turn.criteria.answer_quality.description)
-      .toContain("belongs exclusively to the separate outcome grade");
-    expect(GRAPH_PRESENTATION_RUBRIC_V7.subjects.layer.criteria.relationship_clarity.description)
-      .toContain("score at most 2");
-    expect(GRAPH_PRESENTATION_RUBRIC_V7.subjects.turn.criteria.recursive_coherence.description)
-      .toContain("never convert an artifact defect");
-  });
-
-  it("records polish separately in recursive contract v4 without semantic compensation", () => {
-    expect(GRAPH_PRESENTATION_RUBRIC_V8.rubricVersion).toBe("graph-presentation-rubric-v8");
-    expect(GRAPH_PRESENTATION_RUBRIC_V8.recursiveJudgment).toMatchObject({
-      contractId: "recursive-presentation-judge-v4",
-      nodeScoreDimensions: ["content", "actionAllocation", "actionDelivery", "recursiveQuality", "polish"],
-    });
-    expect(GRAPH_PRESENTATION_RUBRIC_V8.subjects.turn.criteria.presentation_quality.description)
-      .toContain("recorded only as polish");
-    expect(GRAPH_PRESENTATION_RUBRIC_V8.subjects.layer.criteria.visual_organization.description)
-      .toContain("cannot raise this rating");
-  });
-
-  it("makes polish evidence exclusive and raises the graph-native bar in v9", () => {
-    expect(GRAPH_PRESENTATION_RUBRIC_V9.rubricVersion).toBe("graph-presentation-rubric-v9");
-    expect(GRAPH_PRESENTATION_RUBRIC_V9.polishPolicy).toEqual({
-      exclusiveEvidence: ["readability", "spacing", "alignment", "clipping", "density", "render_consistency", "icon_consistency"],
-      mayAffectOtherRatings: false,
-    });
-    expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.layer.criteria.visual_organization.label)
-      .toBe("Information architecture");
-    expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.turn.criteria.presentation_quality.label)
-      .toBe("Graph experience");
-    expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.turn.criteria.presentation_quality.description)
-      .toContain("Static prose-in-boxes is at most 2");
-    expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.layer.criteria.relationship_clarity.description)
-      .toContain("Do not infer a sequence from card prose");
-  });
-
-  it("uses reasoned 1-8 judgments without canned point meanings in v10", () => {
-    expect(GRAPH_PRESENTATION_RUBRIC_V10).toMatchObject({
-      rubricVersion: "graph-presentation-rubric-v10",
-      ratingScale: {
-        minimum: 1,
-        maximum: 8,
-        direction: "higher_is_better",
-        fixedPointMeanings: false,
-        reasonRequired: true,
-        screenshotEvidenceRequired: true,
-      },
-      recursiveJudgment: { contractId: "recursive-presentation-judge-v5" },
-    });
-    expect(GRAPH_PRESENTATION_RUBRIC_V10.subjects.turn.criteria.presentation_quality.description)
-      .not.toMatch(/a 3|4 is|at most 2/);
-  });
-
-  it("adds immutable input-action quality and five-choice allocation together in v11", () => {
-    expect(GRAPH_PRESENTATION_RUBRIC_V11).toMatchObject({
-      rubricVersion: "graph-presentation-rubric-v11",
-      recursiveJudgment: {
-        contractId: "recursive-presentation-judge-v6",
-        allocationChoices: ["expand", "reference", "invoke", "input", "stop"],
-      },
-      subjects: {
-        input_action: {
-          requiredScreenshotContext: ["visible_source", "presented_input_control_before_answer"],
-        },
-      },
-    });
-    expect(getRubricCriterionKeys("input_action")).toEqual([
-      "prompt_answerability",
-      "option_set_quality",
-      "control_fit",
-    ]);
-    expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria.option_set_quality.description)
-      .toContain("text action, having no authored options is the correct assessable state");
-    expect(JSON.stringify(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria)).not.toContain("necessity");
-    expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.turn.criteria.recursive_coherence.description)
-      .toContain("penalizing authored questions that were unnecessary");
+  it("versions every presentation rubric change independently", () => {
+    const cases: readonly [label: string, check: () => void][] = [
+      ["v3 defines artifact-grounded recursive presentation guidance", () => {
+        expect(GRAPH_PRESENTATION_RUBRIC_V3.rubricVersion).toBe("graph-presentation-rubric-v3");
+        expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.node.criteria.substance.label).toBe("Explanatory value");
+        expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn.criteria.answer_quality.description)
+          .toContain("Inspect the artifact");
+        expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn.criteria.recursive_coherence.description)
+          .toContain("At every node");
+      }],
+      ["v4 versions the bottom-up semantic LayerResult contract independently", () => {
+        expect(GRAPH_PRESENTATION_RUBRIC_V4.rubricVersion).toBe("graph-presentation-rubric-v4");
+        expect(GRAPH_PRESENTATION_RUBRIC_V4.recursiveJudgment).toMatchObject({
+          contractId: "recursive-presentation-judge-v2",
+          fixedNodeCapacity: 8,
+          finalTurnInput: ["original_request", "artifact_evidence", "root_layer_result"],
+          arithmeticCompression: false,
+        });
+      }],
+      ["v5 versions missing-action-aware recursive judgment independently", () => {
+        expect(GRAPH_PRESENTATION_RUBRIC_V5.rubricVersion).toBe("graph-presentation-rubric-v5");
+        expect(GRAPH_PRESENTATION_RUBRIC_V5.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
+        expect(GRAPH_PRESENTATION_RUBRIC_V5.subjects.turn.criteria.recursive_coherence.description)
+          .toContain("first-class missing-action opportunity");
+      }],
+      ["v6 makes interaction choices and relational layout explicit without changing the recursive data contract", () => {
+        expect(GRAPH_PRESENTATION_RUBRIC_V6.rubricVersion).toBe("graph-presentation-rubric-v6");
+        expect(GRAPH_PRESENTATION_RUBRIC_V6.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
+        expect(GRAPH_PRESENTATION_RUBRIC_V6.subjects.layer.criteria.relationship_clarity.description)
+          .toContain("arbitrary row or line");
+        expect(GRAPH_PRESENTATION_RUBRIC_V6.subjects.turn.criteria.navigation_value.description)
+          .toContain("there is no required action count");
+        expect(GRAPH_PRESENTATION_RUBRIC_V6.subjects.turn.criteria.presentation_quality.description)
+          .toContain("Do not require media capabilities");
+      }],
+      ["v7 separates human experience from task outcome and anchors weak relationship layouts", () => {
+        expect(GRAPH_PRESENTATION_RUBRIC_V7.rubricVersion).toBe("graph-presentation-rubric-v7");
+        expect(GRAPH_PRESENTATION_RUBRIC_V7.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
+        expect(GRAPH_PRESENTATION_RUBRIC_V7.subjects.turn.criteria.answer_quality.description)
+          .toContain("belongs exclusively to the separate outcome grade");
+        expect(GRAPH_PRESENTATION_RUBRIC_V7.subjects.layer.criteria.relationship_clarity.description)
+          .toContain("score at most 2");
+        expect(GRAPH_PRESENTATION_RUBRIC_V7.subjects.turn.criteria.recursive_coherence.description)
+          .toContain("never convert an artifact defect");
+      }],
+      ["v8 records polish separately in recursive contract v4 without semantic compensation", () => {
+        expect(GRAPH_PRESENTATION_RUBRIC_V8.rubricVersion).toBe("graph-presentation-rubric-v8");
+        expect(GRAPH_PRESENTATION_RUBRIC_V8.recursiveJudgment).toMatchObject({
+          contractId: "recursive-presentation-judge-v4",
+          nodeScoreDimensions: ["content", "actionAllocation", "actionDelivery", "recursiveQuality", "polish"],
+        });
+        expect(GRAPH_PRESENTATION_RUBRIC_V8.subjects.turn.criteria.presentation_quality.description)
+          .toContain("recorded only as polish");
+        expect(GRAPH_PRESENTATION_RUBRIC_V8.subjects.layer.criteria.visual_organization.description)
+          .toContain("cannot raise this rating");
+      }],
+      ["v9 makes polish evidence exclusive and raises the graph-native bar", () => {
+        expect(GRAPH_PRESENTATION_RUBRIC_V9.rubricVersion).toBe("graph-presentation-rubric-v9");
+        expect(GRAPH_PRESENTATION_RUBRIC_V9.polishPolicy).toEqual({
+          exclusiveEvidence: ["readability", "spacing", "alignment", "clipping", "density", "render_consistency", "icon_consistency"],
+          mayAffectOtherRatings: false,
+        });
+        expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.layer.criteria.visual_organization.label)
+          .toBe("Information architecture");
+        expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.turn.criteria.presentation_quality.label)
+          .toBe("Graph experience");
+        expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.turn.criteria.presentation_quality.description)
+          .toContain("Static prose-in-boxes is at most 2");
+        expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.layer.criteria.relationship_clarity.description)
+          .toContain("Do not infer a sequence from card prose");
+      }],
+      ["v10 uses reasoned 1-8 judgments without canned point meanings", () => {
+        expect(GRAPH_PRESENTATION_RUBRIC_V10).toMatchObject({
+          rubricVersion: "graph-presentation-rubric-v10",
+          ratingScale: {
+            minimum: 1,
+            maximum: 8,
+            direction: "higher_is_better",
+            fixedPointMeanings: false,
+            reasonRequired: true,
+            screenshotEvidenceRequired: true,
+          },
+          recursiveJudgment: { contractId: "recursive-presentation-judge-v5" },
+        });
+        expect(GRAPH_PRESENTATION_RUBRIC_V10.subjects.turn.criteria.presentation_quality.description)
+          .not.toMatch(/a 3|4 is|at most 2/);
+      }],
+      ["v11 adds immutable input-action quality and five-choice allocation together", () => {
+        expect(GRAPH_PRESENTATION_RUBRIC_V11).toMatchObject({
+          rubricVersion: "graph-presentation-rubric-v11",
+          recursiveJudgment: {
+            contractId: "recursive-presentation-judge-v6",
+            allocationChoices: ["expand", "reference", "invoke", "input", "stop"],
+          },
+          subjects: {
+            input_action: {
+              requiredScreenshotContext: ["visible_source", "presented_input_control_before_answer"],
+            },
+          },
+        });
+        expect(getRubricCriterionKeys("input_action")).toEqual([
+          "prompt_answerability",
+          "option_set_quality",
+          "control_fit",
+        ]);
+        expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria.option_set_quality.description)
+          .toContain("text action, having no authored options is the correct assessable state");
+        expect(JSON.stringify(GRAPH_PRESENTATION_RUBRIC_V11.subjects.input_action.criteria)).not.toContain("necessity");
+        expect(GRAPH_PRESENTATION_RUBRIC_V11.subjects.turn.criteria.recursive_coherence.description)
+          .toContain("penalizing authored questions that were unnecessary");
+      }],
+    ];
+    expect(cases, "one row per presentation rubric version v3-v11").toHaveLength(9);
+    for (const [label, check] of cases) expect.soft(check, label).not.toThrow();
   });
 
   it("reports missing, unknown, and invalid rating keys without inference", () => {
@@ -285,7 +277,7 @@ describe("recursive simulated-user rubric", () => {
       title_detail_alignment: 3,
       substance: 5,
       invented_formula: 1,
-    })).toEqual([
+    }), "rating validation reports every problem key with its exact code").toEqual([
       {
         code: "missing_rubric_key",
         key: "detail_presentation",

@@ -68,10 +68,10 @@ function caseInput(): AutonomousCaseSnapshotInputV1 {
 }
 
 describe("autonomous case snapshot contract", () => {
-  it("creates a frozen five-artifact snapshot with the default presentation decay", () => {
+  it("creates a confined, frozen five-artifact snapshot", () => {
     const snapshot = createAutonomousCaseSnapshot(caseInput());
 
-    expect(snapshot).toMatchObject({
+    expect(snapshot, "the snapshot carries the five artifacts with the default presentation decay").toMatchObject({
       schemaVersion: 1,
       category: "coding",
       taskType: "feature-change",
@@ -85,100 +85,93 @@ describe("autonomous case snapshot contract", () => {
         outcomeRubric: { kind: "outcome-rubric" },
       },
     });
-    expect(Object.isFrozen(snapshot)).toBe(true);
-    expect(Object.isFrozen(snapshot.artifacts.verifier.mandatoryGates)).toBe(true);
-  });
+    expect(Object.isFrozen(snapshot), "the snapshot is immutable").toBe(true);
+    expect(Object.isFrozen(snapshot.artifacts.verifier.mandatoryGates), "the verifier gates are immutable").toBe(true);
 
-  it("requires a mandatory verifier gate and validates presentation decay", () => {
     const original = caseInput();
-    const missingGate = {
-      ...original,
-      artifacts: {
-        ...original.artifacts,
-        verifier: { ...original.artifacts.verifier, mandatoryGates: [] },
-      },
-    };
-    expect(() => createAutonomousCaseSnapshot(missingGate)).toThrow("at least one mandatory gate");
-
-    expect(() => createAutonomousCaseSnapshot({
-      ...caseInput(),
-      presentation: { graphApplicable: true, layerDepthDecay: 0 },
-    })).toThrow("layer-depth decay");
-  });
-
-  it("rejects unsafe sealed paths and duplicate rubric identifiers", () => {
-    const original = caseInput();
-    const unsafe = {
-      ...original,
-      artifacts: {
-        ...original.artifacts,
-        reference: { ...original.artifacts.reference, sealedPath: "../solution.patch" },
-      },
-    };
-    expect(() => createAutonomousCaseSnapshot(unsafe)).toThrow("package-relative confined path");
-
-    const duplicate = {
-      ...original,
-      artifacts: {
-        ...original.artifacts,
-        outcomeRubric: {
-          ...original.artifacts.outcomeRubric,
-          criteria: [
-            ...original.artifacts.outcomeRubric.criteria,
-            { ...original.artifacts.outcomeRubric.criteria[0]! },
-          ],
+    const cases: readonly [label: string, input: typeof original, message: string][] = [
+      ["a verifier without mandatory gates", {
+        ...original,
+        artifacts: {
+          ...original.artifacts,
+          verifier: { ...original.artifacts.verifier, mandatoryGates: [] },
         },
-      },
-    };
-    expect(() => createAutonomousCaseSnapshot(duplicate)).toThrow("duplicate outcome rubric criterion IDs");
+      }, "at least one mandatory gate"],
+      ["an out-of-range layer-depth decay", {
+        ...original,
+        presentation: { graphApplicable: true, layerDepthDecay: 0 },
+      }, "layer-depth decay"],
+      ["an unsafe sealed path", {
+        ...original,
+        artifacts: {
+          ...original.artifacts,
+          reference: { ...original.artifacts.reference, sealedPath: "../solution.patch" },
+        },
+      }, "package-relative confined path"],
+      ["duplicate rubric identifiers", {
+        ...original,
+        artifacts: {
+          ...original.artifacts,
+          outcomeRubric: {
+            ...original.artifacts.outcomeRubric,
+            criteria: [
+              ...original.artifacts.outcomeRubric.criteria,
+              { ...original.artifacts.outcomeRubric.criteria[0]! },
+            ],
+          },
+        },
+      }, "duplicate outcome rubric criterion IDs"],
+    ];
+    expect(cases, "every confined-snapshot violation is a named row").toHaveLength(4);
+    for (const [label, input, message] of cases) {
+      expect(() => createAutonomousCaseSnapshot(input), `${label} is rejected`).toThrow(message);
+    }
   });
-});
 
-describe("autonomous case catalog projection", () => {
-  it("produces a stable canonical digest independent of object key insertion order", () => {
-    expect(canonicalJson({ z: 1, a: { y: 2, x: 3 } })).toBe(canonicalJson({ a: { x: 3, y: 2 }, z: 1 }));
+  it("projects sealed snapshots into safe catalog bindings", () => {
+    expect(
+      canonicalJson({ z: 1, a: { y: 2, x: 3 } }),
+      "canonical JSON is independent of object key insertion order",
+    ).toBe(canonicalJson({ a: { x: 3, y: 2 }, z: 1 }));
     const snapshot = createAutonomousCaseSnapshot(caseInput());
-    expect(digestAutonomousCaseSnapshot(snapshot)).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(digestAutonomousCaseSnapshot(structuredClone(snapshot))).toBe(digestAutonomousCaseSnapshot(snapshot));
-  });
+    expect(digestAutonomousCaseSnapshot(snapshot), "the snapshot digest is a sha256 value").toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(
+      digestAutonomousCaseSnapshot(structuredClone(snapshot)),
+      "the digest is stable across clones",
+    ).toBe(digestAutonomousCaseSnapshot(snapshot));
 
-  it("never exposes sealed paths from the sanitized snapshot", () => {
-    const snapshot = createAutonomousCaseSnapshot(caseInput());
     const runtimeSnapshot = structuredClone(snapshot) as typeof snapshot & {
       artifacts: typeof snapshot.artifacts & {
         reference: typeof snapshot.artifacts.reference & { contents: string };
         verifier: typeof snapshot.artifacts.verifier & { privatePath: string };
-      };
+      },
     };
     runtimeSnapshot.artifacts.reference.contents = "sealed reference contents";
     runtimeSnapshot.artifacts.verifier.privatePath = "/private/verifier";
     const sanitized = sanitizeAutonomousCaseSnapshot(runtimeSnapshot);
     const serialized = JSON.stringify(sanitized);
 
-    expect(serialized).not.toContain("solution/reference.patch");
-    expect(serialized).not.toContain("verifier/verify.mjs");
-    expect(serialized).not.toContain("sealed reference contents");
-    expect(serialized).not.toContain("/private/verifier");
-    expect(sanitized.artifacts.reference).not.toHaveProperty("sealedPath");
-    expect(sanitized.artifacts.verifier).not.toHaveProperty("sealedPath");
-    expect(sanitized.artifacts.reference.contentDigest).toBe(digest("4"));
-    expect(sanitized.artifacts.verifier.mandatoryGates).toHaveLength(1);
-  });
+    expect(serialized, "sealed reference paths never leave the sanitizer").not.toContain("solution/reference.patch");
+    expect(serialized, "sealed verifier paths never leave the sanitizer").not.toContain("verifier/verify.mjs");
+    expect(serialized, "sealed reference contents never leave the sanitizer").not.toContain("sealed reference contents");
+    expect(serialized, "runtime-private paths never leave the sanitizer").not.toContain("/private/verifier");
+    expect(sanitized.artifacts.reference, "the sanitized reference drops sealedPath").not.toHaveProperty("sealedPath");
+    expect(sanitized.artifacts.verifier, "the sanitized verifier drops sealedPath").not.toHaveProperty("sealedPath");
+    expect(sanitized.artifacts.reference.contentDigest, "the reference digest survives sanitization").toBe(digest("4"));
+    expect(sanitized.artifacts.verifier.mandatoryGates, "the mandatory gates survive sanitization").toHaveLength(1);
 
-  it("binds legacy in-memory definitions while decorating catalogs only with safe data", () => {
     const definition = { id: "legacy-case", prompts: ["Do the work."] };
-    const snapshot = createAutonomousCaseSnapshot(caseInput());
     const bound = bindAutonomousCaseSnapshot(definition, snapshot);
     const catalog = decorateCatalogCaseWithSnapshot(bound);
 
-    expect(bound.snapshot.artifacts.reference.sealedPath).toBe("solution/reference.patch");
-    expect(bound.snapshotDigest).toBe(digestAutonomousCaseSnapshot(snapshot));
-    expect(catalog).toMatchObject({
+    expect(bound.snapshot.artifacts.reference.sealedPath, "the in-memory binding keeps the sealed path for evaluators").toBe("solution/reference.patch");
+    expect(bound.snapshotDigest, "the binding records the snapshot digest").toBe(digestAutonomousCaseSnapshot(snapshot));
+    expect(catalog, "the catalog carries only safe decorated data").toMatchObject({
       definition,
       caseSnapshot: { id: "coding.example-feature" },
       caseSnapshotDigest: bound.snapshotDigest,
     });
-    expect(JSON.stringify(catalog)).not.toContain("sealedPath");
-    expect(Object.isFrozen(catalog)).toBe(true);
+    expect(JSON.stringify(catalog), "the catalog never exposes sealedPath").not.toContain("sealedPath");
+    expect(Object.isFrozen(catalog), "the catalog projection is immutable").toBe(true);
   });
 });

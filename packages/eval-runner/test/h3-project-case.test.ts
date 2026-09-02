@@ -28,8 +28,8 @@ afterEach(async () => {
 });
 
 describe("pinned h3 project case", () => {
-  it("defines one ordered shared-project workflow with three two-turn threads", () => {
-    expect(h3ProjectEvalCase).toMatchObject({
+  it("defines, seeds, and materializes the pinned h3 project on the declared platform", async () => {
+    expect(h3ProjectEvalCase, "one ordered shared-project workflow").toMatchObject({
       id: H3_PROJECT_CASE_ID,
       localOnly: true,
       supportedPlatform: "darwin",
@@ -42,25 +42,24 @@ describe("pinned h3 project case", () => {
         license: "MIT",
       },
     });
-    expect(h3ProjectEvalCase.threads.map((thread) => [thread.id, thread.permissionProfileId, thread.mutationPolicy, thread.prompts.length])).toEqual([
+    expect(
+      h3ProjectEvalCase.threads.map((thread) => [thread.id, thread.permissionProfileId, thread.mutationPolicy, thread.prompts.length]),
+      "three two-turn threads in workflow order",
+    ).toEqual([
       ["architecture", "auto", "read-only", 2],
       ["diagnosis", "auto", "read-only", 2],
       ["implementation", "auto", "writable", 2],
     ]);
-    expect(h3ProjectEvalCase.threads.flatMap((thread) => thread.prompts)).toHaveLength(6);
-    expect(h3ProjectEvalCase.threads[0]!.prompts[1]).toContain("Think deeper");
-    expect(h3ProjectEvalCase.threads[1]!.prompts[1]).toContain("competing hypothesis");
-    expect(h3ProjectEvalCase.threads[2]!.prompts[1]).toContain("second meaningful local commit");
-  });
+    expect(h3ProjectEvalCase.threads.flatMap((thread) => thread.prompts), "six prompts total").toHaveLength(6);
+    expect(h3ProjectEvalCase.threads[0]!.prompts[1], "the architecture deepening prompt").toContain("Think deeper");
+    expect(h3ProjectEvalCase.threads[1]!.prompts[1], "the diagnosis deepening prompt").toContain("competing hypothesis");
+    expect(h3ProjectEvalCase.threads[2]!.prompts[1], "the implementation deepening prompt").toContain("second meaningful local commit");
 
-  it("applies only the intentional integer-to-finite seeded change", () => {
     const source = "before Number.isInteger(statusCode) after";
-    expect(seedH3SanitizerSource(source)).toBe("before Number.isFinite(statusCode) after");
-    expect(() => seedH3SanitizerSource("Number.isFinite(statusCode)")).toThrow("does not match");
-    expect(() => seedH3SanitizerSource(`${source} ${source}`)).toThrow("does not match");
-  });
+    expect(seedH3SanitizerSource(source), "the seed applies the intentional integer-to-finite change").toBe("before Number.isFinite(statusCode) after");
+    expect(() => seedH3SanitizerSource("Number.isFinite(statusCode)"), "an already-seeded source is rejected").toThrow("does not match");
+    expect(() => seedH3SanitizerSource(`${source} ${source}`), "an ambiguous source is rejected").toThrow("does not match");
 
-  it("materializes from a verified cache, makes the deterministic seed commit, and installs frozen", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-h3-case-test-"));
     directories.push(root);
     const cacheDirectory = join(root, "cache");
@@ -102,50 +101,49 @@ describe("pinned h3 project case", () => {
       runCommand,
     });
 
-    expect(receipt).toMatchObject({
+    expect(receipt, "materialization produces a verified seeded receipt").toMatchObject({
       workspaceDirectory,
       seededCommit: H3_SEEDED_COMMIT,
       seededTree: H3_SEEDED_TREE,
       installedWithFrozenLockfile: true,
     });
-    expect(calls).toContain(`corepack ${H3_PACKAGE_MANAGER} install --frozen-lockfile`);
-    expect(calls).toContain("git commit -m Seed status-code decimal validation bug");
-  });
+    expect(calls, "dependencies install frozen through corepack").toContain(`corepack ${H3_PACKAGE_MANAGER} install --frozen-lockfile`);
+    expect(calls, "the deterministic seed commit is made").toContain("git commit -m Seed status-code decimal validation bug");
 
-  it("rejects non-Mac and unsupported Node materialization before touching a checkout", async () => {
     const unused: CommandRunner = async () => { throw new Error("must not run"); };
     await expect(materializeH3ProjectFixture({
       cacheDirectory: "/unused/cache",
       workspaceDirectory: "/unused/workspace",
       platform: "linux",
       runCommand: unused,
-    })).rejects.toThrow("local Mac only");
+    }), "non-Mac materialization is rejected before touching a checkout").rejects.toThrow("local Mac only");
     await expect(materializeH3ProjectFixture({
       cacheDirectory: "/unused/cache",
       workspaceDirectory: "/unused/workspace",
       platform: "darwin",
       nodeVersion: "20.11.0",
       runCommand: unused,
-    })).rejects.toThrow("requires Node");
+    }), "unsupported Node materialization is rejected before touching a checkout").rejects.toThrow("requires Node");
   });
 });
 
 describe("h3 deterministic workspace grading", () => {
-  it("requires zero diff for question and diagnosis and expects the seeded hidden failure", async () => {
-    const runCommand: CommandRunner = async (command, args) => {
+  it("grades implementation work against the seeded hidden failure", async () => {
+    const zeroDiffRunner: CommandRunner = async (command, args) => {
       if (command === "git" && args[0] === "rev-parse") return { exitCode: 0, stdout: `${H3_SEEDED_COMMIT}\n`, stderr: "" };
       if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "" };
       if (command === "git" && args[0] === "diff") return { exitCode: 0, stdout: "", stderr: "" };
       if (command === "node") return { exitCode: 1, stdout: "", stderr: "decimal leaked" };
       throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
     };
-    expect((await gradeH3Workspace({ workspaceDirectory: "/fixture", grade: "question", runCommand })).every((check) => check.passed)).toBe(true);
-    const diagnosis = await gradeH3Workspace({ workspaceDirectory: "/fixture", grade: "diagnosis", runCommand });
-    expect(diagnosis.every((check) => check.passed)).toBe(true);
-    expect(diagnosis.at(-1)?.name).toBe("workspace:diagnosis-reproduces-seeded-failure");
-  });
+    expect(
+      (await gradeH3Workspace({ workspaceDirectory: "/fixture", grade: "question", runCommand: zeroDiffRunner })).every((check) => check.passed),
+      "the question grade requires a zero diff",
+    ).toBe(true);
+    const diagnosis = await gradeH3Workspace({ workspaceDirectory: "/fixture", grade: "diagnosis", runCommand: zeroDiffRunner });
+    expect(diagnosis.every((check) => check.passed), "the diagnosis grade requires a zero diff").toBe(true);
+    expect(diagnosis.at(-1)?.name, "the diagnosis grade expects the seeded hidden failure").toBe("workspace:diagnosis-reproduces-seeded-failure");
 
-  it("requires build, typecheck, hidden behavior, focused files, clean state, and two meaningful commits", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-h3-grade-test-"));
     directories.push(root);
     await mkdir(join(root, "src", "utils"), { recursive: true });
@@ -184,7 +182,7 @@ describe("h3 deterministic workspace grading", () => {
     };
 
     const checks = await gradeH3Workspace({ workspaceDirectory: root, grade: "implementation", runCommand });
-    expect(checks.map((check) => check.name)).toEqual([
+    expect(checks.map((check) => check.name), "the implementation grade runs the full deterministic checklist").toEqual([
       "workspace:implementation-build",
       "workspace:implementation-typecheck",
       "workspace:implementation-focused-tests",
@@ -198,9 +196,9 @@ describe("h3 deterministic workspace grading", () => {
       "workspace:implementation-two-meaningful-commits",
       "workspace:implementation-clean",
     ]);
-    expect(checks.every((check) => check.passed)).toBe(true);
-    expect(verifierCommandDirectories).not.toContain(root);
-    expect(new Set(verifierCommandDirectories)).toHaveLength(1);
+    expect(checks.every((check) => check.passed), "a complete implementation passes every check").toBe(true);
+    expect(verifierCommandDirectories, "verifier commands never run inside the candidate workspace").not.toContain(root);
+    expect(new Set(verifierCommandDirectories), "verifier commands run in one isolated directory").toHaveLength(1);
 
     const autonomousRunCommand: CommandRunner = async (command, args) => {
       if (command === "corepack") return { exitCode: 0, stdout: "installed", stderr: "" };
@@ -226,83 +224,88 @@ describe("h3 deterministic workspace grading", () => {
       grade: "autonomous-implementation",
       runCommand: autonomousRunCommand,
     });
-    expect(autonomousChecks.find((check) => check.name === "workspace:implementation-meaningful-commit")?.passed).toBe(true);
-    expect(autonomousChecks.every((check) => check.passed)).toBe(true);
-  });
+    expect(
+      autonomousChecks.find((check) => check.name === "workspace:implementation-meaningful-commit")?.passed,
+      "the autonomous grade accepts a single meaningful commit",
+    ).toBe(true);
+    expect(autonomousChecks.every((check) => check.passed), "the autonomous grade passes a complete implementation").toBe(true);
 
-  it("accepts different valid implementation shapes and is deterministic across repeated grading", async () => {
-    const implementations = [
-      `export function sanitizeStatusCode(input?: string | number, fallback = 200) {
+    const validImplementations: readonly [label: string, source: string][] = [
+      ["safe-integer range check", `export function sanitizeStatusCode(input?: string | number, fallback = 200) {
         const normalized = Number(input);
         return Number.isSafeInteger(normalized) && normalized >= 100 && normalized <= 599 ? normalized : fallback;
-      }`,
-      `export function sanitizeStatusCode(input?: string | number, fallback = 200) {
+      }`],
+      ["finite-plus-trunc whole check", `export function sanitizeStatusCode(input?: string | number, fallback = 200) {
         const normalized = Number(input);
         const whole = Number.isFinite(normalized) && Math.trunc(normalized) === normalized;
         return whole && normalized >= 100 && normalized <= 599 ? normalized : fallback;
-      }`,
-      `export function sanitizeStatusCode(input?: string | number, fallback = 200) {
+      }`],
+      ["digit-string guard", `export function sanitizeStatusCode(input?: string | number, fallback = 200) {
         if (!/^\\d+$/.test(String(input))) return fallback;
         const normalized = Number(input);
         return normalized >= 100 && normalized <= 599 ? normalized : fallback;
-      }`,
+      }`],
     ];
-    for (const source of implementations) {
-      const root = await createBehaviorWorkspace(source, 'sanitizeStatusCode("404.1")\nsanitizeStatusCode("599.5", 418)\n');
+    expect(validImplementations, "every accepted implementation shape is a named row").toHaveLength(3);
+    for (const [label, source] of validImplementations) {
+      const shapeRoot = await createBehaviorWorkspace(source, 'sanitizeStatusCode("404.1")\nsanitizeStatusCode("599.5", 418)\n');
       const verdicts: string[][] = [];
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const checks = await gradeH3Workspace({
-          workspaceDirectory: root,
+        const shapeChecks = await gradeH3Workspace({
+          workspaceDirectory: shapeRoot,
           grade: "autonomous-implementation",
-          runCommand: behaviorWorkspaceRunner(root),
+          runCommand: behaviorWorkspaceRunner(shapeRoot),
         });
-        expect(checks.filter((check) => check.name.startsWith("workspace:behavior-")).every((check) => check.passed)).toBe(true);
-        expect(checks.some((check) => check.name.includes("validation-boundary"))).toBe(false);
-        verdicts.push(checks.map((check) => `${check.name}:${check.passed}`));
+        expect.soft(
+          shapeChecks.filter((check) => check.name.startsWith("workspace:behavior-")).every((check) => check.passed),
+          `${label}: every behavior check passes`,
+        ).toBe(true);
+        expect.soft(
+          shapeChecks.some((check) => check.name.includes("validation-boundary")),
+          `${label}: no validation-boundary check appears`,
+        ).toBe(false);
+        verdicts.push(shapeChecks.map((check) => `${check.name}:${check.passed}`));
       }
-      expect(new Set(verdicts.map((verdict) => JSON.stringify(verdict)))).toHaveLength(1);
+      expect.soft(
+        new Set(verdicts.map((verdict) => JSON.stringify(verdict))),
+        `${label}: repeated grading is deterministic`,
+      ).toHaveLength(1);
     }
-  });
 
-  it("attributes a decimal-string-only near miss to the exact behavioral requirement", async () => {
-    const root = await createBehaviorWorkspace(`
+    const nearMissRoot = await createBehaviorWorkspace(`
       export function sanitizeStatusCode(input?: string | number, fallback = 200) {
         const normalized = Number(input);
         if (typeof input === "number" && !Number.isInteger(normalized)) return fallback;
         return Number.isFinite(normalized) && normalized >= 100 && normalized <= 599 ? normalized : fallback;
       }
     `, "candidate tests are not verifier evidence\n");
-    const checks = await gradeH3Workspace({
-      workspaceDirectory: root,
+    const nearMissChecks = await gradeH3Workspace({
+      workspaceDirectory: nearMissRoot,
       grade: "autonomous-implementation",
-      runCommand: behaviorWorkspaceRunner(root),
+      runCommand: behaviorWorkspaceRunner(nearMissRoot),
     });
-    const behavior = Object.fromEntries(checks.filter((check) => check.name.startsWith("workspace:behavior-")).map((check) => [check.name, check]));
+    const nearMiss = Object.fromEntries(nearMissChecks.filter((check) => check.name.startsWith("workspace:behavior-")).map((check) => [check.name, check]));
+    expect(nearMiss["workspace:behavior-decimal-number"]?.passed, "the near miss passes the decimal-number requirement").toBe(true);
+    expect(nearMiss["workspace:behavior-decimal-numeric-string"]?.passed, "the near miss fails only the decimal-numeric-string requirement").toBe(false);
+    expect(nearMiss["workspace:behavior-decimal-numeric-string"]?.detail, "the failure names the offending input").toContain('"404.1"');
 
-    expect(behavior["workspace:behavior-decimal-number"]?.passed).toBe(true);
-    expect(behavior["workspace:behavior-decimal-numeric-string"]?.passed).toBe(false);
-    expect(behavior["workspace:behavior-decimal-numeric-string"]?.detail).toContain('"404.1"');
-  });
-
-  it("keeps the seeded finite-only validation red on both decimal requirements", async () => {
-    const root = await createBehaviorWorkspace(`
+    const seededRoot = await createBehaviorWorkspace(`
       export function sanitizeStatusCode(input?: string | number, fallback = 200) {
         const normalized = Number(input);
         return Number.isFinite(normalized) && normalized >= 100 && normalized <= 599 ? normalized : fallback;
       }
     `, "");
-    const checks = await gradeH3Workspace({
-      workspaceDirectory: root,
+    const seededChecks = await gradeH3Workspace({
+      workspaceDirectory: seededRoot,
       grade: "autonomous-implementation",
-      runCommand: behaviorWorkspaceRunner(root),
+      runCommand: behaviorWorkspaceRunner(seededRoot),
     });
-    const behavior = Object.fromEntries(checks.filter((check) => check.name.startsWith("workspace:behavior-")).map((check) => [check.name, check.passed]));
-
-    expect(behavior["workspace:behavior-decimal-number"]).toBe(false);
-    expect(behavior["workspace:behavior-decimal-numeric-string"]).toBe(false);
-    expect(behavior["workspace:behavior-lower-boundary"]).toBe(true);
-    expect(behavior["workspace:behavior-upper-boundary"]).toBe(true);
-  });
+    const seeded = Object.fromEntries(seededChecks.filter((check) => check.name.startsWith("workspace:behavior-")).map((check) => [check.name, check.passed]));
+    expect(seeded["workspace:behavior-decimal-number"], "the seeded finite-only validation stays red on decimal numbers").toBe(false);
+    expect(seeded["workspace:behavior-decimal-numeric-string"], "the seeded finite-only validation stays red on decimal strings").toBe(false);
+    expect(seeded["workspace:behavior-lower-boundary"], "the seeded validation keeps the lower boundary").toBe(true);
+    expect(seeded["workspace:behavior-upper-boundary"], "the seeded validation keeps the upper boundary").toBe(true);
+  }, 20_000);
 });
 
 async function createBehaviorWorkspace(source: string, tests: string): Promise<string> {
