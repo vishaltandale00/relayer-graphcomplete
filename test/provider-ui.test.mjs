@@ -238,6 +238,9 @@ describe("provider and harness renderer markup", () => {
     }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
     expect(markup).toContain("Needs execution setup");
     expect(markup).toContain(">Repair</button>");
+    // The visible label is short; the accessible name still names the
+    // operation and the exact provider so sibling cards stay distinct.
+    expect(markup).toContain('aria-label="Repair execution configurations for ');
     expect(markup).not.toContain("codex-basic");
     expect(markup).not.toContain("prime-agent");
   });

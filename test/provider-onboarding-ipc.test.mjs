@@ -9,6 +9,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
   let currentSettings = structuredClone(savedSettings);
   const modelCatalog = { settingsOpened: vi.fn(), explicitRefresh: vi.fn() };
   const shell = { openExternal: vi.fn() };
+  const presentWindow = vi.fn();
   const settings = {
     read: async () => structuredClone(currentSettings),
     write: async (value) => {
@@ -32,6 +33,10 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     providerDefinitions: {
       adapters: () => [], list: async () => [],
       logout: vi.fn(async () => ({ status: "disconnected" })),
+      completeConnection: vi.fn(async (connectionId) => ({
+        status: connectionId === "pending-connection" ? "pending" : "connected",
+        connectionId, providerDefinition: { id: connectionId },
+      })),
       reconnect: vi.fn(async (id) => ({
         status: "pending", connectionId: id, providerDefinition: { id },
         login: { authUrl: "https://login.example.test" },
@@ -40,6 +45,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     validateProviderOnboarding,
     settings,
     updater: { status: () => ({ phase: "idle" }), check: vi.fn(), download: vi.fn(), install: vi.fn(), setChannel: vi.fn() },
+    presentWindow,
     getWindow: () => null,
     getAppearance: () => "dark",
     setAppearance: vi.fn(),
@@ -49,6 +55,8 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     status: handlers.get("relayer:provider-status"),
     logout: handlers.get("relayer:provider-logout"),
     reconnect: handlers.get("relayer:provider-reconnect"),
+    completeConnection: handlers.get("relayer:provider-connect-complete"),
+    presentWindow,
     refreshModels: handlers.get("relayer:model-catalog-refresh"),
     modelCatalog,
     shell,
@@ -86,6 +94,19 @@ describe("provider onboarding IPC hard gate", () => {
     // Sign-in continues in the browser, so the handoff asks for the browser to
     // come forward instead of leaving the user in front of an unchanged window.
     expect(shell.openExternal).toHaveBeenCalledWith("https://login.example.test", { activate: true });
+  });
+
+  it("returns to Relayer when a provider connection completes, and not while it is pending", async () => {
+    const { completeConnection, presentWindow } = fixture(async () => false);
+
+    // Connect and reconnect both settle here. A pending attempt is not finished.
+    await expect(completeConnection(null, { connectionId: "pending-connection" }))
+      .resolves.toMatchObject({ status: "pending" });
+    expect(presentWindow).not.toHaveBeenCalled();
+
+    await expect(completeConnection(null, { connectionId: "codex-work" }))
+      .resolves.toMatchObject({ status: "connected" });
+    expect(presentWindow).toHaveBeenCalledOnce();
   });
 
   it("routes model-family recovery refresh to the exact connected provider", async () => {

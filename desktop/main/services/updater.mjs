@@ -31,6 +31,9 @@ const IN_FLIGHT_UPDATE_PHASES = ["checking", "available", "downloading", "ready"
 // because the only other checks are one at startup and the Settings button.
 export const UPDATE_POLL_INTERVAL_MS = 3 * 60 * 60 * 1000;
 
+// Launch discovery waits for the window to settle before touching the network.
+export const UPDATE_LAUNCH_CHECK_DELAY_MS = 5_000;
+
 export function createDesktopUpdater({
   autoUpdater,
   app,
@@ -41,12 +44,17 @@ export function createDesktopUpdater({
   platform = process.platform,
   release = systemRelease(),
   pollIntervalMs = UPDATE_POLL_INTERVAL_MS,
+  launchCheckDelayMs = UPDATE_LAUNCH_CHECK_DELAY_MS,
   setPollTimer = setInterval,
   clearPollTimer = clearInterval,
+  setLaunchTimer = setTimeout,
+  clearLaunchTimer = clearTimeout,
 }) {
   let channel = "stable";
   let availableInfo = null;
   let pollTimer = null;
+  let launchTimer = null;
+  let launchCheckScheduled = false;
   let displayedDownloadPercent = 0;
   let state = { phase: app.isPackaged ? "idle" : "development", channel, version: app.getVersion() };
   const publish = (patch) => {
@@ -131,21 +139,40 @@ export function createDesktopUpdater({
     }
   }
 
+  // A scheduled discovery never disturbs an update already in the user's
+  // hands, and never fails a caller that cannot act on the result.
+  async function backgroundCheck() {
+    if (IN_FLIGHT_UPDATE_PHASES.includes(state.phase)) return state;
+    try {
+      return await check();
+    } catch {
+      return state;
+    }
+  }
+
   return {
     status: () => state,
     check,
     startPolling() {
       if (!app.isPackaged || pollTimer !== null) return false;
-      pollTimer = setPollTimer(() => {
-        // A poll only discovers. An update already offered, downloading, or
-        // staged belongs to the user, so leave it and its progress alone.
-        if (IN_FLIGHT_UPDATE_PHASES.includes(state.phase)) return;
-        void check().catch(() => undefined);
-      }, pollIntervalMs);
+      // The launch check is a discovery too, so it takes the same guard as the
+      // poll instead of calling check() unconditionally. It also fires at most
+      // once per process: recreating a window while an update is downloading or
+      // staged must not reset that phase back to checking.
+      if (!launchCheckScheduled) {
+        launchCheckScheduled = true;
+        launchTimer = setLaunchTimer(() => { void backgroundCheck(); }, launchCheckDelayMs);
+        launchTimer?.unref?.();
+      }
+      pollTimer = setPollTimer(() => { void backgroundCheck(); }, pollIntervalMs);
       pollTimer?.unref?.();
       return true;
     },
     stopPolling() {
+      if (launchTimer !== null) {
+        clearLaunchTimer(launchTimer);
+        launchTimer = null;
+      }
       if (pollTimer === null) return false;
       clearPollTimer(pollTimer);
       pollTimer = null;
