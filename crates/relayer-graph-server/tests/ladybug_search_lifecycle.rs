@@ -3,9 +3,9 @@
 #![cfg(feature = "ladybug")]
 
 use relayer_graph_core::{
-    ActionDraft, ActionKind, CurrentTransition, GraphDatabase, LayerDraft, LayerLayout,
-    NavigateRelation, NodeDraft, NodePlacement, SearchIndex, SearchIndexRevision, SearchTarget,
-    TemporalFeatureConfig, ThreadId,
+    ActionDraft, ActionKind, CurrentTransition, EdgeDraft, GraphDatabase, LayerDraft, LayerLayout,
+    NavigateRelation, NodeDraft, NodeId, NodePlacement, ProjectId, SearchIndex,
+    SearchIndexRevision, SearchTarget, TemporalFeatureConfig, ThreadId,
 };
 use relayer_graph_server::search_index::LadybugSearchIndex;
 use serde_json::json;
@@ -284,6 +284,110 @@ async fn missing_store_rebuilds_every_accepted_closure_from_sqlite() {
         database.search_index_rebuild_snapshot().await.unwrap(),
         canonical
     );
+}
+
+/// Every fixture above publishes edgeless layers, so the rebuild's inventory
+/// comparison never saw a CONNECTED relationship. A single edge is enough to
+/// make startup fail closed, which is what shipped in Desktop 0.2.29.
+async fn accepted_graph_with_an_edge(
+    path: &std::path::Path,
+    project: Option<ProjectId>,
+) -> GraphDatabase {
+    let database = GraphDatabase::open(path).await.unwrap();
+    let thread = ThreadId::new(41).unwrap();
+    let interaction = database
+        .create_interaction(project, thread, "Explain the queue")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let mut nodes: Vec<NodeId> = Vec::new();
+    for (client_key, title) in [("queue", "Queue"), ("worker", "Worker")] {
+        nodes.push(
+            writer
+                .submit_node(&NodeDraft {
+                    client_key: client_key.into(),
+                    kind: "concept".into(),
+                    icon: "list-tree".into(),
+                    title: title.into(),
+                    detail: "Pending work".into(),
+                })
+                .await
+                .unwrap()
+                .id,
+        );
+    }
+    let edge = writer
+        .create_edge(&EdgeDraft {
+            client_key: "queue-worker".into(),
+            endpoints: [nodes[0], nodes[1]],
+        })
+        .await
+        .unwrap();
+    let layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "root".into(),
+            nodes: nodes.clone(),
+            edges: vec![edge.id],
+            layout: Some(LayerLayout::v1(vec![
+                NodePlacement {
+                    node_id: nodes[0],
+                    x: 0.25,
+                    y: 0.5,
+                },
+                NodePlacement {
+                    node_id: nodes[1],
+                    x: 0.75,
+                    y: 0.5,
+                },
+            ])),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .add_action(&ActionDraft {
+            client_key: "response".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(layer.id),
+            interaction_text: None,
+            input: None,
+        })
+        .await
+        .unwrap();
+    writer.complete(interaction.id).await.unwrap();
+    database
+}
+
+#[tokio::test]
+async fn a_closure_containing_edges_rebuilds_and_validates() {
+    for project in [None, Some(ProjectId::new(1).unwrap())] {
+        let _guard = lifecycle_test_guard().await;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("graph.db");
+        let database = accepted_graph_with_an_edge(&path, project).await;
+
+        let snapshot = database.search_index_rebuild_snapshot().await.unwrap();
+        assert!(
+            !snapshot.targets.is_empty(),
+            "the fixture publishes at least one accepted target"
+        );
+
+        let index = LadybugSearchIndex::open_reconciled(&path, &database)
+            .await
+            .expect("a closure with an edge reconciles");
+
+        // Every canonical target survives the rebuild at its canonical revision.
+        for (target, revision) in &snapshot.targets {
+            assert_eq!(index.revision(*target).await.unwrap(), Some(*revision));
+        }
+    }
 }
 
 #[tokio::test]
