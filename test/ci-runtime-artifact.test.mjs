@@ -16,62 +16,7 @@ import {
 } from "../scripts/ci/runtime-artifact.mjs";
 
 describe("Rust runtime workflow artifact", () => {
-  test("installs only binaries bound to the exact source and toolchain inputs", () => {
-    const repository = mkdtempSync(join(tmpdir(), "relayer-runtime-source-"));
-    const artifactDirectory = mkdtempSync(
-      join(tmpdir(), "relayer-runtime-artifact-"),
-    );
-    const installDirectory = mkdtempSync(
-      join(tmpdir(), "relayer-runtime-install-"),
-    );
-    try {
-      const targetDirectory = join(repository, "target", "debug");
-      mkdirSync(targetDirectory, { recursive: true });
-      writeFileSync(join(repository, "Cargo.lock"), "version = 4\n");
-      writeFileSync(
-        join(targetDirectory, "relayer-graph-server"),
-        "graph-server-bytes",
-      );
-      writeFileSync(
-        join(targetDirectory, "relayer-app-server"),
-        "app-server-bytes",
-      );
-
-      const sourceCommit = "0123456789abcdef0123456789abcdef01234567";
-      createRuntimeArtifact({
-        repository,
-        targetDirectory,
-        artifactDirectory,
-        sourceCommit,
-        platform: "Linux-X64",
-        rustcRelease: "1.94.0",
-        cargoProfile: "debug-line-tables-only",
-        packages: ["relayer-app-server", "relayer-graph-server"],
-      });
-      verifyRuntimeArtifact({
-        repository,
-        artifactDirectory,
-        installDirectory,
-        sourceCommit,
-        platform: "Linux-X64",
-        rustcRelease: "1.94.0",
-        cargoProfile: "debug-line-tables-only",
-      });
-
-      expect(
-        readFileSync(join(installDirectory, "relayer-app-server"), "utf8"),
-      ).toBe("app-server-bytes");
-      expect(
-        readFileSync(join(installDirectory, "relayer-graph-server"), "utf8"),
-      ).toBe("graph-server-bytes");
-    } finally {
-      rmSync(repository, { recursive: true, force: true });
-      rmSync(artifactDirectory, { recursive: true, force: true });
-      rmSync(installDirectory, { recursive: true, force: true });
-    }
-  });
-
-  test("rejects modified binary bytes instead of installing them", () => {
+  test("installs only exact-match binaries after rejecting every mismatched identity, digest, and inventory boundary", () => {
     const repository = mkdtempSync(join(tmpdir(), "relayer-runtime-source-"));
     const artifactDirectory = mkdtempSync(
       join(tmpdir(), "relayer-runtime-artifact-"),
@@ -91,61 +36,7 @@ describe("Rust runtime workflow artifact", () => {
         join(targetDirectory, "relayer-graph-server"),
         "trusted-graph-bytes",
       );
-      const options = {
-        repository,
-        targetDirectory,
-        artifactDirectory,
-        sourceCommit: "0123456789abcdef0123456789abcdef01234567",
-        platform: "Linux-X64",
-        rustcRelease: "1.94.0",
-        cargoProfile: "debug-line-tables-only",
-        packages: ["relayer-app-server", "relayer-graph-server"],
-      };
-      createRuntimeArtifact(options);
-      expect(() =>
-        verifyRuntimeArtifact({
-          ...options,
-          cargoProfile: "debug",
-          installDirectory,
-        }),
-      ).toThrow("cargoProfile: artifact identity mismatch");
-      expect(readdirSync(installDirectory)).toEqual([]);
 
-      writeFileSync(
-        join(artifactDirectory, "bin", "relayer-graph-server"),
-        "modified-bytes",
-      );
-
-      expect(() =>
-        verifyRuntimeArtifact({
-          ...options,
-          installDirectory,
-        }),
-      ).toThrow("relayer-graph-server: artifact digest mismatch");
-      expect(readdirSync(installDirectory)).toEqual([]);
-    } finally {
-      rmSync(repository, { recursive: true, force: true });
-      rmSync(artifactDirectory, { recursive: true, force: true });
-      rmSync(installDirectory, { recursive: true, force: true });
-    }
-  });
-
-  test("rejects every mismatched identity and inventory boundary before installation", () => {
-    const repository = mkdtempSync(join(tmpdir(), "relayer-runtime-source-"));
-    const artifactDirectory = mkdtempSync(
-      join(tmpdir(), "relayer-runtime-artifact-"),
-    );
-    const installDirectory = mkdtempSync(
-      join(tmpdir(), "relayer-runtime-install-"),
-    );
-    try {
-      const targetDirectory = join(repository, "target", "debug");
-      mkdirSync(targetDirectory, { recursive: true });
-      writeFileSync(join(repository, "Cargo.lock"), "version = 4\n");
-      writeFileSync(
-        join(targetDirectory, "relayer-app-server"),
-        "trusted-app-bytes",
-      );
       const options = {
         repository,
         targetDirectory,
@@ -155,11 +46,22 @@ describe("Rust runtime workflow artifact", () => {
         platform: "Linux-X64",
         rustcRelease: "1.94.0",
         cargoProfile: "debug-line-tables-only",
-        packages: ["relayer-app-server"],
+        packages: ["relayer-app-server", "relayer-graph-server"],
       };
       const original = createRuntimeArtifact(options);
       const manifestPath = join(artifactDirectory, "manifest.json");
-      const cases = [
+      const writeManifest = (manifest) =>
+        writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      const expectRejected = (label, message, attempt) => {
+        expect(attempt, `${label}: verification must throw`).toThrow(message);
+        expect(
+          readdirSync(installDirectory),
+          `${label}: nothing is installed after rejection`,
+        ).toEqual([]);
+      };
+
+      // Every manifest identity field is a reject boundary.
+      const identityCases = [
         ["version", 2, "version: artifact identity mismatch"],
         [
           "sourceCommit",
@@ -176,37 +78,62 @@ describe("Rust runtime workflow artifact", () => {
         ["cargoProfile", "release", "cargoProfile: artifact identity mismatch"],
         ["featureSet", "all", "featureSet: artifact identity mismatch"],
       ];
-      for (const [field, value, message] of cases) {
-        writeFileSync(
-          manifestPath,
-          `${JSON.stringify({ ...original, [field]: value }, null, 2)}\n`,
-        );
-        expect(() => verifyRuntimeArtifact(options)).toThrow(message);
-        expect(readdirSync(installDirectory)).toEqual([]);
+      expect(identityCases).toHaveLength(7);
+      for (const [field, value, message] of identityCases) {
+        writeManifest({ ...original, [field]: value });
+        expectRejected(`tampered manifest ${field}`, message, () =>
+          verifyRuntimeArtifact(options));
       }
+      writeManifest(original);
 
-      writeFileSync(
-        manifestPath,
-        `${JSON.stringify(
-          {
-            ...original,
-            binaries: [{ ...original.binaries[0], name: "../escape" }],
-          },
-          null,
-          2,
-        )}\n`,
+      // The caller-supplied identity is checked too, not just the manifest.
+      expectRejected(
+        "mismatched cargoProfile in the verify request",
+        "cargoProfile: artifact identity mismatch",
+        () => verifyRuntimeArtifact({ ...options, cargoProfile: "debug" }),
       );
-      expect(() => verifyRuntimeArtifact(options)).toThrow(
+
+      // Modified binary bytes are rejected by digest before installation.
+      const graphBinary = join(artifactDirectory, "bin", "relayer-graph-server");
+      writeFileSync(graphBinary, "modified-bytes");
+      expectRejected(
+        "modified binary bytes",
+        "relayer-graph-server: artifact digest mismatch",
+        () => verifyRuntimeArtifact(options),
+      );
+      writeFileSync(graphBinary, "trusted-graph-bytes");
+
+      // Binary names cannot escape the install directory.
+      writeManifest({
+        ...original,
+        binaries: [{ ...original.binaries[0], name: "../escape" }],
+      });
+      expectRejected(
+        "path-traversal binary name",
         "../escape: invalid binary name",
+        () => verifyRuntimeArtifact(options),
       );
-      expect(readdirSync(installDirectory)).toEqual([]);
+      writeManifest(original);
 
-      writeFileSync(manifestPath, `${JSON.stringify(original, null, 2)}\n`);
+      // Unexpected files in the artifact inventory are rejected.
       writeFileSync(join(artifactDirectory, "bin", "unexpected"), "bytes");
-      expect(() => verifyRuntimeArtifact(options)).toThrow(
+      expectRejected(
+        "unexpected binary in the artifact inventory",
         "artifact binary inventory mismatch",
+        () => verifyRuntimeArtifact(options),
       );
-      expect(readdirSync(installDirectory)).toEqual([]);
+      rmSync(join(artifactDirectory, "bin", "unexpected"));
+
+      // An untampered artifact verifies and installs the exact bytes.
+      verifyRuntimeArtifact(options);
+      expect(
+        readFileSync(join(installDirectory, "relayer-app-server"), "utf8"),
+        "the app-server binary installs byte-for-byte",
+      ).toBe("trusted-app-bytes");
+      expect(
+        readFileSync(join(installDirectory, "relayer-graph-server"), "utf8"),
+        "the graph-server binary installs byte-for-byte",
+      ).toBe("trusted-graph-bytes");
     } finally {
       rmSync(repository, { recursive: true, force: true });
       rmSync(artifactDirectory, { recursive: true, force: true });

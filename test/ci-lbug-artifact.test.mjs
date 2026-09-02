@@ -80,24 +80,22 @@ describe("prebuilt Ladybug artifact", () => {
     return copy;
   }
 
-  test("packages the library, the include tree, and a flat umbrella layout", () => {
+  test("packages the library, the include tree, and a flat umbrella layout that verifies and exports the link environment", () => {
     const manifest = JSON.parse(readFileSync(join(bundle, "manifest.json"), "utf8"));
-    expect(manifest.kind).toBe("lbug-prebuilt");
-    expect(manifest.sourceCommit).toBe(sourceCommit);
-    expect(manifest.platform).toBe("Linux-X64");
-    expect(manifest.rustcRelease).toBe("1.94.0");
-    expect(manifest.lbugVersion).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(Array.isArray(manifest.lbugFeatures)).toBe(true);
-    expect(manifest.library.sha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(typeof manifest.library.sizeBytes).toBe("number");
-    expect(manifest.contentsSha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(existsSync(join(bundle, "lib", "liblbug.a"))).toBe(true);
-    expect(existsSync(join(bundle, "include", "lbug.h"))).toBe(true);
-    expect(existsSync(join(bundle, "include", "lbug.hpp"))).toBe(true);
-    expect(existsSync(join(bundle, "include", "common", "types.h"))).toBe(true);
-  });
+    expect(manifest.kind, "the bundle identifies itself as the lbug prebuilt").toBe("lbug-prebuilt");
+    expect(manifest.sourceCommit, "the bundle is sealed to the source commit").toBe(sourceCommit);
+    expect(manifest.platform, "the bundle records its platform").toBe("Linux-X64");
+    expect(manifest.rustcRelease, "the bundle records its toolchain").toBe("1.94.0");
+    expect(manifest.lbugVersion, "the bundle carries the parsed Ladybug version").toMatch(/^\d+\.\d+\.\d+$/);
+    expect(Array.isArray(manifest.lbugFeatures), "the bundle lists its Ladybug features").toBe(true);
+    expect(manifest.library.sha256, "the library is sealed by digest").toMatch(/^[0-9a-f]{64}$/);
+    expect(typeof manifest.library.sizeBytes, "the library records its size").toBe("number");
+    expect(manifest.contentsSha256, "the whole contents tree is sealed by digest").toMatch(/^[0-9a-f]{64}$/);
+    expect(existsSync(join(bundle, "lib", "liblbug.a")), "the static library is packaged").toBe(true);
+    expect(existsSync(join(bundle, "include", "lbug.h")), "the flat C umbrella header is packaged").toBe(true);
+    expect(existsSync(join(bundle, "include", "lbug.hpp")), "the flat C++ umbrella header is packaged").toBe(true);
+    expect(existsSync(join(bundle, "include", "common", "types.h")), "the include tree keeps its nested headers").toBe(true);
 
-  test("verify accepts an untampered bundle and exports the link environment", () => {
     const envFile = join(fixture, "github-env-happy");
     run([
       "verify",
@@ -107,119 +105,110 @@ describe("prebuilt Ladybug artifact", () => {
       ...identity,
     ]);
     const exported = readFileSync(envFile, "utf8");
-    expect(exported).toContain(`LBUG_LIBRARY_DIR=${join(bundle, "lib")}`);
-    expect(exported).toContain(`LBUG_INCLUDE_DIR=${join(bundle, "include")}`);
+    expect(exported, "verify exports the library directory").toContain(`LBUG_LIBRARY_DIR=${join(bundle, "lib")}`);
+    expect(exported, "verify exports the include directory").toContain(`LBUG_INCLUDE_DIR=${join(bundle, "include")}`);
   });
 
-  test("verify rejects a tampered library before any environment is exported", () => {
-    const copy = tamperedCopy("tampered-lib");
-    appendFileSync(join(copy, "lib", "liblbug.a"), "tampered");
-    const envFile = join(fixture, "github-env-tampered-lib");
-    expect(() =>
-      run([
-        "verify",
-        "--repository", repositoryRoot,
-        "--artifact-dir", copy,
-        "--github-env", envFile,
-        ...identity,
-      ]),
-    ).toThrow(/digest does not match/);
-    expect(existsSync(envFile)).toBe(false);
-  });
-
-  test("verify rejects a bundle built for another platform", () => {
-    expect(() =>
-      run([
-        "verify",
-        "--repository", repositoryRoot,
-        "--artifact-dir", bundle,
-        "--platform", "macOS-ARM64",
-        "--rustc-release", "1.94.0",
-      ]),
-    ).toThrow(/platform/);
-  });
-
-  test("verify rejects a bundle built by another toolchain", () => {
-    expect(() =>
-      run([
-        "verify",
-        "--repository", repositoryRoot,
-        "--artifact-dir", bundle,
-        "--platform", "Linux-X64",
-        "--rustc-release", "9.9.9",
-      ]),
-    ).toThrow(/rustc/);
-  });
-
-  test("verify rejects a bundle sealed against an older Cargo.lock", () => {
-    const copy = tamperedCopy("stale-lock");
-    const manifestPath = join(copy, "manifest.json");
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    manifest.cargoLockSha256 = "0".repeat(64);
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-    expect(() =>
-      run([
-        "verify",
-        "--repository", repositoryRoot,
-        "--artifact-dir", copy,
-        ...identity,
-      ]),
-    ).toThrow(/Cargo\.lock digest/);
-  });
-
-  test("verify rejects a truncated include tree via the contents digest", () => {
-    const copy = tamperedCopy("tampered-include");
-    writeFileSync(join(copy, "include", "common", "types.h"), "truncated\n");
-    expect(() =>
-      run([
-        "verify",
-        "--repository", repositoryRoot,
-        "--artifact-dir", copy,
-        ...identity,
-      ]),
-    ).toThrow(/contents digest/);
-  });
-
-  test("verify rejects a library whose size does not match the manifest", () => {
-    const copy = tamperedCopy("stale-size");
-    const manifestPath = join(copy, "manifest.json");
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    manifest.library.sizeBytes += 1;
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-    expect(() =>
-      run([
-        "verify",
-        "--repository", repositoryRoot,
-        "--artifact-dir", copy,
-        ...identity,
-      ]),
-    ).toThrow(/size does not match/);
-  });
-
-  test("verify rejects a directory without a manifest", () => {
-    const empty = join(fixture, "empty-bundle");
-    mkdirSync(empty, { recursive: true });
-    expect(() =>
-      run([
-        "verify",
-        "--repository", repositoryRoot,
-        "--artifact-dir", empty,
-        ...identity,
-      ]),
-    ).toThrow(/manifest\.json missing/);
-  });
-
-  test("create fails loudly when the target directory has no Ladybug build", () => {
-    expect(() =>
-      run([
-        "create",
-        "--repository", repositoryRoot,
-        "--target-dir", join(fixture, "empty-target"),
-        "--artifact-dir", join(fixture, "bundle-missing"),
-        "--lbug-source-dir", join(fixture, "lbug-source"),
-        "--source-commit", sourceCommit,
-        ...identity,
-      ]),
-    ).toThrow(/no build outputs|no lbug CMake output/);
+  test("rejects every tampered or mismatched bundle before exporting any environment", () => {
+    const rewriteManifest = (copy, mutate) => {
+      const manifestPath = join(copy, "manifest.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      mutate(manifest);
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    };
+    const cases = [
+      {
+        label: "a tampered library fails the digest check",
+        copy: "tampered-lib",
+        mutate: (copy) => appendFileSync(join(copy, "lib", "liblbug.a"), "tampered"),
+        error: /digest does not match/,
+      },
+      {
+        label: "a bundle built for another platform is rejected",
+        args: ["--platform", "macOS-ARM64", "--rustc-release", "1.94.0"],
+        error: /platform/,
+      },
+      {
+        label: "a bundle built by another toolchain is rejected",
+        args: ["--platform", "Linux-X64", "--rustc-release", "9.9.9"],
+        error: /rustc/,
+      },
+      {
+        label: "a bundle sealed against an older Cargo.lock is rejected",
+        copy: "stale-lock",
+        mutate: (copy) =>
+          rewriteManifest(copy, (manifest) => {
+            manifest.cargoLockSha256 = "0".repeat(64);
+          }),
+        error: /Cargo\.lock digest/,
+      },
+      {
+        label: "a truncated include tree fails the contents digest",
+        copy: "tampered-include",
+        mutate: (copy) =>
+          writeFileSync(join(copy, "include", "common", "types.h"), "truncated\n"),
+        error: /contents digest/,
+      },
+      {
+        label: "a library whose size does not match the manifest is rejected",
+        copy: "stale-size",
+        mutate: (copy) =>
+          rewriteManifest(copy, (manifest) => {
+            manifest.library.sizeBytes += 1;
+          }),
+        error: /size does not match/,
+      },
+      {
+        label: "a directory without a manifest is rejected",
+        emptyDir: "empty-bundle",
+        error: /manifest\.json missing/,
+      },
+      {
+        label: "create fails loudly when the target directory has no Ladybug build",
+        mode: "create",
+        error: /no build outputs|no lbug CMake output/,
+      },
+    ];
+    expect(cases).toHaveLength(8);
+    for (const row of cases) {
+      if (row.mode === "create") {
+        expect(
+          () =>
+            run([
+              "create",
+              "--repository", repositoryRoot,
+              "--target-dir", join(fixture, "empty-target"),
+              "--artifact-dir", join(fixture, "bundle-missing"),
+              "--lbug-source-dir", join(fixture, "lbug-source"),
+              "--source-commit", sourceCommit,
+              ...identity,
+            ]),
+          row.label,
+        ).toThrow(row.error);
+        continue;
+      }
+      const artifactDir = row.copy
+        ? tamperedCopy(row.copy)
+        : join(fixture, row.emptyDir ?? "untouched");
+      if (row.copy) row.mutate(artifactDir);
+      if (row.emptyDir) mkdirSync(artifactDir, { recursive: true });
+      const envFile = join(fixture, `github-env-${row.label.replace(/\W+/g, "-")}`);
+      const args = row.args ?? [...identity];
+      expect.soft(
+        () =>
+          run([
+            "verify",
+            "--repository", repositoryRoot,
+            "--artifact-dir", artifactDir,
+            "--github-env", envFile,
+            ...args,
+          ]),
+        row.label,
+      ).toThrow(row.error);
+      expect.soft(
+        existsSync(envFile),
+        `${row.label}: no environment is exported before rejection`,
+      ).toBe(false);
+    }
   });
 });

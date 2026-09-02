@@ -15,175 +15,181 @@ function configuration(name, implementation, adapterId) {
   };
 }
 
+const providerDefinition = { id: "work", adapterId: "openai-api", accessContract: "secret@1" };
+const models = [{ id: "gpt-work", visible: true, availability: "available" }];
+const runtimeRequirements = {
+  "codex.basic": { runtimeId: "codex", recipeId: "codex@0.147.0" },
+  "claude.basic": { runtimeId: "claude", recipeId: "claude@0.3.250" },
+};
+
+function singleCodexCoordinator(overrides = {}) {
+  const prepareRecipe = overrides.prepareRecipe ?? vi.fn(async () => ({ runtimeId: "codex" }));
+  const publishAvailability = overrides.publishAvailability ?? vi.fn(async () => {});
+  const coordinator = createHarnessReadinessCoordinator({
+    configurations: new Map([["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")]]),
+    digestConfiguration: () => "sha256:codex-basic",
+    runtimeRequirements: { "codex.basic": { runtimeId: "codex", recipeId: "codex@0.147.0" } },
+    prepareRecipe,
+    checkers: overrides.checkers ?? { "codex.basic": async () => ({ available: true }) },
+    publishAvailability,
+  });
+  return { coordinator, prepareRecipe, publishAvailability };
+}
+
 describe("production harness readiness", () => {
-  it("prepares shared recipes once and publishes independent compatible route results", async () => {
-    const configurations = new Map([
-      ["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")],
-      ["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openai-api")],
-      ["prime-agent-deep", configuration("prime-agent-deep", "prime.agent", "openai-api")],
-      ["claude-basic", configuration("claude-basic", "claude.basic", "anthropic-api")],
-    ]);
-    const prepareRecipe = vi.fn(async (recipeId) => ({ recipeId, executable: `/managed/${recipeId}` }));
-    const publishAvailability = vi.fn(async () => {});
-    const coordinator = createHarnessReadinessCoordinator({
-      configurations,
-      digestConfiguration: ({ name }) => `sha256:${name}`,
-      runtimeRequirements: {
-        "codex.basic": { runtimeId: "codex", recipeId: "codex@0.147.0" },
-        "claude.basic": { runtimeId: "claude", recipeId: "claude@0.3.250" },
-      },
-      prepareRecipe,
-      checkers: {
-        "codex.basic": async ({ runtime }) => ({ available: runtime.recipeId === "codex@0.147.0" }),
-        "claude.basic": async () => ({ available: true }),
-        "prime.agent": async () => ({
-          available: false,
-          reason: { code: "prime_managed_kernel_unavailable", message: "Prime is unavailable." },
-        }),
-      },
-      publishAvailability,
-    });
-
-    const result = await coordinator.evaluate({
-      trigger: "connect",
-      providerDefinition: { id: "work", adapterId: "openai-api", accessContract: "secret@1" },
-      models: [{ id: "gpt-work", visible: true, availability: "available" }],
-    });
-
-    expect(prepareRecipe).toHaveBeenCalledTimes(1);
-    expect(prepareRecipe).toHaveBeenCalledWith("codex@0.147.0");
-    expect(result.readyHarnessIds).toEqual(["codex-basic"]);
-    expect(publishAvailability).toHaveBeenCalledWith([
-      { harnessId: "codex-basic", configurationDigest: "sha256:codex-basic", generation: 1, available: true, unavailableReason: null },
-      { harnessId: "prime-agent-basic", configurationDigest: "sha256:prime-agent-basic", generation: 1, available: false, unavailableReason: { code: "prime_managed_kernel_unavailable", message: "Prime is unavailable." } },
-      { harnessId: "prime-agent-deep", configurationDigest: "sha256:prime-agent-deep", generation: 1, available: false, unavailableReason: { code: "prime_managed_kernel_unavailable", message: "Prime is unavailable." } },
-    ]);
-  });
-
-  it("requires a readiness checker for every loaded production implementation", () => {
-    expect(() => createHarnessReadinessCoordinator({
-      configurations: new Map([["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")]]),
-      digestConfiguration: () => "sha256:codex-basic",
-      runtimeRequirements: { "codex.basic": { runtimeId: "codex", recipeId: "codex@0.147.0" } },
-      prepareRecipe: async () => ({}),
-      checkers: {},
-      publishAvailability: async () => {},
-    })).toThrow("codex.basic has no production readiness checker");
-  });
-
-  it("does not run readiness for background, settings, picker, or send triggers", async () => {
-    const prepareRecipe = vi.fn();
-    const publishAvailability = vi.fn();
-    const coordinator = createHarnessReadinessCoordinator({
-      configurations: new Map([["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")]]),
-      digestConfiguration: () => "sha256:codex-basic",
-      runtimeRequirements: { "codex.basic": { runtimeId: "codex", recipeId: "codex@0.147.0" } },
-      prepareRecipe,
-      checkers: { "codex.basic": async () => ({ available: true }) },
-      publishAvailability,
-    });
-
-    for (const trigger of ["background", "settings-open", "picker", "send"]) {
-      await expect(coordinator.evaluate({
-        trigger,
-        providerDefinition: { id: "work", adapterId: "openai-api", accessContract: "secret@1" },
-        models: [{ id: "gpt-work", visible: true, availability: "available" }],
-      })).resolves.toEqual({ readyHarnessIds: [], routeResults: [] });
+  it("requires connected triggers, matching contracts, exact model rules, and a production checker before preparing routes", async () => {
+    const cases = [
+      [
+        "loading an implementation without a readiness checker fails fast",
+        async () => {
+          let buildError = null;
+          try {
+            singleCodexCoordinator({ checkers: {} });
+          } catch (error) {
+            buildError = error;
+          }
+          return { buildError: buildError?.message ?? null };
+        },
+        (outcome, label) => {
+          expect.soft(outcome.buildError, `${label}: the coordinator must refuse to start`).toBe("codex.basic has no production readiness checker.");
+        },
+      ],
+      [
+        "background, settings, picker, and send triggers never run readiness",
+        async () => {
+          const outcomes = [];
+          for (const trigger of ["background", "settings-open", "picker", "send"]) {
+            const { coordinator, prepareRecipe, publishAvailability } = singleCodexCoordinator();
+            const result = await coordinator.evaluate({ trigger, providerDefinition, models });
+            outcomes.push({ trigger, result, prepareCalls: prepareRecipe.mock.calls.length, publishCalls: publishAvailability.mock.calls.length });
+          }
+          return outcomes;
+        },
+        (outcomes, label) => {
+          for (const outcome of outcomes) {
+            expect.soft(outcome.result, `${label}: ${outcome.trigger} resolves empty`).toEqual({ readyHarnessIds: [], routeResults: [] });
+            expect.soft(outcome.prepareCalls + outcome.publishCalls, `${label}: ${outcome.trigger} touches no recipe or publication`).toBe(0);
+          }
+        },
+      ],
+      [
+        "a provider without the bound access contract prepares nothing",
+        async () => {
+          const { coordinator, prepareRecipe, publishAvailability } = singleCodexCoordinator();
+          await coordinator.evaluate({
+            trigger: "connect",
+            providerDefinition: { id: "work", adapterId: "openai-api", accessContract: "managed-runtime@1" },
+            models,
+          });
+          return { prepareCalls: prepareRecipe.mock.calls.length, publishCalls: publishAvailability.mock.calls.length };
+        },
+        (outcome, label) => {
+          expect.soft(outcome.prepareCalls + outcome.publishCalls, `${label}: contract mismatch never reaches recipe preparation`).toBe(0);
+        },
+      ],
+      [
+        "a provider without the exact model-rule adapter prepares nothing",
+        async () => {
+          const { coordinator, prepareRecipe, publishAvailability } = singleCodexCoordinator();
+          await coordinator.evaluate({
+            trigger: "connect",
+            providerDefinition: { id: "work", adapterId: "anthropic-api", accessContract: "secret@1" },
+            models,
+          });
+          return { prepareCalls: prepareRecipe.mock.calls.length, publishCalls: publishAvailability.mock.calls.length };
+        },
+        (outcome, label) => {
+          expect.soft(outcome.prepareCalls + outcome.publishCalls, `${label}: adapter mismatch never reaches recipe preparation`).toBe(0);
+        },
+      ],
+      [
+        "a connected evaluation prepares the shared recipe once and publishes independent compatible route results",
+        async () => {
+          const prepareRecipe = vi.fn(async (recipeId) => ({ recipeId, executable: `/managed/${recipeId}` }));
+          const publishAvailability = vi.fn(async () => {});
+          const coordinator = createHarnessReadinessCoordinator({
+            configurations: new Map([
+              ["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")],
+              ["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openai-api")],
+              ["prime-agent-deep", configuration("prime-agent-deep", "prime.agent", "openai-api")],
+              ["claude-basic", configuration("claude-basic", "claude.basic", "anthropic-api")],
+            ]),
+            digestConfiguration: ({ name }) => `sha256:${name}`,
+            runtimeRequirements,
+            prepareRecipe,
+            checkers: {
+              "codex.basic": async ({ runtime }) => ({ available: runtime.recipeId === "codex@0.147.0" }),
+              "claude.basic": async () => ({ available: true }),
+              "prime.agent": async () => ({
+                available: false,
+                reason: { code: "prime_managed_kernel_unavailable", message: "Prime is unavailable." },
+              }),
+            },
+            publishAvailability,
+          });
+          const result = await coordinator.evaluate({ trigger: "connect", providerDefinition, models });
+          return { result, prepareCalls: prepareRecipe.mock.calls, publishCalls: publishAvailability.mock.calls };
+        },
+        (outcome, label) => {
+          expect.soft(outcome.prepareCalls, `${label}: the shared codex recipe is prepared exactly once`).toEqual([["codex@0.147.0"]]);
+          expect.soft(outcome.result.readyHarnessIds, `${label}: only the compatible codex route becomes ready`).toEqual(["codex-basic"]);
+          expect.soft(outcome.publishCalls, `${label}: every independent compatible route result is published`).toEqual([[[
+            { harnessId: "codex-basic", configurationDigest: "sha256:codex-basic", generation: 1, available: true, unavailableReason: null },
+            { harnessId: "prime-agent-basic", configurationDigest: "sha256:prime-agent-basic", generation: 1, available: false, unavailableReason: { code: "prime_managed_kernel_unavailable", message: "Prime is unavailable." } },
+            { harnessId: "prime-agent-deep", configurationDigest: "sha256:prime-agent-deep", generation: 1, available: false, unavailableReason: { code: "prime_managed_kernel_unavailable", message: "Prime is unavailable." } },
+          ]]]);
+        },
+      ],
+    ];
+    expect(cases).toHaveLength(5);
+    for (const [label, scenario, assert] of cases) {
+      assert(await scenario(), label);
     }
-    expect(prepareRecipe).not.toHaveBeenCalled();
-    expect(publishAvailability).not.toHaveBeenCalled();
   });
 
-  it("requires both the access contract and exact model rule before preparing a route", async () => {
-    const prepareRecipe = vi.fn(async () => ({ runtimeId: "codex" }));
-    const publishAvailability = vi.fn(async () => {});
-    const coordinator = createHarnessReadinessCoordinator({
-      configurations: new Map([["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")]]),
-      digestConfiguration: () => "sha256:codex-basic",
-      runtimeRequirements: { "codex.basic": { runtimeId: "codex", recipeId: "codex@0.147.0" } },
-      prepareRecipe,
-      checkers: { "codex.basic": async () => ({ available: true }) },
-      publishAvailability,
-    });
+  it("supersedes stale generations and serializes publication so old writes never land last", async () => {
+    const request = { trigger: "reconnect", providerDefinition, models };
 
-    await coordinator.evaluate({
-      trigger: "connect",
-      providerDefinition: { id: "work", adapterId: "openai-api", accessContract: "managed-runtime@1" },
-      models: [{ id: "gpt-work", visible: true, availability: "available" }],
-    });
-    await coordinator.evaluate({
-      trigger: "connect",
-      providerDefinition: { id: "work", adapterId: "anthropic-api", accessContract: "secret@1" },
-      models: [{ id: "gpt-work", visible: true, availability: "available" }],
-    });
-
-    expect(prepareRecipe).not.toHaveBeenCalled();
-    expect(publishAvailability).not.toHaveBeenCalled();
-  });
-
-  it("drops a late readiness result after a newer evaluation starts for the same harness", async () => {
+    // Checkpoint 1: a late readiness result is dropped once a newer
+    // evaluation has started for the same harness.
     let finishFirst;
     const first = new Promise((resolve) => { finishFirst = resolve; });
-    const prepareRecipe = vi.fn()
-      .mockImplementationOnce(() => first)
-      .mockResolvedValueOnce({ runtimeId: "codex" });
-    const publishAvailability = vi.fn(async () => {});
-    const coordinator = createHarnessReadinessCoordinator({
-      configurations: new Map([["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")]]),
-      digestConfiguration: () => "sha256:codex-basic",
-      runtimeRequirements: { "codex.basic": { runtimeId: "codex", recipeId: "codex@0.147.0" } },
-      prepareRecipe,
-      checkers: { "codex.basic": async () => ({ available: true }) },
-      publishAvailability,
+    const lateRace = singleCodexCoordinator({
+      prepareRecipe: vi.fn()
+        .mockImplementationOnce(() => first)
+        .mockResolvedValueOnce({ runtimeId: "codex" }),
     });
-    const request = {
-      trigger: "reconnect",
-      providerDefinition: { id: "work", adapterId: "openai-api", accessContract: "secret@1" },
-      models: [{ id: "gpt-work", visible: true, availability: "available" }],
-    };
-    const oldEvaluation = coordinator.evaluate(request);
-    const newEvaluation = coordinator.evaluate(request);
+    const oldEvaluation = lateRace.coordinator.evaluate(request);
+    const newEvaluation = lateRace.coordinator.evaluate(request);
     await newEvaluation;
     finishFirst({ runtimeId: "codex" });
-    await expect(oldEvaluation).resolves.toEqual({ readyHarnessIds: [], routeResults: [] });
-    expect(publishAvailability).toHaveBeenCalledTimes(1);
-    expect(publishAvailability.mock.calls[0][0][0].generation).toBe(2);
-  });
+    await expect(oldEvaluation, "late readiness result: the superseded evaluation resolves empty").resolves.toEqual({ readyHarnessIds: [], routeResults: [] });
+    expect(lateRace.publishAvailability, "late readiness result: only the newer generation publishes").toHaveBeenCalledTimes(1);
+    expect(lateRace.publishAvailability.mock.calls[0][0][0].generation, "late readiness result: publication carries the fresh generation").toBe(2);
 
-  it("serializes publication so an older HTTP write cannot land after a newer generation", async () => {
+    // Checkpoint 2: publication is serialized so an older HTTP write cannot
+    // land after a newer generation.
     let finishFirstPublish;
     const firstPublish = new Promise((resolve) => { finishFirstPublish = resolve; });
     const published = [];
-    const coordinator = createHarnessReadinessCoordinator({
-      configurations: new Map([["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")]]),
-      digestConfiguration: () => "sha256:codex-basic",
-      runtimeRequirements: { "codex.basic": { runtimeId: "codex", recipeId: "codex@0.147.0" } },
-      prepareRecipe: async () => ({ runtimeId: "codex" }),
-      checkers: { "codex.basic": async () => ({ available: true }) },
+    const serialized = singleCodexCoordinator({
       publishAvailability: async (updates) => {
         published.push(updates[0].generation);
         if (updates[0].generation === 1) await firstPublish;
       },
     });
-    const request = {
-      trigger: "reconnect",
-      providerDefinition: { id: "work", adapterId: "openai-api", accessContract: "secret@1" },
-      models: [{ id: "gpt-work", visible: true, availability: "available" }],
-    };
-
-    const oldEvaluation = coordinator.evaluate(request);
-    await vi.waitFor(() => expect(published).toEqual([1]));
-    const newEvaluation = coordinator.evaluate(request);
+    const serializedOld = serialized.coordinator.evaluate(request);
+    await vi.waitFor(() => expect(published, "serialized publication: the first generation starts writing").toEqual([1]));
+    const serializedNew = serialized.coordinator.evaluate(request);
     await Promise.resolve();
-    expect(published).toEqual([1]);
+    expect(published, "serialized publication: the newer generation waits for the older write").toEqual([1]);
     finishFirstPublish();
+    await expect(serializedOld, "serialized publication: the superseded evaluation resolves empty").resolves.toEqual({ readyHarnessIds: [], routeResults: [] });
+    await expect(serializedNew, "serialized publication: the fresh evaluation stays ready").resolves.toMatchObject({ readyHarnessIds: ["codex-basic"] });
+    expect(published, "serialized publication: generations land in order").toEqual([1, 2]);
 
-    await expect(oldEvaluation).resolves.toEqual({ readyHarnessIds: [], routeResults: [] });
-    await expect(newEvaluation).resolves.toMatchObject({ readyHarnessIds: ["codex-basic"] });
-    expect(published).toEqual([1, 2]);
-  });
-
-  it("publishes still-current routes from an overlapping batch when only one harness is superseded", async () => {
+    // Checkpoint 3: an overlapping batch still publishes the routes that
+    // remain current when only one harness is superseded.
     let finishPrime;
     const primePending = new Promise((resolve) => { finishPrime = resolve; });
     const codex = configuration("codex-basic", "codex.basic", "openai-api");
@@ -191,8 +197,8 @@ describe("production harness readiness", () => {
       ...configuration("prime-agent-basic", "prime.agent", "openai-api"),
       modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: "^prime-" }], deny: [] },
     };
-    const published = [];
-    const coordinator = createHarnessReadinessCoordinator({
+    const overlappingBatch = [];
+    const overlapCoordinator = createHarnessReadinessCoordinator({
       configurations: new Map([[codex.name, codex], [prime.name, prime]]),
       digestConfiguration: ({ name }) => `sha256:${name}`,
       runtimeRequirements: {},
@@ -201,25 +207,23 @@ describe("production harness readiness", () => {
         "codex.basic": async () => ({ available: true }),
         "prime.agent": async () => primePending,
       },
-      publishAvailability: async (updates) => { published.push(updates); },
+      publishAvailability: async (updates) => { overlappingBatch.push(updates); },
     });
-    const providerDefinition = { id: "work", adapterId: "openai-api", accessContract: "secret@1" };
-    const overlapping = coordinator.evaluate({
+    const overlapping = overlapCoordinator.evaluate({
       trigger: "reconnect",
       providerDefinition,
       models: [{ id: "codex-model" }, { id: "prime-model" }],
     });
     await Promise.resolve();
-    const codexOnly = coordinator.evaluate({
+    const codexOnly = overlapCoordinator.evaluate({
       trigger: "reconnect",
       providerDefinition,
       models: [{ id: "codex-model" }],
     });
     await codexOnly;
     finishPrime({ available: true });
-
-    await expect(overlapping).resolves.toMatchObject({ readyHarnessIds: ["prime-agent-basic"] });
-    expect(published).toEqual([
+    await expect(overlapping, "overlapping batch: the superseded batch still resolves its own ready routes").resolves.toMatchObject({ readyHarnessIds: ["prime-agent-basic"] });
+    expect(overlappingBatch, "overlapping batch: only still-current routes are published, newest generation first").toEqual([
       [{ harnessId: "codex-basic", configurationDigest: "sha256:codex-basic", generation: 2, available: true, unavailableReason: null }],
       [{ harnessId: "prime-agent-basic", configurationDigest: "sha256:prime-agent-basic", generation: 1, available: true, unavailableReason: null }],
     ]);
