@@ -29,6 +29,15 @@ import {
 import { resolveDesktopReleaseContract } from "../desktop/release/contract.mjs";
 import { verifyMacOSApplication } from "../desktop/release/verify-macos-app.mjs";
 
+async function rejectionOf(promise) {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  return null;
+}
+
 const repositoryRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const manifestPath = join(repositoryRoot, "vendor", "prime-agent", "manifest.json");
 const execFileAsync = promisify(execFile);
@@ -65,156 +74,53 @@ async function readArchiveFiles(archivePath, wantedPaths) {
 }
 
 describe("Prime Agent packaged runtime", () => {
-  it("keeps integrity-bound source assets byte-stable across host checkouts", async () => {
+  it("seals the reviewed Prime closure: pins, digests, byte ordering, and signed variance", async () => {
     const attributes = await readFile(join(repositoryRoot, ".gitattributes"), "utf8");
-    expect(attributes.split(/\r?\n/)).toEqual(expect.arrayContaining([
+    expect(attributes.split(/\r?\n/), "integrity-bound source assets stay LF across host checkouts").toEqual(expect.arrayContaining([
       "harnesses/*.yaml text eol=lf",
       "python/relayer-graph/src/relayer_graph/**/*.py text eol=lf",
     ]));
-    expect(asarEntryPath("/node_modules/@earendil-works/pi-agent-core/package.json", "darwin"))
-      .toBe("node_modules/@earendil-works/pi-agent-core/package.json");
-    expect(asarEntryPath("\\node_modules\\@earendil-works\\pi-agent-core\\package.json", "win32"))
-      .toBe("node_modules\\@earendil-works\\pi-agent-core\\package.json");
-  });
+    expect(asarEntryPath("/node_modules/@earendil-works/pi-agent-core/package.json", "darwin"),
+      "darwin asar entries drop the leading separator").toBe("node_modules/@earendil-works/pi-agent-core/package.json");
+    expect(asarEntryPath("\\node_modules\\@earendil-works\\pi-agent-core\\package.json", "win32"),
+      "win32 asar entries keep backslashes").toBe("node_modules\\@earendil-works\\pi-agent-core\\package.json");
 
-  it("pins reproducible content-addressed packages and lockfile resolutions", async () => {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     const lockfile = JSON.parse(await readFile(join(repositoryRoot, "package-lock.json"), "utf8"));
     const desktopManifest = JSON.parse(await readFile(join(repositoryRoot, "desktop", "package.json"), "utf8"));
-
-    expect(manifest.source.commit).toBe("f6130839ad3043f1cd3d5294fe03023035bfcd5c");
-    expect(manifest.runtimeContract.modelScopeAccess).toBe("upfront-request-access@1");
-    expect(manifest.packages).toHaveLength(4);
+    expect(manifest.source.commit, "the reviewed Prime source commit").toBe("f6130839ad3043f1cd3d5294fe03023035bfcd5c");
+    expect(manifest.runtimeContract.modelScopeAccess, "the model scope access contract").toBe("upfront-request-access@1");
+    expect(manifest.packages, "the vendored package inventory").toHaveLength(4);
     for (const entry of manifest.packages) {
       const bytes = await readFile(join(repositoryRoot, "vendor", "prime-agent", entry.file));
-      expect(createHash("sha256").update(bytes).digest("hex")).toBe(entry.sha256);
+      expect(createHash("sha256").update(bytes).digest("hex"), `${entry.name} archive hash`)
+        .toBe(entry.sha256);
       const expectedResolution = `file:vendor/prime-agent/${entry.file}`;
-      expect(lockfile.packages[`node_modules/${entry.name}`]).toMatchObject({
+      expect(lockfile.packages[`node_modules/${entry.name}`], `${entry.name} lockfile resolution`).toMatchObject({
         version: entry.version,
         resolved: expectedResolution,
       });
-      expect(desktopManifest.dependencies[entry.name]).toBe(`file:../vendor/prime-agent/${entry.file}`);
+      expect(desktopManifest.dependencies[entry.name], `${entry.name} desktop dependency`)
+        .toBe(`file:../vendor/prime-agent/${entry.file}`);
     }
-    expect(JSON.stringify(lockfile)).not.toContain("/Users/");
-    expect(JSON.stringify(lockfile)).not.toContain("prime-agent/packages/");
-  });
+    expect(JSON.stringify(lockfile), "the lockfile never embeds absolute user paths").not.toContain("/Users/");
+    expect(JSON.stringify(lockfile), "the lockfile never resolves into prime-agent/packages").not.toContain("prime-agent/packages/");
 
-  // The first dynamic import of the vendored Prime package plus the bundled
-  // skill-directory scan exceeded the default 5s timeout on loaded runners.
-  it("discovers the browser route through Prime's bundled Python skill semantics", { timeout: 30_000 }, async () => {
-    const { loadSkillsFromDir } = await import("@earendil-works/pi-coding-agent");
-    const packageRoot = resolve(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "..");
-    const { skills } = loadSkillsFromDir({ dir: join(packageRoot, "skills"), source: "builtin" });
-    const browser = skills.find(({ name }) => name === "browser");
-
-    expect(browser).toMatchObject({
-      name: "browser",
-      kind: "python",
-      python: { importName: "browser" },
-    });
-    for (const name of ["prime-agent-basic.yaml", "prime-agent-deep.yaml"]) {
-      const configuration = await readFile(join(repositoryRoot, "harnesses", name), "utf8");
-      expect(configuration).toContain("ask:\n    boundary: workspace-write@1");
-      expect(configuration).toContain("auto:\n    boundary: workspace-write@1");
-      expect(configuration).toContain("full: {}");
-    }
-  });
-
-  it("ships the tested browser helper at both production skill paths", async () => {
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    const codingAgent = manifest.packages.find(({ name }) => name === "@earendil-works/pi-coding-agent");
-    const sourcePath = "package/skills/browser/src/browser/__init__.py";
-    const distPath = "package/dist/skills/browser/src/browser/__init__.py";
-    const archiveFiles = await readArchiveFiles(
-      join(repositoryRoot, "vendor", "prime-agent", codingAgent.file),
-      new Set([sourcePath, distPath]),
-    );
-    expect(archiveFiles.get(sourcePath)).toEqual(archiveFiles.get(distPath));
-
-    const helper = archiveFiles.get(sourcePath)?.toString("utf8") ?? "";
-    expect(helper).toContain('element.matches(":disabled")');
-    expect(helper).toContain('element.getAttribute("aria-disabled") === "true"');
-    expect(helper).toContain("HTMLElement.prototype.click.call(element)");
-    expect(helper).toContain("return {{ previous, current: String(element.value) }};");
-    expect(helper).toContain("if current != value:");
-    expect(helper).toContain("page rejected or sanitized the requested fill value");
-    expect(helper).toContain("Replace and verify an input value, then disconnect this terminal page action.");
-    expect(helper).toContain("Click one matching element, then disconnect this terminal page action.");
-    expect(helper.match(/await asyncio\.shield\(self\.close\(\)\)/g)).toHaveLength(4);
-    expect(helper).toContain('"Page.lifecycleEvent",');
-    expect(helper).toContain('"Page.navigatedWithinDocument",');
-    expect(helper).toContain('params.get("loaderId") == loader_id');
-    expect(helper).toContain('params.get("frameId") == frame_id');
-    expect(helper).toContain('_normalized_navigation_url(params["url"]) == normalized_url');
-  });
-
-  it("admits only the exact runtime API, production configs, and Python client", async () => {
-    await expect(inspectPrimeAgentRuntime({
-      appPath: repositoryRoot,
-      harnessDirectory: join(repositoryRoot, "harnesses"),
-      manifestPath,
-      pythonClientRoot: join(repositoryRoot, "python", "relayer-graph", "src"),
-      platform: "darwin",
-      architecture: "arm64",
-    })).resolves.toMatchObject({
-      available: true,
-      sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
-      configurationNames: ["prime-agent-basic", "prime-agent-deep"],
-    });
-
-    const rejected = await inspectPrimeAgentRuntime({
-      appPath: repositoryRoot,
-      harnessDirectory: join(repositoryRoot, "harnesses"),
-      manifestPath,
-      pythonClientRoot: join(repositoryRoot, "python", "relayer-graph", "src"),
-      platform: "darwin",
-      architecture: "arm64",
-      importPrimeAgent: async () => ({
-        AGENT_RUN_MODEL_SCOPE_VERSION: 1,
-        AGENT_RUN_TOOL_AUTHORITY_SCOPE_VERSION: 1,
-        AGENT_RUN_KERNEL_BOUNDARY_SCOPE_VERSION: 1,
-      }),
-    });
-    expect(rejected).toMatchObject({
-      available: false,
-      code: "prime_agent_api_incompatible",
-      message: "This Relayer build cannot use the packaged Prime Agent API. Update Relayer.",
-      diagnostics: {
-        sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
-        packages: expect.arrayContaining([{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }]),
-      },
-    });
-    expect(JSON.stringify(rejected)).not.toContain("createAgentRunModelScope");
-  });
-
-  it("rejects manifests that duplicate configurations or weaken the runtime API", async () => {
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    for (const mutate of [
-      (candidate) => { candidate.harnessConfigurations = ["prime-agent-basic.yaml", "prime-agent-basic.yaml"]; },
-      (candidate) => { candidate.runtimeContract.constants = {}; },
-      (candidate) => { candidate.runtimeContract.functions = []; },
-      (candidate) => { candidate.runtimeContract.sessionFunctions = []; },
-    ]) {
-      const candidate = structuredClone(manifest);
-      mutate(candidate);
-      expect(() => validatePrimeAgentManifest(candidate)).toThrow();
-    }
-  });
-
-  it("seals package resolution metadata and precedence-winning nested dependencies", () => {
     const root = "node_modules/@earendil-works/pi-coding-agent";
     const nested = `${root}/node_modules/nested-runtime`;
     const optional = "node_modules/optional-runtime";
     const peer = "node_modules/required-peer";
+    const rootPackageJson = (main, extra = {}) => Buffer.from(JSON.stringify({
+      name: "root",
+      main,
+      ...extra,
+      dependencies: { "nested-runtime": "1.0.0" },
+      optionalDependencies: { "optional-runtime": "1.0.0", "missing-optional": "1.0.0" },
+      peerDependencies: { "required-peer": "1.0.0", "missing-optional-peer": "1.0.0" },
+      peerDependenciesMeta: { "missing-optional-peer": { optional: true } },
+    }));
     const files = new Map([
-      [`${root}/package.json`, Buffer.from(JSON.stringify({
-        name: "root",
-        main: "dist/index.js",
-        dependencies: { "nested-runtime": "1.0.0" },
-        optionalDependencies: { "optional-runtime": "1.0.0", "missing-optional": "1.0.0" },
-        peerDependencies: { "required-peer": "1.0.0", "missing-optional-peer": "1.0.0" },
-        peerDependenciesMeta: { "missing-optional-peer": { optional: true } },
-      }))],
+      [`${root}/package.json`, rootPackageJson("dist/index.js")],
       [`${root}/dist/index.js`, Buffer.from("export const root = true;\n")],
       [`${nested}/package.json`, Buffer.from(JSON.stringify({ name: "nested-runtime", main: "index.js" }))],
       [`${nested}/index.js`, Buffer.from("module.exports = true;\n")],
@@ -232,39 +138,22 @@ describe("Prime Agent packaged runtime", () => {
       (_asar, path) => files.get(path),
     );
     const baseline = digest();
-    files.set(`${root}/package.json`, Buffer.from(JSON.stringify({
-      name: "root",
-      main: "attacker.js",
-      exports: "./attacker.js",
-      dependencies: { "nested-runtime": "1.0.0" },
-      optionalDependencies: { "optional-runtime": "1.0.0", "missing-optional": "1.0.0" },
-      peerDependencies: { "required-peer": "1.0.0", "missing-optional-peer": "1.0.0" },
-      peerDependenciesMeta: { "missing-optional-peer": { optional: true } },
-    })));
-    expect(digest()).not.toBe(baseline);
-    files.set(`${root}/package.json`, Buffer.from(JSON.stringify({
-      name: "root",
-      main: "dist/index.js",
-      dependencies: { "nested-runtime": "1.0.0" },
-      optionalDependencies: { "optional-runtime": "1.0.0", "missing-optional": "1.0.0" },
-      peerDependencies: { "required-peer": "1.0.0", "missing-optional-peer": "1.0.0" },
-      peerDependenciesMeta: { "missing-optional-peer": { optional: true } },
-    })));
+    files.set(`${root}/package.json`, rootPackageJson("attacker.js", { exports: "./attacker.js" }));
+    expect(digest(), "an entrypoint takeover changes the closure digest").not.toBe(baseline);
+    files.set(`${root}/package.json`, rootPackageJson("dist/index.js"));
     files.set(`${nested}/index.js`, Buffer.from("module.exports = 'mutated';\n"));
-    expect(digest()).not.toBe(baseline);
+    expect(digest(), "a mutated precedence-winning nested dependency changes the digest").not.toBe(baseline);
     files.set(`${nested}/index.js`, Buffer.from("module.exports = true;\n"));
     files.set(`${optional}/index.js`, Buffer.from("module.exports = 'mutated optional';\n"));
-    expect(digest()).not.toBe(baseline);
+    expect(digest(), "a mutated optional dependency changes the digest").not.toBe(baseline);
     files.set(`${optional}/index.js`, Buffer.from("module.exports = 'optional';\n"));
     files.set(`${peer}/index.js`, Buffer.from("module.exports = 'mutated peer';\n"));
-    expect(digest()).not.toBe(baseline);
+    expect(digest(), "a mutated peer dependency changes the digest").not.toBe(baseline);
     entries = new Set([...entries].filter((path) => !path.startsWith(`${peer}/`)));
-    expect(digest).toThrow("required-peer is unresolved");
-  });
+    expect(digest, "a missing required peer fails closed").toThrow("required-peer is unresolved");
 
-  it("uses locale-independent UTF-8 byte ordering for integrity digests", async () => {
     const integrityModule = new URL("../desktop/shared/prime-runtime-integrity.mjs", import.meta.url).href;
-    const source = `
+    const localeSource = `
       import { digestFileEntries } from ${JSON.stringify(integrityModule)};
       const entries = [
         { path: "runtime/I.js", bytes: Buffer.from("upper") },
@@ -273,13 +162,136 @@ describe("Prime Agent packaged runtime", () => {
       ];
       process.stdout.write(digestFileEntries(entries));
     `;
-    const run = async (locale) => (await execFileAsync(process.execPath, ["--input-type=module", "--eval", source], {
+    const runLocale = async (locale) => (await execFileAsync(process.execPath, ["--input-type=module", "--eval", localeSource], {
       env: { ...process.env, LC_ALL: locale, LANG: locale },
     })).stdout;
-    expect(await run("tr_TR.UTF-8")).toBe(await run("en_US.UTF-8"));
+    expect(await runLocale("tr_TR.UTF-8"), "integrity digests ignore locale-specific collation")
+      .toBe(await runLocale("en_US.UTF-8"));
+
+    const unsignedEntries = [
+      { path: "node_modules/runtime/index.js", bytes: Buffer.from("reviewed JavaScript") },
+      { path: "node_modules/runtime/addon.node", bytes: machONativeBytes("unsigned signature") },
+    ];
+    const snapshot = createSignedDependencyClosureSnapshot(unsignedEntries, "darwin-arm64");
+    const signedEntries = [
+      unsignedEntries[0],
+      { path: "node_modules/runtime/addon.node", bytes: machONativeBytes("Developer ID signature") },
+    ];
+    expect(() => verifySignedDependencyClosureSnapshot(signedEntries, snapshot, "darwin-arm64"),
+      "signing variance on snapshotted Mach-O binaries is permitted").not.toThrow();
+    const signedVarianceCorpus = [
+      ["mutated JavaScript", [{ path: "node_modules/runtime/index.js", bytes: Buffer.from("mutated JavaScript") }, signedEntries[1]], snapshot, "darwin-arm64", "signed immutable closure mismatch"],
+      ["a missing native binary", [signedEntries[0]], snapshot, "darwin-arm64", "signed native-code inventory mismatch"],
+      ["an added native binary", [...signedEntries, { path: "node_modules/runtime/added.node", bytes: machONativeBytes("added signature") }], snapshot, "darwin-arm64", "signed native-code inventory mismatch"],
+      ["a non-Mach-O replacement", [signedEntries[0], { path: signedEntries[1].path, bytes: Buffer.from("not Mach-O") }], snapshot, "darwin-arm64", "signed native-code inventory mismatch"],
+      ["a different target", signedEntries, snapshot, "darwin-x64", "signed closure snapshot is invalid"],
+      ["a schema-version bump", signedEntries, { ...snapshot, schemaVersion: 2 }, "darwin-arm64", "signed closure snapshot is invalid"],
+    ];
+    expect(signedVarianceCorpus, "signed variance rejection inventory").toHaveLength(6);
+    for (const [label, mutatedEntries, mutatedSnapshot, target, message] of signedVarianceCorpus) {
+      expect(() => verifySignedDependencyClosureSnapshot(mutatedEntries, mutatedSnapshot, target), label)
+        .toThrow(message);
+    }
   });
 
-  it("compares packaged Prime source bytes and every declared support asset to reviewed content", async () => {
+  it("discovers, inspects, and verifies the packaged Prime runtime end to end", { timeout: 120_000 }, async () => {
+    // The first dynamic import of the vendored Prime package plus the bundled
+    // skill-directory scan exceeded the default 5s timeout on loaded runners.
+    const { loadSkillsFromDir } = await import("@earendil-works/pi-coding-agent");
+    const packageRoot = resolve(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "..");
+    const { skills } = loadSkillsFromDir({ dir: join(packageRoot, "skills"), source: "builtin" });
+    const browser = skills.find(({ name }) => name === "browser");
+    expect(browser, "the browser route ships as a Python skill").toMatchObject({
+      name: "browser",
+      kind: "python",
+      python: { importName: "browser" },
+    });
+    for (const name of ["prime-agent-basic.yaml", "prime-agent-deep.yaml"]) {
+      const configuration = await readFile(join(repositoryRoot, "harnesses", name), "utf8");
+      expect(configuration, `${name} pins the Ask boundary`).toContain("ask:\n    boundary: workspace-write@1");
+      expect(configuration, `${name} pins the Auto boundary`).toContain("auto:\n    boundary: workspace-write@1");
+      expect(configuration, `${name} leaves Full unbounded`).toContain("full: {}");
+    }
+
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const codingAgent = manifest.packages.find(({ name }) => name === "@earendil-works/pi-coding-agent");
+    const sourcePath = "package/skills/browser/src/browser/__init__.py";
+    const distPath = "package/dist/skills/browser/src/browser/__init__.py";
+    const archiveFiles = await readArchiveFiles(
+      join(repositoryRoot, "vendor", "prime-agent", codingAgent.file),
+      new Set([sourcePath, distPath]),
+    );
+    expect(archiveFiles.get(sourcePath), "source and dist browser helpers are byte-identical")
+      .toEqual(archiveFiles.get(distPath));
+    const helper = archiveFiles.get(sourcePath)?.toString("utf8") ?? "";
+    for (const token of [
+      'element.matches(":disabled")',
+      'element.getAttribute("aria-disabled") === "true"',
+      "HTMLElement.prototype.click.call(element)",
+      "return {{ previous, current: String(element.value) }};",
+      "if current != value:",
+      "page rejected or sanitized the requested fill value",
+      "Replace and verify an input value, then disconnect this terminal page action.",
+      "Click one matching element, then disconnect this terminal page action.",
+      '"Page.lifecycleEvent",',
+      '"Page.navigatedWithinDocument",',
+      'params.get("loaderId") == loader_id',
+      'params.get("frameId") == frame_id',
+      '_normalized_navigation_url(params["url"]) == normalized_url',
+    ]) {
+      expect.soft(helper, `browser helper keeps ${token}`).toContain(token);
+    }
+    expect(helper.match(/await asyncio\.shield\(self\.close\(\)\)/g), "every terminal action shields close")
+      .toHaveLength(4);
+
+    await expect(inspectPrimeAgentRuntime({
+      appPath: repositoryRoot,
+      harnessDirectory: join(repositoryRoot, "harnesses"),
+      manifestPath,
+      pythonClientRoot: join(repositoryRoot, "python", "relayer-graph", "src"),
+      platform: "darwin",
+      architecture: "arm64",
+    }), "the exact runtime API, configs, and Python client are admitted").resolves.toMatchObject({
+      available: true,
+      sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
+      configurationNames: ["prime-agent-basic", "prime-agent-deep"],
+    });
+    const rejected = await inspectPrimeAgentRuntime({
+      appPath: repositoryRoot,
+      harnessDirectory: join(repositoryRoot, "harnesses"),
+      manifestPath,
+      pythonClientRoot: join(repositoryRoot, "python", "relayer-graph", "src"),
+      platform: "darwin",
+      architecture: "arm64",
+      importPrimeAgent: async () => ({
+        AGENT_RUN_MODEL_SCOPE_VERSION: 1,
+        AGENT_RUN_TOOL_AUTHORITY_SCOPE_VERSION: 1,
+        AGENT_RUN_KERNEL_BOUNDARY_SCOPE_VERSION: 1,
+      }),
+    });
+    expect(rejected, "a weakened runtime API fails closed with an update message").toMatchObject({
+      available: false,
+      code: "prime_agent_api_incompatible",
+      message: "This Relayer build cannot use the packaged Prime Agent API. Update Relayer.",
+      diagnostics: {
+        sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
+        packages: expect.arrayContaining([{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }]),
+      },
+    });
+    expect(JSON.stringify(rejected), "API rejection never leaks unreviewed function names")
+      .not.toContain("createAgentRunModelScope");
+
+    for (const [label, mutate] of [
+      ["duplicate harness configurations", (candidate) => { candidate.harnessConfigurations = ["prime-agent-basic.yaml", "prime-agent-basic.yaml"]; }],
+      ["emptied runtime constants", (candidate) => { candidate.runtimeContract.constants = {}; }],
+      ["emptied runtime functions", (candidate) => { candidate.runtimeContract.functions = []; }],
+      ["emptied session functions", (candidate) => { candidate.runtimeContract.sessionFunctions = []; }],
+    ]) {
+      const candidate = structuredClone(manifest);
+      mutate(candidate);
+      expect.soft(() => validatePrimeAgentManifest(candidate), label).toThrow();
+    }
+
     const resources = await mkdtemp(join(tmpdir(), "relayer-prime-integrity-"));
     try {
       await mkdir(join(resources, "prime-agent"), { recursive: true });
@@ -294,7 +306,6 @@ describe("Prime Agent packaged runtime", () => {
         join(resources, "python", "relayer-graph", "src", "relayer_graph"),
         { recursive: true },
       );
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
       const packagedEntries = new Set((await Promise.all(manifest.packages.map(async (entry) => {
         const prefix = `node_modules/${entry.name}/`;
         return (await packageFileEntries(
@@ -304,22 +315,23 @@ describe("Prime Agent packaged runtime", () => {
       }))).flat());
       for (const path of PACKAGED_PROVIDER_MODULES) packagedEntries.add(`main/${path}`);
       const extractPackageFile = (_asar, path) => readFileSync(join(repositoryRoot, path));
-      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
+      const verifyOptions = (overrides = {}) => ({
         extractPackageFile,
         vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
         verifyDependencyClosure: () => manifest.dependencyClosureSha256ByTarget["darwin-arm64"],
         targetKey: "darwin-arm64",
-      })).resolves.toMatchObject({ sourceCommit: manifest.source.commit, packages: 4 });
-      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
-        extractPackageFile,
-        vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
-        verifyDependencyClosure: () => "unreviewed-closure",
-        targetKey: "darwin-arm64",
-      })).rejects.toThrow("dependency closure mismatch");
+        ...overrides,
+      });
 
-      expect(Object.keys(manifest.dependencyClosureSha256ByTarget).sort()).toEqual([
-        "darwin-arm64",
-      ]);
+      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, verifyOptions()),
+        "reviewed packaged bytes verify against the manifest").resolves.toMatchObject({
+        sourceCommit: manifest.source.commit, packages: 4,
+      });
+      expect((await rejectionOf(verifyPackagedPrimeAgent(resources, packagedEntries, verifyOptions({
+        verifyDependencyClosure: () => "unreviewed-closure",
+      }))))?.message ?? "promise resolved instead of rejecting", "an unreviewed dependency closure fails closed").toMatch("dependency closure mismatch");
+      expect(Object.keys(manifest.dependencyClosureSha256ByTarget).sort(),
+        "only the supported packaged target carries a closure hash").toEqual(["darwin-arm64"]);
 
       const copiedVendor = join(resources, "vendor");
       await mkdir(copiedVendor, { recursive: true });
@@ -329,26 +341,18 @@ describe("Prime Agent packaged runtime", () => {
       const codingArchive = manifest.packages.find(({ name }) => name === "@earendil-works/pi-coding-agent").file;
       const codingArchivePath = join(copiedVendor, codingArchive);
       await writeFile(codingArchivePath, Buffer.concat([await readFile(codingArchivePath), Buffer.from("mutation")]));
-      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
-        extractPackageFile,
-        vendorDirectory: copiedVendor,
-        verifyDependencyClosure: () => manifest.dependencyClosureSha256ByTarget["darwin-arm64"],
-        targetKey: "darwin-arm64",
-      })).rejects.toThrow("archive hash mismatch");
+      expect((await rejectionOf(verifyPackagedPrimeAgent(resources, packagedEntries, verifyOptions({ vendorDirectory: copiedVendor }))))?.message ?? "promise resolved instead of rejecting", "a mutated vendor archive fails closed").toMatch("archive hash mismatch");
 
-      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
+      expect((await rejectionOf(verifyPackagedPrimeAgent(resources, packagedEntries, verifyOptions({
         extractPackageFile: (_asar, path) => {
           const bytes = readFileSync(join(repositoryRoot, path));
           return path === "node_modules/@earendil-works/pi-coding-agent/dist/index.js"
             ? Buffer.concat([bytes, Buffer.from("\n// mutation")])
             : bytes;
         },
-        vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
-        verifyDependencyClosure: () => manifest.dependencyClosureSha256ByTarget["darwin-arm64"],
-        targetKey: "darwin-arm64",
-      })).rejects.toThrow("package bytes mismatch");
+      }))))?.message ?? "promise resolved instead of rejecting", "mutated package bytes fail closed").toMatch("package bytes mismatch");
 
-      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
+      expect((await rejectionOf(verifyPackagedPrimeAgent(resources, packagedEntries, verifyOptions({
         extractPackageFile: (_asar, path) => {
           const bytes = readFileSync(join(repositoryRoot, path));
           if (path !== "node_modules/@earendil-works/pi-coding-agent/package.json") return bytes;
@@ -356,18 +360,10 @@ describe("Prime Agent packaged runtime", () => {
           metadata.main = "dist/unreviewed-entrypoint.js";
           return Buffer.from(JSON.stringify(metadata));
         },
-        vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
-        verifyDependencyClosure: () => manifest.dependencyClosureSha256ByTarget["darwin-arm64"],
-        targetKey: "darwin-arm64",
-      })).rejects.toThrow("package metadata mismatch");
+      }))))?.message ?? "promise resolved instead of rejecting", "an unreviewed package entrypoint fails closed").toMatch("package metadata mismatch");
 
       await writeFile(join(resources, "harnesses", "prime-agent-basic.yaml"), "mutated\n");
-      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
-        extractPackageFile,
-        vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
-        verifyDependencyClosure: () => manifest.dependencyClosureSha256ByTarget["darwin-arm64"],
-        targetKey: "darwin-arm64",
-      })).rejects.toThrow("harness integrity mismatch");
+      expect((await rejectionOf(verifyPackagedPrimeAgent(resources, packagedEntries, verifyOptions())))?.message ?? "promise resolved instead of rejecting", "a mutated harness configuration fails closed").toMatch("harness integrity mismatch");
       await expect(inspectPrimeAgentRuntime({
         appPath: repositoryRoot,
         harnessDirectory: join(resources, "harnesses"),
@@ -375,60 +371,44 @@ describe("Prime Agent packaged runtime", () => {
         pythonClientRoot: join(resources, "python", "relayer-graph", "src"),
         platform: "darwin",
         architecture: "arm64",
-      })).resolves.toMatchObject({ available: false, code: "prime_agent_assets_missing" });
+      }), "the runtime inspector reports missing assets").resolves.toMatchObject({
+        available: false, code: "prime_agent_assets_missing",
+      });
       await rm(join(resources, "harnesses", "prime-agent-basic.yaml"));
-      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
-        extractPackageFile,
-        vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
-        verifyDependencyClosure: () => manifest.dependencyClosureSha256ByTarget["darwin-arm64"],
-        targetKey: "darwin-arm64",
-      })).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await rejectionOf(verifyPackagedPrimeAgent(resources, packagedEntries, verifyOptions())), "a deleted harness configuration surfaces ENOENT").toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(resources, { recursive: true, force: true });
     }
-  });
 
-  it("permits only the snapshotted Mach-O signature variance after signing", () => {
-    const unsignedEntries = [
-      { path: "node_modules/runtime/index.js", bytes: Buffer.from("reviewed JavaScript") },
-      {
-        path: "node_modules/runtime/addon.node",
-        bytes: machONativeBytes("unsigned signature"),
-      },
-    ];
-    const snapshot = createSignedDependencyClosureSnapshot(unsignedEntries, "darwin-arm64");
-    const signedEntries = [
-      unsignedEntries[0],
-      {
-        path: "node_modules/runtime/addon.node",
-        bytes: machONativeBytes("Developer ID signature"),
-      },
-    ];
-    expect(() => verifySignedDependencyClosureSnapshot(signedEntries, snapshot, "darwin-arm64"))
-      .not.toThrow();
-    expect(() => verifySignedDependencyClosureSnapshot([
-      { path: "node_modules/runtime/index.js", bytes: Buffer.from("mutated JavaScript") },
-      signedEntries[1],
-    ], snapshot, "darwin-arm64")).toThrow("signed immutable closure mismatch");
-    expect(() => verifySignedDependencyClosureSnapshot([signedEntries[0]], snapshot, "darwin-arm64"))
-      .toThrow("signed native-code inventory mismatch");
-    expect(() => verifySignedDependencyClosureSnapshot([
-      ...signedEntries,
-      { path: "node_modules/runtime/added.node", bytes: machONativeBytes("added signature") },
-    ], snapshot, "darwin-arm64")).toThrow("signed native-code inventory mismatch");
-    expect(() => verifySignedDependencyClosureSnapshot([
-      signedEntries[0],
-      { path: signedEntries[1].path, bytes: Buffer.from("not Mach-O") },
-    ], snapshot, "darwin-arm64")).toThrow("signed native-code inventory mismatch");
-    expect(() => verifySignedDependencyClosureSnapshot(signedEntries, snapshot, "darwin-x64"))
-      .toThrow("signed closure snapshot is invalid");
-    expect(() => verifySignedDependencyClosureSnapshot(signedEntries, {
-      ...snapshot,
-      schemaVersion: 2,
-    }, "darwin-arm64")).toThrow("signed closure snapshot is invalid");
-  });
+    const signedRuntimeDirectory = await mkdtemp(join(tmpdir(), "relayer-signed-prime-runtime-"));
+    const packagedAppPath = join(signedRuntimeDirectory, "app.asar");
+    try {
+      await symlink(repositoryRoot, packagedAppPath, "dir");
+      const unsignedEntries = [
+        { path: "node_modules/runtime/index.js", bytes: Buffer.from("reviewed JavaScript") },
+        { path: "node_modules/runtime/addon.node", bytes: machONativeBytes("unsigned signature") },
+      ];
+      await expect(inspectPrimeAgentRuntime({
+        appPath: packagedAppPath,
+        architecture: "arm64",
+        collectDependencyClosure: async () => [
+          unsignedEntries[0],
+          { path: "node_modules/runtime/addon.node", bytes: machONativeBytes("Developer ID signature") },
+        ],
+        harnessDirectory: join(repositoryRoot, "harnesses"),
+        integrityPhase: "signed",
+        manifestPath,
+        platform: "darwin",
+        pythonClientRoot: join(repositoryRoot, "python", "relayer-graph", "src"),
+        readSignedClosureSnapshot: async () => createSignedDependencyClosureSnapshot(unsignedEntries, "darwin-arm64"),
+      }), "a signed runtime is admitted after walking its mutated native closure").resolves.toMatchObject({
+        available: true,
+        configurationNames: ["prime-agent-basic", "prime-agent-deep"],
+      });
+    } finally {
+      await rm(signedRuntimeDirectory, { recursive: true, force: true });
+    }
 
-  it("uses the app signature instead of unsigned native hashes after macOS signing", async () => {
     const appPath = await mkdtemp(join(tmpdir(), "relayer-signed-prime-"));
     try {
       const bundleCalls = [];
@@ -461,60 +441,20 @@ describe("Prime Agent packaged runtime", () => {
           verificationOrder.push("bundle");
           bundleCalls.push(args);
         },
-      })).resolves.toMatchObject({ appPath, expectedTeamId: "NZ253AL7U6" });
-      expect(verificationOrder).toEqual(["signature", "bundle"]);
-      expect(bundleCalls).toEqual([[appPath, expect.objectContaining({
+      }), "macOS verification admits the signed application").resolves.toMatchObject({
+        appPath, expectedTeamId: "NZ253AL7U6",
+      });
+      expect(verificationOrder, "the app signature is verified before bundle verification")
+        .toEqual(["signature", "bundle"]);
+      expect(bundleCalls, "bundle verification runs in the signed integrity phase").toEqual([[appPath, expect.objectContaining({
         expectedArchitecture: "arm64",
         primeAgentIntegrityPhase: "signed",
       })]]);
     } finally {
       await rm(appPath, { recursive: true, force: true });
     }
-  });
 
-  it("admits a signed packaged Prime runtime after walking its mutated native closure", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-signed-prime-runtime-"));
-    const packagedAppPath = join(directory, "app.asar");
-    try {
-      await symlink(repositoryRoot, packagedAppPath, "dir");
-      const unsignedEntries = [
-        { path: "node_modules/runtime/index.js", bytes: Buffer.from("reviewed JavaScript") },
-        {
-          path: "node_modules/runtime/addon.node",
-          bytes: machONativeBytes("unsigned signature"),
-        },
-      ];
-      const signedEntries = [
-        unsignedEntries[0],
-        {
-          path: "node_modules/runtime/addon.node",
-          bytes: machONativeBytes("Developer ID signature"),
-        },
-      ];
-      await expect(inspectPrimeAgentRuntime({
-        appPath: packagedAppPath,
-        architecture: "arm64",
-        collectDependencyClosure: async () => signedEntries,
-        harnessDirectory: join(repositoryRoot, "harnesses"),
-        integrityPhase: "signed",
-        manifestPath,
-        platform: "darwin",
-        pythonClientRoot: join(repositoryRoot, "python", "relayer-graph", "src"),
-        readSignedClosureSnapshot: async () => createSignedDependencyClosureSnapshot(
-          unsignedEntries,
-          "darwin-arm64",
-        ),
-      })).resolves.toMatchObject({
-        available: true,
-        configurationNames: ["prime-agent-basic", "prime-agent-deep"],
-      });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 15_000);
-
-  it("fails closed with a stable harness-neutral reason for Windows default Auto", async () => {
-    const rejected = await inspectPrimeAgentRuntime({
+    const windowsRejected = await inspectPrimeAgentRuntime({
       appPath: "C:\\Program Files\\Relayer\\resources\\app.asar",
       harnessDirectory: "C:\\Program Files\\Relayer\\resources\\harnesses",
       manifestPath: "C:\\secret-profile\\manifest.json",
@@ -523,16 +463,16 @@ describe("Prime Agent packaged runtime", () => {
       defaultPermissionProfileId: "auto",
       importPrimeAgent: async () => { throw new Error("secret import detail"); },
     });
-    expect(rejected).toMatchObject({
+    expect(windowsRejected, "Windows default Auto fails closed with a stable harness-neutral reason").toMatchObject({
       available: false,
       code: "prime_agent_boundary_unsupported",
       message: "Prime Agent Ask and Auto require macOS. Choose another available harness on this device.",
     });
-    expect(JSON.stringify(rejected)).not.toContain("secret-profile");
-    expect(JSON.stringify(rejected)).not.toContain("secret import detail");
+    expect(JSON.stringify(windowsRejected), "the Windows rejection never leaks local paths").not.toContain("secret-profile");
+    expect(JSON.stringify(windowsRejected), "the Windows rejection never leaks import errors").not.toContain("secret import detail");
   });
 
-  it("packages basic and deep without the development layered configuration", () => {
+  it("packages the release harness set and widens bundle permissions without following symlinks", async () => {
     const contract = resolveDesktopReleaseContract({
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },
       version: "0.2.14",
@@ -542,20 +482,17 @@ describe("Prime Agent packaged runtime", () => {
       argv: [],
     });
     const resources = config.extraResources.map(({ to }) => to);
-    expect(resources).toContain("harnesses/prime-agent-basic.yaml");
-    expect(resources).toContain("harnesses/prime-agent-deep.yaml");
-    expect(resources).not.toContain("harnesses/prime-agent-layered-navigation-luna.yaml");
-    expect(resources).toContain("python/relayer-graph/src/relayer_graph");
-    expect(resources).toContain("prime-agent/manifest.json");
-    expect(config.files).toContain("!node_modules/@earendil-works/pi-ai/dist/providers/faux.*");
-  });
-});
+    expect(resources, "basic and deep harnesses ship").toContain("harnesses/prime-agent-basic.yaml");
+    expect(resources, "the deep harness ships").toContain("harnesses/prime-agent-deep.yaml");
+    expect(resources, "the development layered configuration never ships")
+      .not.toContain("harnesses/prime-agent-layered-navigation-luna.yaml");
+    expect(resources, "the Python graph client ships").toContain("python/relayer-graph/src/relayer_graph");
+    expect(resources, "the Prime manifest ships").toContain("prime-agent/manifest.json");
+    expect(config.files, "faux provider builds are excluded").toContain("!node_modules/@earendil-works/pi-ai/dist/providers/faux.*");
 
-describe("packaged bundle permissions", () => {
-  // Signed CI builds shipped a 0700 application, so Spotlight and Launch
-  // Services could not index it and it never appeared in search. Local builds
-  // were already 0755, so only a release DMG reproduced it.
-  it("widens group and other to match the owner without following symlinks", async () => {
+    // Signed CI builds shipped a 0700 application, so Spotlight and Launch
+    // Services could not index it and it never appeared in search. Local builds
+    // were already 0755, so only a release DMG reproduced it.
     const directory = await mkdtemp(join(tmpdir(), "relayer-bundle-permissions-"));
     try {
       const appPath = join(directory, "Relayer.app");
@@ -573,14 +510,14 @@ describe("packaged bundle permissions", () => {
       await normalizePackagedBundlePermissions(appPath);
 
       const modeOf = async (path) => ((await lstat(path)).mode & 0o7777).toString(8);
-      expect(await modeOf(appPath)).toBe("755");
-      expect(await modeOf(join(appPath, "Contents"))).toBe("755");
-      expect(await modeOf(macOsDirectory)).toBe("755");
-      expect(await modeOf(join(macOsDirectory, "Relayer"))).toBe("755");
+      expect(await modeOf(appPath), "the app bundle widens to 755").toBe("755");
+      expect(await modeOf(join(appPath, "Contents")), "Contents widens to 755").toBe("755");
+      expect(await modeOf(macOsDirectory), "MacOS widens to 755").toBe("755");
+      expect(await modeOf(join(macOsDirectory, "Relayer")), "the executable widens to 755").toBe("755");
       // A plain file stays non-executable; only readability widens.
-      expect(await modeOf(join(appPath, "Contents", "Info.plist"))).toBe("644");
+      expect(await modeOf(join(appPath, "Contents", "Info.plist")), "plain files widen to 644 without execute").toBe("644");
       // The symlink target keeps the mode it was given through its own path.
-      expect(await modeOf(join(appPath, "Contents", "Info.plist"))).toBe("644");
+      expect(await modeOf(join(appPath, "Contents", "Info.plist")), "symlinks are never followed for permission changes").toBe("644");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

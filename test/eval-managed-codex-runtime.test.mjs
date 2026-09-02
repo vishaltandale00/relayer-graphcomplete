@@ -17,6 +17,15 @@ import {
   withManagedCodexPath,
 } from "../desktop/shared/codex-runtime-environment.mjs";
 
+async function rejectionOf(promise) {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  return null;
+}
+
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const services = [];
 const directories = [];
@@ -27,89 +36,99 @@ afterEach(async () => {
 });
 
 describe("Eval managed Codex runtime", () => {
-  it("defers platform validation until a runtime is requested", async () => {
-    const createInstaller = vi.fn(() => { throw new Error("unsupported linux target"); });
-    const runtime = createEvalManagedCodexRuntime({
+  it("defers platform validation, honors development executables, caches one install, and leases exact access", async () => {
+    const unsupported = vi.fn(() => { throw new Error("unsupported linux target"); });
+    const deferredRuntime = createEvalManagedCodexRuntime({
       root: "/eval/managed-runtimes",
       enableMaintenance: false,
       environment: { PATH: "/usr/bin" },
-      createInstaller,
+      createInstaller: unsupported,
     });
 
-    expect(runtime.activeOperations()).toEqual([]);
-    await expect(runtime.pruneInactiveInstallations()).resolves.toEqual({ removed: [], failures: [] });
-    expect(createInstaller).not.toHaveBeenCalled();
-    await expect(runtime.resolve()).rejects.toThrow("unsupported linux target");
-    expect(createInstaller).toHaveBeenCalledOnce();
-  });
+    expect(deferredRuntime.activeOperations(), "operations are empty before any installer exists").toEqual([]);
+    await expect(deferredRuntime.pruneInactiveInstallations(), "maintenance is a no-op without an installer")
+      .resolves.toEqual({ removed: [], failures: [] });
+    expect(unsupported, "nothing constructs an installer until a runtime is requested").not.toHaveBeenCalled();
+    expect((await rejectionOf(deferredRuntime.resolve()))?.message ?? "promise resolved instead of rejecting", "platform validation surfaces at resolve time").toMatch("unsupported linux target");
+    expect(unsupported, "resolve constructed the installer exactly once").toHaveBeenCalledOnce();
 
-  it("uses an explicit development executable without validating managed-runtime platform support", async () => {
-    const createInstaller = vi.fn(() => { throw new Error("unsupported linux target"); });
-    const runtime = createEvalManagedCodexRuntime({
+    const developmentInstaller = vi.fn(() => { throw new Error("unsupported linux target"); });
+    const developmentRuntime = createEvalManagedCodexRuntime({
       root: "/eval/managed-runtimes",
       developmentExecutable: "/usr/local/bin/codex",
       environment: { PATH: "/usr/bin" },
-      createInstaller,
+      createInstaller: developmentInstaller,
     });
+    await expect(developmentRuntime.resolve(), "a development executable bypasses managed resolution")
+      .resolves.toMatchObject({
+        executable: "/usr/local/bin/codex",
+        environment: { PATH: "/usr/local/codex-path:/usr/bin" },
+      });
+    expect(developmentInstaller, "development executables never validate platform support").not.toHaveBeenCalled();
 
-    await expect(runtime.resolve()).resolves.toMatchObject({
-      executable: "/usr/local/bin/codex",
-      environment: { PATH: "/usr/local/codex-path:/usr/bin" },
-    });
-    expect(createInstaller).not.toHaveBeenCalled();
-  });
-
-  it("runs packaged maintenance through the managed installer before a runtime is requested", async () => {
     const pruneInactiveInstallations = vi.fn(async () => ({ removed: ["old"], failures: [] }));
-    const createInstaller = vi.fn(() => ({ pruneInactiveInstallations }));
-    const runtime = createEvalManagedCodexRuntime({ root: "/eval/managed-runtimes", createInstaller });
+    const maintenanceRuntime = createEvalManagedCodexRuntime({
+      root: "/eval/managed-runtimes",
+      createInstaller: vi.fn(() => ({ pruneInactiveInstallations })),
+    });
+    await expect(maintenanceRuntime.pruneInactiveInstallations(), "packaged maintenance routes through the installer")
+      .resolves.toEqual({ removed: ["old"], failures: [] });
+    expect(pruneInactiveInstallations, "maintenance invoked the installer once").toHaveBeenCalledOnce();
 
-    await expect(runtime.pruneInactiveInstallations()).resolves.toEqual({ removed: ["old"], failures: [] });
-    expect(createInstaller).toHaveBeenCalledOnce();
-    expect(pruneInactiveInstallations).toHaveBeenCalledOnce();
-  });
-
-  it("caches one successful installation result for all Eval consumers", async () => {
     const prepare = vi.fn(async () => ({
       runtimeId: "codex",
       recipeId: "codex@0.147.0",
       version: "0.147.0",
       executable: "/managed/installations/current/vendor/target/bin/codex",
     }));
-    const runtime = createEvalManagedCodexRuntime({
+    const cachedRuntime = createEvalManagedCodexRuntime({
       root: "/eval/managed-runtimes",
       environment: { PATH: "/usr/bin" },
       createInstaller: () => ({ prepare, activeOperations: () => [], cancelAll: async () => {} }),
     });
+    const [first, second] = await Promise.all([cachedRuntime.resolve(), cachedRuntime.resolve()]);
+    expect(first, "concurrent consumers share one resolution").toBe(second);
+    expect(await cachedRuntime.resolve(), "later consumers reuse the cached result").toBe(first);
+    expect(prepare, "the exact recipe prepared once").toHaveBeenCalledOnce();
+    expect(prepare, "preparation requested the pinned recipe").toHaveBeenCalledWith("codex@0.147.0");
+    expect(first.environment.PATH, "the resolved PATH carries the helper directory")
+      .toBe("/managed/installations/current/vendor/target/codex-path:/usr/bin");
 
-    const [first, second] = await Promise.all([runtime.resolve(), runtime.resolve()]);
-    expect(first).toBe(second);
-    expect(await runtime.resolve()).toBe(first);
-    expect(prepare).toHaveBeenCalledOnce();
-    expect(prepare).toHaveBeenCalledWith("codex@0.147.0");
-    expect(first.environment.PATH).toBe("/managed/installations/current/vendor/target/codex-path:/usr/bin");
-  });
-
-  it("leases exact Codex managed-runtime access to the Eval harness broker", async () => {
     const resolveRuntime = vi.fn(async () => ({
       executable: "/managed/codex",
       environment: Object.freeze({ PATH: "/managed/codex-path:/usr/bin" }),
     }));
     const acquire = createEvalCodexExecutionLease(resolveRuntime);
     const lease = await acquire("codex");
-    expect(lease).toMatchObject({
+    expect(lease, "the lease exposes the managed Codex provider identity").toMatchObject({
       definition: { id: "codex", adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
       descriptor: { adapterId: "codex-subscription", accessContract: "managed-runtime@1", implementationVersion: "1" },
     });
-    await expect(lease.runtime.executionAccess()).resolves.toEqual({
-      kind: "managed-runtime",
-      environment: { PATH: "/managed/codex-path:/usr/bin" },
+    await expect(lease.runtime.executionAccess(), "execution access is a managed-runtime environment grant")
+      .resolves.toEqual({
+        kind: "managed-runtime",
+        environment: { PATH: "/managed/codex-path:/usr/bin" },
+      });
+    expect((await rejectionOf(acquire("other")))?.message ?? "promise resolved instead of rejecting", "unknown providers get no execution adapter").toMatch("no execution adapter");
+    await expect(lease.release(), "the lease releases cleanly").resolves.toBeUndefined();
+
+    const executable = "/runtime/vendor/target/bin/codex";
+    expect(managedCodexHelperDirectory(executable), "helper directory sits beside the vendor bin dir")
+      .toBe("/runtime/vendor/target/codex-path");
+    expect(withManagedCodexPath({
+      Path: "/runtime/vendor/target/codex-path:/usr/bin",
+    }, executable, { platform: "linux" }), "an already-present helper PATH deduplicates and normalizes the key").toEqual({
+      PATH: "/runtime/vendor/target/codex-path:/usr/bin",
     });
-    await expect(acquire("other")).rejects.toThrow("no execution adapter");
-    await expect(lease.release()).resolves.toBeUndefined();
+    expect(withManagedCodexPath({
+      PATH: "C:\\ambiguous\\bin",
+      Path: "C:\\Windows\\System32",
+    }, "C:\\runtime\\vendor\\target\\bin\\codex.exe", { platform: "win32" }), "win32 keeps the case-variant Path key").toEqual({
+      Path: expect.stringMatching(/^.*codex-path;C:\\Windows\\System32$/),
+    });
   });
 
-  it("publishes the connected managed Codex catalog once for fresh Eval profiles", async () => {
+  it("publishes the managed Codex catalog once and materializes a selectable family on a live product server", { timeout: 60_000 }, async () => {
     const close = vi.fn(async () => undefined);
     const credentialEnvironments = [];
     const requests = [];
@@ -142,7 +161,7 @@ describe("Eval managed Codex runtime", () => {
         return {
           account: async () => ({ status: "connected", account: { id: "account" } }),
           request: async (method) => {
-            expect(method).toBe("model/list");
+            expect(method, "catalog listing uses model/list").toBe("model/list");
             return { data: [{ id: "catalog-sol", model: "gpt-5.6-sol", displayName: "Sol", isDefault: true, supportedReasoningEfforts: [] }], nextCursor: null };
           },
           close,
@@ -155,36 +174,34 @@ describe("Eval managed Codex runtime", () => {
       provision("codex-layered-personal-presentation-v1"),
     ]);
 
-    expect(fetchImpl).toHaveBeenCalledTimes(5);
-    expect(requests[0]).toMatchObject({
+    expect(fetchImpl, "concurrent provisions collapse into one publish sequence").toHaveBeenCalledTimes(5);
+    expect(requests[0], "settings are read with the session cookie").toMatchObject({
       url: "http://127.0.0.1:43123/api/model-settings", method: "GET",
       headers: { Cookie: "relayer_session=write-token" },
     });
-    expect(requests[1]).toMatchObject({
+    expect(requests[1], "the requested harness becomes the provisional default").toMatchObject({
       url: "http://127.0.0.1:43123/api/model-settings/defaults", method: "PUT",
       body: { harnessId: "codex-layered-personal-presentation-v0" },
     });
-    expect(requests[2]).toMatchObject({
+    expect(requests[2], "the managed Codex provider definition is published").toMatchObject({
       url: "http://127.0.0.1:43123/api/internal/provider-definitions", method: "PUT",
       headers: { Authorization: "Bearer write-token" },
       body: [{ id: "codex", adapterId: "codex-subscription", accessContract: "managed-runtime@1" }],
     });
-    expect(requests[3]).toMatchObject({
+    expect(requests[3], "the connected catalog is published with the default model").toMatchObject({
       url: "http://127.0.0.1:43123/api/internal/provider-catalog", method: "PUT",
       body: { providerId: "codex", connected: true, models: [{ id: "gpt-5.6-sol", providerDefault: true }] },
     });
-    expect(requests[4]).toMatchObject({
+    expect(requests[4], "the prior fixture default is restored afterwards").toMatchObject({
       url: "http://127.0.0.1:43123/api/model-settings/defaults", method: "PUT",
       body: { harnessId: "fixture-task-system" },
     });
-    expect(close).toHaveBeenCalledOnce();
-    expect(credentialEnvironments).toEqual([{
+    expect(close, "credentials close exactly once").toHaveBeenCalledOnce();
+    expect(credentialEnvironments, "credentials receive the managed runtime environment").toEqual([{
       PATH: "/managed/codex-path:/usr/bin",
       RELAYER_CODEX_BINARY: "/managed/codex",
     }]);
-  });
 
-  it("materializes a selectable managed family without changing Eval's fixture default", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-codex-catalog-"));
     directories.push(dataDirectory);
     const runtime = new GraphCompleteRuntimeService({
@@ -209,7 +226,7 @@ describe("Eval managed Codex runtime", () => {
     });
     services.push(product);
     const productSession = await product.start();
-    const provision = createEvalCodexCatalogProvisioner({
+    const liveProvision = createEvalCodexCatalogProvisioner({
       productSession,
       resolveRuntime: async () => ({ executable: "/managed/codex", environment: {} }),
       createCredentials: () => ({
@@ -228,15 +245,15 @@ describe("Eval managed Codex runtime", () => {
       }),
     });
 
-    await provision("codex-layered-personal-presentation-v0");
+    await liveProvision("codex-layered-personal-presentation-v0");
 
     const response = await fetch(new URL("/api/model-settings", productSession.origin), {
       headers: { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}` },
     });
-    expect(response.ok).toBe(true);
+    expect(response.ok, "the live product server answers model-settings").toBe(true);
     const settings = await response.json();
-    expect(settings.defaults.harnessId).toBe("fixture-task-system");
-    expect(settings.families).toEqual([
+    expect(settings.defaults.harnessId, "the Eval fixture default stays the default").toBe("fixture-task-system");
+    expect(settings.families, "the managed family is materialized and selectable").toEqual([
       expect.objectContaining({
         kind: "system",
         enabled: true,
@@ -248,21 +265,5 @@ describe("Eval managed Codex runtime", () => {
         members: [{ position: 0, providerId: "codex", modelId: "gpt-5.6-sol" }],
       }),
     ]);
-  });
-
-  it("normalizes and deduplicates the helper PATH", () => {
-    const executable = "/runtime/vendor/target/bin/codex";
-    expect(managedCodexHelperDirectory(executable)).toBe("/runtime/vendor/target/codex-path");
-    expect(withManagedCodexPath({
-      Path: "/runtime/vendor/target/codex-path:/usr/bin",
-    }, executable, { platform: "linux" })).toEqual({
-      PATH: "/runtime/vendor/target/codex-path:/usr/bin",
-    });
-    expect(withManagedCodexPath({
-      PATH: "C:\\ambiguous\\bin",
-      Path: "C:\\Windows\\System32",
-    }, "C:\\runtime\\vendor\\target\\bin\\codex.exe", { platform: "win32" })).toEqual({
-      Path: expect.stringMatching(/^.*codex-path;C:\\Windows\\System32$/),
-    });
   });
 });

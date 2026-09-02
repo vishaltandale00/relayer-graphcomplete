@@ -23,7 +23,7 @@ function fixture({ prefetchRuntimeUpdate = async () => {}, onRuntimePrefetchFail
 }
 
 describe("managed runtime application-update boundary", () => {
-  it("starts runtime prefetch from incoming metadata alongside the application download", async () => {
+  it("prefetches runtimes from update metadata without ever failing the application download", async () => {
     const prefetchRuntimeUpdate = vi.fn(async () => {});
     const { autoUpdater, updater } = fixture({ prefetchRuntimeUpdate });
     const info = {
@@ -34,20 +34,21 @@ describe("managed runtime application-update boundary", () => {
 
     await updater.download();
 
-    expect(prefetchRuntimeUpdate).toHaveBeenCalledWith(info);
-    expect(autoUpdater.downloadUpdate).toHaveBeenCalledOnce();
-  });
+    expect(prefetchRuntimeUpdate, "runtime prefetch receives the incoming update metadata")
+      .toHaveBeenCalledWith(info);
+    expect(autoUpdater.downloadUpdate, "the application download still starts").toHaveBeenCalledOnce();
 
-  it("never fails the application download when runtime prefetch fails", async () => {
     const failure = new Error("runtime registry unavailable");
     const reported = vi.fn();
-    const { autoUpdater, updater } = fixture({
+    const failing = fixture({
       prefetchRuntimeUpdate: async () => { throw failure; },
       onRuntimePrefetchFailure: reported,
     });
-    autoUpdater.emit("update-available", { version: "0.2.15", relayerManagedRuntimes: {} });
+    failing.autoUpdater.emit("update-available", { version: "0.2.15", relayerManagedRuntimes: {} });
 
-    await expect(updater.download()).resolves.toMatchObject({ channel: "stable" });
-    await vi.waitFor(() => expect(reported).toHaveBeenCalledWith(failure));
+    await expect(failing.updater.download(), "a failed runtime prefetch never fails the application download")
+      .resolves.toMatchObject({ channel: "stable" });
+    await vi.waitFor(() => expect(reported, "the prefetch failure is reported separately")
+      .toHaveBeenCalledWith(failure));
   });
 });
