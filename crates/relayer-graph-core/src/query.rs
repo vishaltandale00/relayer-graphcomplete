@@ -795,7 +795,9 @@ fn validate_graph_value(
     };
     match kind {
         "node" | "layer" => {
-            require_string("id")?;
+            let identity = require_string("id")?;
+            let identity_prefix = if kind == "node" { "content" } else { "layer" };
+            validate_public_identity(identity, identity_prefix, true, &invalid)?;
             let expected_kind = if kind == "node" { "Content" } else { "Layer" };
             if tagged.get("kind").and_then(serde_json::Value::as_str) != Some(expected_kind) {
                 return Err(invalid("a vertex kind must match its tagged graph type"));

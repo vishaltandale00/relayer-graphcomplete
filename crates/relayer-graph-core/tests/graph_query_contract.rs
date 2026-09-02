@@ -9,6 +9,7 @@ const POSITIVE: &str = include_str!("../../../fixtures/graph-query-v1/positive.j
 const NEGATIVE: &str = include_str!("../../../fixtures/graph-query-v1/negative.json");
 const VALUES: &str = include_str!("../../../fixtures/graph-query-v1/values.json");
 const LIMITS: &str = include_str!("../../../fixtures/graph-query-v1/limits.json");
+const HARDENING: &str = include_str!("../../../fixtures/graph-query-v1/hardening-354.json");
 
 fn parse(source: &str) -> Value {
     serde_json::from_str(source).unwrap()
@@ -57,6 +58,7 @@ fn top_level_case_ids(
     negative: &Value,
     values: &Value,
     limits: &Value,
+    hardening: &Value,
 ) -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     for items in [
@@ -68,6 +70,8 @@ fn top_level_case_ids(
         objects(values, "cases"),
         objects(values, "normalizationErrors"),
         objects(limits, "cases"),
+        objects(hardening, "positiveCases"),
+        objects(hardening, "negativeCases"),
     ] {
         for item in items {
             assert!(ids.insert(item["id"].as_str().unwrap().to_owned()));
@@ -279,6 +283,7 @@ fn manifest_is_a_complete_inventory_of_the_frozen_contract() {
     let negative = parse(NEGATIVE);
     let values = parse(VALUES);
     let limits = parse(LIMITS);
+    let hardening = parse(HARDENING);
 
     for document in [
         &manifest,
@@ -287,11 +292,23 @@ fn manifest_is_a_complete_inventory_of_the_frozen_contract() {
         &negative,
         &values,
         &limits,
+        &hardening,
     ] {
         assert_eq!(document["queryContractVersion"], 1);
     }
     assert_eq!(manifest["corpus"], "relayer.graph-query");
     assert_eq!(manifest["status"], "frozen");
+    assert_eq!(manifest["files"]["hardening"], "hardening-354.json");
+    assert_eq!(hardening["status"], "frozen");
+    assert_eq!(hardening["issue"], 354);
+    assert_eq!(
+        manifest["qualificationEvidence"]["historicalReceipt"]["issue"],
+        261
+    );
+    assert_eq!(
+        manifest["qualificationEvidence"]["currentConformance"][0]["issue"],
+        354
+    );
     assert_eq!(
         manifest["publicCandidateSources"],
         serde_json::json!(["structural"])
@@ -318,7 +335,14 @@ fn manifest_is_a_complete_inventory_of_the_frozen_contract() {
         .collect::<BTreeSet<_>>();
     assert_eq!(checkpoints, required_checkpoints);
 
-    let all_case_ids = top_level_case_ids(&supergraph, &positive, &negative, &values, &limits);
+    let all_case_ids = top_level_case_ids(
+        &supergraph,
+        &positive,
+        &negative,
+        &values,
+        &limits,
+        &hardening,
+    );
     let mut covered_ids = BTreeSet::new();
     for entry in objects(&manifest, "coverage") {
         for case_id in entry["cases"].as_array().unwrap() {
