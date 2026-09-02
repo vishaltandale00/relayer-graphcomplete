@@ -20,216 +20,227 @@ function advance(current, event) {
   return reduceOnboardingTutorial(current, event);
 }
 
-describe("onboarding tutorial state", () => {
-  it("starts with the ordinary editable question and waits for successful thread creation", () => {
-    const initial = createOnboardingTutorialState();
+function waitingState() {
+  return advance(createOnboardingTutorialState(), {
+    type: "thread-created",
+    threadId: 7,
+    interactionId: 11,
+  });
+}
 
-    expect(ONBOARDING_TUTORIAL_PROMPT).toBe("Why can time seem to pass faster as we get older?");
-    expect(initial).toEqual({
+function activeState() {
+  return advance(waitingState(), {
+    type: "response-accepted",
+    threadId: 7,
+    interactionId: 11,
+    layer: acceptedLayer({ actions: [
+      { id: 31, kind: "navigate", sourceNodeId: "node-2", targetLayerId: 20 },
+    ] }),
+  });
+}
+
+describe("onboarding tutorial state", () => {
+  it("walks the guided authoring lifecycle from question to completion", () => {
+    expect(ONBOARDING_TUTORIAL_PROMPT, "ordinary tutorial question").toBe(
+      "Why can time seem to pass faster as we get older?",
+    );
+    let tutorial = createOnboardingTutorialState();
+    expect(tutorial, "initial composer state").toEqual({
       phase: "initial-composer",
       threadId: null,
       interactionId: null,
       target: null,
       reason: null,
     });
-    expect(advance(initial, { type: "response-accepted", layer: acceptedLayer() })).toBe(initial);
-    expect(advance(initial, {
+    expect(
+      advance(tutorial, { type: "response-accepted", layer: acceptedLayer() }),
+      "responses before thread creation are ignored",
+    ).toBe(tutorial);
+
+    tutorial = advance(tutorial, {
       type: "thread-created",
       threadId: "thread-7",
       interactionId: "turn-1",
-    })).toEqual({
+    });
+    expect(tutorial, "awaiting the first accepted response").toEqual({
       phase: "awaiting-accepted-response",
       threadId: "thread-7",
       interactionId: "turn-1",
       target: null,
       reason: null,
     });
-  });
 
-  it("prioritizes a node-linked navigate action over earlier invoke actions", () => {
-    const layer = acceptedLayer({ actions: [
-      { id: "invoke-1", kind: "invoke", sourceNodeId: "node-1" },
-      { id: "navigate-1", kind: "navigate", sourceNodeId: "node-2", targetLayerId: 2 },
-      { id: "navigate-orphan", kind: "navigate", sourceNodeId: "missing-node", targetLayerId: 3 },
-    ] });
-
-    expect(selectOnboardingTutorialAction(layer)).toEqual({
-      nodeId: "node-2",
-      actionId: "navigate-1",
-      actionKind: "navigate",
-    });
-  });
-
-  it("excludes malformed, invoked, and disabled actions before choosing a fallback", () => {
-    const layer = acceptedLayer({ actions: [
-      { id: "navigate-missing-target", kind: "navigate", sourceNodeId: "node-1" },
-      { kind: "navigate", sourceNodeId: "node-1", targetLayerId: 2 },
-      { id: "navigate-invoked", kind: "navigate", sourceNodeId: "node-1", targetLayerId: 3 },
-      { id: "invoke-disabled", kind: "invoke", sourceNodeId: "node-1", interactionText: "One" },
-      { id: "invoke-empty", kind: "invoke", sourceNodeId: "node-1", interactionText: "  " },
-      { id: "invoke-ready", kind: "invoke", sourceNodeId: "node-2", interactionText: "Two" },
-    ] });
-
-    expect(selectOnboardingTutorialAction(layer, {
-      invokedActionIds: ["navigate-invoked"],
-      disabledActionIds: new Set(["invoke-disabled"]),
-    })).toEqual({
-      nodeId: "node-2",
-      actionId: "invoke-ready",
-      actionKind: "invoke",
-    });
-  });
-
-  it("excludes resolved invokes before choosing an invoke fallback", () => {
-    const layer = acceptedLayer({ actions: [
-      {
-        id: "invoke-resolved",
-        kind: "invoke",
-        sourceNodeId: "node-1",
-        targetLayerId: "layer-2",
-        interactionText: "Already explored",
-      },
-      {
-        id: "invoke-ready",
-        kind: "invoke",
-        sourceNodeId: "node-2",
-        targetLayerId: null,
-        interactionText: "Explore next",
-      },
-    ] });
-
-    expect(selectOnboardingTutorialAction(layer)).toEqual({
-      nodeId: "node-2",
-      actionId: "invoke-ready",
-      actionKind: "invoke",
-    });
-  });
-
-  it("guides node selection, navigation, and a user-written follow-up", () => {
-    let tutorial = createOnboardingTutorialState();
-    tutorial = advance(tutorial, { type: "thread-created", threadId: 7, interactionId: 11 });
     tutorial = advance(tutorial, {
       type: "response-accepted",
-      threadId: 7,
-      interactionId: 11,
+      threadId: "thread-7",
+      interactionId: "turn-1",
       layer: acceptedLayer({ actions: [
         { id: 31, kind: "navigate", sourceNodeId: "node-2", targetLayerId: 20 },
       ] }),
     });
-    expect(tutorial.phase).toBe("select-node");
+    expect(tutorial.phase, "node guidance begins").toBe("select-node");
 
-    const wrongNode = advance(tutorial, {
-      type: "node-selected", threadId: 7, interactionId: 11, nodeId: "node-1",
-    });
-    expect(wrongNode).toBe(tutorial);
+    expect(advance(tutorial, {
+      type: "node-selected", threadId: "thread-7", interactionId: "turn-1", nodeId: "node-1",
+    }), "unrelated node selection is ignored").toBe(tutorial);
     tutorial = advance(tutorial, {
-      type: "node-selected", threadId: 7, interactionId: 11, nodeId: "node-2",
+      type: "node-selected", threadId: "thread-7", interactionId: "turn-1", nodeId: "node-2",
     });
-    expect(tutorial.phase).toBe("use-action");
+    expect(tutorial.phase, "action guidance begins").toBe("use-action");
 
-    const wrongAction = advance(tutorial, {
-      type: "action-succeeded", threadId: 7, interactionId: 11, actionId: 99,
-    });
-    expect(wrongAction).toBe(tutorial);
+    for (const [label, nodeId] of [
+      ["inspector closes", null],
+      ["inspector changes", "node-1"],
+    ]) {
+      tutorial = advance(tutorial, {
+        type: "node-selected", threadId: "thread-7", interactionId: "turn-1", nodeId,
+      });
+      expect(tutorial.phase, `${label}: guidance returns to node selection`).toBe("select-node");
+      expect(tutorial.target, `${label}: guidance target retained`).toEqual({
+        nodeId: "node-2",
+        actionId: 31,
+        actionKind: "navigate",
+      });
+      tutorial = advance(tutorial, {
+        type: "node-selected", threadId: "thread-7", interactionId: "turn-1", nodeId: "node-2",
+      });
+      expect(tutorial.phase, `${label}: action guidance resumes`).toBe("use-action");
+    }
+
+    expect(advance(tutorial, {
+      type: "action-succeeded", threadId: "thread-7", interactionId: "turn-1", actionId: 99,
+    }), "unrelated action success is ignored").toBe(tutorial);
     tutorial = advance(tutorial, {
-      type: "action-succeeded", threadId: 7, interactionId: 11, actionId: "31",
+      type: "action-succeeded", threadId: "thread-7", interactionId: "turn-1", actionId: "31",
     });
-    expect(tutorial.phase).toBe("write-follow-up");
-    expect(tutorial.target).toBeNull();
+    expect(tutorial.phase, "follow-up guidance begins").toBe("write-follow-up");
+    expect(tutorial.target, "follow-up guidance releases the target").toBeNull();
 
     tutorial = advance(tutorial, { type: "followup-submitted" });
-    expect(tutorial.phase).toBe("write-follow-up");
-    tutorial = advance(tutorial, { type: "followup-submitted", threadId: "7", interactionId: 12 });
-    expect(tutorial).toEqual({
+    expect(tutorial.phase, "anonymous follow-up submission is ignored").toBe("write-follow-up");
+    tutorial = advance(tutorial, {
+      type: "followup-submitted", threadId: "thread-7", interactionId: "turn-2",
+    });
+    expect(tutorial, "tutorial completes with the follow-up interaction").toEqual({
       phase: "complete",
-      threadId: 7,
-      interactionId: 12,
+      threadId: "thread-7",
+      interactionId: "turn-2",
       target: null,
       reason: null,
     });
+    expect(advance(tutorial, { type: "leave" }), "completed state stays terminal").toBe(tutorial);
   });
 
-  it.each([
-    ["closes", null],
-    ["changes", "node-1"],
-  ])("returns to node selection when the inspector %s during action guidance", (_label, nodeId) => {
-    let tutorial = createOnboardingTutorialState();
-    tutorial = advance(tutorial, { type: "thread-created", threadId: 7, interactionId: 11 });
-    tutorial = advance(tutorial, {
+  it("dismisses every disqualifying outcome without changing the thread", () => {
+    const waiting = waitingState();
+    const active = activeState();
+    const dismissedShape = (reason) => ({
+      phase: "dismissed",
+      threadId: 7,
+      interactionId: 11,
+      target: null,
+      reason,
+    });
+
+    expect(advance(waiting, {
       type: "response-accepted",
       threadId: 7,
       interactionId: 11,
       layer: acceptedLayer({ actions: [
-        { id: 31, kind: "navigate", sourceNodeId: "node-2", targetLayerId: 20 },
+        { id: "orphan", kind: "navigate", sourceNodeId: "missing-node", targetLayerId: 2 },
       ] }),
-    });
-    tutorial = advance(tutorial, {
-      type: "node-selected", threadId: 7, interactionId: 11, nodeId: "node-2",
-    });
-    expect(tutorial.phase).toBe("use-action");
+    }), "accepted response without a node-linked action dismisses").toEqual(dismissedShape("no-action"));
 
-    tutorial = advance(tutorial, {
-      type: "node-selected", threadId: 7, interactionId: 11, nodeId,
-    });
+    for (const status of ["failed", "cancelled", "stopped"]) {
+      expect(advance(waiting, {
+        type: "response-terminal",
+        threadId: 8,
+        interactionId: 11,
+        status,
+      }), `${status} terminal from another thread is ignored`).toBe(waiting);
+      expect(advance(waiting, {
+        type: "response-terminal",
+        threadId: 7,
+        interactionId: 11,
+        status,
+      }), `${status} awaited response dismisses`).toEqual(dismissedShape(`response-${status}`));
+    }
 
-    expect(tutorial.phase).toBe("select-node");
-    expect(tutorial.target).toEqual({
-      nodeId: "node-2",
-      actionId: 31,
-      actionKind: "navigate",
-    });
-  });
+    for (const [type, reason] of [
+      ["skip", "skipped"],
+      ["leave", "left"],
+      ["close", "closed"],
+    ]) {
+      expect(advance(active, { type }), `${type} ends the tutorial`).toEqual(dismissedShape(reason));
+    }
 
-  it("uses an invoke fallback but still requires eventual navigation", () => {
-    let tutorial = advance(createOnboardingTutorialState(), {
+    const dismissed = advance(createOnboardingTutorialState(), { type: "skip" });
+    expect(advance(dismissed, {
       type: "thread-created",
       threadId: 7,
       interactionId: 11,
-    });
-    tutorial = advance(tutorial, {
-      type: "response-accepted",
-      threadId: 7,
-      interactionId: 11,
-      layer: acceptedLayer({ actions: [
-        { id: "invoke-1", kind: "invoke", sourceNodeId: "node-1", interactionText: "Go deeper" },
-      ] }),
-    });
-    tutorial = advance(tutorial, {
-      type: "node-selected", threadId: 7, interactionId: 11, nodeId: "node-1",
-    });
-    tutorial = advance(tutorial, {
-      type: "action-succeeded",
-      threadId: 7,
-      interactionId: 11,
-      actionId: "invoke-1",
-      resultInteractionId: 12,
-    });
-    expect(tutorial.phase).toBe("awaiting-accepted-response");
-    expect(tutorial.interactionId).toBe(12);
-
-    tutorial = advance(tutorial, {
-      type: "response-accepted",
-      threadId: 7,
-      interactionId: 12,
-      layer: acceptedLayer({ actions: [
-        { id: "navigate-2", kind: "navigate", sourceNodeId: "node-2", targetLayerId: 20 },
-      ] }),
-    });
-    tutorial = advance(tutorial, {
-      type: "node-selected", threadId: 7, interactionId: 12, nodeId: "node-2",
-    });
-    tutorial = advance(tutorial, {
-      type: "action-succeeded", threadId: 7, interactionId: 12, actionId: "navigate-2",
-    });
-    expect(tutorial.phase).toBe("write-follow-up");
+    }), "dismissed state stays terminal").toBe(dismissed);
   });
 
-  it("can repeat invoke guidance until a later accepted interaction offers navigation", () => {
-    let tutorial = advance(createOnboardingTutorialState(), {
-      type: "thread-created",
-      threadId: 7,
-      interactionId: 11,
-    });
+  it("selects the tutorial action from the candidate corpus by priority and exclusion", () => {
+    const cases = [
+      [
+        "node-linked navigate beats earlier invokes",
+        acceptedLayer({ actions: [
+          { id: "invoke-1", kind: "invoke", sourceNodeId: "node-1", interactionText: "Go deeper" },
+          { id: "navigate-1", kind: "navigate", sourceNodeId: "node-2", targetLayerId: 2 },
+          { id: "navigate-orphan", kind: "navigate", sourceNodeId: "missing-node", targetLayerId: 3 },
+        ] }),
+        undefined,
+        { nodeId: "node-2", actionId: "navigate-1", actionKind: "navigate" },
+      ],
+      [
+        "malformed, invoked, and disabled candidates fall back to a ready invoke",
+        acceptedLayer({ actions: [
+          { id: "navigate-missing-target", kind: "navigate", sourceNodeId: "node-1" },
+          { kind: "navigate", sourceNodeId: "node-1", targetLayerId: 2 },
+          { id: "navigate-invoked", kind: "navigate", sourceNodeId: "node-1", targetLayerId: 3 },
+          { id: "invoke-disabled", kind: "invoke", sourceNodeId: "node-1", interactionText: "One" },
+          { id: "invoke-empty", kind: "invoke", sourceNodeId: "node-1", interactionText: "  " },
+          { id: "invoke-ready", kind: "invoke", sourceNodeId: "node-2", interactionText: "Two" },
+        ] }),
+        {
+          invokedActionIds: ["navigate-invoked"],
+          disabledActionIds: new Set(["invoke-disabled"]),
+        },
+        { nodeId: "node-2", actionId: "invoke-ready", actionKind: "invoke" },
+      ],
+      [
+        "resolved invokes fall back to an unresolved invoke",
+        acceptedLayer({ actions: [
+          {
+            id: "invoke-resolved",
+            kind: "invoke",
+            sourceNodeId: "node-1",
+            targetLayerId: "layer-2",
+            interactionText: "Already explored",
+          },
+          {
+            id: "invoke-ready",
+            kind: "invoke",
+            sourceNodeId: "node-2",
+            targetLayerId: null,
+            interactionText: "Explore next",
+          },
+        ] }),
+        undefined,
+        { nodeId: "node-2", actionId: "invoke-ready", actionKind: "invoke" },
+      ],
+    ];
+    expect(cases, "action selection corpus").toHaveLength(3);
+    for (const [label, layer, options, expected] of cases) {
+      expect(selectOnboardingTutorialAction(layer, options), label).toEqual(expected);
+    }
+  });
+
+  it("follows the invoke fallback chain until navigation becomes available", () => {
+    let tutorial = waitingState();
+
     for (const [sourceInteractionId, resultInteractionId, actionId] of [
       [11, 12, "invoke-1"],
       [12, 13, "invoke-2"],
@@ -245,6 +256,7 @@ describe("onboarding tutorial state", () => {
           interactionText: "Continue",
         }] }),
       });
+      expect(tutorial.phase, `invoke cycle ${actionId}: guidance starts`).toBe("select-node");
       tutorial = advance(tutorial, {
         type: "node-selected",
         threadId: 7,
@@ -258,7 +270,26 @@ describe("onboarding tutorial state", () => {
         actionId,
         resultInteractionId,
       });
-      expect(tutorial.interactionId).toBe(resultInteractionId);
+      expect(tutorial.phase, `invoke cycle ${actionId}: awaits the result interaction`).toBe(
+        "awaiting-accepted-response",
+      );
+      expect(tutorial.interactionId, `invoke cycle ${actionId}: result interaction adopted`).toBe(
+        resultInteractionId,
+      );
+
+      if (sourceInteractionId === 11) {
+        expect(advance(tutorial, {
+          type: "response-accepted",
+          threadId: 7,
+          interactionId: 11,
+          layer: acceptedLayer({ actions: [{
+            id: "navigate-stale",
+            kind: "navigate",
+            sourceNodeId: "node-2",
+            targetLayerId: 20,
+          }] }),
+        }), "stale accepted interaction after an invoke is ignored").toBe(tutorial);
+      }
     }
 
     tutorial = advance(tutorial, {
@@ -272,152 +303,15 @@ describe("onboarding tutorial state", () => {
         targetLayerId: 20,
       }] }),
     });
-    expect(tutorial.phase).toBe("select-node");
-    expect(tutorial.target.actionKind).toBe("navigate");
-  });
+    expect(tutorial.phase, "later navigation offer restarts node guidance").toBe("select-node");
+    expect(tutorial.target.actionKind, "later navigation offer targets navigation").toBe("navigate");
 
-  it("ignores stale accepted interactions after an invoke", () => {
-    let tutorial = advance(createOnboardingTutorialState(), {
-      type: "thread-created",
-      threadId: 7,
-      interactionId: 11,
+    tutorial = advance(tutorial, {
+      type: "node-selected", threadId: 7, interactionId: 13, nodeId: "node-2",
     });
     tutorial = advance(tutorial, {
-      type: "response-accepted",
-      threadId: 7,
-      interactionId: 11,
-      layer: acceptedLayer({ actions: [{
-        id: "invoke-1",
-        kind: "invoke",
-        sourceNodeId: "node-1",
-        interactionText: "Continue",
-      }] }),
+      type: "action-succeeded", threadId: 7, interactionId: 13, actionId: "navigate-3",
     });
-    tutorial = advance(tutorial, {
-      type: "node-selected", threadId: 7, interactionId: 11, nodeId: "node-1",
-    });
-    tutorial = advance(tutorial, {
-      type: "action-succeeded",
-      threadId: 7,
-      interactionId: 11,
-      actionId: "invoke-1",
-      resultInteractionId: 12,
-    });
-
-    const stale = advance(tutorial, {
-      type: "response-accepted",
-      threadId: 7,
-      interactionId: 11,
-      layer: acceptedLayer({ actions: [{
-        id: "navigate-stale",
-        kind: "navigate",
-        sourceNodeId: "node-2",
-        targetLayerId: 20,
-      }] }),
-    });
-    expect(stale).toBe(tutorial);
-  });
-
-  it("dismisses an accepted response with no node-linked action", () => {
-    const waiting = advance(createOnboardingTutorialState(), {
-      type: "thread-created",
-      threadId: 7,
-      interactionId: 11,
-    });
-    const dismissed = advance(waiting, {
-      type: "response-accepted",
-      threadId: 7,
-      interactionId: 11,
-      layer: acceptedLayer({ actions: [
-        { id: "orphan", kind: "navigate", sourceNodeId: "missing-node", targetLayerId: 2 },
-      ] }),
-    });
-
-    expect(dismissed).toEqual({
-      phase: "dismissed",
-      threadId: 7,
-      interactionId: 11,
-      target: null,
-      reason: "no-action",
-    });
-  });
-
-  it.each(["failed", "cancelled", "stopped"])(
-    "dismisses when the awaited response becomes %s",
-    (status) => {
-      const waiting = advance(createOnboardingTutorialState(), {
-        type: "thread-created",
-        threadId: 7,
-        interactionId: 11,
-      });
-      const stale = advance(waiting, {
-        type: "response-terminal",
-        threadId: 8,
-        interactionId: 11,
-        status,
-      });
-      expect(stale).toBe(waiting);
-
-      expect(advance(waiting, {
-        type: "response-terminal",
-        threadId: 7,
-        interactionId: 11,
-        status,
-      })).toEqual({
-        phase: "dismissed",
-        threadId: 7,
-        interactionId: 11,
-        target: null,
-        reason: `response-${status}`,
-      });
-    },
-  );
-
-  it.each([
-    ["skip", "skipped"],
-    ["leave", "left"],
-    ["close", "closed"],
-  ])("lets %s end the tutorial without changing the thread", (type, reason) => {
-    const active = advance(
-      advance(createOnboardingTutorialState(), {
-        type: "thread-created",
-        threadId: 7,
-        interactionId: 11,
-      }),
-      {
-        type: "response-accepted",
-        threadId: 7,
-        interactionId: 11,
-        layer: acceptedLayer({ actions: [
-          { id: 31, kind: "navigate", sourceNodeId: "node-2", targetLayerId: 20 },
-        ] }),
-      },
-    );
-
-    expect(advance(active, { type })).toEqual({
-      phase: "dismissed",
-      threadId: 7,
-      interactionId: 11,
-      target: null,
-      reason,
-    });
-  });
-
-  it("keeps terminal states terminal", () => {
-    const dismissed = advance(createOnboardingTutorialState(), { type: "skip" });
-    expect(advance(dismissed, {
-      type: "thread-created",
-      threadId: 7,
-      interactionId: 11,
-    })).toBe(dismissed);
-
-    const complete = Object.freeze({
-      phase: "complete",
-      threadId: 7,
-      interactionId: 12,
-      target: null,
-      reason: null,
-    });
-    expect(advance(complete, { type: "leave" })).toBe(complete);
+    expect(tutorial.phase, "navigation still required before the follow-up").toBe("write-follow-up");
   });
 });

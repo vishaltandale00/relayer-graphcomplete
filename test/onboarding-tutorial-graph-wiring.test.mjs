@@ -45,19 +45,24 @@ afterEach(() => {
 });
 
 describe("onboarding tutorial graph wiring", () => {
-  it.each([
-    ["inspector close", null],
-    ["selection change", "node-1"],
-  ])("forwards %s to the tutorial state machine", async (_label, nodeId) => {
-    const { replaceCurrentSelection, tutorialController, workspaceOptions } = await loadGraphAdapter();
+  it("forwards every inspector selection outcome to the tutorial state machine", async () => {
+    const cases = [
+      ["inspector close", null],
+      ["selection change", "node-1"],
+    ];
+    expect(cases, "selection outcome inventory").toHaveLength(2);
 
-    workspaceOptions.onSelectionChange(nodeId);
+    for (const [label, nodeId] of cases) {
+      const { replaceCurrentSelection, tutorialController, workspaceOptions } = await loadGraphAdapter();
 
-    expect(replaceCurrentSelection).toHaveBeenCalledWith(nodeId);
-    expect(tutorialController.nodeSelected).toHaveBeenCalledWith({
-      threadId: "7",
-      interactionId: "11",
-      nodeId,
-    });
+      workspaceOptions.onSelectionChange(nodeId);
+
+      expect(replaceCurrentSelection, `${label}: current selection replaced`).toHaveBeenCalledWith(nodeId);
+      expect(tutorialController.nodeSelected, `${label}: tutorial notified`).toHaveBeenCalledWith({
+        threadId: "7",
+        interactionId: "11",
+        nodeId,
+      });
+    }
   });
 });

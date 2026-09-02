@@ -30,22 +30,20 @@ afterEach(async () => {
 });
 
 describe("desktop tutorial lifecycle", () => {
-  it("exposes lifecycle IPC only to the product preload", async () => {
+  it("exposes and routes the tutorial lifecycle only through product preload IPC", async () => {
     const productPreload = await readFile(new URL("../desktop/preload/index.cjs", import.meta.url), "utf8");
-    expect(productPreload).toContain("tutorial: {");
-    expect(productPreload).toContain('ipcRenderer.invoke("relayer:tutorial-read", context)');
-    expect(productPreload).toContain('ipcRenderer.invoke("relayer:tutorial-begin-automatic", context)');
-    expect(productPreload).toContain('ipcRenderer.invoke("relayer:tutorial-begin-manual")');
-    expect(productPreload).toContain('ipcRenderer.invoke("relayer:tutorial-dismiss")');
-    expect(productPreload).toContain('ipcRenderer.invoke("relayer:tutorial-complete")');
+    expect(productPreload, "product preload exposes the tutorial namespace").toContain("tutorial: {");
+    expect(productPreload, "read channel").toContain('ipcRenderer.invoke("relayer:tutorial-read", context)');
+    expect(productPreload, "begin-automatic channel").toContain('ipcRenderer.invoke("relayer:tutorial-begin-automatic", context)');
+    expect(productPreload, "begin-manual channel").toContain('ipcRenderer.invoke("relayer:tutorial-begin-manual")');
+    expect(productPreload, "dismiss channel").toContain('ipcRenderer.invoke("relayer:tutorial-dismiss")');
+    expect(productPreload, "complete channel").toContain('ipcRenderer.invoke("relayer:tutorial-complete")');
 
     for (const name of ["eval-dashboard.cjs", "eval-review.cjs", "eval-judge.cjs", "eval-trace.cjs"]) {
       const evalPreload = await readFile(new URL(`../desktop/preload/${name}`, import.meta.url), "utf8");
-      expect(evalPreload).not.toContain("relayer:tutorial");
+      expect(evalPreload, `${name} stays free of tutorial IPC`).not.toContain("relayer:tutorial");
     }
-  });
 
-  it("routes the product preload lifecycle contract through dedicated IPC handlers", async () => {
     const handlers = new Map();
     const tutorial = {
       read: async (context) => ({ method: "read", context }),
@@ -76,85 +74,86 @@ describe("desktop tutorial lifecycle", () => {
     });
 
     const context = productContext();
-    await expect(handlers.get("relayer:tutorial-read")({}, context)).resolves.toEqual({ method: "read", context });
-    await expect(handlers.get("relayer:tutorial-begin-automatic")({}, context))
+    await expect(handlers.get("relayer:tutorial-read")({}, context), "read routed with context")
+      .resolves.toEqual({ method: "read", context });
+    await expect(handlers.get("relayer:tutorial-begin-automatic")({}, context), "begin-automatic routed with context")
       .resolves.toEqual({ method: "beginAutomatic", context });
-    await expect(handlers.get("relayer:tutorial-begin-manual")()).resolves.toEqual({ method: "beginManual" });
-    await expect(handlers.get("relayer:tutorial-dismiss")()).resolves.toEqual({ method: "dismiss" });
-    await expect(handlers.get("relayer:tutorial-complete")()).resolves.toEqual({ method: "complete" });
+    await expect(handlers.get("relayer:tutorial-begin-manual")(), "begin-manual routed")
+      .resolves.toEqual({ method: "beginManual" });
+    await expect(handlers.get("relayer:tutorial-dismiss")(), "dismiss routed")
+      .resolves.toEqual({ method: "dismiss" });
+    await expect(handlers.get("relayer:tutorial-complete")(), "complete routed")
+      .resolves.toEqual({ method: "complete" });
   });
 
-  it("automatically starts exactly once only after connection in an empty product", async () => {
-    const { tutorial } = await fixture();
-    await expect(tutorial.read(productContext({ providerConnected: false }))).resolves.toEqual({
-      status: "never-shown",
-      automaticEligible: false,
-    });
-    await expect(tutorial.read(productContext({ threadCount: 1 }))).resolves.toEqual({
-      status: "never-shown",
-      automaticEligible: false,
-    });
-    await expect(tutorial.read(productContext())).resolves.toEqual({
-      status: "never-shown",
-      automaticEligible: true,
-    });
+  it("walks the tutorial lifecycle state machine with durable, fail-closed settings", async () => {
+    const gated = await fixture();
+    await expect(
+      gated.tutorial.read(productContext({ providerConnected: false })),
+      "disconnected provider is ineligible",
+    ).resolves.toEqual({ status: "never-shown", automaticEligible: false });
+    await expect(
+      gated.tutorial.read(productContext({ threadCount: 1 })),
+      "non-empty product is ineligible",
+    ).resolves.toEqual({ status: "never-shown", automaticEligible: false });
+    await expect(
+      gated.tutorial.read(productContext()),
+      "connected empty product is eligible",
+    ).resolves.toEqual({ status: "never-shown", automaticEligible: true });
 
-    await expect(tutorial.beginAutomatic(productContext())).resolves.toEqual({
+    await expect(
+      gated.tutorial.beginAutomatic(productContext()),
+      "first automatic begin starts",
+    ).resolves.toEqual({
       status: "dismissed",
       automaticEligible: false,
       started: true,
       source: "automatic",
     });
-    await expect(tutorial.beginAutomatic(productContext())).resolves.toEqual({
+    await expect(
+      gated.tutorial.beginAutomatic(productContext()),
+      "second automatic begin is a no-op",
+    ).resolves.toEqual({
       status: "dismissed",
       automaticEligible: false,
       started: false,
       source: "automatic",
     });
-  });
 
-  it("keeps dismissal and completion terminal while allowing manual replay", async () => {
-    const { tutorial } = await fixture();
-    await expect(tutorial.dismiss()).resolves.toEqual({ status: "dismissed" });
-    await expect(tutorial.beginManual()).resolves.toEqual({
+    const terminal = await fixture();
+    await expect(terminal.tutorial.dismiss(), "dismiss records dismissal").resolves.toEqual({ status: "dismissed" });
+    await expect(terminal.tutorial.beginManual(), "manual replay after dismissal").resolves.toEqual({
       status: "dismissed",
       started: true,
       source: "manual",
     });
-    await expect(tutorial.complete()).resolves.toEqual({ status: "completed" });
-    await expect(tutorial.dismiss()).resolves.toEqual({ status: "completed" });
-    await expect(tutorial.beginManual()).resolves.toEqual({
+    await expect(terminal.tutorial.complete(), "completion is recorded").resolves.toEqual({ status: "completed" });
+    await expect(terminal.tutorial.dismiss(), "dismissal after completion stays completed")
+      .resolves.toEqual({ status: "completed" });
+    await expect(terminal.tutorial.beginManual(), "manual replay after completion").resolves.toEqual({
       status: "completed",
       started: true,
       source: "manual",
     });
-  });
 
-  it("suppresses automatic launch when a never-shown tutorial starts manually", async () => {
-    const { settings, tutorial } = await fixture();
+    const manualFirst = await fixture();
+    await expect(manualFirst.tutorial.beginManual(), "manual start on a never-shown tutorial")
+      .resolves.toEqual({ status: "dismissed", started: true, source: "manual" });
+    await expect(manualFirst.settings.read(), "manual start suppresses automatic launch").resolves
+      .toMatchObject({ tutorial: { version: TUTORIAL_VERSION, status: "dismissed" } });
 
-    await expect(tutorial.beginManual()).resolves.toEqual({
-      status: "dismissed",
-      started: true,
-      source: "manual",
-    });
-    await expect(settings.read()).resolves.toMatchObject({
-      tutorial: { version: TUTORIAL_VERSION, status: "dismissed" },
-    });
-  });
-
-  it("preserves unrelated desktop settings across lifecycle changes", async () => {
-    const { directory, tutorial } = await fixture({ appearance: "light", updateChannel: "preview" });
-    await tutorial.beginAutomatic(productContext());
-    await tutorial.complete();
-    expect(JSON.parse(await readFile(join(directory, "desktop-settings.json"), "utf8"))).toEqual({
+    const preserved = await fixture({ appearance: "light", updateChannel: "preview" });
+    await preserved.tutorial.beginAutomatic(productContext());
+    await preserved.tutorial.complete();
+    expect(
+      JSON.parse(await readFile(join(preserved.directory, "desktop-settings.json"), "utf8")),
+      "unrelated settings survive lifecycle changes",
+    ).toEqual({
       appearance: "light",
       updateChannel: "preview",
       tutorial: { version: TUTORIAL_VERSION, status: "completed" },
     });
-  });
 
-  it("fails closed for unknown markers and rejects non-product automatic contexts", async () => {
     for (const marker of [
       null,
       "completed",
@@ -162,34 +161,32 @@ describe("desktop tutorial lifecycle", () => {
       { version: TUTORIAL_VERSION, status: "unknown" },
     ]) {
       const { tutorial } = await fixture({ tutorial: marker });
-      await expect(tutorial.read(productContext())).resolves.toEqual({
-        status: "dismissed",
-        automaticEligible: false,
-      });
+      await expect(
+        tutorial.read(productContext()),
+        `unknown marker ${JSON.stringify(marker)} fails closed`,
+      ).resolves.toEqual({ status: "dismissed", automaticEligible: false });
     }
 
-    const { tutorial } = await fixture();
-    await expect(tutorial.read({ ...productContext(), surface: "review" }))
+    const invalid = await fixture();
+    await expect(invalid.tutorial.read({ ...productContext(), surface: "review" }), "non-product read rejected")
       .rejects.toThrow("writable product surface");
-    await expect(tutorial.beginAutomatic({ ...productContext(), surface: "eval" }))
+    await expect(invalid.tutorial.beginAutomatic({ ...productContext(), surface: "eval" }), "non-product begin rejected")
       .rejects.toThrow("writable product surface");
-    await expect(tutorial.read(productContext({ providerConnected: "yes" })))
+    await expect(invalid.tutorial.read(productContext({ providerConnected: "yes" })), "providerConnected type enforced")
       .rejects.toThrow("providerConnected must be a boolean");
-    await expect(tutorial.read(productContext({ threadCount: -1 })))
+    await expect(invalid.tutorial.read(productContext({ threadCount: -1 })), "threadCount range enforced")
       .rejects.toThrow("threadCount must be a non-negative integer");
-  });
 
-  it("serializes settings updates so concurrent features do not lose fields", async () => {
-    const { settings } = await fixture();
+    const concurrent = await fixture();
     await Promise.all([
-      settings.update((current) => ({ ...current, appearance: "light" })),
-      settings.update((current) => ({ ...current, tutorial: { version: TUTORIAL_VERSION, status: "dismissed" } })),
-      settings.update((current) => ({ ...current, updateChannel: "preview" })),
+      concurrent.settings.update((current) => ({ ...current, appearance: "light" })),
+      concurrent.settings.update((current) => ({ ...current, tutorial: { version: TUTORIAL_VERSION, status: "dismissed" } })),
+      concurrent.settings.update((current) => ({ ...current, updateChannel: "preview" })),
     ]);
-    await expect(settings.read()).resolves.toEqual({
+    await expect(concurrent.settings.read(), "concurrent updates keep every field").resolves.toEqual({
       appearance: "light",
       tutorial: { version: TUTORIAL_VERSION, status: "dismissed" },
       updateChannel: "preview",
     });
-  });
+  }, 15_000);
 });
