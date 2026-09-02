@@ -31,38 +31,39 @@ const descriptors = [
 ];
 
 describe("provider renderer model", () => {
-  it("groups registry descriptors by connection flow without adapter-specific branches", () => {
+  it("normalizes registry descriptors and validates connection forms", () => {
     const groups = providerDescriptorGroups(descriptors);
-    expect(groups.subscriptions.map((item) => item.adapterId)).toEqual(["codex-subscription"]);
-    expect(groups.api.map((item) => item.adapterId)).toEqual(["openai-api"]);
-  });
+    expect(groups.subscriptions.map((item) => item.adapterId), "managed subscriptions group separately")
+      .toEqual(["codex-subscription"]);
+    expect(groups.api.map((item) => item.adapterId), "secret adapters group together").toEqual(["openai-api"]);
 
-  it("fails closed for malformed registry descriptors", () => {
-    expect(() => normalizeProviderDescriptor({ adapterId: "bad", label: "Bad", connection: { mode: "oauth" } }))
-      .toThrow("invalid connection mode");
-    expect(() => normalizeProviderDescriptor({ adapterId: "bad", label: "Bad", connection: { mode: "secret-fields", fields: [{ id: "token", label: "Token", kind: "html" }] } }))
-      .toThrow("invalid connection field");
-  });
+    const malformed = [
+      ["unknown connection mode", { adapterId: "bad", label: "Bad", connection: { mode: "oauth" } }, "invalid connection mode"],
+      ["invalid field kind", { adapterId: "bad", label: "Bad", connection: { mode: "secret-fields", fields: [{ id: "token", label: "Token", kind: "html" }] } }, "invalid connection field"],
+    ];
+    expect(malformed, "malformed descriptor inventory").toHaveLength(2);
+    for (const [label, descriptor, message] of malformed) {
+      expect.soft(() => normalizeProviderDescriptor(descriptor), label).toThrow(message);
+    }
 
-  it("keeps active and removal-pending names case-insensitively unique", () => {
     const definitions = [
       { id: "work", label: "OpenAI Work", lifecycleState: "active" },
       { id: "pending", label: "Company Proxy", lifecycleState: "removal_pending" },
       { id: "old", label: "OpenAI Personal", lifecycleState: "tombstoned" },
     ];
-    expect(providerLabelError("openai work", definitions)).toBe("Active connection names must be unique.");
-    expect(providerLabelError("company proxy", definitions)).toBe("Active connection names must be unique.");
-    expect(providerLabelError("openai personal", definitions)).toBeNull();
-    expect(providerLabelError("OPENAI WORK", definitions, "work")).toBeNull();
-  });
+    expect(providerLabelError("openai work", definitions), "active names collide case-insensitively")
+      .toBe("Active connection names must be unique.");
+    expect(providerLabelError("company proxy", definitions), "removal-pending names still collide")
+      .toBe("Active connection names must be unique.");
+    expect(providerLabelError("openai personal", definitions), "tombstoned names are reusable").toBeNull();
+    expect(providerLabelError("OPENAI WORK", definitions, "work"), "a definition keeps its own name").toBeNull();
 
-  it("validates typed fields and safe editable endpoints while preserving form intent", () => {
     const descriptor = normalizeProviderDescriptor(descriptors[0]);
     expect(providerConnectionErrors(descriptor, {
       label: "OpenAI Work",
       endpoint: "https://proxy.example/v1?key=secret",
       fields: { apiKey: "" },
-    })).toEqual({
+    }), "embedded credentials and missing secrets are both reported").toEqual({
       endpoint: "The endpoint cannot contain credentials, query parameters, or a fragment.",
       apiKey: "Enter API key.",
     });
@@ -70,56 +71,49 @@ describe("provider renderer model", () => {
       label: "OpenAI Work",
       endpoint: "http://127.0.0.1:8080/v1",
       fields: { apiKey: "sk-test" },
-    })).toEqual({ endpoint: "Use an HTTPS endpoint." });
-  });
+    }), "plain HTTP stays rejected").toEqual({ endpoint: "Use an HTTPS endpoint." });
 
-  it("builds a creation payload without implementation version or access-contract authority", () => {
-    expect(providerCreationPayload(normalizeProviderDescriptor(descriptors[0]), {
+    expect(providerCreationPayload(descriptor, {
       label: " OpenAI Work ",
       endpoint: "https://proxy.example/v1/",
       fields: { apiKey: "sk-test" },
-    })).toEqual({
+    }), "payload trims the label, normalizes the endpoint, and carries no descriptor authority").toEqual({
       adapterId: "openai-api",
       label: "OpenAI Work",
       endpoint: "https://proxy.example/v1",
       fields: { apiKey: "sk-test" },
     });
-  });
-
-  it("carries a renderer-owned connection attempt id without provider authority", () => {
-    expect(providerCreationPayload(normalizeProviderDescriptor(descriptors[0]), {
+    expect(providerCreationPayload(descriptor, {
       label: "OpenAI Work",
       endpoint: "https://proxy.example/v1",
       fields: { apiKey: "sk-test" },
-    }, { connectionId: "attempt-1" })).toMatchObject({
+    }, { connectionId: "attempt-1" }), "renderer-owned connection attempt id passes through").toMatchObject({
       connectionId: "attempt-1",
       adapterId: "openai-api",
     });
   });
 
-  it("hard-gates only first run and distinguishes provider from family resolution", () => {
-    expect(firstRunGateState({ hasCompletedOnboarding: false, providers: [], defaultResolution: null }))
-      .toEqual({ blocked: true, reason: "Connect a working provider to continue." });
+  it("hard-gates first run on provider and default family resolution", () => {
+    expect(firstRunGateState({ hasCompletedOnboarding: false, providers: [], defaultResolution: null }),
+      "no provider blocks first run").toEqual({ blocked: true, reason: "Connect a working provider to continue." });
     expect(firstRunGateState({
       hasCompletedOnboarding: false,
       providers: [{ lifecycleState: "active" }],
       defaultResolution: null,
-    }).reason).toContain("default model family");
+    }).reason, "a provider without a family names the family gap").toContain("default model family");
     expect(firstRunGateState({
       hasCompletedOnboarding: false,
       providers: [{ lifecycleState: "active" }],
       defaultResolution: { familyId: 7 },
-    }).reason).toContain("no model available");
+    }).reason, "a family without a model names the model gap").toContain("no model available");
     expect(firstRunGateState({
       hasCompletedOnboarding: false,
       providers: [{ lifecycleState: "active" }],
       defaultResolution: { familyId: 7, providerDefinitionId: "work", modelId: "gpt-5.2" },
-    })).toEqual({ blocked: false, reason: null });
-    expect(firstRunGateState({ hasCompletedOnboarding: true, providers: [], defaultResolution: null }))
-      .toEqual({ blocked: false, reason: null });
-  });
+    }), "a fully resolved default unblocks first run").toEqual({ blocked: false, reason: null });
+    expect(firstRunGateState({ hasCompletedOnboarding: true, providers: [], defaultResolution: null }),
+      "completed onboarding never re-gates").toEqual({ blocked: false, reason: null });
 
-  it("directs a connected zero-eligible provider to model refresh instead of another connection", () => {
     expect(firstRunGateState({
       hasCompletedOnboarding: false,
       providers: [{
@@ -128,13 +122,11 @@ describe("provider renderer model", () => {
         unavailableReason: { code: "provider_no_eligible_execution_models", message: "No supported text models." },
       }],
       defaultResolution: null,
-    })).toEqual({
+    }), "a zero-eligible provider is directed to model refresh, not another connection").toEqual({
       blocked: true,
       reason: "Refresh models and set up defaults for the connected provider.",
     });
-  });
 
-  it("directs a connected provider with no ready route to execution repair", () => {
     const provider = {
       lifecycleState: "active",
       connected: true,
@@ -143,7 +135,7 @@ describe("provider renderer model", () => {
         message: "This provider currently has no available execution configurations.",
       },
     };
-    expect(providerDefinitionStatus(provider)).toMatchObject({
+    expect(providerDefinitionStatus(provider), "no-ready-route providers need execution setup").toMatchObject({
       lifecycle: "needs_execution_setup",
       recovery: "repair_execution",
       usable: false,
@@ -152,35 +144,38 @@ describe("provider renderer model", () => {
       hasCompletedOnboarding: false,
       providers: [provider],
       defaultResolution: null,
-    })).toEqual({
+    }), "a no-ready-route provider is directed to execution repair").toEqual({
       blocked: true,
       reason: "Repair execution configurations for the connected provider.",
     });
   });
 
-  it("does not announce recovery while the exact provider still has no eligible family", () => {
-    const status = { definitions: [{
-      id: "work",
-      unavailableReason: { code: "provider_no_eligible_execution_models", message: "No supported text models." },
-    }] };
-    expect(providerFamilyRecoveryResult(status, "work")).toEqual({
-      recovered: false,
-      message: "No supported text models.",
-    });
-    expect(providerFamilyRecoveryResult({ definitions: [{ id: "work", unavailableReason: null }] }, "work"))
-      .toEqual({ recovered: true, message: "Provider models and default family refreshed." });
-    expect(providerFamilyRecoveryResult({ definitions: [{
-      id: "work",
-      unavailableReason: { code: "provider_unavailable", message: "Provider credentials were rejected." },
-    }] }, "work")).toEqual({ recovered: false, message: "Provider credentials were rejected." });
-    expect(providerFamilyRecoveryResult({ definitions: [] }, "work")).toEqual({
-      recovered: false,
-      message: "Provider refresh completed, but default family setup could not be confirmed.",
-    });
-  });
+  it("reports definition status and family recovery outcomes", () => {
+    const recoveryCases = [
+      ["still ineligible", { definitions: [{
+        id: "work",
+        unavailableReason: { code: "provider_no_eligible_execution_models", message: "No supported text models." },
+      }] }, { recovered: false, message: "No supported text models." }],
+      ["recovered", { definitions: [{ id: "work", unavailableReason: null }] }, {
+        recovered: true, message: "Provider models and default family refreshed.",
+      }],
+      ["credentials rejected", { definitions: [{
+        id: "work",
+        unavailableReason: { code: "provider_unavailable", message: "Provider credentials were rejected." },
+      }] }, { recovered: false, message: "Provider credentials were rejected." }],
+      ["missing definition", { definitions: [] }, {
+        recovered: false,
+        message: "Provider refresh completed, but default family setup could not be confirmed.",
+      }],
+    ];
+    expect(recoveryCases, "family recovery outcome inventory").toHaveLength(4);
+    for (const [label, status, expected] of recoveryCases) {
+      expect.soft(providerFamilyRecoveryResult(status, "work"), label).toEqual(expected);
+    }
 
-  it("labels pending and tombstoned definitions as unusable", () => {
-    expect(providerDefinitionStatus({ lifecycleState: "removal_pending" })).toMatchObject({ usable: false, label: "Finishing removal" });
-    expect(providerDefinitionStatus({ lifecycleState: "tombstoned" })).toMatchObject({ usable: false, label: "Removed provider" });
+    expect(providerDefinitionStatus({ lifecycleState: "removal_pending" }), "removal-pending stays unusable")
+      .toMatchObject({ usable: false, label: "Finishing removal" });
+    expect(providerDefinitionStatus({ lifecycleState: "tombstoned" }), "tombstoned stays unusable")
+      .toMatchObject({ usable: false, label: "Removed provider" });
   });
 });

@@ -57,132 +57,119 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
 }
 
 describe("provider onboarding IPC hard gate", () => {
-  it("rejects a forged completion when current product defaults do not resolve", async () => {
-    const { complete, writes } = fixture(async () => false);
-    await expect(complete()).rejects.toThrow("working default provider, family, and harness");
-    expect(writes).toEqual([]);
-  });
+  it("hard-gates completion and migration on authoritative product validation", async () => {
+    const forged = fixture(async () => false);
+    await expect(forged.complete(), "a forged completion without resolving defaults rejects")
+      .rejects.toThrow("working default provider, family, and harness");
+    expect(forged.writes, "a forged completion persists nothing").toEqual([]);
 
-  it("persists completion only after authoritative product validation", async () => {
     const validate = vi.fn(async () => true);
-    const { complete, writes } = fixture(validate);
-    await expect(complete()).resolves.toEqual({ hasCompletedOnboarding: true });
-    expect(validate).toHaveBeenCalledOnce();
-    expect(writes).toEqual([{ appearance: "dark", providerOnboardingComplete: true }]);
-  });
+    const valid = fixture(validate);
+    await expect(valid.complete(), "a validated completion resolves").resolves.toEqual({ hasCompletedOnboarding: true });
+    expect(validate, "completion consults the authoritative validator exactly once").toHaveBeenCalledOnce();
+    expect(valid.writes, "completion persists only after validation").toEqual([
+      { appearance: "dark", providerOnboardingComplete: true },
+    ]);
 
-  it("routes logout by exact provider definition through the generic IPC", async () => {
-    const { logout } = fixture(async () => false);
-    await expect(logout(null, { id: "claude-work" })).resolves.toEqual({ status: "disconnected" });
-  });
+    const migrateValidate = vi.fn(async () => true);
+    const migrating = fixture(migrateValidate, { appearance: "dark" });
+    await expect(migrating.status(), "an already-valid Codex user migrates without first-run setup")
+      .resolves.toMatchObject({ hasCompletedOnboarding: true });
+    expect(migrateValidate, "migration consults the validator exactly once").toHaveBeenCalledOnce();
+    expect(migrating.writes, "migration persists the completion flag").toEqual([
+      { appearance: "dark", providerOnboardingComplete: true },
+    ]);
 
-  it("routes reconnect through the same definition identity and opens its managed login", async () => {
-    const { reconnect } = fixture(async () => false);
-    await expect(reconnect(null, { id: "claude-work" })).resolves.toMatchObject({
-      status: "pending", connectionId: "claude-work", providerDefinition: { id: "claude-work" },
-    });
-  });
-
-  it("routes model-family recovery refresh to the exact connected provider", async () => {
-    const { refreshModels, modelCatalog } = fixture(async () => false);
-
-    await refreshModels(null, "openai-work");
-
-    expect(modelCatalog.explicitRefresh).toHaveBeenCalledWith("openai-work");
-  });
-
-  it("migrates an existing already-valid Codex user without showing first-run setup", async () => {
-    const validate = vi.fn(async () => true);
-    const { status, writes } = fixture(validate, { appearance: "dark" });
-    await expect(status()).resolves.toMatchObject({ hasCompletedOnboarding: true });
-    expect(validate).toHaveBeenCalledOnce();
-    expect(writes).toEqual([{ appearance: "dark", providerOnboardingComplete: true }]);
-  });
-
-  it("preserves composer drafts written while provider validation is pending", async () => {
     let finishValidation;
-    const validate = vi.fn(() => new Promise((resolve) => { finishValidation = resolve; }));
-    const { status, settings, readSettings } = fixture(validate, { appearance: "dark" });
-
-    const pendingStatus = status();
-    await vi.waitFor(() => expect(validate).toHaveBeenCalledOnce());
-    await settings.update((current) => ({
+    const pendingValidate = vi.fn(() => new Promise((resolve) => { finishValidation = resolve; }));
+    const pending = fixture(pendingValidate, { appearance: "dark" });
+    const pendingStatus = pending.status();
+    await vi.waitFor(() => expect(pendingValidate).toHaveBeenCalledOnce());
+    await pending.settings.update((current) => ({
       ...current,
       composerDrafts: { pendingNewThread: { text: "Keep me", scope: null }, threadFollowups: {} },
     }));
     finishValidation(true);
-
-    await expect(pendingStatus).resolves.toMatchObject({ hasCompletedOnboarding: true });
-    expect(readSettings()).toMatchObject({
+    await expect(pendingStatus, "pending validation still completes").resolves.toMatchObject({ hasCompletedOnboarding: true });
+    expect(pending.readSettings(), "composer drafts written during validation survive migration").toMatchObject({
       providerOnboardingComplete: true,
       composerDrafts: { pendingNewThread: { text: "Keep me", scope: null } },
     });
+
+    const blocked = fixture(async () => false, { appearance: "dark" });
+    await expect(blocked.status(), "unresolvable defaults never migrate an existing user")
+      .resolves.toMatchObject({ hasCompletedOnboarding: false });
+    expect(blocked.writes, "a blocked migration persists nothing").toEqual([]);
   });
 
-  it("does not migrate an existing user whose defaults no longer resolve", async () => {
-    const { status, writes } = fixture(async () => false, { appearance: "dark" });
-    await expect(status()).resolves.toMatchObject({ hasCompletedOnboarding: false });
-    expect(writes).toEqual([]);
+  it("routes provider actions by exact definition identity through the generic IPC", async () => {
+    const routed = fixture(async () => false);
+    await expect(routed.logout(null, { id: "claude-work" }), "logout targets the exact definition")
+      .resolves.toEqual({ status: "disconnected" });
+    await expect(routed.reconnect(null, { id: "claude-work" }), "reconnect keeps the same definition identity")
+      .resolves.toMatchObject({
+        status: "pending", connectionId: "claude-work", providerDefinition: { id: "claude-work" },
+      });
+    await routed.refreshModels(null, "openai-work");
+    expect(routed.modelCatalog.explicitRefresh, "model-family recovery refreshes the exact provider")
+      .toHaveBeenCalledWith("openai-work");
   });
 
-  it("treats an authoritative incomplete saved-default status as an incomplete first run", async () => {
-    const service = new RelayerAppServerService({
-      userDataDirectory: "/tmp/unused", binaryPath: "/tmp/unused", webDirectory: "/tmp/unused",
-      permissionCatalogPath: "/tmp/unused",
-    });
-    service.start = async () => ({ origin: "http://127.0.0.1:43123", cookie: { name: "relayer_control", value: "token" } });
-    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+  it("reads authoritative onboarding and provider state through the app server seam", async () => {
+    function serverFixture(defaultHarnessConfiguration) {
+      const service = new RelayerAppServerService({
+        userDataDirectory: "/tmp/unused", binaryPath: "/tmp/unused", webDirectory: "/tmp/unused",
+        permissionCatalogPath: "/tmp/unused", defaultHarnessConfiguration,
+      });
+      service.start = async () => ({ origin: "http://127.0.0.1:43123", cookie: { name: "relayer_control", value: "token" } });
+      return service;
+    }
+
+    const incomplete = serverFixture(undefined);
+    const incompleteFetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
       complete: false,
       defaults: { providerId: "codex", harnessId: "codex-basic", familyId: null },
       blockingReason: { code: "default_family_required", message: "Choose a family." },
     }), {
       status: 200, headers: { "Content-Type": "application/json" },
     }));
-    await expect(service.validateProviderOnboarding()).resolves.toBe(false);
-    expect(fetch.mock.calls[0][0].pathname).toBe("/api/provider-onboarding/status");
-    expect(fetch.mock.calls[0][0].search).toBe("");
-    expect(fetch.mock.calls[0][1]).toMatchObject({
-      headers: { Cookie: "relayer_control=token" },
-    });
-    fetch.mockRestore();
-  });
+    await expect(incomplete.validateProviderOnboarding(),
+      "an incomplete saved-default status is an incomplete first run").resolves.toBe(false);
+    expect(incompleteFetch.mock.calls[0][0].pathname, "onboarding status uses the exact endpoint")
+      .toBe("/api/provider-onboarding/status");
+    expect(incompleteFetch.mock.calls[0][0].search, "onboarding status carries no query").toBe("");
+    expect(incompleteFetch.mock.calls[0][1], "onboarding status authenticates with the control cookie")
+      .toMatchObject({ headers: { Cookie: "relayer_control=token" } });
+    incompleteFetch.mockRestore();
 
-  it("accepts saved alternate-harness defaults after restart without consulting the boot harness", async () => {
-    const service = new RelayerAppServerService({
-      userDataDirectory: "/tmp/unused", binaryPath: "/tmp/unused", webDirectory: "/tmp/unused",
-      permissionCatalogPath: "/tmp/unused", defaultHarnessConfiguration: "packaged-default",
-    });
-    service.start = async () => ({ origin: "http://127.0.0.1:43123", cookie: { name: "relayer_control", value: "token" } });
-    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+    const alternate = serverFixture("packaged-default");
+    const alternateFetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
       complete: true,
       defaults: { providerId: "anthropic-work", harnessId: "claude-basic", familyId: 12 },
       resolution: { familyId: 12, familyRevision: 3, resolvableMembers: [{ providerId: "anthropic-work", modelId: "claude-sonnet", position: 0 }] },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
-    await expect(service.validateProviderOnboarding()).resolves.toBe(true);
-    expect(fetch.mock.calls[0][0].pathname).toBe("/api/provider-onboarding/status");
-    expect(fetch.mock.calls[0][0].searchParams.has("harnessId")).toBe(false);
-    fetch.mockRestore();
-  });
+    await expect(alternate.validateProviderOnboarding(),
+      "saved alternate-harness defaults stay valid after restart").resolves.toBe(true);
+    expect(alternateFetch.mock.calls[0][0].searchParams.has("harnessId"),
+      "alternate-harness validation never consults the boot harness").toBe(false);
+    alternateFetch.mockRestore();
 
-  it("loads authoritative provider connection and revocation state", async () => {
-    const service = new RelayerAppServerService({
-      userDataDirectory: "/tmp/unused", binaryPath: "/tmp/unused", webDirectory: "/tmp/unused",
-      permissionCatalogPath: "/tmp/unused",
-    });
-    service.start = async () => ({ origin: "http://127.0.0.1:43123", cookie: { name: "relayer_control", value: "token" } });
-    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+    const statuses = serverFixture(undefined);
+    const statusFetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
       providers: [{
         id: "work-api", connected: false,
         unavailableReason: { code: "credentials_revoked", message: "Reconnect this provider." },
       }],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
-    await expect(service.providerStatuses()).resolves.toEqual(new Map([["work-api", {
-      connected: false,
-      unavailableReason: { code: "credentials_revoked", message: "Reconnect this provider." },
-    }]]));
-    expect(fetch).toHaveBeenCalledWith(new URL("http://127.0.0.1:43123/api/model-settings"), {
-      headers: { Cookie: "relayer_control=token" }, signal: undefined,
-    });
-    fetch.mockRestore();
+    await expect(statuses.providerStatuses(), "provider connection and revocation state loads authoritatively")
+      .resolves.toEqual(new Map([["work-api", {
+        connected: false,
+        unavailableReason: { code: "credentials_revoked", message: "Reconnect this provider." },
+      }]]));
+    expect(statusFetch, "provider statuses come from the model-settings endpoint").toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:43123/api/model-settings"),
+      { headers: { Cookie: "relayer_control=token" }, signal: undefined },
+    );
+    statusFetch.mockRestore();
   });
 });

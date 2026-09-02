@@ -33,21 +33,19 @@ function forbiddenImplementationImport(importer, specifier, implementationDirect
 }
 
 describe("provider adapter architecture", () => {
-  it("recognizes static, dynamic, and CommonJS imports of concrete adapters", async () => {
+  it("keeps every concrete provider implementation behind the authoritative registry", async () => {
     await init;
+
     expect(importedSpecifiers(`
       import "./providers/implementations/openai-api.mjs";
       await import("./providers/implementations/anthropic-api.mjs");
       require("./providers/implementations/openrouter.mjs");
-    `)).toEqual([
+    `), "recognizes static, dynamic, and CommonJS imports").toEqual([
       "./providers/implementations/openai-api.mjs",
       "./providers/implementations/anthropic-api.mjs",
       "./providers/implementations/openrouter.mjs",
     ]);
-  });
 
-  it("allows only the authoritative registry to import concrete implementations", async () => {
-    await init;
     const desktopRoot = resolve("desktop");
     const registry = resolve(desktopRoot, "main/providers/provider-adapter-registry.mjs");
     const implementationDirectory = resolve(desktopRoot, "main/providers/implementations");
@@ -57,6 +55,14 @@ describe("provider adapter architecture", () => {
     const supportModules = new Set(PROVIDER_ADAPTER_SUPPORT_MODULES.map((module) => (
       resolve(desktopRoot, "main", module)
     )));
+
+    expect(forbiddenImplementationImport(
+      resolve(desktopRoot, "main/index.mjs"),
+      "./providers/implementations/future-provider.mjs",
+      implementationDirectory,
+      new Set(),
+    ), "rejects a direct import of an unregistered seventh provider implementation").toBe(true);
+
     const implementationFiles = new Set();
     const violations = [];
     for await (const relative of glob("**/*", { cwd: desktopRoot })) {
@@ -71,25 +77,14 @@ describe("provider adapter architecture", () => {
         && !importedSpecifiers(source).some((specifier) => specifier.includes("providers/implementations/"));
       if (importsProviderImplementation || hidesImplementationImportFromTheParser) violations.push(relative);
     }
-    expect(violations).toEqual([]);
-    expect(implementationFiles).toEqual(new Set([...concreteAdapters, ...supportModules]));
+    expect(violations, "only the registry imports concrete implementations").toEqual([]);
+    expect(implementationFiles, "no unregistered implementation files ship").toEqual(
+      new Set([...concreteAdapters, ...supportModules]),
+    );
     const productionComposition = await readFile(resolve(desktopRoot, "main/index.mjs"), "utf8");
-    expect(productionComposition).not.toMatch(/definition\.adapterId\s*===/u);
-  });
+    expect(productionComposition, "composition stays adapter-agnostic").not.toMatch(/definition\.adapterId\s*===/u);
 
-  it("rejects a direct import of an unregistered seventh provider implementation", () => {
-    const implementationDirectory = resolve("desktop/main/providers/implementations");
-    const importer = resolve("desktop/main/index.mjs");
-    expect(forbiddenImplementationImport(
-      importer,
-      "./providers/implementations/future-provider.mjs",
-      implementationDirectory,
-      new Set(),
-    )).toBe(true);
-  });
-
-  it("does not read the legacy Codex account after generic provider onboarding", async () => {
     const auth = await readFile(resolve("desktop/renderer/src/auth.js"), "utf8");
-    expect(auth).not.toContain("desktop.account?.read?.()");
-  });
+    expect(auth, "generic onboarding never reads the legacy Codex account").not.toContain("desktop.account?.read?.()");
+  }, 15_000);
 });

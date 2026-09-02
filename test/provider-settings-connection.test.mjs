@@ -13,7 +13,7 @@ function deferred() {
 }
 
 describe("Provider Settings connection behavior", () => {
-  it("keeps the first Connect winner and continues through its managed-login id", async () => {
+  it("keeps the first Connect winner, continues through its managed-login id, and releases ownership on error or close", async () => {
     const first = deferred();
     const providers = {
       connect: vi.fn(() => first.promise),
@@ -31,41 +31,65 @@ describe("Provider Settings connection behavior", () => {
     });
 
     const winning = controller.connect({ adapterId: "claude-subscription", label: "Claude Work" });
-    await expect(controller.connect({ adapterId: "claude-subscription", label: "Claude Work" }))
-      .resolves.toEqual({ status: "ignored" });
-    expect(providers.connect).toHaveBeenCalledTimes(1);
-    expect(controller.current()).toBe("request-1");
+    await expect(
+      controller.connect({ adapterId: "claude-subscription", label: "Claude Work" }),
+      "a duplicate Connect is ignored",
+    ).resolves.toEqual({ status: "ignored" });
+    expect(providers.connect, "only the winner reaches IPC").toHaveBeenCalledTimes(1);
+    expect(controller.current(), "the winning request id is owned").toBe("request-1");
 
     first.resolve({ status: "pending", connectionId: "authorization-1", login: { kind: "browser" } });
-    await expect(winning).resolves.toEqual({
+    await expect(winning, "the winner continues through its managed-login id").resolves.toEqual({
       status: "settled",
       result: { status: "connected", providerDefinition: { id: "claude-work" } },
     });
-    expect(onPending).toHaveBeenCalledOnce();
-    expect(providers.completeConnection).toHaveBeenCalledWith("authorization-1");
-    expect(controller.current()).toBeNull();
-  });
+    expect(onPending, "pending managed login is announced once").toHaveBeenCalledOnce();
+    expect(providers.completeConnection, "completion uses the managed-login connection id")
+      .toHaveBeenCalledWith("authorization-1");
+    expect(controller.current(), "ownership releases after settling").toBeNull();
 
-  it("releases ownership after errors so Settings can retry", async () => {
-    const providers = {
+    const retryProviders = {
       connect: vi.fn()
         .mockRejectedValueOnce(new Error("Authentication failed."))
         .mockResolvedValueOnce({ status: "connected", providerDefinition: { id: "openai-work" } }),
       completeConnection: vi.fn(),
       cancelConnection: vi.fn(async () => ({ cancelled: true })),
     };
-    const controller = createProviderSettingsConnectionController({
-      providers,
+    const retryController = createProviderSettingsConnectionController({
+      providers: retryProviders,
       createConnectionId: vi.fn().mockReturnValueOnce("request-1").mockReturnValueOnce("request-2"),
     });
+    await expect(
+      retryController.connect({ adapterId: "openai-api" }),
+      "a failed Connect surfaces its error",
+    ).rejects.toThrow("Authentication failed.");
+    expect(retryController.current(), "errors release ownership").toBeNull();
+    await expect(
+      retryController.connect({ adapterId: "openai-api" }),
+      "Settings can retry after an error",
+    ).resolves.toMatchObject({ status: "settled" });
+    expect(retryProviders.connect, "the retry reaches IPC").toHaveBeenCalledTimes(2);
 
-    await expect(controller.connect({ adapterId: "openai-api" })).rejects.toThrow("Authentication failed.");
-    expect(controller.current()).toBeNull();
-    await expect(controller.connect({ adapterId: "openai-api" })).resolves.toMatchObject({ status: "settled" });
-    expect(providers.connect).toHaveBeenCalledTimes(2);
+    const closePending = deferred();
+    const closeProviders = {
+      connect: vi.fn(() => closePending.promise),
+      completeConnection: vi.fn(),
+      cancelConnection: vi.fn(async () => ({ cancelled: true })),
+    };
+    const closeController = createProviderSettingsConnectionController({
+      providers: closeProviders,
+      createConnectionId: () => "request-1",
+    });
+    const connecting = closeController.connect({ adapterId: "claude-subscription" });
+    expect(closeController.close(), "closing the dialog releases the owned id").toBe(true);
+    expect(closeController.current(), "close clears ownership").toBeNull();
+    expect(closeProviders.cancelConnection, "close cancels the owned connection attempt")
+      .toHaveBeenCalledWith("request-1");
+    closePending.resolve({ status: "connected", providerDefinition: { id: "claude-work" } });
+    await expect(connecting, "a late response after close is abandoned").resolves.toEqual({ status: "abandoned" });
   });
 
-  it("claims a reconnect definition before IPC and ignores a duplicate click", async () => {
+  it("isolates reconnect ownership from Add Provider ownership", async () => {
     const first = deferred();
     const providers = {
       connect: vi.fn(),
@@ -79,65 +103,48 @@ describe("Provider Settings connection behavior", () => {
     });
 
     const winning = controller.reconnect("claude-work");
-    expect(controller.current()).toBe("claude-work");
-    await expect(controller.reconnect("claude-work")).resolves.toEqual({ status: "ignored" });
-    expect(providers.reconnect).toHaveBeenCalledTimes(1);
+    expect(controller.current(), "reconnect claims the definition before IPC").toBe("claude-work");
+    await expect(
+      controller.reconnect("claude-work"),
+      "a duplicate reconnect click is ignored",
+    ).resolves.toEqual({ status: "ignored" });
+    expect(providers.reconnect, "only the first reconnect reaches IPC").toHaveBeenCalledTimes(1);
 
     first.resolve({ status: "pending", connectionId: "authorization-1", login: { kind: "browser" } });
-    await expect(winning).resolves.toEqual({
+    await expect(winning, "reconnect continues through the managed-login id").resolves.toEqual({
       status: "settled",
       result: { status: "connected", providerDefinition: { id: "claude-work" } },
     });
-    expect(providers.completeConnection).toHaveBeenCalledWith("authorization-1");
-    expect(controller.current()).toBeNull();
-  });
+    expect(providers.completeConnection, "reconnect completion uses the definition's connection id")
+      .toHaveBeenCalledWith("authorization-1");
+    expect(controller.current(), "reconnect ownership releases after settling").toBeNull();
 
-  it("keeps Add Provider ownership isolated from reconnect ownership", async () => {
     const addPending = deferred();
     const reconnectPending = deferred();
-    const providers = {
+    const isolatedProviders = {
       connect: vi.fn(() => addPending.promise),
       reconnect: vi.fn(() => reconnectPending.promise),
       completeConnection: vi.fn(),
       cancelConnection: vi.fn(async () => ({ cancelled: true })),
     };
     const addController = createProviderSettingsConnectionController({
-      providers,
+      providers: isolatedProviders,
       createConnectionId: () => "request-1",
     });
-    const reconnectController = createProviderSettingsConnectionController({ providers });
+    const reconnectController = createProviderSettingsConnectionController({ providers: isolatedProviders });
 
     const adding = addController.connect({ adapterId: "openai-api" });
     const reconnecting = reconnectController.reconnect("claude-work");
-    expect(addController.current()).toBe("request-1");
-    expect(reconnectController.current()).toBe("claude-work");
-    expect(addController.close()).toBe(true);
-    expect(reconnectController.current()).toBe("claude-work");
+    expect(addController.current(), "Add Provider owns its request id").toBe("request-1");
+    expect(reconnectController.current(), "reconnect owns its definition id").toBe("claude-work");
+    expect(addController.close(), "closing Add Provider releases only its own claim").toBe(true);
+    expect(reconnectController.current(), "reconnect ownership survives Add Provider close").toBe("claude-work");
 
     addPending.resolve({ status: "connected", providerDefinition: { id: "openai-work" } });
     reconnectPending.resolve({ status: "connected", providerDefinition: { id: "claude-work" } });
-    await expect(adding).resolves.toEqual({ status: "abandoned" });
-    await expect(reconnecting).resolves.toMatchObject({ status: "settled" });
-    expect(providers.cancelConnection).toHaveBeenCalledWith("request-1");
-  });
-
-  it("releases and cancels the owned id when the Settings dialog closes", async () => {
-    const pending = deferred();
-    const providers = {
-      connect: vi.fn(() => pending.promise),
-      completeConnection: vi.fn(),
-      cancelConnection: vi.fn(async () => ({ cancelled: true })),
-    };
-    const controller = createProviderSettingsConnectionController({
-      providers,
-      createConnectionId: () => "request-1",
-    });
-
-    const connecting = controller.connect({ adapterId: "claude-subscription" });
-    expect(controller.close()).toBe(true);
-    expect(controller.current()).toBeNull();
-    expect(providers.cancelConnection).toHaveBeenCalledWith("request-1");
-    pending.resolve({ status: "connected", providerDefinition: { id: "claude-work" } });
-    await expect(connecting).resolves.toEqual({ status: "abandoned" });
+    await expect(adding, "the closed Add Provider attempt is abandoned").resolves.toEqual({ status: "abandoned" });
+    await expect(reconnecting, "the reconnect attempt still settles").resolves.toMatchObject({ status: "settled" });
+    expect(isolatedProviders.cancelConnection, "only the Add Provider attempt is cancelled")
+      .toHaveBeenCalledWith("request-1");
   });
 });

@@ -76,59 +76,77 @@ afterEach(async () => {
 });
 
 describe("straightforward discovered-model provider flows", () => {
-  it.each(flows)(
-    "$adapterId creates its default family for $harnessId without typed models or a custom family",
-    async (flow) => {
-      const { product, session } = await productFixture();
-      const onboardingProviderId = `onboarding-${flow.adapterId}`;
-      await addDiscoveredProvider(product, flow, onboardingProviderId);
+  async function walkFlow(flow) {
+    const label = (checkpoint) => `${flow.adapterId}: ${checkpoint}`;
+    const { product, session } = await productFixture();
+    const onboardingProviderId = `onboarding-${flow.adapterId}`;
+    await addDiscoveredProvider(product, flow, onboardingProviderId);
 
-      const completion = await productRequest(session, "/api/provider-onboarding/default", {
-        method: "POST",
-        body: JSON.stringify({ providerId: onboardingProviderId }),
-      });
-      expect(completion.defaults).toMatchObject({
-        harnessId: flow.harnessId,
+    const completion = await productRequest(session, "/api/provider-onboarding/default", {
+      method: "POST",
+      body: JSON.stringify({ providerId: onboardingProviderId }),
+    });
+    expect(completion.defaults, label("onboarding defaults point at the discovered provider")).toMatchObject({
+      harnessId: flow.harnessId,
+      providerId: onboardingProviderId,
+      familyId: completion.resolution.familyId,
+    });
+    expect(completion.resolution.resolvableMembers, label("onboarding resolves every discovered model")).toEqual(
+      familyMembers(onboardingProviderId, flow.modelIds),
+    );
+
+    const afterOnboarding = await productRequest(session, "/api/model-settings");
+    const onboardingFamily = familyForProvider(afterOnboarding, onboardingProviderId);
+    expect(onboardingFamily, label("the automatic family is an enabled system family")).toMatchObject({
+      kind: "system", enabled: true,
+    });
+    expect(onboardingFamily.members, label("the automatic family keeps every discovered model")).toEqual(
+      familyMembers(onboardingProviderId, flow.modelIds),
+    );
+    expect(readyComposerRequest(afterOnboarding, flow.harnessId, onboardingFamily.id),
+      label("the composer is ready on the default family selection")).toMatchObject({
+      harnessId: flow.harnessId,
+      modelSelection: {
+        familyId: onboardingFamily.id,
         providerId: onboardingProviderId,
-        familyId: completion.resolution.familyId,
-      });
-      expect(completion.resolution.resolvableMembers).toEqual(familyMembers(
-        onboardingProviderId,
-        flow.modelIds,
-      ));
+        modelId: flow.modelIds[0],
+      },
+    });
 
-      const afterOnboarding = await productRequest(session, "/api/model-settings");
-      const onboardingFamily = familyForProvider(afterOnboarding, onboardingProviderId);
-      expect(onboardingFamily).toMatchObject({ kind: "system", enabled: true });
-      expect(onboardingFamily.members).toEqual(familyMembers(onboardingProviderId, flow.modelIds));
-      expect(readyComposerRequest(afterOnboarding, flow.harnessId, onboardingFamily.id)).toMatchObject({
-        harnessId: flow.harnessId,
-        modelSelection: {
-          familyId: onboardingFamily.id,
-          providerId: onboardingProviderId,
-          modelId: flow.modelIds[0],
-        },
-      });
+    const preservedDefaults = structuredClone(afterOnboarding.defaults);
+    const settingsProviderId = `settings-${flow.adapterId}`;
+    await addDiscoveredProvider(product, flow, settingsProviderId);
+    const afterSettings = await productRequest(session, "/api/model-settings");
+    expect(afterSettings.defaults, label("a settings-added provider never replaces product defaults"))
+      .toEqual(preservedDefaults);
+    const settingsFamily = familyForProvider(afterSettings, settingsProviderId);
+    expect(settingsFamily, label("the settings-added provider also gets an enabled system family"))
+      .toMatchObject({ kind: "system", enabled: true });
+    expect(readyComposerRequest(afterSettings, flow.harnessId, settingsFamily.id),
+      label("the composer is ready for the settings-added provider too")).toMatchObject({
+      harnessId: flow.harnessId,
+      modelSelection: {
+        familyId: settingsFamily.id,
+        providerId: settingsProviderId,
+        modelId: flow.modelIds[0],
+      },
+    });
+    expect(afterSettings.families.filter(({ kind }) => kind === "custom"),
+      label("no custom families are created implicitly")).toEqual([]);
+  }
 
-      const preservedDefaults = structuredClone(afterOnboarding.defaults);
-      const settingsProviderId = `settings-${flow.adapterId}`;
-      await addDiscoveredProvider(product, flow, settingsProviderId);
-      const afterSettings = await productRequest(session, "/api/model-settings");
-      expect(afterSettings.defaults).toEqual(preservedDefaults);
-      const settingsFamily = familyForProvider(afterSettings, settingsProviderId);
-      expect(settingsFamily).toMatchObject({ kind: "system", enabled: true });
-      expect(readyComposerRequest(afterSettings, flow.harnessId, settingsFamily.id)).toMatchObject({
-        harnessId: flow.harnessId,
-        modelSelection: {
-          familyId: settingsFamily.id,
-          providerId: settingsProviderId,
-          modelId: flow.modelIds[0],
-        },
-      });
-      expect(afterSettings.families.filter(({ kind }) => kind === "custom")).toEqual([]);
-    },
-    15_000,
-  );
+  const managedFlows = flows.filter(({ accessContract }) => accessContract === "managed-runtime@1");
+  const secretFlows = flows.filter(({ accessContract }) => accessContract === "secret@1");
+
+  it("creates default families for managed-runtime providers without typed models or a custom family", async () => {
+    expect(managedFlows, "managed-runtime flow inventory").toHaveLength(2);
+    for (const flow of managedFlows) await walkFlow(flow);
+  }, managedFlows.length * 15_000);
+
+  it("creates default families for secret-backed providers without typed models or a custom family", async () => {
+    expect(secretFlows, "secret-backed flow inventory").toHaveLength(4);
+    for (const flow of secretFlows) await walkFlow(flow);
+  }, secretFlows.length * 15_000);
 });
 
 async function productFixture() {

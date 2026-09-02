@@ -58,8 +58,75 @@ function runtimeForAdapter(adapterId) {
     : codexRuntime;
 }
 
+function managedDescriptor(adapterId, overrides = {}) {
+  return {
+    adapterId, implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
+    defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, ...overrides,
+  };
+}
+
+function spawnClaudeChild(payload, exitCode) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = vi.fn();
+  queueMicrotask(() => {
+    child.stdout.emit("data", JSON.stringify(payload));
+    child.emit("exit", exitCode);
+  });
+  return child;
+}
+
+function serviceFixture({ failDiscovery = false, diagnostics = null, removeRuntimeState = async () => false } = {}) {
+  let stored = [];
+  const credentials = new Map();
+  const closes = [];
+  const descriptor = {
+    adapterId: "fake-api", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
+    defaultEndpoint: "https://example.test/v1", endpointEditableDuringCreation: true,
+    connection: { mode: "secret-fields", fields: [{ id: "api-key", label: "API key", kind: "secret" }] },
+    create: ({ definition: created }) => ({
+      async discover() {
+        if (failDiscovery) throw new Error("discovery failed");
+        return { models: [{ visible: true }], provider: { id: created.id } };
+      },
+      async close() { closes.push(created.id); },
+    }),
+  };
+  const service = new ProviderDefinitionService({
+    registry: createProviderAdapterRegistry([descriptor]),
+    definitionStore: {
+      async load() { return structuredClone(stored); },
+      async save(value) { stored = structuredClone(value); },
+      async createWithCatalog(candidate) { stored.push(structuredClone(candidate)); },
+    },
+    credentialStore: {
+      async set(key, value) { credentials.set(key, structuredClone(value)); },
+      async get(key) { return credentials.get(key) ?? null; },
+      async delete(key) { return credentials.delete(key); },
+    },
+    idGenerator: (() => { let id = 0; return () => `provider-${++id}`; })(),
+    diagnostics,
+    removeRuntimeState,
+  });
+  return { service, definitions: () => stored, credentials, closes };
+}
+
+function completeSnapshot(providerId) {
+  return {
+    provider: { id: providerId, label: providerId, status: "available", unavailableReason: null },
+    models: [{
+      id: "model-1", label: "Model 1", description: "", visible: true, executionModel: "model-1",
+      availability: "available", unavailableReason: null, availabilityNotice: null, isDefault: false,
+      replacementModelId: null, upgradeInfo: null, supportedEfforts: [], defaultEffort: null,
+      inputModalities: ["text"], supportsPersonality: false, serviceTiers: [], defaultServiceTier: null,
+    }],
+    systemFamily: { id: `${providerId}-default`, label: "Default", modelIds: [] },
+  };
+}
+
 describe("authoritative provider adapter registry", () => {
-  it("normalizes the installed runtime shape for readiness and harness factories", () => {
+  it("locks the six-adapter registry contract and rejects malformed entries", async () => {
     expect(productionHarnessRuntimeDescriptor({
       runtimeId: "claude",
       version: "0.3.250",
@@ -71,44 +138,68 @@ describe("authoritative provider adapter registry", () => {
         HOME: "/Users/tester",
         ANTHROPIC_API_KEY: "ambient-secret",
       },
-    })).toEqual({
+    }), "installed runtime shape normalizes module paths and strips ambient secrets").toEqual({
       runtimeId: "claude",
       version: "0.3.250",
       executable: "/managed/claude",
       moduleUrl: "file:///managed/claude/sdk.mjs",
       environment: { PATH: "/safe/bin", HOME: "/Users/tester" },
     });
-  });
 
-  it("contains exactly the six initial production adapters with valid contracts", async () => {
-    expect(ACTIVE_PROVIDER_ADAPTER_IDS).toEqual(expectedAdapters);
-    expect(productionProviderAdapterRegistry.list().map(({ adapterId }) => adapterId)).toEqual(expectedAdapters);
-    expect(Object.keys(ACTIVE_PROVIDER_ADAPTER_MODULES)).toEqual(expectedAdapters);
+    expect(ACTIVE_PROVIDER_ADAPTER_IDS, "active adapter ids").toEqual(expectedAdapters);
+    expect(productionProviderAdapterRegistry.list().map(({ adapterId }) => adapterId),
+      "registry listing order").toEqual(expectedAdapters);
+    expect(Object.keys(ACTIVE_PROVIDER_ADAPTER_MODULES), "adapter module map keys").toEqual(expectedAdapters);
     for (const modulePath of Object.values(ACTIVE_PROVIDER_ADAPTER_MODULES)) {
-      await expect(access(join(import.meta.dirname, "../desktop/main", modulePath))).resolves.toBeUndefined();
+      await expect(access(join(import.meta.dirname, "../desktop/main", modulePath)),
+        `module ${modulePath} ships`).resolves.toBeUndefined();
     }
-    expect(productionProviderAdapterRegistry.list().map(({ accessContract }) => accessContract)).toEqual([
+    expect(productionProviderAdapterRegistry.list().map(({ accessContract }) => accessContract),
+      "access contracts follow the adapter order").toEqual([
       "managed-runtime@1", "managed-runtime@1", "secret@1", "secret@1", "secret@1", "secret@1",
     ]);
-    expect(productionProviderAdapterRegistry.get("claude-subscription").catalog.source).toBe("code-manifest");
-    expect(CLAUDE_SUBSCRIPTION_MODELS.map(({ id }) => id)).toEqual([
+    expect(productionProviderAdapterRegistry.get("claude-subscription").catalog.source,
+      "Claude catalog comes from the code manifest").toBe("code-manifest");
+    expect(CLAUDE_SUBSCRIPTION_MODELS.map(({ id }) => id), "Claude code-manifest models").toEqual([
       "sonnet", "opus", "fable",
     ]);
-    expect(() => productionProviderAdapterRegistry.get("future-provider")).toThrow("Unknown provider adapter");
-  });
+    expect(() => productionProviderAdapterRegistry.get("future-provider"),
+      "unknown adapters reject").toThrow("Unknown provider adapter");
 
-  it("rejects duplicate and invalid descriptors", () => {
     const descriptor = {
       adapterId: "fake", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
       defaultEndpoint: "https://example.test/v1", endpointEditableDuringCreation: true,
       connection: { mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }] },
       create() {},
     };
-    expect(() => createProviderAdapterRegistry([descriptor, descriptor])).toThrow("Duplicate provider adapter");
-    expect(() => createProviderAdapterRegistry([{ ...descriptor, implementationVersion: "v1" }])).toThrow("positive integer");
+    const invalidDescriptors = [
+      ["duplicate descriptors", [descriptor, descriptor], "Duplicate provider adapter"],
+      ["non-positive implementation version", [{ ...descriptor, implementationVersion: "v1" }], "positive integer"],
+    ];
+    expect(invalidDescriptors, "registry rejection inventory").toHaveLength(2);
+    for (const [label, descriptors, message] of invalidDescriptors) {
+      expect.soft(() => createProviderAdapterRegistry(descriptors), label).toThrow(message);
+    }
+
+    const acceptedEndpoints = [
+      ["trailing slashes normalize", "https://example.test/v1///", undefined, "https://example.test/v1"],
+      ["development loopback stays allowed", "http://127.0.0.1:8123/v1", { allowDevelopmentLoopback: true }, "http://127.0.0.1:8123/v1"],
+    ];
+    for (const [label, endpoint, options, expected] of acceptedEndpoints) {
+      expect.soft(normalizeProviderEndpoint(endpoint, options), label).toBe(expected);
+    }
+    const rejectedEndpoints = [
+      ["embedded credentials reject", "https://key@example.test/v1", "credentials"],
+      ["query strings reject", "https://example.test/v1?api_key=secret", "query string"],
+      ["plain HTTP rejects", "http://example.test/v1", "HTTPS"],
+    ];
+    expect(rejectedEndpoints, "endpoint rejection inventory").toHaveLength(3);
+    for (const [label, endpoint, message] of rejectedEndpoints) {
+      expect.soft(() => normalizeProviderEndpoint(endpoint), label).toThrow(message);
+    }
   });
 
-  it("requires and routes an explicit managed runtime for every active adapter", async () => {
+  it("routes every adapter through an explicit provisioned managed runtime", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-provider-dependencies-"));
     for (const adapterId of expectedAdapters) {
       const id = `${adapterId}-work`;
@@ -125,40 +216,39 @@ describe("authoritative provider adapter registry", () => {
           UNRELATED_TOKEN: "ambient-unrelated-secret",
         },
       });
-      expect(dependencies.managedRuntime).toEqual(managedRuntime);
-      expect(dependencies.environment).toMatchObject({
+      expect(dependencies.managedRuntime, `${adapterId} passes the managed runtime through`).toEqual(managedRuntime);
+      expect(dependencies.environment, `${adapterId} keeps conventional paths`).toMatchObject({
         PATH: managedRuntime.runtimeId === "codex" ? "/codex-path:/safe/bin" : "/safe/bin",
         HOME: "/Users/tester",
         USERPROFILE: "C:\\Users\\tester",
       });
-      expect(dependencies.environment).not.toHaveProperty("OPENAI_API_KEY");
-      expect(dependencies.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
-      expect(dependencies.environment).not.toHaveProperty("UNRELATED_TOKEN");
+      expect(dependencies.environment, `${adapterId} strips ambient OpenAI secrets`).not.toHaveProperty("OPENAI_API_KEY");
+      expect(dependencies.environment, `${adapterId} strips ambient Anthropic secrets`).not.toHaveProperty("ANTHROPIC_API_KEY");
+      expect(dependencies.environment, `${adapterId} strips unrelated tokens`).not.toHaveProperty("UNRELATED_TOKEN");
       if (managedRuntime.runtimeId === "codex") {
-        expect(dependencies.environment).toMatchObject({
+        expect(dependencies.environment, `${adapterId} isolates CODEX_HOME per definition`).toMatchObject({
           CODEX_HOME: join(root, id, "codex-home"),
           RELAYER_CODEX_BINARY: managedRuntime.executable,
         });
       } else {
-        expect(dependencies.environment.CLAUDE_CONFIG_DIR).toBe(join(root, id, "claude-home"));
+        expect(dependencies.environment.CLAUDE_CONFIG_DIR, `${adapterId} isolates CLAUDE_CONFIG_DIR per definition`)
+          .toBe(join(root, id, "claude-home"));
       }
     }
     await expect(productionProviderRuntimeDependencies({
       id: "openai-work", adapterId: "openai-api",
-    }, { runtimeRoot: root, environment: {}, codexBinary: "/ambient/codex" }))
-      .rejects.toThrow("managed runtime");
+    }, { runtimeRoot: root, environment: {}, codexBinary: "/ambient/codex" }),
+    "an ambient codex binary never substitutes the managed runtime").rejects.toThrow("managed runtime");
     await expect(productionProviderRuntimeDependencies({
       id: "claude-work", adapterId: "claude-subscription",
-    }, { runtimeRoot: root, environment: {}, managedRuntime: codexRuntime }))
-      .rejects.toThrow("requires the claude managed runtime");
-  });
+    }, { runtimeRoot: root, environment: {}, managedRuntime: codexRuntime }),
+    "a mismatched managed runtime rejects").rejects.toThrow("requires the claude managed runtime");
 
-  it("uses one conventional Windows Path for Claude authentication", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-provider-claude-windows-path-"));
-    const dependencies = await productionProviderRuntimeDependencies({
+    const windowsRoot = await mkdtemp(join(tmpdir(), "relayer-provider-claude-windows-path-"));
+    const windowsDependencies = await productionProviderRuntimeDependencies({
       id: "claude-work", adapterId: "claude-subscription",
     }, {
-      runtimeRoot: root,
+      runtimeRoot: windowsRoot,
       managedRuntime: claudeRuntime,
       platform: "win32",
       environment: {
@@ -167,33 +257,23 @@ describe("authoritative provider adapter registry", () => {
       },
     });
     let spawnedEnvironment;
-    const spawnProcess = vi.fn(() => {
-      const child = new EventEmitter();
-      child.stdout = new EventEmitter();
-      child.stderr = new EventEmitter();
-      child.kill = vi.fn();
-      queueMicrotask(() => {
-        child.stdout.emit("data", JSON.stringify({ loggedIn: true }));
-        child.emit("exit", 0);
-      });
-      return child;
-    });
+    const spawnProcess = vi.fn(() => spawnClaudeChild({ loggedIn: true }, 0));
     const runtime = new ClaudeCliManagedRuntime({
-      environment: dependencies.environment,
-      executable: dependencies.executable,
+      environment: windowsDependencies.environment,
+      executable: windowsDependencies.executable,
       spawnProcess: (...args) => {
         spawnedEnvironment = args[2].env;
         return spawnProcess(...args);
       },
     });
+    await expect(runtime.account(), "Claude authentication succeeds with the conventional Windows env")
+      .resolves.toMatchObject({ status: "connected" });
+    expect(spawnedEnvironment.Path, "the conventional Windows Path wins")
+      .toBe("C:\\Windows\\System32;C:\\Program Files\\nodejs");
+    expect(spawnedEnvironment, "the POSIX PATH key never ships on Windows").not.toHaveProperty("PATH");
+    expect(Object.keys(spawnedEnvironment).filter((key) => key.toLowerCase() === "path"),
+      "exactly one path-like variable survives").toEqual(["Path"]);
 
-    await expect(runtime.account()).resolves.toMatchObject({ status: "connected" });
-    expect(spawnedEnvironment.Path).toBe("C:\\Windows\\System32;C:\\Program Files\\nodejs");
-    expect(spawnedEnvironment).not.toHaveProperty("PATH");
-    expect(Object.keys(spawnedEnvironment).filter((key) => key.toLowerCase() === "path")).toEqual(["Path"]);
-  });
-
-  it("preserves the legacy Codex home only for the migrated default definition across restarts", async () => {
     const profile = await mkdtemp(join(tmpdir(), "relayer-legacy-codex-home-"));
     const runtimeRoot = join(profile, "provider-runtimes");
     const legacyHome = join(profile, "codex-home");
@@ -202,267 +282,137 @@ describe("authoritative provider adapter registry", () => {
     await mkdir(conflictingIsolatedHome, { recursive: true });
     await writeFile(join(legacyHome, "auth.json"), "legacy-session");
     await writeFile(join(conflictingIsolatedHome, "auth.json"), "unrelated-isolated-session");
-
-    const context = {
+    const legacyContext = {
       runtimeRoot,
       legacyCodexHome: legacyHome,
       environment: { PATH: "/safe/bin" },
       managedRuntime: codexRuntime,
     };
     const migrated = { id: "codex", adapterId: "codex-subscription" };
-    const firstStart = await productionProviderRuntimeDependencies(migrated, context);
-    const restarted = await productionProviderRuntimeDependencies(migrated, context);
-
-    expect(firstStart.environment.CODEX_HOME).toBe(legacyHome);
-    expect(restarted.environment.CODEX_HOME).toBe(legacyHome);
-    await expect(readFile(join(legacyHome, "auth.json"), "utf8")).resolves.toBe("legacy-session");
-    await expect(readFile(join(conflictingIsolatedHome, "auth.json"), "utf8"))
-      .resolves.toBe("unrelated-isolated-session");
-
+    const firstStart = await productionProviderRuntimeDependencies(migrated, legacyContext);
+    const restarted = await productionProviderRuntimeDependencies(migrated, legacyContext);
+    expect(firstStart.environment.CODEX_HOME, "the migrated default keeps the legacy home").toBe(legacyHome);
+    expect(restarted.environment.CODEX_HOME, "restarts keep the legacy home").toBe(legacyHome);
+    await expect(readFile(join(legacyHome, "auth.json"), "utf8"), "the legacy session survives").resolves.toBe("legacy-session");
+    await expect(readFile(join(conflictingIsolatedHome, "auth.json"), "utf8"),
+      "unrelated isolated homes stay untouched").resolves.toBe("unrelated-isolated-session");
     const newDefinition = await productionProviderRuntimeDependencies({
       id: "new-codex-connection", adapterId: "codex-subscription",
-    }, context);
-    expect(newDefinition.environment.CODEX_HOME)
-      .toBe(join(runtimeRoot, "new-codex-connection", "codex-home"));
-  });
-
-  it("resolves both legacy Codex home locations with the prior override precedence", () => {
-    expect(resolveLegacyCodexHome("/profile", {})).toBe(join("/profile", "codex-home"));
-    expect(resolveLegacyCodexHome("/profile", { RELAYER_CODEX_HOME: "/custom/codex" }))
-      .toBe("/custom/codex");
-    expect(resolveLegacyCodexHome("/profile", { RELAYER_CODEX_HOME: "" }))
+    }, legacyContext);
+    expect(newDefinition.environment.CODEX_HOME, "new definitions stay isolated").toBe(
+      join(runtimeRoot, "new-codex-connection", "codex-home"),
+    );
+    expect(resolveLegacyCodexHome("/profile", {}), "the default legacy home is profile-scoped")
       .toBe(join("/profile", "codex-home"));
-  });
+    expect(resolveLegacyCodexHome("/profile", { RELAYER_CODEX_HOME: "/custom/codex" }),
+      "an explicit override wins").toBe("/custom/codex");
+    expect(resolveLegacyCodexHome("/profile", { RELAYER_CODEX_HOME: "" }),
+      "an empty override falls back").toBe(join("/profile", "codex-home"));
 
-  it("normalizes safe endpoints and rejects embedded authority or query data", () => {
-    expect(normalizeProviderEndpoint("https://example.test/v1///")).toBe("https://example.test/v1");
-    expect(() => normalizeProviderEndpoint("https://key@example.test/v1")).toThrow("credentials");
-    expect(() => normalizeProviderEndpoint("https://example.test/v1?api_key=secret")).toThrow("query string");
-    expect(() => normalizeProviderEndpoint("http://example.test/v1")).toThrow("HTTPS");
-    expect(normalizeProviderEndpoint("http://127.0.0.1:8123/v1", { allowDevelopmentLoopback: true }))
-      .toBe("http://127.0.0.1:8123/v1");
-  });
-});
+    expect(() => productionProviderAdapterRegistry.create({
+      id: "codex-ambient", adapterId: "codex-subscription", label: "Codex", endpoint: null,
+    }, { environment: { PATH: "/ambient/bin" }, managedRuntime: codexRuntime }),
+    "ambient Codex executable discovery rejects").toThrow("requires the provisioned managed runtime executable");
+    expect(() => new ClaudeCliManagedRuntime({ environment: { PATH: "/ambient/bin" } }),
+      "ambient Claude executable discovery rejects").toThrow("managed runtime executable is required");
 
-describe("secret-backed API adapters", () => {
-  it.each([
-    ["openai-api", [{ id: "gpt-5.4" }, { id: "text-embedding-3-large" }], "gpt-5.4"],
-    ["anthropic-api", [{ id: "claude-sonnet-4-20250514" }, { id: "embedding-model" }], "claude-sonnet-4-20250514"],
-    ["openrouter", [
-      { id: "openai/gpt-5.4", architecture: { output_modalities: ["text"] } },
-      { id: "openai/text-embedding-3-large", architecture: { output_modalities: ["embeddings"] } },
-    ], "openai/gpt-5.4"],
-    ["vercel-ai-router", [{ id: "openai/gpt-5.4", type: "language" }, { id: "openai/sora", type: "video" }], "openai/gpt-5.4"],
-  ])("%s preserves catalog diagnostics but admits only capability-proven agent models", async (
-    adapterId,
-    models,
-    eligibleId,
-  ) => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [...models, { id: "unknown-model" }] }),
-    }));
-    const descriptor = productionProviderAdapterRegistry.get(adapterId);
-    const adapter = productionProviderAdapterRegistry.create(
-      definition(adapterId, descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "secret" }, managedRuntime: runtimeForAdapter(adapterId), environment: {} },
-    );
+    const revoked = productionProviderAdapterRegistry.create({
+      id: "codex-revoked", adapterId: "codex-subscription", label: "Codex Revoked", endpoint: null,
+    }, { environment: { PATH: "", RELAYER_CODEX_BINARY: codexRuntime.executable }, managedRuntime: codexRuntime });
+    revoked.credentials.account = async () => ({ status: "disconnected", account: null });
+    await expect(revoked.executionAccess(), "a revoked Codex subscription fails closed before execution")
+      .rejects.toThrow("not connected");
 
-    const snapshot = await adapter.connect();
-    const product = toProductCatalogSnapshot(snapshot);
-
-    expect(snapshot.models.map(({ id, visible }) => ({ id, visible }))).toEqual(
-      models.concat({ id: "unknown-model" }).map(({ id }) => ({ id, visible: true })),
-    );
-    expect(snapshot.models.filter(({ availability }) => availability === "available").map(({ id }) => id))
-      .toEqual([eligibleId]);
-    expect(product.models.filter(({ available }) => !available)).toEqual([
-      expect.objectContaining({
-        unavailableReason: {
-          code: "provider_model_not_execution_eligible",
-          message: "This provider model is not eligible for agent execution.",
-        },
+    const codexEnvironment = {
+      CODEX_HOME: "/isolated/codex",
+      RELAYER_CODEX_BINARY: codexRuntime.executable,
+    };
+    const codex = productionProviderAdapterRegistry.create({
+      id: "codex-connected", adapterId: "codex-subscription", label: "Codex", endpoint: null,
+    }, { environment: codexEnvironment, managedRuntime: codexRuntime });
+    codex.credentials.account = async () => ({ status: "connected", account: {} });
+    await expect(codex.executionAccess(), "Codex harnesses receive the exact provisioned descriptor").resolves.toEqual({
+      kind: "managed-runtime", ...codexRuntime, environment: codexEnvironment,
+    });
+    const claudeEnvironment = { CLAUDE_CONFIG_DIR: "/isolated/claude" };
+    const claude = productionProviderAdapterRegistry.create({
+      id: "claude-connected", adapterId: "claude-subscription", label: "Claude", endpoint: null,
+    }, {
+      managedRuntime: claudeRuntime,
+      runtimeFactory: async () => ({
+        environment: claudeEnvironment,
+        account: async () => ({ status: "connected", account: {} }),
+        close: async () => {},
       }),
-      expect.objectContaining({
-        id: "unknown-model",
-        unavailableReason: {
-          code: "provider_model_capability_unknown",
-          message: "This provider model has no recognized agent-execution capability evidence.",
-        },
-      }),
-    ]);
-  });
-
-  it("keeps a provider connected when discovery has zero execution-eligible models", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("openai-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openai-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "text-embedding-3-large" }] }) }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: codexRuntime,
-        environment: {},
-      },
-    );
-
-    const snapshot = await adapter.connect();
-
-    expect(snapshot.provider.status).toBe("available");
-    expect(snapshot.models).toEqual([expect.objectContaining({
-      id: "text-embedding-3-large",
-      visible: true,
-      availability: "unavailable",
-      unavailableReasonCode: "provider_model_not_execution_eligible",
-    })]);
-  });
-
-  it("rejects an expired OpenRouter key before accepting its public model catalog", async () => {
-    const fetch = vi.fn(async (url) => url.endsWith("/key")
-      ? { ok: false, status: 401 }
-      : {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ id: "deepseek/deepseek-v4-pro-0813", architecture: { output_modalities: ["text"] } }] }),
-        });
-    const descriptor = productionProviderAdapterRegistry.get("openrouter");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "expired" }, managedRuntime: codexRuntime, environment: {} },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({
-      provider: { status: "unavailable", unavailableReason: "Provider credentials were rejected." },
-      models: [],
     });
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["https://openrouter.ai/api/v1/key"]);
-  });
-
-  it("uses the catalog contract without the proprietary key probe for a custom OpenRouter endpoint", async () => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [{ id: "z-ai/glm-5.3", architecture: { output_modalities: ["text"] } }] }),
-    }));
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", "https://router.example.test/v1"),
-      { fetch, secrets: { "api-key": "secret" }, managedRuntime: codexRuntime, environment: {} },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({ provider: { status: "available" } });
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["https://router.example.test/v1/models"]);
-  });
-
-  it("rejects Anthropic capability models even when their IDs start with claude", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("anthropic-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("anthropic-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "claude-embedding" }] }) }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: claudeRuntime,
-        environment: {},
-      },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({
-      models: [{ id: "claude-embedding", availability: "unavailable", unavailableReasonCode: "provider_model_not_execution_eligible" }],
+    await expect(claude.executionAccess(), "Claude harnesses receive the exact provisioned descriptor").resolves.toEqual({
+      kind: "managed-runtime", ...claudeRuntime, environment: claudeEnvironment,
     });
-  });
 
-  it("admits only reviewed Claude text-family IDs and rejects unrecognized Claude capabilities", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("anthropic-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("anthropic-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [
-          { id: "claude-sonnet-4-20250514" },
-          { id: "claude-3-5-haiku-20241022" },
-          { id: "claude-realtime" },
-          { id: "claude-batch" },
-          { id: "claude-sonnet-realtime" },
-          { id: "claude-opus-batch" },
-          { id: "claude-haiku-audio" },
-          { id: "claude-3-realtime" },
-          { id: "claude-1-batch" },
-        ] }) }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: claudeRuntime,
-        environment: {},
-      },
-    );
-
-    const snapshot = await adapter.connect();
-    expect(snapshot.models.filter(({ availability }) => availability === "available").map(({ id }) => id))
-      .toEqual(["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"]);
-    expect(snapshot.models.filter(({ availability }) => availability === "unavailable").map(({ id, unavailableReasonCode }) => ({ id, unavailableReasonCode })))
-      .toEqual([
-        { id: "claude-realtime", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-batch", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-sonnet-realtime", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-opus-batch", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-haiku-audio", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-3-realtime", unavailableReasonCode: "provider_model_capability_unknown" },
-        { id: "claude-1-batch", unavailableReasonCode: "provider_model_capability_unknown" },
-      ]);
-  });
-
-  it("fails closed for an unknown model that merely uses an OpenAI agent-family prefix", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("openai-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openai-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: "gpt-made-up" }] }) }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: codexRuntime,
-        environment: {},
-      },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({
-      provider: { status: "available" },
-      models: [{
-        id: "gpt-made-up",
-        availability: "unavailable",
-        unavailableReasonCode: "provider_model_capability_unknown",
-      }],
+    const missing = productionProviderAdapterRegistry.create({
+      id: "claude-missing", adapterId: "claude-subscription", label: "Claude Missing", endpoint: null,
+    }, {
+      executable: "/definitely/missing/relayer-claude",
+      managedRuntime: { ...claudeRuntime, executable: "/definitely/missing/relayer-claude" },
     });
-  });
+    await expect(missing.credentials.account(), "a missing definition-scoped CLI reports unavailable")
+      .resolves.toMatchObject({ status: "unavailable" });
+    await expect(missing.credentials.login(), "a missing definition-scoped CLI cannot log in")
+      .rejects.toThrow("login is unavailable");
+    await expect(missing.executionAccess(), "a missing definition-scoped CLI cannot execute")
+      .rejects.toThrow("not connected");
 
-  it("keeps a provider connected when every discovered model is provider-hidden and ineligible", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("openai-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openai-api", descriptor.defaultEndpoint),
-      {
-        fetch: async () => ({
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ id: "text-embedding-3-large", hidden: true }] }),
-        }),
-        secrets: { "api-key": "secret" },
-        managedRuntime: codexRuntime,
-        environment: {},
-      },
-    );
-
-    await expect(adapter.connect()).resolves.toMatchObject({
-      provider: { status: "available" },
-      models: [{
-        id: "text-embedding-3-large",
-        visible: false,
-        availability: "unavailable",
-        unavailableReasonCode: "provider_model_not_execution_eligible",
-      }],
+    const loggedOut = new ClaudeCliManagedRuntime({
+      executable: "/bin/claude",
+      spawnProcess: vi.fn(() => spawnClaudeChild({ loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, 1)),
     });
-  });
+    await expect(loggedOut.account(), "logged-out JSON with exit code one stays a clean disconnected")
+      .resolves.toMatchObject({
+        status: "disconnected",
+        account: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" },
+      });
 
-  for (const [adapterId, expectedEndpoint, expectedHeader] of [
-    ["openai-api", "https://api.openai.com/v1/models", "authorization"],
-    ["anthropic-api", "https://api.anthropic.com/v1/models", "x-api-key"],
-    ["openrouter", "https://openrouter.ai/api/v1/models", "authorization"],
-    ["vercel-ai-router", "https://ai-gateway.vercel.sh/v1/models", "authorization"],
-  ]) {
-    it(`${adapterId} discovers stable model ids through the common contract`, async () => {
+    const accounts = new Map();
+    const runtimeFactory = vi.fn(async (created) => {
+      accounts.set(created.id, "connected");
+      return {
+        account: async () => ({ status: accounts.get(created.id) }),
+        login: async () => { accounts.set(created.id, "connected"); },
+        logout: async () => { accounts.set(created.id, "disconnected"); },
+        close: async () => {},
+      };
+    });
+    const scopedDependencies = {
+      runtimeFactory,
+      discoverModels: async () => [{ id: "claude-model", label: "Claude model" }],
+      managedRuntime: claudeRuntime,
+    };
+    const firstClaude = productionProviderAdapterRegistry.create({
+      id: "claude-work", adapterId: "claude-subscription", label: "Claude Work", endpoint: null,
+    }, scopedDependencies);
+    const secondClaude = productionProviderAdapterRegistry.create({
+      id: "claude-personal", adapterId: "claude-subscription", label: "Claude Personal", endpoint: null,
+    }, scopedDependencies);
+    await firstClaude.catalog.discover();
+    await secondClaude.catalog.discover();
+    await firstClaude.credentials.logout();
+    expect(await firstClaude.credentials.account(), "logging out touches only its own runtime")
+      .toMatchObject({ status: "disconnected" });
+    expect(await secondClaude.credentials.account(), "the other definition stays connected")
+      .toMatchObject({ status: "connected" });
+    expect(runtimeFactory.mock.calls.map(([created]) => created.id),
+      "each Claude definition materializes its own runtime").toEqual(["claude-work", "claude-personal"]);
+  }, 30_000);
+
+  it("discovers stable model ids through the common contract for each secret adapter", async () => {
+    const contractRows = [
+      ["openai-api", "https://api.openai.com/v1/models", "authorization"],
+      ["anthropic-api", "https://api.anthropic.com/v1/models", "x-api-key"],
+      ["openrouter", "https://openrouter.ai/api/v1/models", "authorization"],
+      ["vercel-ai-router", "https://ai-gateway.vercel.sh/v1/models", "authorization"],
+    ];
+    expect(contractRows, "common contract discovery inventory").toHaveLength(4);
+    for (const [adapterId, expectedEndpoint, expectedHeader] of contractRows) {
       const modelId = adapterId === "openai-api" ? "gpt-5.4" : "model-stable";
       const fetch = vi.fn(async () => ({
         ok: true,
@@ -480,15 +430,213 @@ describe("secret-backed API adapters", () => {
       const expectedUrls = adapterId === "openrouter"
         ? ["https://openrouter.ai/api/v1/key", expectedEndpoint]
         : [expectedEndpoint];
-      expect(fetch.mock.calls.map(([url]) => url)).toEqual(expectedUrls);
-      expect(Object.keys(fetch.mock.calls.at(-1)[1].headers).map((key) => key.toLowerCase())).toContain(expectedHeader);
-      expect(snapshot.models[0]).toMatchObject({ id: modelId, executionModel: modelId });
-      expect(snapshot.systemFamily.modelIds).toEqual([]);
-    });
-  }
+      expect(fetch.mock.calls.map(([url]) => url), `${adapterId} hits the exact discovery urls`).toEqual(expectedUrls);
+      expect(Object.keys(fetch.mock.calls.at(-1)[1].headers).map((key) => key.toLowerCase()),
+        `${adapterId} authenticates with ${expectedHeader}`).toContain(expectedHeader);
+      expect(snapshot.models[0], `${adapterId} reports stable model ids`).toMatchObject({ id: modelId, executionModel: modelId });
+      expect(snapshot.systemFamily.modelIds, `${adapterId} discovers no implicit system family`).toEqual([]);
+    }
+  }, 15_000);
 
-  it("carries OpenRouter's exact per-model token capabilities into execution access", async () => {
-    const fetch = vi.fn(async () => ({
+  it("admits only capability-proven agent models", async () => {
+    const notEligible = {
+      code: "provider_model_not_execution_eligible",
+      message: "This provider model is not eligible for agent execution.",
+    };
+    const capabilityUnknown = {
+      code: "provider_model_capability_unknown",
+      message: "This provider model has no recognized agent-execution capability evidence.",
+    };
+    const eligibilityCases = [
+      {
+        label: "openai-api admits proven agent models only",
+        adapterId: "openai-api",
+        models: [{ id: "gpt-5.4" }, { id: "text-embedding-3-large" }],
+        extraModels: [{ id: "unknown-model" }],
+        available: ["gpt-5.4"],
+        unavailable: [
+          { id: "text-embedding-3-large", reason: notEligible },
+          { id: "unknown-model", reason: capabilityUnknown },
+        ],
+      },
+      {
+        label: "anthropic-api admits proven agent models only",
+        adapterId: "anthropic-api",
+        models: [{ id: "claude-sonnet-4-20250514" }, { id: "embedding-model" }],
+        extraModels: [{ id: "unknown-model" }],
+        available: ["claude-sonnet-4-20250514"],
+        unavailable: [
+          { id: "embedding-model", reason: notEligible },
+          { id: "unknown-model", reason: capabilityUnknown },
+        ],
+      },
+      {
+        label: "openrouter admits proven agent models only",
+        adapterId: "openrouter",
+        models: [
+          { id: "openai/gpt-5.4", architecture: { output_modalities: ["text"] } },
+          { id: "openai/text-embedding-3-large", architecture: { output_modalities: ["embeddings"] } },
+        ],
+        extraModels: [{ id: "unknown-model" }],
+        available: ["openai/gpt-5.4"],
+        unavailable: [
+          { id: "openai/text-embedding-3-large", reason: notEligible },
+          { id: "unknown-model", reason: capabilityUnknown },
+        ],
+      },
+      {
+        label: "vercel-ai-router admits proven agent models only",
+        adapterId: "vercel-ai-router",
+        models: [{ id: "openai/gpt-5.4", type: "language" }, { id: "openai/sora", type: "video" }],
+        extraModels: [{ id: "unknown-model" }],
+        available: ["openai/gpt-5.4"],
+        unavailable: [
+          { id: "openai/sora", reason: notEligible },
+          { id: "unknown-model", reason: capabilityUnknown },
+        ],
+      },
+      {
+        label: "claude-prefixed capability models stay ineligible",
+        adapterId: "anthropic-api",
+        models: [{ id: "claude-embedding" }],
+        available: [],
+        unavailable: [{ id: "claude-embedding", reason: notEligible }],
+      },
+      {
+        label: "only reviewed Claude text-family IDs are admitted",
+        adapterId: "anthropic-api",
+        models: [
+          { id: "claude-sonnet-4-20250514" },
+          { id: "claude-3-5-haiku-20241022" },
+          { id: "claude-realtime" },
+          { id: "claude-batch" },
+          { id: "claude-sonnet-realtime" },
+          { id: "claude-opus-batch" },
+          { id: "claude-haiku-audio" },
+          { id: "claude-3-realtime" },
+          { id: "claude-1-batch" },
+        ],
+        available: ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"],
+        unavailable: [
+          { id: "claude-realtime", reason: capabilityUnknown },
+          { id: "claude-batch", reason: capabilityUnknown },
+          { id: "claude-sonnet-realtime", reason: capabilityUnknown },
+          { id: "claude-opus-batch", reason: capabilityUnknown },
+          { id: "claude-haiku-audio", reason: capabilityUnknown },
+          { id: "claude-3-realtime", reason: capabilityUnknown },
+          { id: "claude-1-batch", reason: capabilityUnknown },
+        ],
+      },
+      {
+        label: "an unknown OpenAI-prefix model fails closed",
+        adapterId: "openai-api",
+        models: [{ id: "gpt-made-up" }],
+        available: [],
+        unavailable: [{ id: "gpt-made-up", reason: capabilityUnknown }],
+      },
+      {
+        label: "provider-hidden models stay invisible and ineligible",
+        adapterId: "openai-api",
+        models: [{ id: "text-embedding-3-large", hidden: true }],
+        available: [],
+        unavailable: [{ id: "text-embedding-3-large", reason: notEligible, visible: false }],
+      },
+      {
+        label: "zero execution-eligible models keep the provider connected",
+        adapterId: "openai-api",
+        models: [{ id: "text-embedding-3-large" }],
+        available: [],
+        unavailable: [{ id: "text-embedding-3-large", reason: notEligible }],
+      },
+    ];
+    expect(eligibilityCases, "model eligibility inventory").toHaveLength(9);
+    for (const { label, adapterId, models, extraModels = [], available, unavailable } of eligibilityCases) {
+      const allModels = [...models, ...extraModels];
+      const fetch = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: allModels }),
+      }));
+      const descriptor = productionProviderAdapterRegistry.get(adapterId);
+      const adapter = productionProviderAdapterRegistry.create(
+        definition(adapterId, descriptor.defaultEndpoint),
+        { fetch, secrets: { "api-key": "secret" }, managedRuntime: runtimeForAdapter(adapterId), environment: {} },
+      );
+
+      const snapshot = await adapter.connect();
+      const product = toProductCatalogSnapshot(snapshot);
+
+      expect.soft(snapshot.provider.status, `${label}: the provider stays connected`).toBe("available");
+      expect.soft(snapshot.models.map(({ id, visible }) => ({ id, visible })),
+        `${label}: discovery diagnostics stay visible for every model`).toEqual(
+        allModels.map(({ id, hidden }) => ({ id, visible: hidden ? false : true })),
+      );
+      expect.soft(snapshot.models.filter(({ availability }) => availability === "available").map(({ id }) => id),
+        `${label}: only capability-proven models are available`).toEqual(available);
+      expect.soft(snapshot.models
+        .filter(({ availability }) => availability === "unavailable")
+        .map(({ id, unavailableReasonCode }) => ({ id, unavailableReasonCode })),
+        `${label}: unavailable models carry reason codes`).toEqual(
+        unavailable.map(({ id, reason }) => ({ id, unavailableReasonCode: reason.code })),
+      );
+      expect.soft(product.models.filter(({ available: usable }) => !usable)
+        .map(({ id, unavailableReason }) => ({ id, unavailableReason })),
+        `${label}: the product catalog carries full unavailability reasons`).toEqual(
+        unavailable.map(({ id, reason }) => ({ id, unavailableReason: reason })),
+      );
+      for (const { id, visible } of unavailable) {
+        if (visible === false) {
+          expect.soft(snapshot.models.find((model) => model.id === id).visible,
+            `${label}: ${id} stays hidden`).toBe(false);
+        }
+      }
+    }
+
+    const emptyDescriptor = productionProviderAdapterRegistry.get("openai-api");
+    const emptyAdapter = productionProviderAdapterRegistry.create(
+      definition("openai-api", emptyDescriptor.defaultEndpoint),
+      { fetch: async () => ({ ok: true, json: async () => ({ data: [] }) }), secrets: { "api-key": "secret" }, managedRuntime: codexRuntime, environment: {} },
+    );
+    await expect(emptyAdapter.connect(), "empty discovery rejects without manual model entry")
+      .rejects.toThrow("visible models");
+  }, 30_000);
+
+  it("verifies gateway credentials before discovery and carries per-model capabilities into execution", async () => {
+    const expiredKeyFetch = vi.fn(async (url) => url.endsWith("/key")
+      ? { ok: false, status: 401 }
+      : {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [{ id: "deepseek/deepseek-v4-pro-0813", architecture: { output_modalities: ["text"] } }] }),
+        });
+    const openrouterDescriptor = productionProviderAdapterRegistry.get("openrouter");
+    const expiredAdapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", openrouterDescriptor.defaultEndpoint),
+      { fetch: expiredKeyFetch, secrets: { "api-key": "expired" }, managedRuntime: codexRuntime, environment: {} },
+    );
+    await expect(expiredAdapter.connect(), "an expired OpenRouter key rejects before the public catalog")
+      .resolves.toMatchObject({
+        provider: { status: "unavailable", unavailableReason: "Provider credentials were rejected." },
+        models: [],
+      });
+    expect(expiredKeyFetch.mock.calls.map(([url]) => url), "the key probe runs alone before rejection")
+      .toEqual(["https://openrouter.ai/api/v1/key"]);
+
+    const customFetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{ id: "z-ai/glm-5.3", architecture: { output_modalities: ["text"] } }] }),
+    }));
+    const customAdapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", "https://router.example.test/v1"),
+      { fetch: customFetch, secrets: { "api-key": "secret" }, managedRuntime: codexRuntime, environment: {} },
+    );
+    await expect(customAdapter.connect(), "a custom OpenRouter endpoint stays available through the catalog contract")
+      .resolves.toMatchObject({ provider: { status: "available" } });
+    expect(customFetch.mock.calls.map(([url]) => url), "custom endpoints skip the proprietary key probe")
+      .toEqual(["https://router.example.test/v1/models"]);
+
+    const openrouterCapabilities = vi.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => ({ data: [
@@ -507,25 +655,22 @@ describe("secret-backed API adapters", () => {
         { id: "unknown-limits", name: "Unknown limits" },
       ] }),
     }));
-    const descriptor = productionProviderAdapterRegistry.get("openrouter");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
+    const openrouterCapabilitiesAdapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", openrouterDescriptor.defaultEndpoint),
+      { fetch: openrouterCapabilities, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
     );
-
-    await adapter.connect();
-
-    expect(adapter.executionAccess()).toMatchObject({
+    await openrouterCapabilitiesAdapter.connect();
+    expect(openrouterCapabilitiesAdapter.executionAccess(),
+      "OpenRouter token capabilities reach execution access").toMatchObject({
       modelCapabilities: {
         "z-ai/glm-5.3": { contextWindow: 196_608, maxOutputTokens: 131_072 },
         "small-output-model": { contextWindow: 32_768, maxOutputTokens: 2_048 },
       },
     });
-    expect(adapter.executionAccess().modelCapabilities).not.toHaveProperty("unknown-limits");
-  });
+    expect((await openrouterCapabilitiesAdapter.executionAccess()).modelCapabilities,
+      "OpenRouter models without limits stay out of execution access").not.toHaveProperty("unknown-limits");
 
-  it("carries Vercel AI Gateway's exact per-model token capabilities into execution access", async () => {
-    const fetch = vi.fn(async () => ({
+    const vercelCapabilities = vi.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => ({ data: [
@@ -543,24 +688,22 @@ describe("secret-backed API adapters", () => {
         },
       ] }),
     }));
-    const descriptor = productionProviderAdapterRegistry.get("vercel-ai-router");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("vercel-ai-router", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
+    const vercelDescriptor = productionProviderAdapterRegistry.get("vercel-ai-router");
+    const vercelCapabilitiesAdapter = productionProviderAdapterRegistry.create(
+      definition("vercel-ai-router", vercelDescriptor.defaultEndpoint),
+      { fetch: vercelCapabilities, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
     );
-
-    await adapter.connect();
-
-    expect(adapter.executionAccess()).toMatchObject({
+    await vercelCapabilitiesAdapter.connect();
+    expect(vercelCapabilitiesAdapter.executionAccess(),
+      "Vercel token capabilities reach execution access").toMatchObject({
       modelCapabilities: {
         "deepseek/deepseek-v4-pro-0813": { contextWindow: 1_000_000, maxOutputTokens: 384_000 },
       },
     });
-    expect(adapter.executionAccess().modelCapabilities).not.toHaveProperty("unknown-limits");
-  });
+    expect((await vercelCapabilitiesAdapter.executionAccess()).modelCapabilities,
+      "Vercel models without limits stay out of execution access").not.toHaveProperty("unknown-limits");
 
-  it("refreshes OpenRouter discovery before execution when startup did not populate capabilities", async () => {
-    const fetch = vi.fn(async () => ({
+    const openrouterRefreshFetch = vi.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => ({ data: [{
@@ -569,27 +712,24 @@ describe("secret-backed API adapters", () => {
         top_provider: { context_length: 196_608, max_completion_tokens: 131_072 },
       }] }),
     }));
-    const descriptor = productionProviderAdapterRegistry.get("openrouter");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
+    const openrouterRefreshAdapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", openrouterDescriptor.defaultEndpoint),
+      { fetch: openrouterRefreshFetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
     );
-
-    const access = await adapter.executionAccess();
-
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
-      `${descriptor.defaultEndpoint}/key`,
-      `${descriptor.defaultEndpoint}/models`,
+    const openrouterAccess = await openrouterRefreshAdapter.executionAccess();
+    expect(openrouterRefreshFetch, "unpopulated OpenRouter startup rediscovers before execution").toHaveBeenCalledTimes(2);
+    expect(openrouterRefreshFetch.mock.calls.map(([url]) => url),
+      "OpenRouter rediscovery hits the key probe then the catalog").toEqual([
+      `${openrouterDescriptor.defaultEndpoint}/key`,
+      `${openrouterDescriptor.defaultEndpoint}/models`,
     ]);
-    expect(access.modelCapabilities["z-ai/glm-5.3"]).toEqual({
+    expect(openrouterAccess.modelCapabilities["z-ai/glm-5.3"],
+      "OpenRouter rediscovery populates capabilities").toEqual({
       contextWindow: 196_608,
       maxOutputTokens: 131_072,
     });
-  });
 
-  it("refreshes Vercel discovery before execution when startup did not populate capabilities", async () => {
-    const fetch = vi.fn(async () => ({
+    const vercelRefreshFetch = vi.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => ({ data: [{
@@ -599,90 +739,79 @@ describe("secret-backed API adapters", () => {
         max_tokens: 384_000,
       }] }),
     }));
-    const descriptor = productionProviderAdapterRegistry.get("vercel-ai-router");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("vercel-ai-router", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
+    const vercelRefreshAdapter = productionProviderAdapterRegistry.create(
+      definition("vercel-ai-router", vercelDescriptor.defaultEndpoint),
+      { fetch: vercelRefreshFetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: codexRuntime, environment: {} },
     );
-
-    const access = await adapter.executionAccess();
-
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(access.modelCapabilities["deepseek/deepseek-v4-pro-0813"]).toEqual({
+    const vercelAccess = await vercelRefreshAdapter.executionAccess();
+    expect(vercelRefreshFetch, "Vercel rediscovery uses the single catalog call").toHaveBeenCalledOnce();
+    expect(vercelAccess.modelCapabilities["deepseek/deepseek-v4-pro-0813"],
+      "Vercel rediscovery populates capabilities").toEqual({
       contextWindow: 1_000_000,
       maxOutputTokens: 384_000,
     });
-  });
 
-  it("fails one bounded OpenRouter rediscovery when credentials are rejected", async () => {
-    const fetch = vi.fn(async () => ({ ok: false, status: 401 }));
-    const descriptor = productionProviderAdapterRegistry.get("openrouter");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openrouter", descriptor.defaultEndpoint),
-      { fetch, secrets: { "api-key": "rejected" }, managedRuntime: codexRuntime, environment: {} },
+    const rejectedRediscoveryFetch = vi.fn(async () => ({ ok: false, status: 401 }));
+    const rejectedRediscoveryAdapter = productionProviderAdapterRegistry.create(
+      definition("openrouter", openrouterDescriptor.defaultEndpoint),
+      { fetch: rejectedRediscoveryFetch, secrets: { "api-key": "rejected" }, managedRuntime: codexRuntime, environment: {} },
     );
+    await expect(rejectedRediscoveryAdapter.executionAccess(),
+      "rejected credentials fail one bounded rediscovery").rejects.toThrow("credentials were rejected");
+    expect(rejectedRediscoveryFetch, "bounded rediscovery stops after one call").toHaveBeenCalledOnce();
 
-    await expect(adapter.executionAccess()).rejects.toThrow("credentials were rejected");
-    expect(fetch).toHaveBeenCalledOnce();
-  });
+    const secretAccessRows = [
+      ["openai-api", codexRuntime],
+      ["openrouter", codexRuntime],
+      ["vercel-ai-router", codexRuntime],
+      ["anthropic-api", claudeRuntime],
+    ];
+    expect(secretAccessRows, "secret access isolation inventory").toHaveLength(4);
+    for (const [adapterId, managedRuntime] of secretAccessRows) {
+      const descriptor = productionProviderAdapterRegistry.get(adapterId);
+      const environment = managedRuntime.runtimeId === "codex"
+        ? { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: managedRuntime.executable }
+        : { CLAUDE_CONFIG_DIR: "/isolated/claude" };
+      const adapter = productionProviderAdapterRegistry.create(
+        definition(adapterId, descriptor.defaultEndpoint),
+        {
+          fetch: vi.fn(async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({ data: [{ id: "model", context_length: 32_768, top_provider: { context_length: 32_768, max_completion_tokens: 8_192 } }] }),
+          })),
+          secrets: { "api-key": "secret" },
+          managedRuntime,
+          environment,
+        },
+      );
+      expect(await adapter.executionAccess(), `${adapterId} hands out only secret material`).toEqual(
+        expect.objectContaining({
+          kind: "secret",
+          endpoint: descriptor.defaultEndpoint,
+          fields: { "api-key": "secret" },
+        }),
+      );
+      expect(await adapter.executionAccess(), `${adapterId} never leaks managed runtime material`)
+        .not.toHaveProperty("runtime");
+    }
 
-  it.each([
-    ["openai-api", codexRuntime],
-    ["openrouter", codexRuntime],
-    ["vercel-ai-router", codexRuntime],
-    ["anthropic-api", claudeRuntime],
-  ])("%s keeps managed runtime material out of secret execution access", async (adapterId, managedRuntime) => {
-    const descriptor = productionProviderAdapterRegistry.get(adapterId);
-    const environment = managedRuntime.runtimeId === "codex"
-      ? { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: managedRuntime.executable }
-      : { CLAUDE_CONFIG_DIR: "/isolated/claude" };
-    const adapter = productionProviderAdapterRegistry.create(
-      definition(adapterId, descriptor.defaultEndpoint),
-      {
-        fetch: vi.fn(async () => ({
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ id: "model", context_length: 32_768, top_provider: { context_length: 32_768, max_completion_tokens: 8_192 } }] }),
-        })),
-        secrets: { "api-key": "secret" },
-        managedRuntime,
-        environment,
-      },
-    );
-
-    expect(await adapter.executionAccess()).toEqual(expect.objectContaining({
-      kind: "secret",
-      endpoint: descriptor.defaultEndpoint,
-      fields: { "api-key": "secret" },
-    }));
-    expect(await adapter.executionAccess()).not.toHaveProperty("runtime");
-  });
-
-  it("rejects malformed or empty discovery without manual model entry", async () => {
-    const descriptor = productionProviderAdapterRegistry.get("openai-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openai-api", descriptor.defaultEndpoint),
-      { fetch: async () => ({ ok: true, json: async () => ({ data: [] }) }), secrets: { "api-key": "secret" }, managedRuntime: codexRuntime, environment: {} },
-    );
-    await expect(adapter.connect()).rejects.toThrow("visible models");
-  });
-
-  it("publishes rejected API credentials as disconnected while staged creation still rejects", async () => {
-    const fetch = vi.fn(async () => ({ ok: false, status: 401 }));
-    const descriptor = productionProviderAdapterRegistry.get("openai-api");
-    const adapter = productionProviderAdapterRegistry.create(
-      definition("openai-api", descriptor.defaultEndpoint, "revoked-api"),
-      { fetch, secrets: { "api-key": "opaque" }, managedRuntime: codexRuntime, environment: {} },
+    const revokedFetch = vi.fn(async () => ({ ok: false, status: 401 }));
+    const revokedDescriptor = productionProviderAdapterRegistry.get("openai-api");
+    const revokedAdapter = productionProviderAdapterRegistry.create(
+      definition("openai-api", revokedDescriptor.defaultEndpoint, "revoked-api"),
+      { fetch: revokedFetch, secrets: { "api-key": "opaque" }, managedRuntime: codexRuntime, environment: {} },
     );
     const published = [];
     const catalog = new ModelCatalogService({
-      adapters: [adapter], publishSnapshot: async (snapshot) => { published.push(snapshot); },
+      adapters: [revokedAdapter], publishSnapshot: async (snapshot) => { published.push(snapshot); },
     });
-    await expect(catalog.explicitRefresh("revoked-api")).resolves.toMatchObject({
+    await expect(catalog.explicitRefresh("revoked-api"),
+      "rejected API credentials publish as disconnected").resolves.toMatchObject({
       provider: { status: "unavailable", unavailableReason: "Provider credentials were rejected." },
       models: [],
     });
-    expect(published).toEqual([expect.objectContaining({
+    expect(published, "the disconnected snapshot carries the authoritative reason").toEqual([expect.objectContaining({
       providerId: "revoked-api",
       connected: false,
       unavailableReason: { code: "provider_unavailable", message: "Provider credentials were rejected." },
@@ -697,28 +826,25 @@ describe("secret-backed API adapters", () => {
         async createWithCatalog(candidate) { definitions.push(candidate); },
       },
       credentialStore: { set: credentialSet, async delete() {} },
-      runtimeDependencies: async () => ({ fetch, managedRuntime: codexRuntime, environment: {} }),
+      runtimeDependencies: async () => ({ fetch: revokedFetch, managedRuntime: codexRuntime, environment: {} }),
       idGenerator: () => "revoked-staged",
     });
     await expect(setup.connect({
       adapterId: "openai-api", label: "Revoked", fields: { "api-key": "opaque" },
-    })).rejects.toThrow("Provider credentials were rejected");
-    expect(definitions).toEqual([]);
-    expect(credentialSet).not.toHaveBeenCalled();
+    }), "staged creation still rejects rejected credentials").rejects.toThrow("Provider credentials were rejected");
+    expect(definitions, "rejected staged creation persists nothing").toEqual([]);
+    expect(credentialSet, "rejected staged creation stores no credentials").not.toHaveBeenCalled();
     await catalog.close();
-  });
+  }, 30_000);
 });
 
 describe("managed subscription isolation", () => {
-  it("rejects logout while the exact provider has an active execution lease", async () => {
+  it("guards managed logout and reconnect with leases, deferred preparation, and failure cleanup", async () => {
     const logout = vi.fn(async () => ({ status: "disconnected" }));
-    const descriptor = {
-      adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-      defaultEndpoint: null, connection: { mode: "managed-login", fields: [] },
-      create: () => { throw new Error("initial runtime should be reused"); },
-    };
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
+    const leaseService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([managedDescriptor("fake-managed", {
+        create: () => { throw new Error("initial runtime should be reused"); },
+      })]),
       definitionStore: { async load() { return [{
         id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
         accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
@@ -727,70 +853,128 @@ describe("managed subscription isolation", () => {
       initialRuntimes: new Map([["managed-work", { credentials: { logout } }]]),
     });
 
-    const lease = await service.acquireExecution("managed-work");
-    await expect(service.logout("managed-work")).rejects.toThrow("interactions are running");
-    expect(logout).not.toHaveBeenCalled();
+    const lease = await leaseService.acquireExecution("managed-work");
+    await expect(leaseService.logout("managed-work"),
+      "an active execution lease blocks logout for the exact provider").rejects.toThrow("interactions are running");
+    expect(logout, "the blocked logout never reaches the runtime").not.toHaveBeenCalled();
     await lease.release();
-    await expect(service.logout("managed-work")).resolves.toEqual({ status: "disconnected" });
-  });
+    await expect(leaseService.logout("managed-work"), "logout succeeds once the lease releases")
+      .resolves.toEqual({ status: "disconnected" });
 
-  it("reconnects a signed-out managed provider without creating a new definition identity", async () => {
+    const accounts = new Map([["managed-work", "connected"], ["managed-personal", "connected"]]);
+    const scopedRuntime = (id) => ({ credentials: {
+      account: async () => ({ status: accounts.get(id) }),
+      logout: async () => { accounts.set(id, "disconnected"); return { status: "disconnected" }; },
+    } });
+    const changed = [];
+    const scopedService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([managedDescriptor("fake-managed", {
+        create: () => { throw new Error("initial runtimes should be reused"); },
+      })]),
+      definitionStore: { async load() { return [
+        { id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null, accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active" },
+        { id: "managed-personal", adapterId: "fake-managed", label: "Personal", endpoint: null, accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active" },
+      ]; } },
+      credentialStore: {},
+      initialRuntimes: new Map([
+        ["managed-work", scopedRuntime("managed-work")],
+        ["managed-personal", scopedRuntime("managed-personal")],
+      ]),
+      onRuntimeChanged: async ({ id }) => { changed.push(id); },
+    });
+    await expect(scopedService.logout("managed-work"), "logout targets the exact definition")
+      .resolves.toMatchObject({ status: "disconnected" });
+    expect(accounts, "only the targeted definition signs out").toEqual(
+      new Map([["managed-work", "disconnected"], ["managed-personal", "connected"]]),
+    );
+    expect(changed, "only the targeted definition reports a change").toEqual(["managed-work"]);
+
+    const diagnostics = { write: vi.fn(async () => {}) };
+    const publicationService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([managedDescriptor("fake-managed", {
+        create: () => { throw new Error("initial runtime should be reused"); },
+      })]),
+      definitionStore: { async load() { return [{
+        id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
+        accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
+      }]; } },
+      credentialStore: {},
+      initialRuntimes: new Map([["managed-work", { credentials: {
+        logout: async () => ({ status: "disconnected" }),
+      } }]]),
+      providerStatuses: async () => new Map([["managed-work", { connected: true, unavailableReason: null }]]),
+      onRuntimeChanged: async () => { throw new Error("catalog publication unavailable"); },
+      diagnostics,
+    });
+    await expect(publicationService.logout("managed-work"),
+      "logout stays disconnected even when catalog publication fails").resolves.toEqual({ status: "disconnected" });
+    await expect(publicationService.list(), "the listing reflects the logout").resolves.toEqual([
+      expect.objectContaining({
+        id: "managed-work",
+        connected: false,
+        unavailableReason: expect.objectContaining({ code: "provider_logged_out" }),
+      }),
+    ]);
+    expect(diagnostics.write, "the publication failure is diagnosed").toHaveBeenCalledWith(expect.objectContaining({
+      category: "provider_logout_catalog_refresh_failed",
+      providerId: "managed-work",
+    }));
+
     let accountStatus = "disconnected";
     const published = [];
-    const definition = {
+    const reconnectDefinition = {
       id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
       accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
     };
-    const runtime = {
-      providerId: definition.id,
+    const reconnectRuntime = {
+      providerId: reconnectDefinition.id,
       credentials: {
         login: vi.fn(async () => ({ authUrl: "https://login.example.test/work" })),
         account: vi.fn(async () => ({ status: accountStatus })),
       },
       discover: vi.fn(async () => ({
-        provider: { id: definition.id, label: definition.label, status: "available" },
+        provider: { id: reconnectDefinition.id, label: reconnectDefinition.label, status: "available" },
         models: [{ visible: true }],
-        systemFamily: { id: definition.id, label: definition.label, modelIds: [] },
+        systemFamily: { id: reconnectDefinition.id, label: reconnectDefinition.label, modelIds: [] },
       })),
     };
     const prepareRuntime = vi.fn(async () => {});
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([{
-        adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-        defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, create: () => runtime,
-      }]),
+    const reconnectService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([managedDescriptor("fake-managed", { create: () => reconnectRuntime })]),
       definitionStore: {
-        async load() { return [definition]; },
+        async load() { return [reconnectDefinition]; },
         createWithCatalog: vi.fn(async () => { throw new Error("reconnect must not create a definition"); }),
       },
       credentialStore: {},
-      initialRuntimes: new Map([[definition.id, runtime]]),
+      initialRuntimes: new Map([[reconnectDefinition.id, reconnectRuntime]]),
       prepareRuntime,
       publishCatalog: async (snapshot) => { published.push(snapshot); },
     });
-
-    const pending = await service.reconnect(definition.id);
-    expect(pending).toMatchObject({
-      status: "pending", connectionId: definition.id,
-      providerDefinition: { id: definition.id },
+    const pending = await reconnectService.reconnect(reconnectDefinition.id);
+    expect(pending, "reconnect keeps the definition identity").toMatchObject({
+      status: "pending", connectionId: reconnectDefinition.id,
+      providerDefinition: { id: reconnectDefinition.id },
     });
-    expect(pending.login.authUrl).toBe("https://login.example.test/work");
-    expect(prepareRuntime).toHaveBeenCalledWith(expect.objectContaining({
-      adapterId: "fake-managed",
-      providerDefinition: expect.objectContaining({ id: definition.id }),
-    }));
-    await expect(service.completeConnection(definition.id)).resolves.toMatchObject({ status: "pending" });
+    expect(pending.login.authUrl, "reconnect opens the managed login").toBe("https://login.example.test/work");
+    expect(prepareRuntime, "reconnect defers runtime preparation for the same definition").toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterId: "fake-managed",
+        providerDefinition: expect.objectContaining({ id: reconnectDefinition.id }),
+      }),
+    );
+    await expect(reconnectService.completeConnection(reconnectDefinition.id),
+      "a still-disconnected account keeps the connection pending").resolves.toMatchObject({ status: "pending" });
     accountStatus = "connected";
-    await expect(service.completeConnection(definition.id)).resolves.toMatchObject({
-      status: "connected", providerDefinition: { id: definition.id },
+    await expect(reconnectService.completeConnection(reconnectDefinition.id),
+      "a connected account completes the reconnect").resolves.toMatchObject({
+      status: "connected", providerDefinition: { id: reconnectDefinition.id },
     });
-    expect(published).toHaveLength(1);
-    await expect(service.list()).resolves.toEqual([expect.objectContaining({ id: definition.id })]);
-  });
+    expect(published, "reconnect publishes exactly one catalog snapshot").toHaveLength(1);
+    await expect(reconnectService.list(), "the listing keeps the original definition").resolves.toEqual([
+      expect.objectContaining({ id: reconnectDefinition.id }),
+    ]);
 
-  it.each(["reconnect", "recoverUnavailable"])(
-    "%s leaves unrelated provider leases available while runtime preparation is deferred",
-    async (operationName) => {
+    for (const operationName of ["reconnect", "recoverUnavailable"]) {
       const definitions = [
         {
           id: "managed-repair", adapterId: "fake-managed", label: "Repair", endpoint: null,
@@ -811,10 +995,7 @@ describe("managed subscription isolation", () => {
       };
       const readyRuntime = {};
       const service = new ProviderDefinitionService({
-        registry: createProviderAdapterRegistry([{
-          adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-          defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, create: () => repairRuntime,
-        }]),
+        registry: createProviderAdapterRegistry([managedDescriptor("fake-managed", { create: () => repairRuntime })]),
         definitionStore: { async load() { return definitions; } },
         credentialStore: {},
         initialRuntimes: new Map([
@@ -834,7 +1015,7 @@ describe("managed subscription isolation", () => {
         acquisition,
         new Promise((resolve) => setImmediate(() => resolve({ kind: "blocked" }))),
       ]);
-      expect(first.kind).toBe("lease");
+      expect(first.kind, `${operationName} leaves unrelated provider leases available`).toBe("lease");
       await first.lease.release();
 
       const targetLease = operationName === "reconnect"
@@ -842,51 +1023,46 @@ describe("managed subscription isolation", () => {
         : null;
       finishPreparation();
       if (targetLease) {
-        await expect(repairing).rejects.toThrow("interactions are running");
+        await expect(repairing, `${operationName} yields to a lease on the exact target`)
+          .rejects.toThrow("interactions are running");
         await targetLease.release();
       } else {
-        await expect(repairing).resolves.toBeDefined();
+        await expect(repairing, `${operationName} completes once preparation finishes`).resolves.toBeDefined();
       }
       await service.close();
-    },
-  );
+    }
 
-  it("cancels and drains reconnect runtime preparation before service close completes", async () => {
-    const definition = {
+    const closeDefinition = {
       id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
       accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
     };
-    let finishPreparation;
-    const preparation = new Promise((resolve) => { finishPreparation = resolve; });
+    let finishClosePreparation;
+    const closePreparation = new Promise((resolve) => { finishClosePreparation = resolve; });
     const login = vi.fn(async () => ({ authUrl: "https://login.example.test/work" }));
     const closeRuntime = vi.fn(async () => {});
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([{
-        adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-        defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, create: () => { throw new Error("unused"); },
-      }]),
-      definitionStore: { async load() { return [definition]; } },
+    const closingService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([managedDescriptor("fake-managed", {
+        create: () => { throw new Error("unused"); },
+      })]),
+      definitionStore: { async load() { return [closeDefinition]; } },
       credentialStore: {},
-      initialRuntimes: new Map([[definition.id, { credentials: { login }, close: closeRuntime }]]),
-      prepareRuntime: () => preparation,
+      initialRuntimes: new Map([[closeDefinition.id, { credentials: { login }, close: closeRuntime }]]),
+      prepareRuntime: () => closePreparation,
     });
 
-    const reconnecting = service.reconnect(definition.id);
+    const reconnecting = closingService.reconnect(closeDefinition.id);
     await new Promise((resolve) => setImmediate(resolve));
     let closed = false;
-    const closing = service.close().then(() => { closed = true; });
+    const closing = closingService.close().then(() => { closed = true; });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(closed).toBe(false);
-    finishPreparation();
-
-    await expect(reconnecting).rejects.toThrow("shutting down");
+    expect(closed, "close waits for the running preparation").toBe(false);
+    finishClosePreparation();
+    await expect(reconnecting, "close cancels the in-flight reconnect").rejects.toThrow("shutting down");
     await closing;
-    expect(login).not.toHaveBeenCalled();
-    expect(closeRuntime).toHaveBeenCalledOnce();
-  });
+    expect(login, "a drained reconnect never opens the login").not.toHaveBeenCalled();
+    expect(closeRuntime, "close still closes the runtime exactly once").toHaveBeenCalledOnce();
 
-  it("cleans a terminal reconnect account failure so the same definition can reconnect again", async () => {
-    const definition = {
+    const terminalDefinition = {
       id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
       accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
     };
@@ -898,226 +1074,158 @@ describe("managed subscription isolation", () => {
       close: vi.fn(async () => {}),
     };
     const replacementRuntime = {
-      providerId: definition.id,
+      providerId: terminalDefinition.id,
       credentials: {
         login: vi.fn(async () => ({ authUrl: "https://login.example.test/work" })),
         account: vi.fn(async () => ({ status: "connected" })),
       },
       discover: vi.fn(async () => ({
-        provider: { id: definition.id, label: definition.label, status: "available" },
+        provider: { id: terminalDefinition.id, label: terminalDefinition.label, status: "available" },
         models: [{ visible: true }],
-        systemFamily: { id: definition.id, label: definition.label, modelIds: [] },
+        systemFamily: { id: terminalDefinition.id, label: terminalDefinition.label, modelIds: [] },
       })),
     };
     const create = vi.fn(() => replacementRuntime);
     const removed = vi.fn(async () => {});
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([{
-        adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-        defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, create,
-      }]),
-      definitionStore: { async load() { return [definition]; } },
+    const terminalService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([managedDescriptor("fake-managed", { create })]),
+      definitionStore: { async load() { return [terminalDefinition]; } },
       credentialStore: {},
-      initialRuntimes: new Map([[definition.id, failedRuntime]]),
+      initialRuntimes: new Map([[terminalDefinition.id, failedRuntime]]),
       onRuntimeRemoved: removed,
       publishCatalog: vi.fn(async () => {}),
     });
-
-    await expect(service.reconnect(definition.id)).resolves.toMatchObject({ status: "pending" });
-    await expect(service.completeConnection(definition.id)).rejects.toThrow("managed account check failed");
-    expect(failedRuntime.close).toHaveBeenCalledOnce();
-    expect(removed).toHaveBeenCalledWith(expect.objectContaining({ id: definition.id }));
-
-    await expect(service.reconnect(definition.id)).resolves.toMatchObject({
-      status: "pending", connectionId: definition.id,
+    await expect(terminalService.reconnect(terminalDefinition.id), "reconnect starts pending")
+      .resolves.toMatchObject({ status: "pending" });
+    await expect(terminalService.completeConnection(terminalDefinition.id),
+      "a terminal account failure surfaces").rejects.toThrow("managed account check failed");
+    expect(failedRuntime.close, "the failed runtime is closed").toHaveBeenCalledOnce();
+    expect(removed, "the failed runtime is removed").toHaveBeenCalledWith(
+      expect.objectContaining({ id: terminalDefinition.id }),
+    );
+    await expect(terminalService.reconnect(terminalDefinition.id),
+      "the same definition can reconnect after cleanup").resolves.toMatchObject({
+      status: "pending", connectionId: terminalDefinition.id,
     });
-    expect(create).toHaveBeenCalledOnce();
-    await expect(service.completeConnection(definition.id)).resolves.toMatchObject({
-      status: "connected", providerDefinition: { id: definition.id },
+    expect(create, "the replacement runtime is created exactly once").toHaveBeenCalledOnce();
+    await expect(terminalService.completeConnection(terminalDefinition.id),
+      "the replacement runtime completes the connection").resolves.toMatchObject({
+      status: "connected", providerDefinition: { id: terminalDefinition.id },
     });
-  });
+  }, 45_000);
 
-  it("logs out only the exact managed provider definition through the generic service", async () => {
-    const accounts = new Map([["managed-work", "connected"], ["managed-personal", "connected"]]);
-    const descriptor = {
-      adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-      defaultEndpoint: null, connection: { mode: "managed-login", fields: [] },
-      create: () => { throw new Error("initial runtimes should be reused"); },
-    };
-    const runtime = (id) => ({ credentials: {
-      account: async () => ({ status: accounts.get(id) }),
-      logout: async () => { accounts.set(id, "disconnected"); return { status: "disconnected" }; },
-    } });
-    const changed = [];
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
-      definitionStore: { async load() { return [
-        { id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null, accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active" },
-        { id: "managed-personal", adapterId: "fake-managed", label: "Personal", endpoint: null, accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active" },
-      ]; } },
-      credentialStore: {},
-      initialRuntimes: new Map([["managed-work", runtime("managed-work")], ["managed-personal", runtime("managed-personal")]]),
-      onRuntimeChanged: async ({ id }) => { changed.push(id); },
-    });
-
-    await expect(service.logout("managed-work")).resolves.toMatchObject({ status: "disconnected" });
-    expect(accounts).toEqual(new Map([["managed-work", "disconnected"], ["managed-personal", "connected"]]));
-    expect(changed).toEqual(["managed-work"]);
-  });
-
-  it("reports a managed provider disconnected even when post-logout catalog publication fails", async () => {
-    const descriptor = {
-      adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
-      defaultEndpoint: null, connection: { mode: "managed-login", fields: [] },
-      create: () => { throw new Error("initial runtime should be reused"); },
-    };
-    const diagnostics = { write: vi.fn(async () => {}) };
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
-      definitionStore: { async load() { return [{
-        id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
-        accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
-      }]; } },
-      credentialStore: {},
-      initialRuntimes: new Map([["managed-work", { credentials: {
-        logout: async () => ({ status: "disconnected" }),
-      } }]]),
-      providerStatuses: async () => new Map([["managed-work", { connected: true, unavailableReason: null }]]),
-      onRuntimeChanged: async () => { throw new Error("catalog publication unavailable"); },
-      diagnostics,
-    });
-
-    await expect(service.logout("managed-work")).resolves.toEqual({ status: "disconnected" });
-    await expect(service.list()).resolves.toEqual([
-      expect.objectContaining({
-        id: "managed-work",
-        connected: false,
-        unavailableReason: expect.objectContaining({ code: "provider_logged_out" }),
+  it("completes or cancels staged managed login without persisting pending setup", async () => {
+    let accountStatus = "disconnected";
+    let stored = [];
+    const close = vi.fn(async () => {});
+    const registry = createProviderAdapterRegistry([managedDescriptor("fake-managed", {
+      create: ({ definition: created }) => ({
+        credentials: {
+          login: async () => ({ loginId: "login-1", authUrl: "https://login.example.test" }),
+          account: async () => ({ status: accountStatus }),
+        },
+        catalog: { discover: async () => ({ provider: { id: created.id }, models: [{ visible: true }] }) },
+        close,
       }),
-    ]);
-    expect(diagnostics.write).toHaveBeenCalledWith(expect.objectContaining({
-      category: "provider_logout_catalog_refresh_failed",
-      providerId: "managed-work",
-    }));
-  });
-
-  it("refuses ambient subscription executable discovery", () => {
-    expect(() => productionProviderAdapterRegistry.create({
-      id: "codex-ambient", adapterId: "codex-subscription", label: "Codex", endpoint: null,
-    }, { environment: { PATH: "/ambient/bin" }, managedRuntime: codexRuntime }))
-      .toThrow("requires the provisioned managed runtime executable");
-    expect(() => new ClaudeCliManagedRuntime({ environment: { PATH: "/ambient/bin" } }))
-      .toThrow("managed runtime executable is required");
-  });
-
-  it("fails closed before handing out a revoked Codex managed runtime", async () => {
-    const provider = productionProviderAdapterRegistry.create({
-      id: "codex-revoked", adapterId: "codex-subscription", label: "Codex Revoked", endpoint: null,
-    }, { environment: { PATH: "", RELAYER_CODEX_BINARY: codexRuntime.executable }, managedRuntime: codexRuntime });
-    provider.credentials.account = async () => ({ status: "disconnected", account: null });
-    await expect(provider.executionAccess()).rejects.toThrow("not connected");
-  });
-
-  it("hands subscription harnesses the exact provisioned runtime descriptor", async () => {
-    const codexEnvironment = {
-      CODEX_HOME: "/isolated/codex",
-      RELAYER_CODEX_BINARY: codexRuntime.executable,
-    };
-    const codex = productionProviderAdapterRegistry.create({
-      id: "codex-connected", adapterId: "codex-subscription", label: "Codex", endpoint: null,
-    }, { environment: codexEnvironment, managedRuntime: codexRuntime });
-    codex.credentials.account = async () => ({ status: "connected", account: {} });
-    await expect(codex.executionAccess()).resolves.toEqual({
-      kind: "managed-runtime", ...codexRuntime, environment: codexEnvironment,
+    })]);
+    const removals = [];
+    const service = new ProviderDefinitionService({
+      registry,
+      definitionStore: { async load() { return structuredClone(stored); }, async save(value) { stored = structuredClone(value); } },
+      credentialStore: { async set() {}, async get() { return {}; }, async delete() {} },
+      idGenerator: (() => { let id = 0; return () => `managed-${++id}`; })(),
+      removeRuntimeState: async (candidate) => { removals.push(candidate.id); },
     });
-
-    const claudeEnvironment = { CLAUDE_CONFIG_DIR: "/isolated/claude" };
-    const claude = productionProviderAdapterRegistry.create({
-      id: "claude-connected", adapterId: "claude-subscription", label: "Claude", endpoint: null,
-    }, {
-      managedRuntime: claudeRuntime,
-      runtimeFactory: async () => ({
-        environment: claudeEnvironment,
-        account: async () => ({ status: "connected", account: {} }),
-        close: async () => {},
-      }),
+    const pending = await service.connect({ adapterId: "fake-managed", label: "Managed Work" });
+    expect(pending, "managed login starts pending with a login id").toMatchObject({
+      status: "pending", connectionId: "managed-1", login: { loginId: "login-1" },
     });
-    await expect(claude.executionAccess()).resolves.toEqual({
-      kind: "managed-runtime", ...claudeRuntime, environment: claudeEnvironment,
+    expect(stored, "pending setup persists nothing").toEqual([]);
+    await expect(service.completeConnection(pending.connectionId),
+      "a disconnected account keeps setup pending").resolves.toMatchObject({ status: "pending" });
+    accountStatus = "connected";
+    await expect(service.completeConnection(pending.connectionId),
+      "a connected account commits the definition").resolves.toMatchObject({
+      status: "connected", providerDefinition: { id: "managed-1" },
     });
-  });
+    expect(stored, "only the committed setup persists").toHaveLength(1);
 
-  it("production Claude composition fails unavailable when its definition-scoped CLI is missing", async () => {
-    const provider = productionProviderAdapterRegistry.create({
-      id: "claude-missing", adapterId: "claude-subscription", label: "Claude Missing", endpoint: null,
-    }, {
-      executable: "/definitely/missing/relayer-claude",
-      managedRuntime: { ...claudeRuntime, executable: "/definitely/missing/relayer-claude" },
+    const cancelled = await service.connect({ adapterId: "fake-managed", label: "Managed Personal" });
+    expect(await service.cancelConnection(cancelled.connectionId), "cancellation reports success").toBe(true);
+    expect(stored, "cancelled setup persists nothing").toHaveLength(1);
+    expect(close, "cancelled setup closes its runtime").toHaveBeenCalledOnce();
+    expect(removals, "cancelled setup removes its runtime state").toEqual(["managed-2"]);
+
+    let releaseDiscovery;
+    const discoveryGate = new Promise((resolve) => { releaseDiscovery = resolve; });
+    let racingStored = [];
+    const racingClose = vi.fn(async () => {});
+    const racingService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([managedDescriptor("racing-managed", {
+        create: ({ definition: created }) => ({
+          credentials: {
+            login: async () => ({ loginId: "login-race" }),
+            account: async () => ({ status: "connected" }),
+          },
+          catalog: { discover: async () => {
+            await discoveryGate;
+            return { provider: { id: created.id }, models: [{ visible: true }] };
+          } },
+          close: racingClose,
+        }),
+      })]),
+      definitionStore: {
+        async load() { return structuredClone(racingStored); },
+        async createWithCatalog(candidate) { racingStored.push(structuredClone(candidate)); },
+      },
+      credentialStore: { async delete() {} },
+      idGenerator: () => "managed-race",
     });
-    await expect(provider.credentials.account()).resolves.toMatchObject({ status: "unavailable" });
-    await expect(provider.credentials.login()).rejects.toThrow("login is unavailable");
-    await expect(provider.executionAccess()).rejects.toThrow("not connected");
-  });
+    const racingPending = await racingService.connect({ adapterId: "racing-managed", label: "Race" });
+    const completion = racingService.completeConnection(racingPending.connectionId);
+    const cancellation = racingService.cancelConnection(racingPending.connectionId);
+    releaseDiscovery();
+    await expect(completion, "discovery completes the connection").resolves.toMatchObject({ status: "connected" });
+    await expect(cancellation, "cancellation serializes behind discovery and loses").resolves.toBe(false);
+    expect(racingStored, "the committed runtime survives the race").toHaveLength(1);
+    expect(racingClose, "a committed runtime is never closed by cancellation").not.toHaveBeenCalled();
 
-  it("keeps Claude browser login pending when auth status returns logged-out JSON with exit code one", async () => {
-    const spawnProcess = vi.fn(() => {
-      const child = new EventEmitter();
-      child.stdout = new EventEmitter();
-      child.stderr = new EventEmitter();
-      child.kill = vi.fn();
-      queueMicrotask(() => {
-        child.stdout.emit("data", JSON.stringify({
-          loggedIn: false,
-          authMethod: "none",
-          apiProvider: "firstParty",
-        }));
-        child.emit("exit", 1);
-      });
-      return child;
+    let failedStored = [];
+    const removed = [];
+    const failedClose = vi.fn(async () => {});
+    const failedService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([managedDescriptor("failed-managed", {
+        create: ({ definition: created }) => ({
+          credentials: {
+            login: async () => ({ loginId: "login-failed" }),
+            account: async () => ({ status: "connected" }),
+          },
+          catalog: { discover: async () => ({
+            provider: { id: created.id }, models: [{ visible: true }],
+          }) },
+          close: failedClose,
+        }),
+      })]),
+      definitionStore: {
+        async load() { return structuredClone(failedStored); },
+        async createWithCatalog(candidate) { failedStored.push(structuredClone(candidate)); },
+      },
+      credentialStore: { async delete() {} },
+      idGenerator: () => "managed-failed",
+      onRuntimeReady: async () => { throw new Error("registration failed"); },
+      onRuntimeRemoved: async ({ id }) => { removed.push(id); },
     });
-    const runtime = new ClaudeCliManagedRuntime({ executable: "/bin/claude", spawnProcess });
-
-    await expect(runtime.account()).resolves.toMatchObject({
-      status: "disconnected",
-      account: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" },
-    });
-  });
-
-  it("keeps multiple Claude definitions in definition-scoped runtimes", async () => {
-    const accounts = new Map();
-    const runtimeFactory = vi.fn(async (created) => {
-      accounts.set(created.id, "connected");
-      return {
-        account: async () => ({ status: accounts.get(created.id) }),
-        login: async () => { accounts.set(created.id, "connected"); },
-        logout: async () => { accounts.set(created.id, "disconnected"); },
-        close: async () => {},
-      };
-    });
-    const dependencies = {
-      runtimeFactory,
-      discoverModels: async () => [{ id: "claude-model", label: "Claude model" }],
-      managedRuntime: claudeRuntime,
-    };
-    const first = productionProviderAdapterRegistry.create({
-      id: "claude-work", adapterId: "claude-subscription", label: "Claude Work", endpoint: null,
-    }, dependencies);
-    const second = productionProviderAdapterRegistry.create({
-      id: "claude-personal", adapterId: "claude-subscription", label: "Claude Personal", endpoint: null,
-    }, dependencies);
-
-    await first.catalog.discover();
-    await second.catalog.discover();
-    await first.credentials.logout();
-
-    expect(await first.credentials.account()).toMatchObject({ status: "disconnected" });
-    expect(await second.credentials.account()).toMatchObject({ status: "connected" });
-    expect(runtimeFactory.mock.calls.map(([created]) => created.id)).toEqual(["claude-work", "claude-personal"]);
-  });
+    const failedPending = await failedService.connect({ adapterId: "failed-managed", label: "Failed" });
+    await expect(failedService.completeConnection(failedPending.connectionId),
+      "registration failure surfaces").rejects.toThrow("registration failed");
+    expect(failedStored, "failed registration persists nothing").toEqual([]);
+    expect(failedClose, "failed registration closes the runtime").toHaveBeenCalledOnce();
+    expect(removed, "failed registration removes the runtime").toEqual(["managed-failed"]);
+  }, 30_000);
 });
 
 describe("retry and local diagnostics", () => {
-  it("retries only transient classes with bounded deterministic jitter", async () => {
+  it("bounds provider IO with transient-only retry and a redacted rotating log", async () => {
     const delays = [];
     const operation = vi.fn()
       .mockRejectedValueOnce(new ProviderHttpError("busy", { status: 429 }))
@@ -1126,14 +1234,12 @@ describe("retry and local diagnostics", () => {
     await expect(withProviderRetry(operation, {
       random: () => 0.5,
       sleep: async (delay) => { delays.push(delay); },
-    })).resolves.toBe("ok");
-    expect(delays).toEqual([250, 500]);
+    }), "transient classes retry with bounded deterministic jitter").resolves.toBe("ok");
+    expect(delays, "the jitter schedule is exact").toEqual([250, 500]);
     await expect(withProviderRetry(async () => {
       throw new ProviderHttpError("bad key", { status: 401 });
-    }, { sleep: vi.fn() })).rejects.toThrow("bad key");
-  });
+    }, { sleep: vi.fn() }), "auth failures never retry").rejects.toThrow("bad key");
 
-  it("stops retry when cancelled", async () => {
     const controller = new AbortController();
     const sleep = vi.fn(async (_delay, signal) => {
       controller.abort(new Error("cancelled"));
@@ -1141,10 +1247,8 @@ describe("retry and local diagnostics", () => {
     });
     await expect(withProviderRetry(async () => {
       throw new ProviderHttpError("busy", { status: 429 });
-    }, { signal: controller.signal, sleep })).rejects.toThrow("cancelled");
-  });
+    }, { signal: controller.signal, sleep }), "cancellation stops retry").rejects.toThrow("cancelled");
 
-  it("bounds and redacts the rotating diagnostic log", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-provider-log-"));
     const path = join(root, "provider.log");
     const log = createProviderDiagnosticsLog({ path, maximumBytes: 512 });
@@ -1152,45 +1256,41 @@ describe("retry and local diagnostics", () => {
       await log.write({ code: `failure-${index}`, apiKey: "sk-super-secret-value", message: "Bearer hidden-value" });
     }
     const contents = await readFile(path, "utf8");
-    expect(Buffer.byteLength(contents)).toBeLessThanOrEqual(512);
-    expect(contents).not.toContain("super-secret");
-    expect(contents).not.toContain("hidden-value");
-    expect(contents).toContain("failure-19");
-  });
+    expect(Buffer.byteLength(contents), "the log rotates at its byte bound").toBeLessThanOrEqual(512);
+    expect(contents, "secret api keys are redacted").not.toContain("super-secret");
+    expect(contents, "secret bearer tokens are redacted").not.toContain("hidden-value");
+    expect(contents, "the newest failure survives rotation").toContain("failure-19");
 
-  it("serializes concurrent writes and never persists arbitrary error text", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-provider-log-concurrent-"));
-    const path = join(root, "provider.log");
-    const log = createProviderDiagnosticsLog({ path, maximumBytes: 16 * 1024 });
-    await Promise.all(Array.from({ length: 40 }, (_, index) => log.write({
+    const concurrentRoot = await mkdtemp(join(tmpdir(), "relayer-provider-log-concurrent-"));
+    const concurrentPath = join(concurrentRoot, "provider.log");
+    const concurrentLog = createProviderDiagnosticsLog({ path: concurrentPath, maximumBytes: 16 * 1024 });
+    await Promise.all(Array.from({ length: 40 }, (_, index) => concurrentLog.write({
       code: `failure-${index}`,
       error: `opaque-private-value-${index}`,
     })));
-    const contents = await readFile(path, "utf8");
-    const events = contents.trim().split("\n").map((line) => JSON.parse(line));
-    expect(events).toHaveLength(40);
-    expect(new Set(events.map(({ code }) => code)).size).toBe(40);
-    expect(contents).not.toContain("opaque-private-value");
-  });
+    const concurrentContents = await readFile(concurrentPath, "utf8");
+    const events = concurrentContents.trim().split("\n").map((line) => JSON.parse(line));
+    expect(events, "concurrent writes serialize without loss").toHaveLength(40);
+    expect(new Set(events.map(({ code }) => code)).size, "every concurrent event stays unique").toBe(40);
+    expect(concurrentContents, "arbitrary error text never persists").not.toContain("opaque-private-value");
+  }, 15_000);
 });
 
 describe("managed provider runtime cleanup", () => {
-  it("derives cleanup eligibility from a registry descriptor instead of adapter names", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-custom-"));
-    await mkdir(join(root, "future-work"), { recursive: true });
-    const registry = createProviderAdapterRegistry([{
-      adapterId: "future-subscription", implementationVersion: "1", label: "Future",
-      accessContract: "managed-runtime@1", defaultEndpoint: null,
-      connection: { mode: "existing-runtime-auth", fields: [] }, create: () => ({}),
-    }]);
-    const removeRuntimeState = createProviderRuntimeStateRemover({ runtimeRoot: root, registry });
-    await expect(removeRuntimeState({
+  it("removes only definition-scoped runtime state and reconciles orphans", async () => {
+    const customRoot = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-custom-"));
+    await mkdir(join(customRoot, "future-work"), { recursive: true });
+    const registry = createProviderAdapterRegistry([managedDescriptor("future-subscription", {
+      connection: { mode: "existing-runtime-auth", fields: [] },
+      create: () => ({}),
+    })]);
+    const customRemover = createProviderRuntimeStateRemover({ runtimeRoot: customRoot, registry });
+    await expect(customRemover({
       id: "future-work", adapterId: "future-subscription", accessContract: "managed-runtime@1",
-    })).resolves.toBe(true);
-    await expect(access(join(root, "future-work"))).rejects.toMatchObject({ code: "ENOENT" });
-  });
+    }), "cleanup eligibility comes from the registry descriptor, not adapter names").resolves.toBe(true);
+    await expect(access(join(customRoot, "future-work")), "the custom runtime directory is gone")
+      .rejects.toMatchObject({ code: "ENOENT" });
 
-  it("deletes only the exact definition-scoped directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-"));
     const work = join(root, "claude-work");
     const personal = join(root, "claude-personal");
@@ -1198,55 +1298,51 @@ describe("managed provider runtime cleanup", () => {
     await mkdir(join(personal, "claude-home"), { recursive: true });
     await writeFile(join(work, "claude-home", "auth.json"), "work");
     await writeFile(join(personal, "claude-home", "auth.json"), "personal");
-
     const removeRuntimeState = createProviderRuntimeStateRemover({
       runtimeRoot: root, registry: productionProviderAdapterRegistry,
     });
     await expect(removeRuntimeState({
       id: "claude-work", adapterId: "claude-subscription", accessContract: "managed-runtime@1",
-    })).resolves.toBe(true);
-    await expect(access(work)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(personal, "claude-home", "auth.json"), "utf8")).resolves.toBe("personal");
-    await expect(removeRuntimeState({ id: "api", adapterId: "openai-api" })).resolves.toBe(false);
-  });
+    }), "the exact definition-scoped directory is removed").resolves.toBe(true);
+    await expect(access(work), "the removed definition directory is gone").rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(personal, "claude-home", "auth.json"), "utf8"),
+      "sibling definitions stay untouched").resolves.toBe("personal");
+    await expect(removeRuntimeState({ id: "api", adapterId: "openai-api" }),
+      "a definition without managed state removes nothing").resolves.toBe(false);
 
-  it("deletes definition-scoped runtime state for an API adapter after its definition is removed", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-api-remove-"));
-    await mkdir(join(root, "openai-work", "codex-home"), { recursive: true });
-    const removeRuntimeState = createProviderRuntimeStateRemover({
-      runtimeRoot: root,
+    const apiRoot = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-api-remove-"));
+    await mkdir(join(apiRoot, "openai-work", "codex-home"), { recursive: true });
+    const apiRemover = createProviderRuntimeStateRemover({
+      runtimeRoot: apiRoot,
       registry: productionProviderAdapterRegistry,
     });
-
-    await expect(removeRuntimeState({
+    await expect(apiRemover({
       id: "openai-work",
       adapterId: "openai-api",
       accessContract: "secret@1",
-    })).resolves.toBe(true);
-    await expect(access(join(root, "openai-work"))).rejects.toMatchObject({ code: "ENOENT" });
-  });
+    }), "API adapters keep definition-scoped state removable").resolves.toBe(true);
+    await expect(access(join(apiRoot, "openai-work")), "the API runtime directory is gone")
+      .rejects.toMatchObject({ code: "ENOENT" });
 
-  it("rejects traversal and non-definition paths", () => {
-    expect(() => providerRuntimeDirectory("/tmp/provider-runtimes", {
-      id: "../escape", adapterId: "codex-subscription",
-      accessContract: "managed-runtime@1",
-    }, productionProviderAdapterRegistry)).toThrow("stable provider definition id");
-    expect(() => providerRuntimeDirectory("/tmp/provider-runtimes", {
-      id: "/absolute", adapterId: "claude-subscription",
-      accessContract: "managed-runtime@1",
-    }, productionProviderAdapterRegistry)).toThrow("stable provider definition id");
-  });
-
-  it("reconciles crash-orphan directories while retaining active managed definitions", async () => {
-    const root = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-reconcile-"));
-    for (const name of ["codex-active", "openai-active", "claude-orphan", "api-artifact"]) {
-      await mkdir(join(root, name), { recursive: true });
-      await writeFile(join(root, name, "state"), name);
+    const traversalCases = [
+      ["parent traversal", { id: "../escape", adapterId: "codex-subscription", accessContract: "managed-runtime@1" }],
+      ["absolute paths", { id: "/absolute", adapterId: "claude-subscription", accessContract: "managed-runtime@1" }],
+    ];
+    expect(traversalCases, "path traversal inventory").toHaveLength(2);
+    for (const [label, candidate] of traversalCases) {
+      expect.soft(() => providerRuntimeDirectory("/tmp/provider-runtimes", candidate, productionProviderAdapterRegistry),
+        label).toThrow("stable provider definition id");
     }
-    const removeRuntimeState = createProviderRuntimeStateRemover({
-      runtimeRoot: root, registry: productionProviderAdapterRegistry,
+
+    const reconcileRoot = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-reconcile-"));
+    for (const name of ["codex-active", "openai-active", "claude-orphan", "api-artifact"]) {
+      await mkdir(join(reconcileRoot, name), { recursive: true });
+      await writeFile(join(reconcileRoot, name, "state"), name);
+    }
+    const reconciler = createProviderRuntimeStateRemover({
+      runtimeRoot: reconcileRoot, registry: productionProviderAdapterRegistry,
     });
-    await expect(removeRuntimeState.reconcile([
+    await expect(reconciler.reconcile([
       {
         id: "codex-active", adapterId: "codex-subscription", accessContract: "managed-runtime@1",
         lifecycleState: "active",
@@ -1255,82 +1351,64 @@ describe("managed provider runtime cleanup", () => {
         id: "openai-active", adapterId: "openai-api", accessContract: "secret@1",
         lifecycleState: "active",
       },
-    ])).resolves.toEqual(["api-artifact", "claude-orphan"]);
-    await expect(readFile(join(root, "codex-active", "state"), "utf8")).resolves.toBe("codex-active");
-    await expect(readFile(join(root, "openai-active", "state"), "utf8")).resolves.toBe("openai-active");
-    await expect(access(join(root, "claude-orphan"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(join(root, "api-artifact"))).rejects.toMatchObject({ code: "ENOENT" });
-  });
+    ]), "reconciliation reports exactly the removed orphans").resolves.toEqual(["api-artifact", "claude-orphan"]);
+    await expect(readFile(join(reconcileRoot, "codex-active", "state"), "utf8"),
+      "active managed definitions keep their state").resolves.toBe("codex-active");
+    await expect(readFile(join(reconcileRoot, "openai-active", "state"), "utf8"),
+      "active API definitions keep their state").resolves.toBe("openai-active");
+    await expect(access(join(reconcileRoot, "claude-orphan")), "orphan managed directories are removed")
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(reconcileRoot, "api-artifact")), "stray API artifacts are removed")
+      .rejects.toMatchObject({ code: "ENOENT" });
+  }, 15_000);
 });
 
 describe("provider definition lifecycle", () => {
-  function serviceFixture({ failDiscovery = false, diagnostics = null, removeRuntimeState = async () => false } = {}) {
-    let stored = [];
-    const credentials = new Map();
-    const closes = [];
-    const descriptor = {
-      adapterId: "fake-api", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
-      defaultEndpoint: "https://example.test/v1", endpointEditableDuringCreation: true,
-      connection: { mode: "secret-fields", fields: [{ id: "api-key", label: "API key", kind: "secret" }] },
-      create: ({ definition: created }) => ({
-        async discover() {
-          if (failDiscovery) throw new Error("discovery failed");
-          return { models: [{ visible: true }], provider: { id: created.id } };
-        },
-        async close() { closes.push(created.id); },
-      }),
-    };
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
-      definitionStore: {
-        async load() { return structuredClone(stored); },
-        async save(value) { stored = structuredClone(value); },
-        async createWithCatalog(candidate) { stored.push(structuredClone(candidate)); },
-      },
-      credentialStore: {
-        async set(key, value) { credentials.set(key, structuredClone(value)); },
-        async get(key) { return credentials.get(key) ?? null; },
-        async delete(key) { return credentials.delete(key); },
-      },
-      idGenerator: (() => { let id = 0; return () => `provider-${++id}`; })(),
-      diagnostics,
-      removeRuntimeState,
-    });
-    return { service, definitions: () => stored, credentials, closes };
-  }
-
-  it("persists only after discovery and stores a credential reference instead of secret bytes", async () => {
+  it("stages provider creation discovery-first and compensates every failure", async () => {
     const fixture = serviceFixture();
     const created = await fixture.service.connect({
       adapterId: "fake-api", label: "Work", endpoint: "https://example.test/v1", fields: { "api-key": "secret" },
     });
-    expect(created).toMatchObject({ status: "connected", providerDefinition: { id: "provider-1" } });
-    expect(JSON.stringify(fixture.definitions())).not.toContain('"api-key":"secret"');
-    expect(created.providerDefinition.credentialReference).toBe("provider:provider-1");
+    expect(created, "a discovered provider connects").toMatchObject({
+      status: "connected", providerDefinition: { id: "provider-1" },
+    });
+    expect(JSON.stringify(fixture.definitions()), "definitions never carry secret bytes")
+      .not.toContain('"api-key":"secret"');
+    expect(created.providerDefinition.credentialReference, "definitions carry a credential reference")
+      .toBe("provider:provider-1");
+
+    fixture.service.providerStatuses = async () => new Map([[created.providerDefinition.id, {
+      connected: false,
+      unavailableReason: { code: "credentials_revoked", message: "Reconnect this provider." },
+    }]]);
+    await expect(fixture.service.list(), "listings join authoritative connection state").resolves.toEqual([
+      expect.objectContaining({
+        id: created.providerDefinition.id,
+        connected: false,
+        unavailableReason: { code: "credentials_revoked", message: "Reconnect this provider." },
+      }),
+    ]);
 
     const failed = serviceFixture({ failDiscovery: true });
     await expect(failed.service.connect({
       adapterId: "fake-api", label: "Broken", fields: { "api-key": "secret" },
-    })).rejects.toThrow("discovery failed");
-    expect(failed.definitions()).toEqual([]);
-    expect(failed.credentials.size).toBe(0);
-  });
+    }), "failed discovery surfaces the provider error").rejects.toThrow("discovery failed");
+    expect(failed.definitions(), "failed discovery persists nothing").toEqual([]);
+    expect(failed.credentials.size, "failed discovery stores no credentials").toBe(0);
 
-  it("writes credentials only after discovery and removes them when the atomic product commit fails", async () => {
     const order = [];
     const deleted = [];
-    const descriptor = {
-      adapterId: "ordered-api", implementationVersion: "1", label: "Ordered", accessContract: "secret@1",
-      defaultEndpoint: "https://example.test/v1", connection: {
-        mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
-      },
-      create: () => ({ discover: async () => {
-        order.push("discover");
-        return { models: [{ visible: true }] };
-      } }),
-    };
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
+    const orderedService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "ordered-api", implementationVersion: "1", label: "Ordered", accessContract: "secret@1",
+        defaultEndpoint: "https://example.test/v1", connection: {
+          mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
+        },
+        create: () => ({ discover: async () => {
+          order.push("discover");
+          return { models: [{ visible: true }] };
+        } }),
+      }]),
       definitionStore: {
         async load() { return []; },
         async createWithCatalog() { order.push("commit"); throw new Error("commit failed"); },
@@ -1341,311 +1419,173 @@ describe("provider definition lifecycle", () => {
       },
       idGenerator: () => "ordered",
     });
-    await expect(service.connect({ adapterId: "ordered-api", label: "Ordered", fields: { key: "opaque" } }))
-      .rejects.toThrow("commit failed");
-    expect(order).toEqual(["discover", "credential", "commit"]);
-    expect(deleted).toEqual(["provider:ordered"]);
-    await expect(service.list()).resolves.toEqual([]);
-  });
+    await expect(orderedService.connect({ adapterId: "ordered-api", label: "Ordered", fields: { key: "opaque" } }),
+      "a failed atomic commit surfaces").rejects.toThrow("commit failed");
+    expect(order, "credentials are written only after discovery and before commit")
+      .toEqual(["discover", "credential", "commit"]);
+    expect(deleted, "a failed commit deletes the staged credential").toEqual(["provider:ordered"]);
+    await expect(orderedService.list(), "a failed commit leaves no definition").resolves.toEqual([]);
 
-  it("compensates runtime registration before a failed staged create and leaves no active definition", async () => {
-    const fixture = serviceFixture();
     const unregistered = [];
-    fixture.service.onRuntimeReady = async () => { throw new Error("runtime registration failed"); };
-    fixture.service.onRuntimeRemoved = async ({ id }) => { unregistered.push(id); };
-    await expect(fixture.service.connect({
+    const registrationFixture = serviceFixture();
+    registrationFixture.service.onRuntimeReady = async () => { throw new Error("runtime registration failed"); };
+    registrationFixture.service.onRuntimeRemoved = async ({ id }) => { unregistered.push(id); };
+    await expect(registrationFixture.service.connect({
       adapterId: "fake-api", label: "Broken registration", fields: { "api-key": "opaque" },
-    })).rejects.toThrow("runtime registration failed");
-    expect(fixture.definitions()).toEqual([]);
-    expect(fixture.credentials.size).toBe(0);
-    expect(fixture.closes).toEqual(["provider-1"]);
-    expect(unregistered).toEqual(["provider-1"]);
-  });
+    }), "failed runtime registration surfaces").rejects.toThrow("runtime registration failed");
+    expect(registrationFixture.definitions(), "failed registration leaves no definition").toEqual([]);
+    expect(registrationFixture.credentials.size, "failed registration stores no credentials").toBe(0);
+    expect(registrationFixture.closes, "failed registration closes the staged runtime").toEqual(["provider-1"]);
+    expect(unregistered, "failed registration unregisters the runtime").toEqual(["provider-1"]);
 
-  it("joins authoritative connection state into generic provider listings", async () => {
-    const fixture = serviceFixture();
-    const created = await fixture.service.connect({
-      adapterId: "fake-api", label: "Revoked", fields: { "api-key": "opaque" },
-    });
-    fixture.service.providerStatuses = async () => new Map([[created.providerDefinition.id, {
-      connected: false,
-      unavailableReason: { code: "credentials_revoked", message: "Reconnect this provider." },
-    }]]);
-    await expect(fixture.service.list()).resolves.toEqual([expect.objectContaining({
-      id: created.providerDefinition.id,
-      connected: false,
-      unavailableReason: { code: "credentials_revoked", message: "Reconnect this provider." },
-    })]);
-  });
-
-  it("logs only sanitized failure metadata and cleans orphaned crash-window credentials", async () => {
     const events = [];
-    const failed = serviceFixture({
+    const sanitized = serviceFixture({
       failDiscovery: true,
       diagnostics: { write: async (event) => { events.push(event); } },
     });
-    await expect(failed.service.connect({ adapterId: "fake-api", label: "Broken", fields: { key: "opaque" } }))
-      .rejects.toThrow("discovery failed");
-    expect(JSON.stringify(events)).not.toContain("discovery failed");
-    expect(events[0]).toMatchObject({ category: "provider_connection_failed", code: "unknown" });
-
-    const deleted = [];
+    await expect(sanitized.service.connect({ adapterId: "fake-api", label: "Broken", fields: { key: "opaque" } }),
+      "sanitized logging still surfaces discovery failures").rejects.toThrow("discovery failed");
+    expect(JSON.stringify(events), "diagnostics never carry raw error text").not.toContain("discovery failed");
+    expect(events[0], "diagnostics carry sanitized metadata").toMatchObject({
+      category: "provider_connection_failed", code: "unknown",
+    });
+    const orphaned = [];
     const restarted = new ProviderDefinitionService({
-      registry: failed.service.registry,
+      registry: sanitized.service.registry,
       definitionStore: { async load() { return []; } },
       credentialStore: {
         async listReferences() { return ["provider:orphan"]; },
-        async delete(reference) { deleted.push(reference); },
+        async delete(reference) { orphaned.push(reference); },
       },
     });
     await restarted.reconcileStartup();
-    expect(deleted).toEqual(["provider:orphan"]);
-  });
+    expect(orphaned, "startup cleans crash-window orphan credentials").toEqual(["provider:orphan"]);
 
-  it("uses bounded retry during staged catalog discovery without retrying auth failures", async () => {
     let attempts = 0;
     const delays = [];
     let stored = [];
-    const descriptor = {
-      adapterId: "retry-api", implementationVersion: "1", label: "Retry", accessContract: "secret@1",
-      defaultEndpoint: "https://example.test/v1", connection: { mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }] },
-      create: () => ({ discover: async () => {
-        attempts += 1;
-        if (attempts < 3) throw new ProviderHttpError("busy", { status: 503 });
-        return { models: [{ visible: true }] };
-      } }),
-    };
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
+    const retryService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "retry-api", implementationVersion: "1", label: "Retry", accessContract: "secret@1",
+        defaultEndpoint: "https://example.test/v1", connection: { mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }] },
+        create: () => ({ discover: async () => {
+          attempts += 1;
+          if (attempts < 3) throw new ProviderHttpError("busy", { status: 503 });
+          return { models: [{ visible: true }] };
+        } }),
+      }]),
       definitionStore: { async load() { return stored; }, async save(value) { stored = structuredClone(value); } },
       credentialStore: { async set() {}, async delete() {}, async get() { return {}; } },
       retry: { random: () => 0.5, sleep: async (delay) => { delays.push(delay); } },
       idGenerator: () => "retry-provider",
     });
-    await expect(service.connect({ adapterId: "retry-api", label: "Retry", fields: { key: "hidden" } }))
-      .resolves.toMatchObject({ status: "connected" });
-    expect(attempts).toBe(3);
-    expect(delays).toEqual([250, 500]);
-  });
+    await expect(retryService.connect({ adapterId: "retry-api", label: "Retry", fields: { key: "hidden" } }),
+      "staged discovery retries transient failures").resolves.toMatchObject({ status: "connected" });
+    expect(attempts, "staged discovery uses bounded retry").toBe(3);
+    expect(delays, "staged discovery uses the deterministic jitter schedule").toEqual([250, 500]);
+  }, 30_000);
 
-  it("enforces active label uniqueness and drains admitted work before tombstoning", async () => {
+  it("drains admitted work before tombstoning and reconciles durable removal failures", async () => {
     const removals = [];
     const fixture = serviceFixture({ removeRuntimeState: async (candidate) => { removals.push(candidate.id); } });
     const first = await fixture.service.connect({ adapterId: "fake-api", label: "Work", fields: { "api-key": "one" } });
-    await expect(fixture.service.connect({ adapterId: "fake-api", label: "work", fields: { "api-key": "two" } }))
-      .rejects.toThrow("already uses");
+    await expect(fixture.service.connect({ adapterId: "fake-api", label: "work", fields: { "api-key": "two" } }),
+      "active labels stay case-insensitively unique").rejects.toThrow("already uses");
     const providerId = first.providerDefinition.id;
     const admission = await fixture.service.acquireExecution(providerId);
     const pending = await fixture.service.remove(providerId);
-    expect(pending.lifecycleState).toBe("removal_pending");
-    await expect(fixture.service.acquireExecution(providerId)).rejects.toThrow("unavailable");
-    expect(fixture.credentials.size).toBe(1);
-    expect(removals).toEqual([]);
+    expect(pending.lifecycleState, "removal defers while work is admitted").toBe("removal_pending");
+    await expect(fixture.service.acquireExecution(providerId), "pending removal stops new admissions")
+      .rejects.toThrow("unavailable");
+    expect(fixture.credentials.size, "pending removal keeps credentials until drained").toBe(1);
+    expect(removals, "pending removal deletes nothing until drained").toEqual([]);
     await admission.release();
-    expect(fixture.definitions()[0]).toMatchObject({ lifecycleState: "tombstoned", credentialReference: null });
-    expect(fixture.credentials.size).toBe(0);
-    expect(removals).toEqual([providerId]);
-  });
+    expect(fixture.definitions()[0], "draining tombstones the definition").toMatchObject({
+      lifecycleState: "tombstoned", credentialReference: null,
+    });
+    expect(fixture.credentials.size, "draining deletes the credential").toBe(0);
+    expect(removals, "draining removes the runtime state").toEqual([providerId]);
 
-  it("retains runtime and credentials when authoritative tombstoning fails, then reconciles on restart", async () => {
-    const removals = [];
-    const fixture = serviceFixture({ removeRuntimeState: async ({ id }) => { removals.push(id); } });
-    const created = await fixture.service.connect({
+    const durableRemovals = [];
+    const durableFixture = serviceFixture({ removeRuntimeState: async ({ id }) => { durableRemovals.push(id); } });
+    const durable = await durableFixture.service.connect({
       adapterId: "fake-api", label: "Durable", fields: { "api-key": "opaque" },
     });
-    const originalSave = fixture.service.definitionStore.save.bind(fixture.service.definitionStore);
-    fixture.service.definitionStore.save = async (definitions) => {
+    const originalSave = durableFixture.service.definitionStore.save.bind(durableFixture.service.definitionStore);
+    durableFixture.service.definitionStore.save = async (definitions) => {
       if (definitions.some(({ lifecycleState }) => lifecycleState === "tombstoned")) {
         throw new Error("durable attempt still running");
       }
       await originalSave(definitions);
     };
-
-    await expect(fixture.service.remove(created.providerDefinition.id)).rejects.toThrow("durable attempt still running");
-    expect(fixture.definitions()[0]).toMatchObject({
-      lifecycleState: "removal_pending", credentialReference: `provider:${created.providerDefinition.id}`,
+    await expect(durableFixture.service.remove(durable.providerDefinition.id),
+      "a failed tombstone surfaces").rejects.toThrow("durable attempt still running");
+    expect(durableFixture.definitions()[0], "a failed tombstone leaves removal pending").toMatchObject({
+      lifecycleState: "removal_pending", credentialReference: `provider:${durable.providerDefinition.id}`,
     });
-    expect(fixture.credentials.size).toBe(1);
-    expect(fixture.closes).toEqual([]);
-    expect(removals).toEqual([]);
-
-    const restarted = new ProviderDefinitionService({
-      registry: fixture.service.registry,
+    expect(durableFixture.credentials.size, "a failed tombstone keeps the credential").toBe(1);
+    expect(durableFixture.closes, "a failed tombstone keeps the runtime open").toEqual([]);
+    expect(durableRemovals, "a failed tombstone deletes no runtime state").toEqual([]);
+    const reconciled = new ProviderDefinitionService({
+      registry: durableFixture.service.registry,
       definitionStore: {
-        async load() { return structuredClone(fixture.definitions()); },
-        async save(value) { fixture.definitions().splice(0, Infinity, ...structuredClone(value)); },
+        async load() { return structuredClone(durableFixture.definitions()); },
+        async save(value) { durableFixture.definitions().splice(0, Infinity, ...structuredClone(value)); },
       },
       credentialStore: {
-        async get(key) { return fixture.credentials.get(key) ?? null; },
-        async delete(key) { return fixture.credentials.delete(key); },
-        async listReferences() { return [...fixture.credentials.keys()]; },
+        async get(key) { return durableFixture.credentials.get(key) ?? null; },
+        async delete(key) { return durableFixture.credentials.delete(key); },
+        async listReferences() { return [...durableFixture.credentials.keys()]; },
       },
-      removeRuntimeState: async ({ id }) => { removals.push(id); },
+      removeRuntimeState: async ({ id }) => { durableRemovals.push(id); },
     });
-    await restarted.reconcileStartup();
-    expect(fixture.definitions()[0]).toMatchObject({ lifecycleState: "tombstoned", credentialReference: null });
-    expect(fixture.credentials.size).toBe(0);
-    expect(removals).toEqual([created.providerDefinition.id]);
-  });
+    await reconciled.reconcileStartup();
+    expect(durableFixture.definitions()[0], "restart finalizes the pending tombstone").toMatchObject({
+      lifecycleState: "tombstoned", credentialReference: null,
+    });
+    expect(durableFixture.credentials.size, "restart deletes the durable credential").toBe(0);
+    expect(durableRemovals, "restart removes the durable runtime state").toEqual([durable.providerDefinition.id]);
 
-  it("rolls back cached rename and removal state when authoritative persistence rejects", async () => {
-    const fixture = serviceFixture();
-    const created = await fixture.service.connect({
+    const rollbackFixture = serviceFixture();
+    const stable = await rollbackFixture.service.connect({
       adapterId: "fake-api", label: "Stable", fields: { "api-key": "one" },
     });
-    fixture.service.definitionStore.save = async () => { throw new Error("authoritative guard rejected"); };
-    await expect(fixture.service.rename(created.providerDefinition.id, "Changed"))
-      .rejects.toThrow("authoritative guard rejected");
-    await expect(fixture.service.remove(created.providerDefinition.id))
-      .rejects.toThrow("authoritative guard rejected");
-    await expect(fixture.service.list()).resolves.toEqual([
+    rollbackFixture.service.definitionStore.save = async () => { throw new Error("authoritative guard rejected"); };
+    await expect(rollbackFixture.service.rename(stable.providerDefinition.id, "Changed"),
+      "rejected rename persistence surfaces").rejects.toThrow("authoritative guard rejected");
+    await expect(rollbackFixture.service.remove(stable.providerDefinition.id),
+      "rejected removal persistence surfaces").rejects.toThrow("authoritative guard rejected");
+    await expect(rollbackFixture.service.list(), "rejected persistence rolls back cached state").resolves.toEqual([
       expect.objectContaining({ label: "Stable", lifecycleState: "active" }),
     ]);
-    const lease = await fixture.service.acquireExecution(created.providerDefinition.id);
-    await lease.release();
-  });
+    const rollbackLease = await rollbackFixture.service.acquireExecution(stable.providerDefinition.id);
+    await rollbackLease.release();
 
-  it("completes or cancels managed login without persisting pending setup", async () => {
-    let accountStatus = "disconnected";
-    let stored = [];
-    const close = vi.fn(async () => {});
-    const registry = createProviderAdapterRegistry([{
-      adapterId: "fake-managed", implementationVersion: "1", label: "Managed",
-      accessContract: "managed-runtime@1", defaultEndpoint: null,
-      connection: { mode: "managed-login", fields: [] },
-      create: ({ definition: created }) => ({
-        credentials: {
-          login: async () => ({ loginId: "login-1", authUrl: "https://login.example.test" }),
-          account: async () => ({ status: accountStatus }),
-        },
-        catalog: { discover: async () => ({ provider: { id: created.id }, models: [{ visible: true }] }) },
-        close,
-      }),
-    }]);
-    const removals = [];
-    const service = new ProviderDefinitionService({
-      registry,
-      definitionStore: { async load() { return structuredClone(stored); }, async save(value) { stored = structuredClone(value); } },
-      credentialStore: { async set() {}, async get() { return {}; }, async delete() {} },
-      idGenerator: (() => { let id = 0; return () => `managed-${++id}`; })(),
-      removeRuntimeState: async (candidate) => { removals.push(candidate.id); },
-    });
-    const pending = await service.connect({ adapterId: "fake-managed", label: "Managed Work" });
-    expect(pending).toMatchObject({ status: "pending", connectionId: "managed-1", login: { loginId: "login-1" } });
-    expect(stored).toEqual([]);
-    await expect(service.completeConnection(pending.connectionId)).resolves.toMatchObject({ status: "pending" });
-    accountStatus = "connected";
-    await expect(service.completeConnection(pending.connectionId)).resolves.toMatchObject({
-      status: "connected", providerDefinition: { id: "managed-1" },
-    });
-    expect(stored).toHaveLength(1);
-
-    const cancelled = await service.connect({ adapterId: "fake-managed", label: "Managed Personal" });
-    expect(await service.cancelConnection(cancelled.connectionId)).toBe(true);
-    expect(stored).toHaveLength(1);
-    expect(close).toHaveBeenCalledOnce();
-    expect(removals).toEqual(["managed-2"]);
-  });
-
-  it("serializes cancellation behind managed discovery so it cannot delete a committed runtime", async () => {
-    let releaseDiscovery;
-    const discoveryGate = new Promise((resolve) => { releaseDiscovery = resolve; });
-    let stored = [];
-    const close = vi.fn(async () => {});
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([{
-        adapterId: "racing-managed", implementationVersion: "1", label: "Managed",
-        accessContract: "managed-runtime@1", defaultEndpoint: null,
-        connection: { mode: "managed-login", fields: [] },
-        create: ({ definition: created }) => ({
-          credentials: {
-            login: async () => ({ loginId: "login-race" }),
-            account: async () => ({ status: "connected" }),
-          },
-          catalog: { discover: async () => {
-            await discoveryGate;
-            return { provider: { id: created.id }, models: [{ visible: true }] };
-          } },
-          close,
-        }),
-      }]),
+    const finalizeFixture = serviceFixture();
+    await finalizeFixture.service.connect({ adapterId: "fake-api", label: "Old", fields: { "api-key": "secret" } });
+    finalizeFixture.definitions()[0].lifecycleState = "removal_pending";
+    const finalizeRemovals = [];
+    const finalizing = new ProviderDefinitionService({
+      registry: finalizeFixture.service.registry,
       definitionStore: {
-        async load() { return structuredClone(stored); },
-        async createWithCatalog(candidate) { stored.push(structuredClone(candidate)); },
-      },
-      credentialStore: { async delete() {} },
-      idGenerator: () => "managed-race",
-    });
-    const pending = await service.connect({ adapterId: "racing-managed", label: "Race" });
-    const completion = service.completeConnection(pending.connectionId);
-    const cancellation = service.cancelConnection(pending.connectionId);
-    releaseDiscovery();
-    await expect(completion).resolves.toMatchObject({ status: "connected" });
-    await expect(cancellation).resolves.toBe(false);
-    expect(stored).toHaveLength(1);
-    expect(close).not.toHaveBeenCalled();
-  });
-
-  it("does not persist or destroy credentials after managed runtime registration fails", async () => {
-    let stored = [];
-    const removed = [];
-    const closed = vi.fn(async () => {});
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([{
-        adapterId: "failed-managed", implementationVersion: "1", label: "Managed",
-        accessContract: "managed-runtime@1", defaultEndpoint: null,
-        connection: { mode: "managed-login", fields: [] },
-        create: ({ definition: created }) => ({
-          credentials: {
-            login: async () => ({ loginId: "login-failed" }),
-            account: async () => ({ status: "connected" }),
-          },
-          catalog: { discover: async () => ({
-            provider: { id: created.id }, models: [{ visible: true }],
-          }) },
-          close: closed,
-        }),
-      }]),
-      definitionStore: {
-        async load() { return structuredClone(stored); },
-        async createWithCatalog(candidate) { stored.push(structuredClone(candidate)); },
-      },
-      credentialStore: { async delete() {} },
-      idGenerator: () => "managed-failed",
-      onRuntimeReady: async () => { throw new Error("registration failed"); },
-      onRuntimeRemoved: async ({ id }) => { removed.push(id); },
-    });
-    const pending = await service.connect({ adapterId: "failed-managed", label: "Failed" });
-    await expect(service.completeConnection(pending.connectionId)).rejects.toThrow("registration failed");
-    expect(stored).toEqual([]);
-    expect(closed).toHaveBeenCalledOnce();
-    expect(removed).toEqual(["managed-failed"]);
-  });
-
-  it("finalizes removal-pending definitions on startup", async () => {
-    const fixture = serviceFixture();
-    await fixture.service.connect({ adapterId: "fake-api", label: "Old", fields: { "api-key": "secret" } });
-    fixture.definitions()[0].lifecycleState = "removal_pending";
-    const removals = [];
-    const restarted = new ProviderDefinitionService({
-      registry: fixture.service.registry,
-      definitionStore: {
-        async load() { return structuredClone(fixture.definitions()); },
-        async save(value) { fixture.definitions().splice(0, Infinity, ...structuredClone(value)); },
+        async load() { return structuredClone(finalizeFixture.definitions()); },
+        async save(value) { finalizeFixture.definitions().splice(0, Infinity, ...structuredClone(value)); },
       },
       credentialStore: {
-        async get(key) { return fixture.credentials.get(key) ?? null; },
-        async delete(key) { return fixture.credentials.delete(key); },
+        async get(key) { return finalizeFixture.credentials.get(key) ?? null; },
+        async delete(key) { return finalizeFixture.credentials.delete(key); },
       },
-      removeRuntimeState: async (candidate) => { removals.push(candidate.id); },
+      removeRuntimeState: async (candidate) => { finalizeRemovals.push(candidate.id); },
     });
-    await restarted.reconcileStartup();
-    expect(fixture.definitions()[0]).toMatchObject({ lifecycleState: "tombstoned", credentialReference: null });
-    expect(fixture.credentials.size).toBe(0);
-    expect(removals).toEqual(["provider-1"]);
-  });
+    await finalizing.reconcileStartup();
+    expect(finalizeFixture.definitions()[0], "startup finalizes removal-pending definitions").toMatchObject({
+      lifecycleState: "tombstoned", credentialReference: null,
+    });
+    expect(finalizeFixture.credentials.size, "startup deletes the pending credential").toBe(0);
+    expect(finalizeRemovals, "startup removes the pending runtime state").toEqual(["provider-1"]);
+  }, 30_000);
 
-  it("registers persisted providers before startup refresh and supports manual refresh", async () => {
+  it("activates persisted providers best-effort and refreshes catalogs without overlap", async () => {
     let discoveries = 0;
     const snapshot = (providerId) => ({
       provider: { id: providerId, label: providerId, adapterId: "fake-api", status: "available" },
@@ -1683,16 +1623,15 @@ describe("provider definition lifecycle", () => {
     });
     await service.activate();
     await modelCatalog.startup();
-    expect(discoveries).toBe(1);
-    expect(published.some(({ providerId }) => providerId === "persisted")).toBe(true);
+    expect(discoveries, "persisted providers register before startup refresh").toBe(1);
+    expect(published.some(({ providerId }) => providerId === "persisted"),
+      "startup publishes the persisted provider").toBe(true);
     await modelCatalog.explicitRefresh("persisted");
-    expect(discoveries).toBe(2);
-  });
+    expect(discoveries, "manual refresh rediscovers on demand").toBe(2);
 
-  it("continues activation when one persisted provider has revoked credentials", async () => {
     const ready = [];
     const diagnostics = [];
-    const registry = createProviderAdapterRegistry([{
+    const partialRegistry = createProviderAdapterRegistry([{
       adapterId: "fake-api", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
       defaultEndpoint: "https://example.test/v1", connection: {
         mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
@@ -1703,32 +1642,32 @@ describe("provider definition lifecycle", () => {
       id, adapterId: "fake-api", label: id, endpoint: "https://example.test/v1", accessContract: "secret@1",
       credentialReference: `provider:${id}`, lifecycleState: "active", removedAt: null,
     }));
-    const service = new ProviderDefinitionService({
-      registry,
+    const partialService = new ProviderDefinitionService({
+      registry: partialRegistry,
       definitionStore: { async load() { return persisted; } },
       credentialStore: { async get(reference) { return reference.endsWith("healthy") ? { key: "valid" } : null; } },
       diagnostics: { write: async (event) => { diagnostics.push(event); } },
       onRuntimeReady: (definition) => { ready.push(definition.id); },
     });
-    await expect(service.activate()).resolves.toBeUndefined();
-    expect(ready).toEqual(["healthy"]);
-    expect(diagnostics).toEqual([expect.objectContaining({
+    await expect(partialService.activate(), "activation continues past one revoked provider")
+      .resolves.toBeUndefined();
+    expect(ready, "only the healthy provider activates").toEqual(["healthy"]);
+    expect(diagnostics, "the revoked provider is diagnosed").toEqual([expect.objectContaining({
       category: "provider_activation_failed", providerId: "revoked", code: "unknown",
     })]);
-    await expect(service.acquireExecution("revoked")).rejects.toThrow("credentials are unavailable");
-  });
+    await expect(partialService.acquireExecution("revoked"), "revoked providers cannot execute")
+      .rejects.toThrow("credentials are unavailable");
 
-  it("marks a persisted provider unavailable when startup activation cannot load its credential", async () => {
     const unavailable = [];
-    const descriptor = {
+    const missingDescriptor = {
       adapterId: "fake-api", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
       defaultEndpoint: "https://example.test/v1", connection: {
         mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
       },
       create: vi.fn(),
     };
-    const service = new ProviderDefinitionService({
-      registry: createProviderAdapterRegistry([descriptor]),
+    const missingService = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([missingDescriptor]),
       definitionStore: { async load() { return [{
         id: "missing", adapterId: "fake-api", label: "Missing", endpoint: "https://example.test/v1",
         accessContract: "secret@1", credentialReference: "provider:missing", lifecycleState: "active",
@@ -1737,24 +1676,24 @@ describe("provider definition lifecycle", () => {
       providerStatuses: async () => new Map([["missing", { connected: true, unavailableReason: null }]]),
       onRuntimeUnavailable: async (definition, error) => { unavailable.push({ definition, error }); },
     });
+    await missingService.activate();
+    expect(missingDescriptor.create, "a missing credential never instantiates the adapter").not.toHaveBeenCalled();
+    expect(unavailable, "the missing credential reports unavailable").toHaveLength(1);
+    expect(unavailable[0].definition.id, "the unavailable report names the definition").toBe("missing");
+    expect(unavailable[0].error.message, "the unavailable report names the credential gap")
+      .toContain("credentials are unavailable");
+    await expect(missingService.list(), "listings show the activation failure").resolves.toEqual([
+      expect.objectContaining({
+        id: "missing",
+        connected: false,
+        unavailableReason: expect.objectContaining({ code: "provider_activation_failed" }),
+      }),
+    ]);
 
-    await service.activate();
-    expect(descriptor.create).not.toHaveBeenCalled();
-    expect(unavailable).toHaveLength(1);
-    expect(unavailable[0].definition.id).toBe("missing");
-    expect(unavailable[0].error.message).toContain("credentials are unavailable");
-    await expect(service.list()).resolves.toEqual([expect.objectContaining({
-      id: "missing",
-      connected: false,
-      unavailableReason: expect.objectContaining({ code: "provider_activation_failed" }),
-    })]);
-  });
-
-  it("does not cache a lazy runtime whose catalog registration failed", async () => {
-    const closed = [];
+    const closedGenerations = [];
     let creations = 0;
     let registrations = 0;
-    const registry = createProviderAdapterRegistry([{
+    const lazyRegistry = createProviderAdapterRegistry([{
       adapterId: "lazy-api", implementationVersion: "1", label: "Lazy", accessContract: "secret@1",
       defaultEndpoint: "https://example.test/v1", connection: {
         mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
@@ -1762,11 +1701,11 @@ describe("provider definition lifecycle", () => {
       create: () => {
         creations += 1;
         const generation = creations;
-        return { close: async () => { closed.push(generation); } };
+        return { close: async () => { closedGenerations.push(generation); } };
       },
     }]);
-    const service = new ProviderDefinitionService({
-      registry,
+    const lazyService = new ProviderDefinitionService({
+      registry: lazyRegistry,
       definitionStore: { async load() { return [{
         id: "lazy", adapterId: "lazy-api", label: "Lazy", endpoint: "https://example.test/v1",
         accessContract: "secret@1", credentialReference: "provider:lazy", lifecycleState: "active",
@@ -1777,75 +1716,58 @@ describe("provider definition lifecycle", () => {
         if (registrations === 1) throw new Error("registration failed");
       },
     });
-    await service.activate();
-    expect(closed).toEqual([1]);
-    const lease = await service.acquireExecution("lazy");
-    expect(creations).toBe(2);
-    expect(registrations).toBe(2);
-    await lease.release();
-  });
-});
+    await lazyService.activate();
+    expect(closedGenerations, "a failed registration closes its generation").toEqual([1]);
+    const lazyLease = await lazyService.acquireExecution("lazy");
+    expect(creations, "a failed registration is never cached").toBe(2);
+    expect(registrations, "the next admission registers again").toBe(2);
+    await lazyLease.release();
 
-describe("background model catalog refresh", () => {
-  function completeSnapshot(providerId) {
-    return {
-      provider: { id: providerId, label: providerId, status: "available", unavailableReason: null },
-      models: [{
-        id: "model-1", label: "Model 1", description: "", visible: true, executionModel: "model-1",
-        availability: "available", unavailableReason: null, availabilityNotice: null, isDefault: false,
-        replacementModelId: null, upgradeInfo: null, supportedEfforts: [], defaultEffort: null,
-        inputModalities: ["text"], supportsPersonality: false, serviceTiers: [], defaultServiceTier: null,
-      }],
-      systemFamily: { id: `${providerId}-default`, label: "Default", modelIds: [] },
-    };
-  }
-
-  it("boots best-effort with a revoked provider and refreshes healthy providers", async () => {
-    const published = [];
-    const service = new ModelCatalogService({
+    const bootPublished = [];
+    const bootService = new ModelCatalogService({
       adapters: [
         { providerId: "revoked", discover: async () => { throw new ProviderHttpError("revoked", { status: 401 }); } },
         { providerId: "healthy", discover: async () => completeSnapshot("healthy") },
       ],
-      publishSnapshot: async (snapshot) => { published.push(snapshot); },
+      publishSnapshot: async (snapshot) => { bootPublished.push(snapshot); },
       setTimer: () => ({ unref() {} }),
     });
-    const results = await service.startup();
-    expect(results.map(({ status }) => status)).toEqual(["rejected", "fulfilled"]);
-    expect(published.map(({ providerId }) => providerId)).toEqual(["healthy"]);
-    await service.close();
-  });
+    const results = await bootService.startup();
+    expect(results.map(({ status }) => status), "startup boots best-effort across providers")
+      .toEqual(["rejected", "fulfilled"]);
+    expect(bootPublished.map(({ providerId }) => providerId), "only healthy providers publish on boot")
+      .toEqual(["healthy"]);
+    await bootService.close();
 
-  it("uses an unref non-overlapping timer, retains the last snapshot on failure, and cancels on close", async () => {
     const callbacks = [];
     const cleared = [];
     const unref = vi.fn();
     let calls = 0;
     let rejectBackground;
     const backgroundFailure = new Promise((_resolve, reject) => { rejectBackground = reject; });
-    const published = [];
-    const service = new ModelCatalogService({
+    const timerPublished = [];
+    const timerService = new ModelCatalogService({
       adapters: [{ providerId: "scheduled", discover: async () => {
         calls += 1;
         if (calls === 1) return completeSnapshot("scheduled");
         return backgroundFailure;
       } }],
-      publishSnapshot: async (snapshot) => { published.push(snapshot); },
+      publishSnapshot: async (snapshot) => { timerPublished.push(snapshot); },
       setTimer: (callback) => { const token = { callback, unref }; callbacks.push(token); return token; },
       clearTimer: (token) => { cleared.push(token); },
       backgroundIntervalMs: 10,
     });
-    await service.startup();
-    expect(unref).toHaveBeenCalledOnce();
+    await timerService.startup();
+    expect(unref, "the background timer never holds the process").toHaveBeenCalledOnce();
     const tick = callbacks[0].callback();
     await new Promise((resolve) => setImmediate(resolve));
-    expect(calls).toBe(2);
-    expect(callbacks).toHaveLength(1);
+    expect(calls, "the tick rediscovers the provider").toBe(2);
+    expect(callbacks, "a running tick never overlaps with a new timer").toHaveLength(1);
     rejectBackground(new Error("temporarily unavailable"));
     await tick;
-    expect(published).toHaveLength(1);
-    expect(callbacks).toHaveLength(2);
-    await service.close();
-    expect(cleared).toEqual([callbacks[1]]);
-  });
+    expect(timerPublished, "a failed tick retains the last snapshot").toHaveLength(1);
+    expect(callbacks, "the next timer arms after the tick settles").toHaveLength(2);
+    await timerService.close();
+    expect(cleared, "close cancels the pending timer").toEqual([callbacks[1]]);
+  }, 30_000);
 });

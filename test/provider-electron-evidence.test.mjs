@@ -21,7 +21,7 @@ function pngDimensions(bytes) {
 }
 
 describe("provider browser evidence", () => {
-  it("locks every committed frame, variant, poster, and video to the evidence manifest", async () => {
+  it("locks every committed evidence artifact and script to the manifest", async () => {
     const manifest = JSON.parse(await readFile(new URL("manifest.json", evidenceDirectory), "utf8"));
     expect(manifest).toMatchObject({ schemaVersion: 1, inference: false, viewport: { width: 1280, height: 800 } });
     expect(manifest.activeAdapters).toEqual([
@@ -64,7 +64,22 @@ describe("provider browser evidence", () => {
     }
     expect(motionBytes).toBe(manifest.recording.frameBytes);
     expect(motionHash.digest("hex")).toBe(manifest.recording.framesSha256);
-  });
+
+    // The capture flow below needs macOS media tools and skips elsewhere, but
+    // these parse checkpoints run on every CI platform and catch syntax or
+    // import regressions in the evidence scripts.
+    for (const script of [
+      "scripts/capture-provider-ux-video.mjs",
+      "scripts/provider-ux-evidence-browser.mjs",
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "--check"],
+        { input: readFileSync(new URL(`../${script}`, import.meta.url)), encoding: "utf8" },
+      );
+      expect(result.status, `${script} stays parseable: ${result.stderr.trim()}`).toBe(0);
+    }
+  }, 15_000);
 
   it.skipIf(!mediaToolsAvailable)("renders the actual desktop UI against fake APIs and encodes deterministic video evidence", async () => {
     const output = await mkdtemp(join(tmpdir(), "relayer-provider-video-test-"));
@@ -135,24 +150,4 @@ describe("provider browser evidence", () => {
       await rm(output, { recursive: true, force: true });
     }
   }, 120_000);
-
-  // The capture flow above needs macOS media tools and skips elsewhere, but
-  // these parse checkpoints run on every CI platform and catch syntax or
-  // import regressions in the evidence scripts.
-  for (const script of [
-    "scripts/capture-provider-ux-video.mjs",
-    "scripts/provider-ux-evidence-browser.mjs",
-  ]) {
-    it(`keeps ${script} parseable`, () => {
-      const result = spawnSync(
-        process.execPath,
-        ["--input-type=module", "--check"],
-        {
-          input: readFileSync(new URL(`../${script}`, import.meta.url)),
-          encoding: "utf8",
-        },
-      );
-      expect(result.status, result.stderr).toBe(0);
-    });
-  }
 });

@@ -43,20 +43,22 @@ async function buildConfiguredAsar({ source, stage, archive, patterns }) {
 }
 
 describe("provider adapter packaging", () => {
-  it.each([
-    "node_modules/@openai/codex/vendor/aarch64-apple-darwin/bin/codex",
-    "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
-    "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude",
-  ])("rejects a packaged native harness runtime: %s", (entry) => {
-    expect(() => assertNoBundledHarnessRuntimes(new Set([entry]))).toThrow(/must not package a native harness runtime/);
-  });
-
-  it("allows the JavaScript SDK and installer dependencies without native harness artifacts", () => {
+  it("rejects native harness runtimes while allowing script-only dependencies", () => {
+    const rejected = [
+      ["codex vendor binary", "node_modules/@openai/codex/vendor/aarch64-apple-darwin/bin/codex"],
+      ["codex platform package binary", "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"],
+      ["claude agent sdk native binary", "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"],
+    ];
+    expect(rejected, "native harness runtime rejection inventory").toHaveLength(3);
+    for (const [label, entry] of rejected) {
+      expect.soft(() => assertNoBundledHarnessRuntimes(new Set([entry])), label)
+        .toThrow(/must not package a native harness runtime/);
+    }
     expect(() => assertNoBundledHarnessRuntimes(new Set([
       "node_modules/@openai/codex-sdk/dist/index.js",
       "node_modules/semver/index.js",
       "node_modules/tar/dist/commonjs/index.js",
-    ]))).not.toThrow();
+    ])), "JavaScript SDK and installer dependencies stay allowed").not.toThrow();
   });
 
   it("generates an ASAR containing every active adapter and no test provider fixtures", async () => {
