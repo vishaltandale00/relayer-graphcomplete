@@ -231,11 +231,12 @@ export function createProviderExecutionAccessBroker(acquireProviderExecution) {
 }
 
 /**
- * Developer-only enable path for the recursive Complete seam.
+ * Enable path for the recursive Complete seam.
  *
- * This is not a product setting and has no user-visible control. Recursive completions
- * need the whole persisted feature chain, so one switch turns on every prerequisite.
- * Whether the feature ships enabled by default is decided from live-run timing evidence.
+ * Recursive completions need the whole persisted feature chain, so one switch turns on
+ * every prerequisite. Relayer Desktop ships that chain enabled. It is not a user-visible
+ * product setting; RELAYER_DESKTOP_PROVIDER_RECURSION=0 falls back to the all-off
+ * compatibility stage for diagnosis.
  */
 export const RECURSIVE_TEMPORAL_FEATURES = Object.freeze({
   schemaRead: true,
@@ -245,10 +246,10 @@ export const RECURSIVE_TEMPORAL_FEATURES = Object.freeze({
   providerRecursion: true,
 });
 
-export function developerTemporalFeatures(environment = process.env) {
-  return String(environment.RELAYER_DEV_PROVIDER_RECURSION ?? "").trim() === "1"
-    ? RECURSIVE_TEMPORAL_FEATURES
-    : {};
+export function productTemporalFeatures(environment = process.env) {
+  return String(environment.RELAYER_DESKTOP_PROVIDER_RECURSION ?? "").trim() === "0"
+    ? {}
+    : RECURSIVE_TEMPORAL_FEATURES;
 }
 
 export class GraphCompleteRuntimeService {

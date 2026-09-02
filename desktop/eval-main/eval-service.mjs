@@ -121,17 +121,10 @@ export const evalCases = Object.freeze([
   })),
 ]);
 
-const evalAblations = Object.freeze([Object.freeze({
-  id: "graph-search-query-v1",
-  name: "Graph search · query-v1",
-  description: "Run the same graph-memory case with indexing-only baselines and explicit query-v1 search treatments.",
-  testCaseIds: Object.freeze([graphMemoryEvalCaseId]),
-  harnessPairs: Object.freeze([
-    Object.freeze({ provider: "Codex", control: "codex-basic", treatment: "codex-basic-graph-search" }),
-    Object.freeze({ provider: "Claude", control: "claude-basic", treatment: "claude-basic-graph-search" }),
-    Object.freeze({ provider: "Prime Agent", control: "prime-agent-basic", treatment: "prime-agent-basic-graph-search" }),
-  ]),
-})]);
+// Ablation presets pair a search-off control against a search-on treatment. The
+// query-v1 ablation retired once the product harnesses adopted search by default,
+// which left each pair comparing a configuration to itself.
+const evalAblations = Object.freeze([]);
 
 export function resolveEvalCasePrompts(definition, testRunId) {
   if (!definition) throw new Error("Cannot resolve prompts for an unknown Eval case.");

@@ -35,7 +35,6 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "fixture-task-system.yaml"),
     ...(graphSearchQualified ? [join(harnessDirectory, "fixture-graph-memory.yaml")] : []),
     join(harnessDirectory, "codex-basic.yaml"),
-    ...(graphSearchQualified ? [join(harnessDirectory, "codex-basic-graph-search.yaml")] : []),
     join(harnessDirectory, "codex-basic-high.yaml"),
     join(harnessDirectory, "codex-eval-complete-disabled.yaml"),
     join(harnessDirectory, "codex-eval-complete-enabled.yaml"),
@@ -48,14 +47,12 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "codex-layered-navigation-luna.yaml"),
     join(harnessDirectory, "codex-multi-agent-layered-navigation.yaml"),
     join(harnessDirectory, "claude-basic.yaml"),
-    ...(graphSearchQualified ? [join(harnessDirectory, "claude-basic-graph-search.yaml")] : []),
     join(harnessDirectory, "codex-layered-personal-presentation-v0.yaml"),
     join(harnessDirectory, "codex-layered-personal-presentation-v1.yaml"),
   ];
   if (!isPackaged && packageAvailable(primeAgentPackage)) {
     paths.push(
       join(harnessDirectory, "prime-agent-basic.yaml"),
-      ...(graphSearchQualified ? [join(harnessDirectory, "prime-agent-basic-graph-search.yaml")] : []),
       join(harnessDirectory, "prime-agent-deep.yaml"),
       join(harnessDirectory, "prime-agent-layered-navigation-luna.yaml"),
     );

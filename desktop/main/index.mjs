@@ -30,7 +30,7 @@ import { inspectCodexBrowserMcpRuntime } from "./services/codex-browser-mcp-runt
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { installElectronMainErrorAdapter } from "./services/electron-main-error-adapter.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
-import { GraphCompleteRuntimeService, developerTemporalFeatures } from "./services/graphcomplete-runtime.mjs";
+import { GraphCompleteRuntimeService, productTemporalFeatures } from "./services/graphcomplete-runtime.mjs";
 import {
   inspectPrimeAgentRuntime,
   PRIME_AGENT_ASSET_SHA256,
@@ -203,13 +203,13 @@ if (primaryInstance) {
       "claude-basic",
       ...(primeAgentRuntime.available ? primeAgentRuntime.configurationNames : []),
     ])].map((name) => join(harnessDirectory, `${name}.yaml`)),
-    unavailableConfigurations: primeAgentRuntime.available ? [] : ["prime-agent-basic", "prime-agent-deep"].map((name) => ({
+    unavailableConfigurations: primeAgentRuntime.available ? [] : ["prime-agent-basic"].map((name) => ({
       name,
       reason: { code: primeAgentRuntime.code, message: primeAgentRuntime.message },
       diagnostics: primeAgentRuntime.diagnostics,
     })),
     codexBasicClientModuleUrl: graphClientModuleUrl,
-    temporalFeatures: developerTemporalFeatures(),
+    temporalFeatures: productTemporalFeatures(),
     ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
     acquireProviderExecution: (providerId) => {
       if (!providerSetup) throw new Error("Provider execution broker is not ready.");

@@ -112,7 +112,7 @@ describe("Prime Agent packaged runtime", () => {
       kind: "python",
       python: { importName: "browser" },
     });
-    for (const name of ["prime-agent-basic.yaml", "prime-agent-deep.yaml"]) {
+    for (const name of ["prime-agent-basic.yaml"]) {
       const configuration = await readFile(join(repositoryRoot, "harnesses", name), "utf8");
       expect(configuration).toContain("ask:\n    boundary: workspace-write@1");
       expect(configuration).toContain("auto:\n    boundary: workspace-write@1");
@@ -159,7 +159,7 @@ describe("Prime Agent packaged runtime", () => {
     })).resolves.toMatchObject({
       available: true,
       sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
-      configurationNames: ["prime-agent-basic", "prime-agent-deep"],
+      configurationNames: ["prime-agent-basic"],
     });
 
     const rejected = await inspectPrimeAgentRuntime({
@@ -286,7 +286,7 @@ describe("Prime Agent packaged runtime", () => {
       await mkdir(join(resources, "harnesses"), { recursive: true });
       await mkdir(join(resources, "python", "relayer-graph", "src"), { recursive: true });
       await cp(manifestPath, join(resources, "prime-agent", "manifest.json"));
-      for (const name of ["prime-agent-basic.yaml", "prime-agent-deep.yaml"]) {
+      for (const name of ["prime-agent-basic.yaml"]) {
         await cp(join(repositoryRoot, "harnesses", name), join(resources, "harnesses", name));
       }
       await cp(
@@ -506,7 +506,7 @@ describe("Prime Agent packaged runtime", () => {
         ),
       })).resolves.toMatchObject({
         available: true,
-        configurationNames: ["prime-agent-basic", "prime-agent-deep"],
+        configurationNames: ["prime-agent-basic"],
       });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -543,7 +543,7 @@ describe("Prime Agent packaged runtime", () => {
     });
     const resources = config.extraResources.map(({ to }) => to);
     expect(resources).toContain("harnesses/prime-agent-basic.yaml");
-    expect(resources).toContain("harnesses/prime-agent-deep.yaml");
+    expect(resources).not.toContain("harnesses/prime-agent-deep.yaml");
     expect(resources).not.toContain("harnesses/prime-agent-layered-navigation-luna.yaml");
     expect(resources).toContain("python/relayer-graph/src/relayer_graph");
     expect(resources).toContain("prime-agent/manifest.json");
