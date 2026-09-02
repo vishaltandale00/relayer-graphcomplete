@@ -1415,6 +1415,14 @@ const PERSONAL_PRESENTATION_MANIFESTS: Readonly<Record<string, PersonalPresentat
       { clientKey: "decision-useful-center", kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "The user prefers central layers that are immediately decision-useful. Foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations." },
       { clientKey: "adaptive-progressive-disclosure", kind: "presentation-preference", icon: "layers", title: "Adaptive progressive disclosure", detail: "Reveal additional information according to its value to understanding. Keep information central when it is necessary to understand the response without navigating. Use graph actions when supporting evidence, implementation detail, or secondary context would materially improve understanding or help the user proceed. Do not add branches that merely repeat or decorate the central explanation." },
       { clientKey: "visible-working-state", kind: "presentation-preference", icon: "workflow", title: "Visible working state", detail: "For work that will not finish immediately, prefer establishing a useful current early and advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress even when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates." },
+    ]),
+  }),
+  "personal-presentation-v3": Object.freeze({
+    text: "Personal presentation V3",
+    nodes: Object.freeze([
+      { clientKey: "decision-useful-center", kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "The user prefers central layers that are immediately decision-useful. Foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations." },
+      { clientKey: "adaptive-progressive-disclosure", kind: "presentation-preference", icon: "layers", title: "Adaptive progressive disclosure", detail: "Reveal additional information according to its value to understanding. Keep information central when it is necessary to understand the response without navigating. Use graph actions when supporting evidence, implementation detail, or secondary context would materially improve understanding or help the user proceed. Do not add branches that merely repeat or decorate the central explanation." },
+      { clientKey: "visible-working-state", kind: "presentation-preference", icon: "workflow", title: "Visible working state", detail: "For work that will not finish immediately, prefer establishing a useful current early and advancing it often enough for the user to follow and steer the work. Exercise judgment so updates remain useful rather than noisy. Then return an integrated final response. Use separate semantic work scopes when available and useful, but preserve visible progress even when all work remains inside one completion. Do not expose private scratch reasoning or create decorative progress updates." },
       { clientKey: "authored-visual-node-details", kind: "presentation-preference", icon: "layout-template", title: "Authored visual Node Details", detail: "When a node's detail benefits from visual presentation, author a compiled visual Node Detail through the node detail authoring API instead of plain Markdown: structured HTML with authored CSS layout, placed visual assets, and capability controls such as links, invokes, inputs, expands, and references. Keep the authored page self-contained, keyboard operable, and accessible, and let authored actions live inside the detail page rather than a separate action tray." },
     ]),
   }),
@@ -1445,7 +1453,8 @@ async function ensurePersonalPresentationVersion(graphUrl: string, controlToken:
   }
   const placementsByCount = {
     2: [[0.25, 0.5], [0.75, 0.5]] as const,
-    4: [[0.5, 0.15], [0.2, 0.75], [0.5, 0.8], [0.8, 0.75]] as const,
+    3: [[0.5, 0.2], [0.25, 0.75], [0.75, 0.75]] as const,
+    4: [[0.5, 0.2], [0.25, 0.75], [0.75, 0.75], [0.9, 0.35]] as const,
   } as const;
   const placements = (placementsByCount[submitted.length as keyof typeof placementsByCount] ?? placementsByCount[4]);
   const layout = new LayerLayoutObject(submitted.map((node, index) => {

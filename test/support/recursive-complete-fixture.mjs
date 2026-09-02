@@ -4,6 +4,8 @@ import {
   NodeObject,
   NodePlacementObject,
   RelayerGraphClient,
+  css,
+  html,
 } from "@relayer/graph-client";
 import { nativeExecutionHandle } from "@relayer/harness-host";
 
@@ -65,6 +67,16 @@ async function runRecursiveFixture(context, signal, observed, brokerUrl) {
   const current = await graph.getCurrent();
   observed.parentStartRevision = current.headRevision;
   const plan = new NodeObject("box", "Plan", "Split the work in half.", "concept", "plan");
+  const visualNodeDetailsRequested = context.personalPresentation?.graph.layers.some(({ nodes }) => (
+    nodes.some(({ title }) => title === "Authored visual Node Details")
+  )) === true;
+  if (visualNodeDetailsRequested) {
+    plan.detailAuthoring.setComponent(
+      "plan-summary",
+      html`<section><h2>Plan</h2><p>Split the work in half.</p></section>`,
+      css`section { display: grid; gap: 0.5rem; } h2, p { margin: 0; }`,
+    );
+  }
   await graph.submitNode(plan);
   const planLayer = new LayerObject([plan], [], centered(plan), "plan-layer");
   await graph.submitLayer(planLayer);

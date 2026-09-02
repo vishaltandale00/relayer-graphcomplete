@@ -274,21 +274,22 @@ npm run eval-app:dev
 
 The default `fixture-task-system` harness is the safe deterministic path: it exercises the real Rust app server, Node harness host, graph client, product workspace, and Eval UI without credentials or inference. `npm run eval-app:dev` still needs the native Rust/Ladybug build prerequisites below because the application is built before Electron starts. `codex-basic`, `codex-basic-high`, and the other provider-backed configurations are paid live-Eval paths; selecting one and approving a run is explicit, and live runs are excluded from `npm run check`. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
 
-The dashboard also exposes the non-default **Visible working state · recursive
-comparison** case and its required Codex pair:
+The dashboard also exposes the non-default **Visual Node Details · recursive
+baseline** case and its required Codex pair:
 
-- `codex-eval-complete-disabled`
-- `codex-eval-complete-enabled`
+- `codex-eval-visual-node-details-control`
+- `codex-eval-visual-node-details-treatment`
 
-Selecting that case isolates and selects both configurations. It is deliberately a
-combined product-experience comparison, not an isolated causal measurement: the off
-cell pins V1 and disables agent-authored Complete, while the on cell pins V2 and enables
-it. They hold the Codex harness implementation, provider/model settings, permissions,
-natural task, and temporal runtime substrate fixed. The execution dossier
+Selecting that case isolates and selects both configurations. Both cells retain the
+established recursive Complete authority, graph pointers and navigation, and input
+actions. The control pins the pre-#404 V2 presentation. The treatment pins V3, which
+adds only the authored visual Node Detail preference. They hold the Codex harness
+implementation, provider/model settings, permissions, natural task, and temporal runtime
+substrate fixed. The execution dossier
 separates semantic children from human turns and exposes each child's source
 action, attached provider execution, successful settlement, terminal projection,
 and candidate trace. The deterministic fixture proves this comparison path without
-inference. A live run starts two Codex subscription root executions and the enabled
+inference. A live run starts two Codex subscription root executions and either recursive
 root may start additional agent-authored child execution. That scope must be confirmed
 explicitly in the dashboard; the treatment is pinned to the control's resolved
 provider and model before it starts.

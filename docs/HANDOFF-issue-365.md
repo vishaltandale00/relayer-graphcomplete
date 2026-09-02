@@ -14,10 +14,10 @@ The next operator is working against the **Relayer Eval desktop app** (`npm run 
 - **F2** (persistence revalidation): renderer is authority; persistence does not re-check markup
 - **F3, F4, F5, F6**: engineering fixes, all committed (stable client-key memoization, pre-clone archive limits, filename normalization, staging cleanup)
 - **Live harness configs chosen**: fixture + three provider-backed variants
-- **Preference version**: extended `personal-presentation-v2` — fourth preference "Authored visual Node Details"
+- **Preference version**: preserved the established V2 baseline and added V3 with the fourth preference "Authored visual Node Details"
 
 ## What the next operator should rely on
-1. **Case**: `empty-project.recursive-complete.comparison` pairs `codex-eval-complete-disabled` (v1) vs `codex-eval-complete-enabled` (v2). The v2 preference steers the agent toward authoring visual Node Details with the DSL.
+1. **Case**: `empty-project.recursive-complete.comparison` pairs `codex-eval-visual-node-details-control` (V2 baseline) with `codex-eval-visual-node-details-treatment` (V3). Both retain recursive Complete; only V3 adds the authored visual Node Detail preference.
 2. **Desktop Eval path**: `npm run eval-app:dev`, select that case, approve live inference, let it run through the Electron app with its own app server (which correctly attaches preference version at completion-prep time).
 3. **What to test**: the agent should author `NodeDetailAuthoring.setComponent(...)` — structured HTML/CSS, placed visual assets (per #364), capability controls — and the constrained runtime should mount it (per #366). Issue #371 intact.
 
@@ -27,5 +27,5 @@ The next operator is working against the **Relayer Eval desktop app** (`npm run 
 
 ## Do these
 - Keep `crates/relayer-app-server/src/runtime.rs` — the v2 preference definition and materialization tests.
-- Keep `harnesses/codex-layered-personal-presentation-v2.yaml` + registered in `configuration-paths.mjs`.
+- Keep the V2 baseline plus the V2/V3 visual Node Detail Eval pair registered in `configuration-paths.mjs`.
 - Keep `#365` and `#366` in full.

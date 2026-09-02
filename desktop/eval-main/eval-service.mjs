@@ -562,6 +562,31 @@ function sameJson(left, right) {
   return canonicalJson(left) === canonicalJson(right);
 }
 
+export function visualNodeDetailCheck(output, personalPresentationVersion) {
+  const authoredNodes = output.rootLayer.nodes.filter((node) => node.authoredDetail !== undefined);
+  const compiledNodes = authoredNodes.filter(({ authoredDetail }) => (
+    authoredDetail?.version === 1
+    && Array.isArray(authoredDetail.components)
+    && authoredDetail.components.length > 0
+    && authoredDetail.components.every((component) => (
+      typeof component?.id === "string" && component.id !== ""
+      && typeof component?.html === "string" && component.html !== ""
+      && typeof component?.css === "string"
+    ))
+    && Array.isArray(authoredDetail.mounts)
+    && Array.isArray(authoredDetail.assets)
+    && /^[a-f0-9]{64}$/.test(authoredDetail.integritySha256 || "")
+  ));
+  const treatment = personalPresentationVersion === "personal-presentation-v3";
+  return {
+    name: "visual-node-detail:authored-output",
+    passed: treatment ? compiledNodes.length > 0 : authoredNodes.length === 0,
+    detail: treatment
+      ? `The V3 treatment must accept at least one compiled visual Node Detail; observed ${compiledNodes.length} valid package${compiledNodes.length === 1 ? "" : "s"} across ${authoredNodes.length} authored node${authoredNodes.length === 1 ? "" : "s"}.`
+      : `The pre-#404 V2 control must retain plain node details; observed ${authoredNodes.length} authored visual Node Detail${authoredNodes.length === 1 ? "" : "s"}.`,
+  };
+}
+
 export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = true } = {}) {
   const enabled = execution.harnessConfiguration?.complete?.agentAuthored === true;
   const root = execution.turns[0];
@@ -694,6 +719,8 @@ export async function validateCandidateTrace(directory, descriptor, interaction,
     [manifest?.traceId === descriptor.traceId, "manifest-trace"],
     [manifest?.productInteractionId === interaction.id, "product-interaction"],
     [manifest?.interactionNodeId === interaction.graphNodeId, "graph-completion"],
+    [(manifest?.personalPresentationVersionId ?? null) === (descriptor.personalPresentationVersionId ?? null), "personal-presentation-version-id"],
+    [(manifest?.personalPresentationVersionKey ?? null) === (descriptor.personalPresentationVersionKey ?? null), "personal-presentation-version-key"],
     [Object.entries(correlation).every(([key, value]) => manifest?.correlation?.[key] === value), "correlation"],
     [eventsArtifact?.ref === "events.jsonl", "event-ref"],
     [eventsArtifact?.sha256 === eventsSha256, "event-sha"],
@@ -1385,12 +1412,12 @@ export class EvalService {
         this.configurations.get(name)
       ));
       if (pair.some((configuration) => configuration === undefined)
-        || pair[0]?.complete?.agentAuthored !== false
+        || pair[0]?.complete?.agentAuthored !== true
         || pair[1]?.complete?.agentAuthored !== true
-        || pair[0]?.settings?.personalPresentationVersion !== "personal-presentation-v1"
-        || pair[1]?.settings?.personalPresentationVersion !== "personal-presentation-v2"
+        || pair[0]?.settings?.personalPresentationVersion !== "personal-presentation-v2"
+        || pair[1]?.settings?.personalPresentationVersion !== "personal-presentation-v3"
         || combinedComparisonConfigurationIdentity(pair[0]) !== combinedComparisonConfigurationIdentity(pair[1])) {
-        throw new Error("The visible-working-state recursive configurations differ outside their approved V1/off and V2/on experience pair.");
+        throw new Error("The visual Node Detail configurations differ outside their approved V2 control and V3 treatment presentation versions.");
       }
       const liveProviderExecutions = pair.filter(({ implementation }) => implementation !== "fixture.task-system").length;
       if (liveProviderExecutions > 0 && (
@@ -1469,7 +1496,7 @@ export class EvalService {
         ? copy(selection?.liveAuthorization || null)
         : null,
       comparison: testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID) ? {
-        kind: "agent-authored-complete-pair",
+        kind: "visual-node-details-pair",
         temporalRuntimeFeatures: copy(RECURSIVE_TEMPORAL_FEATURES),
         controlledFields: [
           "task",
@@ -1479,7 +1506,7 @@ export class EvalService {
           "providerModelSelection",
           "temporalRuntimeFeatures",
         ],
-        variedField: "combined personalPresentationVersion and complete.agentAuthored experience",
+        variedField: "personalPresentationVersion",
         passed: null,
       } : testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID) ? {
         kind: "graph-search-recursion-2x2",
@@ -1983,7 +2010,7 @@ export class EvalService {
       }
       await this.#changed();
     }
-    if (run.comparison?.kind === "agent-authored-complete-pair") {
+    if (run.comparison?.kind === "visual-node-details-pair") {
       this.#finalizeRecursiveComparison(run);
       await this.#changed();
     }
@@ -2004,19 +2031,24 @@ export class EvalService {
     const executions = run.executions.filter(({ testCaseId }) => testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID);
     const [control, treatment] = executions;
     const controlled = executions.length === 2
-      && control?.harnessConfigurationName === "codex-eval-complete-disabled"
-      && treatment?.harnessConfigurationName === "codex-eval-complete-enabled"
+      && control?.harnessConfigurationName === "codex-eval-visual-node-details-control"
+      && treatment?.harnessConfigurationName === "codex-eval-visual-node-details-treatment"
+      && Number.isSafeInteger(control?.turns?.[0]?.personalPresentationVersionId)
+      && Number.isSafeInteger(treatment?.turns?.[0]?.personalPresentationVersionId)
+      && control?.turns?.[0]?.personalPresentationVersionKey === "personal-presentation-v2"
+      && treatment?.turns?.[0]?.personalPresentationVersionKey === "personal-presentation-v3"
+      && control.turns[0].personalPresentationVersionId !== treatment.turns[0].personalPresentationVersionId
       && sameJson(control?.modelResolution, treatment?.modelResolution)
       && sameJson(control?.turns?.map(({ prompt }) => prompt), treatment?.turns?.map(({ prompt }) => prompt))
       && sameJson(control?.turns?.map(({ modelSelection }) => modelSelection), treatment?.turns?.map(({ modelSelection }) => modelSelection))
       && sameJson(control?.turns?.map(({ permissionProfileId }) => permissionProfileId), treatment?.turns?.map(({ permissionProfileId }) => permissionProfileId))
       && sameJson(control?.turns?.map(({ effectivePermissionReceipt }) => effectivePermissionReceipt), treatment?.turns?.map(({ effectivePermissionReceipt }) => effectivePermissionReceipt));
     const check = {
-      name: "agent-authored-complete:controlled-pair",
+      name: "visual-node-details:controlled-pair",
       passed: controlled,
       detail: controlled
-        ? "The exact V1/off and V2/on cells used one pinned provider/model resolution and identical task and permission inputs."
-        : "The combined-experience cells drifted outside their controlled provider, task, or permission inputs.",
+        ? "The exact V2 control and V3 visual-detail treatment recorded distinct attached presentation versions while using one pinned provider/model resolution and identical task and permission inputs."
+        : "The visual-detail cells lacked distinct attached presentation versions or drifted outside their controlled provider, task, or permission inputs.",
     };
     for (const execution of executions) {
       execution.checks.push(copy(check));
@@ -2126,6 +2158,7 @@ export class EvalService {
           : null,
         effectiveExecutionDigest: interaction.effectiveExecutionDigest,
         personalPresentationVersionId: execution.candidateTraceCaptures?.[String(interaction.id)]?.personalPresentationVersionId ?? null,
+        personalPresentationVersionKey: execution.candidateTraceCaptures?.[String(interaction.id)]?.personalPresentationVersionKey ?? null,
         modelSelection: copy(interaction.modelSelection || null),
         effectivePermissionReceipt: copy(interaction.effectivePermissionReceipt),
         status: interaction.completionStatus,
@@ -2194,6 +2227,15 @@ export class EvalService {
               ...check,
               name: `${checkPrefix}:${check.name}`,
             })));
+          }
+          if (definition.requiredChecks?.includes("visual-node-detail")) {
+            turnChecks.push({
+              ...visualNodeDetailCheck(
+                interaction.completionOutput,
+                execution.harnessConfiguration?.settings?.personalPresentationVersion,
+              ),
+              name: `${checkPrefix}:visual-node-detail:authored-output`,
+            });
           }
           if (projectCaseIds.has(definition.id)) {
             try {

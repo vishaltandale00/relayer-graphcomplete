@@ -1,10 +1,9 @@
 export const RECURSIVE_COMPLETE_EVAL_CASE_ID = "empty-project.recursive-complete.comparison";
 
 /**
- * Natural product-planning task for observing visible working state and semantic scopes.
+ * Natural product-planning task for comparing visual Node Detail presentation.
  *
- * The prompt is deliberately demanding without instructing delegation: the enabled
- * treatment passes only when the agent independently decides to create semantic work.
+ * The prompt is deliberately demanding without prescribing the visual-detail API.
  */
 export const RECURSIVE_COMPLETE_EVAL_PROMPT = [
   "You're planning a six-week private beta for Lantern, a fictional macOS desktop agent",
@@ -18,13 +17,13 @@ export const RECURSIVE_COMPLETE_EVAL_PROMPT = [
 
 export const recursiveCompleteEvalCase = Object.freeze({
   id: RECURSIVE_COMPLETE_EVAL_CASE_ID,
-  name: "Visible working state · recursive comparison",
-  description: "Combined experience comparison: V1 without recursive Complete versus V2 with recursive Complete, using the same natural planning task.",
+  name: "Visual Node Details · recursive baseline",
+  description: "Compares the established recursive V2 presentation baseline with V3 visual Node Detail guidance using the same natural planning task.",
   defaultSelected: false,
   requiredHarnessConfigurationNames: Object.freeze([
-    "codex-eval-complete-disabled",
-    "codex-eval-complete-enabled",
+    "codex-eval-visual-node-details-control",
+    "codex-eval-visual-node-details-treatment",
   ]),
   prompts: Object.freeze([RECURSIVE_COMPLETE_EVAL_PROMPT]),
-  requiredChecks: Object.freeze(["agent-authored-complete"]),
+  requiredChecks: Object.freeze(["agent-authored-complete", "visual-node-detail"]),
 });

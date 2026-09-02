@@ -53,6 +53,7 @@ export interface HarnessTraceStartInput {
   readonly interactionNodeId: number;
   readonly productInteractionId?: number;
   readonly personalPresentationVersionId?: number;
+  readonly personalPresentationVersionKey?: string;
   readonly implementation: string;
   readonly configurationName: string;
   readonly support: HarnessTraceSupport;
@@ -442,6 +443,7 @@ class BufferedHarnessTrace implements ActiveHarnessTrace, HarnessTraceSink {
         interactionNodeId: input.interactionNodeId,
         ...(input.productInteractionId === undefined ? {} : { productInteractionId: input.productInteractionId }),
         ...(input.personalPresentationVersionId === undefined ? {} : { personalPresentationVersionId: input.personalPresentationVersionId }),
+        ...(input.personalPresentationVersionKey === undefined ? {} : { personalPresentationVersionKey: input.personalPresentationVersionKey }),
         configurationName: input.configurationName,
       },
     });
@@ -571,6 +573,9 @@ class BufferedHarnessTrace implements ActiveHarnessTrace, HarnessTraceSink {
           ...(this.input.personalPresentationVersionId === undefined ? {} : {
             personalPresentationVersionId: this.input.personalPresentationVersionId,
           }),
+          ...(this.input.personalPresentationVersionKey === undefined ? {} : {
+            personalPresentationVersionKey: this.input.personalPresentationVersionKey,
+          }),
         };
         const manifest: JsonObject = {
           schemaVersion: 1,
@@ -586,6 +591,7 @@ class BufferedHarnessTrace implements ActiveHarnessTrace, HarnessTraceSink {
           interactionNodeId: this.input.interactionNodeId,
           productInteractionId: this.input.productInteractionId ?? null,
           personalPresentationVersionId: this.input.personalPresentationVersionId ?? null,
+          personalPresentationVersionKey: this.input.personalPresentationVersionKey ?? null,
           declaredCoverage: redactTraceData(this.input.support),
           achievedCoverage: redactTraceData(achievedCoverage),
           policy: redactTraceData(this.policy),

@@ -849,6 +849,7 @@ export class HarnessHost {
     }
     const scope = new ActiveHarnessGraphScope(capability);
     const support = session.harness.traceSupport?.() ?? NO_HARNESS_TRACE_SUPPORT;
+    const configuredPersonalPresentationVersion = session.descriptor.configuration.settings.personalPresentationVersion;
     const trace = this.traceStore?.start({
       threadId,
       interactionNodeId,
@@ -856,6 +857,9 @@ export class HarnessHost {
       ...(traceContext?.personalPresentationVersionId === undefined ? {} : {
         personalPresentationVersionId: traceContext.personalPresentationVersionId,
       }),
+      ...(typeof configuredPersonalPresentationVersion === "string" ? {
+        personalPresentationVersionKey: configuredPersonalPresentationVersion,
+      } : {}),
       implementation: session.descriptor.configuration.implementation,
       configurationName: session.descriptor.configuration.name,
       support,

@@ -1,5 +1,5 @@
 schemaVersion: 1
-name: codex-eval-complete-enabled
+name: codex-eval-visual-node-details-control
 implementation: codex.basic
 implementationVersion: 1
 revision: 1

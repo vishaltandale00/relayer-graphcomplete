@@ -31,15 +31,15 @@ describe("Eval dashboard run presentation", () => {
     )).toEqual({
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
-        "codex-eval-complete-disabled",
-        "codex-eval-complete-enabled",
+        "codex-eval-visual-node-details-control",
+        "codex-eval-visual-node-details-treatment",
       ],
     });
     const selection = {
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
-        "codex-eval-complete-disabled",
-        "codex-eval-complete-enabled",
+        "codex-eval-visual-node-details-control",
+        "codex-eval-visual-node-details-treatment",
       ],
       judgeConfigurationName: "deterministic-graph-contract",
     };
