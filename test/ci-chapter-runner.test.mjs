@@ -184,6 +184,18 @@ describe("CI chapter runner", () => {
     ]);
   });
 
+  test("runs Vitest with its configured workers and only the selected files", () => {
+    // Worker policy lives in vitest.config.js; the chapter must not pin it.
+    expect(run("vitest", { mode: "full" })).toEqual([
+      "npx:vitest run",
+      "npm:run test:codex-secret-boundary",
+    ]);
+    writeFileSync(trace, "");
+    expect(
+      run("vitest", { mode: "affected", vitestFiles: ["test/complete.test.ts"] }),
+    ).toEqual(["npx:vitest run test/complete.test.ts"]);
+  });
+
   test("executes the machine-readable authority and prerequisite contract", () => {
     const portfolio = JSON.parse(
       readFileSync(

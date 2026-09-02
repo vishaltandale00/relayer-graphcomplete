@@ -48,14 +48,18 @@ This preserves Issue #360's explicit constraints: fresh selected tests, fail-ope
 
 ## Why the current every-PR command is the wrong unit
 
-The root command is:
+The root command was two invocations when this note was written:
 
 ```sh
 cargo test -p relayer-graph-core --features crash-test-support --test search_index_ordering
 cargo test -p relayer-graph-server --features crash-test-support
 ```
 
-The second invocation is not a crash-only suite. Enabling `crash-test-support` makes six integration-test binaries eligible, but `cargo test -p relayer-graph-server` also executes ordinary crate unit and integration tests. On the observed hosted run it executed:
+It has since been folded into one invocation with the same feature
+configuration, `cargo test -p relayer-graph-core -p relayer-graph-server
+--features crash-test-support`, which compiles both crates once and also runs
+graph-core's other test targets under the feature. The analysis below is
+unchanged by that fold. The second invocation is not a crash-only suite. Enabling `crash-test-support` makes six integration-test binaries eligible, but `cargo test -p relayer-graph-server` also executes ordinary crate unit and integration tests. On the observed hosted run it executed:
 
 - 21 graph-core ordering tests, of which four use injected crash points;
 - 25 graph-server library tests;

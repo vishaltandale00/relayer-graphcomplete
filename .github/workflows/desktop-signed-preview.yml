@@ -33,7 +33,6 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .node-version
-          cache: npm
 
       - name: Verify Node toolchain
         run: node scripts/check-node-version.mjs
@@ -77,13 +76,15 @@ jobs:
           export RELAYER_DESKTOP_TAG_MESSAGE="$(git for-each-ref --format='%(contents)' "$GITHUB_REF")"
           node desktop/release/preview-candidate-run.mjs
 
-      - name: Install locked dependencies
+      # Pushes to main run the full verification portfolio in ci.yml, so the
+      # commit's successful `check` context is `npm run check` and
+      # `npm run build` executed freshly on this exact source. Requiring that
+      # run replaces repeating the serial script on a cold runner here.
+      - name: Require the main CI check for this commit
         if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: npm ci
-
-      - name: Run repository checks
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: npm run check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node desktop/release/main-ci-check.mjs
 
   package-macos:
     name: Sign and notarize ${{ matrix.target }} Preview

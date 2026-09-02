@@ -784,7 +784,12 @@ async function waitForCompletedRun(evalService, runId) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const run = evalService.getRun(runId);
-    if (!["queued", "running"].includes(run.status) && typeof run.bundleRef === "string") return run;
+    if (!["queued", "running"].includes(run.status) && typeof run.bundleRef === "string") {
+      // The terminal status is visible before its state write finishes; drain
+      // it so cleanup never removes the data directory mid-write.
+      await evalService.persistTail;
+      return run;
+    }
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
   throw new Error("Eval run did not finish in time.");
