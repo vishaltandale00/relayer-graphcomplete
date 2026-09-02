@@ -29,7 +29,11 @@ export function validateVerificationPortfolio(repository, manifest) {
   for (const [chapterName, chapter] of Object.entries(
     manifest.chapters ?? {},
   )) {
-    if (typeof chapter.job !== "string" || chapter.job.length === 0) {
+    // A chapter may run in more than one workflow job (both Vitest shards
+    // execute the prerequisite chapter); model that as a job list.
+    const jobs =
+      typeof chapter.job === "string" ? [chapter.job] : (chapter.job ?? []);
+    if (jobs.length === 0 || jobs.some((job) => typeof job !== "string" || job.length === 0)) {
       failures.push(`${chapterName}: missing workflow job owner`);
     }
     for (const role of ["authorities", "prerequisites"]) {
@@ -47,9 +51,12 @@ export function validateVerificationPortfolio(repository, manifest) {
       const chapters = authorityChapters.get(id) ?? [];
       chapters.push(chapterName);
       authorityChapters.set(id, chapters);
-      if (manifest.commands?.[id]?.owner !== chapter.job) {
+      if (!jobs.includes(manifest.commands?.[id]?.owner)) {
+        const owner = manifest.commands?.[id]?.owner ?? "missing";
         failures.push(
-          `${id}: declared owner ${manifest.commands?.[id]?.owner ?? "missing"} does not match ${chapterName} job ${chapter.job}`,
+          jobs.length === 1
+            ? `${id}: declared owner ${owner} does not match ${chapterName} job ${jobs[0]}`
+            : `${id}: declared owner ${owner} does not match ${chapterName} jobs ${jobs.join(", ")}`,
         );
       }
     }

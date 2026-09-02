@@ -13,16 +13,26 @@ versioned affected-module plan. The integration branch pull request back to
 `main` runs the full portfolio. The versioned
 `scripts/ci/verification-portfolio.v1.json` manifest assigns every command in
 the repository-required `npm run check` and `npm run build` scripts to exactly
-one authoritative CI job. A deterministic test compares the manifest with the
-current package scripts and executes every declared chapter against the same
-machine-readable authority/prerequisite contract. Adding, removing, reordering,
-or moving a required command to an unrelated job therefore fails before the
-portfolio can silently diverge. Vitest may repeat package compilation as an
-explicit non-authoritative prerequisite; that repetition prepares current
-runtime bytes but does not create a second verification owner. CI executes the
-authorities in parallel instead of rerunning both complete scripts in a second serial job.
-The exact scripts remain the required local pre-commit gates. Merge remains
-manual.
+one authoritative chapter, and each chapter names the workflow job or jobs
+that execute it. A chapter may run in more than one job — the runtime build
+also runs inside the Vitest job as a fail-open fallback — without creating a
+second authoritative owner. A deterministic test compares the manifest with the current package
+scripts and executes every declared chapter against the same machine-readable
+authority/prerequisite contract. Adding, removing, reordering, or moving a
+required command to an unrelated job therefore fails before the portfolio can
+silently diverge. Vitest may repeat package compilation as an explicit
+non-authoritative prerequisite; that repetition prepares current runtime
+bytes but does not create a second verification owner. CI executes the
+authorities in parallel instead of rerunning both complete scripts in a
+second serial job. The exact scripts remain the required local pre-commit
+gates. Merge remains manual.
+
+Quick deterministic checks no longer gate the parallel chapter and lane
+jobs: every chapter starts as soon as the plan is ready, and the quick job
+fails the required `check` aggregate on its own. A formatting failure
+therefore no longer short-circuits the Rust spend; the accepted trade buys
+the quick-job duration back on every run. Cache saves remain gated on their
+own success conditions, never on quick.
 
 Tests are always invoked for the current source snapshot. Cache entries contain
 dependency and compilation artifacts only; they are untrusted acceleration and
@@ -57,7 +67,14 @@ cache namespace so incompatible full-debug objects cannot be reused. Each lane
 records text and JSON sccache statistics as a non-gating, 14-day workflow
 artifact. The separate Cargo registry/git archive excludes `target/` and remains
 a trusted-branch-only writer. The platform packaging
-archive retains its existing restore-on-PR, write-on-branch behavior.
+archive retains its restore-on-PR, write-on-branch behavior with a
+`Cargo.lock`-keyed exact key and a versioned prefix fallback. The prefix
+restore already hands a Rust PR the newest available `target/`, and Cargo's
+own fingerprinting rebuilds only the drifted crates, so binding the full
+Rust input digest would add no warmth: it would only miss more often and
+re-save multi-gigabyte entries on every Rust push, churning the shared
+10 GB cache budget against the Ladybug, runtime, and dependency entries the
+other levers depend on.
 
 The parallel namespace is a staged canary until a real changed-head pull request
 and its integrated push demonstrate compiler-cache hits, lower p95 Rust wall
@@ -70,19 +87,26 @@ their presence is not a verification claim. A cache or telemetry failure must
 not make the stable required `check` fail when the same source compiles and
 tests successfully without acceleration.
 
-The Ladybug native library is built once per run by the `Prebuilt Ladybug
-native library` job whenever any Rust lane runs. It compiles the pinned
+The Ladybug native library is built by the `Prebuilt Ladybug native
+library` job only when the trusted bundle cache misses. The plan job performs
+a lookup-only restore against the bundle key and publishes whether the bundle
+exists; warm runs skip the prebuilt job entirely and each Rust lane restores
+the bundle straight from the Actions cache, while cold runs build once,
+upload a one-day artifact, and the lanes download it. It compiles the pinned
 bundled source (`cargo build -p lbug`), strips debug info from the static
 archive, and packages the library with the headers the external-link path
-needs. The bundle is uploaded as a one-day artifact and saved to the Actions
-cache on trusted pushes with a key over the runner platform, rustc release,
-and `Cargo.lock` digest. Each Rust lane downloads the bundle and runs
-`scripts/ci/lbug-artifact.mjs verify`, which re-checks the platform, rustc
-release, `Cargo.lock` digest, pinned lbug version, and the library SHA-256
-before exporting `LBUG_LIBRARY_DIR`/`LBUG_INCLUDE_DIR`. A missing or rejected
-bundle fails open to the in-lane source build, and the lanes keep running on
-their own source builds even if the producing job fails: their gates re-derive
-from the plan and quick results, never from the acceleration job. The bundle
+needs. The bundle is saved to the Actions cache on trusted pushes and on
+same-repository pull requests, matching the sccache trust model, with a key
+over the runner platform, rustc release, and `Cargo.lock` digest; a
+`Cargo.lock` bump therefore pays the bundle build once per PR instead of on
+every push to the PR, and fork pull requests never save. Each Rust lane runs
+`scripts/ci/lbug-artifact.mjs verify` on whichever path supplied the bundle,
+which re-checks the platform, rustc release, `Cargo.lock` digest, pinned
+lbug version, and the library SHA-256 before exporting
+`LBUG_LIBRARY_DIR`/`LBUG_INCLUDE_DIR`. A missing or rejected bundle fails
+open to the in-lane source build, and the lanes keep running on their own
+source builds even if the producing job fails: their gates re-derive from
+the plan results, never from the acceleration job. The bundle
 records the commit that built it for provenance, but equality keys on the
 pinned source, the resolved lbug feature set, and the toolchain, because the
 bundled source cannot change without a `Cargo.lock` change. The manifest also
@@ -94,14 +118,49 @@ source build pays a cold CMake compile until it re-stores them. Tests still
 compile and run freshly against whichever library they link; the bundle is
 acceleration, never evidence.
 
+Vitest worker policy lives in `vitest.config.js`, not in the chapter
+runner: the isolated project runs with file-level workers and the
+process-bound files run one at a time after it. The chapter must not pin
+`--maxWorkers`, and a deterministic test enforces that. Sharding the
+portfolio across two runners was measured against this arrangement and lost
+— a single parallel runner finished the full portfolio in 1.9 minutes
+against 2.7 for a two-runner serial split, at half the runner cost — so the
+portfolio stays on one runner and the parallelism stays in the config.
+
 The selected default-feature `relayer-app-server` and
-`relayer-graph-server` binaries are built once in the runtime lane. Its workflow
-artifact is retained for one day and binds the exact workflow commit, runner
-platform and architecture, Rust release, `Cargo.lock` digest, Cargo profile,
-feature set, binary inventory, and per-binary SHA-256 digest. Vitest verifies
-all fields and installs only those authenticated bytes into `target/debug`.
-This removes independent Vitest Rust compilation without caching any test
-result; every mapped Vitest test still runs freshly.
+`relayer-graph-server` binaries are built once in the runtime lane when the
+trusted runtime cache misses. The sealed bundle binds the Rust input digest
+(over `crates/`, `Cargo.toml`, `Cargo.lock`, and `.cargo/`), runner platform
+and architecture, Rust release, `Cargo.lock` digest, Cargo profile, feature
+set, binary inventory, and per-binary SHA-256 digest; the commit that built
+it is recorded for provenance only, mirroring the Ladybug bundle. The plan
+job performs a lookup-only restore against that digest, and on a hit the
+runtime lane is skipped and the Vitest jobs restore the sealed bundle
+directly from the Actions cache; only trusted `main` pushes save it. On a
+miss the lane builds, uploads a one-day workflow artifact, and the Vitest
+jobs download it. The cache key binds the package set as well as the
+digest. Trusted bundles are seeded only by full-mode main pushes, so the
+key carries the full-portfolio package constant for every plan — keying on
+a consuming plan's own subset would miss the seeded entry structurally —
+and verify additionally asserts the bundle covers the consuming plan's
+`runtimeRustPackages`, which is the lock that makes restoring a superset
+bundle safe for narrow plans. Both paths verify
+every identity field through `scripts/ci/runtime-artifact.mjs verify` and
+install only those authenticated bytes into `target/debug`; a failed restore
+or verification fails open to an in-lane fresh build so acceleration trouble
+never fails the fresh chapters. That fallback rebuilds with the runtime
+lane's compilation inputs — the trusted Ladybug bundle (cache first, the
+prebuilt artifact second) and the Cargo dependency archive — instead of
+paying a cold CMake floor; the build itself is fresh verification, so a
+failed fallback build fails the chapter the same way a failed runtime lane
+would. This removes independent Vitest Rust compilation without caching any
+test result; every mapped Vitest test still runs freshly. Whenever the
+trusted cache covers the current Rust inputs — the common case for non-Rust
+pull requests — no Rust lane enters the path at all: those runs narrow to
+plan, quick, Vitest, any other selected non-Rust chapters, and the check
+aggregate. On a miss the runtime lane builds fresh and seeds the cache once,
+and Vitest still declares it in `needs` so a failed fresh build stays
+visible.
 
 The Clippy, default-test, and runtime lanes append `--timings` to their
 direct Cargo invocations when the workflow gives them a
@@ -168,22 +227,3 @@ contract tests, so it selects the Rust closure of `relayer-graph-core`.
 `docs/graph-query-v1-errors.json` is the source of the generated
 query-error code and the Python client contract, so it selects the
 `@relayer/graph-client` workspace closure and the Python chapter.
-
-## Desktop candidate validation
-
-The manual `Desktop Signed Preview Candidates` workflow does not repeat
-`npm run check` on a cold runner. Its validate job runs
-`desktop/release/main-ci-check.mjs`, which requires a completed, successful
-`push` run of the `CI` workflow on `main` for the exact candidate commit and
-one successful `check` job in that run's latest attempt. Pushes to `main`
-always select the full portfolio, and the portfolio manifest assigns every
-`npm run check` and `npm run build` command to one lane, so that run executed
-every required command against the same source snapshot. Two differences from
-the old serial job are accepted: the Rust lanes link the prebuilt Ladybug
-bundle built from the same pinned source instead of compiling it again, and a
-re-run of failed jobs keeps earlier-attempt results for lanes that already
-passed on that commit. The equivalence rests on the commit's own `CI`
-workflow and manifest, the same trust the package scripts already carry. A
-commit whose `main` run is still in progress or failed cannot become a signed
-candidate; rerun the `main` workflow rather than weakening the candidate gate.
-Tag pushes never reran repository checks and are unchanged.

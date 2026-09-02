@@ -19,9 +19,16 @@ function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-function assertIdentity({ sourceCommit, platform, rustcRelease }) {
-  if (!/^[0-9a-f]{40}$/.test(sourceCommit))
+function assertProvenance(sourceCommit) {
+  if (!/^[0-9a-f]{40}$/.test(sourceCommit ?? ""))
     throw new Error("source commit must be a lowercase 40-character SHA");
+}
+
+function assertIdentity({ rustInputDigest, platform, rustcRelease }) {
+  if (!/^[0-9a-f]{64}$/.test(rustInputDigest ?? ""))
+    throw new Error(
+      "Rust input digest must be a lowercase 64-character SHA-256",
+    );
   if (!platform) throw new Error("platform is required");
   if (!rustcRelease) throw new Error("rustc release is required");
 }
@@ -31,12 +38,14 @@ export function createRuntimeArtifact({
   targetDirectory,
   artifactDirectory,
   sourceCommit,
+  rustInputDigest,
   platform,
   rustcRelease,
   cargoProfile = "debug",
   packages,
 }) {
-  assertIdentity({ sourceCommit, platform, rustcRelease });
+  assertProvenance(sourceCommit);
+  assertIdentity({ rustInputDigest, platform, rustcRelease });
   const selectedPackages = [...new Set(packages)].sort();
   if (selectedPackages.length === 0)
     throw new Error("at least one runtime package is required");
@@ -55,6 +64,12 @@ export function createRuntimeArtifact({
   });
   const manifest = {
     version: 1,
+    // The digest over crates/, Cargo.toml, Cargo.lock, and .cargo/ is the
+    // identity binding: the binaries are fully determined by those inputs,
+    // the toolchain, the platform, and the profile. The commit that produced
+    // the artifact is recorded for provenance only, mirroring the Ladybug
+    // bundle.
+    rustInputDigest,
     sourceCommit,
     platform,
     rustcRelease,
@@ -74,18 +89,19 @@ export function verifyRuntimeArtifact({
   repository,
   artifactDirectory,
   installDirectory,
-  sourceCommit,
+  rustInputDigest,
   platform,
   rustcRelease,
   cargoProfile = "debug",
+  expectedPackages,
 }) {
-  assertIdentity({ sourceCommit, platform, rustcRelease });
+  assertIdentity({ rustInputDigest, platform, rustcRelease });
   const manifest = JSON.parse(
     readFileSync(join(artifactDirectory, "manifest.json"), "utf8"),
   );
   const expectedIdentity = {
     version: 1,
-    sourceCommit,
+    rustInputDigest,
     platform,
     rustcRelease,
     cargoLockSha256: sha256(join(repository, "Cargo.lock")),
@@ -98,6 +114,21 @@ export function verifyRuntimeArtifact({
   }
   if (!Array.isArray(manifest.binaries) || manifest.binaries.length === 0) {
     throw new Error("artifact contains no binaries");
+  }
+  // Coverage, not equality: a bundle sealing extra binaries is harmless, but
+  // one missing a binary the consuming plan requires would leave the Vitest
+  // chapters without it. The cache key binds the package set too; this check
+  // is the second lock against an under-covering bundle.
+  if (Array.isArray(expectedPackages) && expectedPackages.length > 0) {
+    const provided = new Set(manifest.binaries.map((binary) => binary.name));
+    const missing = expectedPackages.filter(
+      (packageName) => !provided.has(packageName),
+    );
+    if (missing.length > 0) {
+      throw new Error(
+        `artifact does not cover required runtime packages: ${missing.join(", ")}`,
+      );
+    }
   }
   for (const binary of manifest.binaries) {
     if (basename(binary.name) !== binary.name)
@@ -137,6 +168,8 @@ function parseArguments(argv) {
     else if (argument === "--artifact-dir") options.artifactDirectory = value;
     else if (argument === "--install-dir") options.installDirectory = value;
     else if (argument === "--source-commit") options.sourceCommit = value;
+    else if (argument === "--rust-input-digest")
+      options.rustInputDigest = value;
     else if (argument === "--platform") options.platform = value;
     else if (argument === "--rustc-release") options.rustcRelease = value;
     else if (argument === "--cargo-profile") options.cargoProfile = value;
@@ -160,7 +193,13 @@ function parseArguments(argv) {
 function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.mode === "create") createRuntimeArtifact(options);
-  else if (options.mode === "verify") verifyRuntimeArtifact(options);
+  else if (options.mode === "verify") {
+    if (options.planJson) {
+      options.expectedPackages = JSON.parse(options.planJson)
+        .runtimeRustPackages;
+    }
+    verifyRuntimeArtifact(options);
+  }
   else
     throw new Error(
       `Unsupported runtime artifact mode: ${options.mode ?? "missing"}`,

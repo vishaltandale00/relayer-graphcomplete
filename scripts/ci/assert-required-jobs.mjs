@@ -14,10 +14,13 @@ export function evaluateRequiredJobs(plan, results) {
   return { ok: failures.length === 0, failures };
 }
 
-export function evaluateRustJobs(plan, results) {
+export function evaluateRustJobs(plan, results, options = {}) {
   const required = ["rust-clippy", "rust-tests"];
   if (plan.rustCrash) required.push("rust-crash");
-  if ((plan.runtimeRustPackages ?? []).length > 0)
+  // A trusted runtime bundle restored from the digest cache replaces the
+  // runtime lane; the Vitest jobs verify and install those bytes, so the
+  // aggregate must not demand the skipped lane.
+  if ((plan.runtimeRustPackages ?? []).length > 0 && !options.runtimeCacheHit)
     required.push("rust-runtime");
   const failures = required
     .filter((job) => results[job] !== "success")
@@ -61,6 +64,7 @@ function main() {
         Object.fromEntries(
           Object.entries(needs).map(([job, value]) => [job, value.result]),
         ),
+        { runtimeCacheHit: process.env.CI_RUNTIME_CACHE_HIT === "true" },
       );
     } catch {
       evaluation = { ok: false, failures: ["rust: malformed aggregate input"] };

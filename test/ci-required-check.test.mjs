@@ -85,6 +85,21 @@ test("the full portfolio is satisfied by its authoritative chapters without a du
       packaging: "success",
     }),
   ).toEqual({ ok: true, failures: [] });
+  // A selected chapter is required: skipping its runner must fail the
+  // aggregate rather than passing vacuously.
+  expect(
+    evaluateRequiredJobs(fullPlan, {
+      plan: "success",
+      quick: "success",
+      rust: "success",
+      typescript: "success",
+      vitest: "skipped",
+      python: "success",
+      receipts: "success",
+      prd: "success",
+      packaging: "success",
+    }),
+  ).toEqual({ ok: false, failures: ["vitest: skipped"] });
 });
 
 test("a failed planner with no output still names the first actionable failure", () => {
@@ -94,6 +109,27 @@ test("a failed planner with no output still names the first actionable failure",
     ok: false,
     failures: ["plan: failure"],
   });
+});
+
+test("the Rust aggregate drops the runtime lane when the digest cache replaced it", () => {
+  const plan = {
+    chapters: { rust: true },
+    rustCrash: true,
+    runtimeRustPackages: ["relayer-graph-server"],
+  };
+  const laneResults = {
+    "rust-clippy": "success",
+    "rust-tests": "success",
+    "rust-crash": "success",
+    "rust-runtime": "skipped",
+  };
+  expect(evaluateRustJobs(plan, laneResults)).toEqual({
+    ok: false,
+    failures: ["rust-runtime: skipped"],
+  });
+  expect(
+    evaluateRustJobs(plan, laneResults, { runtimeCacheHit: true }),
+  ).toEqual({ ok: true, failures: [] });
 });
 
 test("the Rust aggregate requires every selected fresh lane", () => {
@@ -213,7 +249,164 @@ describe("CI workflow contract", () => {
     expect(workflow.jobs.full).toBeUndefined();
   });
 
-  test("restores compilation caches on PRs but saves them only on trusted branch pushes", () => {
+  test("stops gating the parallel chapters on quick while check still requires it", () => {
+    // Policy: a formatting failure still fails the required check through
+    // quick, but it no longer short-circuits the Rust and chapter spend.
+    expect(workflow.jobs.check.needs).toContain("quick");
+    expect(workflow.jobs.quick.needs).toBe("plan");
+    for (const jobName of [
+      "lbug-prebuilt",
+      "rust",
+      "typescript",
+      "vitest",
+      "python",
+      "receipts",
+      "prd",
+      "packaging",
+    ]) {
+      const job = workflow.jobs[jobName];
+      expect(job.needs, jobName).not.toContain("quick");
+      expect(JSON.stringify(job.if ?? ""), jobName).not.toContain("quick");
+      expect(JSON.stringify(job.needs), jobName).toContain("plan");
+    }
+  });
+
+  test("keeps every acceleration cache key on one trusted expression", () => {
+    const installRuntime = parse(
+      readFileSync(
+        join(
+          repositoryRoot,
+          ".github",
+          "actions",
+          "install-rust-runtime",
+          "action.yml",
+        ),
+        "utf8",
+      ),
+    );
+    const installLbug = parse(
+      readFileSync(
+        join(
+          repositoryRoot,
+          ".github",
+          "actions",
+          "install-lbug-bundle",
+          "action.yml",
+        ),
+        "utf8",
+      ),
+    );
+    // The sites differ only in where the rustc release, the Rust input
+    // digest, and the package set come from; normalize those sources before
+    // comparing so a drift in any one site fails.
+    const normalize = (key) =>
+      key
+        .replace(
+          /\$\{\{ (steps\.[a-z-]+\.outputs\.(rustc-release|release)|inputs\.rustc-release) \}\}/g,
+          "RELEASE",
+        )
+        .replace(
+          /(\$\{\{ hashFiles\('crates\/\*\*', 'Cargo\.toml', 'Cargo\.lock', '\.cargo\/\*\*'\) \}\}|\$\{\{ inputs\.rust-input-digest \}\})/g,
+          "DIGEST",
+        )
+        .replace(
+          /\$\{\{ (steps\.plan\.outputs\.runtime_packages_key|needs\.plan\.outputs\.runtime_packages_key|inputs\.runtime-packages-key) \}\}/g,
+          "PKGKEY",
+        );
+    const planJob = workflow.jobs.plan;
+    const lbugLookup = planJob.steps.find((step) => step.id === "lbug-lookup");
+    const runtimeLookup = planJob.steps.find(
+      (step) => step.id === "runtime-lookup",
+    );
+    expect(lbugLookup.with["lookup-only"]).toBe(true);
+    expect(runtimeLookup.with["lookup-only"]).toBe(true);
+    // A cache-service error must read as a miss, never fail the plan or a
+    // lane into a red aggregate.
+    expect(lbugLookup["continue-on-error"]).toBe(true);
+    expect(runtimeLookup["continue-on-error"]).toBe(true);
+    expect(planJob.outputs.lbug_cached).toBe(
+      "${{ steps.lookups.outputs.lbug_cached }}",
+    );
+    expect(planJob.outputs.runtime_cache_hit).toBe(
+      "${{ steps.lookups.outputs.runtime_cache_hit }}",
+    );
+    expect(planJob.outputs.runtime_packages_key).toBe(
+      "${{ steps.plan.outputs.runtime_packages_key }}",
+    );
+
+    // One Ladybug key serves the plan lookup, the prebuilt job, every lane
+    // (through the shared install action), and the runtime fallback.
+    const lbugKeys = [
+      lbugLookup.with.key,
+      workflow.jobs["lbug-prebuilt"].steps.find(
+        (step) => step.id === "lbug-cache",
+      ).with.key,
+      installLbug.runs.steps.find(
+        (step) => step.id === "lbug-cache-restore",
+      ).with.key,
+      installRuntime.runs.steps.find(
+        (step) => step.id === "fallback-lbug-cache",
+      ).with.key,
+    ].map(normalize);
+    expect(new Set(lbugKeys).size).toBe(1);
+    expect(lbugKeys[0]).toContain("-v1-${{ hashFiles('Cargo.lock') }}");
+
+    // One runtime key serves the plan lookup, the trusted save, and the
+    // shard restore; it binds the Rust input digest and the sealed package
+    // set so an under-covering bundle can never hit.
+    const runtimeKeys = [
+      runtimeLookup.with.key,
+      workflow.jobs["rust-runtime"].steps.find(
+        (step) => step.name === "Save trusted Rust runtime bundle",
+      ).with.key,
+      installRuntime.runs.steps.find(
+        (step) => step.id === "runtime-cache",
+      ).with.key,
+    ].map(normalize);
+    expect(new Set(runtimeKeys).size).toBe(1);
+    expect(runtimeKeys[0]).toContain("-debug-default-v1-DIGEST-PKGKEY");
+
+    // The shard restore shares the other steps' gate and never unpacks a
+    // bundle the plan did not select.
+    const shardRestore = installRuntime.runs.steps.find(
+      (step) => step.id === "runtime-cache",
+    );
+    expect(shardRestore.if).toBe(
+      "${{ inputs.rust-runtime-selected == 'true' && inputs.runtime-cache-hit == 'true' }}",
+    );
+    expect(shardRestore["continue-on-error"]).toBe(true);
+
+    // Every lane installs the bundle through the shared action, so the four
+    // former copies cannot drift apart.
+    for (const lane of [
+      "rust-clippy",
+      "rust-tests",
+      "rust-crash",
+      "rust-runtime",
+    ]) {
+      const install = workflow.jobs[lane].steps.find(
+        (step) => step.name === "Install prebuilt Ladybug library",
+      );
+      expect(install.uses, lane).toBe("./.github/actions/install-lbug-bundle");
+      expect(install.with["lbug-cached"], lane).toBe(
+        "${{ needs.plan.outputs.lbug_cached }}",
+      );
+      expect(install.with["rustc-release"], lane).toBe(
+        "${{ steps.rust-setup.outputs.rustc-release }}",
+      );
+    }
+
+    // The Rust aggregate must see the same cache-hit flag that skipped the
+    // runtime lane.
+    const aggregate = workflow.jobs.rust.steps.find(
+      (step) => step.name === "Assert every selected Rust lane passed",
+    );
+    expect(aggregate.env.CI_RUNTIME_CACHE_HIT).toBe(
+      "${{ needs.plan.outputs.runtime_cache_hit }}",
+    );
+  });
+
+  test("restores acceleration caches on PRs and saves them only from trusted runs", () => {
     const allSteps = Object.values(workflow.jobs).flatMap(
       (job) => job.steps ?? [],
     );
@@ -241,10 +434,23 @@ describe("CI workflow contract", () => {
         "utf8",
       ),
     );
+    const installRuntimeAction = parse(
+      readFileSync(
+        join(
+          repositoryRoot,
+          ".github",
+          "actions",
+          "install-rust-runtime",
+          "action.yml",
+        ),
+        "utf8",
+      ),
+    );
     const cacheSteps = [
       ...allSteps,
       ...setupAction.runs.steps,
       ...rustSetupAction.runs.steps,
+      ...installRuntimeAction.runs.steps,
     ];
     const restores = cacheSteps.filter((step) =>
       step.uses?.startsWith("actions/cache/restore@"),
@@ -255,10 +461,41 @@ describe("CI workflow contract", () => {
 
     expect(restores.length).toBeGreaterThan(0);
     expect(saves.length).toBeGreaterThan(0);
-    for (const restore of restores) expect(restore.if).toBeUndefined();
+    // Restores are unconditional or gated by the plan's lookup-only
+    // results, the runtime cache-hit input, or the fail-open fallback
+    // condition; no other gate may starve a lane of an available entry.
+    const allowedRestoreGates = [
+      /^\$\{\{ \(?steps\.plan\.outputs\./,
+      /^\$\{\{ needs\.plan\.outputs\.lbug_cached == 'true' \}\}$/,
+      /^\$\{\{ inputs\.rust-runtime-selected == 'true' && inputs\.runtime-cache-hit == 'true' \}\}$/,
+      /^\$\{\{ inputs\.rust-runtime-selected == 'true' && steps\.runtime-install\.outcome != 'success'/,
+    ];
+    for (const restore of restores) {
+      if (restore.if === undefined) continue;
+      expect(
+        allowedRestoreGates.some((gate) => gate.test(restore.if)),
+        restore.if,
+      ).toBe(true);
+    }
     for (const save of saves) {
       expect(save.if).toContain("github.event_name == 'push'");
     }
+    // The Ladybug bundle may also be saved by same-repository pull requests,
+    // matching the sccache trust model; fork pull requests never save.
+    const lbugSave = saves.find(
+      (step) => step.name === "Save trusted prebuilt Ladybug bundle",
+    );
+    expect(lbugSave.if).toContain(
+      "github.event.pull_request.head.repo.full_name == github.repository",
+    );
+    // The runtime bundle is seeded only by trusted main pushes; the Vitest
+    // jobs restore it by digest.
+    const runtimeSave = saves.find(
+      (step) => step.name === "Save trusted Rust runtime bundle",
+    );
+    expect(runtimeSave.if).toContain("github.ref == 'refs/heads/main'");
+    expect(runtimeSave["continue-on-error"]).toBe(true);
+    expect(runtimeSave.with.path).not.toContain("target");
     const rustDependencyRestore = restores.find(
       (step) => step.name === "Restore Rust dependency downloads",
     );
@@ -423,59 +660,187 @@ describe("CI workflow contract", () => {
     );
   });
 
-  test("verifies the exact Rust runtime artifact before executing the fresh Vitest portfolio", () => {
-    const steps = workflow.jobs.vitest.steps;
-    const downloadIndex = steps.findIndex(
-      (step) => step.name === "Download selected Rust runtime",
+  test("installs the digest-bound Rust runtime before executing both fresh Vitest shards", () => {
+    const runtimeAction = parse(
+      readFileSync(
+        join(
+          repositoryRoot,
+          ".github",
+          "actions",
+          "install-rust-runtime",
+          "action.yml",
+        ),
+        "utf8",
+      ),
     );
-    const verifyIndex = steps.findIndex(
-      (step) => step.name === "Verify and install selected Rust runtime",
-    );
-    const prerequisiteIndex = steps.findIndex(
-      (step) => step.name === "Build non-Rust Vitest prerequisites",
-    );
-    const testIndex = steps.findIndex(
-      (step) => step.name === "Run fresh Vitest and secret-boundary tests",
-    );
-    const download = steps[downloadIndex];
-    const verify = steps[verifyIndex];
     const upload = workflow.jobs["rust-runtime"].steps.find(
       (step) => step.name === "Upload selected Rust runtime",
     );
+    const rustInputDigest =
+      "${{ hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', '.cargo/**') }}";
 
-    expect(workflow.jobs.vitest.needs).toContain("rust-runtime");
-    expect(downloadIndex).toBeGreaterThan(-1);
-    expect(verifyIndex).toBeGreaterThan(downloadIndex);
-    expect(prerequisiteIndex).toBeGreaterThan(-1);
-    expect(testIndex).toBeGreaterThan(prerequisiteIndex);
+    for (const jobName of ["vitest"]) {
+      const steps = workflow.jobs[jobName].steps;
+      const installIndex = steps.findIndex(
+        (step) => step.name === "Install selected Rust runtime",
+      );
+      const prerequisiteIndex = steps.findIndex(
+        (step) => step.name === "Build non-Rust Vitest prerequisites",
+      );
+      const testIndex = steps.findIndex((step) =>
+        step.name.startsWith("Run fresh Vitest"),
+      );
+      const install = steps[installIndex];
+
+      expect(workflow.jobs[jobName].needs).toContain("rust-runtime");
+      expect(installIndex).toBeGreaterThan(-1);
+      expect(prerequisiteIndex).toBeGreaterThan(installIndex);
+      expect(testIndex).toBeGreaterThan(prerequisiteIndex);
+      expect(install.uses).toBe("./.github/actions/install-rust-runtime");
+      expect(install.with["rust-runtime-selected"]).toBe(
+        "${{ needs.plan.outputs.rust_runtime }}",
+      );
+      expect(install.with["runtime-cache-hit"]).toBe(
+        "${{ needs.plan.outputs.runtime_cache_hit }}",
+      );
+      expect(install.with["rustc-release"]).toBe(
+        "${{ steps.rust-toolchain.outputs.release }}",
+      );
+      expect(install.with["rustc-host"]).toBe(
+        "${{ steps.rust-toolchain.outputs.host }}",
+      );
+      expect(install.with["rust-input-digest"]).toBe(rustInputDigest);
+      expect(install.with["runtime-packages-key"]).toBe(
+        "${{ needs.plan.outputs.runtime_packages_key }}",
+      );
+      expect(install.with["artifact-name"]).toBe(upload.with.name);
+      expect(install.with["lbug-artifact-name"]).toBe(
+        "lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}",
+      );
+      expect(install.with["plan-json"]).toBe(
+        "${{ needs.plan.outputs.plan }}",
+      );
+      // No shard restores a raw target directory.
+      expect(
+        steps.some(
+          (step) =>
+            step.uses?.startsWith("actions/cache/") &&
+            step.with?.path?.includes("target"),
+        ),
+      ).toBe(false);
+    }
+
+    // The shared action restores the trusted cache on a hit, downloads the
+    // lane artifact on a miss, verifies by digest, and fails open to an
+    // in-lane build; acceleration trouble never fails the fresh chapters.
+    const restore = runtimeAction.runs.steps.find(
+      (step) => step.id === "runtime-cache",
+    );
+    const download = runtimeAction.runs.steps.find(
+      (step) => step.name === "Download selected Rust runtime",
+    );
+    const verify = runtimeAction.runs.steps.find(
+      (step) => step.name === "Verify and install selected Rust runtime",
+    );
+    const fallback = runtimeAction.runs.steps.find(
+      (step) =>
+        step.name === "Build selected Rust runtime in lane after acceleration failure",
+    );
+    expect(restore.uses).toMatch(/^actions\/cache\/restore@/);
+    expect(restore.if).toBe(
+      "${{ inputs.rust-runtime-selected == 'true' && inputs.runtime-cache-hit == 'true' }}",
+    );
     expect(download.uses).toMatch(/^actions\/download-artifact@[0-9a-f]{40}$/);
-    expect(upload.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
-    expect(download.with.name).toBe(upload.with.name);
-    // Artifacts are immutable per workflow run; overwrite lets "re-run all
-    // jobs" replace the first attempt's bytes while a stable name keeps
-    // partial re-runs able to download the original upload.
-    expect(upload.with.overwrite).toBe(true);
+    expect(download.if).toBe(
+      "${{ inputs.rust-runtime-selected == 'true' && inputs.runtime-cache-hit != 'true' }}",
+    );
+    expect(download["continue-on-error"]).toBe(true);
+    expect(verify["continue-on-error"]).toBe(true);
     for (const identity of [
-      "--source-commit",
+      "--rust-input-digest",
       "--platform",
       "--rustc-release",
       "--cargo-profile",
     ]) {
       expect(verify.run).toContain(identity);
     }
+    // The digest replaced the source-commit binding: trusted cache entries
+    // built by an earlier main commit must install for the current checkout.
+    // The plan JSON makes verify assert the bundle covers the consuming
+    // plan's runtime packages.
+    expect(verify.run).not.toContain("--source-commit");
+    expect(verify.run).toContain("--plan-json");
+    // The fail-open path rebuilds with the lane's compilation inputs: the
+    // trusted Ladybug bundle (cache first, artifact second) and the Cargo
+    // dependency archive. A cold CMake floor would be a cliff on both
+    // shards at once.
+    const fallbackGate =
+      "${{ inputs.rust-runtime-selected == 'true' && steps.runtime-install.outcome != 'success' }}";
+    const fallbackLbugCache = runtimeAction.runs.steps.find(
+      (step) => step.id === "fallback-lbug-cache",
+    );
+    const fallbackLbugDownload = runtimeAction.runs.steps.find(
+      (step) => step.id === "fallback-lbug-download",
+    );
+    const fallbackLbugInstall = runtimeAction.runs.steps.find(
+      (step) => step.id === "fallback-lbug-install",
+    );
+    const fallbackDependencies = runtimeAction.runs.steps.find(
+      (step) =>
+        step.name ===
+        "Restore Cargo dependency downloads for the runtime fallback",
+    );
+    expect(fallbackLbugCache.if).toBe(fallbackGate);
+    expect(fallbackLbugCache["continue-on-error"]).toBe(true);
+    expect(fallbackLbugDownload.if).toBe(
+      "${{ inputs.rust-runtime-selected == 'true' && steps.runtime-install.outcome != 'success' && steps.fallback-lbug-cache.outputs.cache-hit != 'true' }}",
+    );
+    expect(fallbackLbugDownload["continue-on-error"]).toBe(true);
+    expect(fallbackLbugInstall.if).toBe(fallbackGate);
+    expect(fallbackLbugInstall.run).toContain("scripts/ci/lbug-artifact.mjs verify");
+    expect(fallbackLbugInstall.run).toContain('--github-env "$GITHUB_ENV"');
+    expect(fallbackDependencies.if).toBe(fallbackGate);
+    expect(fallbackDependencies.with.path).toContain("~/.cargo/registry/cache");
+    expect(fallback.if).toBe(fallbackGate);
+    expect(fallback.run).toContain("scripts/ci/run-chapter.mjs rust-runtime");
+    // The summary surfaces the fallback: it is the most expensive path this
+    // workflow can take, and telemetry must not read it as a benign fail-open.
+    const summary = runtimeAction.runs.steps.find(
+      (step) => step.name === "Record runtime acceleration outcome",
+    );
+    expect(summary.run).toContain("In-lane fallback build");
+    expect(summary.env.FALLBACK_BUILD).toBe(
+      "${{ steps.runtime-fallback-build.outcome }}",
+    );
+    // Artifacts are immutable per workflow run; overwrite lets "re-run all
+    // jobs" replace the first attempt's bytes while a stable name keeps
+    // partial re-runs able to download the original upload.
+    expect(upload.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
+    expect(upload.with.overwrite).toBe(true);
     // The seal step must read the binaries from the same target directory
-    // the lanes build into; a drift here fails late (ENOENT) without this pin.
+    // the lanes build into; a drift here fails late (ENOENT) without this
+    // pin. It binds the same Rust input digest that keys the cache.
     const seal = workflow.jobs["rust-runtime"].steps.find(
       (step) => step.name === "Seal selected Rust runtime",
     );
     expect(seal.run).toContain('--target-dir "$RUNNER_TEMP/cargo-target/debug"');
-    expect(
-      steps.some(
-        (step) =>
-          step.uses?.startsWith("actions/cache/") &&
-          step.with?.path?.includes("target"),
-      ),
-    ).toBe(false);
+    expect(seal.run).toContain("--rust-input-digest");
+    expect(seal.run).toContain(
+      "hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', '.cargo/**')",
+    );
+    // Only trusted main pushes seed the runtime bundle cache.
+    const runtimeSave = workflow.jobs["rust-runtime"].steps.find(
+      (step) => step.name === "Save trusted Rust runtime bundle",
+    );
+    expect(runtimeSave.uses).toMatch(/^actions\/cache\/save@/);
+    expect(runtimeSave.if).toContain("github.event_name == 'push'");
+    expect(runtimeSave.if).toContain("github.ref == 'refs/heads/main'");
+    expect(runtimeSave.with.path).toBe(
+      "${{ runner.temp }}/relayer-rust-runtime",
+    );
+    expect(runtimeSave.with.key).toContain(
+      "hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', '.cargo/**')",
+    );
     expect(
       readFileSync(
         join(repositoryRoot, "scripts", "ci", "run-chapter.mjs"),
@@ -486,8 +851,10 @@ describe("CI workflow contract", () => {
 
   test("builds the Ladybug library once and verifies it before every Rust lane links it", () => {
     const job = workflow.jobs["lbug-prebuilt"];
+    // Warm runs skip the prebuilt hop: the plan lookup proved the bundle
+    // cache entry exists and the lanes restore it directly.
     expect(job.if).toBe(
-      "${{ needs.quick.result == 'success' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true' || needs.plan.outputs.rust_crash == 'true') }}",
+      "${{ needs.plan.outputs.lbug_cached != 'true' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true' || needs.plan.outputs.rust_crash == 'true') }}",
     );
     expect(
       job.steps.find((step) => step.id === "rust-setup").uses,
@@ -510,6 +877,9 @@ describe("CI workflow contract", () => {
       (step) => step.name === "Save trusted prebuilt Ladybug bundle",
     );
     expect(save.if).toContain("github.event_name == 'push'");
+    expect(save.if).toContain(
+      "github.event.pull_request.head.repo.full_name == github.repository",
+    );
     expect(save.with.key).toBe("${{ steps.lbug-cache.outputs.cache-primary-key }}");
     // The job that does the steady-state C++ compiling stays visible to the
     // cache-evidence chain like every other compiling lane.
@@ -531,30 +901,72 @@ describe("CI workflow contract", () => {
       "rust-runtime",
     ]) {
       const laneJob = workflow.jobs[lane];
-      expect(laneJob.needs).toContain("lbug-prebuilt");
+      expect(laneJob.needs).toEqual(["plan", "lbug-prebuilt"]);
       // A failed acceleration job must never skip the lanes into a red
-      // aggregate: the gates re-derive from plan/quick results only, and the
-      // lanes' download/verify steps fail open to the source build.
+      // aggregate: the gates re-derive from the plan result only, and the
+      // lanes' restore/verify steps fail open to the source build. Quick no
+      // longer gates the lanes, so a formatting failure cannot short-circuit
+      // the Rust spend; the check aggregator still fails the run.
       expect(laneJob.if).toBe(
         lane === "rust-crash"
-          ? "${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}"
+          ? "${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}"
           : lane === "rust-runtime"
-            ? "${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_runtime == 'true' }}"
-            : "${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}",
+            ? "${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust_runtime == 'true' && needs.plan.outputs.runtime_cache_hit != 'true' }}"
+            : "${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}",
       );
-      const download = laneJob.steps.find(
-        (step) => step.name === "Download prebuilt Ladybug library",
+      // Every lane installs the bundle through one shared action; the
+      // former four copies can no longer drift apart, including the cache
+      // key that must match the plan lookup.
+      const install = laneJob.steps.find(
+        (step) => step.name === "Install prebuilt Ladybug library",
       );
-      const verify = laneJob.steps.find(
-        (step) => step.name === "Verify and install prebuilt Ladybug library",
+      expect(install.uses).toBe("./.github/actions/install-lbug-bundle");
+      expect(install.with["lbug-cached"]).toBe(
+        "${{ needs.plan.outputs.lbug_cached }}",
       );
-      // Fail-open: a missing or rejected bundle falls back to the source build.
-      expect(download["continue-on-error"]).toBe(true);
-      expect(verify["continue-on-error"]).toBe(true);
-      expect(download.with.name).toBe(upload.with.name);
-      expect(verify.run).toContain("scripts/ci/lbug-artifact.mjs verify");
-      expect(verify.run).toContain('--github-env "$GITHUB_ENV"');
+      expect(install.with["rustc-release"]).toBe(
+        "${{ steps.rust-setup.outputs.rustc-release }}",
+      );
+      expect(install.with["artifact-name"]).toBe(upload.with.name);
     }
+
+    // Warm runs restore straight from the cache; cold runs download the
+    // prebuilt job's artifact. Both paths converge on one directory that
+    // the shared verify step rejects or installs; a missing or rejected
+    // bundle fails open to the lane's source build.
+    const installLbug = parse(
+      readFileSync(
+        join(
+          repositoryRoot,
+          ".github",
+          "actions",
+          "install-lbug-bundle",
+          "action.yml",
+        ),
+        "utf8",
+      ),
+    );
+    const cacheRestore = installLbug.runs.steps.find(
+      (step) => step.id === "lbug-cache-restore",
+    );
+    const download = installLbug.runs.steps.find(
+      (step) => step.name === "Download prebuilt Ladybug library",
+    );
+    const verify = installLbug.runs.steps.find(
+      (step) => step.name === "Verify and install prebuilt Ladybug library",
+    );
+    expect(cacheRestore.uses).toMatch(/^actions\/cache\/restore@/);
+    expect(cacheRestore.if).toBe("${{ inputs.lbug-cached == 'true' }}");
+    expect(cacheRestore.with.path).toBe("${{ runner.temp }}/lbug-prebuilt");
+    expect(cacheRestore["continue-on-error"]).toBe(true);
+    expect(download.if).toBe("${{ inputs.lbug-cached != 'true' }}");
+    expect(download.with.path).toBe("${{ runner.temp }}/lbug-prebuilt");
+    expect(download.with.name).toBe("${{ inputs.artifact-name }}");
+    expect(download["continue-on-error"]).toBe(true);
+    expect(verify["continue-on-error"]).toBe(true);
+    expect(verify.run).toContain("scripts/ci/lbug-artifact.mjs verify");
+    expect(verify.run).toContain('--artifact-dir "$RUNNER_TEMP/lbug-prebuilt"');
+    expect(verify.run).toContain('--github-env "$GITHUB_ENV"');
   });
 
   test("preserves PR parent history for complete Vitest evidence checks", () => {

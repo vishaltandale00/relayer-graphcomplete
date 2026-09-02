@@ -1,0 +1,61 @@
+name: Install prebuilt Ladybug bundle
+description: >-
+  Restore the trusted Ladybug bundle from the cache or the prebuilt job's
+  artifact, then verify and install it. A missing or rejected bundle fails
+  open to the caller's source build: acceleration trouble never fails a lane.
+
+inputs:
+  lbug-cached:
+    description: Whether the plan lookup found a trusted bundle cache entry.
+    required: true
+  rustc-release:
+    description: rustc release of this runner.
+    required: true
+  artifact-name:
+    description: Prebuilt job artifact name for the current run.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Warm runs restore the trusted bundle straight from the cache instead of
+    # hopping through the prebuilt job's artifact. A miss after the plan
+    # lookup (eviction race) leaves no bundle behind; verify then rejects and
+    # the caller fails open to its source build. A cache-service error reads
+    # as a miss the same way.
+    - name: Restore prebuilt Ladybug bundle from the trusted cache
+      id: lbug-cache-restore
+      if: ${{ inputs.lbug-cached == 'true' }}
+      continue-on-error: true
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ runner.temp }}/lbug-prebuilt
+        key: lbug-prebuilt-${{ runner.os }}-${{ runner.arch }}-${{ inputs.rustc-release }}-v1-${{ hashFiles('Cargo.lock') }}
+    - name: Download prebuilt Ladybug library
+      if: ${{ inputs.lbug-cached != 'true' }}
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/lbug-prebuilt
+      continue-on-error: true
+    - name: Verify and install prebuilt Ladybug library
+      id: lbug-install
+      continue-on-error: true
+      shell: bash
+      run: |
+        node scripts/ci/lbug-artifact.mjs verify \
+          --repository "$GITHUB_WORKSPACE" \
+          --artifact-dir "$RUNNER_TEMP/lbug-prebuilt" \
+          --platform "${{ runner.os }}-${{ runner.arch }}" \
+          --rustc-release "${{ inputs.rustc-release }}" \
+          --github-env "$GITHUB_ENV"
+    - name: Record prebuilt Ladybug outcome
+      if: ${{ always() }}
+      shell: bash
+      env:
+        CACHE_HIT: ${{ steps.lbug-cache-restore.outputs.cache-hit }}
+        INSTALL_OUTCOME: ${{ steps.lbug-install.outcome }}
+      run: |
+        echo "### Ladybug bundle acceleration" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Trusted cache restore hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Verify and install: ${INSTALL_OUTCOME:-skipped}" >> "$GITHUB_STEP_SUMMARY"
