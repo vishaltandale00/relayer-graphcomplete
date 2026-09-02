@@ -72,6 +72,12 @@ jobs:
         run: |
           set -euo pipefail
           export RELAYER_DESKTOP_VERSION="${RELAYER_DESKTOP_VERSION#desktop-v}"
+          # actions/checkout leaves the pushed tag ref resolved to its commit, so
+          # the annotated tag object is absent locally and its annotation cannot
+          # be read at all. Restore the tag object itself before reading it;
+          # without this every annotated tag looks lightweight and publication
+          # fails closed.
+          git fetch --no-tags --force origin "+${GITHUB_REF}:${GITHUB_REF}"
           export RELAYER_DESKTOP_TAG_OBJECT_TYPE="$(git cat-file -t "$GITHUB_REF")"
           export RELAYER_DESKTOP_TAG_MESSAGE="$(git for-each-ref --format='%(contents)' "$GITHUB_REF")"
           node desktop/release/preview-candidate-run.mjs
