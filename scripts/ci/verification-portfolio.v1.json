@@ -38,7 +38,7 @@
       "owner": "typescript"
     },
     "vitest": {
-      "shell": "vitest run --maxWorkers=1",
+      "shell": "vitest run",
       "owner": "vitest"
     },
     "codex-secret-boundary": {

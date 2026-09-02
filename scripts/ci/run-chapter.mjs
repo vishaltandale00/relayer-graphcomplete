@@ -223,7 +223,6 @@ if (chapter === "quick") {
   runAuthority("vitest", "Fresh mapped Vitest tests", "npx", [
     "vitest",
     "run",
-    "--maxWorkers=1",
     ...selectedFiles,
   ]);
   if (

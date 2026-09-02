@@ -168,3 +168,22 @@ contract tests, so it selects the Rust closure of `relayer-graph-core`.
 `docs/graph-query-v1-errors.json` is the source of the generated
 query-error code and the Python client contract, so it selects the
 `@relayer/graph-client` workspace closure and the Python chapter.
+
+## Desktop candidate validation
+
+The manual `Desktop Signed Preview Candidates` workflow does not repeat
+`npm run check` on a cold runner. Its validate job runs
+`desktop/release/main-ci-check.mjs`, which requires a completed, successful
+`push` run of the `CI` workflow on `main` for the exact candidate commit and
+one successful `check` job in that run's latest attempt. Pushes to `main`
+always select the full portfolio, and the portfolio manifest assigns every
+`npm run check` and `npm run build` command to one lane, so that run executed
+every required command against the same source snapshot. Two differences from
+the old serial job are accepted: the Rust lanes link the prebuilt Ladybug
+bundle built from the same pinned source instead of compiling it again, and a
+re-run of failed jobs keeps earlier-attempt results for lanes that already
+passed on that commit. The equivalence rests on the commit's own `CI`
+workflow and manifest, the same trust the package scripts already carry. A
+commit whose `main` run is still in progress or failed cannot become a signed
+candidate; rerun the `main` workflow rather than weakening the candidate gate.
+Tag pushes never reran repository checks and are unchanged.

@@ -303,7 +303,7 @@ npm run test:codex-secret-boundary
 
 The Vitest and Rust commands are D1 seams. `evidence:provider-ux` and `evidence:model-selector` are partial D2 captures; neither enumerates all 36 flow cells. `npm run evidence:prime-family:packaged` is a separate heavy packaged-app runner and is due only in its declared clean-install/release context.
 
-`npm run check` runs Vitest serially because concurrent repository runs have repeatedly raced while removing the shared `eval-data` fixture directory. It also invokes `test:codex-secret-boundary`: the real pinned Codex process boundary runs in isolation on macOS and is explicitly skipped elsewhere because a non-macOS binary does not prove the shipped desktop boundary.
+`npm run check` runs Vitest with its default file-level workers; each evaluation test creates its own temporary `eval-data` directory rather than sharing a repository fixture, and the process-bound files listed in `vitest.config.js` run one at a time after the isolated group. It also invokes `test:codex-secret-boundary`: the real pinned Codex process boundary runs in isolation on macOS and is explicitly skipped elsewhere because a non-macOS binary does not prove the shipped desktop boundary.
 
 No current command maps all 36 flow cells to independently visible results, fixtures, reset boundaries, timeouts, stable error codes, request counts, and artifacts. A future deterministic D2 entry point such as `npm run evidence:provider-harness-matrix` is therefore a required but currently undefined mapping gap, not a command that may be claimed as run.
 

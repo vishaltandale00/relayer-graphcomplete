@@ -92,7 +92,7 @@ The audit checks environment branch policies, target-required secret and variabl
 1. Merge reviewed release changes to `main`.
 2. Increment `desktop/package.json` to one numeric version shared by all targets.
 3. Run `npm run check` and `npm run build` from the exact commit.
-4. Run `Desktop Signed Preview Candidates` manually to build the enabled signed candidates without publication. Each signed release receipt seals its producing workflow run ID and attempt. Record the run ID and attempt, plus each enabled target artifact's numeric ID and `sha256:` digest from the GitHub Actions artifact API. A target remains eligible when its package job and artifact succeed even if an independent sibling target fails.
+4. Run `Desktop Signed Preview Candidates` manually to build the enabled signed candidates without publication. Its validate job does not rerun `npm run check`; it requires a completed, successful `push` run of `ci.yml` on `main` for the exact commit, whose `check` context is the full verification portfolio, and fails closed until that run exists. Each signed release receipt seals its producing workflow run ID and attempt. Record the run ID and attempt, plus each enabled target artifact's numeric ID and `sha256:` digest from the GitHub Actions artifact API. A target remains eligible when its package job and artifact succeed even if an independent sibling target fails.
 5. Review every release receipt and installer signature from that manual run.
 6. After explicit publication approval, create one protected annotated tag on that exact `main` commit. Pin the reviewed manual run in the annotation; do not choose it by recency:
 

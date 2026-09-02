@@ -103,6 +103,7 @@
       "vitestFiles": [
         "test/composer-context-state.test.mjs",
         "test/composer-provider-lifecycle.test.mjs",
+        "test/desktop-release-main-ci-check.test.mjs",
         "test/desktop-shell.test.mjs",
         "test/first-message-composer-integration.test.mjs",
         "test/settings-navigation.test.mjs",
