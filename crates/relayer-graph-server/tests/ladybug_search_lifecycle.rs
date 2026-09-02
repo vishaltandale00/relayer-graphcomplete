@@ -3,7 +3,7 @@
 #![cfg(feature = "ladybug")]
 
 use relayer_graph_core::{
-    ActionDraft, ActionKind, CurrentTransition, GraphDatabase, LayerDraft, LayerLayout,
+    ActionDraft, ActionKind, CurrentTransition, EdgeDraft, GraphDatabase, LayerDraft, LayerLayout,
     NavigateRelation, NodeDraft, NodePlacement, SearchIndex, SearchIndexRevision, SearchTarget,
     TemporalFeatureConfig, ThreadId,
 };
@@ -278,6 +278,123 @@ async fn missing_store_rebuilds_every_accepted_closure_from_sqlite() {
             vec![json!({"type": "string", "value": "Explain the queue"})],
             vec![json!({"type": "string", "value": "Queue"})],
         ]
+    );
+    assert!(index.layout().active().is_file());
+    assert_eq!(
+        database.search_index_rebuild_snapshot().await.unwrap(),
+        canonical
+    );
+}
+
+async fn accepted_graph_with_connected_edge(path: &std::path::Path) -> GraphDatabase {
+    let database = GraphDatabase::open(path).await.unwrap();
+    let thread = ThreadId::new(41).unwrap();
+    let interaction = database
+        .create_interaction(None, thread, "Explain the queue")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let queue = writer
+        .submit_node(&NodeDraft {
+            client_key: "queue".into(),
+            kind: "concept".into(),
+            icon: "list-tree".into(),
+            title: "Queue".into(),
+            detail: "Pending work".into(),
+        })
+        .await
+        .unwrap();
+    let worker = writer
+        .submit_node(&NodeDraft {
+            client_key: "worker".into(),
+            kind: "concept".into(),
+            icon: "cpu".into(),
+            title: "Worker".into(),
+            detail: "Claims work".into(),
+        })
+        .await
+        .unwrap();
+    let edge = writer
+        .create_edge(&EdgeDraft {
+            client_key: "queue-worker".into(),
+            endpoints: [queue.id, worker.id],
+        })
+        .await
+        .unwrap();
+    let layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "root".into(),
+            nodes: vec![queue.id, worker.id],
+            edges: vec![edge.id],
+            layout: Some(LayerLayout::v1(vec![
+                NodePlacement {
+                    node_id: queue.id,
+                    x: 0.2,
+                    y: 0.5,
+                },
+                NodePlacement {
+                    node_id: worker.id,
+                    x: 0.8,
+                    y: 0.5,
+                },
+            ])),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .add_action(&ActionDraft {
+            client_key: "response".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(layer.id),
+            interaction_text: None,
+            input: None,
+        })
+        .await
+        .unwrap();
+    writer.complete(interaction.id).await.unwrap();
+    database
+}
+
+/// The canonical rebuild must reproduce a graph that carries a CONNECTED edge.
+///
+/// Every other scenario in this file builds from `accepted_sqlite_graph`, whose
+/// only layer declares `edges: vec![]`. A canonical multiplicity for CONNECTED
+/// that disagrees with the physical store is therefore invisible to them: the
+/// disagreement can only be observed once at least one edge exists and startup
+/// takes the synchronous rebuild, which is the path a missing store forces.
+#[tokio::test]
+async fn missing_store_rebuilds_a_graph_carrying_a_connected_edge() {
+    let _guard = lifecycle_test_guard().await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("graph.db");
+    let database = accepted_graph_with_connected_edge(&path).await;
+    let canonical = database.search_index_rebuild_snapshot().await.unwrap();
+    let target = SearchTarget::Thread(ThreadId::new(41).unwrap());
+
+    let index = LadybugSearchIndex::open_reconciled(&path, &database)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        index.revision(target).await.unwrap(),
+        database.search_index_revision(target).await.unwrap(),
+    );
+    // One stored record per edge, matching the physical inventory's directed
+    // read. Two would mean the rebuild duplicated the topology.
+    assert_eq!(
+        index
+            .normalized_rows("MATCH ()-[r:CONNECTED]->() RETURN count(r) AS count")
+            .await
+            .unwrap(),
+        vec![vec![json!({"type": "integer", "value": "1"})]],
     );
     assert!(index.layout().active().is_file());
     assert_eq!(

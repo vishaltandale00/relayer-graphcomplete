@@ -340,10 +340,13 @@ pub fn canonical_inventory(snapshot: &SearchIndexRebuildSnapshot) -> SearchInven
                         Value::String(wire(edge.state).expect("edge state serializes")),
                     )],
                     &targets,
-                    // Ladybug 0.18 reports one undirected CONNECTED record in
-                    // both orientations. An injected duplicate therefore adds
-                    // two more entries to the physical multiset.
-                    2,
+                    // `physical_inventory` reads relationships back with a
+                    // directed `(a)-[r]->(b)` match and normalizes CONNECTED
+                    // endpoints into sorted order, so one edge is one entry.
+                    // Expecting two made this validation unsatisfiable for any
+                    // graph holding an edge, which only surfaced on the
+                    // synchronous rebuild path.
+                    1,
                 );
             }
             for action in &layer.actions {
