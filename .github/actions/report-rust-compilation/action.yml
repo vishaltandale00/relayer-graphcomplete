@@ -50,3 +50,12 @@ runs:
           ${{ runner.temp }}/${{ inputs.lane }}-sccache-stats.json
         if-no-files-found: ignore
         retention-days: 14
+    - name: Upload Cargo timing report
+      if: ${{ always() }}
+      continue-on-error: true
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: ${{ inputs.lane }}-cargo-timings-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/cargo-timings-${{ inputs.lane }}
+        if-no-files-found: ignore
+        retention-days: 14

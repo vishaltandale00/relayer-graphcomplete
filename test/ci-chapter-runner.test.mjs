@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -41,6 +43,13 @@ describe("CI chapter runner", () => {
       cwd: repositoryRoot,
       env: {
         ...process.env,
+        // Pin the timing inputs so ambient exports cannot flip these tests
+        // into the --timings branch or move a real report as a side effect.
+        // GITHUB_STEP_SUMMARY points at a scratch file so spawned failures
+        // never write triage lines into the real CI job summary.
+        CARGO_TARGET_DIR: join(directory, "cargo-target"),
+        RELAYER_CARGO_TIMINGS_DIR: "",
+        GITHUB_STEP_SUMMARY: join(directory, "step-summary.md"),
         CI_PLAN_JSON: JSON.stringify(plan),
         CI_INVOCATION_TRACE: invocationTrace,
         PATH: `${directory}:${process.env.PATH}`,
@@ -61,6 +70,108 @@ describe("CI chapter runner", () => {
     expect(run("rust-tests", plan)).toEqual([
       "cargo:test -p relayer-graph-core -p relayer-graph-server",
     ]);
+  });
+
+  test("keeps Cargo invocations timing-free unless a timings directory is set", () => {
+    const plan = { rustPackages: ["relayer-graph-core"] };
+    expect(run("rust-tests", plan)).toEqual([
+      "cargo:test -p relayer-graph-core",
+    ]);
+  });
+
+  test("adds --timings and harvests the report when a timings directory is set", () => {
+    const timingsDirectory = join(directory, "timings");
+    const targetDirectory = join(directory, "cargo-target");
+    writeFileSync(trace, "");
+    writeFileSync(
+      join(directory, "cargo"),
+      '#!/bin/sh\necho "cargo:$*" >> "$TRACE"\ncase " $* " in\n  *--timings*) mkdir -p "$CARGO_TARGET_DIR/cargo-timings" && echo "<html></html>" > "$CARGO_TARGET_DIR/cargo-timings/cargo-timing.html" ;;\nesac\n',
+    );
+    chmodSync(join(directory, "cargo"), 0o755);
+    execFileSync(
+      process.execPath,
+      [runner, "rust-tests"],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: targetDirectory,
+          CI_PLAN_JSON: JSON.stringify({ rustPackages: ["relayer-graph-core"] }),
+          CI_INVOCATION_TRACE: invocationTrace,
+          PATH: `${directory}:${process.env.PATH}`,
+          RELAYER_CARGO_TIMINGS_DIR: timingsDirectory,
+          GITHUB_STEP_SUMMARY: join(directory, "step-summary.md"),
+          TRACE: trace,
+        },
+      },
+    );
+    expect(readFileSync(trace, "utf8").trim()).toBe(
+      "cargo:test -p relayer-graph-core --timings",
+    );
+    expect(readdirSync(timingsDirectory)).toEqual(["rust-tests.html"]);
+    expect(
+      existsSync(join(targetDirectory, "cargo-timings", "cargo-timing.html")),
+    ).toBe(false);
+  });
+
+  test("keeps --timings before the Clippy lint argument separator", () => {
+    const timingsDirectory = join(directory, "timings-clippy");
+    const targetDirectory = join(directory, "cargo-target-clippy");
+    writeFileSync(
+      join(directory, "cargo"),
+      '#!/bin/sh\necho "cargo:$*" >> "$TRACE"\ncase " $* " in\n  *--timings*) mkdir -p "$CARGO_TARGET_DIR/cargo-timings" && echo "<html></html>" > "$CARGO_TARGET_DIR/cargo-timings/cargo-timing.html" ;;\nesac\n',
+    );
+    chmodSync(join(directory, "cargo"), 0o755);
+    execFileSync(
+      process.execPath,
+      [runner, "rust-clippy"],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: targetDirectory,
+          CI_PLAN_JSON: JSON.stringify({ rustPackages: ["relayer-graph-core"] }),
+          CI_INVOCATION_TRACE: invocationTrace,
+          PATH: `${directory}:${process.env.PATH}`,
+          RELAYER_CARGO_TIMINGS_DIR: timingsDirectory,
+          GITHUB_STEP_SUMMARY: join(directory, "step-summary.md"),
+          TRACE: trace,
+        },
+      },
+    );
+    expect(readFileSync(trace, "utf8").trim()).toBe(
+      "cargo:clippy -p relayer-graph-core --all-targets --all-features --timings -- -D warnings",
+    );
+    expect(readdirSync(timingsDirectory)).toEqual(["rust-clippy.html"]);
+  });
+
+  test("harvests the timing report even when the Cargo invocation fails", () => {
+    const timingsDirectory = join(directory, "timings-failed");
+    const targetDirectory = join(directory, "cargo-target-failed");
+    writeFileSync(trace, "");
+    writeFileSync(
+      join(directory, "cargo"),
+      '#!/bin/sh\necho "cargo:$*" >> "$TRACE"\ncase " $* " in\n  *--timings*) mkdir -p "$CARGO_TARGET_DIR/cargo-timings" && echo "<html></html>" > "$CARGO_TARGET_DIR/cargo-timings/cargo-timing.html" ;;\nesac\nexit 101\n',
+    );
+    chmodSync(join(directory, "cargo"), 0o755);
+    expect(() =>
+      execFileSync(process.execPath, [runner, "rust-tests"], {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: targetDirectory,
+          CI_PLAN_JSON: JSON.stringify({ rustPackages: ["relayer-graph-core"] }),
+          CI_INVOCATION_TRACE: invocationTrace,
+          PATH: `${directory}:${process.env.PATH}`,
+          RELAYER_CARGO_TIMINGS_DIR: timingsDirectory,
+          GITHUB_STEP_SUMMARY: join(directory, "step-summary.md"),
+          TRACE: trace,
+        },
+      }),
+    ).toThrow();
+    // The report exists to diagnose exactly the runs that fail; losing it on
+    // the failure path would defeat its purpose.
+    expect(readdirSync(timingsDirectory)).toEqual(["rust-tests.html"]);
   });
 
   test("builds only the planner-selected runtime and keeps crash tests fresh", () => {

@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -439,5 +443,48 @@ describe("live run credentials", () => {
       const candidate = { runs: { only: { ...document.runs["codex-openai"], auth: { kind, apiKey } } } };
       expect(resolveRunProfile(candidate, "only", codex).adapterId).toBe(LIVE_RUN_AUTH[kind].adapterId);
     }
+  });
+
+  it("resolves the checked-in live-run template users copy", async () => {
+    // The README tells users to copy live-run.example.json; the model tests
+    // above exercise an inline duplicate, so this checkpoint pins the real
+    // template's shape against the same resolver. The implementation comes
+    // from the selected harness yaml exactly like the paid entry point
+    // (scripts/run-recursive-live-run.mjs), so an unknown or typo'd harness
+    // id fails here instead of surfacing only when a user spends a run.
+    const { loadHarnessConfigurations } = await import("@relayer/harness-host");
+    const template = JSON.parse(
+      readFileSync(new URL("../live-run.example.json", import.meta.url), "utf8"),
+    );
+    const profiles = Object.entries(template.runs);
+    expect(profiles.length).toBeGreaterThan(0);
+    for (const [name, profile] of profiles) {
+      const configurationPath = fileURLToPath(
+        new URL(`../harnesses/${profile.harness}.yaml`, import.meta.url),
+      );
+      const configurations = await loadHarnessConfigurations([configurationPath]);
+      const implementation = configurations.get(profile.harness)?.implementation;
+      expect(typeof implementation, `${name}: harness ${profile.harness}`).toBe("string");
+      const resolved = resolveRunProfile(template, name, { implementation });
+      expect(typeof resolved.adapterId, name).toBe("string");
+      expect(typeof profile.harness, name).toBe("string");
+      expect(typeof profile.modelId, name).toBe("string");
+    }
+  });
+
+  it("keeps the paid live-run entry point parseable without executing it", () => {
+    // The entry point awaits its paid main() at top level, so CI must never
+    // import it; a module parse catches syntax and import regressions.
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--check"],
+      {
+        input: readFileSync(
+          new URL("../scripts/run-recursive-live-run.mjs", import.meta.url),
+        ),
+        encoding: "utf8",
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
   });
 });

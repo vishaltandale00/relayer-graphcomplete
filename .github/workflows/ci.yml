@@ -66,10 +66,77 @@ jobs:
         env:
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
 
+  lbug-prebuilt:
+    name: Prebuilt Ladybug native library
+    needs: [plan, quick]
+    if: ${{ needs.quick.result == 'success' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true' || needs.plan.outputs.rust_crash == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up isolated Rust compilation
+        id: rust-setup
+        uses: ./.github/actions/setup-rust-compilation
+        with:
+          lane: lbug-prebuilt
+      - name: Restore trusted prebuilt Ladybug bundle
+        id: lbug-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/lbug-prebuilt
+          key: lbug-prebuilt-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-setup.outputs.rustc-release }}-v1-${{ hashFiles('Cargo.lock') }}
+      - name: Build Ladybug from the pinned bundled source
+        if: ${{ steps.lbug-cache.outputs.cache-hit != 'true' }}
+        run: |
+          node scripts/ci/run-timed.mjs "Ladybug source build" cargo build -p lbug --timings
+          mkdir -p "$RUNNER_TEMP/cargo-timings-lbug-prebuilt"
+          cp "$RUNNER_TEMP/cargo-target/cargo-timings/cargo-timing.html" \
+            "$RUNNER_TEMP/cargo-timings-lbug-prebuilt/lbug-prebuilt.html" 2>/dev/null || true
+          node scripts/ci/lbug-artifact.mjs create \
+            --repository "$GITHUB_WORKSPACE" \
+            --target-dir "$RUNNER_TEMP/cargo-target" \
+            --artifact-dir "$RUNNER_TEMP/lbug-prebuilt" \
+            --source-commit "$GITHUB_SHA" \
+            --platform "${{ runner.os }}-${{ runner.arch }}" \
+            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}"
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+          CARGO_INCREMENTAL: "0"
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-lbug-prebuilt
+          RELAYER_SCCACHE_ENABLED: ${{ steps.rust-setup.outputs.sccache-enabled }}
+          RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
+          SCCACHE_CLIENT_SIDE: "1"
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_GHA_RW_MODE: READ_WRITE
+          SCCACHE_GHA_VERSION: ${{ steps.rust-setup.outputs.cache-version }}
+          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+      - name: Upload prebuilt Ladybug library
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/lbug-prebuilt
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 1
+      - name: Save trusted prebuilt Ladybug bundle
+        if: ${{ github.event_name == 'push' && success() && steps.lbug-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/lbug-prebuilt
+          key: ${{ steps.lbug-cache.outputs.cache-primary-key }}
+      - name: Report Ladybug build compiler cache
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: ./.github/actions/report-rust-compilation
+        with:
+          lane: lbug-prebuilt
+          sccache-enabled: ${{ steps.rust-setup.outputs.sccache-enabled }}
+
   rust-clippy:
     name: Rust Clippy
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    needs: [plan, quick, lbug-prebuilt]
+    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -83,10 +150,31 @@ jobs:
         uses: ./.github/actions/setup-rust-compilation
         with:
           lane: rust-clippy
+      - name: Download prebuilt Ladybug library
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/lbug-prebuilt-download
+        continue-on-error: true
+      - name: Verify and install prebuilt Ladybug library
+        id: lbug-install
+        continue-on-error: true
+        run: |
+          node scripts/ci/lbug-artifact.mjs verify \
+            --repository "$GITHUB_WORKSPACE" \
+            --artifact-dir "$RUNNER_TEMP/lbug-prebuilt-download" \
+            --platform "${{ runner.os }}-${{ runner.arch }}" \
+            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
+            --github-env "$GITHUB_ENV"
+      - name: Record prebuilt Ladybug outcome
+        if: ${{ always() }}
+        run: |
+          echo "- Prebuilt Ladybug library: ${{ steps.lbug-install.outcome }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Run Rust Clippy
         run: node scripts/ci/run-chapter.mjs rust-clippy
         env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-clippy
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+          RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-rust-clippy
           CARGO_INCREMENTAL: "0"
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
@@ -118,8 +206,8 @@ jobs:
 
   rust-tests:
     name: Fresh Rust tests
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    needs: [plan, quick, lbug-prebuilt]
+    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -133,11 +221,32 @@ jobs:
         uses: ./.github/actions/setup-rust-compilation
         with:
           lane: rust-tests
+      - name: Download prebuilt Ladybug library
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/lbug-prebuilt-download
+        continue-on-error: true
+      - name: Verify and install prebuilt Ladybug library
+        id: lbug-install
+        continue-on-error: true
+        run: |
+          node scripts/ci/lbug-artifact.mjs verify \
+            --repository "$GITHUB_WORKSPACE" \
+            --artifact-dir "$RUNNER_TEMP/lbug-prebuilt-download" \
+            --platform "${{ runner.os }}-${{ runner.arch }}" \
+            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
+            --github-env "$GITHUB_ENV"
+      - name: Record prebuilt Ladybug outcome
+        if: ${{ always() }}
+        run: |
+          echo "- Prebuilt Ladybug library: ${{ steps.lbug-install.outcome }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Run fresh Rust tests
         run: node scripts/ci/run-chapter.mjs rust-tests
         env:
           CARGO_INCREMENTAL: "0"
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-tests
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+          RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-rust-tests
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
@@ -158,8 +267,8 @@ jobs:
 
   rust-crash:
     name: Fresh crash reconciliation tests
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}
+    needs: [plan, quick, lbug-prebuilt]
+    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -173,11 +282,31 @@ jobs:
         uses: ./.github/actions/setup-rust-compilation
         with:
           lane: rust-crash
+      - name: Download prebuilt Ladybug library
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/lbug-prebuilt-download
+        continue-on-error: true
+      - name: Verify and install prebuilt Ladybug library
+        id: lbug-install
+        continue-on-error: true
+        run: |
+          node scripts/ci/lbug-artifact.mjs verify \
+            --repository "$GITHUB_WORKSPACE" \
+            --artifact-dir "$RUNNER_TEMP/lbug-prebuilt-download" \
+            --platform "${{ runner.os }}-${{ runner.arch }}" \
+            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
+            --github-env "$GITHUB_ENV"
+      - name: Record prebuilt Ladybug outcome
+        if: ${{ always() }}
+        run: |
+          echo "- Prebuilt Ladybug library: ${{ steps.lbug-install.outcome }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Run fresh crash reconciliation tests
         run: node scripts/ci/run-chapter.mjs rust-crash
         env:
           CARGO_INCREMENTAL: "0"
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-crash
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
@@ -198,8 +327,8 @@ jobs:
 
   rust-runtime:
     name: Rust runtime build
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.rust_runtime == 'true' }}
+    needs: [plan, quick, lbug-prebuilt]
+    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_runtime == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -213,11 +342,39 @@ jobs:
         uses: ./.github/actions/setup-rust-compilation
         with:
           lane: rust-runtime
+          # The runtime lane's unique outputs are uncachable binary links; its
+          # shareable units are identical to the default-test lane's. When the
+          # Rust chapter runs, the writer lanes seed those objects and the
+          # runtime lane reads without writing to avoid duplicate-write
+          # collisions. On runtime-only plans no writer lane exists, so the
+          # runtime lane writes to keep the namespace from going cold.
+          sccache-mode: ${{ needs.plan.outputs.rust == 'true' && 'READ_ONLY' || 'READ_WRITE' }}
+      - name: Download prebuilt Ladybug library
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/lbug-prebuilt-download
+        continue-on-error: true
+      - name: Verify and install prebuilt Ladybug library
+        id: lbug-install
+        continue-on-error: true
+        run: |
+          node scripts/ci/lbug-artifact.mjs verify \
+            --repository "$GITHUB_WORKSPACE" \
+            --artifact-dir "$RUNNER_TEMP/lbug-prebuilt-download" \
+            --platform "${{ runner.os }}-${{ runner.arch }}" \
+            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
+            --github-env "$GITHUB_ENV"
+      - name: Record prebuilt Ladybug outcome
+        if: ${{ always() }}
+        run: |
+          echo "- Prebuilt Ladybug library: ${{ steps.lbug-install.outcome }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Run selected Rust runtime build
         run: node scripts/ci/run-chapter.mjs rust-runtime
         env:
           CARGO_INCREMENTAL: "0"
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target-rust-runtime
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+          RELAYER_CARGO_TIMINGS_DIR: ${{ runner.temp }}/cargo-timings-rust-runtime
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
@@ -225,7 +382,7 @@ jobs:
           RUSTC_WRAPPER: ${{ github.workspace }}/scripts/ci/sccache-wrapper.sh
           SCCACHE_CLIENT_SIDE: "1"
           SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_GHA_RW_MODE: READ_WRITE
+          SCCACHE_GHA_RW_MODE: ${{ needs.plan.outputs.rust == 'true' && 'READ_ONLY' || 'READ_WRITE' }}
           SCCACHE_GHA_VERSION: ${{ steps.rust-setup.outputs.cache-version }}
           SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
       - name: Report runtime-build compiler cache
@@ -239,7 +396,7 @@ jobs:
         run: |
           node scripts/ci/runtime-artifact.mjs create \
             --repository "$GITHUB_WORKSPACE" \
-            --target-dir "$RUNNER_TEMP/cargo-target-rust-runtime/debug" \
+            --target-dir "$RUNNER_TEMP/cargo-target/debug" \
             --artifact-dir "$RUNNER_TEMP/relayer-rust-runtime" \
             --source-commit "$GITHUB_SHA" \
             --platform "${{ runner.os }}-${{ runner.arch }}" \
@@ -253,6 +410,9 @@ jobs:
         with:
           name: rust-runtime-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
           path: ${{ runner.temp }}/relayer-rust-runtime
+          # Artifacts are immutable per run; overwrite lets "re-run all jobs"
+          # replace the first attempt's bytes instead of failing the upload.
+          overwrite: true
           if-no-files-found: error
           retention-days: 1
       - name: Save trusted Rust dependency downloads for runtime-only changes
