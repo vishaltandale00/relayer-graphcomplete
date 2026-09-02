@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   GraphCompleteRuntimeService,
   RECURSIVE_TEMPORAL_FEATURES,
-  developerTemporalFeatures,
+  productTemporalFeatures,
 } from "../desktop/main/services/graphcomplete-runtime.mjs";
 
 const runtimeDirectories = [];
@@ -28,17 +28,23 @@ function spawnedGraphArguments(temporalFeatures) {
   return { service, spawned };
 }
 
-describe("developer recursion enable path", () => {
+describe("product recursion enable path", () => {
   afterEach(() => {
     while (runtimeDirectories.length > 0) {
       rmSync(runtimeDirectories.pop(), { recursive: true, force: true });
     }
   });
 
-  it("leaves every temporal feature off without the developer switch", () => {
-    expect(developerTemporalFeatures({})).toEqual({});
-    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "0" })).toEqual({});
-    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "true" })).toEqual({});
+  it("ships the whole chain enabled by default", () => {
+    expect(productTemporalFeatures({})).toBe(RECURSIVE_TEMPORAL_FEATURES);
+    expect(productTemporalFeatures({ RELAYER_DESKTOP_PROVIDER_RECURSION: "1" }))
+      .toBe(RECURSIVE_TEMPORAL_FEATURES);
+    expect(productTemporalFeatures({ RELAYER_DESKTOP_PROVIDER_RECURSION: "false" }))
+      .toBe(RECURSIVE_TEMPORAL_FEATURES);
+  });
+
+  it("falls back to the all-off compatibility stage for diagnosis", () => {
+    expect(productTemporalFeatures({ RELAYER_DESKTOP_PROVIDER_RECURSION: "0" })).toEqual({});
   });
 
   it("enables the whole persisted chain recursion depends on", () => {
@@ -49,8 +55,6 @@ describe("developer recursion enable path", () => {
       invokeResolution: true,
       providerRecursion: true,
     });
-    expect(developerTemporalFeatures({ RELAYER_DEV_PROVIDER_RECURSION: "1" }))
-      .toBe(RECURSIVE_TEMPORAL_FEATURES);
   });
 
   it("passes the enabled chain to the graph server it starts", async () => {
@@ -69,8 +73,10 @@ describe("developer recursion enable path", () => {
     ]));
   });
 
-  it("starts the graph server with no temporal switch by default", async () => {
-    const { service, spawned } = spawnedGraphArguments(developerTemporalFeatures({}));
+  it("starts the graph server with no temporal switch when the chain is disabled", async () => {
+    const { service, spawned } = spawnedGraphArguments(
+      productTemporalFeatures({ RELAYER_DESKTOP_PROVIDER_RECURSION: "0" }),
+    );
 
     await expect(service.start()).rejects.toThrow("startup is not exercised");
 

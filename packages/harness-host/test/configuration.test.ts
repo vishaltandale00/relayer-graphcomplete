@@ -68,15 +68,23 @@ describe("harness configuration", () => {
     "codex-basic",
     "claude-basic",
     "prime-agent-basic",
+  ])("ships %s with query-v1 graph search and agent-authored Complete", async (name) => {
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
+    expect(configuration.graphCapabilityProfile).toEqual({ search: "query-v1" });
+    expect(resolveGraphCapabilityProfile(configuration)).toEqual({ search: "query-v1" });
+    expect(configuration.complete).toEqual({ agentAuthored: true });
+  });
+
+  it.each([
     "prime-agent-deep",
-  ])("ships %s as a search-disabled baseline", async (name) => {
+  ])("keeps %s as a search-disabled baseline", async (name) => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
     expect(configuration.graphCapabilityProfile).toEqual({ search: "disabled" });
     expect(resolveGraphCapabilityProfile(configuration)).toEqual({ search: "disabled" });
   });
 
   it.each([
-    ["codex-basic", "medium", 6, "layered-navigation-multi-agent-v1"],
+    ["codex-basic", "medium", 7, "layered-navigation-multi-agent-v1"],
     ["codex-basic-high", "high", 4, undefined],
   ])("loads the checked-in %s configuration", async (name, modelReasoningEffort, revision, promptProfile) => {
     await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
@@ -102,7 +110,7 @@ describe("harness configuration", () => {
       },
       executionAccessContracts: ["managed-runtime@1", "secret@1"],
       modelDefaults: { familyPolicy: { id: "codex-default-family", version: 2 } },
-      ...(name === "codex-basic" ? { graphCapabilityProfile: { search: "disabled" } } : {}),
+      ...(name === "codex-basic" ? { complete: { agentAuthored: true }, graphCapabilityProfile: { search: "query-v1" } } : {}),
       settings: {
         modelReasoningEffort,
         ...(promptProfile === undefined ? {} : { promptProfile }),

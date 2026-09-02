@@ -2,7 +2,9 @@ schemaVersion: 1
 name: prime-agent-basic
 implementation: prime.agent
 implementationVersion: 1
-revision: 2
+revision: 3
+complete:
+  agentAuthored: true
 permissionBindings:
   ask:
     boundary: workspace-write@1
@@ -26,7 +28,7 @@ modelRules:
   deny: []
 executionAccessContracts: [secret@1]
 graphCapabilityProfile:
-  search: disabled
+  search: query-v1
 settings:
   thinkingLevel: medium
   rlmMaxDepth: 1

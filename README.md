@@ -129,13 +129,17 @@ deterministic test suite.
 
 ### Recursive Complete live run
 
-Recursive `complete(inputGraph)` is off in the shipped app. A developer-only
-switch enables the whole persisted feature chain it depends on. It is not a
-product setting and has no user-visible control:
+Recursive `complete(inputGraph)` ships enabled. Recursion needs the whole
+persisted feature chain, so one switch turns on every prerequisite. It is not a
+user-visible product setting; to fall back to the all-off compatibility stage
+for diagnosis:
 
 ```sh
-RELAYER_DEV_PROVIDER_RECURSION=1 npm run desktop:dev
+RELAYER_DESKTOP_PROVIDER_RECURSION=0 npm run desktop:dev
 ```
+
+A harness also has to allow it: recursion requires both this runtime chain and
+`complete.agentAuthored: true` in the selected harness configuration.
 
 The opt-in live run drives one fixed synthetic task through the same runtime and
 app server the desktop uses, with recursion enabled and disabled on the same
@@ -241,8 +245,9 @@ required API surface, production configuration files, and trusted Python graph
 client before selecting `prime-agent-basic`. It uses a separate ignored desktop
 profile. Use
 `npm run desktop:dev:prime -- --configuration prime-agent-deep` to try the deeper
-configuration. Packaged builds carry `prime-agent-basic` and `prime-agent-deep`;
-the development-only layered Luna configuration is not packaged.
+configuration from a development checkout. Packaged builds carry
+`prime-agent-basic` only; the deeper and layered Luna configurations are not
+packaged.
 
 Every thread pins a product permission profile before execution. New Thread loads the available Ask for approval, Approve for me, and Full access choices from Rust product policy, selects the product default, and sends that choice through ordinary thread creation. The saved thread shows its pinned profile. The public contract is `ask`, `auto`, or `full`; raw provider sandbox and approval flags remain harness implementation details. Full access is intentionally unrestricted and is not a hard filesystem or network boundary. See [ADR 0004](docs/decisions/0004-product-permission-profiles.md).
 

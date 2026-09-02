@@ -428,7 +428,20 @@ impl SqliteProductStore {
                 }
             }
         }
-        retire_absent_product_codex_high(&mut transaction, runtime_harnesses).await?;
+        retire_absent_product_harness(
+            &mut transaction,
+            runtime_harnesses,
+            "codex-basic-high",
+            "codex-basic",
+        )
+        .await?;
+        retire_absent_product_harness(
+            &mut transaction,
+            runtime_harnesses,
+            "prime-agent-deep",
+            "prime-agent-basic",
+        )
+        .await?;
         sqlx::query(
             "UPDATE product_model_preferences SET default_harness_configuration_name=?1 WHERE singleton=1 AND defaults_modified=0",
         )
@@ -2645,23 +2658,31 @@ pub(super) async fn validate_catalog_rows(pool: &SqlitePool) -> Result<(), Stora
     Ok(())
 }
 
-async fn retire_absent_product_codex_high(
+/// Move product selections off a configuration this runtime no longer offers and onto
+/// its replacement. A catalog that still carries the retired configuration keeps every
+/// existing selection, and a catalog missing the replacement changes nothing rather than
+/// stranding rows on a name that is also absent.
+async fn retire_absent_product_harness(
     connection: &mut SqliteConnection,
     runtime_harnesses: &[RuntimeProductHarness],
+    retired: &str,
+    replacement: &str,
 ) -> Result<(), StorageError> {
-    let has_product_basic = runtime_harnesses
+    let has_replacement = runtime_harnesses
         .iter()
-        .any(|harness| harness.id == "codex-basic");
-    let has_eval_high = runtime_harnesses
+        .any(|harness| harness.id == replacement);
+    let has_retired = runtime_harnesses
         .iter()
-        .any(|harness| harness.id == "codex-basic-high");
-    if !has_product_basic || has_eval_high {
+        .any(|harness| harness.id == retired);
+    if !has_replacement || has_retired {
         return Ok(());
     }
 
     sqlx::query(
-        "UPDATE threads SET harness_configuration_name='codex-basic' WHERE harness_configuration_name='codex-basic-high'",
+        "UPDATE threads SET harness_configuration_name=?1 WHERE harness_configuration_name=?2",
     )
+    .bind(replacement)
+    .bind(retired)
     .execute(&mut *connection)
     .await?;
     // Identified sends and authoritative invoke results have durable replay identities. An
@@ -2671,10 +2692,10 @@ async fn retire_absent_product_codex_high(
     sqlx::query(
         "UPDATE interactions
          SET graph_node_id=NULL,completion_status='submitted',
-             harness_configuration_name='codex-basic',harness_configuration_digest=NULL,
+             harness_configuration_name=?1,harness_configuration_digest=NULL,
              effective_execution_digest=NULL,effective_permission_receipt_json=NULL,
              completion_output_json=NULL,completion_error=NULL
-         WHERE harness_configuration_name='codex-basic-high'
+         WHERE harness_configuration_name=?2
            AND completion_status IN ('not_started','running','submitted','waiting_for_approval')
            AND graph_node_id IS NOT NULL
            AND (input_identity IS NOT NULL OR EXISTS (
@@ -2682,16 +2703,21 @@ async fn retire_absent_product_codex_high(
                WHERE result_interaction_id=interactions.id AND authoritative=1
            ))",
     )
+    .bind(replacement)
+    .bind(retired)
     .execute(&mut *connection)
     .await?;
     sqlx::query(
-        "UPDATE product_model_preferences SET default_harness_configuration_name='codex-basic' WHERE singleton=1 AND default_harness_configuration_name='codex-basic-high'",
+        "UPDATE product_model_preferences SET default_harness_configuration_name=?1 WHERE singleton=1 AND default_harness_configuration_name=?2",
     )
+    .bind(replacement)
+    .bind(retired)
     .execute(&mut *connection)
     .await?;
     sqlx::query(
-        "UPDATE product_harnesses SET product_visible=0,available=0,unavailable_reason_code='harness_retired',unavailable_reason_message='This product harness has been retired.' WHERE configuration_name='codex-basic-high'",
+        "UPDATE product_harnesses SET product_visible=0,available=0,unavailable_reason_code='harness_retired',unavailable_reason_message='This product harness has been retired.' WHERE configuration_name=?1",
     )
+    .bind(retired)
     .execute(&mut *connection)
     .await?;
     Ok(())
@@ -2953,6 +2979,94 @@ mod provider_definition_tests {
         assert_eq!(thread_harness, "codex-basic-high");
         assert_eq!(default_harness, "codex-basic-high");
         assert_eq!(high, (true, true));
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn product_catalog_retires_prime_agent_deep_onto_prime_agent_basic() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-prime-deep-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query("INSERT INTO product_harnesses(configuration_name,label,product_visible,available,unavailable_reason_code,unavailable_reason_message) VALUES ('prime-agent-deep','Prime Agent Deep',1,1,NULL,NULL)")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("UPDATE product_model_preferences SET default_harness_configuration_name='prime-agent-deep',defaults_modified=1 WHERE singleton=1")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Deep','1','1','prime-agent-deep','auto')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name) VALUES (1,1,1,'Historical','1','accepted','prime-agent-deep')")
+            .execute(&store.pool).await.unwrap();
+
+        store
+            .initialize_model_catalog("prime-agent-basic", &[runtime_harness("prime-agent-basic")])
+            .await
+            .unwrap();
+
+        let thread_harness: String =
+            sqlx::query_scalar("SELECT harness_configuration_name FROM threads WHERE id=1")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        let default_harness: String = sqlx::query_scalar(
+            "SELECT default_harness_configuration_name FROM product_model_preferences WHERE singleton=1",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let retired: (bool, bool, Option<String>) = sqlx::query_as(
+            "SELECT product_visible,available,unavailable_reason_code FROM product_harnesses WHERE configuration_name='prime-agent-deep'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let historical_harness: String =
+            sqlx::query_scalar("SELECT harness_configuration_name FROM interactions WHERE id=1")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+
+        assert_eq!(thread_harness, "prime-agent-basic");
+        assert_eq!(default_harness, "prime-agent-basic");
+        assert_eq!(retired, (false, false, Some("harness_retired".into())));
+        // Accepted history keeps the identity of the harness that actually executed.
+        assert_eq!(historical_harness, "prime-agent-deep");
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn absent_prime_replacement_leaves_deep_threads_untouched() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-prime-deep-absent-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Deep','1','1','prime-agent-deep','auto')")
+            .execute(&store.pool).await.unwrap();
+
+        // Prime is unavailable entirely, so there is no replacement to move onto.
+        store
+            .initialize_model_catalog("codex-basic", &[runtime_harness("codex-basic")])
+            .await
+            .unwrap();
+
+        let thread_harness: String =
+            sqlx::query_scalar("SELECT harness_configuration_name FROM threads WHERE id=1")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+
+        assert_eq!(thread_harness, "prime-agent-deep");
         drop(store);
         let _ = std::fs::remove_file(path);
     }

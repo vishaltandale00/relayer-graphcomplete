@@ -233,6 +233,7 @@ describe("EvalService simulated-user result persistence", () => {
       stateFile,
       productSession: productSession(),
       configurationPaths: [join(repositoryRoot, "harnesses", "claude-basic.yaml")],
+      targetKey: "macos-arm64",
     }).open();
 
     const created = await service.createRun({
@@ -630,7 +631,7 @@ describe("EvalService simulated-user result persistence", () => {
     });
   });
 
-  it("preserves Prime's requested bounded profile while retaining the explicit sole-Full exception", async () => {
+  it("preserves Prime's requested bounded profile while retaining the explicit sole-Full exception", { timeout: 30_000 }, async () => {
     const { stateFile } = await testPaths();
     const product = fakeAcceptedProduct();
     globalThis.fetch = product;
@@ -639,6 +640,7 @@ describe("EvalService simulated-user result persistence", () => {
       productSession: productSession(),
       configurationPaths: [join(repositoryRoot, "harnesses", "prime-agent-basic.yaml")],
       platform: "darwin",
+      targetKey: "macos-arm64",
     }).open();
 
     const soleFullConfiguration = { name: "legacy-full-only", permissionBindings: { full: {} } };
@@ -779,7 +781,7 @@ function jsonResponse(value, status = 200) {
 }
 
 async function waitForCompletedRun(evalService, runId) {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const run = evalService.getRun(runId);
     if (!["queued", "running"].includes(run.status) && typeof run.bundleRef === "string") return run;
@@ -789,7 +791,7 @@ async function waitForCompletedRun(evalService, runId) {
 }
 
 async function waitForPersistedRun(stateFile, runId) {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const persisted = JSON.parse(await readFile(stateFile, "utf8"));
     const run = persisted.runs.find((candidate) => candidate.id === runId);

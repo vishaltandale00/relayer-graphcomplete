@@ -79,7 +79,6 @@ export function createDesktopBuilderConfig(
       { from: resolve(repositoryRoot, "harnesses/codex-basic.yaml"), to: "harnesses/codex-basic.yaml" },
       { from: resolve(repositoryRoot, "harnesses/claude-basic.yaml"), to: "harnesses/claude-basic.yaml" },
       { from: resolve(repositoryRoot, "harnesses/prime-agent-basic.yaml"), to: "harnesses/prime-agent-basic.yaml" },
-      { from: resolve(repositoryRoot, "harnesses/prime-agent-deep.yaml"), to: "harnesses/prime-agent-deep.yaml" },
       { from: resolve(repositoryRoot, "permissions/desktop.json"), to: "permissions/desktop.json" },
       { from: resolve(repositoryRoot, "packages/graph-client/dist"), to: "graph-client" },
       { from: resolve(repositoryRoot, "python/relayer-graph/src/relayer_graph"), to: "python/relayer-graph/src/relayer_graph", filter: ["**/*.py"] },
