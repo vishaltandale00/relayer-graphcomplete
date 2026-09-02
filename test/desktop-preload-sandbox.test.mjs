@@ -10,10 +10,6 @@ import { describe, expect, it } from "vitest";
 const preloadSource = readFileSync(new URL("../desktop/preload/index.cjs", import.meta.url), "utf8");
 
 describe("sandboxed preload module boundary", () => {
-  it("requires no relative module", () => {
-    expect(preloadSource.match(/require\(\s*["'`]\.[^"'`]*["'`]\s*\)/gu)).toBeNull();
-  });
-
   it("requires only modules a sandboxed preload can resolve", () => {
     const required = [...preloadSource.matchAll(/require\(\s*["'`]([^"'`]+)["'`]\s*\)/gu)].map(([, name]) => name);
     expect(required.length).toBeGreaterThan(0);
