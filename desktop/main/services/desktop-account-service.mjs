@@ -358,7 +358,17 @@ export function createDesktopAccountService({
         && keyCount("code") === 1
         && keyCount("state") === 1
         && keys.length === 2;
-      if (!stateMatches || (!validErrorShape && !validCodeShape)) {
+      if (!stateMatches) {
+        // The state identifies which attempt a callback belongs to. One that
+        // does not carry this attempt's state cannot authenticate and is not
+        // this attempt's business: a login replaced on the same loopback port
+        // would otherwise have its own stale callback cancel its replacement.
+        // Answer it, leave the owning attempt in flight, and present nothing.
+        response.statusCode = 400;
+        response.end("Sign-in could not be verified.");
+        return;
+      }
+      if (!validErrorShape && !validCodeShape) {
         response.statusCode = 400;
         response.end("Sign-in could not be verified.");
         await finishAttempt(current, publicState(current.channel, "error", { reason: "authentication-failed" }));

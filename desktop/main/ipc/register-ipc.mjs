@@ -61,6 +61,7 @@ export function registerDesktopIpc({
   tutorial,
   updater,
   getWindow,
+  presentWindow = () => {},
   getAppearance,
   setAppearance,
   beforeUpdateInstall = async () => {},
@@ -114,6 +115,14 @@ export function registerDesktopIpc({
       kind: result.status === "connected" ? "connected" : "connection_pending",
       providerId: result.providerDefinition.id,
     });
+    // Connect and reconnect both settle here. A connection that finished in the
+    // browser belongs back in Relayer, on the same terms as account sign-in: a
+    // still-pending attempt is not finished, so it presents nothing.
+    if (result.status === "connected") {
+      try { presentWindow(); } catch {
+        // Window presentation is a courtesy and cannot fail a connection.
+      }
+    }
     return result;
   });
   ipcMain.handle("relayer:provider-connect-cancel", async (_event, { connectionId }) => {

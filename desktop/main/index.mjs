@@ -564,6 +564,7 @@ if (primaryInstance) {
       shell,
       nativeTheme,
       credentials: accountService,
+      presentWindow: () => { primaryInstance?.presentPrimaryWindow(); },
       accountChannel: {
         setChannel: (nextChannel) => setDesktopAuthenticatedErrorChannel({
           reporting: authenticatedErrorReporting,

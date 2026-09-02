@@ -380,18 +380,58 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await service.close();
   });
 
-  it("fails closed on state mismatch and rejects the late valid callback", async () => {
+  it("refuses a foreign state without cancelling or presenting the attempt that owns the listener", async () => {
     const auth0 = await fakeAuth0();
     let launchUrl;
-    const { service } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; } });
+    const presentWindow = vi.fn();
+    const { service } = await fixture({
+      auth0,
+      openExternal: async (value) => { launchUrl = value; },
+      presentWindow,
+    });
     await service.start();
     await service.login();
+
+    // A state this attempt did not issue cannot authenticate, so it is refused.
+    // It also is not this attempt's callback, so it must not end it.
     expect((await callbackFromLauncher(launchUrl, { state: randomBytes(32).toString("base64url") })).status).toBe(400);
-    await expect(service.waitForIdle()).resolves.toEqual({
-      status: "error", channel: "stable", reason: "authentication-failed",
-    });
-    await expect(callbackFromLauncher(launchUrl)).rejects.toThrow();
+    expect(await service.account()).toEqual({ status: "signing-in", channel: "stable" });
+    expect(presentWindow).not.toHaveBeenCalled();
     expect(auth0.requests.filter(({ url }) => url === "/oauth/token")).toHaveLength(0);
+
+    // The attempt still owns its listener and still completes.
+    expect((await callbackFromLauncher(launchUrl)).status).toBe(200);
+    await expect(service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
+    expect(presentWindow).toHaveBeenCalledOnce();
+    await service.close();
+  });
+
+  it("does not let a replaced login's stale callback cancel or present its replacement", async () => {
+    const auth0 = await fakeAuth0();
+    const launches = [];
+    const presentWindow = vi.fn();
+    const { service } = await fixture({
+      auth0,
+      openExternal: async (value) => { launches.push(value); },
+      presentWindow,
+    });
+    await service.start();
+    await service.login();
+    await service.login();
+    expect(launches).toHaveLength(2);
+    const [first, second] = launches;
+    // Same loopback port, different state: the replacement owns the listener.
+    expect(new URL(new URL(first).searchParams.get("redirect_uri")).port)
+      .toBe(new URL(new URL(second).searchParams.get("redirect_uri")).port);
+
+    expect((await callbackFromLauncher(first)).status).toBe(400);
+    expect(await service.account()).toEqual({ status: "signing-in", channel: "stable" });
+    expect(presentWindow).not.toHaveBeenCalled();
+    expect(auth0.requests.filter(({ url }) => url === "/oauth/token")).toHaveLength(0);
+
+    expect((await callbackFromLauncher(second)).status).toBe(200);
+    await expect(service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
+    expect(presentWindow).toHaveBeenCalledOnce();
     await service.close();
   });
 

@@ -269,5 +269,10 @@ describe("desktop account presentation", () => {
     expect(css).toContain("body.sidebar-collapsed .footer-button span");
     // Two controls do not fit the 58px collapsed rail side by side.
     expect(css).toContain("body.sidebar-collapsed .sidebar-footer{flex-direction:column");
+    // Nor do Settings, Account and the update indicator fit the 210px rail the
+    // 980px breakpoint switches to, so the footer drops its labels there and
+    // the circular indicator keeps its diameter instead of being squashed.
+    expect(css).toContain("@media(max-width:980px){.sidebar-footer .footer-button span{display:none}");
+    expect(css).toContain(".update-button{margin-left:auto;flex:none");
   });
 });
