@@ -105,7 +105,7 @@ export async function verifyLadybugNativeReceipts({
 
   // An unlisted file under the notices root would ship without a digest or
   // provenance, so the directory must contain exactly the inventoried notices
-  // (ignoring OS metadata that is never shipped).
+  // (ignoring only the two filenames electron-builder's copy drops).
   const noticesDirectory = noticesRoot
     ? resolve(noticesRoot)
     : resolveRepositoryPath(LADYBUG_NOTICES_REPO_ROOT, "notices root");
@@ -117,7 +117,7 @@ export async function verifyLadybugNativeReceipts({
     })
     .sort();
   assert.deepEqual(
-    (await relativeFiles(noticesDirectory, noticesDirectory, [], { strict: true, skipOsMetadata: true })).sort(),
+    (await relativeFiles(noticesDirectory, noticesDirectory, [], { strict: true, skipCopyDropped: true })).sort(),
     expectedNotices,
     "notices directory must contain exactly the inventoried files",
   );

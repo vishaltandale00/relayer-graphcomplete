@@ -92,14 +92,25 @@ describe("Ladybug native dependency receipts", () => {
     expect(result.stderr).toContain("notices directory must contain exactly the inventoried files");
   });
 
-  it("ignores OS metadata files in the notices directory", () => {
+  it("ignores the two filenames electron-builder drops during copy", () => {
     const directory = temporaryDirectory("ladybug-notices-");
     const notices = join(directory, "notices");
     cpSync(join(root, "vendor/ladybug/notices"), notices, { recursive: true });
     writeFileSync(join(notices, ".DS_Store"), "finder metadata\n");
+    writeFileSync(join(notices, ".gitkeep"), "");
     const result = spawnSync(process.execPath, [verifier, "--notices-root", notices], { encoding: "utf8" });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("no release blockers declared");
+  });
+
+  it("rejects metadata that electron-builder would still copy into the bundle", () => {
+    const directory = temporaryDirectory("ladybug-notices-");
+    const notices = join(directory, "notices");
+    cpSync(join(root, "vendor/ladybug/notices"), notices, { recursive: true });
+    writeFileSync(join(notices, "Thumbs.db"), "windows metadata\n");
+    const result = spawnSync(process.execPath, [verifier, "--notices-root", notices], { encoding: "utf8" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("notices directory must contain exactly the inventoried files");
   });
 
   it("fails closed when the exact source contains an unlisted native subtree", () => {

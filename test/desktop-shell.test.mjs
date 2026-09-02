@@ -2955,6 +2955,18 @@ describe("desktop skeleton", () => {
       await expect(verifyPackagedLadybugNotices(noticeFixture, {
         inventoryPath: noticeInventoryPath,
       })).rejects.toThrow("ships unlisted Ladybug notices");
+      await rm(join(noticeFixture, "notices", "ladybug", "third-party", "stray-LICENSE"));
+      // Only the two copy-dropped filenames are ignored; other metadata would be
+      // copied into the bundle, so it must be rejected.
+      await writeFile(join(noticeFixture, "notices", "ladybug", ".DS_Store"), "finder metadata\n");
+      await writeFile(join(noticeFixture, "notices", "ladybug", ".gitkeep"), "");
+      await expect(verifyPackagedLadybugNotices(noticeFixture, {
+        inventoryPath: noticeInventoryPath,
+      })).resolves.toEqual({ notices: 2 });
+      await writeFile(join(noticeFixture, "notices", "ladybug", "Thumbs.db"), "windows metadata\n");
+      await expect(verifyPackagedLadybugNotices(noticeFixture, {
+        inventoryPath: noticeInventoryPath,
+      })).rejects.toThrow("ships unlisted Ladybug notices");
 
       const names = desktopReleaseArtifactNames(contract);
       const dmg = Buffer.from("signed-notarized-dmg-fixture");

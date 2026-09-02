@@ -131,12 +131,12 @@ export async function verifyPackagedLadybugNotices(
     }
   }
   // An unlisted file in the bundle would ship without a digest or provenance,
-  // so the bundle must contain exactly the inventoried notices (ignoring OS
-  // metadata that electron-builder skips during copy).
+  // so the bundle must contain exactly the inventoried notices (ignoring only
+  // the two filenames electron-builder's copy drops).
   const bundleRoot = join(resourcesPath, LADYBUG_NOTICES_BUNDLE_DIR);
   const bundledFiles = await relativeFiles(bundleRoot, bundleRoot, [], {
     strict: true,
-    skipOsMetadata: true,
+    skipCopyDropped: true,
   });
   const unexpected = bundledFiles.filter((path) => !expectedRelatives.has(path));
   if (unexpected.length !== 0) {
