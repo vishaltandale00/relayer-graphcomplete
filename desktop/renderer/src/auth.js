@@ -213,7 +213,7 @@ function renderOnboardingChoices({ focus } = {}) {
   const recovery = providerOnboardingRecoveryAction(onboardingProjection);
   const recoveryButton = $("#refreshOnboardingProviderModels");
   recoveryButton.classList.toggle("hidden", recovery === null);
-  recoveryButton.textContent = recovery?.label ?? "Refresh models and set up defaults";
+  recoveryButton.textContent = recovery?.label ?? "Refresh models";
   bindOnboardingChoices({ focus });
 }
 

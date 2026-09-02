@@ -237,7 +237,7 @@ describe("provider and harness renderer markup", () => {
       },
     }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
     expect(markup).toContain("Needs execution setup");
-    expect(markup).toContain("Repair execution configurations");
+    expect(markup).toContain(">Repair</button>");
     expect(markup).not.toContain("codex-basic");
     expect(markup).not.toContain("prime-agent");
   });
