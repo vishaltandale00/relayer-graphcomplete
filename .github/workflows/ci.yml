@@ -30,6 +30,9 @@ jobs:
       receipts: ${{ steps.plan.outputs.receipts }}
       prd: ${{ steps.plan.outputs.prd }}
       packaging: ${{ steps.plan.outputs.packaging }}
+      lbug_cached: ${{ steps.lookups.outputs.lbug_cached }}
+      runtime_cache_hit: ${{ steps.lookups.outputs.runtime_cache_hit }}
+      runtime_packages_key: ${{ steps.plan.outputs.runtime_packages_key }}
     steps:
       - name: Check out source and base history
         uses: actions/checkout@v7
@@ -49,6 +52,38 @@ jobs:
             --base "${{ github.event.pull_request.base.sha || github.event.before }}" \
             --head "${{ github.event.pull_request.head.sha || github.sha }}" \
             --mode "$mode"
+      # Lookup-only restores let the rest of the workflow skip acceleration
+      # jobs whose trusted cache entry already exists. Lookups never
+      # download, so they cost a metadata round-trip instead of a transfer.
+      - name: Identify Rust acceleration inputs
+        id: rust-id
+        if: ${{ steps.plan.outputs.rust == 'true' || steps.plan.outputs.rust_runtime == 'true' || steps.plan.outputs.rust_crash == 'true' }}
+        run: |
+          rustc --version --verbose
+          echo "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
+      - name: Look up trusted prebuilt Ladybug bundle
+        id: lbug-lookup
+        if: ${{ steps.plan.outputs.rust == 'true' || steps.plan.outputs.rust_runtime == 'true' || steps.plan.outputs.rust_crash == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/lbug-prebuilt
+          key: lbug-prebuilt-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-id.outputs.release }}-v1-${{ hashFiles('Cargo.lock') }}
+          lookup-only: true
+      - name: Look up trusted Rust runtime bundle
+        id: runtime-lookup
+        if: ${{ steps.plan.outputs.vitest == 'true' && steps.plan.outputs.rust_runtime == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/relayer-rust-runtime
+          key: rust-runtime-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-id.outputs.release }}-debug-default-v1-${{ hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', '.cargo/**') }}-${{ steps.plan.outputs.runtime_packages_key }}
+          lookup-only: true
+      - name: Publish acceleration lookups
+        id: lookups
+        run: |
+          echo "lbug_cached=${{ steps.lbug-lookup.outputs.cache-hit == 'true' }}" >> "$GITHUB_OUTPUT"
+          echo "runtime_cache_hit=${{ steps.runtime-lookup.outputs.cache-hit == 'true' }}" >> "$GITHUB_OUTPUT"
 
   quick:
     name: Quick deterministic checks
@@ -68,8 +103,10 @@ jobs:
 
   lbug-prebuilt:
     name: Prebuilt Ladybug native library
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true' || needs.plan.outputs.rust_crash == 'true') }}
+    needs: plan
+    # Warm runs skip this hop entirely: the plan lookup already proved the
+    # trusted bundle cache entry exists, and the lanes restore it directly.
+    if: ${{ needs.plan.outputs.lbug_cached != 'true' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.rust_runtime == 'true' || needs.plan.outputs.rust_crash == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -119,8 +156,11 @@ jobs:
           overwrite: true
           if-no-files-found: error
           retention-days: 1
+      # Same-repository pull requests may also save, matching the sccache
+      # trust model: a Cargo.lock bump then pays the bundle build once in the
+      # PR instead of on every push to the PR. Fork pull requests never save.
       - name: Save trusted prebuilt Ladybug bundle
-        if: ${{ github.event_name == 'push' && success() && steps.lbug-cache.outputs.cache-hit != 'true' }}
+        if: ${{ (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && success() && steps.lbug-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
         with:
           path: ${{ runner.temp }}/lbug-prebuilt
@@ -135,8 +175,8 @@ jobs:
 
   rust-clippy:
     name: Rust Clippy
-    needs: [plan, quick, lbug-prebuilt]
-    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    needs: [plan, lbug-prebuilt]
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -150,26 +190,12 @@ jobs:
         uses: ./.github/actions/setup-rust-compilation
         with:
           lane: rust-clippy
-      - name: Download prebuilt Ladybug library
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Install prebuilt Ladybug library
+        uses: ./.github/actions/install-lbug-bundle
         with:
-          name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/lbug-prebuilt-download
-        continue-on-error: true
-      - name: Verify and install prebuilt Ladybug library
-        id: lbug-install
-        continue-on-error: true
-        run: |
-          node scripts/ci/lbug-artifact.mjs verify \
-            --repository "$GITHUB_WORKSPACE" \
-            --artifact-dir "$RUNNER_TEMP/lbug-prebuilt-download" \
-            --platform "${{ runner.os }}-${{ runner.arch }}" \
-            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
-            --github-env "$GITHUB_ENV"
-      - name: Record prebuilt Ladybug outcome
-        if: ${{ always() }}
-        run: |
-          echo "- Prebuilt Ladybug library: ${{ steps.lbug-install.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          lbug-cached: ${{ needs.plan.outputs.lbug_cached }}
+          rustc-release: ${{ steps.rust-setup.outputs.rustc-release }}
+          artifact-name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
       - name: Run Rust Clippy
         run: node scripts/ci/run-chapter.mjs rust-clippy
         env:
@@ -206,8 +232,8 @@ jobs:
 
   rust-tests:
     name: Fresh Rust tests
-    needs: [plan, quick, lbug-prebuilt]
-    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    needs: [plan, lbug-prebuilt]
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -221,26 +247,12 @@ jobs:
         uses: ./.github/actions/setup-rust-compilation
         with:
           lane: rust-tests
-      - name: Download prebuilt Ladybug library
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Install prebuilt Ladybug library
+        uses: ./.github/actions/install-lbug-bundle
         with:
-          name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/lbug-prebuilt-download
-        continue-on-error: true
-      - name: Verify and install prebuilt Ladybug library
-        id: lbug-install
-        continue-on-error: true
-        run: |
-          node scripts/ci/lbug-artifact.mjs verify \
-            --repository "$GITHUB_WORKSPACE" \
-            --artifact-dir "$RUNNER_TEMP/lbug-prebuilt-download" \
-            --platform "${{ runner.os }}-${{ runner.arch }}" \
-            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
-            --github-env "$GITHUB_ENV"
-      - name: Record prebuilt Ladybug outcome
-        if: ${{ always() }}
-        run: |
-          echo "- Prebuilt Ladybug library: ${{ steps.lbug-install.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          lbug-cached: ${{ needs.plan.outputs.lbug_cached }}
+          rustc-release: ${{ steps.rust-setup.outputs.rustc-release }}
+          artifact-name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
       - name: Run fresh Rust tests
         run: node scripts/ci/run-chapter.mjs rust-tests
         env:
@@ -267,8 +279,8 @@ jobs:
 
   rust-crash:
     name: Fresh crash reconciliation tests
-    needs: [plan, quick, lbug-prebuilt]
-    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}
+    needs: [plan, lbug-prebuilt]
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -282,26 +294,12 @@ jobs:
         uses: ./.github/actions/setup-rust-compilation
         with:
           lane: rust-crash
-      - name: Download prebuilt Ladybug library
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Install prebuilt Ladybug library
+        uses: ./.github/actions/install-lbug-bundle
         with:
-          name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/lbug-prebuilt-download
-        continue-on-error: true
-      - name: Verify and install prebuilt Ladybug library
-        id: lbug-install
-        continue-on-error: true
-        run: |
-          node scripts/ci/lbug-artifact.mjs verify \
-            --repository "$GITHUB_WORKSPACE" \
-            --artifact-dir "$RUNNER_TEMP/lbug-prebuilt-download" \
-            --platform "${{ runner.os }}-${{ runner.arch }}" \
-            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
-            --github-env "$GITHUB_ENV"
-      - name: Record prebuilt Ladybug outcome
-        if: ${{ always() }}
-        run: |
-          echo "- Prebuilt Ladybug library: ${{ steps.lbug-install.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          lbug-cached: ${{ needs.plan.outputs.lbug_cached }}
+          rustc-release: ${{ steps.rust-setup.outputs.rustc-release }}
+          artifact-name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
       - name: Run fresh crash reconciliation tests
         run: node scripts/ci/run-chapter.mjs rust-crash
         env:
@@ -327,8 +325,8 @@ jobs:
 
   rust-runtime:
     name: Rust runtime build
-    needs: [plan, quick, lbug-prebuilt]
-    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust_runtime == 'true' }}
+    needs: [plan, lbug-prebuilt]
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust_runtime == 'true' && needs.plan.outputs.runtime_cache_hit != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -349,26 +347,12 @@ jobs:
           # collisions. On runtime-only plans no writer lane exists, so the
           # runtime lane writes to keep the namespace from going cold.
           sccache-mode: ${{ needs.plan.outputs.rust == 'true' && 'READ_ONLY' || 'READ_WRITE' }}
-      - name: Download prebuilt Ladybug library
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Install prebuilt Ladybug library
+        uses: ./.github/actions/install-lbug-bundle
         with:
-          name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/lbug-prebuilt-download
-        continue-on-error: true
-      - name: Verify and install prebuilt Ladybug library
-        id: lbug-install
-        continue-on-error: true
-        run: |
-          node scripts/ci/lbug-artifact.mjs verify \
-            --repository "$GITHUB_WORKSPACE" \
-            --artifact-dir "$RUNNER_TEMP/lbug-prebuilt-download" \
-            --platform "${{ runner.os }}-${{ runner.arch }}" \
-            --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
-            --github-env "$GITHUB_ENV"
-      - name: Record prebuilt Ladybug outcome
-        if: ${{ always() }}
-        run: |
-          echo "- Prebuilt Ladybug library: ${{ steps.lbug-install.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          lbug-cached: ${{ needs.plan.outputs.lbug_cached }}
+          rustc-release: ${{ steps.rust-setup.outputs.rustc-release }}
+          artifact-name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
       - name: Run selected Rust runtime build
         run: node scripts/ci/run-chapter.mjs rust-runtime
         env:
@@ -402,6 +386,7 @@ jobs:
             --platform "${{ runner.os }}-${{ runner.arch }}" \
             --rustc-release "${{ steps.rust-setup.outputs.rustc-release }}" \
             --cargo-profile "debug-line-tables-only" \
+            --rust-input-digest "${{ hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', '.cargo/**') }}" \
             --plan-json "$CI_PLAN_JSON"
         env:
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
@@ -415,6 +400,16 @@ jobs:
           overwrite: true
           if-no-files-found: error
           retention-days: 1
+      # The Vitest jobs restore this bundle by Rust-input digest whenever the
+      # runtime lane is skipped; only trusted main pushes seed it, matching
+      # the dependency-cache writer.
+      - name: Save trusted Rust runtime bundle
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && success() }}
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/relayer-rust-runtime
+          key: rust-runtime-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-setup.outputs.rustc-release }}-debug-default-v1-${{ hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', '.cargo/**') }}-${{ needs.plan.outputs.runtime_packages_key }}
       - name: Save trusted Rust dependency downloads for runtime-only changes
         if: ${{ github.event_name == 'push' && success() && needs.plan.outputs.rust != 'true' && steps.rust-setup.outputs.dependency-cache-hit != 'true' }}
         continue-on-error: true
@@ -428,8 +423,8 @@ jobs:
 
   rust:
     name: Rust checks and fresh tests
-    needs: [plan, quick, rust-clippy, rust-tests, rust-crash, rust-runtime]
-    if: ${{ always() && needs.plan.result == 'success' && needs.quick.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    needs: [plan, rust-clippy, rust-tests, rust-crash, rust-runtime]
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -444,11 +439,12 @@ jobs:
           CI_AGGREGATE: rust
           CI_PLAN_JSON: ${{ needs.plan.outputs.plan }}
           CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          CI_RUNTIME_CACHE_HIT: ${{ needs.plan.outputs.runtime_cache_hit }}
 
   typescript:
     name: TypeScript builds
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.typescript == 'true' }}
+    needs: plan
+    if: ${{ needs.plan.outputs.typescript == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -462,11 +458,11 @@ jobs:
 
   vitest:
     name: Fresh deterministic Vitest portfolio
-    needs: [plan, quick, rust-runtime]
-    if: ${{ always() && needs.quick.result == 'success' && needs.plan.outputs.vitest == 'true' && ((needs.plan.outputs.rust_runtime == 'true' && needs['rust-runtime'].result == 'success') || needs.plan.outputs.rust_runtime != 'true') }}
+    needs: [plan, rust-runtime]
+    if: ${{ always() && needs.plan.outputs.vitest == 'true' && (needs.plan.outputs.rust_runtime != 'true' || needs.plan.outputs.runtime_cache_hit == 'true' || needs['rust-runtime'].result == 'success') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check out source
+      - name: Check out source and base history
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -477,23 +473,19 @@ jobs:
         run: |
           rustc --version --verbose
           echo "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
-      - name: Download selected Rust runtime
-        if: ${{ needs.plan.outputs.rust_runtime == 'true' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+          echo "host=$(rustc --version --verbose | sed -n 's/^host: //p')" >> "$GITHUB_OUTPUT"
+      - name: Install selected Rust runtime
+        uses: ./.github/actions/install-rust-runtime
         with:
-          name: rust-runtime-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/relayer-rust-runtime
-      - name: Verify and install selected Rust runtime
-        if: ${{ needs.plan.outputs.rust_runtime == 'true' }}
-        run: |
-          node scripts/ci/runtime-artifact.mjs verify \
-            --repository "$GITHUB_WORKSPACE" \
-            --artifact-dir "$RUNNER_TEMP/relayer-rust-runtime" \
-            --install-dir "$GITHUB_WORKSPACE/target/debug" \
-            --source-commit "$GITHUB_SHA" \
-            --platform "${{ runner.os }}-${{ runner.arch }}" \
-            --rustc-release "${{ steps.rust-toolchain.outputs.release }}" \
-            --cargo-profile "debug-line-tables-only"
+          rust-runtime-selected: ${{ needs.plan.outputs.rust_runtime }}
+          runtime-cache-hit: ${{ needs.plan.outputs.runtime_cache_hit }}
+          rustc-release: ${{ steps.rust-toolchain.outputs.release }}
+          rustc-host: ${{ steps.rust-toolchain.outputs.host }}
+          rust-input-digest: ${{ hashFiles('crates/**', 'Cargo.toml', 'Cargo.lock', '.cargo/**') }}
+          runtime-packages-key: ${{ needs.plan.outputs.runtime_packages_key }}
+          artifact-name: rust-runtime-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
+          lbug-artifact-name: lbug-prebuilt-${{ github.sha }}-${{ runner.os }}-${{ runner.arch }}
+          plan-json: ${{ needs.plan.outputs.plan }}
       - name: Build non-Rust Vitest prerequisites
         run: node scripts/ci/run-chapter.mjs vitest-prerequisites
         env:
@@ -505,8 +497,8 @@ jobs:
 
   python:
     name: Fresh Python client tests
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.python == 'true' }}
+    needs: plan
+    if: ${{ needs.plan.outputs.python == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -522,8 +514,8 @@ jobs:
 
   receipts:
     name: Receipt integrity
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.receipts == 'true' }}
+    needs: plan
+    if: ${{ needs.plan.outputs.receipts == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -537,8 +529,8 @@ jobs:
 
   prd:
     name: PRD readability
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.prd == 'true' }}
+    needs: plan
+    if: ${{ needs.plan.outputs.prd == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -554,8 +546,8 @@ jobs:
 
   packaging:
     name: Prime runtime package (${{ matrix.target }})
-    needs: [plan, quick]
-    if: ${{ needs.quick.result == 'success' && needs.plan.outputs.packaging == 'true' }}
+    needs: plan
+    if: ${{ needs.plan.outputs.packaging == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -625,7 +617,17 @@ jobs:
     name: check
     if: always()
     needs:
-      [plan, quick, rust, typescript, vitest, python, receipts, prd, packaging]
+      [
+        plan,
+        quick,
+        rust,
+        typescript,
+        vitest,
+        python,
+        receipts,
+        prd,
+        packaging,
+      ]
     runs-on: ubuntu-latest
     steps:
       - name: Check out source

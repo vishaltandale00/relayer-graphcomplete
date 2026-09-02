@@ -522,6 +522,27 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
     expect(result.reasons.join(" ")).toContain("docs/graph-query-v1.mdx");
   });
 
+  test("keys the runtime bundle cache on the portfolio constant, not the plan subset", () => {
+    // Trusted bundles are seeded only by full-mode main pushes, which seal
+    // the full portfolio. A narrow plan must still look up that entry --
+    // keying on its own subset would miss structurally -- and verify's
+    // coverage assertion is what makes the superset restore safe.
+    const narrow = plan("test/graph-authoring-replay.test.mjs");
+    expect(narrow.runtimeRustPackages).toEqual(["relayer-graph-server"]);
+    expect(narrow.runtimePackagesKey).toBe(
+      "relayer-app-server.relayer-graph-server",
+    );
+    expect(fullPlanWithoutDiff().runtimePackagesKey).toBe(
+      narrow.runtimePackagesKey,
+    );
+    // The separator cannot appear in a Cargo package name, so the fragment
+    // splits back into exactly the portfolio set even if it grows.
+    expect(narrow.runtimePackagesKey.split(".")).toEqual([
+      "relayer-app-server",
+      "relayer-graph-server",
+    ]);
+  });
+
   test("keeps CI-tooling scripts on the full portfolio", () => {
     const result = plan("scripts/check-node-version.mjs");
 

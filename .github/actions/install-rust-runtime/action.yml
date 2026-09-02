@@ -1,0 +1,147 @@
+name: Install selected Rust runtime
+description: >-
+  Restore the digest-bound runtime bundle from the trusted cache or the
+  runtime lane, verify and install it, and fail open to an in-lane fresh
+  build that reuses the lane's compilation inputs.
+
+inputs:
+  rust-runtime-selected:
+    description: Whether the plan selected runtime Rust packages for Vitest.
+    required: true
+  runtime-cache-hit:
+    description: Whether the plan lookup found a trusted bundle for this digest.
+    required: true
+  rustc-release:
+    description: rustc release of this runner.
+    required: true
+  rustc-host:
+    description: rustc host triple of this runner.
+    required: true
+  rust-input-digest:
+    description: Digest over crates/, Cargo.toml, Cargo.lock, and .cargo/.
+    required: true
+  runtime-packages-key:
+    description: >-
+      Trusted runtime bundle package set. Trusted bundles are seeded only by
+      full-mode main pushes, so this is the full-portfolio constant for every
+      plan; verify's coverage check makes superset restores safe.
+    required: true
+  artifact-name:
+    description: Runtime lane artifact name for the current run.
+    required: true
+  lbug-artifact-name:
+    description: Prebuilt Ladybug artifact name for the current run.
+    required: true
+  plan-json:
+    description: Affected-module plan JSON for coverage checks and the fallback build.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The key binds the binary set it seals: a plan expecting a different
+    # package set misses instead of restoring an under-covering bundle.
+    - name: Restore cached selected Rust runtime
+      id: runtime-cache
+      if: ${{ inputs.rust-runtime-selected == 'true' && inputs.runtime-cache-hit == 'true' }}
+      # A cache-service error reads as a miss; the verify step then falls
+      # open to the in-lane build.
+      continue-on-error: true
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ runner.temp }}/relayer-rust-runtime
+        key: rust-runtime-${{ runner.os }}-${{ runner.arch }}-${{ inputs.rustc-release }}-debug-default-v1-${{ inputs.rust-input-digest }}-${{ inputs.runtime-packages-key }}
+    - name: Download selected Rust runtime
+      if: ${{ inputs.rust-runtime-selected == 'true' && inputs.runtime-cache-hit != 'true' }}
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/relayer-rust-runtime
+      # Fail open: a missing or rejected bundle falls back to the in-lane
+      # build. Acceleration trouble must never fail the fresh Vitest chapters.
+      continue-on-error: true
+    - name: Verify and install selected Rust runtime
+      id: runtime-install
+      if: ${{ inputs.rust-runtime-selected == 'true' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        CI_PLAN_JSON: ${{ inputs.plan-json }}
+      run: |
+        node scripts/ci/runtime-artifact.mjs verify \
+          --repository "$GITHUB_WORKSPACE" \
+          --artifact-dir "$RUNNER_TEMP/relayer-rust-runtime" \
+          --install-dir "$GITHUB_WORKSPACE/target/debug" \
+          --rust-input-digest "${{ inputs.rust-input-digest }}" \
+          --platform "${{ runner.os }}-${{ runner.arch }}" \
+          --rustc-release "${{ inputs.rustc-release }}" \
+          --cargo-profile "debug-line-tables-only" \
+          --plan-json "$CI_PLAN_JSON"
+    # Fail-open path: an eviction race or a corrupted bundle leaves nothing
+    # installable. Rebuild in lane with the same compilation inputs the
+    # runtime lane uses — the trusted Ladybug bundle when one exists and the
+    # Cargo dependency archive — instead of paying a cold CMake floor. The
+    # build itself is fresh verification: if it fails, the chapter fails the
+    # same way a failed runtime lane would.
+    - name: Restore prebuilt Ladybug bundle for the runtime fallback
+      id: fallback-lbug-cache
+      if: ${{ inputs.rust-runtime-selected == 'true' && steps.runtime-install.outcome != 'success' }}
+      continue-on-error: true
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ runner.temp }}/lbug-prebuilt
+        key: lbug-prebuilt-${{ runner.os }}-${{ runner.arch }}-${{ inputs.rustc-release }}-v1-${{ hashFiles('Cargo.lock') }}
+    - name: Download prebuilt Ladybug bundle for the runtime fallback
+      id: fallback-lbug-download
+      if: ${{ inputs.rust-runtime-selected == 'true' && steps.runtime-install.outcome != 'success' && steps.fallback-lbug-cache.outputs.cache-hit != 'true' }}
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: ${{ inputs.lbug-artifact-name }}
+        path: ${{ runner.temp }}/lbug-prebuilt
+      continue-on-error: true
+    - name: Install prebuilt Ladybug bundle for the runtime fallback
+      id: fallback-lbug-install
+      if: ${{ inputs.rust-runtime-selected == 'true' && steps.runtime-install.outcome != 'success' }}
+      continue-on-error: true
+      shell: bash
+      run: |
+        node scripts/ci/lbug-artifact.mjs verify \
+          --repository "$GITHUB_WORKSPACE" \
+          --artifact-dir "$RUNNER_TEMP/lbug-prebuilt" \
+          --platform "${{ runner.os }}-${{ runner.arch }}" \
+          --rustc-release "${{ inputs.rustc-release }}" \
+          --github-env "$GITHUB_ENV"
+    - name: Restore Cargo dependency downloads for the runtime fallback
+      if: ${{ inputs.rust-runtime-selected == 'true' && steps.runtime-install.outcome != 'success' }}
+      continue-on-error: true
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: rust-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ inputs.rustc-release }}-${{ inputs.rustc-host }}-v1-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          rust-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ inputs.rustc-release }}-${{ inputs.rustc-host }}-v1-
+    - name: Build selected Rust runtime in lane after acceleration failure
+      id: runtime-fallback-build
+      if: ${{ inputs.rust-runtime-selected == 'true' && steps.runtime-install.outcome != 'success' }}
+      shell: bash
+      run: node scripts/ci/run-chapter.mjs rust-runtime
+      env:
+        CARGO_INCREMENTAL: "0"
+        CARGO_PROFILE_DEV_DEBUG: line-tables-only
+        CARGO_PROFILE_TEST_DEBUG: line-tables-only
+        CI_PLAN_JSON: ${{ inputs.plan-json }}
+    - name: Record runtime acceleration outcome
+      if: ${{ always() && inputs.rust-runtime-selected == 'true' }}
+      shell: bash
+      env:
+        CACHE_HIT: ${{ steps.runtime-cache.outputs.cache-hit }}
+        INSTALL_OUTCOME: ${{ steps.runtime-install.outcome }}
+        FALLBACK_BUILD: ${{ steps.runtime-fallback-build.outcome }}
+      run: |
+        echo "### Rust runtime acceleration" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Trusted cache restore hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Verify and install: ${INSTALL_OUTCOME:-skipped}" >> "$GITHUB_STEP_SUMMARY"
+        echo "- In-lane fallback build: ${FALLBACK_BUILD:-skipped}" >> "$GITHUB_STEP_SUMMARY"

@@ -191,6 +191,16 @@ function ownerMatches(owner, path) {
   return matches(path, owner);
 }
 
+// The trusted runtime bundle is seeded only by full-mode main pushes, which
+// seal the full portfolio. Every lookup, restore, and save keys on that
+// portfolio constant rather than a consuming plan's own subset, which would
+// miss structurally; verify's coverage assertion is the lock that makes
+// installing a superset bundle safe for a narrow plan. The separator cannot
+// appear in a Cargo package name, so the fragment stays injective.
+function runtimePackagesKey(config) {
+  return [...config.vitestRustRuntime.fullPortfolio].sort().join(".");
+}
+
 function allTrueChapters() {
   return Object.fromEntries(allChapterNames.map((chapter) => [chapter, true]));
 }
@@ -209,6 +219,7 @@ function fullPlan(repository, config, changedFiles, reasons) {
     vitestRustPackages: [...config.vitestRustRuntime.fullPortfolio].sort(),
     runtimeRustPackages: [...config.vitestRustRuntime.fullPortfolio].sort(),
     rustCrash: true,
+    runtimePackagesKey: runtimePackagesKey(config),
     rootTypeScript: true,
     chapters: allTrueChapters(),
   };
@@ -364,6 +375,7 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
       config.rustCrashPackages.includes(name),
     ),
     rootTypeScript,
+    runtimePackagesKey: runtimePackagesKey(config),
     chapters,
   };
 }
@@ -375,6 +387,7 @@ function writeActionsOutputs(plan) {
     `mode=${plan.mode}`,
     `rust_crash=${plan.rustCrash}`,
     `rust_runtime=${plan.runtimeRustPackages.length > 0}`,
+    `runtime_packages_key=${plan.runtimePackagesKey}`,
     ...Object.entries(plan.chapters).map(
       ([chapter, selected]) => `${chapter}=${selected}`,
     ),
