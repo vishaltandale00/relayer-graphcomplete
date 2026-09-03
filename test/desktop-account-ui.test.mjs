@@ -277,11 +277,16 @@ describe("desktop account presentation", () => {
     expect(accountPanel).not.toContain("desktopAccountChannel");
     expect(accountPanel).not.toContain("Release channel");
     expect(css).toContain(".desktop-account-onboarding{position:fixed;inset:0;");
+    // The optional-account step was the last surface carrying a coloured wash.
+    expect(css).toContain("padding:32px;background:var(--bg)");
+    expect(css).not.toContain("radial-gradient(circle at 50% 40%,#f7f4ef");
     // Nothing floats over the workspace any more, and the control keeps its
     // glyph when the sidebar collapses to icons.
     expect(css).not.toContain("desktop-account-corner-control");
-    // A drawn person mark in the sidebar's stroked-SVG idiom, not a glyph.
-    expect(css).toContain(".account-footer-button svg{width:16px;height:16px");
+    // Both footer marks are drawn in the sidebar's stroked-SVG idiom, so the
+    // pair no longer mixes a glyph with a drawn icon at different weights.
+    expect(css).toContain(".sidebar-footer .footer-button svg{width:16px;height:16px");
+    expect(sidebarFooter.match(/<svg viewBox="0 0 20 20"/g)).toHaveLength(2);
     expect(css).toContain("stroke:currentColor");
     expect(css).not.toContain("account-footer-button:before");
     // The label collapses through the rule every other footer control uses,
@@ -300,11 +305,11 @@ describe("desktop account presentation", () => {
     // does is layout, which jsdom cannot answer: capture-provider-ux-video.mjs
     // measures the rendered footer, and this only pins the rule it depends on.
     expect(css).toContain("white-space:nowrap;overflow:hidden;text-overflow:ellipsis");
-    // Hiding the label must never take the decorative glyph with it, and the
+    // Hiding the label must never take a decorative mark with it, and the
     // footer controls keep a name once their label is gone.
     expect(css).toContain("body.sidebar-collapsed .footer-button span:not([aria-hidden])");
     expect(sidebarFooter).toContain('id="settingsButton" type="button" title="Settings" aria-label="Settings"');
-    expect(sidebarFooter).toContain('<span aria-hidden="true">⚙</span>');
+    expect(sidebarFooter).not.toContain("⚙");
     expect(sidebarFooter).toContain('id="updateButton" type="button" title="Application update status" aria-label="Application update status"');
   });
 });

@@ -316,23 +316,19 @@ async function recordBrowserFlow(url, directory, profile) {
         const previousLabel = label.textContent;
         indicator.classList.remove('hidden');
         label.textContent = 'Signing in…';
-        const probe = document.createElement('span');
-        probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:' + getComputedStyle(label).font;
-        probe.textContent = label.textContent;
-        document.body.appendChild(probe);
-        const naturalWidth = probe.getBoundingClientRect().width;
-        probe.remove();
         const overflowed = footer.scrollWidth > footer.clientWidth;
         const indicatorWidth = indicator.getBoundingClientRect().width;
-        const labelVisible = label.getClientRects().length > 0;
-        const wrapped = labelVisible && naturalWidth > label.getBoundingClientRect().width + 0.5;
+        // Wrapping is a line count, not a width comparison: with nowrap the
+        // label truncates instead, and a truncated label is not a wrapped one.
+        const lineBoxes = label.getClientRects().length;
+        const wrapped = lineBoxes > 1;
         const settingsName = settings.getAttribute('aria-label');
         const indicatorName = indicator.getAttribute('aria-label');
         if (wasHidden) indicator.classList.add('hidden');
         label.textContent = previousLabel;
         if (overflowed) throw new Error('Sidebar footer overflows with the update indicator visible.');
         if (indicatorWidth < 30.5) throw new Error('Update indicator was shrunk to ' + indicatorWidth + 'px.');
-        if (wrapped) throw new Error('A busy account label wraps inside the footer control.');
+        if (wrapped) throw new Error('A busy account label wraps across ' + lineBoxes + ' lines in the footer control.');
         if (settingsName !== 'Settings') throw new Error('Settings is named ' + JSON.stringify(settingsName) + '.');
         if (!indicatorName || /available/i.test(indicatorName)) {
           throw new Error('Update indicator claims a state it may not be in: ' + JSON.stringify(indicatorName));
