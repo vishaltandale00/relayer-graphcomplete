@@ -14,7 +14,7 @@ target_dmg=""
 target_receipt=""
 publication_receipt=""
 evidence_directory=""
-timeout_seconds=1800
+timeout_seconds=900
 while (($#)); do
   case "$1" in
     --target)
@@ -135,7 +135,45 @@ wait_for_target_trace() {
     sleep 2
   done
   echo "Timed out waiting for the $target_label target to relaunch." >&2
+  relaunch_timeout_diagnostics "$log" "$target_version" "$seed_pid"
   return 1
+}
+
+# The relaunch can fail for reasons that look identical from the trace alone.
+# Report the few facts that separate them, so one timed-out run is enough to
+# tell whether Squirrel never fetched, fetched but did not install, or installed
+# while the relaunched process failed to record its trace.
+relaunch_timeout_diagnostics() {
+  local log="$1" target_version="$2" seed_pid="$3"
+  local seed_log="$evidence_directory/${evidence_prefix}-seed-update.log"
+  [[ -f "$seed_log" ]] || seed_log="$evidence_directory/seed-update.log"
+  {
+    echo "--- relaunch timeout diagnostics ---"
+    echo "installed bundle version: $(defaults read "$application/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo unreadable)"
+    echo "expected target version:  $target_version"
+    echo "squirrel proxy requests:  $(grep -c "requested" "$seed_log" 2>/dev/null || echo 0)"
+    echo "launchctl canary log:     $(launchctl getenv RELAYER_DESKTOP_CANARY_LOG 2>/dev/null || echo unset)"
+    echo "launchctl user data dir:  $(launchctl getenv RELAYER_DESKTOP_USER_DATA_DIR 2>/dev/null || echo unset)"
+    echo "seed pid:                 $seed_pid (alive: $(kill -0 "$seed_pid" 2>/dev/null && echo yes || echo no))"
+    echo "running Relayer processes:"
+    pgrep -lf "Relayer.app/Contents/MacOS/Relayer" 2>/dev/null | sed "s/^/  /" || echo "  none"
+    echo "trace versions/processIds seen:"
+    if [[ -s "$log" ]]; then
+      node -e '
+        const fs = require("fs");
+        const records = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
+        const seen = new Map();
+        for (const record of records) {
+          const key = `${record.state?.version} pid=${record.processId} phase=${record.state?.phase}`;
+          seen.set(key, (seen.get(key) || 0) + 1);
+        }
+        for (const [key, count] of seen) console.log(`  ${key} x${count}`);
+      ' "$log" || echo "  unreadable"
+    else
+      echo "  (live state log is empty -- the relaunched app wrote nothing)"
+    fi
+    echo "--- end diagnostics ---"
+  } >&2
 }
 
 target_process_id_from_trace() {
