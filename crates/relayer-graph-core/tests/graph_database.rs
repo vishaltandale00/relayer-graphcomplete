@@ -160,6 +160,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                 interaction_node_id: interaction_node_id.into(),
                 root_action: ImportedAction {
                     id: "action-1".into(),
+                    client_key: None,
                     source_node_id: interaction_node_id.into(),
                     source_layer_id: None,
                     kind: "navigate".into(),
@@ -176,6 +177,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                 layers: vec![ImportedResolvedLayer {
                     layer: ImportedLayer {
                         id: "layer-1".into(),
+                        client_key: None,
                         nodes: vec!["node-1".into()],
                         edges: vec![],
                         layout: Some(ImportedLayerLayout {
@@ -189,6 +191,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                     },
                     nodes: vec![ImportedNode {
                         id: "node-1".into(),
+                        client_key: None,
                         kind: "concept".into(),
                         icon: "box".into(),
                         title: "Queue".into(),
@@ -215,6 +218,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
             interaction_node_id: "interaction-1".into(),
             root_action: ImportedAction {
                 id: "root-action-1".into(),
+                client_key: Some("authored-root-action-1".into()),
                 source_node_id: "interaction-1".into(),
                 source_layer_id: None,
                 kind: "navigate".into(),
@@ -231,12 +235,14 @@ fn imported_invoke_conversation() -> ImportedConversation {
             layers: vec![ImportedResolvedLayer {
                 layer: ImportedLayer {
                     id: "layer-1".into(),
+                    client_key: Some("authored-layer-1".into()),
                     nodes: vec!["node-1".into()],
                     edges: vec![],
                     layout: None,
                 },
                 nodes: vec![ImportedNode {
                     id: "node-1".into(),
+                    client_key: Some("authored-node-1".into()),
                     kind: "concept".into(),
                     icon: "box".into(),
                     title: "Path".into(),
@@ -246,6 +252,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                 edges: vec![],
                 actions: vec![ImportedAction {
                     id: "invoke-action-1".into(),
+                    client_key: Some("authored-invoke-action-1".into()),
                     source_node_id: "node-1".into(),
                     source_layer_id: Some("layer-1".into()),
                     kind: "invoke".into(),
@@ -275,6 +282,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
             interaction_node_id: "interaction-2".into(),
             root_action: ImportedAction {
                 id: "root-action-2".into(),
+                client_key: None,
                 source_node_id: "interaction-2".into(),
                 source_layer_id: None,
                 kind: "navigate".into(),
@@ -291,12 +299,14 @@ fn imported_invoke_conversation() -> ImportedConversation {
             layers: vec![ImportedResolvedLayer {
                 layer: ImportedLayer {
                     id: "layer-2".into(),
+                    client_key: None,
                     nodes: vec!["node-2".into()],
                     edges: vec![],
                     layout: None,
                 },
                 nodes: vec![ImportedNode {
                     id: "node-2".into(),
+                    client_key: None,
                     kind: "concept".into(),
                     icon: "box".into(),
                     title: "Destination".into(),
@@ -406,6 +416,7 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
     let mut input = imported_conversation("interaction-1");
     let target = ImportedNode {
         id: "node-1".into(),
+        client_key: None,
         kind: "concept".into(),
         icon: "box".into(),
         title: "Queue".into(),
@@ -491,6 +502,7 @@ async fn imported_unanswered_input_action_keeps_its_authored_payload() {
         .actions
         .push(ImportedAction {
             id: "unanswered-input".into(),
+            client_key: None,
             source_node_id: "node-1".into(),
             source_layer_id: Some("layer-1".into()),
             kind: "input".into(),
@@ -548,6 +560,7 @@ async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable()
         .actions
         .push(ImportedAction {
             id: "input-action-1".into(),
+            client_key: None,
             source_node_id: "node-1".into(),
             source_layer_id: Some("layer-1".into()),
             kind: "input".into(),
@@ -650,6 +663,7 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
         });
     resolved.nodes.push(ImportedNode {
         id: "node-2".into(),
+        client_key: None,
         kind: "concept".into(),
         icon: "box".into(),
         title: "Worker".into(),
@@ -660,6 +674,7 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
     for id in ["input-action-1", "input-action-2"] {
         resolved.actions.push(ImportedAction {
             id: id.into(),
+            client_key: None,
             source_node_id: "node-1".into(),
             source_layer_id: Some("layer-1".into()),
             kind: "input".into(),
@@ -758,6 +773,7 @@ async fn imported_submitted_input_value_must_satisfy_the_accepted_action() {
     for id in ["input-action-1", "input-action-2"] {
         resolved.actions.push(ImportedAction {
             id: id.into(),
+            client_key: None,
             source_node_id: "node-1".into(),
             source_layer_id: Some("layer-1".into()),
             kind: "input".into(),
@@ -874,6 +890,23 @@ async fn imported_action_origin_reconstructs_resolved_invoke_navigation() {
         .iter()
         .find(|action| action.kind == ActionKind::Invoke)
         .unwrap();
+
+    assert_eq!(
+        source_layer.layer.client_key.as_deref(),
+        Some("authored-layer-1")
+    );
+    assert_eq!(
+        source_layer.nodes[0].client_key.as_deref(),
+        Some("authored-node-1")
+    );
+    assert_eq!(
+        invoke.client_key.as_deref(),
+        Some("authored-invoke-action-1")
+    );
+    assert_eq!(
+        invoke.source_layer_client_key.as_deref(),
+        Some("authored-layer-1")
+    );
 
     assert_eq!(
         invoke.target_layer_id.map(LayerId::value),

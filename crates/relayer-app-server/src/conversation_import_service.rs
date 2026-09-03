@@ -419,6 +419,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                 id: context.id,
                 target: ImportedNode {
                     id: context.target.id,
+                    client_key: None,
                     kind: context.target.kind,
                     icon: context.target.icon,
                     title: context.target.title,
@@ -472,6 +473,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                 .map(|resolved| ImportedResolvedLayer {
                     layer: ImportedLayer {
                         id: resolved.layer.id,
+                        client_key: resolved.layer.client_key,
                         nodes: resolved.layer.nodes,
                         edges: resolved.layer.edges,
                         layout: resolved.layer.layout.map(|layout| {
@@ -494,6 +496,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                         .into_iter()
                         .map(|node| ImportedNode {
                             id: node.id,
+                            client_key: node.client_key,
                             kind: node.kind,
                             icon: node.icon,
                             title: node.title,
@@ -520,6 +523,7 @@ fn import_action(action: ExportAction) -> ImportedAction {
     let input = action.input.map(import_input_action);
     ImportedAction {
         id: action.id,
+        client_key: action.client_key,
         source_node_id: action.source_node_id,
         source_layer_id: action.source_layer_id,
         kind: match action.kind {

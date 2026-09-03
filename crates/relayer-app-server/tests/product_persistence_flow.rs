@@ -6115,8 +6115,7 @@ fn exits_when_desktop_control_pipe_closes() {
     fs::create_dir_all(&root).unwrap();
     let permissions = permission_catalog();
 
-    let executable = std::env::var("CARGO_BIN_EXE_relayer-app-server")
-        .expect("Cargo must provide the relayer-app-server test executable");
+    let executable = env!("CARGO_BIN_EXE_relayer-app-server");
     let mut child = Command::new(executable)
         .args([
             "--data-dir",

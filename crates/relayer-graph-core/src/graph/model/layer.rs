@@ -11,6 +11,8 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 pub struct GraphLayer {
     pub id: LayerId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub nodes: Vec<NodeId>,
     pub edges: Vec<EdgeId>,
     #[serde(default)]

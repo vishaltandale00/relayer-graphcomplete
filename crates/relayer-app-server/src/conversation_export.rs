@@ -333,6 +333,8 @@ pub struct ExportResolvedLayer {
 #[serde(rename_all = "camelCase")]
 pub struct ExportLayer {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub nodes: Vec<String>,
     pub edges: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -359,6 +361,8 @@ pub struct ExportNodePlacement {
 #[serde(rename_all = "camelCase")]
 pub struct ExportNode {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub kind: String,
     pub icon: String,
     pub title: String,
@@ -410,6 +414,8 @@ pub enum ExportActionVariant {
 #[serde(rename_all = "camelCase")]
 pub struct ExportAction {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub source_node_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_layer_id: Option<String>,
@@ -666,6 +672,7 @@ impl ConversationExportValidator {
             )?;
             let target = ExportNode {
                 id: context.target.id.clone(),
+                client_key: None,
                 kind: context.target.kind.clone(),
                 icon: context.target.icon.clone(),
                 title: context.target.title.clone(),
@@ -1671,6 +1678,7 @@ fn validate_accepted_view(
     validate_root_action(&view.root_action, view, &path)?;
 
     let mut layers = HashMap::new();
+    let mut layer_client_keys = HashMap::new();
     for (index, resolved) in view.layers.iter().enumerate() {
         let layer_path = format!("{path}.layers[{index}]");
         require_id(
@@ -1691,6 +1699,17 @@ fn validate_accepted_view(
                 ),
             ));
         }
+        if let Some(client_key) = resolved.layer.client_key.as_deref()
+            && let Some(existing_id) =
+                layer_client_keys.insert(client_key, resolved.layer.id.as_str())
+            && existing_id != resolved.layer.id
+        {
+            return Err(ExportValidationError::new(
+                "duplicate_layer_client_key",
+                format!("{layer_path}.layer.clientKey"),
+                "A stable layer client key may identify only one layer within an accepted view.",
+            ));
+        }
         validate_layer(resolved, &layer_path)?;
     }
     if !layers.contains_key(view.root_layer_id.as_str()) {
@@ -1704,8 +1723,10 @@ fn validate_accepted_view(
     let mut pending = VecDeque::from([view.root_layer_id.as_str()]);
     let mut visited = HashSet::new();
     let mut nodes_by_id = HashMap::<&str, &ExportNode>::new();
+    let mut node_client_keys = HashMap::<&str, &str>::new();
     let mut edges_by_id = HashMap::<&str, &ExportEdge>::new();
     let mut actions_by_id = HashMap::<&str, &ExportAction>::new();
+    let mut action_client_keys = HashMap::<(&str, &str), &str>::new();
     let mut expand_adjacency = HashMap::<&str, Vec<&str>>::new();
     let mut target_relations = HashMap::<&str, ExportNavigateRelation>::new();
     target_relations.insert(view.root_layer_id.as_str(), ExportNavigateRelation::Expand);
@@ -1722,6 +1743,16 @@ fn validate_accepted_view(
                     "node_identity_conflict",
                     format!("{path}.node[{}]", node.id),
                     "A portable node ID must have one immutable definition within an accepted view.",
+                ));
+            }
+            if let Some(client_key) = node.client_key.as_deref()
+                && let Some(existing_id) = node_client_keys.insert(client_key, node.id.as_str())
+                && existing_id != node.id
+            {
+                return Err(ExportValidationError::new(
+                    "duplicate_node_client_key",
+                    format!("{path}.node[{}].clientKey", node.id),
+                    "A stable node client key may identify only one node within an accepted view.",
                 ));
             }
         }
@@ -1745,6 +1776,19 @@ fn validate_accepted_view(
                     "action_identity_conflict",
                     format!("{path}.action[{}]", action.id),
                     "A portable action ID must have one immutable definition within an accepted view.",
+                ));
+            }
+            if let Some(client_key) = action.client_key.as_deref()
+                && let Some(existing_id) = action_client_keys.insert(
+                    (action.source_node_id.as_str(), client_key),
+                    action.id.as_str(),
+                )
+                && existing_id != action.id
+            {
+                return Err(ExportValidationError::new(
+                    "duplicate_action_client_key",
+                    format!("{path}.action[{}].clientKey", action.id),
+                    "A stable action client key may identify only one action for its source node.",
                 ));
             }
             if action.id == view.root_action.id {
@@ -1848,6 +1892,9 @@ fn validate_root_action(
 }
 
 fn validate_layer(resolved: &ExportResolvedLayer, path: &str) -> Result<(), ExportValidationError> {
+    if let Some(client_key) = &resolved.layer.client_key {
+        require_string(client_key, format!("{path}.layer.clientKey"))?;
+    }
     if resolved.nodes.is_empty() || resolved.nodes.len() > MAX_NODES_PER_LAYER {
         return Err(ExportValidationError::new(
             "layer_node_count",
@@ -1943,6 +1990,9 @@ fn validate_layer(resolved: &ExportResolvedLayer, path: &str) -> Result<(), Expo
     }
     for (index, node) in resolved.nodes.iter().enumerate() {
         require_id(&node.id, "node", format!("{path}.nodes[{index}].id"))?;
+        if let Some(client_key) = &node.client_key {
+            require_string(client_key, format!("{path}.nodes[{index}].clientKey"))?;
+        }
         require_string(&node.kind, format!("{path}.nodes[{index}].kind"))?;
         require_string(&node.icon, format!("{path}.nodes[{index}].icon"))?;
         require_string(&node.title, format!("{path}.nodes[{index}].title"))?;
@@ -1985,6 +2035,16 @@ fn validate_layer(resolved: &ExportResolvedLayer, path: &str) -> Result<(), Expo
 
 fn validate_action(action: &ExportAction, path: &str) -> Result<(), ExportValidationError> {
     require_id(&action.id, "action", format!("{path}.id"))?;
+    if let Some(client_key) = &action.client_key {
+        require_string(client_key, format!("{path}.clientKey"))?;
+        if client_key.contains('\0') {
+            return Err(ExportValidationError::new(
+                "reserved_action_client_key",
+                format!("{path}.clientKey"),
+                "Action client keys cannot contain NUL characters.",
+            ));
+        }
+    }
     require_id(
         &action.source_node_id,
         "node",

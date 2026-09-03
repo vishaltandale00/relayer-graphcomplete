@@ -83,6 +83,7 @@ export class RelayerGraphClient {
     });
     const accepted = validatedSubmittedNodeResponse(
       body,
+      envelope.clientKey,
       authoredDetail.components.length === 0 ? undefined : authoredDetail,
     );
     applyAcceptedNodeResponse(envelope.owner.object, accepted);
@@ -421,7 +422,11 @@ interface ResolvedDetailAsset {
 
 const GRAPH_NODE_KEYS = Object.freeze(["detail", "icon", "id", "kind", "state", "title"]);
 
-function validatedSubmittedNodeResponse(value: unknown, expectedAuthoredDetail?: CompiledNodeDetail): GraphNode {
+function validatedSubmittedNodeResponse(
+  value: unknown,
+  expectedClientKey: string,
+  expectedAuthoredDetail?: CompiledNodeDetail,
+): GraphNode {
   try {
     const envelope = snapshotNodeResponseRecord(
       value,
@@ -433,7 +438,7 @@ function validatedSubmittedNodeResponse(value: unknown, expectedAuthoredDetail?:
     const candidate = snapshotNodeResponseRecord(
       envelope.values.node,
       GRAPH_NODE_KEYS,
-      ["authoredDetail", "leasedActionId"],
+      ["authoredDetail", "clientKey", "leasedActionId"],
       "node",
       "Node must use the exact ordinary GraphNode data shape",
     );
@@ -444,6 +449,9 @@ function validatedSubmittedNodeResponse(value: unknown, expectedAuthoredDetail?:
     if (candidate.optionalFields.has("leasedActionId") && fields.leasedActionId !== null
       && (!Number.isSafeInteger(fields.leasedActionId) || (fields.leasedActionId as number) < 1)) {
       return invalidNodeResponse("node.leasedActionId", "Node leased action id must be null or a positive safe integer");
+    }
+    if (candidate.optionalFields.has("clientKey") && fields.clientKey !== expectedClientKey) {
+      return invalidNodeResponse("node.clientKey", "Node client key must equal the stable key submitted by this client");
     }
     const kind = fields.kind;
     const title = fields.title;
@@ -473,6 +481,7 @@ function validatedSubmittedNodeResponse(value: unknown, expectedAuthoredDetail?:
     }
     return Object.freeze({
       id: fields.id as number,
+      ...(candidate.optionalFields.has("clientKey") ? { clientKey: expectedClientKey } : {}),
       ...(candidate.optionalFields.has("leasedActionId") ? { leasedActionId: fields.leasedActionId as number | null } : {}),
       kind,
       icon: fields.icon,

@@ -101,5 +101,9 @@ describe("Eval ProductWorkspace annotations", () => {
     expect(styles).toContain("#nodeLayer{pointer-events:none}");
     expect(styles).toContain(".graph-node{position:absolute");
     expect(styles).toContain("pointer-events:auto");
+    expect(styles).toContain(".inspector{position:relative}");
+    expect(styles).toContain(".annotation-panel{position:absolute;inset:max(58%,calc(100% - 250px)) 12px 12px");
+    expect(styles).toContain("overflow:auto");
+    expect(styles).toContain("box-shadow:0 18px 48px rgba(0,0,0,.52)");
   });
 });

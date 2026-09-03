@@ -994,6 +994,7 @@ fn export_layer(
     Ok(ExportResolvedLayer {
         layer: ExportLayer {
             id: ids.layer(resolved.layer.id.value()),
+            client_key: resolved.layer.client_key.clone(),
             nodes: resolved
                 .layer
                 .nodes
@@ -1046,6 +1047,7 @@ fn export_node(
     }
     Ok(ExportNode {
         id: ids.node(node.id.value()),
+        client_key: node.client_key.clone(),
         kind: redactor.text(&node.kind),
         icon: redactor.text(&node.icon),
         title: redactor.text(&node.title),
@@ -1104,6 +1106,7 @@ fn export_action(
     };
     Ok(ExportAction {
         id: ids.action(action.id.value()),
+        client_key: action.client_key.clone(),
         source_node_id: ids.node(action.source_node_id.value()),
         source_layer_id: action.source_layer_id.map(|id| ids.layer(id.value())),
         kind,
@@ -1434,6 +1437,7 @@ mod tests {
     fn rejects_private_project_paths_inside_integrity_bound_authored_detail() {
         let node = GraphNode {
             id: NodeId::new(1).unwrap(),
+            client_key: Some("private-detail".into()),
             leased_action_id: None,
             kind: "concept".into(),
             icon: "box".into(),
@@ -1672,6 +1676,7 @@ mod tests {
         };
         let target = InteractionInputNode::from(GraphNode {
             id: NodeId::new(20).unwrap(),
+            client_key: Some("target".into()),
             kind: "concept".into(),
             icon: "file".into(),
             title: "Target".into(),
@@ -1684,6 +1689,7 @@ mod tests {
             input: InteractionInput {
                 interaction: InteractionInputNode::from(GraphNode {
                     id: NodeId::new(10).unwrap(),
+                    client_key: None,
                     kind: "user-interaction".into(),
                     icon: "user".into(),
                     title: "Use context".into(),
@@ -1829,8 +1835,10 @@ mod tests {
     fn resolved_invoke_exports_its_authored_shape() {
         let action = GraphAction {
             id: ActionId::new(1).unwrap(),
+            client_key: Some("continue".into()),
             source_node_id: NodeId::new(2).unwrap(),
             source_layer_id: Some(LayerId::new(3).unwrap()),
+            source_layer_client_key: Some("source".into()),
             kind: ActionKind::Invoke,
             relation: None,
             label: "Continue".into(),
@@ -1861,8 +1869,10 @@ mod tests {
     fn unanswered_input_action_exports_its_authored_payload() {
         let action = GraphAction {
             id: ActionId::new(1).unwrap(),
+            client_key: Some("choose".into()),
             source_node_id: NodeId::new(2).unwrap(),
             source_layer_id: Some(LayerId::new(3).unwrap()),
+            source_layer_client_key: Some("source".into()),
             kind: ActionKind::Input,
             relation: None,
             label: "Choose".into(),
@@ -1919,8 +1929,10 @@ mod tests {
         assert_eq!(authored_key_with_internal_space.len(), 128);
         let action = GraphAction {
             id: ActionId::new(1).unwrap(),
+            client_key: Some("choose".into()),
             source_node_id: NodeId::new(2).unwrap(),
             source_layer_id: Some(LayerId::new(3).unwrap()),
+            source_layer_client_key: Some("source".into()),
             kind: ActionKind::Input,
             relation: None,
             label: "Choose".into(),

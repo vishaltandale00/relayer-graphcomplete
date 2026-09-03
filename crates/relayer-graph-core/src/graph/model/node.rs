@@ -9,6 +9,8 @@ use crate::{ActionId, GraphError, NodeId, RecordState};
 #[serde(rename_all = "camelCase")]
 pub struct GraphNode {
     pub id: NodeId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     #[serde(default)]
     pub leased_action_id: Option<ActionId>,
     pub kind: String,

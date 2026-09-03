@@ -106,6 +106,8 @@ pub struct ImportedResolvedLayer {
 #[serde(rename_all = "camelCase")]
 pub struct ImportedLayer {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub nodes: Vec<String>,
     pub edges: Vec<String>,
     #[serde(default)]
@@ -131,6 +133,8 @@ pub struct ImportedNodePlacement {
 #[serde(rename_all = "camelCase")]
 pub struct ImportedNode {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub kind: String,
     pub icon: String,
     pub title: String,
@@ -150,6 +154,8 @@ pub struct ImportedEdge {
 #[serde(rename_all = "camelCase")]
 pub struct ImportedAction {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub source_node_id: String,
     pub source_layer_id: Option<String>,
     pub kind: String,
@@ -364,7 +370,8 @@ impl crate::GraphDatabase {
                 .map_err(|error| GraphError::Internal(error.to_string()))?;
             let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,'accepted',?8,?9)")
                 .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(node.kind).bind(node.icon)
-                .bind(node.title).bind(node.detail).bind(authored_detail).bind(owner).bind(&portable_id).execute(&mut *tx).await?;
+                .bind(node.title).bind(node.detail).bind(authored_detail).bind(owner)
+                .bind(node.client_key.as_deref().unwrap_or(&portable_id)).execute(&mut *tx).await?;
             node_ids.insert(portable_id, result.last_insert_rowid());
         }
 
@@ -397,7 +404,7 @@ impl crate::GraphDatabase {
                 let result = sqlx::query("INSERT INTO layers(project_id,thread_id,layout_schema_version,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,'accepted',?4,?5)")
                     .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value())
                     .bind(resolved.layer.layout.as_ref().map(|layout| i64::from(layout.version)))
-                    .bind(owner).bind(&resolved.layer.id)
+                    .bind(owner).bind(resolved.layer.client_key.as_deref().unwrap_or(&resolved.layer.id))
                     .execute(&mut *tx).await?;
                 layer_ids.insert(resolved.layer.id, result.last_insert_rowid());
             }
@@ -1156,7 +1163,7 @@ async fn insert_action(
         .bind(context.nodes[&action.source_node_id]).bind(action.source_layer_id.as_ref().map(|id| context.layers[id]))
         .bind(&action.kind).bind(&action.relation).bind(&action.label).bind(&action.variant).bind(&action.icon).bind(&action.description)
         .bind(action.target_layer_id.as_ref().map(|id| context.layers[id])).bind(&action.interaction_text)
-        .bind(response).bind(owner).bind(&action.id)
+        .bind(response).bind(owner).bind(action.client_key.as_deref().unwrap_or(&action.id))
         .execute(&mut **tx).await?;
     let action_id = result.last_insert_rowid();
     if let Some(input) = input {

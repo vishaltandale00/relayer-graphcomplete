@@ -9,6 +9,7 @@ fn action(
 ) -> ExportAction {
     ExportAction {
         id: id.into(),
+        client_key: None,
         source_node_id: source_node_id.into(),
         source_layer_id: source_layer_id.map(Into::into),
         kind: ExportActionKind::Navigate,
@@ -27,6 +28,7 @@ fn action(
 fn invoke(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction {
     ExportAction {
         id: id.into(),
+        client_key: None,
         source_node_id: source_node_id.into(),
         source_layer_id: Some(source_layer_id.into()),
         kind: ExportActionKind::Invoke,
@@ -45,6 +47,7 @@ fn invoke(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction
 fn input(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction {
     ExportAction {
         id: id.into(),
+        client_key: None,
         source_node_id: source_node_id.into(),
         source_layer_id: Some(source_layer_id.into()),
         kind: ExportActionKind::Input,
@@ -78,6 +81,7 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
     ExportResolvedLayer {
         layer: ExportLayer {
             id: id.into(),
+            client_key: None,
             nodes: vec![node_id.into()],
             edges: vec![],
             layout: Some(ExportLayerLayout {
@@ -92,6 +96,7 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
         },
         nodes: vec![ExportNode {
             id: node_id.into(),
+            client_key: None,
             kind: "concept".into(),
             icon: "file".into(),
             title: format!("Node {node_id}"),

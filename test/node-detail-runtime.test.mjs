@@ -485,9 +485,9 @@ describe("compiled Node Detail product runtime", () => {
     });
     const node = { id: 7, clientKey: "authored-node", kind: "concept", icon: "box", title: "Authored node", detail: "Legacy fallback", authoredDetail: detail };
     const actions = [
-      { id: 11, clientKey: "expand-action", sourceNodeId: 7, sourceLayerId: 10, kind: "navigate", relation: "expand", targetLayerId: 91 },
-      { id: 12, clientKey: "invoke-action", sourceNodeId: 7, sourceLayerId: 10, kind: "invoke", interactionText: "Investigate" },
-      { id: 13, clientKey: "input-action", sourceNodeId: 7, sourceLayerId: 10, kind: "input", control: "single_select", prompt: "Choose one", options: [{ key: "one", label: "One" }, { key: "two", label: "Two" }] },
+      { id: 11, clientKey: "expand-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "navigate", relation: "expand", targetLayerId: 91 },
+      { id: 12, clientKey: "invoke-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "invoke", interactionText: "Investigate" },
+      { id: 13, clientKey: "input-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "input", control: "single_select", prompt: "Choose one", options: [{ key: "one", label: "One" }, { key: "two", label: "Two" }] },
     ];
     const layer = {
       layer: { id: 99, clientKey: "presenting-layer", layout: { version: 1, placements: [{ nodeId: 7, x: 0.5, y: 0.5 }] } },

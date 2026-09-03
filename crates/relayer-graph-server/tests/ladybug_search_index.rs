@@ -193,6 +193,7 @@ fn imported_conversation(project_id: Option<ProjectId>) -> ImportedConversation 
                 interaction_node_id: "interaction-1".into(),
                 root_action: ImportedAction {
                     id: "action-1".into(),
+                    client_key: None,
                     source_node_id: "interaction-1".into(),
                     source_layer_id: None,
                     kind: "navigate".into(),
@@ -209,6 +210,7 @@ fn imported_conversation(project_id: Option<ProjectId>) -> ImportedConversation 
                 layers: vec![ImportedResolvedLayer {
                     layer: ImportedLayer {
                         id: "layer-1".into(),
+                        client_key: None,
                         nodes: vec!["node-1".into()],
                         edges: vec![],
                         layout: Some(ImportedLayerLayout {
@@ -222,6 +224,7 @@ fn imported_conversation(project_id: Option<ProjectId>) -> ImportedConversation 
                     },
                     nodes: vec![ImportedNode {
                         id: "node-1".into(),
+                        client_key: None,
                         kind: "concept".into(),
                         icon: "box".into(),
                         title: "Imported queue".into(),

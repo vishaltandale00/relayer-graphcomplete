@@ -1312,6 +1312,7 @@ export function resolveCompiledNodeDetailAction(actions, reference, node) {
     && action.sourceNodeId != null
     && String(action.sourceNodeId) === String(node.id)
     && action.sourceLayerId != null
+    && action.sourceLayerClientKey === reference.sourceLayer.clientKey
   ));
 }
 

@@ -22,8 +22,10 @@ pub(crate) struct RootActionIdentity {
 #[derive(FromRow)]
 struct ActionRow {
     id: i64,
+    client_key: String,
     source_node_id: i64,
     source_layer_id: Option<i64>,
+    source_layer_client_key: Option<String>,
     kind: String,
     relation: Option<String>,
     label: String,
@@ -41,7 +43,7 @@ struct ActionRow {
 
 macro_rules! action_projection {
     () => {
-        "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records"
+        "SELECT id,client_key,source_node_id,source_layer_id,(SELECT client_key FROM layers WHERE layers.id=action_records.source_layer_id) AS source_layer_client_key,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records"
     };
 }
 
@@ -73,7 +75,7 @@ impl<'connection> ActionTable<'connection> {
         id: ActionId,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE id=?1 AND owner_interaction_id=?2 AND state='accepted' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4))",
+            concat!(action_projection!(), " WHERE id=?1 AND owner_interaction_id=?2 AND state='accepted' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4))"),
         )
         .bind(id.value())
         .bind(scope.root_node_id.value())
@@ -546,8 +548,10 @@ impl TryFrom<ActionRow> for ActionRecord {
         Ok(Self {
             action: GraphAction {
                 id: valid_action_id(row.id)?,
+                client_key: Some(row.client_key),
                 source_node_id: valid_node_id(row.source_node_id)?,
                 source_layer_id: row.source_layer_id.map(valid_layer_id).transpose()?,
+                source_layer_client_key: row.source_layer_client_key,
                 kind: ActionKind::parse(&row.kind)?,
                 relation: row
                     .relation
@@ -570,8 +574,10 @@ impl TryFrom<ActionRow> for ActionRecord {
 fn draft_action(id: ActionId, draft: &ActionDraft) -> GraphAction {
     GraphAction {
         id,
+        client_key: Some(draft.client_key.clone()),
         source_node_id: draft.source_node_id,
         source_layer_id: draft.source_layer_id,
+        source_layer_client_key: None,
         kind: draft.kind,
         relation: draft.relation,
         label: draft.label.clone(),

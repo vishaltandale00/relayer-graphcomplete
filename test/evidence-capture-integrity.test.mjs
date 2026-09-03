@@ -219,7 +219,11 @@ describe("evidence capture integrity", () => {
     chmodSync(source, 0o500);
     const captured = lstatSync(source, { bigint: true });
     const authorities = [{ path: source, dev: captured.dev, ino: captured.ino }];
+    // This sandbox requires write permission on a directory while renaming it.
+    // Restore the captured read-only mode after the move; identity is the boundary under test.
+    chmodSync(source, 0o700);
     renameSync(source, moved);
+    chmodSync(moved, 0o500);
     mkdirSync(source);
     chmodSync(source, 0o500);
     try {

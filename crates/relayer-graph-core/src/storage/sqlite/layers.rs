@@ -105,6 +105,7 @@ pub(crate) struct LayerRecord {
 #[derive(FromRow)]
 struct LayerRow {
     id: i64,
+    client_key: String,
     state: String,
     owner_interaction_id: i64,
     layout_schema_version: Option<i64>,
@@ -128,7 +129,7 @@ impl<'connection> LayerTable<'connection> {
         id: LayerId,
     ) -> Result<Option<LayerRecord>, GraphError> {
         let row = sqlx::query_as::<_, LayerRow>(
-            "SELECT id,state,owner_interaction_id,layout_schema_version FROM layers WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            "SELECT id,client_key,state,owner_interaction_id,layout_schema_version FROM layers WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -166,6 +167,7 @@ impl<'connection> LayerTable<'connection> {
         Ok(Some(LayerRecord {
             layer: GraphLayer {
                 id: valid_layer_id(row.id)?,
+                client_key: Some(row.client_key),
                 nodes,
                 edges,
                 layout,
@@ -363,6 +365,7 @@ impl<'connection> LayerTable<'connection> {
         }
         Ok(GraphLayer {
             id,
+            client_key: Some(draft.client_key.clone()),
             nodes: draft.nodes.clone(),
             edges: draft.edges.clone(),
             layout: draft.layout.clone(),

@@ -153,3 +153,9 @@ html[data-theme="light"] .node-input-option-visual{background:linear-gradient(13
 html[data-theme="light"] .project-row:hover,html[data-theme="light"] .project-row:focus-within{color:var(--text)}
 @media(prefers-reduced-motion:reduce){.node-input-actions *{scroll-behavior:auto!important;transition:none!important}.project-new-thread{transition:none!important}}
 .node-detail-runtime-host{position:relative!important;width:100%!important;min-width:0!important;max-width:100%!important;contain:layout paint style!important;isolation:isolate!important;overflow:hidden!important}
+
+/* Eval review comments float over the lower quarter instead of shrinking Node Details. */
+.inspector{position:relative}
+.annotation-panel{position:absolute;inset:max(58%,calc(100% - 250px)) 12px 12px;z-index:20;min-height:0;margin:0;padding:12px 15px 14px;overflow:auto;border:1px solid var(--line-strong);border-radius:12px;background:#0e1012;box-shadow:0 18px 48px rgba(0,0,0,.52)}
+html[data-theme="light"] .annotation-panel{background:#fafaf9;box-shadow:0 18px 48px rgba(28,25,23,.22)}
+@media(max-width:760px){.annotation-panel{position:relative;inset:auto;max-height:48%;margin:14px -18px -15px;border-width:1px 0 0;border-radius:0;box-shadow:none}}

@@ -316,6 +316,7 @@ mod tests {
             node_id: NodeId::new(1).unwrap(),
             interaction: crate::GraphNode {
                 id: NodeId::new(1).unwrap(),
+                client_key: None,
                 leased_action_id: None,
                 kind: "user-interaction".into(),
                 icon: "message-square".into(),
@@ -326,8 +327,10 @@ mod tests {
             },
             root_action: Some(GraphAction {
                 id: crate::ActionId::new(1).unwrap(),
+                client_key: Some("response".into()),
                 source_node_id: NodeId::new(1).unwrap(),
                 source_layer_id: None,
+                source_layer_client_key: None,
                 kind: ActionKind::Navigate,
                 relation: Some(NavigateRelation::Expand),
                 label: "Response".into(),

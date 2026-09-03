@@ -7,6 +7,7 @@ function nodeResponse(init: RequestInit, node: Record<string, unknown>): Respons
   return new Response(JSON.stringify({
     node: {
       ...node,
+      clientKey: request.clientKey,
       ...(Object.hasOwn(request, "authoredDetail") ? { authoredDetail: request.authoredDetail } : {}),
     },
   }), { status: 200, headers: { "content-type": "application/json" } });
@@ -61,6 +62,7 @@ describe("agent-facing graph objects", () => {
         components: [{ id: "summary", order: 0, html: "<p>Submitted detail</p>", css: "" }],
       },
     });
+    expect(node.ref?.clientKey).toBe("draft-node");
     expect(() => node.detailAuthoring.setComponent("late", html`<p>Too late</p>`))
       .toThrow("finalized and cannot be mutated");
   });
@@ -424,6 +426,30 @@ describe("agent-facing graph objects", () => {
       detail: "Markdown detail",
     });
     expect(() => node.detailAuthoring.setComponent("late", html`<p>Too late</p>`)).toThrow("finalized");
+  });
+
+  it("rejects a submitted node projection with a different stable client key", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: {
+        id: 12,
+        clientKey: "substituted-node",
+        kind: "concept",
+        icon: "box",
+        title: "Stable",
+        detail: "Stable identity",
+        state: "draft",
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const node = new NodeObject("box", "Stable", "Stable identity", "concept", "original-node");
+
+    await expect(new RelayerGraphClient({
+      url: "http://127.0.0.1:1",
+      token: "token",
+      nodeId: 1,
+    }).submitNode(node)).rejects.toMatchObject({
+      code: "invalid_node_response",
+      path: "node.clientKey",
+    });
   });
 
   it("serializes a versioned authored layout from node references", async () => {

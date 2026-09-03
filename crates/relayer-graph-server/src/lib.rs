@@ -1744,6 +1744,7 @@ mod tests {
             serde_json::from_slice(&to_bytes(submitted.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         let node_id = submitted["node"]["id"].as_i64().unwrap();
+        assert_eq!(submitted["node"]["clientKey"], "answer");
         assert_eq!(submitted["node"]["authoredDetail"], package);
 
         let fetched = app
@@ -1760,6 +1761,7 @@ mod tests {
         let fetched: Value =
             serde_json::from_slice(&to_bytes(fetched.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
+        assert_eq!(fetched["node"]["clientKey"], "answer");
         assert_eq!(fetched["node"]["authoredDetail"], package);
     }
 
@@ -3384,9 +3386,27 @@ mod tests {
             serde_json::from_slice(&to_bytes(valid.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         let layer_id = valid["layer"]["id"].as_i64().unwrap();
+        assert_eq!(valid["layer"]["clientKey"], "root");
         assert_eq!(valid["layer"]["layout"]["version"], 1);
         assert_eq!(valid["layer"]["layout"]["placements"][0]["x"], 0.25);
 
+        writer
+            .add_action(&ActionDraft {
+                client_key: "continue".into(),
+                source_node_id: answer.id,
+                source_layer_id: LayerId::new(layer_id),
+                kind: ActionKind::Invoke,
+                relation: None,
+                label: "Continue".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: Some("Continue from here".into()),
+                input: None,
+            })
+            .await
+            .unwrap();
         writer
             .add_action(&ActionDraft {
                 client_key: "response".into(),
@@ -3427,6 +3447,16 @@ mod tests {
         assert_eq!(
             completed["rootLayer"]["layer"]["layout"],
             valid["layer"]["layout"]
+        );
+        assert_eq!(completed["rootLayer"]["layer"]["clientKey"], "root");
+        assert_eq!(completed["rootLayer"]["nodes"][0]["clientKey"], "answer");
+        assert_eq!(
+            completed["rootLayer"]["actions"][0]["clientKey"],
+            "continue"
+        );
+        assert_eq!(
+            completed["rootLayer"]["actions"][0]["sourceLayerClientKey"],
+            "root"
         );
 
         let terminal_broker_read = app

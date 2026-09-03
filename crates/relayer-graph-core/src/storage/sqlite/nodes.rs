@@ -23,6 +23,7 @@ pub(crate) struct InteractionLease {
 #[derive(FromRow)]
 struct NodeRow {
     id: i64,
+    client_key: Option<String>,
     leased_action_id: Option<i64>,
     kind: String,
     icon: String,
@@ -117,6 +118,7 @@ impl<'connection> NodeTable<'connection> {
         .await?;
         Ok(GraphNode {
             id: valid_node_id(result.last_insert_rowid())?,
+            client_key: None,
             leased_action_id: invocation.map(|value| value.source_action_id),
             kind: "user-interaction".into(),
             icon: "user".into(),
@@ -135,7 +137,7 @@ impl<'connection> NodeTable<'connection> {
         input_digest: &str,
     ) -> Result<Option<GraphNode>, GraphError> {
         let row = sqlx::query_as::<_, NodeRow>(
-            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE thread_id=?1 AND input_identity=?2",
+            "SELECT id,client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE thread_id=?1 AND input_identity=?2",
         ).bind(thread_id.value()).bind(input_identity).fetch_optional(&mut *self.connection).await?;
         let Some(row) = row else {
             return Ok(None);
@@ -207,7 +209,7 @@ impl<'connection> NodeTable<'connection> {
             return Ok(None);
         };
         let node = self.fetch_optional(
-            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE leased_action_id=?1",
+            "SELECT id,client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE leased_action_id=?1",
             action_id.value(),
             None,
         )
@@ -403,7 +405,7 @@ impl<'connection> NodeTable<'connection> {
         client_key: &str,
     ) -> Result<Option<NodeRecord>, GraphError> {
         self.fetch_optional(
-            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE owner_interaction_id=?1 AND client_key=?2",
+            "SELECT id,client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE owner_interaction_id=?1 AND client_key=?2",
             owner.value(),
             Some(client_key),
         )
@@ -416,7 +418,7 @@ impl<'connection> NodeTable<'connection> {
         id: NodeId,
     ) -> Result<GraphNode, GraphError> {
         let row = sqlx::query_as::<_, NodeRow>(
-            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            "SELECT id,client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -453,7 +455,7 @@ impl<'connection> NodeTable<'connection> {
 
     pub(crate) async fn record(&mut self, id: NodeId) -> Result<Option<NodeRecord>, GraphError> {
         self.fetch_optional(
-            "SELECT id,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE id=?1",
+            "SELECT id,client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE id=?1",
             id.value(),
             None,
         )
@@ -522,7 +524,7 @@ impl<'connection> NodeTable<'connection> {
     ) -> Result<Vec<GraphNode>, GraphError> {
         let rows = sqlx::query_as::<_, NodeRow>(
             r#"
-            SELECT n.id,n.leased_action_id,n.kind,n.icon,n.title,n.detail,n.authored_detail,n.state,n.owner_interaction_id
+            SELECT n.id,n.client_key,n.leased_action_id,n.kind,n.icon,n.title,n.detail,n.authored_detail,n.state,n.owner_interaction_id
             FROM edges e
             JOIN nodes n ON n.id = CASE WHEN e.left_id = ?1 THEN e.right_id ELSE e.left_id END
             WHERE e.state='accepted'
@@ -544,7 +546,7 @@ impl<'connection> NodeTable<'connection> {
             .collect::<Result<Vec<_>, _>>()?;
         let derived = sqlx::query_as::<_, NodeRow>(
             r#"
-            SELECT source.id,source.leased_action_id,source.kind,source.icon,source.title,
+            SELECT source.id,source.client_key,source.leased_action_id,source.kind,source.icon,source.title,
                    source.detail,source.authored_detail,source.state,source.owner_interaction_id
             FROM nodes interaction
             JOIN actions leased ON leased.id=interaction.leased_action_id
@@ -619,6 +621,7 @@ impl TryFrom<NodeRow> for NodeRecord {
         Ok(Self {
             node: GraphNode {
                 id: valid_node_id(row.id)?,
+                client_key: row.client_key,
                 leased_action_id: row.leased_action_id.map(valid_action_id).transpose()?,
                 kind: row.kind,
                 icon: row.icon,
@@ -643,6 +646,7 @@ impl TryFrom<NodeRow> for NodeRecord {
 fn draft_node(id: NodeId, draft: &NodeDraft, authored_detail: Option<&str>) -> GraphNode {
     GraphNode {
         id,
+        client_key: Some(draft.client_key.clone()),
         leased_action_id: None,
         kind: draft.kind.clone(),
         icon: draft.icon.clone(),
