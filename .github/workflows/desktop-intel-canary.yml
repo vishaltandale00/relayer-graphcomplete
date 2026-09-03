@@ -44,7 +44,7 @@ jobs:
   canary:
     name: Install and update Intel macOS Preview
     runs-on: macos-15-intel
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout canary implementation
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
