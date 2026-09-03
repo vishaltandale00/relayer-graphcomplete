@@ -333,12 +333,17 @@ export function createDesktopAccountService({
       };
       const url = new URL(request.url, current.redirectUri);
       const callback = new URL(current.redirectUri);
+      // Ownership is established before anything is allowed to touch the
+      // attempt. A request that is not this attempt's callback cannot be shown
+      // to belong to it, so it is answered and otherwise ignored: the browser's
+      // own /favicon.ico probe, or a superseded login's callback arriving on
+      // its replacement's listener, must not cancel a live sign-in or pull the
+      // window forward. Only a request that carries this attempt's state may
+      // settle it, below.
       if (request.method !== "GET" || request.headers.host !== callback.host ||
           url.origin !== callback.origin || url.pathname !== CALLBACK_PATH) {
         response.statusCode = 400;
         response.end("Sign-in could not be verified.");
-        await finishAttempt(current, publicState(current.channel, "error", { reason: "authentication-failed" }));
-        returnToRelayer();
         return;
       }
       const keys = [...url.searchParams.keys()];
@@ -359,11 +364,8 @@ export function createDesktopAccountService({
         && keyCount("state") === 1
         && keys.length === 2;
       if (!stateMatches) {
-        // The state identifies which attempt a callback belongs to. One that
-        // does not carry this attempt's state cannot authenticate and is not
-        // this attempt's business: a login replaced on the same loopback port
-        // would otherwise have its own stale callback cancel its replacement.
-        // Answer it, leave the owning attempt in flight, and present nothing.
+        // The state names which attempt a callback belongs to. Same boundary as
+        // above: not ours, so answer it and leave the owning attempt alone.
         response.statusCode = 400;
         response.end("Sign-in could not be verified.");
         return;

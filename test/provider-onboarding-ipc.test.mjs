@@ -10,6 +10,18 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
   const modelCatalog = { settingsOpened: vi.fn(), explicitRefresh: vi.fn() };
   const shell = { openExternal: vi.fn() };
   const presentWindow = vi.fn();
+  const providerDefinitions = {
+    adapters: () => [], list: async () => [],
+    logout: vi.fn(async () => ({ status: "disconnected" })),
+    completeConnection: vi.fn(async (connectionId) => ({
+      status: connectionId === "pending-connection" ? "pending" : "connected",
+      connectionId, providerDefinition: { id: connectionId },
+    })),
+    reconnect: vi.fn(async (id) => ({
+      status: "pending", connectionId: id, providerDefinition: { id },
+      login: { authUrl: "https://login.example.test" },
+    })),
+  };
   const settings = {
     read: async () => structuredClone(currentSettings),
     write: async (value) => {
@@ -30,18 +42,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     nativeTheme: {},
     credentials: { account: vi.fn(), login: vi.fn(), logout: vi.fn() },
     modelCatalog,
-    providerDefinitions: {
-      adapters: () => [], list: async () => [],
-      logout: vi.fn(async () => ({ status: "disconnected" })),
-      completeConnection: vi.fn(async (connectionId) => ({
-        status: connectionId === "pending-connection" ? "pending" : "connected",
-        connectionId, providerDefinition: { id: connectionId },
-      })),
-      reconnect: vi.fn(async (id) => ({
-        status: "pending", connectionId: id, providerDefinition: { id },
-        login: { authUrl: "https://login.example.test" },
-      })),
-    },
+    providerDefinitions,
     validateProviderOnboarding,
     settings,
     updater: { status: () => ({ phase: "idle" }), check: vi.fn(), download: vi.fn(), install: vi.fn(), setChannel: vi.fn() },
@@ -59,6 +60,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     presentWindow,
     refreshModels: handlers.get("relayer:model-catalog-refresh"),
     modelCatalog,
+    providerDefinitions,
     shell,
     settings,
     readSettings: () => structuredClone(currentSettings),
@@ -106,6 +108,16 @@ describe("provider onboarding IPC hard gate", () => {
 
     await expect(completeConnection(null, { connectionId: "codex-work" }))
       .resolves.toMatchObject({ status: "connected" });
+    expect(presentWindow).toHaveBeenCalledOnce();
+  });
+
+  it("returns to Relayer when a provider connection fails after the browser leg", async () => {
+    const { completeConnection, providerDefinitions, presentWindow } = fixture(async () => false);
+    providerDefinitions.completeConnection.mockRejectedValueOnce(new Error("catalog discovery failed"));
+
+    // The renderer reports this error; it must not do so behind the browser.
+    await expect(completeConnection(null, { connectionId: "codex-work" }))
+      .rejects.toThrow("catalog discovery failed");
     expect(presentWindow).toHaveBeenCalledOnce();
   });
 
