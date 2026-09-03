@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { registerDesktopIpc } from "../desktop/main/ipc/register-ipc.mjs";
+import { TERMINAL_CONNECTION_FAILURE } from "../desktop/main/providers/provider-definition-service.mjs";
+// Mirrors what the service records when it cancels the pending attempt.
+const settledFailure = (message) => Object.defineProperty(new Error(message), TERMINAL_CONNECTION_FAILURE, {
+  value: true, enumerable: false,
+});
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 
 function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark" }) {
@@ -111,14 +116,30 @@ describe("provider onboarding IPC hard gate", () => {
     expect(presentWindow).toHaveBeenCalledOnce();
   });
 
-  it("returns to Relayer when a provider connection fails after the browser leg", async () => {
+  it("returns to Relayer only for a failure that settled the attempt", async () => {
     const { completeConnection, providerDefinitions, presentWindow } = fixture(async () => false);
-    providerDefinitions.completeConnection.mockRejectedValueOnce(new Error("catalog discovery failed"));
-
-    // The renderer reports this error; it must not do so behind the browser.
+    // A failure that settled the attempt is over, so its outcome belongs in the
+    // app. The renderer still reports it, but not behind the browser.
+    providerDefinitions.completeConnection.mockRejectedValueOnce(
+      settledFailure("catalog discovery failed"),
+    );
     await expect(completeConnection(null, { connectionId: "codex-work" }))
       .rejects.toThrow("catalog discovery failed");
     expect(presentWindow).toHaveBeenCalledOnce();
+    presentWindow.mockClear();
+
+    // A transient failure leaves the attempt live in the browser. Presenting
+    // here would pull the user out of a flow they are still completing.
+    providerDefinitions.completeConnection.mockRejectedValueOnce(new Error("temporary account check failure"));
+    await expect(completeConnection(null, { connectionId: "codex-work" }))
+      .rejects.toThrow("temporary account check failure");
+    expect(presentWindow).not.toHaveBeenCalled();
+
+    // An unknown or stale connection never owned an attempt to return from.
+    providerDefinitions.completeConnection.mockRejectedValueOnce(new Error("Unknown pending provider connection."));
+    await expect(completeConnection(null, { connectionId: "gone" }))
+      .rejects.toThrow("Unknown pending provider connection.");
+    expect(presentWindow).not.toHaveBeenCalled();
   });
 
   it("routes model-family recovery refresh to the exact connected provider", async () => {

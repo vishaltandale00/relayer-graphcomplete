@@ -1,4 +1,7 @@
 import { desktop } from "./state.js";
+import { updateIndicatorName } from "./update-indicator-model.js";
+
+export { updateIndicatorName };
 import { $, toast } from "./ui.js";
 
 let updateState = { phase: "development", channel: "stable", version: "dev" };
@@ -7,6 +10,12 @@ export function renderUpdate(next) {
   updateState = { ...updateState, ...next };
   const visible = ["available", "downloading", "ready", "failed"].includes(updateState.phase);
   $("#updateButton").classList.toggle("hidden", !visible);
+  // The control is one button across four phases, so its name has to follow the
+  // phase. A fixed "update available" would misreport a failed check and would
+  // never announce that a verified update is staged.
+  const indicatorName = updateIndicatorName(updateState);
+  $("#updateButton").setAttribute("aria-label", indicatorName);
+  $("#updateButton").setAttribute("title", indicatorName);
   $("#updateChannel").value = updateState.channel || "stable";
   $("#currentVersion").textContent = `Current version ${updateState.version || "development"}`;
   const labels = {

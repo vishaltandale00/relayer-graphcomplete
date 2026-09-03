@@ -306,6 +306,37 @@ async function recordBrowserFlow(url, directory, profile) {
         if (!control.closest('.sidebar-footer')) {
           throw new Error('Account control is not seated in the sidebar footer.');
         }
+        // Computed, not asserted from source: jsdom has no layout engine, so
+        // the footer's fit and its accessible names can only be proven here.
+        const footer = document.querySelector('.sidebar-footer');
+        const settings = document.querySelector('#settingsButton');
+        const indicator = document.querySelector('#updateButton');
+        const label = document.querySelector('#desktopAccountLabel');
+        const wasHidden = indicator.classList.contains('hidden');
+        const previousLabel = label.textContent;
+        indicator.classList.remove('hidden');
+        label.textContent = 'Signing in…';
+        const probe = document.createElement('span');
+        probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:' + getComputedStyle(label).font;
+        probe.textContent = label.textContent;
+        document.body.appendChild(probe);
+        const naturalWidth = probe.getBoundingClientRect().width;
+        probe.remove();
+        const overflowed = footer.scrollWidth > footer.clientWidth;
+        const indicatorWidth = indicator.getBoundingClientRect().width;
+        const labelVisible = label.getClientRects().length > 0;
+        const wrapped = labelVisible && naturalWidth > label.getBoundingClientRect().width + 0.5;
+        const settingsName = settings.getAttribute('aria-label');
+        const indicatorName = indicator.getAttribute('aria-label');
+        if (wasHidden) indicator.classList.add('hidden');
+        label.textContent = previousLabel;
+        if (overflowed) throw new Error('Sidebar footer overflows with the update indicator visible.');
+        if (indicatorWidth < 30.5) throw new Error('Update indicator was shrunk to ' + indicatorWidth + 'px.');
+        if (wrapped) throw new Error('A busy account label wraps inside the footer control.');
+        if (settingsName !== 'Settings') throw new Error('Settings is named ' + JSON.stringify(settingsName) + '.');
+        if (!indicatorName || /available/i.test(indicatorName)) {
+          throw new Error('Update indicator claims a state it may not be in: ' + JSON.stringify(indicatorName));
+        }
         if (style.position === 'fixed') {
           throw new Error('Account control still floats over the workspace.');
         }
