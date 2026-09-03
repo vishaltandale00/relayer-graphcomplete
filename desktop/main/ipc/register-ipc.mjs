@@ -1,4 +1,5 @@
 import { inspectFolder } from "../services/folder-service.mjs";
+import { isTerminalConnectionFailure } from "../providers/provider-definition-service.mjs";
 
 // Sign-in continues in the browser, so the browser has to come forward.
 // Relying on the platform default left users looking at an unchanged
@@ -124,7 +125,11 @@ export function registerDesktopIpc({
     try {
       result = await providerDefinitions.completeConnection(connectionId);
     } catch (error) {
-      returnToRelayer();
+      // Only a failure that settled the attempt is terminal. An unknown or
+      // stale connection never owned one, and a transient failure such as a
+      // temporary account check leaves the attempt live in the browser, so
+      // neither may pull focus out of it.
+      if (isTerminalConnectionFailure(error)) returnToRelayer();
       throw error;
     }
     getWindow()?.webContents.send("relayer:providers-changed", {

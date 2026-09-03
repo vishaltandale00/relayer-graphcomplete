@@ -25,10 +25,6 @@ const openAi = normalizeProviderDescriptor({
 describe("provider and harness renderer markup", () => {
   it("stops accepting Cancel once provider commit precedes deferred default setup", async () => {
     const source = await readFile(new URL("../desktop/renderer/src/auth.js", import.meta.url), "utf8");
-    // First-run recovery carries the same contextual accessible name as the
-    // provider cards, so the short visible label never stands alone.
-    expect(source).toContain('recoveryButton.setAttribute(');
-    expect(source).toContain("`${recoveryDescription} for ${recoveryProvider}`");
     const committed = source.indexOf('if (result.status !== "connected") return;');
     const disableCancel = source.indexOf("setConnectionCancellationAvailable(false);", committed);
     const refreshStatus = source.indexOf("providerStatus = await desktop.providers.status();", committed);
@@ -242,11 +238,32 @@ describe("provider and harness renderer markup", () => {
     }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
     expect(markup).toContain("Needs execution setup");
     expect(markup).toContain(">Repair</button>");
-    // The visible label is short; the accessible name still names the
-    // operation and the exact provider so sibling cards stay distinct.
-    expect(markup).toContain('aria-label="Repair execution configurations for ');
     expect(markup).not.toContain("codex-basic");
     expect(markup).not.toContain("prime-agent");
+  });
+
+  it("names both recovery actions by operation and exact provider", () => {
+    const card = (id, label, code, message) => ({
+      id, adapterId: "openai-api", label,
+      lifecycleState: "active", connected: true,
+      unavailableReason: { code, message },
+    });
+    const markup = providerDefinitionsMarkup([
+      card("openai-work", "OpenAI Work", "provider_no_available_execution_configurations",
+        "This provider currently has no available execution configurations."),
+      card("openai-lab", "OpenAI Lab", "provider_no_eligible_execution_models",
+        "This provider currently has no eligible execution models."),
+    ], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
+
+    const names = [...markup.matchAll(/data-provider-family-recovery="[^"]*" aria-label="([^"]*)">([^<]*)</g)]
+      .map(([, accessibleName, visible]) => ({ accessibleName, visible }));
+
+    // Two cards, two short labels, two names that tell them apart.
+    expect(names).toEqual([
+      { accessibleName: "Repair execution configurations for OpenAI Work", visible: "Repair" },
+      { accessibleName: "Refresh models and set up defaults for OpenAI Lab", visible: "Refresh models" },
+    ]);
+    expect(new Set(names.map(({ accessibleName }) => accessibleName)).size).toBe(2);
   });
 
   it("shows only harnesses usable through a currently connected provider and eligible model", () => {

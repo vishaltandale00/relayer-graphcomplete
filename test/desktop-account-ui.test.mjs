@@ -8,6 +8,7 @@ import {
   normalizeDesktopAccountState,
   revealDesktopWorkspace,
 } from "../desktop/renderer/src/desktop-account.js";
+import { updateIndicatorName } from "../desktop/renderer/src/update-indicator-model.js";
 
 function classList(...initial) {
   const values = new Set(initial);
@@ -74,6 +75,27 @@ function fixture() {
     controller: createDesktopAccountController({ api, elements, storage, openSettings, showWorkspace }),
   };
 }
+
+describe("desktop update indicator naming", () => {
+  it("names the one indicator button truthfully in every phase it is visible", () => {
+    // The control is shown for these four phases, so a fixed name would both
+    // misreport a failure and hide that a verified update is staged.
+    expect(updateIndicatorName({ phase: "available", availableVersion: "0.2.31" }))
+      .toBe("Version 0.2.31 available. Download update");
+    expect(updateIndicatorName({ phase: "downloading", percent: 42 }))
+      .toBe("Downloading update · 42%");
+    expect(updateIndicatorName({ phase: "ready" })).toBe("Update ready to install. Restart Relayer");
+    expect(updateIndicatorName({ phase: "failed" })).toBe("Update failed. Try again");
+
+    // No phase the button is visible in may claim an update is available.
+    for (const phase of ["downloading", "ready", "failed"]) {
+      expect(updateIndicatorName({ phase })).not.toMatch(/available/i);
+    }
+    // Hidden and unknown phases fall back to a name that claims nothing.
+    expect(updateIndicatorName({ phase: "idle" })).toBe("Application update status");
+    expect(updateIndicatorName(undefined)).toBe("Application update status");
+  });
+});
 
 describe("desktop account presentation", () => {
   it("releases the startup visibility gate before showing the workspace during recovery", () => {
@@ -274,13 +296,15 @@ describe("desktop account presentation", () => {
     // the circular indicator keeps its diameter instead of being squashed.
     expect(css).toContain("@media(max-width:980px){.sidebar-footer .footer-button span:not([aria-hidden]){display:none}");
     expect(css).toContain(".update-button{margin-left:auto;flex:none");
-    // A busy label must not wrap inside a 34px control.
+    // A busy label must not wrap inside a 34px control. Whether it actually
+    // does is layout, which jsdom cannot answer: capture-provider-ux-video.mjs
+    // measures the rendered footer, and this only pins the rule it depends on.
     expect(css).toContain("white-space:nowrap;overflow:hidden;text-overflow:ellipsis");
     // Hiding the label must never take the decorative glyph with it, and the
     // footer controls keep a name once their label is gone.
     expect(css).toContain("body.sidebar-collapsed .footer-button span:not([aria-hidden])");
     expect(sidebarFooter).toContain('id="settingsButton" type="button" title="Settings" aria-label="Settings"');
     expect(sidebarFooter).toContain('<span aria-hidden="true">⚙</span>');
-    expect(sidebarFooter).toContain('id="updateButton" type="button" title="Application update available" aria-label="Application update available"');
+    expect(sidebarFooter).toContain('id="updateButton" type="button" title="Application update status" aria-label="Application update status"');
   });
 });
