@@ -77,6 +77,9 @@ function fixture() {
 }
 
 describe("desktop update indicator naming", () => {
+  // The naming decision only. That renderUpdate applies it, and that activating
+  // the control opens the details instead of performing the nested action, is
+  // proven against the real DOM in the Chromium evidence capture.
   it("names the one indicator button truthfully in every phase it is visible", () => {
     // The control is shown for these four phases, so a fixed name would both
     // misreport a failure and hide that a verified update is staged.

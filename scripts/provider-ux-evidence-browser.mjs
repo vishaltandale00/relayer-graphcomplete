@@ -44,7 +44,11 @@ const connectedDefinitions = [
   },
 ];
 
-const onboardingScenes = new Set(["onboarding", "endpoint", "family", "alternate-harness", "loading", "invalid", "error", "no-compatible", "authorization", "flow"]);
+// First-run states that reach the family step with no usable harness. Each
+// carries a different blocking reason, and the recovery control must name the
+// operation it actually performs for the exact provider on screen.
+const blockedFamilyScenes = ["no-compatible", "repair-execution", "refresh-models"];
+const onboardingScenes = new Set(["onboarding", "endpoint", "family", "alternate-harness", "loading", "invalid", "error", "authorization", "flow", ...blockedFamilyScenes]);
 let definitions = onboardingScenes.has(scene) ? [] : structuredClone(connectedDefinitions);
 let onboardingComplete = !onboardingScenes.has(scene);
 if (scene === "long-label") {
@@ -60,6 +64,14 @@ if (scene === "removed") {
 window.__providerEvidence = { get definitions() { return definitions; } };
 let accountLoginCalls = 0;
 Object.defineProperty(window.__providerEvidence, "accountLoginCalls", { get: () => accountLoginCalls });
+// The update indicator is rendered by the renderer's own subscription, so the
+// evidence drives a real status through it rather than posing the control.
+const updateSubscribers = new Set();
+let updateActionCalls = 0;
+Object.defineProperty(window.__providerEvidence, "updateActionCalls", { get: () => updateActionCalls });
+Object.defineProperty(window.__providerEvidence, "emitUpdate", {
+  value: (status) => { updateSubscribers.forEach((subscriber) => subscriber(status)); },
+});
 const listeners = new Set();
 const noopSubscription = (callback) => {
   listeners.add(callback);
@@ -130,11 +142,14 @@ window.relayerDesktop = {
   },
   updater: {
     status: async () => ({ phase: "idle", channel: "stable", currentVersion: "evidence" }),
-    check: async () => ({ phase: "idle", channel: "stable", currentVersion: "evidence" }),
-    download: async () => ({}),
-    install: async () => ({}),
+    check: async () => { updateActionCalls += 1; return { phase: "idle", channel: "stable", currentVersion: "evidence" }; },
+    download: async () => { updateActionCalls += 1; return {}; },
+    install: async () => { updateActionCalls += 1; return {}; },
     setChannel: async (channel) => ({ phase: "idle", channel, currentVersion: "evidence" }),
-    onChanged: noopSubscription,
+    onChanged: (callback) => {
+      updateSubscribers.add(callback);
+      return () => updateSubscribers.delete(callback);
+    },
   },
 };
 
@@ -176,7 +191,7 @@ async function prepareScene() {
     document.body.dataset.evidenceReady = "true";
     return;
   }
-  if (["endpoint", "family", "loading", "invalid", "error", "no-compatible"].includes(scene)) {
+  if (["endpoint", "family", "loading", "invalid", "error", ...blockedFamilyScenes].includes(scene)) {
     (await waitFor('[data-provider-adapter="openai-api"]')).click();
     const endpoint = await waitFor("#providerField-endpoint");
     endpoint.value = "https://gateway.example.com/openai/v1";
@@ -191,11 +206,11 @@ async function prepareScene() {
     (await waitFor('[data-onboarding-family-kind="create"]')).click();
     await waitFor('[data-onboarding-member-model="claude-sonnet-4"]');
   }
-  if (["family", "loading", "error", "no-compatible"].includes(scene)) {
+  if (["family", "loading", "error", ...blockedFamilyScenes].includes(scene)) {
     document.querySelector("#providerField-label").value = "OpenAI Work";
     document.querySelector('[data-provider-field="api-key"]').value = "evidence-secret";
     document.querySelector("#providerSetupForm").requestSubmit();
-    if (["family", "no-compatible"].includes(scene)) {
+    if (["family", ...blockedFamilyScenes].includes(scene)) {
       await waitForCondition(
         () => document.querySelector("#providerFamilyStep:not(.hidden)")
           || document.querySelector("#authStatus.error")?.textContent,

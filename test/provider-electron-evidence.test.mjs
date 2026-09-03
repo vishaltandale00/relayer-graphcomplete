@@ -104,7 +104,9 @@ describe("provider browser evidence", () => {
         .filter((name) => name.endsWith(".png"))
         .sort();
       expect(variants).toEqual([
-        "authorization.png", "error.png", "invalid.png", "light.png", "loading.png", "long-label.png", "narrow.png", "no-compatible.png", "removed.png", "stale.png", "unavailable.png",
+        "authorization.png", "error.png", "invalid.png", "light.png", "loading.png", "long-label.png",
+        "narrow.png", "no-compatible.png", "refresh-models.png", "removed.png", "repair-execution.png",
+        "stale.png", "unavailable.png",
       ]);
       expect(existsSync(join(output, "manifest.json"))).toBe(true);
       expect(existsSync(join(output, "provider-ux-poster.png"))).toBe(true);

@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { registerDesktopIpc } from "../desktop/main/ipc/register-ipc.mjs";
-import { TerminalConnectionFailure } from "../desktop/main/providers/provider-definition-service.mjs";
+import {
+  ProviderDefinitionService,
+  TerminalConnectionFailure,
+} from "../desktop/main/providers/provider-definition-service.mjs";
+import { createProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-contract.mjs";
 // What the service throws once it has cancelled the pending attempt.
 const settledFailure = (message) => new TerminalConnectionFailure(new Error(message));
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 
-function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark" }) {
+function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark" }, overrides = {}) {
   const handlers = new Map();
   const writes = [];
   let currentSettings = structuredClone(savedSettings);
@@ -50,12 +54,12 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     nativeTheme: {},
     credentials: { account: vi.fn(), login: vi.fn(), logout: vi.fn() },
     modelCatalog,
-    providerDefinitions,
+    providerDefinitions: overrides.providerDefinitions ?? providerDefinitions,
     validateProviderOnboarding,
     settings,
     updater: { status: () => ({ phase: "idle" }), check: vi.fn(), download: vi.fn(), install: vi.fn(), setChannel: vi.fn() },
     presentWindow,
-    getWindow: () => null,
+    getWindow: overrides.getWindow ?? (() => null),
     getAppearance: () => "dark",
     setAppearance: vi.fn(),
   });
@@ -76,6 +80,44 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     writes,
   };
 }
+
+// BRW-004 promises the provider name is free after a failed handoff, and
+// BRW-005 promises a lost renderer releases it. Neither is observable through a
+// mocked cancelConnection: only the real uniqueness rule can answer whether the
+// name was actually readmitted. These wire the IPC layer to the real service.
+function liveProviderFixture() {
+  let stored = [{
+    id: "claude-work", adapterId: "fake-managed", label: "Claude Work", endpoint: null,
+    accessContract: "managed-runtime@1", credentialReference: null,
+    lifecycleState: "active", removedAt: null,
+  }];
+  const providerDefinitions = new ProviderDefinitionService({
+    registry: createProviderAdapterRegistry([{
+      adapterId: "fake-managed", implementationVersion: "1", label: "Managed",
+      accessContract: "managed-runtime@1", defaultEndpoint: null,
+      connection: { mode: "managed-login", fields: [] },
+      create: ({ definition: created }) => ({
+        credentials: {
+          login: async () => ({ loginId: "login-1", authUrl: "https://login.example.test" }),
+          account: async () => ({ status: "disconnected" }),
+        },
+        catalog: { discover: async () => ({ provider: { id: created.id }, models: [{ visible: true }] }) },
+        close: async () => {},
+      }),
+    }]),
+    definitionStore: {
+      async load() { return structuredClone(stored); },
+      async save(value) { stored = structuredClone(value); },
+    },
+    credentialStore: { async set() {}, async get() { return {}; }, async delete() {} },
+  });
+  return {
+    ...fixture(async () => false, { appearance: "dark" }, { providerDefinitions }),
+    providerDefinitions,
+  };
+}
+
+const managedConnect = (connectionId, label) => ({ connectionId, adapterId: "fake-managed", label });
 
 describe("provider onboarding IPC hard gate", () => {
   it("rejects a forged completion when current product defaults do not resolve", async () => {
@@ -158,6 +200,61 @@ describe("provider onboarding IPC hard gate", () => {
     providerDefinitions.cancelConnection.mockClear();
     await expect(reconnect(null, { id: "claude-work" })).rejects.toThrow("no browser available");
     expect(providerDefinitions.cancelConnection).toHaveBeenCalledWith("claude-work");
+  });
+
+  it("readmits the provider name after a failed browser handoff, on connect and reconnect", async () => {
+    const { connect, reconnect, shell } = liveProviderFixture();
+
+    shell.openExternal.mockRejectedValueOnce(new Error("no browser available"));
+    await expect(connect(null, managedConnect("codex-work", "Managed Work")))
+      .rejects.toThrow("no browser available");
+
+    // The promise is not that cancelConnection was called; a no-op cleanup
+    // passes that. It is that the name is taken again by the retry.
+    await expect(connect(null, managedConnect("codex-retry", "Managed Work")))
+      .resolves.toMatchObject({ status: "pending", connectionId: "codex-retry" });
+
+    shell.openExternal.mockRejectedValueOnce(new Error("no browser available"));
+    await expect(reconnect(null, { id: "claude-work" })).rejects.toThrow("no browser available");
+    await expect(reconnect(null, { id: "claude-work" }))
+      .resolves.toMatchObject({ status: "pending", connectionId: "claude-work" });
+  });
+
+  it("releases a pending attempt when the renderer that began it is destroyed", async () => {
+    const { connect, providerDefinitions } = liveProviderFixture();
+    const listeners = new Map();
+    const sender = {
+      once: (event, listener) => listeners.set(event, listener),
+      removeListener: (event) => listeners.delete(event),
+    };
+
+    await expect(connect({ sender }, managedConnect("codex-work", "Managed Work")))
+      .resolves.toMatchObject({ status: "pending" });
+    expect(providerDefinitions.pendingConnections.has("codex-work")).toBe(true);
+
+    // macOS keeps main running after the last window closes, and the window
+    // `activate` builds cannot discover this attempt, so the contents going
+    // away is what has to release the name.
+    listeners.get("destroyed")();
+    await vi.waitFor(() => {
+      expect(providerDefinitions.pendingConnections.has("codex-work")).toBe(false);
+    });
+    await expect(connect({ sender }, managedConnect("codex-retry", "Managed Work")))
+      .resolves.toMatchObject({ status: "pending", connectionId: "codex-retry" });
+  });
+
+  it("keeps a settled connection settled when its change notification throws", async () => {
+    const send = vi.fn(() => { throw new Error("Render frame was disposed."); });
+    const { completeConnection, presentWindow } = fixture(async () => false, { appearance: "dark" }, {
+      getWindow: () => ({ webContents: { send } }),
+    });
+
+    // The announcement is not a step of the operation it reports, and it runs
+    // before the browser return, so it may not pre-empt either.
+    await expect(completeConnection(null, { connectionId: "codex-work" }))
+      .resolves.toMatchObject({ status: "connected" });
+    expect(send).toHaveBeenCalled();
+    expect(presentWindow).toHaveBeenCalledOnce();
   });
 
   it("routes model-family recovery refresh to the exact connected provider", async () => {
