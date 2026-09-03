@@ -111,6 +111,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/main/services/sentry-error-transport.mjs",
     "desktop/main/services/settings-store.mjs",
     "desktop/main/services/tutorial-lifecycle.mjs",
+    "desktop/main/services/update-restart.mjs",
     "desktop/main/services/updater.mjs",
     "desktop/main/single-instance.mjs",
     "desktop/main/window.mjs",
