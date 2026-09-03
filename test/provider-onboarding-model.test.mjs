@@ -40,6 +40,9 @@ describe("provider onboarding renderer state", () => {
     })).toEqual({ kind: "repair_execution", label: "Repair" });
   });
 
+  // The naming decision only. The rendered first-run control is proven in the
+  // Chromium evidence capture (repair-execution and refresh-models variants),
+  // because jsdom has no layout engine and this repository has no DOM runtime.
   it("names both first-run recovery branches by operation and exact provider", () => {
     const repair = providerOnboardingRecoveryAction({
       blockingReason: { code: "provider_no_available_execution_configurations" },

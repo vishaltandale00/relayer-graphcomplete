@@ -19,6 +19,9 @@ import {
 import { ProviderDefinitionService,
   isTerminalConnectionFailure,
 } from "../desktop/main/providers/provider-definition-service.mjs";
+import {
+  createProviderSettingsConnectionController,
+} from "../desktop/renderer/src/provider-settings-connection.js";
 import { createProviderDiagnosticsLog } from "../desktop/main/providers/provider-diagnostics-log.mjs";
 import {
   createProviderRuntimeStateRemover,
@@ -710,29 +713,125 @@ describe("secret-backed API adapters", () => {
     await catalog.close();
   });
 
-  it("keeps a connect attempt pending and cancellable when its account check fails", async () => {
+  // BRW-002. Both shipping managed adapters collapse every runtime, process,
+  // protocol, and parse failure into `unavailable`, so a failed check cannot
+  // tell a hiccup mid-login from a missing executable. Only the budget
+  // separates them, and only the caller's own poll loop observes the result,
+  // so these drive the production controller rather than the service alone.
+  const managedLoginService = (account, overrides = {}) => {
+    let stored = [];
+    let sequence = 0;
     const service = new ProviderDefinitionService({
-      registry: productionProviderAdapterRegistry,
-      definitionStore: { async load() { return []; }, async save() {} },
-      credentialStore: { async set() {}, async delete() {} },
-      runtimeDependencies: async () => ({ fetch, environment: {} }),
+      registry: createProviderAdapterRegistry([{
+        adapterId: "fake-managed", implementationVersion: "1", label: "Managed",
+        accessContract: "managed-runtime@1", defaultEndpoint: null,
+        connection: { mode: "managed-login", fields: [] },
+        create: ({ definition: created }) => ({
+          credentials: {
+            login: async () => ({ loginId: "login-1", authUrl: "https://login.example.test" }),
+            account,
+          },
+          catalog: { discover: async () => ({ provider: { id: created.id }, models: [{ visible: true }] }) },
+          close: async () => {},
+        }),
+      }]),
+      definitionStore: {
+        async load() { return structuredClone(stored); },
+        async save(value) { stored = structuredClone(value); },
+      },
+      credentialStore: { async set() {}, async get() { return {}; }, async delete() {} },
+      idGenerator: () => `managed-${++sequence}`,
+      ...overrides,
     });
-    const candidate = { id: "openai-work", adapterId: "openai-api", label: "OpenAI Work" };
-    const failing = { credentials: { account: async () => { throw new Error("temporary account check failure"); } } };
-    service.pendingConnections.set("openai-work", {
-      candidate, runtime: failing, reconnect: false, login: { authUrl: "https://login.example.test" },
+    const controller = createProviderSettingsConnectionController({
+      providers: service,
+      createConnectionId: () => `managed-${++sequence}`,
+      wait: async () => {},
+    });
+    return { service, controller, definitions: () => stored };
+  };
+
+  it("carries a managed connect through unavailable checks to connected", async () => {
+    const statuses = ["unavailable", "unavailable", "connected"];
+    const { controller, definitions } = managedLoginService(async () => ({ status: statuses.shift() }));
+
+    const outcome = await controller.connect({ adapterId: "fake-managed", label: "Managed Work" });
+
+    expect(statuses).toEqual([]);
+    expect(outcome).toMatchObject({ status: "settled", result: { status: "connected" } });
+    expect(definitions()).toHaveLength(1);
+  });
+
+  it("settles a permanently unavailable managed connect and readmits the same name", async () => {
+    let available = false;
+    const { service, controller } = managedLoginService(
+      async () => ({ status: available ? "connected" : "unavailable" }),
+    );
+
+    await expect(controller.connect({ adapterId: "fake-managed", label: "Managed Work" }))
+      .rejects.toSatisfy((error) => isTerminalConnectionFailure(error)
+        && error.message === "Provider login is unavailable.");
+    expect(service.pendingConnections.size).toBe(0);
+
+    // Releasing the reserved name is the whole point: the retry must be taken.
+    available = true;
+    await expect(controller.connect({ adapterId: "fake-managed", label: "Managed Work" }))
+      .resolves.toMatchObject({ status: "settled", result: { status: "connected" } });
+  });
+
+  it("keeps a managed connect pending across a failed check, abandoned only by its owner", async () => {
+    const { service } = managedLoginService(
+      async () => { throw new Error("temporary account check failure"); },
+    );
+    const pending = [];
+    let waits = 0;
+    const controller = createProviderSettingsConnectionController({
+      providers: service,
+      createConnectionId: () => "managed-hiccup",
+      wait: async () => { if (++waits === 2) controller.close(); },
+      onPending: (result) => pending.push(result),
     });
 
-    // completeConnection is the caller's poll, and its loop continues on
-    // "pending". Rejecting here would end that loop and release ownership
-    // while this attempt still holds the provider name, blocking the retry.
-    const result = await service.completeConnection("openai-work");
-    expect(result).toMatchObject({ status: "pending", connectionId: "openai-work", retrying: "account-check-failed" });
-    expect(service.pendingConnections.has("openai-work")).toBe(true);
+    await expect(controller.connect({ adapterId: "fake-managed", label: "Managed Hiccup" }))
+      .resolves.toMatchObject({ status: "abandoned" });
 
-    // Still owned, so the caller can still abandon it deliberately.
-    await expect(service.cancelConnection("openai-work")).resolves.toBe(true);
-    expect(service.pendingConnections.has("openai-work")).toBe(false);
+    // One hiccup did not settle the attempt. Its owner did.
+    expect(pending[1]).toMatchObject({ status: "pending", retrying: "account-check-failed" });
+  });
+
+  it("runs every teardown stage when a pending runtime refuses to close", async () => {
+    const removals = [];
+    const deletions = [];
+    let stored = [];
+    const service = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "stuck-managed", implementationVersion: "1", label: "Managed",
+        accessContract: "managed-runtime@1", defaultEndpoint: null,
+        connection: { mode: "managed-login", fields: [] },
+        create: () => ({
+          credentials: {
+            login: async () => ({ loginId: "login-1", authUrl: "https://login.example.test" }),
+            account: async () => ({ status: "disconnected" }),
+          },
+          close: async () => { throw new Error("runtime refused to close"); },
+        }),
+      }]),
+      definitionStore: {
+        async load() { return structuredClone(stored); },
+        async save(value) { stored = structuredClone(value); },
+      },
+      credentialStore: { async set() {}, async delete(reference) { deletions.push(reference); } },
+      removeRuntimeState: async (candidate) => { removals.push(candidate.id); },
+      idGenerator: () => "stuck-work",
+    });
+    const pending = await service.connect({ adapterId: "stuck-managed", label: "Stuck Work" });
+
+    // Cleanup stages are independent. Run in sequence, a rejecting close()
+    // would strand the runtime state it exists to reclaim, with the runtime
+    // already dropped from every collection that could revisit it.
+    await expect(service.cancelConnection(pending.connectionId)).resolves.toBe(true);
+    expect(removals).toEqual(["stuck-work"]);
+    expect(service.pendingConnections.has("stuck-work")).toBe(false);
   });
 
   it("settles a reconnect attempt before reporting a terminal account failure", async () => {

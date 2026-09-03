@@ -40,6 +40,8 @@ const variants = [
   { scene: "stale", caption: "Stale catalog member", width: 1280, required: ["This model is no longer in the provider catalog", "Work coding"] },
   { scene: "removed", caption: "Provider removal in progress", width: 1280, required: ["Finishing removal", "Removing"] },
   { scene: "no-compatible", caption: "No compatible harness recovery", width: 1280, required: ["No compatible harness", "Connect another provider", "OpenAI Work"] },
+  { scene: "repair-execution", caption: "First-run execution repair", width: 1280, required: ["no available execution configurations", "OpenAI Work"] },
+  { scene: "refresh-models", caption: "First-run model refresh", width: 1280, required: ["no eligible execution models", "OpenAI Work"] },
   { scene: "authorization", caption: "Authorization pending", width: 1280, required: ["Complete sign-in in your browser", "Claude subscription"] },
 ];
 
@@ -203,6 +205,15 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
             })(),
             firstInvalidFocused: invalidInputs.length > 0 && document.activeElement === invalidInputs[0],
             connectedProviderRetained: Boolean(window.__providerEvidence?.definitions?.some((definition) => definition.id === "openai-work")),
+            firstRunRecovery: (() => {
+              const control = document.querySelector("#refreshOnboardingProviderModels");
+              if (!control) return null;
+              return {
+                visible: visible("#refreshOnboardingProviderModels"),
+                label: control.textContent,
+                accessibleName: control.getAttribute("aria-label"),
+              };
+            })(),
             harnessMarkup: document.querySelector("#harnessConfigurationList")?.innerHTML ?? "",
           };
         })()`,
@@ -314,6 +325,9 @@ async function recordBrowserFlow(url, directory, profile) {
       // Computed, not asserted from source: jsdom has no layout engine, so the
       // footer's fit and its accessible names can only be proven here. Measured
       // on both sides of the 980px breakpoint and at the shipped default width.
+      await evaluate(`window.__providerEvidence.emitUpdate({
+        phase: "available", availableVersion: "0.2.31", channel: "stable", version: "evidence",
+      }) ?? true`);
       for (const auditWidth of [960, 981, 1280, 1420]) {
         await cdp.call("Emulation.setDeviceMetricsOverride", {
           width: auditWidth, height: 800, deviceScaleFactor: 1, mobile: false,
@@ -323,9 +337,10 @@ async function recordBrowserFlow(url, directory, profile) {
           const settings = document.querySelector('#settingsButton');
           const indicator = document.querySelector('#updateButton');
           const label = document.querySelector('#desktopAccountLabel');
-          const wasHidden = indicator.classList.contains('hidden');
+          if (indicator.classList.contains('hidden')) {
+            throw new Error('The update indicator is not rendered for an available update.');
+          }
           const previousLabel = label.textContent;
-          indicator.classList.remove('hidden');
           label.textContent = 'Signing in…';
           const measure = (element) => {
             // Range rects give one rect per line box for inline text, which
@@ -346,16 +361,11 @@ async function recordBrowserFlow(url, directory, profile) {
           const overflowed = footer.scrollWidth > footer.clientWidth;
           const indicatorWidth = indicator.getBoundingClientRect().width;
           const settingsName = settings.getAttribute('aria-label');
-          const indicatorName = indicator.getAttribute('aria-label');
-          if (wasHidden) indicator.classList.add('hidden');
           label.textContent = previousLabel;
           const at = ' at ${auditWidth}px.';
           if (overflowed) throw new Error('Sidebar footer overflows with the update indicator visible' + at);
           if (indicatorWidth < 30.5) throw new Error('Update indicator shrank to ' + indicatorWidth + 'px' + at);
           if (settingsName !== 'Settings') throw new Error('Settings is named ' + JSON.stringify(settingsName) + at);
-          if (!indicatorName || /available/i.test(indicatorName)) {
-            throw new Error('Update indicator claims a state it may not be in: ' + JSON.stringify(indicatorName) + at);
-          }
           for (const [name, measured] of [['account', accountLabel], ['Settings', settingsLabel]]) {
             if (!measured.shown) continue;
             if (measured.lines > 1) throw new Error('The ' + name + ' label wraps across ' + measured.lines + ' lines' + at);
@@ -364,6 +374,35 @@ async function recordBrowserFlow(url, directory, profile) {
           return true;
         })()`);
       }
+      await evaluate(`(() => {
+        const button = document.querySelector('#updateButton');
+        const popover = document.querySelector('#updatePopover');
+        const expected = [
+          [{ phase: 'available', availableVersion: '0.2.31' }, 'Version 0.2.31 available. Open update details'],
+          [{ phase: 'downloading', percent: 42 }, 'Downloading update · 42%. Open update details'],
+          [{ phase: 'ready' }, 'Update ready to install. Open update details'],
+          [{ phase: 'failed' }, 'Update failed. Open update details'],
+        ];
+        const before = window.__providerEvidence.updateActionCalls;
+        for (const [status, name] of expected) {
+          window.__providerEvidence.emitUpdate({ channel: 'stable', version: 'evidence', ...status });
+          const at = ' in phase ' + status.phase + '.';
+          if (button.classList.contains('hidden')) throw new Error('The update indicator is hidden' + at);
+          if (button.getAttribute('aria-label') !== name || button.getAttribute('title') !== name) {
+            throw new Error('The update indicator is named ' + JSON.stringify(button.getAttribute('aria-label')) + at);
+          }
+          popover.classList.add('hidden');
+          button.click();
+          if (popover.classList.contains('hidden')) throw new Error('Activating the indicator did not open update details' + at);
+        }
+        if (window.__providerEvidence.updateActionCalls !== before) {
+          throw new Error('Activating the indicator performed the nested update action.');
+        }
+        popover.classList.add('hidden');
+        window.__providerEvidence.emitUpdate({ phase: 'idle', channel: 'stable', version: 'evidence' });
+        if (!button.classList.contains('hidden')) throw new Error('The update indicator outlived its phase.');
+        return true;
+      })()`);
       await cdp.call("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
       await caption("4 · Start Relayer sign-in directly from the sidebar footer control");
       await click("#desktopAccountButton");
@@ -561,20 +600,39 @@ const modelSettings = (scene) => ({
   ],
 });
 
+// First-run states that reach the family step with no usable harness, each with
+// the blocking reason whose recovery action the step has to name.
+const blockedFirstRun = new Map([
+  ["no-compatible", {
+    code: "no_compatible_harness",
+    message: "No compatible harness is available. Connect another provider to continue.",
+  }],
+  ["repair-execution", {
+    code: "provider_no_available_execution_configurations",
+    message: "This provider currently has no available execution configurations.",
+  }],
+  ["refresh-models", {
+    code: "provider_no_eligible_execution_models",
+    message: "This provider currently has no eligible execution models.",
+  }],
+]);
+const withoutUsableHarness = (scene) => ["family", "alternate-harness"].includes(scene)
+  || blockedFirstRun.has(scene);
+
 const onboardingProjection = (scene, providerId = "openai-work") => ({
   provider: scene === "alternate-harness"
     ? { id: providerId, label: "Claude Work", adapterId: "claude-subscription", accessContract: "managed-runtime@1" }
     : { id: providerId, label: "OpenAI Work", adapterId: "openai-api", accessContract: "secret@1" },
   appDefaultHarnessId: "codex-basic",
-  initialHarnessId: ["family", "no-compatible", "alternate-harness"].includes(scene) ? null : "codex-basic",
+  initialHarnessId: withoutUsableHarness(scene) ? null : "codex-basic",
   harnesses: [
     {
       id: "codex-basic",
       label: "Codex basic",
       configurationRevision: 7,
-      selectable: !["family", "no-compatible", "alternate-harness"].includes(scene),
-      selectedInitially: !["family", "no-compatible", "alternate-harness"].includes(scene),
-      ...(["family", "no-compatible", "alternate-harness"].includes(scene)
+      selectable: !withoutUsableHarness(scene),
+      selectedInitially: !withoutUsableHarness(scene),
+      ...(withoutUsableHarness(scene)
         ? { incompatibilityReason: { code: "model_rules_denied", message: "The app default does not allow this provider's models." } }
         : { matchingAccessContract: "secret@1" }),
       existingCustomFamilies: [],
@@ -615,9 +673,7 @@ const onboardingProjection = (scene, providerId = "openai-work") => ({
     },
   ],
   projectionRevision: "sha256:evidence-projection",
-  ...(scene === "no-compatible" ? {
-    blockingReason: { code: "no_compatible_harness", message: "No compatible harness is available. Connect another provider to continue." },
-  } : {}),
+  ...(blockedFirstRun.has(scene) ? { blockingReason: blockedFirstRun.get(scene) } : {}),
 });
 
 function sceneFromRequest(request) {
@@ -881,6 +937,27 @@ try {
     }
     if (scene === "no-compatible" && !audit.connectedProviderRetained) {
       throw new Error("No-compatible recovery discarded the connected provider definition.");
+    }
+    // The rendered first-run control, not the naming decision behind it: this
+    // fails if auth.js stops assigning the name, names the wrong button, or
+    // renders the other recovery branch.
+    const expectedRecovery = {
+      "repair-execution": { label: "Repair", accessibleName: "Repair execution configurations for OpenAI Work" },
+      "refresh-models": { label: "Refresh models", accessibleName: "Refresh models and set up defaults for OpenAI Work" },
+      "no-compatible": null,
+    }[scene];
+    if (expectedRecovery !== undefined) {
+      const rendered = audit.firstRunRecovery;
+      if (!rendered) throw new Error(`Evidence variant ${scene} has no first-run recovery control.`);
+      if (expectedRecovery === null) {
+        if (rendered.visible) {
+          throw new Error(`Evidence variant ${scene} offers a recovery action for a reason that has none.`);
+        }
+      } else if (!rendered.visible
+        || rendered.label !== expectedRecovery.label
+        || rendered.accessibleName !== expectedRecovery.accessibleName) {
+        throw new Error(`Evidence variant ${scene} recovery control is ${JSON.stringify(rendered)}.`);
+      }
     }
   }
 
