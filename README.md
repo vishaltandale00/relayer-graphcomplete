@@ -339,7 +339,7 @@ The living [Product Requirements](docs/prd/index.html) webpage records what is v
 
 ## Development
 
-Requires Node.js 22.8 or newer. The repository pins Rust and Cargo to 1.88.0 in [rust-toolchain.toml](rust-toolchain.toml), with `rustfmt` and `clippy` included for the CI-authoritative checks. Run the explicit prerequisite doctor with `npm run doctor:dev` before a native build or Eval Desktop session; it reports actionable setup failures without changing the repository's check/build/test policy.
+Requires Node.js 22.8 or newer. The repository pins Rust and Cargo to 1.98.0 in [rust-toolchain.toml](rust-toolchain.toml), with `rustfmt` and `clippy` included for the CI-authoritative checks. Run the explicit prerequisite doctor with `npm run doctor:dev` before a native build or Eval Desktop session; it reports actionable setup failures without changing the repository's check/build/test policy.
 
 The pinned `lbug` 0.18.0 dependency is compiled from its bundled native Ladybug source by `.cargo/config.toml`; this is intentional and keeps development aligned with the qualified native dependency contract. It is not a small Rust-only build. CMake 3.15 or newer is required by the pinned source; CMake 4.4.3 is the known-good local version. Native compilation also requires a C++20 toolchain: Xcode Command Line Tools (or full Xcode) plus `xcrun --find clang++` on macOS, Visual Studio C++ tools or LLVM `clang-cl` plus either Ninja or a supported Visual Studio CMake generator on Windows, and make plus a C++20 compiler on Linux. Full Xcode is needed for macOS signing/release work, while the command-line tools are sufficient for an unsigned local build.
 

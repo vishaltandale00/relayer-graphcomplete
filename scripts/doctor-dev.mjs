@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const REQUIRED_RUST_TOOLCHAIN = "1.88.0";
+export const REQUIRED_RUST_TOOLCHAIN = "1.98.0";
 export const MINIMUM_NODE_VERSION = "22.8.0";
 export const MINIMUM_CMAKE_VERSION = "3.15.0";
 export const ADVISORY_FREE_BYTES = 10n * 1024n * 1024n * 1024n;
