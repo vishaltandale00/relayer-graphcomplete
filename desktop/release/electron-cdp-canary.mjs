@@ -196,6 +196,12 @@ export async function captureInstalledUpdateState({ port, outputPath, targetVers
       const settings = document.querySelector("#settingsView");
       const newThread = document.querySelector("#newThreadView");
       const thread = document.querySelector("#threadView");
+      // index.html ships body.desktop-account-pending and desktop-account.js
+      // clears it once an account resolves. The canary profile never signs in,
+      // so it stays, and ".desktop-account-pending .app-shell{visibility:hidden}"
+      // keeps the whole shell invisible however its display is forced.
+      document.body.classList.remove("desktop-account-pending");
+      shell?.style.setProperty("visibility", "visible", "important");
       auth?.classList.add("hidden");
       auth?.style.setProperty("display", "none", "important");
       shell?.classList.remove("hidden");
