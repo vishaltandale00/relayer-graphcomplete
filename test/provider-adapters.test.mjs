@@ -16,7 +16,9 @@ import {
   createProviderAdapterRegistry,
   normalizeProviderEndpoint,
 } from "../desktop/main/providers/provider-adapter-contract.mjs";
-import { ProviderDefinitionService } from "../desktop/main/providers/provider-definition-service.mjs";
+import { ProviderDefinitionService,
+  isTerminalConnectionFailure,
+} from "../desktop/main/providers/provider-definition-service.mjs";
 import { createProviderDiagnosticsLog } from "../desktop/main/providers/provider-diagnostics-log.mjs";
 import {
   createProviderRuntimeStateRemover,
@@ -706,6 +708,48 @@ describe("secret-backed API adapters", () => {
     expect(definitions).toEqual([]);
     expect(credentialSet).not.toHaveBeenCalled();
     await catalog.close();
+  });
+
+  it("keeps a connect attempt pending and cancellable when its account check fails", async () => {
+    const service = new ProviderDefinitionService({
+      registry: productionProviderAdapterRegistry,
+      definitionStore: { async load() { return []; }, async save() {} },
+      credentialStore: { async set() {}, async delete() {} },
+      runtimeDependencies: async () => ({ fetch, environment: {} }),
+    });
+    const candidate = { id: "openai-work", adapterId: "openai-api", label: "OpenAI Work" };
+    const failing = { credentials: { account: async () => { throw new Error("temporary account check failure"); } } };
+    service.pendingConnections.set("openai-work", {
+      candidate, runtime: failing, reconnect: false, login: { authUrl: "https://login.example.test" },
+    });
+
+    // completeConnection is the caller's poll, and its loop continues on
+    // "pending". Rejecting here would end that loop and release ownership
+    // while this attempt still holds the provider name, blocking the retry.
+    const result = await service.completeConnection("openai-work");
+    expect(result).toMatchObject({ status: "pending", connectionId: "openai-work", retrying: "account-check-failed" });
+    expect(service.pendingConnections.has("openai-work")).toBe(true);
+
+    // Still owned, so the caller can still abandon it deliberately.
+    await expect(service.cancelConnection("openai-work")).resolves.toBe(true);
+    expect(service.pendingConnections.has("openai-work")).toBe(false);
+  });
+
+  it("settles a reconnect attempt before reporting a terminal account failure", async () => {
+    const service = new ProviderDefinitionService({
+      registry: productionProviderAdapterRegistry,
+      definitionStore: { async load() { return []; }, async save() {} },
+      credentialStore: { async set() {}, async delete() {} },
+      runtimeDependencies: async () => ({ fetch, environment: {} }),
+    });
+    const candidate = { id: "claude-work", adapterId: "claude-subscription", label: "Claude Work" };
+    const failing = { credentials: { account: async () => { throw new Error("reconnect account failure"); } } };
+    service.pendingConnections.set("claude-work", { candidate, runtime: failing, reconnect: true });
+
+    await expect(service.completeConnection("claude-work")).rejects.toSatisfy(
+      (error) => isTerminalConnectionFailure(error) && error.message === "reconnect account failure",
+    );
+    expect(service.pendingConnections.has("claude-work")).toBe(false);
   });
 });
 

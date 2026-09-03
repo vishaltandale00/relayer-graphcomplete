@@ -306,44 +306,65 @@ async function recordBrowserFlow(url, directory, profile) {
         if (!control.closest('.sidebar-footer')) {
           throw new Error('Account control is not seated in the sidebar footer.');
         }
-        // Computed, not asserted from source: jsdom has no layout engine, so
-        // the footer's fit and its accessible names can only be proven here.
-        const footer = document.querySelector('.sidebar-footer');
-        const settings = document.querySelector('#settingsButton');
-        const indicator = document.querySelector('#updateButton');
-        const label = document.querySelector('#desktopAccountLabel');
-        const wasHidden = indicator.classList.contains('hidden');
-        const previousLabel = label.textContent;
-        indicator.classList.remove('hidden');
-        label.textContent = 'Signing in…';
-        const overflowed = footer.scrollWidth > footer.clientWidth;
-        const indicatorWidth = indicator.getBoundingClientRect().width;
-        // Wrapping is a line count, not a width comparison: with nowrap the
-        // label truncates instead, and a truncated label is not a wrapped one.
-        const lineBoxes = label.getClientRects().length;
-        const wrapped = lineBoxes > 1;
-        const settingsName = settings.getAttribute('aria-label');
-        const indicatorName = indicator.getAttribute('aria-label');
-        if (wasHidden) indicator.classList.add('hidden');
-        label.textContent = previousLabel;
-        if (overflowed) throw new Error('Sidebar footer overflows with the update indicator visible.');
-        if (indicatorWidth < 30.5) throw new Error('Update indicator was shrunk to ' + indicatorWidth + 'px.');
-        if (wrapped) throw new Error('A busy account label wraps across ' + lineBoxes + ' lines in the footer control.');
-        if (settingsName !== 'Settings') throw new Error('Settings is named ' + JSON.stringify(settingsName) + '.');
-        if (!indicatorName || /available/i.test(indicatorName)) {
-          throw new Error('Update indicator claims a state it may not be in: ' + JSON.stringify(indicatorName));
-        }
-        if (style.position === 'fixed') {
-          throw new Error('Account control still floats over the workspace.');
-        }
-        if (!document.querySelector('.sidebar-footer #settingsButton')) {
-          throw new Error('Account control did not join Settings in the sidebar footer.');
-        }
         if (/preview|stable/i.test(control.textContent)) {
           throw new Error('Everyday account control leaked release-channel presentation.');
         }
         return true;
       })()`);
+      // Computed, not asserted from source: jsdom has no layout engine, so the
+      // footer's fit and its accessible names can only be proven here. Measured
+      // on both sides of the 980px breakpoint and at the shipped default width.
+      for (const auditWidth of [960, 981, 1280, 1420]) {
+        await cdp.call("Emulation.setDeviceMetricsOverride", {
+          width: auditWidth, height: 800, deviceScaleFactor: 1, mobile: false,
+        });
+        await evaluate(`(() => {
+          const footer = document.querySelector('.sidebar-footer');
+          const settings = document.querySelector('#settingsButton');
+          const indicator = document.querySelector('#updateButton');
+          const label = document.querySelector('#desktopAccountLabel');
+          const wasHidden = indicator.classList.contains('hidden');
+          const previousLabel = label.textContent;
+          indicator.classList.remove('hidden');
+          label.textContent = 'Signing in…';
+          const measure = (element) => {
+            // Range rects give one rect per line box for inline text, which
+            // getClientRects on a blockified flex item does not.
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const rects = [...range.getClientRects()];
+            range.detach?.();
+            const lines = new Set(rects.map((rect) => Math.round(rect.top))).size;
+            return {
+              lines,
+              truncated: element.scrollWidth > element.clientWidth + 0.5,
+              shown: element.getClientRects().length > 0,
+            };
+          };
+          const accountLabel = measure(label);
+          const settingsLabel = measure(settings.querySelector('span:not([aria-hidden])'));
+          const overflowed = footer.scrollWidth > footer.clientWidth;
+          const indicatorWidth = indicator.getBoundingClientRect().width;
+          const settingsName = settings.getAttribute('aria-label');
+          const indicatorName = indicator.getAttribute('aria-label');
+          if (wasHidden) indicator.classList.add('hidden');
+          label.textContent = previousLabel;
+          const at = ' at ${auditWidth}px.';
+          if (overflowed) throw new Error('Sidebar footer overflows with the update indicator visible' + at);
+          if (indicatorWidth < 30.5) throw new Error('Update indicator shrank to ' + indicatorWidth + 'px' + at);
+          if (settingsName !== 'Settings') throw new Error('Settings is named ' + JSON.stringify(settingsName) + at);
+          if (!indicatorName || /available/i.test(indicatorName)) {
+            throw new Error('Update indicator claims a state it may not be in: ' + JSON.stringify(indicatorName) + at);
+          }
+          for (const [name, measured] of [['account', accountLabel], ['Settings', settingsLabel]]) {
+            if (!measured.shown) continue;
+            if (measured.lines > 1) throw new Error('The ' + name + ' label wraps across ' + measured.lines + ' lines' + at);
+            if (measured.truncated) throw new Error('The ' + name + ' label is truncated' + at);
+          }
+          return true;
+        })()`);
+      }
+      await cdp.call("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
       await caption("4 · Start Relayer sign-in directly from the sidebar footer control");
       await click("#desktopAccountButton");
       await waitFor("window.__providerEvidence.accountLoginCalls === 1 && document.querySelector('#desktopAccountButton').textContent === 'Signing in…'", "direct sidebar-footer account sign-in");

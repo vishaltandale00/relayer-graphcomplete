@@ -81,13 +81,20 @@ describe("desktop update indicator naming", () => {
     // The control is shown for these four phases, so a fixed name would both
     // misreport a failure and hide that a verified update is staged.
     expect(updateIndicatorName({ phase: "available", availableVersion: "0.2.31" }))
-      .toBe("Version 0.2.31 available. Download update");
+      .toBe("Version 0.2.31 available. Open update details");
     expect(updateIndicatorName({ phase: "downloading", percent: 42 }))
-      .toBe("Downloading update · 42%");
-    expect(updateIndicatorName({ phase: "ready" })).toBe("Update ready to install. Restart Relayer");
-    expect(updateIndicatorName({ phase: "failed" })).toBe("Update failed. Try again");
+      .toBe("Downloading update · 42%. Open update details");
+    expect(updateIndicatorName({ phase: "ready" })).toBe("Update ready to install. Open update details");
+    expect(updateIndicatorName({ phase: "failed" })).toBe("Update failed. Open update details");
 
-    // No phase the button is visible in may claim an update is available.
+    // The button opens the popover; restart, retry and download are the nested
+    // action inside it, so no name may promise them.
+    for (const phase of ["available", "downloading", "ready", "failed"]) {
+      const name = updateIndicatorName({ phase });
+      expect(name).toContain("Open update details");
+      expect(name).not.toMatch(/restart|try again|download update/i);
+    }
+    // Only the available phase may say an update is available.
     for (const phase of ["downloading", "ready", "failed"]) {
       expect(updateIndicatorName({ phase })).not.toMatch(/available/i);
     }

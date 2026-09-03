@@ -7,6 +7,7 @@ import { normalizeProviderDescriptor, providerConnectionErrors, providerCreation
 import {
   providerOnboardingCompletionIntent,
   providerOnboardingRecoveryAction,
+  providerOnboardingRecoveryName,
   createProviderOnboardingProjectionGate,
   createProviderConnectionCancellationState,
   reconcileProviderOnboardingState,
@@ -214,15 +215,9 @@ function renderOnboardingChoices({ focus } = {}) {
   const recoveryButton = $("#refreshOnboardingProviderModels");
   recoveryButton.classList.toggle("hidden", recovery === null);
   recoveryButton.textContent = recovery?.label ?? "Refresh models";
-  // The visible label is short; the accessible name carries the operation
-  // and the exact provider, matching the provider cards in Settings.
-  const recoveryProvider = onboardingProjection?.provider?.label;
-  const recoveryDescription = recovery?.kind === "repair_execution"
-    ? "Repair execution configurations"
-    : "Refresh models and set up defaults";
   recoveryButton.setAttribute(
     "aria-label",
-    recoveryProvider ? `${recoveryDescription} for ${recoveryProvider}` : recoveryDescription,
+    providerOnboardingRecoveryName(recovery, onboardingProjection?.provider?.label),
   );
   bindOnboardingChoices({ focus });
 }
