@@ -183,6 +183,105 @@ export interface CompiledNodeDetail {
   readonly integritySha256: string;
 }
 
+/** Validate and snapshot a canonical package retained by the server for an empty resubmission. @internal */
+export function snapshotRetainedCompiledNodeDetail(value: unknown): CompiledNodeDetail | undefined {
+  if (!isPlainRecordWithKeys(value, ["assets", "components", "integritySha256", "mounts", "version"])) return undefined;
+  if (value.version !== 1 || !Array.isArray(value.components) || !Array.isArray(value.mounts) || !Array.isArray(value.assets)) return undefined;
+  if (value.components.length > DETAIL_AUTHORING_LIMITS.maxComponents
+    || value.mounts.length > DETAIL_AUTHORING_LIMITS.maxMountsPerPackage
+    || value.assets.length > DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage) return undefined;
+
+  const componentIds = new Set<string>();
+  for (const [index, component] of value.components.entries()) {
+    if (!isPlainRecordWithKeys(component, ["css", "html", "id", "order"])
+      || !isBoundedIdentity(component.id)
+      || component.order !== index
+      || typeof component.html !== "string"
+      || typeof component.css !== "string"
+      || componentIds.has(component.id)) return undefined;
+    componentIds.add(component.id);
+  }
+  const assetIds = new Set<string>();
+  for (const asset of value.assets) {
+    if (!isPlainRecordWithKeys(asset, ["digestSha256", "id", "mediaType", "representation"])
+      || !isBoundedIdentity(asset.id)
+      || !isLowerHexDigest(asset.digestSha256)
+      || !["image/jpeg", "image/png", "image/svg+xml"].includes(String(asset.mediaType))
+      || asset.representation !== "image"
+      || assetIds.has(asset.id)) return undefined;
+    assetIds.add(asset.id);
+  }
+  const mountIds = new Set<string>();
+  for (const mount of value.mounts) {
+    if (!isPlainRecord(mount)
+      || !isBoundedIdentity(mount.id)
+      || !isBoundedIdentity(mount.host)
+      || typeof mount.componentId !== "string"
+      || !componentIds.has(mount.componentId)
+      || mountIds.has(mount.id)) return undefined;
+    mountIds.add(mount.id);
+    if (mount.kind === "asset") {
+      if (!hasExactKeys(mount, ["assetId", "componentId", "host", "id", "kind"])
+        || typeof mount.assetId !== "string"
+        || !assetIds.has(mount.assetId)) return undefined;
+    } else if (mount.kind === "capability") {
+      if (!hasExactKeys(mount, ["capability", "componentId", "host", "id", "kind"])
+        || !isCanonicalCapability(mount.capability)) return undefined;
+    } else return undefined;
+  }
+  if (!isLowerHexDigest(value.integritySha256)) return undefined;
+  const content = { version: value.version, components: value.components, mounts: value.mounts, assets: value.assets };
+  const canonical = canonicalJson(content);
+  if (Buffer.byteLength(canonical, "utf8") > DETAIL_AUTHORING_LIMITS.maxCompiledPackageBytes
+    || createHash("sha256").update(canonical).digest("hex") !== value.integritySha256) return undefined;
+  return deepFreezeJson(JSON.parse(JSON.stringify(value))) as CompiledNodeDetail;
+}
+
+function isCanonicalCapability(value: unknown): boolean {
+  if (!isPlainRecord(value) || typeof value.kind !== "string") return false;
+  if (value.kind === "link") return hasExactKeys(value, ["href", "kind"]) && typeof value.href === "string";
+  if (!["expand", "reference", "invoke", "input"].includes(value.kind)
+    || !hasExactKeys(value, ["action", "kind"])
+    || !isPlainRecordWithKeys(value.action, ["clientKey", "sourceLayer", "sourceNode"])
+    || !isBoundedIdentity(value.action.clientKey)) return false;
+  return isStableReference(value.action.sourceLayer) && isStableReference(value.action.sourceNode);
+}
+
+function isStableReference(value: unknown): boolean {
+  if (!isPlainRecord(value) || Object.keys(value).length === 0
+    || Object.keys(value).some((key) => key !== "id" && key !== "clientKey")) return false;
+  return (value.id === undefined || (Number.isSafeInteger(value.id) && (value.id as number) > 0))
+    && (value.clientKey === undefined || isBoundedIdentity(value.clientKey));
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function isPlainRecordWithKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return isPlainRecord(value) && hasExactKeys(value, keys);
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function isBoundedIdentity(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.trim() === value
+    && !value.includes("\0") && Buffer.byteLength(value, "utf8") <= 128;
+}
+
+function isLowerHexDigest(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function deepFreezeJson(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  for (const child of Object.values(value)) deepFreezeJson(child);
+  return Object.freeze(value);
+}
+
 export interface DetailCompilationIssue {
   readonly code: string;
   readonly componentId: string;
@@ -240,6 +339,7 @@ interface AuthoringState {
   readonly components: Map<string, AuthoringComponent>;
   readonly owner: NodeObject | undefined;
   frozen: boolean;
+  finalization: symbol | undefined;
 }
 
 interface DomIdentityRecord {
@@ -251,7 +351,12 @@ const AUTHORING_STATE = new WeakMap<NodeDetailAuthoring, AuthoringState>();
 
 export class NodeDetailAuthoring {
   constructor() {
-    AUTHORING_STATE.set(this, { components: new Map(), owner: undefined, frozen: false });
+    AUTHORING_STATE.set(this, {
+      components: new Map(),
+      owner: undefined,
+      frozen: false,
+      finalization: undefined,
+    });
   }
 
   setComponent(id: string, markup: DetailTemplate, styles: DetailTemplate = emptyCssTemplate()): this {
@@ -272,7 +377,12 @@ export class NodeDetailAuthoring {
 /** @internal */
 export function createOwnedNodeDetailAuthoring(owner: NodeObject): NodeDetailAuthoring {
   const authoring = new NodeDetailAuthoring();
-  AUTHORING_STATE.set(authoring, { components: new Map(), owner, frozen: false });
+  AUTHORING_STATE.set(authoring, {
+    components: new Map(),
+    owner,
+    frozen: false,
+    finalization: undefined,
+  });
   return authoring;
 }
 
@@ -515,7 +625,30 @@ export function compileAuthenticatedNodeDetail(
 
 /** @internal */
 export function freezeNodeDetailAuthoring(authoring: NodeDetailAuthoring): void {
-  authoringState(authoring).frozen = true;
+  const state = authoringState(authoring);
+  state.frozen = true;
+  state.finalization = undefined;
+}
+
+/** @internal */
+export function beginNodeDetailAuthoringFinalization(authoring: NodeDetailAuthoring): symbol {
+  const state = authoringState(authoring);
+  if (state.frozen) throw new Error("Node Detail authoring is finalized and cannot be mutated");
+  const finalization = Symbol("node-detail-finalization");
+  state.frozen = true;
+  state.finalization = finalization;
+  return finalization;
+}
+
+/** @internal */
+export function cancelNodeDetailAuthoringFinalization(
+  authoring: NodeDetailAuthoring,
+  finalization: symbol,
+): void {
+  const state = authoringState(authoring);
+  if (state.finalization !== finalization) return;
+  state.finalization = undefined;
+  state.frozen = false;
 }
 
 function authoringState(authoring: NodeDetailAuthoring): AuthoringState {

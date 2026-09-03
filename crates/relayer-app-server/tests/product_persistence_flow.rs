@@ -2604,6 +2604,18 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         .writer_for_subgraph(graph_interaction.id)
         .await
         .unwrap();
+    let authored_detail = json!({
+        "version": 1,
+        "components": [{
+            "id":"overview",
+            "order":0,
+            "html":"<p>Accepted /private/var/folders/project/tokenizer</p>",
+            "css":"/* /var/folders/project/tokenizer */ p{color:#fff}"
+        }],
+        "mounts": [],
+        "assets": [],
+        "integritySha256": "383447f86c6c16bb8688e982ad8ce92aa597aecb1b512edd7d9b2c2ce0652e04"
+    });
     let answer = writer
         .submit_node_with_authored_detail(
             &NodeDraft {
@@ -2613,13 +2625,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
                 title: "Finding /var/folders/project/tokenizer".into(),
                 detail: "Accepted durable detail /var/folders/project/tokenizer".into(),
             },
-            Some(&json!({
-                "version": 1,
-                "components": [{"id":"overview","order":0,"html":"<p>Accepted</p>","css":"p{color:#fff}"}],
-                "mounts": [],
-                "assets": [],
-                "integritySha256": "6c34582a24f665dfcf9efa843fdb254a646de79c505d76c80863f81ed8dfe659"
-            })),
+            Some(&authored_detail),
         )
         .await
         .unwrap();
@@ -2953,9 +2959,11 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
     assert_eq!(exported_answer.icon, "file");
     assert!(exported_answer.title.contains("[project-path]"));
     assert!(exported_answer.detail.contains("[project-path]"));
-    assert_eq!(
-        exported_answer.authored_detail.as_ref().unwrap()["components"][0]["id"],
-        "overview"
+    assert!(exported_answer.authored_detail.is_none());
+    assert!(
+        exported_answer
+            .detail
+            .contains("Authored visual detail omitted because project-path redaction")
     );
     let exported_invoke = accepted_view
         .layers

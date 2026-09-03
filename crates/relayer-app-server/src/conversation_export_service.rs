@@ -1037,24 +1037,52 @@ fn export_node(
     redactor: &ProjectPathRedactor,
 ) -> Result<ExportNode, ConversationExportBuildError> {
     ensure_accepted(node.state, "node", node.id.value())?;
-    if let Some(authored_detail) = &node.authored_detail {
-        let serialized = serde_json::to_string(authored_detail)?;
-        if redactor.text(&serialized) != serialized {
-            return Err(ConversationExportBuildError::Invalid(
-                "authored Node Detail contains the private project path and cannot be exported without invalidating its integrity".into(),
-            ));
-        }
-    }
+    let authored_detail = node
+        .authored_detail
+        .as_ref()
+        .and_then(|detail| portable_authored_detail(detail, redactor));
+    let detail = if node.authored_detail.is_some() && authored_detail.is_none() {
+        format!(
+            "{}\n\n[Authored visual detail omitted because project-path redaction could not preserve its canonical structure.]",
+            redactor.text(&node.detail)
+        )
+    } else {
+        redactor.text(&node.detail)
+    };
     Ok(ExportNode {
         id: ids.node(node.id.value()),
         client_key: node.client_key.clone(),
         kind: redactor.text(&node.kind),
         icon: redactor.text(&node.icon),
         title: redactor.text(&node.title),
-        detail: redactor.text(&node.detail),
-        authored_detail: node.authored_detail.clone(),
+        detail,
+        authored_detail,
         state: ExportRecordState::Accepted,
     })
+}
+
+fn portable_authored_detail(
+    authored_detail: &serde_json::Value,
+    redactor: &ProjectPathRedactor,
+) -> Option<serde_json::Value> {
+    (!json_contains_private_project_path(authored_detail, redactor))
+        .then(|| authored_detail.clone())
+}
+
+fn json_contains_private_project_path(
+    value: &serde_json::Value,
+    redactor: &ProjectPathRedactor,
+) -> bool {
+    match value {
+        serde_json::Value::String(text) => redactor.contains_private_path(text),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| json_contains_private_project_path(value, redactor)),
+        serde_json::Value::Object(values) => values
+            .values()
+            .any(|value| json_contains_private_project_path(value, redactor)),
+        _ => false,
+    }
 }
 
 fn export_edge(
@@ -1263,9 +1291,23 @@ impl ProjectPathRedactor {
             })
     }
 
+    fn contains_private_path(&self, value: &str) -> bool {
+        if self.project_paths.iter().any(|path| value.contains(path)) {
+            return true;
+        }
+        contains_potential_html_character_reference(value)
+    }
+
     fn optional(&self, value: Option<&str>) -> Option<String> {
         value.map(|value| self.text(value))
     }
+}
+
+fn contains_potential_html_character_reference(value: &str) -> bool {
+    value
+        .as_bytes()
+        .windows(2)
+        .any(|pair| pair[0] == b'&' && (pair[1] == b'#' || pair[1].is_ascii_alphabetic()))
 }
 
 fn injective_portable_option_keys<'a>(
@@ -1434,7 +1476,20 @@ mod tests {
     }
 
     #[test]
-    fn rejects_private_project_paths_inside_integrity_bound_authored_detail() {
+    fn degrades_authored_detail_containing_a_windows_project_path() {
+        let project_path = r#"C:\Users\Vishal\"quoted project"#;
+        let package = serde_json::json!({
+            "version": 1,
+            "components": [{
+                "id":"summary",
+                "order":0,
+                "html":format!("<code>{project_path}\\src\\main.rs</code>"),
+                "css":format!("/* {project_path} */")
+            }],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        });
         let node = GraphNode {
             id: NodeId::new(1).unwrap(),
             client_key: Some("private-detail".into()),
@@ -1443,28 +1498,140 @@ mod tests {
             icon: "box".into(),
             title: "Private detail".into(),
             detail: "Fallback".into(),
-            authored_detail: Some(serde_json::json!({
-                "version": 1,
-                "components": [{"id":"summary","order":0,"html":"<p>/private/project/secret</p>","css":""}],
-                "mounts": [],
-                "assets": [],
-                "integritySha256": "1289b05aad5b595800f3ce4e8b27488f75efced3ddd79e20a9a7986f100d714a"
-            })),
+            authored_detail: Some(package.clone()),
             state: RecordState::Accepted,
         };
 
-        let error = export_node(
+        let exported = export_node(
             &node,
             &mut PortableIds::default(),
-            &ProjectPathRedactor::new(Some("/private/project")),
+            &ProjectPathRedactor::new(Some(project_path)),
         )
-        .unwrap_err();
+        .unwrap();
 
+        assert!(exported.authored_detail.is_none());
+        assert!(exported.detail.contains("Authored visual detail omitted"));
+    }
+
+    #[test]
+    fn explicitly_degrades_to_fallback_when_redaction_breaks_package_structure() {
+        let project_path = r#"C:\p"#;
+        let package = serde_json::json!({
+            "version": 1,
+            "components": [
+                {"id":project_path,"order":0,"html":"<p>Private</p>","css":""},
+                {"id":"[project-path]","order":1,"html":"<p>Portable</p>","css":""}
+            ],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        });
+        let node = GraphNode {
+            id: NodeId::new(1).unwrap(),
+            client_key: Some("private-detail".into()),
+            leased_action_id: None,
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Private detail".into(),
+            detail: "Portable fallback".into(),
+            authored_detail: Some(package),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_node(
+            &node,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some(project_path)),
+        )
+        .unwrap();
+
+        assert!(exported.authored_detail.is_none());
+        assert!(exported.detail.starts_with("Portable fallback"));
+        assert!(exported.detail.contains("Authored visual detail omitted"));
+    }
+
+    #[test]
+    fn degrades_authored_detail_containing_an_html_entity_encoded_project_path() {
+        let project_path = "/private/A&B";
+        let package = serde_json::json!({
+            "version": 1,
+            "components": [{
+                "id":"summary",
+                "order":0,
+                "html":"<code>/private/A&amp;B/src/main.rs</code>",
+                "css":""
+            }],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        });
+        let node = GraphNode {
+            id: NodeId::new(1).unwrap(),
+            client_key: Some("private-detail".into()),
+            leased_action_id: None,
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Private detail".into(),
+            detail: "Portable fallback".into(),
+            authored_detail: Some(package),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_node(
+            &node,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some(project_path)),
+        )
+        .unwrap();
+
+        assert!(exported.authored_detail.is_none());
+        assert!(exported.detail.contains("Authored visual detail omitted"));
         assert!(
-            error
-                .to_string()
-                .contains("cannot be exported without invalidating its integrity")
+            !serde_json::to_string(&exported)
+                .unwrap()
+                .contains("/private/A&amp;B")
         );
+    }
+
+    #[test]
+    fn degrades_nested_numeric_and_named_html_character_references() {
+        let project_path = "/private/A&B";
+        for html in [
+            "&lt;code&gt;&amp;#47;private&amp;#47;A&amp;amp;B/src/main.rs&lt;/code&gt;",
+            "<code>&sol;private&sol;A&amp;B/src/main.rs</code>",
+            "<code>&#x2f;private&#47;A&amp;B/src/main.rs</code>",
+        ] {
+            let node = GraphNode {
+                id: NodeId::new(1).unwrap(),
+                client_key: Some("private-detail".into()),
+                leased_action_id: None,
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Private detail".into(),
+                detail: "Portable fallback".into(),
+                authored_detail: Some(serde_json::json!({
+                    "version": 1,
+                    "components": [{"id":"summary","order":0,"html":html,"css":""}],
+                    "mounts": [],
+                    "assets": [],
+                    "integritySha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                })),
+                state: RecordState::Accepted,
+            };
+
+            let exported = export_node(
+                &node,
+                &mut PortableIds::default(),
+                &ProjectPathRedactor::new(Some(project_path)),
+            )
+            .unwrap();
+
+            assert!(
+                exported.authored_detail.is_none(),
+                "retained encoded HTML: {html}"
+            );
+            assert!(exported.detail.contains("Authored visual detail omitted"));
+        }
     }
 
     #[test]

@@ -4414,6 +4414,49 @@ async fn accepted_authored_detail_survives_caller_mutation_and_database_reopen()
 }
 
 #[tokio::test]
+async fn draft_resubmission_without_authored_detail_preserves_checkpointed_package() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let package = serde_json::json!({
+        "version": 1,
+        "components": [{"id":"summary","order":0,"html":"<p>Checkpointed</p>","css":""}],
+        "mounts": [],
+        "assets": [],
+        "integritySha256": "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac"
+    });
+    let checkpointed = writer
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Checkpointed".into(),
+                detail: "Legacy fallback".into(),
+            },
+            Some(&package),
+        )
+        .await
+        .unwrap();
+
+    let resubmitted = writer
+        .submit_node(&NodeDraft {
+            client_key: "answer".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Revised title".into(),
+            detail: "Revised fallback".into(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(resubmitted.id, checkpointed.id);
+    assert_eq!(resubmitted.authored_detail.as_ref(), Some(&package));
+    accept_single_node(&writer, interaction, resubmitted).await;
+    let accepted = writer.get_node(checkpointed.id).await.unwrap();
+    assert_eq!(accepted.authored_detail.as_ref(), Some(&package));
+}
+
+#[tokio::test]
 async fn authored_detail_rejects_a_package_with_corrupt_canonical_integrity() {
     let (database, interaction) = setup(Some(project(1)), thread(1)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();

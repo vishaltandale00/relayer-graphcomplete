@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { isProxy } from "node:util/types";
-import { DetailCompilationError, NodeDetailAuthoring, compileAuthenticatedNodeDetail, freezeNodeDetailAuthoring, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
+import { DetailCompilationError, NodeDetailAuthoring, beginNodeDetailAuthoringFinalization, cancelNodeDetailAuthoringFinalization, compileAuthenticatedNodeDetail, freezeNodeDetailAuthoring, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, snapshotRetainedCompiledNodeDetail, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
 import { isRelayerIconName } from "./icons.js";
 import { applyAcceptedNodeResponse } from "./node-response.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
@@ -12,6 +12,7 @@ import { GraphApiError, type CompletionInputGraph, type CompletionOutput, type C
 export class RelayerGraphClient {
   readonly capability: GraphCapability;
   readonly #submittedDetails = new WeakMap<NodeObject, Promise<CompiledNodeDetail>>();
+  readonly #acceptedDetails = new WeakMap<NodeObject, Promise<CompiledNodeDetail>>();
   readonly #submissionEnvelopes = new WeakMap<NodeObject, NodeSubmissionEnvelope>();
   readonly #submittedNodes = new WeakMap<NodeObject, Promise<GraphNode>>();
 
@@ -55,7 +56,10 @@ export class RelayerGraphClient {
     let work: Promise<GraphNode>;
     try {
       const envelope = this.submissionEnvelope(node);
-      work = this.submitNodeEnvelope(node, envelope);
+      const acceptedDetail = deferred<CompiledNodeDetail>();
+      this.#acceptedDetails.set(node, acceptedDetail.promise);
+      void acceptedDetail.promise.catch(() => undefined);
+      work = this.submitNodeEnvelope(node, envelope, acceptedDetail);
     } catch (error) {
       if (this.#submittedNodes.get(node) === submission.promise) this.#submittedNodes.delete(node);
       submission.reject(error);
@@ -63,34 +67,49 @@ export class RelayerGraphClient {
     }
     void work.then(submission.resolve, (error: unknown) => {
       if (this.#submittedNodes.get(node) === submission.promise) this.#submittedNodes.delete(node);
+      this.#acceptedDetails.delete(node);
       submission.reject(error);
     });
     return submission.promise;
   }
 
-  private async submitNodeEnvelope(node: NodeObject, envelope: NodeSubmissionEnvelope): Promise<GraphNode> {
-    const authoredDetail = await this.finalizeNodeDetail(node, envelope);
-    const body = await this.request<unknown>("/api/graph/nodes", {
-      method: "POST",
-      body: JSON.stringify({
-        clientKey: envelope.clientKey,
-        kind: envelope.kind,
-        icon: envelope.icon,
-        title: envelope.title,
-        detail: envelope.detail,
-        ...(authoredDetail.components.length === 0 ? {} : { authoredDetail }),
-      }),
-    });
-    const accepted = validatedSubmittedNodeResponse(
-      body,
-      envelope.clientKey,
-      authoredDetail.components.length === 0 ? undefined : authoredDetail,
-    );
-    applyAcceptedNodeResponse(envelope.owner.object, accepted);
-    return accepted;
+  private async submitNodeEnvelope(
+    node: NodeObject,
+    envelope: NodeSubmissionEnvelope,
+    acceptedDetail: ReturnType<typeof deferred<CompiledNodeDetail>>,
+  ): Promise<GraphNode> {
+    let authoredDetail: CompiledNodeDetail | undefined;
+    try {
+      authoredDetail = await this.finalizeNodeDetail(node, envelope);
+      const body = await this.request<unknown>("/api/graph/nodes", {
+        method: "POST",
+        body: JSON.stringify({
+          clientKey: envelope.clientKey,
+          kind: envelope.kind,
+          icon: envelope.icon,
+          title: envelope.title,
+          detail: envelope.detail,
+          ...(authoredDetail.components.length === 0 ? {} : { authoredDetail }),
+        }),
+      });
+      const accepted = validatedSubmittedNodeResponse(
+        body,
+        envelope.clientKey,
+        authoredDetail.components.length === 0 ? undefined : authoredDetail,
+      );
+      acceptedDetail.resolve(accepted.authoredDetail ?? authoredDetail);
+      applyAcceptedNodeResponse(envelope.owner.object, accepted);
+      return accepted;
+    } catch (error) {
+      if (authoredDetail === undefined) acceptedDetail.reject(error);
+      else acceptedDetail.resolve(authoredDetail);
+      throw error;
+    }
   }
 
   checkpointNodeDetail(node: NodeObject): Promise<CompiledNodeDetail> {
+    const accepted = this.#acceptedDetails.get(node);
+    if (accepted !== undefined) return accepted;
     const finalized = this.#submittedDetails.get(node);
     if (finalized !== undefined) return finalized;
     return this.compileNodeDetailCheckpoint(node);
@@ -125,10 +144,16 @@ export class RelayerGraphClient {
 
   private async compileAndFreezeNodeDetail(envelope: NodeSubmissionEnvelope): Promise<CompiledNodeDetail> {
     const program = snapshotAuthoredNodeDetailProgram(envelope.detailAuthoring, envelope.owner);
-    const assets = await this.resolveDetailAssets(program);
-    const compiled = compileAuthenticatedNodeDetail(program, assets);
-    freezeNodeDetailAuthoring(envelope.detailAuthoring);
-    return compiled;
+    const finalization = beginNodeDetailAuthoringFinalization(envelope.detailAuthoring);
+    try {
+      const assets = await this.resolveDetailAssets(program);
+      const compiled = compileAuthenticatedNodeDetail(program, assets);
+      freezeNodeDetailAuthoring(envelope.detailAuthoring);
+      return compiled;
+    } catch (error) {
+      cancelNodeDetailAuthoringFinalization(envelope.detailAuthoring, finalization);
+      throw error;
+    }
   }
 
   private async resolveDetailAssets(program: AuthenticatedNodeDetailProgramSnapshot): Promise<readonly ResolvedDetailAsset[]> {
@@ -472,8 +497,11 @@ function validatedSubmittedNodeResponse(
       return invalidNodeResponse("node.state", "Node state must be draft, accepted, or stopped");
     }
     const hasAuthoredDetail = candidate.optionalFields.has("authoredDetail");
-    if (hasAuthoredDetail !== (expectedAuthoredDetail !== undefined)
-      || (hasAuthoredDetail && !isDeepStrictEqual(fields.authoredDetail, expectedAuthoredDetail))) {
+    const acceptedAuthoredDetail = expectedAuthoredDetail === undefined && hasAuthoredDetail
+      ? snapshotRetainedCompiledNodeDetail(fields.authoredDetail)
+      : expectedAuthoredDetail;
+    if ((expectedAuthoredDetail !== undefined && (!hasAuthoredDetail || !isDeepStrictEqual(fields.authoredDetail, expectedAuthoredDetail)))
+      || (expectedAuthoredDetail === undefined && hasAuthoredDetail && acceptedAuthoredDetail === undefined)) {
       return invalidNodeResponse(
         "node.authoredDetail",
         "Node authored detail must equal the canonical package submitted by this client",
@@ -487,7 +515,7 @@ function validatedSubmittedNodeResponse(
       icon: fields.icon,
       title,
       detail,
-      ...(expectedAuthoredDetail === undefined ? {} : { authoredDetail: expectedAuthoredDetail }),
+      ...(acceptedAuthoredDetail === undefined ? {} : { authoredDetail: acceptedAuthoredDetail }),
       state: fields.state,
     });
   } catch (error) {

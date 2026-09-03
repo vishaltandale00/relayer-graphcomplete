@@ -13,9 +13,10 @@ import {
   graphMemorySearchQuery,
   graphMemorySearchTitle,
 } from "../src/fixtures/graph-memory.js";
+import { nodeDetailFixtureFactory, nodeDetailHarnessConfiguration } from "../src/fixtures/node-detail.js";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkGraphMemoryFirstTurn, checkGraphMemorySecondTurn, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, graphMemoryEvalCaseId, graphMemorySearchRequestMode, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkGraphMemoryFirstTurn, checkGraphMemorySecondTurn, checkNodeNavigation, checkReplayRepairOutput, deferredWorkingDirectoryCleanup, executionDirectory, graphMemoryEvalCaseId, graphMemorySearchRequestMode, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -42,6 +43,15 @@ function graphMemoryExecution() {
   }, new Map([[graphMemoryFixtureConfiguration.name, graphMemoryFixtureConfiguration]]))[0]!;
 }
 
+function nodeDetailExecution(configuration = nodeDetailHarnessConfiguration) {
+  return expandTestRun({
+    testRunId: "fixture-node-detail-run",
+    testCaseIds: [basicEvalCaseId],
+    harnessConfigurationNames: [configuration.name],
+    judgeConfiguration: { name: "none" as const },
+  }, new Map([[configuration.name, configuration]]))[0]!;
+}
+
 function navigationOutput(actions: CompletionOutput["rootLayer"]["actions"] = []): CompletionOutput {
   return {
     nodeId: 1,
@@ -56,6 +66,66 @@ function navigationOutput(actions: CompletionOutput["rootLayer"]["actions"] = []
 }
 
 describe("first runtime evaluation", () => {
+  it("attaches the selected personal presentation to every interaction", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-presentation-turns-"));
+    temporary.push(outputDirectory);
+    const seenVersionIds: number[] = [];
+    const configuration = {
+      ...taskSystemFixtureConfiguration,
+      name: "fixture-task-system-presentation",
+      settings: { personalPresentationVersion: "personal-presentation-v3" },
+    };
+    const observingFactory: HarnessFactory = async (context) => {
+      const fixture = await taskSystemFixtureFactory(context);
+      return {
+        complete(runContext, signal) {
+          const versionId = runContext.personalPresentation?.attachment.versionInteractionNodeId;
+          if (versionId !== undefined) seenVersionIds.push(versionId);
+          return fixture.complete(runContext, signal);
+        },
+        state: () => fixture.state(),
+      };
+    };
+
+    const artifact = await runBasicRuntimeEval({
+      outputDirectory,
+      execution: nodeDetailExecution(configuration),
+      implementations: { "fixture.task-system": observingFactory },
+    });
+
+    expect(artifact.passed).toBe(true);
+    expect(seenVersionIds).toHaveLength(2);
+    expect(new Set(seenVersionIds).size).toBe(1);
+  }, 15_000);
+
+  it("accepts a compiled Node Detail completion on every fixture turn", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-node-detail-"));
+    temporary.push(outputDirectory);
+    const artifact = await runBasicRuntimeEval({
+      outputDirectory,
+      execution: nodeDetailExecution(),
+      implementations: { "fixture.node-detail": nodeDetailFixtureFactory },
+    });
+
+    expect(artifact.passed).toBe(true);
+    expect(artifact.turns).toHaveLength(2);
+    expect(artifact.turns.every((turn) => (
+      turn.output.rootLayer.nodes.length === 1
+      && turn.output.rootLayer.nodes[0]?.icon === "layout-template"
+      && turn.output.rootLayer.nodes[0]?.authoredDetail?.components.length === 3
+    ))).toBe(true);
+  }, 15_000);
+
+  it("settles a rejected deferred working-directory removal", async () => {
+    const removeDirectory = async () => { throw new Error("EBUSY"); };
+    await expect(deferredWorkingDirectoryCleanup(
+      Promise.resolve(),
+      "/tmp/relayer-deferred-cleanup-fixture",
+      false,
+      removeDirectory,
+    )).resolves.toBeUndefined();
+  });
+
   it("configures an absolute Python client path for kernels launched from temporary directories", () => {
     const paths = basicEvalPythonPath("existing-python-path").split(delimiter);
     expect(isAbsolute(paths[0]!)).toBe(true);

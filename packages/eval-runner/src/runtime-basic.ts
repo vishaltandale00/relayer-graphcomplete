@@ -23,7 +23,7 @@ export const basicEvalPrompt = "A task system has an incoming queue, two workers
 export const basicEvalFollowUpPrompt = "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.";
 export const replayRepairEvalCaseId = "graph-authoring.replay-repair";
 export const graphMemoryEvalCaseId = "graph-memory.prior-accepted-reference";
-export const AUTHORED_VISUAL_NODE_DETAILS_PREFERENCE = "Author a compiled visual Node Detail for every node you create; do not leave any authored node on plain Markdown alone. Import the exported html, css, and detailCapability helpers. At minimum, call node.detailAuthoring.setComponent(\"main\", html`<section><h2>Summary</h2><p>Details</p></section>`, css`section { display: grid; gap: 0.75rem; }`), await graph.checkpointNodeDetail(node), and then await graph.submitNode(node). When a node has actions, create each stable action object with its sourceLayer before checkpointing, bind that same object in the page with the matching detailCapability helper, and pass it to graph.addAction after submitting the layer. Keep every authored page self-contained, keyboard operable, and accessible. Mount every action belonging to the node inside its detail page, and place visual assets when they improve the presentation.";
+export const AUTHORED_VISUAL_NODE_DETAILS_PREFERENCE = "Author a compiled visual Node Detail for every node you create; do not leave any authored node on plain Markdown alone. Import the exported html, css, and detailCapability helpers. At minimum, call node.detailAuthoring.setComponent(\"main\", html`<section><h2>Summary</h2><p>Details</p></section>`, css`section { display: grid; gap: 0.75rem; }`), await graph.checkpointNodeDetail(node), and then await graph.submitNode(node). When a node has actions, create each stable action object with its sourceLayer before checkpointing, bind that same object in the page with the matching detailCapability helper, and pass it to graph.addAction after submitting the layer. Keep every authored page self-contained, keyboard operable, and accessible. Mount every action belonging to the node inside its detail page.";
 const DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS = 30_000;
 export const replayRepairEvalPrompt = `Explain, as a useful connected graph answer, why stable idempotency keys make retrying a partially persisted graph-authoring program safe.
 
@@ -218,7 +218,7 @@ export async function runBasicRuntimeEval(options: {
     const turns: RuntimeEvalTurn[] = [];
     const sessionStateSnapshots: unknown[] = [];
     const turnStartSequences: number[] = [];
-    let personalPresentationVersionKeyAccepted: number | false = false;
+    let personalPresentationVersionInteractionNodeId: number | undefined;
     const prompts = options.execution.testCaseId === replayRepairEvalCaseId
       ? [replayRepairEvalPrompt]
       : options.execution.testCaseId === graphMemoryEvalCaseId
@@ -235,11 +235,13 @@ export async function runBasicRuntimeEval(options: {
       const capability = { url: graphAuditProxy?.url ?? graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
       const personalPresentationVersionKey = configuration.settings?.personalPresentationVersion as string | undefined;
-      if (personalPresentationVersionKey !== undefined && personalPresentationVersionKey !== "personal-presentation-v0" && personalPresentationVersionKeyAccepted === false) {
-        const version = await ensurePersonalPresentationVersion(graphProcess.url, graphControlToken, personalPresentationVersionKey);
-        personalPresentationVersionKeyAccepted = version.interactionNodeId;
+      if (personalPresentationVersionKey !== undefined && personalPresentationVersionKey !== "personal-presentation-v0") {
+        if (personalPresentationVersionInteractionNodeId === undefined) {
+          const version = await ensurePersonalPresentationVersion(graphProcess.url, graphControlToken, personalPresentationVersionKey);
+          personalPresentationVersionInteractionNodeId = version.interactionNodeId;
+        }
         await requestJson(`${graphProcess.url}/api/control/interactions/${interaction.node.id}/personal-presentation`, graphControlToken, {
-          versionInteractionNodeId: version.interactionNodeId,
+          versionInteractionNodeId: personalPresentationVersionInteractionNodeId,
         });
       }
       const complete = await completeWithCapabilityCleanup(async () => {
@@ -357,9 +359,11 @@ export async function runBasicRuntimeEval(options: {
         if (workingDirectoryCanBeRemoved && graphProcessStopped) {
           if (!options.keepState) await rm(workingDirectory, { recursive: true, force: true });
         } else if (graphProcessStopped && deferredHarnessClose !== undefined) {
-          void deferredHarnessClose
-            .then(() => { if (!options.keepState) rm(workingDirectory, { recursive: true, force: true }); })
-            .catch(() => undefined);
+          void deferredWorkingDirectoryCleanup(
+            deferredHarnessClose,
+            workingDirectory,
+            options.keepState === true,
+          );
         }
       },
     ]) {
@@ -374,6 +378,17 @@ export async function runBasicRuntimeEval(options: {
       throw new AggregateError(cleanupErrors, "Runtime Eval cleanup failed");
     }
   }
+}
+
+export function deferredWorkingDirectoryCleanup(
+  deferredHarnessClose: Promise<void>,
+  workingDirectory: string,
+  keepState: boolean,
+  removeDirectory: typeof rm = rm,
+): Promise<void> {
+  return deferredHarnessClose
+    .then(() => keepState ? undefined : removeDirectory(workingDirectory, { recursive: true, force: true }))
+    .catch(() => undefined);
 }
 
 async function closeHarnessHostForEval(

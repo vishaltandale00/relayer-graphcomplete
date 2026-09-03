@@ -376,6 +376,7 @@ describe("agent-facing graph objects", () => {
 
     const submissions = [graph.submitNode(node), graph.submitNode(node)];
     await vi.waitFor(() => expect(resolverRequests).toBeGreaterThan(0));
+    expect(() => node.detailAuthoring.setComponent("during-resolution", html`<p>Drift</p>`)).toThrow("finalized");
     releaseResolution();
     await expect(Promise.all(submissions)).resolves.toHaveLength(2);
 
@@ -426,6 +427,100 @@ describe("agent-facing graph objects", () => {
       detail: "Markdown detail",
     });
     expect(() => node.detailAuthoring.setComponent("late", html`<p>Too late</p>`)).toThrow("finalized");
+  });
+
+  it("accepts and snapshots a valid authored detail package retained by the server", async () => {
+    const retained = {
+      version: 1,
+      components: [{ id: "summary", order: 0, html: "<p>Checkpointed</p>", css: "" }],
+      mounts: [],
+      assets: [],
+      integritySha256: "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: {
+        id: 16,
+        clientKey: "retained-node",
+        kind: "concept",
+        icon: "box",
+        title: "Revised",
+        detail: "Revised fallback",
+        authoredDetail: retained,
+        state: "draft",
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const node = new NodeObject("box", "Revised", "Revised fallback", "concept", "retained-node");
+
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const accepted = await client.submitNode(node);
+
+    expect(accepted.authoredDetail).toEqual(retained);
+    expect(Object.isFrozen(accepted.authoredDetail)).toBe(true);
+    expect(Object.isFrozen(accepted.authoredDetail?.components)).toBe(true);
+    expect(node.ref?.authoredDetail).toBe(accepted.authoredDetail);
+    expect(await client.checkpointNodeDetail(node)).toBe(accepted.authoredDetail);
+  });
+
+  it("settles a concurrent checkpoint with the server-retained authored detail", async () => {
+    const retained = {
+      version: 1,
+      components: [{ id: "summary", order: 0, html: "<p>Checkpointed</p>", css: "" }],
+      mounts: [],
+      assets: [],
+      integritySha256: "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac",
+    };
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      await responseGate;
+      return new Response(JSON.stringify({
+        node: {
+          id: 18,
+          clientKey: "concurrent-retained-node",
+          kind: "concept",
+          icon: "box",
+          title: "Revised",
+          detail: "Revised fallback",
+          authoredDetail: retained,
+          state: "draft",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Revised", "Revised fallback", "concept", "concurrent-retained-node");
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    const submission = client.submitNode(node);
+    const checkpoint = client.checkpointNodeDetail(node);
+    releaseResponse();
+    const accepted = await submission;
+
+    expect(await checkpoint).toBe(accepted.authoredDetail);
+    expect(await client.checkpointNodeDetail(node)).toBe(accepted.authoredDetail);
+  });
+
+  it("rejects a corrupt authored detail package retained by the server", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: {
+        id: 17,
+        clientKey: "corrupt-retained-node",
+        kind: "concept",
+        icon: "box",
+        title: "Revised",
+        detail: "Revised fallback",
+        authoredDetail: {
+          version: 1,
+          components: [{ id: "summary", order: 0, html: "<p>Forged</p>", css: "" }],
+          mounts: [],
+          assets: [],
+          integritySha256: "0".repeat(64),
+        },
+        state: "draft",
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const node = new NodeObject("box", "Revised", "Revised fallback", "concept", "corrupt-retained-node");
+
+    await expect(new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node))
+      .rejects.toMatchObject({ code: "invalid_node_response" });
   });
 
   it("rejects a submitted node projection with a different stable client key", async () => {

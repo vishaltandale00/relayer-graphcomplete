@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const graphClientIndexUrl = pathToFileURL(resolve("packages/graph-client/agent-resource/index.js"));
+const graphClientDevelopmentUrl = pathToFileURL(resolve("packages/graph-client/dist/index.js"));
 const execFileAsync = promisify(execFile);
 
 function echoedNodeResponse(init, node) {
@@ -56,14 +57,15 @@ describe("packaged graph-client authored detail boundary", () => {
     ]);
   });
 
-  it("registers submit and detail single-flight promises before synchronous resolver re-entry", async () => {
-    const { NodeObject, RelayerGraphClient, assetRef, html } = await import(graphClientIndexUrl.href);
+  it("does not advertise unresolved asset authoring through the agent resource", async () => {
+    const graphClient = await import(graphClientIndexUrl.href);
+    expect(graphClient.assetRef).toBeUndefined();
+  });
+
+  it("registers submit and detail single-flight promises before synchronous transport re-entry", async () => {
+    const { NodeObject, RelayerGraphClient, html } = await import(graphClientIndexUrl.href);
     const node = new NodeObject("box", "Reentrant", "Fallback", "concept", "reentrant-node");
-    node.detailAuthoring.setComponent(
-      "asset",
-      html`<img alt="Logo" asset=${assetRef("reentrant-logo")}>`,
-    );
-    let resolverPosts = 0;
+    node.detailAuthoring.setComponent("content", html`<p>Reentrant</p>`);
     let nodePosts = 0;
     let didReenter = false;
     let reentrantSubmission;
@@ -72,24 +74,11 @@ describe("packaged graph-client authored detail boundary", () => {
     let submittedDetail;
     let client;
     vi.stubGlobal("fetch", vi.fn((url, init) => {
-      if (String(url).endsWith("/api/graph/detail-assets/resolve")) {
-        resolverPosts += 1;
-        if (!didReenter) {
-          didReenter = true;
-          reentrantSubmission = client.submitNode(node);
-          reentrantCheckpoint = client.checkpointNodeDetail(node);
-          concurrentCheckpoint = client.checkpointNodeDetail(node);
-        }
-        return Promise.resolve(new Response(JSON.stringify({
-          assets: [{
-            logicalId: "reentrant-logo",
-            authority: "current",
-            availability: "available",
-            digestSha256: "a".repeat(64),
-            mediaType: "image/png",
-            representation: { kind: "image", sanitized: true },
-          }],
-        }), { status: 200, headers: { "content-type": "application/json" } }));
+      if (!didReenter) {
+        didReenter = true;
+        reentrantSubmission = client.submitNode(node);
+        reentrantCheckpoint = client.checkpointNodeDetail(node);
+        concurrentCheckpoint = client.checkpointNodeDetail(node);
       }
       nodePosts += 1;
       submittedDetail = JSON.parse(String(init.body)).authoredDetail;
@@ -106,6 +95,7 @@ describe("packaged graph-client authored detail boundary", () => {
     client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
     const firstSubmission = client.submitNode(node);
 
+    await vi.waitFor(() => expect(reentrantSubmission).toBeDefined());
     expect(reentrantSubmission).toBe(firstSubmission);
     expect(concurrentCheckpoint).toBe(reentrantCheckpoint);
     const [accepted, reentrantAccepted] = await Promise.all([firstSubmission, reentrantSubmission]);
@@ -114,46 +104,28 @@ describe("packaged graph-client authored detail boundary", () => {
     expect(concurrentCompiled).toBe(checkpoint);
     expect(submittedDetail).toEqual(checkpoint);
     expect(await client.submitNode(node)).toBe(accepted);
-    expect(resolverPosts).toBe(1);
     expect(nodePosts).toBe(1);
     expect(Object.isFrozen(accepted)).toBe(true);
     expect(node.ref).toBe(accepted);
   });
 
   it("clears failed reentrant placeholders and single-flights an explicit retry", async () => {
-    const { GraphApiError, NodeObject, RelayerGraphClient, assetRef, html } = await import(graphClientIndexUrl.href);
+    const { GraphApiError, NodeObject, RelayerGraphClient, html } = await import(graphClientIndexUrl.href);
     const node = new NodeObject("box", "Retry re-entry", "Fallback", "concept", "retry-reentrant-node");
-    node.detailAuthoring.setComponent(
-      "asset",
-      html`<img alt="Logo" asset=${assetRef("retry-logo")}>`,
-    );
-    let resolverPosts = 0;
+    node.detailAuthoring.setComponent("content", html`<p>Retry</p>`);
     let nodePosts = 0;
     let didReenter = false;
     let reentrantSubmission;
     let client;
     vi.stubGlobal("fetch", vi.fn((url, init) => {
-      if (String(url).endsWith("/api/graph/detail-assets/resolve")) {
-        resolverPosts += 1;
-        if (!didReenter) {
-          didReenter = true;
-          reentrantSubmission = client.submitNode(node);
-          return Promise.resolve(new Response(JSON.stringify({
-            code: "temporary_failure",
-            path: "assets",
-            message: "retry",
-          }), { status: 503, headers: { "content-type": "application/json" } }));
-        }
+      if (!didReenter) {
+        didReenter = true;
+        reentrantSubmission = client.submitNode(node);
         return Promise.resolve(new Response(JSON.stringify({
-          assets: [{
-            logicalId: "retry-logo",
-            authority: "current",
-            availability: "available",
-            digestSha256: "b".repeat(64),
-            mediaType: "image/png",
-            representation: { kind: "image", sanitized: true },
-          }],
-        }), { status: 200, headers: { "content-type": "application/json" } }));
+          code: "temporary_failure",
+          path: "node",
+          message: "retry",
+        }), { status: 503, headers: { "content-type": "application/json" } }));
       }
       nodePosts += 1;
       return Promise.resolve(echoedNodeResponse(init, {
@@ -168,8 +140,10 @@ describe("packaged graph-client authored detail boundary", () => {
 
     client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
     const failedSubmission = client.submitNode(node);
+    const failedExpectation = expect(failedSubmission).rejects.toBeInstanceOf(GraphApiError);
+    await vi.waitFor(() => expect(reentrantSubmission).toBeDefined());
     expect(reentrantSubmission).toBe(failedSubmission);
-    await expect(failedSubmission).rejects.toBeInstanceOf(GraphApiError);
+    await failedExpectation;
 
     const retrySubmission = client.submitNode(node);
     const concurrentRetry = client.submitNode(node);
@@ -177,7 +151,6 @@ describe("packaged graph-client authored detail boundary", () => {
     const accepted = await retrySubmission;
     expect(await concurrentRetry).toBe(accepted);
     expect(await client.submitNode(node)).toBe(accepted);
-    expect(resolverPosts).toBe(2);
     expect(nodePosts).toBe(1);
     expect(node.ref).toBe(accepted);
   });
@@ -500,7 +473,7 @@ describe("packaged graph-client authored detail boundary", () => {
       RelayerGraphClient,
       assetRef,
       html,
-    } = await import(graphClientIndexUrl.href);
+    } = await import(graphClientDevelopmentUrl.href);
     const brandedAsset = assetRef("brand-source");
     const assetBrand = Reflect.ownKeys(brandedAsset).find((key) => typeof key === "symbol");
     let throwingReads = 0;
@@ -541,7 +514,7 @@ describe("packaged graph-client authored detail boundary", () => {
   });
 
   it("uses one frozen logical asset identity for resolution, mounts, and the asset table", async () => {
-    const { NodeObject, RelayerGraphClient, assetRef, html } = await import(graphClientIndexUrl.href);
+    const { NodeObject, RelayerGraphClient, assetRef, html } = await import(graphClientDevelopmentUrl.href);
     const brandedAsset = assetRef("brand-source");
     const assetBrand = Reflect.ownKeys(brandedAsset).find((key) => typeof key === "symbol");
     const reference = { [assetBrand]: true, logicalId: "safe-logo" };
@@ -586,7 +559,7 @@ describe("packaged graph-client authored detail boundary", () => {
       assetRef,
       detailCapability,
       html,
-    } = await import(graphClientIndexUrl.href);
+    } = await import(graphClientDevelopmentUrl.href);
     const owner = new NodeObject("box", "Snapshot", "Fallback", "concept", "snapshot-owner");
     const sourceLayer = new LayerObject([owner], [], new LayerLayoutObject([]), "original-layer");
     const action = {
@@ -628,7 +601,8 @@ describe("packaged graph-client authored detail boundary", () => {
     const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
     const pending = client.submitNode(owner);
     await started;
-    owner.detailAuthoring.setComponent("late", html`<p>Late mutation</p>`);
+    expect(() => owner.detailAuthoring.setComponent("late", html`<p>Late mutation</p>`))
+      .toThrow("finalized");
     action.clientKey = "substituted-action";
     action.label = "Substituted action";
     sourceLayer.clientKey = "substituted-layer";
@@ -665,7 +639,7 @@ describe("packaged graph-client authored detail boundary", () => {
       assetRef,
       detailCapability,
       html,
-    } = await import(graphClientIndexUrl.href);
+    } = await import(graphClientDevelopmentUrl.href);
     const owner = new NodeObject("box", "Checkpoint", "Fallback", "concept", "checkpoint-owner");
     const sourceLayer = new LayerObject([owner], [], new LayerLayoutObject([]), "checkpoint-layer");
     const action = {

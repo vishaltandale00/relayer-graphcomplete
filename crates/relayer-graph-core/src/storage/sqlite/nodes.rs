@@ -504,7 +504,7 @@ impl<'connection> NodeTable<'connection> {
             .transpose()
             .expect("serde_json::Value must serialize");
         sqlx::query(
-            "UPDATE nodes SET kind=?1,icon=?2,title=?3,detail=?4,authored_detail=?5 WHERE id=?6",
+            "UPDATE nodes SET kind=?1,icon=?2,title=?3,detail=?4,authored_detail=COALESCE(?5,authored_detail) WHERE id=?6",
         )
         .bind(&draft.kind)
         .bind(&draft.icon)
@@ -514,7 +514,10 @@ impl<'connection> NodeTable<'connection> {
         .bind(id.value())
         .execute(&mut *self.connection)
         .await?;
-        Ok(draft_node(id, draft, authored_detail.as_deref()))
+        self.record(id)
+            .await?
+            .map(|record| record.node)
+            .ok_or_else(|| GraphError::NotFound(format!("node {id}")))
     }
 
     pub(crate) async fn neighbors(

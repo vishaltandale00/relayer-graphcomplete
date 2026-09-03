@@ -1696,7 +1696,7 @@ mod tests {
     use tower::ServiceExt;
 
     #[tokio::test]
-    async fn node_api_round_trips_the_canonical_authored_detail_package() {
+    async fn node_api_round_trips_and_preserves_the_canonical_authored_detail_package() {
         let graph = GraphDatabase::in_memory().await.unwrap();
         let interaction = graph
             .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Question")
@@ -1747,6 +1747,36 @@ mod tests {
         assert_eq!(submitted["node"]["clientKey"], "answer");
         assert_eq!(submitted["node"]["authoredDetail"], package);
 
+        let resubmitted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/nodes")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(
+                        json!({
+                            "clientKey": "answer",
+                            "kind": "concept",
+                            "icon": "box",
+                            "title": "Revised answer",
+                            "detail": "Revised fallback"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resubmitted.status(), StatusCode::OK);
+        let resubmitted: Value =
+            serde_json::from_slice(&to_bytes(resubmitted.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(resubmitted["node"]["id"], node_id);
+        assert_eq!(resubmitted["node"]["title"], "Revised answer");
+        assert_eq!(resubmitted["node"]["authoredDetail"], package);
+
         let fetched = app
             .oneshot(
                 Request::builder()
@@ -1762,6 +1792,7 @@ mod tests {
             serde_json::from_slice(&to_bytes(fetched.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(fetched["node"]["clientKey"], "answer");
+        assert_eq!(fetched["node"]["title"], "Revised answer");
         assert_eq!(fetched["node"]["authoredDetail"], package);
     }
 

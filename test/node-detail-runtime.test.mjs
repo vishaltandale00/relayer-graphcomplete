@@ -151,7 +151,7 @@ describe("compiled Node Detail product runtime", () => {
     const resolveAction = vi.fn((reference) => actions.get(reference.clientKey));
     const onNavigate = vi.fn();
     const onInvoke = vi.fn();
-    const onInput = vi.fn();
+    const onInput = vi.fn().mockRejectedValueOnce(new Error("commit failed"));
 
     const runtime = await mountCompiledNodeDetail({
       host,
@@ -241,6 +241,8 @@ describe("compiled Node Detail product runtime", () => {
     ["CSS resource functions", "<p>Remote visual</p>", 'p{background-image:image-set("https://attacker.example/pixel.png" 1x)}'],
     ["escaped CSS resource functions", "<p>Remote visual</p>", 'p{background-image:u\\72l("https://attacker.example/pixel.png")}'],
     ["escaped CSS imports", "<p>Remote visual</p>", '@\\69mport "https://attacker.example/pixel.css";'],
+    ["double-quoted CSS bad strings before resources", "<p>Remote visual</p>", 'p{color:red} "\n:host{background:url(https://attacker.example/pixel.png)}"'],
+    ["single-quoted CSS bad strings before imports", "<p>Remote visual</p>", "p{color:red} '\n@import 'https://attacker.example/pixel.css';"],
     ["unterminated CSS structure", "<p>Overlay</p>", "p{position:fixed;inset:0}/*"],
     ["unbound interaction", '<button>Privileged action</button>', ""],
   ])("rejects canonical-looking packages containing %s", async (_name, html, css) => {
@@ -256,7 +258,8 @@ describe("compiled Node Detail product runtime", () => {
     const result = await mountCompiledNodeDetail({ host, detail });
 
     expect(result).toEqual(expect.objectContaining({ status: "fallback", error: "Node Detail package contains unsafe runtime markup." }));
-    expect(host.shadowRoot.querySelector("script,button,img")).toBeNull();
+    expect(host.shadowRoot).toBeNull();
+    expect(host.querySelector("script,button,img")).toBeNull();
   });
 
   it.each(["input", "select", "textarea"])("rejects a graph capability mounted on incompatible <%s>", async (hostName) => {
@@ -435,6 +438,81 @@ describe("compiled Node Detail product runtime", () => {
     expect(container.textContent).toBe("**Legacy detail**");
   });
 
+  it.each(["input", "textarea"])("preserves a staged authored <%s> across an ordinary Product detail rerender", async (hostName) => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    const container = window.document.createElement("div");
+    window.document.body.append(container);
+    const detail = compiledPackage({
+      version: 1,
+      components: [{
+        id: "editor",
+        order: 0,
+        html: `<section class="scroll"><${hostName} aria-label="Draft" data-gc-mount="draft"></${hostName}></section>`,
+        css: ".scroll{max-height:4rem;overflow:auto}",
+      }],
+      mounts: [{
+        id: "draft",
+        componentId: "editor",
+        kind: "capability",
+        host: hostName,
+        capability: {
+          kind: "input",
+          action: { clientKey: "draft", sourceNode: { clientKey: "node" }, sourceLayer: { clientKey: "layer" } },
+        },
+      }],
+      assets: [],
+    });
+    const resolveAction = () => ({ id: 7, kind: "input", control: "text", prompt: "Draft" });
+    const onInput = vi.fn().mockRejectedValueOnce(new Error("temporary input failure"));
+    const first = await renderProductNodeDetail({
+      container,
+      node: { title: "Editor", authoredDetail: detail },
+      mountKey: "stable",
+      resolveAction,
+      onInput,
+      capabilityState: { draft: { value: "committed" } },
+    });
+    const control = first.shadowRoot.querySelector("[data-gc-mount='draft']");
+    const scroll = first.shadowRoot.querySelector(".scroll");
+    control.value = "locally staged value";
+    control.focus();
+    control.setSelectionRange(7, 13);
+    control.scrollTop = 19;
+    scroll.scrollTop = 23;
+    control.dispatchEvent(new window.Event("input", { bubbles: true }));
+
+    const rerendered = await renderProductNodeDetail({
+      container,
+      node: { title: "Editor", authoredDetail: detail },
+      mountKey: "stable",
+      existing: first,
+      resolveAction,
+      onInput,
+      capabilityState: { draft: { value: "committed" } },
+    });
+
+    expect(rerendered).toBe(first);
+    expect(rerendered.shadowRoot.querySelector("[data-gc-mount='draft']")).toBe(control);
+    expect(control.value).toBe("locally staged value");
+    expect(rerendered.shadowRoot.activeElement).toBe(control);
+    expect([control.selectionStart, control.selectionEnd]).toEqual([7, 13]);
+    expect(control.scrollTop).toBe(19);
+    expect(scroll.scrollTop).toBe(23);
+
+    control.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+    expect(onInput).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 7 }),
+      "locally staged value",
+      expect.objectContaining({ mountId: "draft" }),
+    );
+    expect(control.getAttribute("aria-invalid")).toBe("true");
+    control.value = "revised after failure";
+    control.dispatchEvent(new window.Event("input", { bubbles: true }));
+    expect(control.hasAttribute("aria-invalid")).toBe(false);
+    expect(control.hasAttribute("title")).toBe(false);
+  });
+
   it.each([260, 420])("installs the runtime containment contract at a %ipx supported sidebar width", async (width) => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     const host = window.document.createElement("div");
@@ -475,11 +553,11 @@ describe("compiled Node Detail product runtime", () => {
     window.document.body.innerHTML = '<section id="threadView"></section>';
     const detail = compiledPackage({
       version: 1,
-      components: [{ id: "product", order: 0, html: '<section class="independent-scroll"><p>Product-authored detail</p><button data-gc-mount="expand">Expand</button><button data-gc-mount="invoke">Invoke</button><select aria-label="Choose one" data-gc-mount="input"></select></section>', css: "p{color:teal}.independent-scroll{max-height:10rem;overflow:auto}" }],
+      components: [{ id: "product", order: 0, html: '<section class="independent-scroll"><p>Product-authored detail</p><button data-gc-mount="expand">Expand</button><button data-gc-mount="invoke">Invoke</button><textarea aria-label="Draft answer" data-gc-mount="input"></textarea></section>', css: "p{color:teal}.independent-scroll{max-height:10rem;overflow:auto}" }],
       mounts: [
         { id: "expand", componentId: "product", kind: "capability", host: "button", capability: { kind: "expand", action: { clientKey: "expand-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "original-layer" } } } },
         { id: "invoke", componentId: "product", kind: "capability", host: "button", capability: { kind: "invoke", action: { clientKey: "invoke-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "original-layer" } } } },
-        { id: "input", componentId: "product", kind: "capability", host: "select", capability: { kind: "input", action: { clientKey: "input-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "original-layer" } } } },
+        { id: "input", componentId: "product", kind: "capability", host: "textarea", capability: { kind: "input", action: { clientKey: "input-action", sourceNode: { clientKey: "authored-node" }, sourceLayer: { clientKey: "original-layer" } } } },
       ],
       assets: [],
     });
@@ -487,7 +565,7 @@ describe("compiled Node Detail product runtime", () => {
     const actions = [
       { id: 11, clientKey: "expand-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "navigate", relation: "expand", targetLayerId: 91 },
       { id: 12, clientKey: "invoke-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "invoke", interactionText: "Investigate" },
-      { id: 13, clientKey: "input-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "input", control: "single_select", prompt: "Choose one", options: [{ key: "one", label: "One" }, { key: "two", label: "Two" }] },
+      { id: 13, clientKey: "input-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "input", control: "text", prompt: "Draft answer" },
     ];
     const layer = {
       layer: { id: 99, clientKey: "presenting-layer", layout: { version: 1, placements: [{ nodeId: 7, x: 0.5, y: 0.5 }] } },
@@ -526,7 +604,7 @@ describe("compiled Node Detail product runtime", () => {
         attachments: [{
           occurrence,
           sourceNodeId: 7,
-          action: { control: "single_select", prompt: "Choose one", options: [{ key: "one", label: "One" }, { key: "two", label: "Two" }] },
+          action: { control: "text", prompt: "Draft answer" },
           value,
           draftRevision: 1,
           committedAt: "2026-09-01T00:00:01Z",
@@ -553,17 +631,25 @@ describe("compiled Node Detail product runtime", () => {
 
     const runtimeHost = window.document.querySelector("#detailContent [data-node-detail-runtime]");
     expect(runtimeHost).not.toBeNull();
+    await vi.waitFor(() => expect(runtimeHost.shadowRoot).not.toBeNull());
     expect(runtimeHost.shadowRoot.textContent).toContain("Product-authored detail");
     expect(runtimeHost.shadowRoot.querySelector("[data-gc-mount='expand']").dataset.capabilityState).toBe("ready");
     const preservedInput = runtimeHost.shadowRoot.querySelector("[data-gc-mount='input']");
     const preservedScroll = runtimeHost.shadowRoot.querySelector(".independent-scroll");
+    preservedInput.value = "answer still being written";
     preservedInput.focus();
+    preservedInput.setSelectionRange(7, 12);
+    preservedInput.scrollTop = 17;
     preservedScroll.scrollTop = 31;
+    preservedInput.dispatchEvent(new window.Event("input", { bubbles: true }));
     workspace.render();
     await window.happyDOM.waitUntilComplete();
     expect(window.document.querySelector("#detailContent [data-node-detail-runtime]")).toBe(runtimeHost);
     expect(runtimeHost.shadowRoot.querySelector("[data-gc-mount='input']")).toBe(preservedInput);
     expect(runtimeHost.shadowRoot.activeElement).toBe(preservedInput);
+    expect(preservedInput.value).toBe("answer still being written");
+    expect([preservedInput.selectionStart, preservedInput.selectionEnd]).toEqual([7, 12]);
+    expect(preservedInput.scrollTop).toBe(17);
     expect(preservedScroll.scrollTop).toBe(31);
     runtimeHost.shadowRoot.querySelector("[data-gc-mount='expand']").click();
     runtimeHost.shadowRoot.querySelector("[data-gc-mount='invoke']").click();
@@ -572,13 +658,12 @@ describe("compiled Node Detail product runtime", () => {
     expect(onInvokeAction).toHaveBeenCalledWith(actions[1]);
     const input = runtimeHost.shadowRoot.querySelector("[data-gc-mount='input']");
     expect(input.disabled).toBe(false);
-    input.options[0].selected = true;
     input.dispatchEvent(new window.Event("change", { bubbles: true }));
     await window.happyDOM.waitUntilComplete();
     expect(inputDraftApi.commit).toHaveBeenCalledWith(
       3,
       { presentingInteractionNodeId: 50, presentingLayerId: 99, actionId: 13 },
-      { selectedKeys: ["one"] },
+      { text: "answer still being written" },
       0,
     );
     expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(true);
@@ -590,8 +675,9 @@ describe("compiled Node Detail product runtime", () => {
       assets: [],
     });
     workspace.render();
-    await window.happyDOM.waitUntilComplete();
-    expect(window.document.querySelector("#detailContent [role='status']").textContent).toBe("This authored detail does not bind every accepted node action.");
+    await vi.waitFor(() => expect(
+      window.document.querySelector("#detailContent [role='status']")?.textContent,
+    ).toBe("This authored detail does not bind every accepted node action."));
     expect(window.document.querySelector("#detailContent").textContent).toContain("Legacy fallback");
     expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(false);
     expect(window.document.querySelector("#nodeInputActions").classList.contains("hidden")).toBe(false);
@@ -599,8 +685,9 @@ describe("compiled Node Detail product runtime", () => {
     onNavigateLayer.mockClear();
     node.authoredDetail = { ...detail, integritySha256: "0".repeat(64) };
     workspace.render();
-    await window.happyDOM.waitUntilComplete();
-    expect(window.document.querySelector("#detailContent [role='status']").textContent).toBe("Node Detail package integrity check failed.");
+    await vi.waitFor(() => expect(
+      window.document.querySelector("#detailContent [role='status']")?.textContent,
+    ).toBe("Node Detail package integrity check failed."));
     expect(window.document.querySelector("#detailContent").textContent).toContain("Legacy fallback");
     expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(false);
     expect(window.document.querySelector("#nodeInputActions").classList.contains("hidden")).toBe(false);

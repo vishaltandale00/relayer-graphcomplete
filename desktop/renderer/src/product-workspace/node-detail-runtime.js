@@ -28,6 +28,7 @@ const ELEMENT_RUNTIME_ATTRIBUTES = Object.freeze({
   th: new Set(["colspan", "rowspan", "headers", "scope", "abbr"]), time: new Set(["datetime"]),
 });
 const UNSAFE_CSS_RESOURCE_FUNCTION = /(?:\burl|\bimage|\bimage-set|\bcross-fade|\belement|\bpaint)\s*\(/i;
+const CSS_NEWLINE = new Set(["\n", "\r", "\f"]);
 
 function decodeCssEscapes(value) {
   return value.replace(/\\([0-9a-f]{1,6})(?:\s)?|\\(.)/gi, (_match, hex, escaped) => {
@@ -90,7 +91,11 @@ function cssStructureIsClosed(source) {
       continue;
     }
     if (quote !== null) {
-      if (character === "\\") index += 1;
+      if (CSS_NEWLINE.has(character)) return false;
+      if (character === "\\") {
+        if (next === "\r" && source[index + 2] === "\n") index += 2;
+        else index += 1;
+      }
       else if (character === quote) quote = null;
       continue;
     }
@@ -233,7 +238,8 @@ function applyCapabilityState(host, state = {}) {
     const selected = new Set(state.value.map(String));
     for (const option of host.options) option.selected = selected.has(option.value);
   } else if ((host.localName === "input" || host.localName === "textarea")
-    && typeof state.value === "string") {
+    && typeof state.value === "string"
+    && host.value !== state.value) {
     host.value = state.value;
   }
 }
@@ -289,7 +295,7 @@ function assertPotentialInputHost(host) {
   }
 }
 
-function configureInput(host, action, resolveCurrentAction, onInput, context) {
+function configureInput(host, action, resolveCurrentAction, onInput, context, inputDrafts, capabilityStates) {
   if (action.control === "text" && host.localName !== "input" && host.localName !== "textarea") {
     throw new Error("Node Detail text input has an incompatible host.");
   }
@@ -314,9 +320,26 @@ function configureInput(host, action, resolveCurrentAction, onInput, context) {
       assertResolvedAction(context.capability, currentAction);
       await onInput(currentAction, value, context);
     } catch (error) {
-      applyUnavailableCapability(host, error?.message || "Node Detail input action is unavailable.");
+      const failedState = {
+        ...(capabilityStates.get(context.mountId) ?? {}),
+        error: error?.message || "Node Detail input action is unavailable.",
+      };
+      capabilityStates.set(context.mountId, failedState);
+      applyCapabilityState(host, failedState);
     }
   };
+  if (host.localName === "input" || host.localName === "textarea") {
+    host.addEventListener("input", () => {
+      inputDrafts.add(context.mountId);
+      const nextState = {
+        ...(capabilityStates.get(context.mountId) ?? {}),
+        value: host.value,
+        error: null,
+      };
+      capabilityStates.set(context.mountId, nextState);
+      applyCapabilityState(host, nextState);
+    });
+  }
   host.addEventListener("change", () => { void submit(); });
 }
 
@@ -389,6 +412,12 @@ export async function mountCompiledNodeDetail({
     await assertCanonicalPackage(detail, crypto);
     const mounts = mountIndex(detail);
     const components = [...detail.components].sort((left, right) => left.order - right.order);
+    const preparedComponents = components.map((component) => {
+      const template = host.ownerDocument.createElement("template");
+      template.innerHTML = component.html;
+      assertSafeComponent(component, template.content, mounts);
+      return template;
+    });
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
     shadow.replaceChildren();
     const authoredStyles = host.ownerDocument.createElement("style");
@@ -401,10 +430,7 @@ export async function mountCompiledNodeDetail({
 img{max-inline-size:100%}
 .relayer-asset-unavailable{background-image:none!important}`;
     shadow.append(authoredStyles, runtimeStyles);
-    for (const component of components) {
-      const template = host.ownerDocument.createElement("template");
-      template.innerHTML = component.html;
-      assertSafeComponent(component, template.content, mounts);
+    for (const template of preparedComponents) {
       shadow.append(template.content.cloneNode(true));
     }
 
@@ -421,6 +447,7 @@ img{max-inline-size:100%}
     const assetWork = [];
     const capabilityHosts = new Map();
     const capabilityStates = new Map();
+    const inputDrafts = new Set();
     const capabilityRecords = new Map();
     const configuredCapabilities = new Set();
     const adapters = { resolveAction, onNavigate, onInvoke, onInput };
@@ -428,7 +455,15 @@ img{max-inline-size:100%}
       if (configuredCapabilities.has(id)) return;
       const context = Object.freeze({ mountId: id, capability, actionReference: capability.action });
       if (capability.kind === "input") {
-        configureInput(element, action, resolveCurrentAction, (...args) => adapters.onInput(...args), context);
+        configureInput(
+          element,
+          action,
+          resolveCurrentAction,
+          (...args) => adapters.onInput(...args),
+          context,
+          inputDrafts,
+          capabilityStates,
+        );
       } else {
         activateGraphHost(element, async () => {
           const prior = capabilityStates.get(id) ?? {};
@@ -511,7 +546,16 @@ img{max-inline-size:100%}
       updateCapability(mountId, state) {
         const capabilityHost = capabilityHosts.get(mountId);
         if (!capabilityHost) return false;
-        capabilityStates.set(mountId, { ...(capabilityStates.get(mountId) ?? {}), ...state });
+        const nextState = { ...state };
+        const hasValue = Object.prototype.hasOwnProperty.call(nextState, "value");
+        const commitAcknowledged = hasValue
+          && nextState.busy === false
+          && nextState.error == null;
+        if (inputDrafts.has(mountId) && hasValue && !commitAcknowledged) {
+          delete nextState.value;
+        }
+        if (commitAcknowledged) inputDrafts.delete(mountId);
+        capabilityStates.set(mountId, { ...(capabilityStates.get(mountId) ?? {}), ...nextState });
         applyCapabilityState(capabilityHost, capabilityStates.get(mountId));
         return true;
       },

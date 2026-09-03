@@ -172,14 +172,34 @@ describe("Relayer Eval application service", () => {
     }).stable).toBe(true);
   });
 
-  it("records zero child use without failing a recursion-enabled observational cell", () => {
-    const checks = recursiveCompleteChecks({
-      harnessConfiguration: { implementation: "codex.basic", complete: { agentAuthored: true } },
+  it("keeps visual-comparison child creation observational while checking every observed child", () => {
+    const execution = {
+      harnessConfiguration: {
+        implementation: "codex.basic",
+        complete: { agentAuthored: true },
+        settings: { personalPresentationVersion: "personal-presentation-v3" },
+      },
       harnessConfigurationDigest: "sha256:config",
       turns: [{ candidateTrace: { completionBrokerAvailable: true } }],
       semanticChildren: [],
-    }, { requireChildWhenEnabled: false });
-    expect(checks.filter((check) => !check.passed)).toEqual([]);
+    };
+    expect(recursiveCompleteChecks(execution).filter((check) => !check.passed)).toEqual([]);
+
+    const observed = recursiveCompleteChecks({
+      ...execution,
+      semanticChildren: [{
+        sourceInteractionId: 1,
+        sourceActionId: 2,
+        interactionId: 3,
+        graphNodeId: 4,
+        acceptedNodes: [{ id: 5, title: "Plain child", detail: "Plain" }],
+        projectionObservations: [],
+      }],
+    });
+    expect(observed.find((check) => check.name.endsWith(":child-terminal"))?.passed).toBe(false);
+    expect(observed.find((check) => check.name.endsWith(":child-execution"))?.passed).toBe(false);
+    expect(observed.find((check) => check.name.endsWith(":child-trace"))?.passed).toBe(false);
+    expect(observed.find((check) => check.name.includes(":visual-node-detail:"))?.passed).toBe(false);
   });
 
   it("requires authored visual output on every V3 treatment node", () => {
@@ -296,6 +316,7 @@ describe("Relayer Eval application service", () => {
       },
     });
     expect(rendered).toContain(AUTHORED_VISUAL_NODE_DETAILS_PREFERENCE);
+    expect(rendered).not.toContain("visual assets");
     for (const fragment of ["html", "css", "detailCapability", "setComponent", "checkpointNodeDetail", "submitNode", "graph.addAction"]) {
       expect(rendered).toContain(fragment);
     }

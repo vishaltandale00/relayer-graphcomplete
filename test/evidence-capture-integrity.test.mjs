@@ -2003,7 +2003,7 @@ describe("evidence capture integrity", () => {
     const privateFile = join(directory, "private.txt");
     const privateModule = join(directory, "private.mjs");
     try {
-      const allowedModule = join(allowedRoot, "dist", "index.js");
+      const allowedModule = join(allowedRoot, "agent-resource", "index.js");
       writeFileSync(privateFile, "personal evidence must remain unreadable\n");
       writeFileSync(privateModule, "export const privateValue = 'secret';\n");
       const flags = ["--permission", `--allow-fs-read=${allowedRoot}`, "--input-type=module"];
@@ -2068,7 +2068,7 @@ describe("evidence capture integrity", () => {
         ipv6AttackerServer.listen({ port: address.port, host: "::1", ipv6Only: true }, resolve);
       });
       const program = [
-        `const { RelayerGraphClient } = await import(${JSON.stringify(pathToFileURL(join(graphClientRoot, "dist", "index.js")).href)});`,
+        `const { RelayerGraphClient } = await import(${JSON.stringify(pathToFileURL(join(graphClientRoot, "agent-resource", "index.js")).href)});`,
         'if (process.env.RELAYER_PROBE_SECRET !== undefined || process.env.OPENAI_API_KEY !== undefined) throw new Error("provider secret leaked");',
         "const node = await RelayerGraphClient.fromEnv().getNode(1);",
         'if (node.id !== 1) throw new Error("graph client failed");',

@@ -8,7 +8,7 @@ const outputRoot = resolve(packageRoot, "agent-resource");
 await rm(outputRoot, { recursive: true, force: true });
 await mkdir(outputRoot, { recursive: true });
 await build({
-  input: resolve(packageRoot, "dist/index.js"),
+  input: resolve(packageRoot, "dist/agent-resource-entry.js"),
   platform: "node",
   output: {
     file: resolve(outputRoot, "index.js"),
