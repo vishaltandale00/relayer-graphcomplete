@@ -50,6 +50,8 @@ pub struct LadybugSearchIndex {
     runtime: Arc<LadybugRuntime>,
     #[cfg(feature = "crash-test-support")]
     post_commit_crash_hook: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
+    #[cfg(feature = "crash-test-support")]
+    contract_test_wall_time: Option<Duration>,
 }
 
 struct LadybugRuntime {
@@ -287,6 +289,8 @@ impl LadybugSearchIndex {
             }),
             #[cfg(feature = "crash-test-support")]
             post_commit_crash_hook: None,
+            #[cfg(feature = "crash-test-support")]
+            contract_test_wall_time: None,
         }
     }
 
@@ -297,6 +301,34 @@ impl LadybugSearchIndex {
     ) -> Self {
         self.post_commit_crash_hook = Some(hook);
         self
+    }
+
+    /// Run requests that leave `budget.wall_time_ms` unset under `wall_time`
+    /// instead of the contract's product budget. Frozen-corpus conformance
+    /// asserts result bytes, not latency, and a scheduling stall on a shared
+    /// runner must not read as a semantic mismatch. A request that narrows
+    /// `wall_time_ms` keeps its own bound, so the deadline tests and the
+    /// budget-precedence corpus still prove the product budget.
+    #[cfg(feature = "crash-test-support")]
+    #[doc(hidden)]
+    pub fn with_contract_test_wall_time(mut self, wall_time: Duration) -> Self {
+        self.contract_test_wall_time = Some(wall_time);
+        self
+    }
+
+    /// The wall-time budget for one query: the contract limit already
+    /// narrowed to the caller's request.
+    #[cfg(not(feature = "crash-test-support"))]
+    fn wall_time_for(&self, prepared: &PreparedQuery) -> Duration {
+        prepared.limits().wall_time
+    }
+
+    #[cfg(feature = "crash-test-support")]
+    fn wall_time_for(&self, prepared: &PreparedQuery) -> Duration {
+        match self.contract_test_wall_time {
+            Some(wall_time) if prepared.budget().wall_time_ms.is_none() => wall_time,
+            _ => prepared.limits().wall_time,
+        }
     }
 
     #[cfg(feature = "crash-test-support")]
@@ -403,7 +435,7 @@ impl LadybugSearchIndex {
         self.query_readiness(readiness_target)?;
         let store = self.current_store();
         let started = Instant::now();
-        let deadline = started + prepared.limits().wall_time;
+        let deadline = started + self.wall_time_for(&prepared);
         let cold = self.runtime.query_count.fetch_add(1, Ordering::AcqRel) == 0;
         let parameters = prepared.parameters().clone();
         let plan = prepared.plan().clone();
