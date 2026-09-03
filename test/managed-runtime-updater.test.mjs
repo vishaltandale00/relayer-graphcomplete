@@ -51,3 +51,44 @@ describe("managed runtime application-update boundary", () => {
     await vi.waitFor(() => expect(reported).toHaveBeenCalledWith(failure));
   });
 });
+
+describe("a verified download survives a background check", () => {
+  // The window schedules an automatic check five seconds after it opens. When
+  // that lands on a freshly downloaded update it used to walk `ready` back to
+  // `available`, and the install attempt then failed while the bytes sat on
+  // disk. Observed in Preview canary run 33702128267, where `ready` lasted 85ms.
+  it("keeps ready when a later check rediscovers the staged version", () => {
+    const { autoUpdater, updater } = fixture();
+    autoUpdater.emit("update-available", { version: "0.2.30" });
+    autoUpdater.emit("update-downloaded", { version: "0.2.30" });
+    expect(updater.status().phase).toBe("ready");
+
+    autoUpdater.emit("checking-for-update");
+    autoUpdater.emit("update-available", { version: "0.2.30" });
+
+    expect(updater.status()).toMatchObject({ phase: "ready", availableVersion: "0.2.30", percent: 100 });
+    expect(() => updater.install()).not.toThrow();
+    expect(autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps ready when a later check reports nothing available", () => {
+    const { autoUpdater, updater } = fixture();
+    autoUpdater.emit("update-available", { version: "0.2.30" });
+    autoUpdater.emit("update-downloaded", { version: "0.2.30" });
+
+    autoUpdater.emit("checking-for-update");
+    autoUpdater.emit("update-not-available");
+
+    expect(updater.status().phase).toBe("ready");
+  });
+
+  it("still surfaces a genuinely newer version over a staged one", () => {
+    const { autoUpdater, updater } = fixture();
+    autoUpdater.emit("update-available", { version: "0.2.30" });
+    autoUpdater.emit("update-downloaded", { version: "0.2.30" });
+
+    autoUpdater.emit("update-available", { version: "0.2.31" });
+
+    expect(updater.status()).toMatchObject({ phase: "available", availableVersion: "0.2.31" });
+  });
+});

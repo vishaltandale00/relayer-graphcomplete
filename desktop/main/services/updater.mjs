@@ -61,16 +61,26 @@ export function createDesktopUpdater({
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowDowngrade = false;
+    // A verified download survives any later check. The window opens a periodic
+    // check five seconds after launch, so without these guards a background
+    // check lands on a freshly downloaded update, walks `ready` back through
+    // `checking` to `available`, and the next install attempt fails with "No
+    // verified update is ready to install" while the bytes sit on disk. Progress
+    // events already refuse to overwrite `ready`; the check lifecycle must too.
     autoUpdater.on("checking-for-update", () => {
+      if (state.phase === "ready") return;
       resetDownloadProgress();
       publish({ phase: "checking", percent: null, error: null });
     });
     autoUpdater.on("update-available", (info) => {
       availableInfo = info;
+      // Rediscovering the version already staged is not new information.
+      if (state.phase === "ready" && state.availableVersion === info.version) return;
       resetDownloadProgress();
       publish({ phase: "available", availableVersion: info.version, percent: null, error: null });
     });
     autoUpdater.on("update-not-available", () => {
+      if (state.phase === "ready") return;
       availableInfo = null;
       resetDownloadProgress();
       publish({ phase: "idle", availableVersion: null, percent: null, error: null });
