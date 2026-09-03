@@ -81,12 +81,14 @@ export function createDesktopUpdater({
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowDowngrade = false;
-    // A verified download survives any later check. The window opens a periodic
-    // check five seconds after launch, so without these guards a background
+    // A verified download survives any later check. Without these guards a
     // check lands on a freshly downloaded update, walks `ready` back through
     // `checking` to `available`, and the next install attempt fails with "No
     // verified update is ready to install" while the bytes sit on disk. Progress
     // events already refuse to overwrite `ready`; the check lifecycle must too.
+    // Scheduled discovery is guarded earlier, in `backgroundCheck`, so these
+    // guards are what protect the phase when the user checks from Settings —
+    // that path is deliberately unguarded because the user asked for it.
     autoUpdater.on("checking-for-update", () => {
       if (state.phase === "ready") return;
       resetDownloadProgress();
