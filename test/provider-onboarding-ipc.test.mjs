@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { registerDesktopIpc } from "../desktop/main/ipc/register-ipc.mjs";
-import { TERMINAL_CONNECTION_FAILURE } from "../desktop/main/providers/provider-definition-service.mjs";
-// Mirrors what the service records when it cancels the pending attempt.
-const settledFailure = (message) => Object.defineProperty(new Error(message), TERMINAL_CONNECTION_FAILURE, {
-  value: true, enumerable: false,
-});
+import { TerminalConnectionFailure } from "../desktop/main/providers/provider-definition-service.mjs";
+// What the service throws once it has cancelled the pending attempt.
+const settledFailure = (message) => new TerminalConnectionFailure(new Error(message));
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 
 function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark" }) {
@@ -17,6 +15,11 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
   const presentWindow = vi.fn();
   const providerDefinitions = {
     adapters: () => [], list: async () => [],
+    connect: vi.fn(async ({ connectionId }) => ({
+      status: "pending", connectionId, providerDefinition: { id: connectionId },
+      login: { authUrl: "https://login.example.test" },
+    })),
+    cancelConnection: vi.fn(async () => true),
     logout: vi.fn(async () => ({ status: "disconnected" })),
     completeConnection: vi.fn(async (connectionId) => ({
       status: connectionId === "pending-connection" ? "pending" : "connected",
@@ -60,6 +63,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     complete: handlers.get("relayer:provider-onboarding-complete"),
     status: handlers.get("relayer:provider-status"),
     logout: handlers.get("relayer:provider-logout"),
+    connect: handlers.get("relayer:provider-connect"),
     reconnect: handlers.get("relayer:provider-reconnect"),
     completeConnection: handlers.get("relayer:provider-connect-complete"),
     presentWindow,
@@ -140,6 +144,20 @@ describe("provider onboarding IPC hard gate", () => {
     await expect(completeConnection(null, { connectionId: "gone" }))
       .rejects.toThrow("Unknown pending provider connection.");
     expect(presentWindow).not.toHaveBeenCalled();
+  });
+
+  it("cancels the attempt it created when the browser handoff fails", async () => {
+    const { connect, reconnect, providerDefinitions, shell } = fixture(async () => false);
+    // connect() and reconnect() create the pending attempt before the browser
+    // is handed the URL. A failed handoff must not leave it owning the name.
+    shell.openExternal.mockRejectedValue(new Error("no browser available"));
+
+    await expect(connect(null, { connectionId: "codex-work" })).rejects.toThrow("no browser available");
+    expect(providerDefinitions.cancelConnection).toHaveBeenCalledWith("codex-work");
+
+    providerDefinitions.cancelConnection.mockClear();
+    await expect(reconnect(null, { id: "claude-work" })).rejects.toThrow("no browser available");
+    expect(providerDefinitions.cancelConnection).toHaveBeenCalledWith("claude-work");
   });
 
   it("routes model-family recovery refresh to the exact connected provider", async () => {

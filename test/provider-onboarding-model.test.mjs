@@ -5,6 +5,7 @@ import {
   createProviderOnboardingProjectionGate,
   providerOnboardingCompletionIntent,
   providerOnboardingRecoveryAction,
+  providerOnboardingRecoveryName,
   reconcileProviderOnboardingState,
   resolveProviderOnboardingStep,
   resumableProviderDefinitions,
@@ -37,6 +38,26 @@ describe("provider onboarding renderer state", () => {
         message: "No execution configuration is ready.",
       },
     })).toEqual({ kind: "repair_execution", label: "Repair" });
+  });
+
+  it("names both first-run recovery branches by operation and exact provider", () => {
+    const repair = providerOnboardingRecoveryAction({
+      blockingReason: { code: "provider_no_available_execution_configurations" },
+    });
+    const refresh = providerOnboardingRecoveryAction({
+      blockingReason: { code: "provider_no_eligible_execution_models" },
+    });
+
+    expect(providerOnboardingRecoveryName(repair, "OpenAI Work"))
+      .toBe("Repair execution configurations for OpenAI Work");
+    expect(providerOnboardingRecoveryName(refresh, "OpenAI Lab"))
+      .toBe("Refresh models and set up defaults for OpenAI Lab");
+    // Two first-run states must not present the same accessible name.
+    expect(providerOnboardingRecoveryName(repair, "OpenAI Work"))
+      .not.toBe(providerOnboardingRecoveryName(refresh, "OpenAI Work"));
+    // Before a provider resolves, the name still states the operation.
+    expect(providerOnboardingRecoveryName(refresh, undefined))
+      .toBe("Refresh models and set up defaults");
   });
 
   it("rejects an out-of-order projection and binds recovery to the rendered provider", () => {

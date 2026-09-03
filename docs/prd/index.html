@@ -812,6 +812,10 @@ interface CompletionTerminalError extends Error {
 <table>
 <thead><tr><th>Checkpoint</th><th>Smallest deterministic proof</th><th>Excluded proof</th></tr></thead>
 <tbody>
+<tr><td><code>BRW-001</code> Terminal outcomes return</td><td>Account-session tests present once for a verified, cancelled and malformed callback; the provider IPC test presents on a connected completion.</td><td>Real Auth0 and real provider sign-in</td></tr>
+<tr><td><code>BRW-002</code> Only a settled failure returns</td><td>Provider IPC test distinguishes a settled failure, a transient one, and an unknown connection; the service test proves a transient connect stays pending and cancellable.</td><td>Live provider account outages</td></tr>
+<tr><td><code>BRW-003</code> Unowned and pending present nothing</td><td>Account-session tests refuse a foreign state and a non-callback request without settling; the IPC test leaves a pending completion unpresented.</td><td>Real browser focus behaviour</td></tr>
+<tr><td><code>BRW-004</code> A failed handoff frees the name</td><td>Provider IPC test cancels the created attempt when the browser handoff rejects, for connect and reconnect.</td><td>Real openExternal failures</td></tr>
 <tr><td><code>MRT-375-1</code> Exact recipe identity and artifact lock</td><td>Public installer and resolver tests prove exact recipe selection, every supported target identity, digest mismatch rejection, and absence of mutable latest discovery.</td><td>Provider visibility and model discovery</td></tr>
 <tr><td><code>MRT-375-2</code> Isolated wheel-only assembly</td><td>A Prime-shaped fixture proves source-build rejection, absolute managed-tool inputs, closed environment redirects, and writes beneath one temporary managed root.</td><td>Production Prime assembly or a real Prime kernel</td></tr>
 <tr><td><code>MRT-375-3</code> Transactional activation and repair</td><td>Fixture scenarios prove concurrent deduplication, readiness before activation, failed preparation preserving the active descriptor, interrupted staging recovery, exact same-recipe repair, and frozen schema-v1 compatibility.</td><td>Updater download ordering</td></tr>
@@ -896,6 +900,10 @@ type InteractionModelBinding = {
 <li><strong>ACC-006:</strong> Refresh rotation and logout cannot resurrect stale credentials after generation invalidation.</li>
 <li><strong>ACC-007:</strong> Optional account sign-in is a dedicated onboarding step after provider setup and before projects, chats, threads, or the desktop workspace are revealed. Sign in and Continue without an account both resolve the step, and account failure cannot trap local use.</li>
 <li><strong>ACC-008:</strong> The sidebar-footer control, beside Settings, starts sign-in directly while signed out and opens minimal settings for an existing account. Account UX never shows Stable or Preview.</li>
+<li><strong>BRW-001:</strong> Every terminal outcome of a browser leg returns to Relayer. That covers account sign-in, cancellation and failure. It also covers a provider connection or reconnection that succeeds.</li>
+<li><strong>BRW-002:</strong> A provider connection failure returns only when it settled the attempt. A transient failure keeps the attempt pending so the caller keeps polling, and presents nothing. An unknown or stale connection never owned an attempt and presents nothing.</li>
+<li><strong>BRW-003:</strong> A still-pending attempt is not terminal and presents nothing. A request that is not the attempt's own callback presents nothing and does not settle it.</li>
+<li><strong>BRW-004:</strong> A failed browser handoff cancels the attempt it created, so the provider name is free for a retry.</li>
 <li><strong>TEL-001:</strong> Electron main alone owns Sentry admission, identity, queueing, SDK configuration, and transport.</li>
 <li><strong>TEL-002:</strong> Only a verified account generation reports. Main derives the stable domain-separated pseudonym and callers cannot supply identity.</li>
 <li><strong>TEL-003:</strong> The final event contains only approved fields. Forbidden privacy fixtures fail before transport and queue persistence.</li>

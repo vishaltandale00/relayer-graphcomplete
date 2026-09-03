@@ -242,7 +242,9 @@ describe("provider and harness renderer markup", () => {
     expect(markup).not.toContain("prime-agent");
   });
 
-  it("names both recovery actions by operation and exact provider", () => {
+  // First-run's equivalent promise is exercised in provider-onboarding-model,
+  // against the decision auth.js calls, rather than this Settings-card path.
+  it("names both Settings recovery actions by operation and exact provider", () => {
     const card = (id, label, code, message) => ({
       id, adapterId: "openai-api", label,
       lifecycleState: "active", connected: true,

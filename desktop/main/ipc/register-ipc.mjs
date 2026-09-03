@@ -6,6 +6,22 @@ import { isTerminalConnectionFailure } from "../providers/provider-definition-se
 // Relayer window while the real next step sat behind it.
 const BROWSER_HANDOFF = Object.freeze({ activate: true });
 
+// connect() and reconnect() create the pending attempt before the browser is
+// handed the URL. If that handoff fails, nothing downstream ever sees the
+// attempt, so it would keep owning the provider name and reject the retry.
+async function handOffToBrowser(shell, providerDefinitions, result) {
+  if (!result.login?.authUrl) return;
+  try {
+    await shell.openExternal(result.login.authUrl, BROWSER_HANDOFF);
+  } catch (error) {
+    const connectionId = result.connectionId ?? result.providerDefinition?.id;
+    if (connectionId) {
+      await Promise.resolve(providerDefinitions.cancelConnection(connectionId)).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
 const MAX_COMPOSER_DRAFT_BYTES = 1024 * 1024;
 const MAX_FOLLOWUP_DRAFTS = 256;
 
@@ -102,7 +118,7 @@ export function registerDesktopIpc({
   ipcMain.handle("relayer:provider-connect", async (_event, input) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const result = await providerDefinitions.connect(input);
-    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl, BROWSER_HANDOFF);
+    await handOffToBrowser(shell, providerDefinitions, result);
     getWindow()?.webContents.send("relayer:providers-changed", {
       kind: result.status === "connected" ? "connected" : "connection_pending",
       providerId: result.providerDefinition.id,
@@ -158,7 +174,7 @@ export function registerDesktopIpc({
   ipcMain.handle("relayer:provider-reconnect", async (_event, { id }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const result = await providerDefinitions.reconnect(id);
-    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl, BROWSER_HANDOFF);
+    await handOffToBrowser(shell, providerDefinitions, result);
     getWindow()?.webContents.send("relayer:providers-changed", {
       kind: "reconnect_pending",
       providerId: result.providerDefinition.id,
