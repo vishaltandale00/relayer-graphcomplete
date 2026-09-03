@@ -237,13 +237,19 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     expect(cancelledPresent).toHaveBeenCalledOnce();
     await cancelled.service.close();
 
-    // A malformed callback still settles the attempt, so it still returns.
+    // A callback that does carry this attempt's state but is malformed is this
+    // attempt's business, so it still fails closed and still returns.
     const malformedPresent = vi.fn();
     const malformed = await fixture({ auth0, openExternal, presentWindow: malformedPresent });
     await malformed.service.start();
     await malformed.service.login();
     const malformedCallback = new URL(new URL(launchUrl).searchParams.get("redirect_uri"));
-    expect(await rawCallback(malformedCallback, { path: "/favicon.ico" })).toBe(400);
+    malformedCallback.search = new URLSearchParams({
+      state: new URL(launchUrl).searchParams.get("state"),
+      code: "authorization-code",
+      extra: "unexpected",
+    });
+    expect(await rawCallback(malformedCallback)).toBe(400);
     await expect(malformed.service.waitForIdle()).resolves.toMatchObject({ status: "error" });
     expect(malformedPresent).toHaveBeenCalledOnce();
     await malformed.service.close();
@@ -435,31 +441,40 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await service.close();
   });
 
-  it("fails the active attempt closed for wrong callback path, method, or host", async () => {
+  it("refuses a request that is not this attempt's callback without settling or presenting it", async () => {
     const auth0 = await fakeAuth0();
     let launchUrl;
-    const { service } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; } });
+    const presentWindow = vi.fn();
+    const { service } = await fixture({
+      auth0,
+      openExternal: async (value) => { launchUrl = value; },
+      presentWindow,
+    });
     await service.start();
+    await service.login();
+    const launcher = new URL(launchUrl);
+    const callback = new URL(launcher.searchParams.get("redirect_uri"));
+    callback.search = new URLSearchParams({
+      code: "authorization-code",
+      state: launcher.searchParams.get("state"),
+    });
     for (const mutation of [
-      (callback) => ({ path: `/other${callback.search}` }),
+      // The browser's own probe for the callback page carries no state at all.
+      () => ({ path: "/favicon.ico" }),
+      (target) => ({ path: `/other${target.search}` }),
       () => ({ method: "POST" }),
       () => ({ host: "attacker.example" }),
     ]) {
-      await service.login();
-      const launched = launchUrl;
-      const launcher = new URL(launched);
-      const callback = new URL(launcher.searchParams.get("redirect_uri"));
-      callback.search = new URLSearchParams({
-        code: "authorization-code",
-        state: launcher.searchParams.get("state"),
-      });
       expect(await rawCallback(callback, mutation(callback))).toBe(400);
-      await expect(service.waitForIdle()).resolves.toEqual({
-        status: "error", channel: "stable", reason: "authentication-failed",
-      });
-      await expect(callbackFromLauncher(launched)).rejects.toThrow();
+      expect(await service.account()).toEqual({ status: "signing-in", channel: "stable" });
+      expect(presentWindow).not.toHaveBeenCalled();
     }
     expect(auth0.requests.filter(({ url }) => url === "/oauth/token")).toHaveLength(0);
+
+    // None of them disturbed the listener, so the real callback still lands.
+    expect((await callbackFromLauncher(launchUrl)).status).toBe(200);
+    await expect(service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
+    expect(presentWindow).toHaveBeenCalledOnce();
     await service.close();
   });
 

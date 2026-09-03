@@ -110,19 +110,28 @@ export function registerDesktopIpc({
   });
   ipcMain.handle("relayer:provider-connect-complete", async (_event, { connectionId }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
-    const result = await providerDefinitions.completeConnection(connectionId);
+    // Connect and reconnect both settle here. Every terminal outcome of the
+    // browser leg belongs back in Relayer, on the same terms as account
+    // sign-in: a success, and a failure such as catalog discovery or runtime
+    // registration, which the renderer would otherwise report behind the
+    // browser. Only a still-pending attempt is unfinished and presents nothing.
+    const returnToRelayer = () => {
+      try { presentWindow(); } catch {
+        // Window presentation is a courtesy and cannot fail a connection.
+      }
+    };
+    let result;
+    try {
+      result = await providerDefinitions.completeConnection(connectionId);
+    } catch (error) {
+      returnToRelayer();
+      throw error;
+    }
     getWindow()?.webContents.send("relayer:providers-changed", {
       kind: result.status === "connected" ? "connected" : "connection_pending",
       providerId: result.providerDefinition.id,
     });
-    // Connect and reconnect both settle here. A connection that finished in the
-    // browser belongs back in Relayer, on the same terms as account sign-in: a
-    // still-pending attempt is not finished, so it presents nothing.
-    if (result.status === "connected") {
-      try { presentWindow(); } catch {
-        // Window presentation is a courtesy and cannot fail a connection.
-      }
-    }
+    if (result.status === "connected") returnToRelayer();
     return result;
   });
   ipcMain.handle("relayer:provider-connect-cancel", async (_event, { connectionId }) => {

@@ -272,7 +272,15 @@ describe("desktop account presentation", () => {
     // Nor do Settings, Account and the update indicator fit the 210px rail the
     // 980px breakpoint switches to, so the footer drops its labels there and
     // the circular indicator keeps its diameter instead of being squashed.
-    expect(css).toContain("@media(max-width:980px){.sidebar-footer .footer-button span{display:none}");
+    expect(css).toContain("@media(max-width:980px){.sidebar-footer .footer-button span:not([aria-hidden]){display:none}");
     expect(css).toContain(".update-button{margin-left:auto;flex:none");
+    // A busy label must not wrap inside a 34px control.
+    expect(css).toContain("white-space:nowrap;overflow:hidden;text-overflow:ellipsis");
+    // Hiding the label must never take the decorative glyph with it, and the
+    // footer controls keep a name once their label is gone.
+    expect(css).toContain("body.sidebar-collapsed .footer-button span:not([aria-hidden])");
+    expect(sidebarFooter).toContain('id="settingsButton" type="button" title="Settings" aria-label="Settings"');
+    expect(sidebarFooter).toContain('<span aria-hidden="true">⚙</span>');
+    expect(sidebarFooter).toContain('id="updateButton" type="button" title="Application update available" aria-label="Application update available"');
   });
 });
