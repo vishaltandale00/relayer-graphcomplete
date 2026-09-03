@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const graphClientIndexUrl = pathToFileURL(resolve("packages/graph-client/agent-resource/index.js"));
 const graphClientDevelopmentUrl = pathToFileURL(resolve("packages/graph-client/dist/index.js"));
+const graphClientDevelopmentDetailUrl = pathToFileURL(resolve("packages/graph-client/dist/detail.js"));
 const execFileAsync = promisify(execFile);
 
 function echoedNodeResponse(init, node) {
@@ -57,9 +58,13 @@ describe("packaged graph-client authored detail boundary", () => {
     ]);
   });
 
-  it("does not advertise unresolved asset authoring through the agent resource", async () => {
-    const graphClient = await import(graphClientIndexUrl.href);
-    expect(graphClient.assetRef).toBeUndefined();
+  it("does not advertise unresolved asset authoring through either public module", async () => {
+    const [packaged, development] = await Promise.all([
+      import(graphClientIndexUrl.href),
+      import(graphClientDevelopmentUrl.href),
+    ]);
+    expect(packaged.assetRef).toBeUndefined();
+    expect(development.assetRef).toBeUndefined();
   });
 
   it("registers submit and detail single-flight promises before synchronous transport re-entry", async () => {
@@ -471,9 +476,9 @@ describe("packaged graph-client authored detail boundary", () => {
       DetailCompilationError,
       NodeObject,
       RelayerGraphClient,
-      assetRef,
       html,
     } = await import(graphClientDevelopmentUrl.href);
+    const { assetRef } = await import(graphClientDevelopmentDetailUrl.href);
     const brandedAsset = assetRef("brand-source");
     const assetBrand = Reflect.ownKeys(brandedAsset).find((key) => typeof key === "symbol");
     let throwingReads = 0;
@@ -514,7 +519,8 @@ describe("packaged graph-client authored detail boundary", () => {
   });
 
   it("uses one frozen logical asset identity for resolution, mounts, and the asset table", async () => {
-    const { NodeObject, RelayerGraphClient, assetRef, html } = await import(graphClientDevelopmentUrl.href);
+    const { NodeObject, RelayerGraphClient, html } = await import(graphClientDevelopmentUrl.href);
+    const { assetRef } = await import(graphClientDevelopmentDetailUrl.href);
     const brandedAsset = assetRef("brand-source");
     const assetBrand = Reflect.ownKeys(brandedAsset).find((key) => typeof key === "symbol");
     const reference = { [assetBrand]: true, logicalId: "safe-logo" };
@@ -556,10 +562,10 @@ describe("packaged graph-client authored detail boundary", () => {
       LayerObject,
       NodeObject,
       RelayerGraphClient,
-      assetRef,
       detailCapability,
       html,
     } = await import(graphClientDevelopmentUrl.href);
+    const { assetRef } = await import(graphClientDevelopmentDetailUrl.href);
     const owner = new NodeObject("box", "Snapshot", "Fallback", "concept", "snapshot-owner");
     const sourceLayer = new LayerObject([owner], [], new LayerLayoutObject([]), "original-layer");
     const action = {
@@ -636,10 +642,10 @@ describe("packaged graph-client authored detail boundary", () => {
       LayerObject,
       NodeObject,
       RelayerGraphClient,
-      assetRef,
       detailCapability,
       html,
     } = await import(graphClientDevelopmentUrl.href);
+    const { assetRef } = await import(graphClientDevelopmentDetailUrl.href);
     const owner = new NodeObject("box", "Checkpoint", "Fallback", "concept", "checkpoint-owner");
     const sourceLayer = new LayerObject([owner], [], new LayerLayoutObject([]), "checkpoint-layer");
     const action = {

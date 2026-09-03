@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DETAIL_AUTHORING_LIMITS, EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, assetRef, html, type ActionObject } from "../src/index.js";
+import { DETAIL_AUTHORING_LIMITS, EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, html, type ActionObject } from "../src/index.js";
+import { assetRef } from "../src/detail.js";
 import { edgeId, layerId, nodeId } from "../src/objects.js";
 
 function nodeResponse(init: RequestInit, node: Record<string, unknown>): Response {
@@ -205,6 +206,8 @@ describe("agent-facing graph objects", () => {
       { name: "invalid availability", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), availability: "maybe" }] }, path: "assets[0].availability" },
       { name: "invalid digest", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), digestSha256: "A".repeat(64) }] }, path: "assets[0].digestSha256" },
       { name: "invalid media", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), mediaType: "text/html" }] }, path: "assets[0].mediaType" },
+      { name: "unsupported gif", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), mediaType: "image/gif" }] }, path: "assets[0].mediaType" },
+      { name: "unsupported webp", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), mediaType: "image/webp" }] }, path: "assets[0].mediaType" },
       { name: "invalid representation", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), representation: { kind: "video", sanitized: true } }] }, path: "assets[0].representation.kind" },
       { name: "non-boolean sanitization", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), representation: { kind: "image", sanitized: "true" } }] }, path: "assets[0].representation.sanitized" },
     ];
@@ -335,6 +338,37 @@ describe("agent-facing graph objects", () => {
     expect(resolverRequests).toBe(1);
     expect(submittedBodies).toHaveLength(2);
     expect(submittedBodies[1]).toBe(submittedBodies[0]);
+  });
+
+  it("reuses the frozen package when a replacement client retries the same node", async () => {
+    const submittedBodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      submittedBodies.push(String(init.body));
+      if (submittedBodies.length === 1) {
+        return new Response(JSON.stringify({ error: { code: "temporary_failure", message: "retry" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return nodeResponse(init, {
+        id: 131, kind: "concept", icon: "box", title: "Retry", detail: "Fallback", state: "draft",
+      });
+    }));
+    const node = new NodeObject("box", "Retry", "Fallback", "concept", "replacement-client-retry");
+    node.detailAuthoring.setComponent("content", html`<p>Compiled once</p>`);
+
+    await expect(new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node))
+      .rejects.toMatchObject({ status: 503, code: "temporary_failure" });
+    const retryClient = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    await expect(retryClient.submitNode(node))
+      .resolves.toMatchObject({ id: 131 });
+
+    expect(submittedBodies).toHaveLength(2);
+    expect(submittedBodies[1]).toBe(submittedBodies[0]);
+    await expect(retryClient.checkpointNodeDetail(node)).resolves.toEqual(
+      JSON.parse(submittedBodies[0]!).authoredDetail,
+    );
+    expect(node.detailAuthoring.checkpoint()).toEqual(JSON.parse(submittedBodies[0]!).authoredDetail);
   });
 
   it("single-flights first finalization and transport across concurrent submissions", async () => {

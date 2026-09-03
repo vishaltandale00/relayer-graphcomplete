@@ -1041,21 +1041,13 @@ fn export_node(
         .authored_detail
         .as_ref()
         .and_then(|detail| portable_authored_detail(detail, redactor));
-    let detail = if node.authored_detail.is_some() && authored_detail.is_none() {
-        format!(
-            "{}\n\n[Authored visual detail omitted because project-path redaction could not preserve its canonical structure.]",
-            redactor.text(&node.detail)
-        )
-    } else {
-        redactor.text(&node.detail)
-    };
     Ok(ExportNode {
         id: ids.node(node.id.value()),
         client_key: node.client_key.clone(),
         kind: redactor.text(&node.kind),
         icon: redactor.text(&node.icon),
         title: redactor.text(&node.title),
-        detail,
+        detail: redactor.text(&node.detail),
         authored_detail,
         state: ExportRecordState::Accepted,
     })
@@ -1292,10 +1284,26 @@ impl ProjectPathRedactor {
     }
 
     fn contains_private_path(&self, value: &str) -> bool {
+        if self.project_paths.is_empty() {
+            return false;
+        }
         if self.project_paths.iter().any(|path| value.contains(path)) {
             return true;
         }
-        contains_potential_html_character_reference(value)
+        let mut decoded = value.to_owned();
+        for _ in 0..16 {
+            let (next, changed) = decode_html_character_references_once(&decoded);
+            if !changed {
+                return false;
+            }
+            if self.project_paths.iter().any(|path| next.contains(path)) {
+                return true;
+            }
+            decoded = next;
+        }
+        // A path hidden behind an impractically deep chain of encodings must not
+        // escape merely because the bounded decoder stopped making progress.
+        decode_html_character_references_once(&decoded).1
     }
 
     fn optional(&self, value: Option<&str>) -> Option<String> {
@@ -1303,11 +1311,84 @@ impl ProjectPathRedactor {
     }
 }
 
-fn contains_potential_html_character_reference(value: &str) -> bool {
-    value
-        .as_bytes()
-        .windows(2)
-        .any(|pair| pair[0] == b'&' && (pair[1] == b'#' || pair[1].is_ascii_alphabetic()))
+fn decode_html_character_references_once(value: &str) -> (String, bool) {
+    let mut decoded = String::with_capacity(value.len());
+    let mut remaining = value;
+    let mut changed = false;
+    while let Some(offset) = remaining.find('&') {
+        decoded.push_str(&remaining[..offset]);
+        let entity = &remaining[offset..];
+        if let Some((character, consumed)) = decode_html_character_reference(&entity[1..]) {
+            decoded.push(character);
+            remaining = &entity[consumed + 1..];
+            changed = true;
+            continue;
+        }
+        decoded.push('&');
+        remaining = &entity[1..];
+    }
+    decoded.push_str(remaining);
+    (decoded, changed)
+}
+
+fn decode_html_character_reference(entity: &str) -> Option<(char, usize)> {
+    if let Some(numeric) = entity.strip_prefix('#') {
+        let (digits, radix, prefix_len) = numeric
+            .strip_prefix('x')
+            .or_else(|| numeric.strip_prefix('X'))
+            .map_or((numeric, 10, 1), |digits| (digits, 16, 2));
+        let digit_count = digits
+            .bytes()
+            .take_while(|byte| match radix {
+                10 => byte.is_ascii_digit(),
+                16 => byte.is_ascii_hexdigit(),
+                _ => unreachable!(),
+            })
+            .count();
+        if digit_count == 0 {
+            return None;
+        }
+        let character = u32::from_str_radix(&digits[..digit_count], radix)
+            .ok()
+            .and_then(char::from_u32)?;
+        let numeric_len = prefix_len + digit_count;
+        let consumed = numeric_len + usize::from(entity.as_bytes().get(numeric_len) == Some(&b';'));
+        return Some((character, consumed));
+    }
+    let end = entity.find(';').filter(|end| *end <= 31)?;
+    let character = match &entity[..end] {
+        "amp" => '&',
+        "apos" => '\'',
+        "ast" => '*',
+        "bsol" => '\\',
+        "colon" => ':',
+        "comma" => ',',
+        "commat" => '@',
+        "dollar" => '$',
+        "equals" => '=',
+        "excl" => '!',
+        "grave" => '`',
+        "gt" => '>',
+        "hyphen" | "minus" => '-',
+        "lbrack" | "lsqb" => '[',
+        "lpar" => '(',
+        "lowbar" => '_',
+        "lt" => '<',
+        "nbsp" => '\u{a0}',
+        "num" => '#',
+        "percnt" => '%',
+        "period" => '.',
+        "plus" => '+',
+        "quest" => '?',
+        "quot" => '"',
+        "rbrack" | "rsqb" => ']',
+        "rpar" => ')',
+        "semi" => ';',
+        "sol" => '/',
+        "vert" => '|',
+        _ => return None,
+    };
+    Some((character, end + 1))
 }
 
 fn injective_portable_option_keys<'a>(
@@ -1510,11 +1591,50 @@ mod tests {
         .unwrap();
 
         assert!(exported.authored_detail.is_none());
-        assert!(exported.detail.contains("Authored visual detail omitted"));
+        assert_eq!(exported.detail, "Fallback");
     }
 
     #[test]
-    fn explicitly_degrades_to_fallback_when_redaction_breaks_package_structure() {
+    fn preserves_unrelated_html_entities_in_authored_detail() {
+        let package = serde_json::json!({
+            "version": 1,
+            "components": [{
+                "id":"summary",
+                "order":0,
+                "html":"<pre><code>&lt;tag&gt;&amp;text</code></pre>",
+                "css":""
+            }],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        });
+        let node = GraphNode {
+            id: NodeId::new(1).unwrap(),
+            client_key: Some("portable-detail".into()),
+            leased_action_id: None,
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Portable detail".into(),
+            detail: "Fallback".into(),
+            authored_detail: Some(package.clone()),
+            state: RecordState::Accepted,
+        };
+
+        for project_path in [None, Some("/private/project")] {
+            let exported = export_node(
+                &node,
+                &mut PortableIds::default(),
+                &ProjectPathRedactor::new(project_path),
+            )
+            .unwrap();
+
+            assert_eq!(exported.authored_detail.as_ref(), Some(&package));
+            assert_eq!(exported.detail, "Fallback");
+        }
+    }
+
+    #[test]
+    fn degrades_authored_detail_without_mutating_its_fallback() {
         let project_path = r#"C:\p"#;
         let package = serde_json::json!({
             "version": 1,
@@ -1546,8 +1666,7 @@ mod tests {
         .unwrap();
 
         assert!(exported.authored_detail.is_none());
-        assert!(exported.detail.starts_with("Portable fallback"));
-        assert!(exported.detail.contains("Authored visual detail omitted"));
+        assert_eq!(exported.detail, "Portable fallback");
     }
 
     #[test]
@@ -1585,7 +1704,7 @@ mod tests {
         .unwrap();
 
         assert!(exported.authored_detail.is_none());
-        assert!(exported.detail.contains("Authored visual detail omitted"));
+        assert_eq!(exported.detail, "Portable fallback");
         assert!(
             !serde_json::to_string(&exported)
                 .unwrap()
@@ -1595,11 +1714,27 @@ mod tests {
 
     #[test]
     fn degrades_nested_numeric_and_named_html_character_references() {
-        let project_path = "/private/A&B";
-        for html in [
-            "&lt;code&gt;&amp;#47;private&amp;#47;A&amp;amp;B/src/main.rs&lt;/code&gt;",
-            "<code>&sol;private&sol;A&amp;B/src/main.rs</code>",
-            "<code>&#x2f;private&#47;A&amp;B/src/main.rs</code>",
+        for (project_path, html) in [
+            (
+                "/private/A&B",
+                "&lt;code&gt;&amp;#47;private&amp;#47;A&amp;amp;B/src/main.rs&lt;/code&gt;",
+            ),
+            (
+                "/private/A&B",
+                "<code>&sol;private&sol;A&amp;B/src/main.rs</code>",
+            ),
+            (
+                "/private/A&B",
+                "<code>&#x2f;private&#47;A&amp;B/src/main.rs</code>",
+            ),
+            (
+                "/private/A&B",
+                "<code>&amp;#47private&amp;#47A&amp;B/src/main.rs</code>",
+            ),
+            (
+                r"C:\workspace",
+                r"<code>C&#58&#92workspace\src\main.rs</code>",
+            ),
         ] {
             let node = GraphNode {
                 id: NodeId::new(1).unwrap(),
@@ -1630,7 +1765,7 @@ mod tests {
                 exported.authored_detail.is_none(),
                 "retained encoded HTML: {html}"
             );
-            assert!(exported.detail.contains("Authored visual detail omitted"));
+            assert_eq!(exported.detail, "Portable fallback");
         }
     }
 
@@ -1841,17 +1976,29 @@ mod tests {
             completion_error: Some("failed".into()),
             latest_attempt: None,
         };
-        let target = InteractionInputNode::from(GraphNode {
+        let target_node = GraphNode {
             id: NodeId::new(20).unwrap(),
             client_key: Some("target".into()),
             kind: "concept".into(),
             icon: "file".into(),
             title: "Target".into(),
             detail: "Immutable".into(),
-            authored_detail: None,
+            authored_detail: Some(serde_json::json!({
+                "version": 1,
+                "components": [{
+                    "id":"summary",
+                    "order":0,
+                    "html":"<code>/workspace/project/private.txt</code>",
+                    "css":""
+                }],
+                "mounts": [],
+                "assets": [],
+                "integritySha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            })),
             state: RecordState::Accepted,
             leased_action_id: None,
-        });
+        };
+        let target = InteractionInputNode::from(target_node.clone());
         let runtime = RuntimeContextInput {
             input: InteractionInput {
                 interaction: InteractionInputNode::from(GraphNode {
@@ -1911,6 +2058,18 @@ mod tests {
             exported[0].annotations,
             ["Inspect [project-path]/src", "Second"]
         );
+        let exported_target = export_node(
+            &target_node,
+            &mut ids,
+            &ProjectPathRedactor::new(Some("/workspace/project")),
+        )
+        .unwrap();
+        assert!(exported_target.authored_detail.is_none());
+        assert_eq!(exported_target.detail, exported[0].target.detail);
+        assert_eq!(exported_target.id, exported[0].target.id);
+        assert_eq!(exported_target.kind, exported[0].target.kind);
+        assert_eq!(exported_target.icon, exported[0].target.icon);
+        assert_eq!(exported_target.title, exported[0].target.title);
         let intent = InteractionContextIntent {
             target: ProductInteractionContextTarget {
                 node_id: 20,

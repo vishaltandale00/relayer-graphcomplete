@@ -340,6 +340,7 @@ interface AuthoringState {
   readonly owner: NodeObject | undefined;
   frozen: boolean;
   finalization: symbol | undefined;
+  finalizedDetail: CompiledNodeDetail | undefined;
 }
 
 interface DomIdentityRecord {
@@ -356,6 +357,7 @@ export class NodeDetailAuthoring {
       owner: undefined,
       frozen: false,
       finalization: undefined,
+      finalizedDetail: undefined,
     });
   }
 
@@ -369,6 +371,7 @@ export class NodeDetailAuthoring {
 
   checkpoint(): CompiledNodeDetail {
     const state = authoringState(this);
+    if (state.finalizedDetail !== undefined) return state.finalizedDetail;
     const program = snapshotAuthoredNodeDetailProgram(this, safeMaterializeOwner(state.owner));
     return compileAuthoring(program, REJECTING_ASSET_RESOLVER);
   }
@@ -382,6 +385,7 @@ export function createOwnedNodeDetailAuthoring(owner: NodeObject): NodeDetailAut
     owner,
     frozen: false,
     finalization: undefined,
+    finalizedDetail: undefined,
   });
   return authoring;
 }
@@ -624,10 +628,16 @@ export function compileAuthenticatedNodeDetail(
 }
 
 /** @internal */
-export function freezeNodeDetailAuthoring(authoring: NodeDetailAuthoring): void {
+export function freezeNodeDetailAuthoring(authoring: NodeDetailAuthoring, detail: CompiledNodeDetail): void {
   const state = authoringState(authoring);
   state.frozen = true;
   state.finalization = undefined;
+  state.finalizedDetail = detail;
+}
+
+/** Return the immutable package already compiled for this exact builder. @internal */
+export function finalizedNodeDetailAuthoring(authoring: NodeDetailAuthoring): CompiledNodeDetail | undefined {
+  return authoringState(authoring).finalizedDetail;
 }
 
 /** @internal */
@@ -1832,7 +1842,7 @@ function validateAsset(
   if (!/^[a-f0-9]{64}$/.test(resolved.digestSha256)) {
     issues.push(sourceIssue("asset_integrity_invalid", componentId, element, `Asset ${asset.logicalId} needs a resolver-pinned lowercase SHA-256 digest`));
   }
-  const supportedMedia = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
+  const supportedMedia = new Set(["image/png", "image/jpeg", "image/svg+xml"]);
   if (!resolved.representation.sanitized || !supportedMedia.has(resolved.mediaType)) {
     issues.push(sourceIssue("asset_representation_unsafe", componentId, element, `Asset ${asset.logicalId} has no supported sanitized representation`));
   }

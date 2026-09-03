@@ -1,9 +1,7 @@
 const SAFE_ASSET_MEDIA_TYPES = new Set([
-  "image/gif",
   "image/jpeg",
   "image/png",
   "image/svg+xml",
-  "image/webp",
 ]);
 const SAFE_RUNTIME_ELEMENTS = new Set([
   "a", "abbr", "article", "aside", "b", "bdi", "bdo", "blockquote", "br", "button", "caption", "cite", "code",
@@ -29,12 +27,37 @@ const ELEMENT_RUNTIME_ATTRIBUTES = Object.freeze({
 });
 const UNSAFE_CSS_RESOURCE_FUNCTION = /(?:\burl|\bimage|\bimage-set|\bcross-fade|\belement|\bpaint)\s*\(/i;
 const CSS_NEWLINE = new Set(["\n", "\r", "\f"]);
+const CSS_HEX_DIGIT = /^[0-9a-f]$/i;
 
-function decodeCssEscapes(value) {
-  return value.replace(/\\([0-9a-f]{1,6})(?:\s)?|\\(.)/gi, (_match, hex, escaped) => {
-    if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16));
-    return escaped ?? "";
-  });
+function cssNewlineLength(source, index) {
+  if (source[index] === "\r" && source[index + 1] === "\n") return 2;
+  return CSS_NEWLINE.has(source[index]) ? 1 : 0;
+}
+
+function cssEscapeAt(source, index) {
+  if (source[index] !== "\\" || index + 1 >= source.length) return null;
+  let cursor = index + 1;
+  const escapedNewlineLength = cssNewlineLength(source, cursor);
+  if (escapedNewlineLength > 0) {
+    return { decoded: "", length: 1 + escapedNewlineLength, newline: true };
+  }
+  let hex = "";
+  while (hex.length < 6 && CSS_HEX_DIGIT.test(source[cursor] ?? "")) {
+    hex += source[cursor];
+    cursor += 1;
+  }
+  if (hex.length > 0) {
+    const whitespaceLength = cssNewlineLength(source, cursor)
+      || (source[cursor] === " " || source[cursor] === "\t" ? 1 : 0);
+    const codePoint = Number.parseInt(hex, 16);
+    const decoded = codePoint === 0
+      || codePoint > 0x10ffff
+      || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+      ? "\ufffd"
+      : String.fromCodePoint(codePoint);
+    return { decoded, length: cursor + whitespaceLength - index, newline: false };
+  }
+  return { decoded: source[cursor], length: 2, newline: false };
 }
 
 function executableCssText(source) {
@@ -53,7 +76,10 @@ function executableCssText(source) {
       continue;
     }
     if (quote !== null) {
-      if (character === "\\") index += 1;
+      if (character === "\\") {
+        const escape = cssEscapeAt(source, index);
+        index += (escape?.length ?? 1) - 1;
+      }
       else if (character === quote) quote = null;
       result += " ";
       continue;
@@ -66,9 +92,9 @@ function executableCssText(source) {
       quote = character;
       result += " ";
     } else if (character === "\\") {
-      const escaped = source.slice(index).match(/^\\(?:[0-9a-f]{1,6}(?:\s)?|[\s\S])/i)?.[0] ?? character;
-      result += decodeCssEscapes(escaped);
-      index += escaped.length - 1;
+      const escape = cssEscapeAt(source, index);
+      result += escape?.decoded ?? character;
+      index += (escape?.length ?? 1) - 1;
     } else {
       result += character;
     }
@@ -93,8 +119,8 @@ function cssStructureIsClosed(source) {
     if (quote !== null) {
       if (CSS_NEWLINE.has(character)) return false;
       if (character === "\\") {
-        if (next === "\r" && source[index + 2] === "\n") index += 2;
-        else index += 1;
+        const escape = cssEscapeAt(source, index);
+        index += (escape?.length ?? 1) - 1;
       }
       else if (character === quote) quote = null;
       continue;
@@ -105,8 +131,9 @@ function cssStructureIsClosed(source) {
     } else if (character === '"' || character === "'") {
       quote = character;
     } else if (character === "\\") {
-      const escaped = source.slice(index + 1).match(/^[0-9a-f]{1,6}(?:\s)?|^[\s\S]/i)?.[0] ?? "";
-      index += escaped.length;
+      const escape = cssEscapeAt(source, index);
+      if (escape?.newline) return false;
+      index += (escape?.length ?? 1) - 1;
     } else if (character === "{" || character === "(" || character === "[") {
       stack.push(character);
     } else if (character === "}" || character === ")" || character === "]") {
@@ -163,14 +190,18 @@ function mountIndex(detail) {
   return mounts;
 }
 
-function assertSafeComponent(component, fragment, mounts) {
-  const decodedCss = typeof component.css === "string" ? executableCssText(component.css) : "";
-  if (typeof component.css !== "string"
-    || !cssStructureIsClosed(component.css)
+function assertSafeCss(css) {
+  const decodedCss = typeof css === "string" ? executableCssText(css) : "";
+  if (typeof css !== "string"
+    || !cssStructureIsClosed(css)
     || /(?:@import|\bexpression\s*\()/i.test(decodedCss)
     || UNSAFE_CSS_RESOURCE_FUNCTION.test(decodedCss)) {
     throw new Error("Node Detail package contains unsafe runtime markup.");
   }
+}
+
+function assertSafeComponent(component, fragment, mounts) {
+  assertSafeCss(component.css);
   for (const element of fragment.querySelectorAll("*")) {
     const capabilityId = element.getAttribute("data-gc-mount");
     const assetId = element.getAttribute("data-asset-mount");
@@ -194,6 +225,27 @@ function assertSafeComponent(component, fragment, mounts) {
       throw new Error("Node Detail package contains unsafe runtime markup.");
     }
   }
+}
+
+function installStyles(shadow, document, authoredCss, runtimeCss) {
+  const StyleSheet = document.defaultView?.CSSStyleSheet;
+  if (typeof StyleSheet === "function"
+    && typeof StyleSheet.prototype?.replaceSync === "function"
+    && "adoptedStyleSheets" in shadow) {
+    const authoredStyles = new StyleSheet();
+    authoredStyles.replaceSync(authoredCss);
+    const runtimeStyles = new StyleSheet();
+    runtimeStyles.replaceSync(runtimeCss);
+    shadow.adoptedStyleSheets = [authoredStyles, runtimeStyles];
+    return;
+  }
+  const authoredStyles = document.createElement("style");
+  authoredStyles.dataset.nodeDetailAuthoredStyles = "";
+  authoredStyles.textContent = authoredCss;
+  const runtimeStyles = document.createElement("style");
+  runtimeStyles.dataset.nodeDetailRuntimeStyles = "";
+  runtimeStyles.textContent = runtimeCss;
+  shadow.append(authoredStyles, runtimeStyles);
 }
 
 function applyLink(host, capability) {
@@ -412,6 +464,8 @@ export async function mountCompiledNodeDetail({
     await assertCanonicalPackage(detail, crypto);
     const mounts = mountIndex(detail);
     const components = [...detail.components].sort((left, right) => left.order - right.order);
+    const authoredCss = components.map((component) => component.css).join("\n");
+    assertSafeCss(authoredCss);
     const preparedComponents = components.map((component) => {
       const template = host.ownerDocument.createElement("template");
       template.innerHTML = component.html;
@@ -420,16 +474,11 @@ export async function mountCompiledNodeDetail({
     });
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
     shadow.replaceChildren();
-    const authoredStyles = host.ownerDocument.createElement("style");
-    authoredStyles.dataset.nodeDetailAuthoredStyles = "";
-    authoredStyles.textContent = components.map((component) => component.css).join("\n");
-    const runtimeStyles = host.ownerDocument.createElement("style");
-    runtimeStyles.dataset.nodeDetailRuntimeStyles = "";
-    runtimeStyles.textContent = `:host{display:block!important;position:relative!important;inline-size:100%!important;min-width:0!important;max-width:100%!important;contain:layout paint style!important;isolation:isolate!important;overflow:hidden!important;color:inherit;font:inherit;overflow-wrap:anywhere}
+    const runtimeCss = `:host{display:block!important;position:relative!important;inline-size:100%!important;min-width:0!important;max-width:100%!important;contain:layout paint style!important;isolation:isolate!important;overflow:hidden!important;color:inherit;font:inherit;overflow-wrap:anywhere}
 *,*::before,*::after{box-sizing:border-box;min-inline-size:0}
 img{max-inline-size:100%}
 .relayer-asset-unavailable{background-image:none!important}`;
-    shadow.append(authoredStyles, runtimeStyles);
+    installStyles(shadow, host.ownerDocument, authoredCss, runtimeCss);
     for (const template of preparedComponents) {
       shadow.append(template.content.cloneNode(true));
     }

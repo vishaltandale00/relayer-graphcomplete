@@ -6,7 +6,6 @@ import {
   NodeObject,
   NodePlacementObject,
   RelayerGraphClient,
-  assetRef,
   css,
   DetailCompilationError,
   DETAIL_AUTHORING_LIMITS,
@@ -15,6 +14,7 @@ import {
   type ActionObject,
   type InputActionObject,
 } from "../src/index.js";
+import { assetRef } from "../src/detail.js";
 
 describe("typed Node Detail authoring compiler", () => {
   afterEach(() => vi.unstubAllGlobals());

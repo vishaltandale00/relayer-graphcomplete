@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { isProxy } from "node:util/types";
-import { DetailCompilationError, NodeDetailAuthoring, beginNodeDetailAuthoringFinalization, cancelNodeDetailAuthoringFinalization, compileAuthenticatedNodeDetail, freezeNodeDetailAuthoring, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, snapshotRetainedCompiledNodeDetail, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
+import { DetailCompilationError, NodeDetailAuthoring, beginNodeDetailAuthoringFinalization, cancelNodeDetailAuthoringFinalization, compileAuthenticatedNodeDetail, finalizedNodeDetailAuthoring, freezeNodeDetailAuthoring, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, snapshotRetainedCompiledNodeDetail, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
 import { isRelayerIconName } from "./icons.js";
 import { applyAcceptedNodeResponse } from "./node-response.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
@@ -117,6 +117,8 @@ export class RelayerGraphClient {
 
   private async compileNodeDetailCheckpoint(node: NodeObject): Promise<CompiledNodeDetail> {
     const envelope = materializeNodeSubmissionEnvelope(node);
+    const finalized = finalizedNodeDetailAuthoring(envelope.detailAuthoring);
+    if (finalized !== undefined) return finalized;
     const program = snapshotAuthoredNodeDetailProgram(envelope.detailAuthoring, envelope.owner);
     const assets = await this.resolveDetailAssets(program);
     return compileAuthenticatedNodeDetail(program, assets);
@@ -143,12 +145,14 @@ export class RelayerGraphClient {
   }
 
   private async compileAndFreezeNodeDetail(envelope: NodeSubmissionEnvelope): Promise<CompiledNodeDetail> {
+    const finalized = finalizedNodeDetailAuthoring(envelope.detailAuthoring);
+    if (finalized !== undefined) return finalized;
     const program = snapshotAuthoredNodeDetailProgram(envelope.detailAuthoring, envelope.owner);
     const finalization = beginNodeDetailAuthoringFinalization(envelope.detailAuthoring);
     try {
       const assets = await this.resolveDetailAssets(program);
       const compiled = compileAuthenticatedNodeDetail(program, assets);
-      freezeNodeDetailAuthoring(envelope.detailAuthoring);
+      freezeNodeDetailAuthoring(envelope.detailAuthoring, compiled);
       return compiled;
     } catch (error) {
       cancelNodeDetailAuthoringFinalization(envelope.detailAuthoring, finalization);
@@ -565,7 +569,7 @@ const RESOLVED_ASSET_KEYS = Object.freeze([
   "authority", "availability", "digestSha256", "logicalId", "mediaType", "representation",
 ]);
 const RESOLVED_REPRESENTATION_KEYS = Object.freeze(["kind", "sanitized"]);
-const RESOLVED_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
+const RESOLVED_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/svg+xml"]);
 
 function validatedResolvedDetailAssets(value: unknown, logicalIds: readonly string[]): readonly ResolvedDetailAsset[] {
   if (!isRecord(value)) invalidDetailAssetResponse("response", "Response must be an object");

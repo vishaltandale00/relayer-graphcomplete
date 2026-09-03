@@ -30,6 +30,14 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function mountedCss(shadowRoot, index) {
+  const fallback = shadowRoot.querySelector(index === 0
+    ? "[data-node-detail-authored-styles]"
+    : "[data-node-detail-runtime-styles]");
+  if (fallback) return fallback.textContent;
+  return [...(shadowRoot.adoptedStyleSheets[index]?.cssRules ?? [])].map((rule) => rule.cssText).join("\n");
+}
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe("compiled Node Detail product runtime", () => {
@@ -79,8 +87,10 @@ describe("compiled Node Detail product runtime", () => {
 
     expect(runtime.status).toBe("mounted");
     expect(host.shadowRoot).not.toBeNull();
+    expect(host.shadowRoot.adoptedStyleSheets).toHaveLength(2);
+    expect(host.shadowRoot.querySelector("style")).toBeNull();
     expect(host.shadowRoot.textContent).toContain("Documentation");
-    expect(host.shadowRoot.querySelector("style").textContent).toContain("grid-template-columns:auto 1fr");
+    expect(mountedCss(host.shadowRoot, 0)).toContain("grid-template-columns");
     const link = host.shadowRoot.querySelector("[data-gc-mount='link-mount']");
     expect(link.getAttribute("href")).toBe("https://docs.example.com/guide");
     expect(link.getAttribute("target")).toBe("_blank");
@@ -107,7 +117,7 @@ describe("compiled Node Detail product runtime", () => {
     const runtime = await mountCompiledNodeDetail({ host, detail });
 
     expect(runtime.status).toBe("mounted");
-    expect(runtime.shadowRoot.querySelector("[data-node-detail-authored-styles]").textContent).toContain('"url(foo)"');
+    expect(mountedCss(runtime.shadowRoot, 0)).toContain("url(foo)");
   });
 
   it("adapts invoke, input, expand, and reference through host authority without rebuilding unrelated authored regions", async () => {
@@ -241,8 +251,16 @@ describe("compiled Node Detail product runtime", () => {
     ["CSS resource functions", "<p>Remote visual</p>", 'p{background-image:image-set("https://attacker.example/pixel.png" 1x)}'],
     ["escaped CSS resource functions", "<p>Remote visual</p>", 'p{background-image:u\\72l("https://attacker.example/pixel.png")}'],
     ["escaped CSS imports", "<p>Remote visual</p>", '@\\69mport "https://attacker.example/pixel.css";'],
-    ["double-quoted CSS bad strings before resources", "<p>Remote visual</p>", 'p{color:red} "\n:host{background:url(https://attacker.example/pixel.png)}"'],
-    ["single-quoted CSS bad strings before imports", "<p>Remote visual</p>", "p{color:red} '\n@import 'https://attacker.example/pixel.css';"],
+    ["double-quoted CSS bad strings with LF before resources", "<p>Remote visual</p>", 'p{color:red} "\n:host{background:url(https://attacker.example/pixel.png)}"'],
+    ["single-quoted CSS bad strings with LF before imports", "<p>Remote visual</p>", "p{color:red} '\n@import 'https://attacker.example/pixel.css';"],
+    ["double-quoted CSS bad strings with CR before resources", "<p>Remote visual</p>", 'p{color:red} "\r:host{background:url(https://attacker.example/pixel.png)}"'],
+    ["single-quoted CSS bad strings with CR before imports", "<p>Remote visual</p>", "p{color:red} '\r@import 'https://attacker.example/pixel.css';"],
+    ["double-quoted CSS bad strings with CRLF before resources", "<p>Remote visual</p>", 'p{color:red} "\r\n:host{background:url(https://attacker.example/pixel.png)}"'],
+    ["single-quoted CSS bad strings with CRLF before imports", "<p>Remote visual</p>", "p{color:red} '\r\n@import 'https://attacker.example/pixel.css';"],
+    ["double-quoted CSS bad strings with FF before resources", "<p>Remote visual</p>", 'p{color:red} "\f:host{background:url(https://attacker.example/pixel.png)}"'],
+    ["single-quoted CSS bad strings with FF before imports", "<p>Remote visual</p>", "p{color:red} '\f@import 'https://attacker.example/pixel.css';"],
+    ["CRLF-smuggled escaped CSS resources", "<p>Remote visual</p>", 'p{background:u\\72\r\nl(https://attacker.example/pixel.png)}'],
+    ["CRLF-smuggled escaped CSS imports", "<p>Remote visual</p>", '@\\69\r\nmport "https://attacker.example/pixel.css";'],
     ["unterminated CSS structure", "<p>Overlay</p>", "p{position:fixed;inset:0}/*"],
     ["unbound interaction", '<button>Privileged action</button>', ""],
   ])("rejects canonical-looking packages containing %s", async (_name, html, css) => {
@@ -260,6 +278,62 @@ describe("compiled Node Detail product runtime", () => {
     expect(result).toEqual(expect.objectContaining({ status: "fallback", error: "Node Detail package contains unsafe runtime markup." }));
     expect(host.shadowRoot).toBeNull();
     expect(host.querySelector("script,button,img")).toBeNull();
+  });
+
+  it.each([
+    ["escaped CRLF string continuation", 'p::before{content:"safe\\\r\ntext"}'],
+    ["hex escape with LF whitespace", 'p::before{content:"\\41\n"}'],
+    ["hex escape with CRLF whitespace", 'p::before{content:"\\41\r\n"}'],
+  ])("accepts browser-valid CSS containing %s", async (_name, css) => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    const host = window.document.createElement("div");
+    const detail = compiledPackage({
+      version: 1,
+      components: [{ id: "safe", order: 0, html: "<p>Safe CSS</p>", css }],
+      mounts: [],
+      assets: [],
+    });
+
+    const result = await mountCompiledNodeDetail({ host, detail });
+
+    expect(result.status).toBe("mounted");
+    expect(mountedCss(result.shadowRoot, 0)).not.toBe("");
+  });
+
+  it("rejects an unsafe CSS token synthesized only after component concatenation", async () => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    const host = window.document.createElement("div");
+    const detail = compiledPackage({
+      version: 1,
+      components: [
+        { id: "prefix", order: 0, html: "<p>Prefix</p>", css: "@\\69" },
+        { id: "suffix", order: 1, html: "<p>Suffix</p>", css: 'mport "https://attacker.example/theme.css";' },
+      ],
+      mounts: [],
+      assets: [],
+    });
+
+    const result = await mountCompiledNodeDetail({ host, detail });
+
+    expect(result).toEqual(expect.objectContaining({ status: "fallback", error: "Node Detail package contains unsafe runtime markup." }));
+    expect(host.shadowRoot).toBeNull();
+  });
+
+  it.each(["image/gif", "image/webp"])("rejects unsupported V1 asset media %s before resolution", async (mediaType) => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    const host = window.document.createElement("div");
+    const resolveAsset = vi.fn();
+    const detail = compiledPackage({
+      version: 1,
+      components: [{ id: "asset", order: 0, html: '<img alt="Unsupported" data-asset-mount="asset">', css: "" }],
+      mounts: [{ id: "asset", componentId: "asset", kind: "asset", host: "img", assetId: "asset" }],
+      assets: [{ id: "asset", digestSha256: "a".repeat(64), mediaType, representation: "image" }],
+    });
+
+    const result = await mountCompiledNodeDetail({ host, detail, resolveAsset });
+
+    expect(result).toEqual(expect.objectContaining({ status: "fallback", error: "Node Detail asset mount has an unsupported representation." }));
+    expect(resolveAsset).not.toHaveBeenCalled();
   });
 
   it.each(["input", "select", "textarea"])("rejects a graph capability mounted on incompatible <%s>", async (hostName) => {
@@ -529,11 +603,11 @@ describe("compiled Node Detail product runtime", () => {
 
     const runtime = await mountCompiledNodeDetail({ host, detail });
 
-    const runtimeCss = runtime.shadowRoot.querySelector("[data-node-detail-runtime-styles]").textContent;
-    expect(runtimeCss).toContain("inline-size:100%!important");
-    expect(runtimeCss).toContain("contain:layout paint style!important");
-    expect(runtimeCss).toContain("overflow:hidden!important");
-    expect(runtimeCss).toContain("overflow-wrap:anywhere");
+    const runtimeCss = mountedCss(runtime.shadowRoot, 1);
+    expect(runtimeCss).toMatch(/inline-size:\s*100%\s*!important/);
+    expect(runtimeCss).toMatch(/contain:\s*layout paint style\s*!important/);
+    expect(runtimeCss).toMatch(/overflow:\s*hidden\s*!important/);
+    expect(runtimeCss).toMatch(/overflow-wrap:\s*anywhere/);
     expect(runtime.shadowRoot.querySelector(".wide-grid")).not.toBeNull();
     expect(runtime.shadowRoot.textContent.indexOf("First")).toBeLessThan(runtime.shadowRoot.textContent.indexOf("After"));
   });
@@ -681,6 +755,20 @@ describe("compiled Node Detail product runtime", () => {
     expect(window.document.querySelector("#detailContent").textContent).toContain("Legacy fallback");
     expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(false);
     expect(window.document.querySelector("#nodeInputActions").classList.contains("hidden")).toBe(false);
+
+    node.authoredDetail = compiledPackage({
+      version: detail.version,
+      components: detail.components,
+      mounts: detail.mounts.map((mount) => mount.id === "expand"
+        ? { ...mount, capability: { ...mount.capability, kind: "invoke" } }
+        : mount),
+      assets: detail.assets,
+    });
+    workspace.render();
+    await vi.waitFor(() => expect(
+      window.document.querySelector("#detailContent [role='status']")?.textContent,
+    ).toBe("This authored detail does not bind every accepted node action."));
+    expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(false);
 
     onNavigateLayer.mockClear();
     node.authoredDetail = { ...detail, integritySha256: "0".repeat(64) };

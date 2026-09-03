@@ -2270,14 +2270,14 @@ settings:
 <li>Each draft <code>NodeObject</code> owns one typed detail builder alongside its backward-compatible string detail.</li>
 <li>Graph-action mounts derive source-node provenance from the owning node. Capability calls supply only the action; its exact draft source layer must contain that owner.</li>
 <li>Authors checkpoint stable HTML and CSS components through <code>checkpointNodeDetail</code> before submission. Checkpoint errors retain component and source locations; there is no public author-controlled finalize operation.</li>
-<li><code>gc=${capability}</code> binds typed actions to compatible native hosts. <code>asset=${assetRef}</code> carries only a logical visual identity.</li>
+<li><code>gc=${capability}</code> binds typed actions to compatible native hosts. V1 does not export <code>assetRef</code> through either development or packaged agent resources; agent-facing visual asset interpolation remains deferred until the authenticated graph resolver is connected.</li>
 <li>Runtime capability values use the exact graph-client grammar. Capability, action, option, presentation, and draft provenance inputs are snapshotted once from ordinary own data.</li>
 <li>Validation and compilation share that frozen snapshot. Accessors, prototype data, symbols, traps, unknown fields, malformed actions, and invalid presentations fail at their authored source.</li>
 <li>Source-layer membership requires the exact owning <code>NodeObject</code> identity, not an equal client key.</li>
 <li>Author code cannot provide asset authority, availability, digest, sanitization, or a resolver.</li>
 <li>Before authenticated resolution, checkpoint and first-submit finalization snapshot the ordered component program from exact ordinary own data descriptors.</li>
 <li>The snapshot contains HTML/CSS arrays, bindings, actions, provenance, navigate targets, and assets. Resolution-time mutation cannot alter the in-flight package.</li>
-<li>The client resolves logical assets from that snapshot through authenticated transport and validates the complete response as untrusted data before compilation.</li>
+<li>The compiler retains the bounded logical-asset grammar for trusted fixtures and future resolver integration, but the V1 public agent surface cannot construct those bindings.</li>
 <li>The first submit registers shared submission and detail-finalization promises in private client maps keyed by the exact <code>NodeObject</code>. Registration happens before envelope, compiler, resolver, or transport work begins. Synchronous re-entry and ordinary concurrency join those same promises.</li>
 <li>Resolution or compilation failure leaves the builder editable. Successful compilation freezes authoring before one shared transport request.</li>
 <li><code>NodeObject.ref</code> is a non-configurable read-only projection of private response state.</li>
@@ -2336,6 +2336,7 @@ settings:
 <tr><td>Visual representation and #338 fallback</td><td>A link and independent image asset compose in one authored layout; missing content preserves the accessible text link and exposes an explicit visual fallback. Electron system-browser routing and rendered icon placement remain Product visual checkpoints.</td></tr>
 <tr><td>Confinement and rejection</td><td>Integrity drift, executable markup, direct remote image content, unbound interaction, incompatible action authority, unsafe URLs, and unsupported visual resolution fail deterministically without paid inference.</td></tr>
 <tr><td>Product compatibility</td><td>The production workspace seam proves mounting against the projected #365 contract, durable input, action routing, in-place rerender, tray suppression, fallback controls, and legacy Markdown. It is not final #365 or #371 integration evidence.</td></tr>
+<tr><td>Production CSP</td><td><code>npm run test:desktop:node-detail-csp</code> loads the real Product page and proves computed authored and containment styles plus a blob-backed SVG under the shipped policy.</td></tr>
 </tbody>
 </table>
 <h3>6.4 Accepted Node Detail persistence and portability</h3>

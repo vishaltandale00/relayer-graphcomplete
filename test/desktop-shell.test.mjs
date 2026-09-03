@@ -184,6 +184,7 @@ describe("desktop skeleton", () => {
     const desktopMain = await readFile(new URL("../desktop/main/index.mjs", import.meta.url), "utf8");
     const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
     const desktopManifest = await readFile(new URL("../desktop/package.json", import.meta.url), "utf8");
+    const packageScripts = JSON.parse(packageManifest).scripts;
     const vitestConfiguration = await readFile(new URL("../vitest.config.js", import.meta.url), "utf8");
     const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
     const desktopWindow = await readFile(new URL("../desktop/main/window.mjs", import.meta.url), "utf8");
@@ -197,6 +198,10 @@ describe("desktop skeleton", () => {
       prd.indexOf('</section>', prd.indexOf('<section class="status-tracker"')),
     );
     const prdServer = await readFile(new URL("../docs/prd/server.mjs", import.meta.url), "utf8");
+    expect(html).toContain("style-src 'self'");
+    expect(html).not.toContain("style-src 'self' 'unsafe-inline'");
+    expect(html).toContain("img-src 'self' data: blob:");
+    expect(packageScripts["test:desktop:node-detail-csp"]).toContain("scripts/test-node-detail-csp.mjs");
     expect(html).toContain("Connect a provider");
     expect(html).toContain('id="providerSetupOptions"');
     expect(html).toContain('id="newProviderDefinition"');

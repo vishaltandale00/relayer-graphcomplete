@@ -3,13 +3,11 @@ export {
   DETAIL_AUTHORING_LIMITS,
   DetailCompilationError,
   NodeDetailAuthoring,
-  assetRef,
   css,
   detailCapability,
   html,
 } from "./detail.js";
 export type {
-  AssetRef,
   CompiledAsset,
   CompiledAssetMount,
   CompiledCapabilityMount,

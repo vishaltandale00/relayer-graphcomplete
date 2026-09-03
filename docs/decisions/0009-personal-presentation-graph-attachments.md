@@ -14,6 +14,8 @@ Relayer owns one hidden personal-presentation profile thread. Its V0 and V1 reco
 
 V2 is another ordinary immutable accepted completion in that same hidden thread, not a mutation or extension layer of V1. Its one required root layer owns three self-contained preference nodes: Decision-useful center, Adaptive progressive disclosure, and Visible working state. Decision-useful center is connected by ordinary undirected edges to each of the other two nodes; the authored layout places that hub above the two related preferences. V2 is materialized and published without changing the active V1 policy. Activation remains a separate product-policy operation.
 
+V3 is the Eval-only successor to V2 for the visual Node Detail comparison. It keeps the complete V2 graph and adds the Authored visual Node Details preference. The comparison gives both control and treatment the same recursive Complete authority, but child creation is observational rather than required: requiring a child would make recursion behavior a second manipulated variable instead of testing only the attached presentation version. Every child that is observed remains subject to the full attachment, settlement, accepted-current, and exportable-trace checks.
+
 The product database reserves negative row identities for this singleton hidden
 thread and its source interactions. They remain valid foreign-key-backed rows
 but cannot consume or collide with the positive product IDs used by ordinary
@@ -42,6 +44,7 @@ Execution traces and Eval artifacts record only `personalPresentationVersionId`.
 - Activating a new version is a product-policy operation after evidence; it never rewrites historical pins.
 - V1 deliberately adds no preference editor, attachment UI, export field, pairwise Eval judge, new metric, or harness scheduler.
 - V2 can guide useful current-pointer progress and semantic work scopes, but it cannot grant current-write or completion-broker authority and does not require either behavior for a simple task.
+- The V2/V3 visual comparison records broker authority in both cells without treating zero provider-native children as failure; this does not weaken validation of any child that is created.
 
 ## Verification
 

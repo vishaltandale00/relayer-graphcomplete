@@ -1319,7 +1319,16 @@ export function resolveCompiledNodeDetailAction(actions, reference, node) {
 export function compiledNodeDetailCoversActions(detail, actions, node) {
   const boundActionIds = new Set((detail?.mounts ?? [])
     .filter((mount) => mount.kind === "capability" && mount.capability.kind !== "link")
-    .map((mount) => resolveCompiledNodeDetailAction(actions, mount.capability.action, node)?.id)
+    .map((mount) => {
+      const action = resolveCompiledNodeDetailAction(actions, mount.capability.action, node);
+      if (mount.capability.kind === "input" && action?.kind === "input") return action.id;
+      if (mount.capability.kind === "invoke" && action?.kind === "invoke") return action.id;
+      if ((mount.capability.kind === "expand" || mount.capability.kind === "reference")
+        && action?.kind === "navigate"
+        && action.relation === mount.capability.kind
+        && action.targetLayerId != null) return action.id;
+      return undefined;
+    })
     .filter((id) => id != null)
     .map(String));
   return (actions ?? []).every((action) => boundActionIds.has(String(action.id)));

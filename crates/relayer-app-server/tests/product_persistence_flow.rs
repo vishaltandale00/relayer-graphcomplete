@@ -2958,13 +2958,11 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
     assert!(exported_answer.kind.contains("[project-path]"));
     assert_eq!(exported_answer.icon, "file");
     assert!(exported_answer.title.contains("[project-path]"));
-    assert!(exported_answer.detail.contains("[project-path]"));
-    assert!(exported_answer.authored_detail.is_none());
-    assert!(
-        exported_answer
-            .detail
-            .contains("Authored visual detail omitted because project-path redaction")
+    assert_eq!(
+        exported_answer.detail,
+        "Accepted durable detail [project-path]"
     );
+    assert!(exported_answer.authored_detail.is_none());
     let exported_invoke = accepted_view
         .layers
         .iter()
