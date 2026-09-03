@@ -16,14 +16,27 @@ use relayer_graph_core::{
     },
 };
 use relayer_graph_server::search_index::{
-    GraphQueryFailure, GraphQueryResult, LadybugSearchIndex, QueryCancellation,
-    SearchTargetReadiness,
+    GraphQueryFailure, LadybugSearchIndex, QueryCancellation, SearchTargetReadiness,
     contract_test_support::{
         endpoint_scan_count, index_from_supergraph, normalization_error, reset_endpoint_scan_count,
     },
 };
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::{path::Path, sync::Arc, time::Duration};
+
+/// This file asserts result bytes and error precedence, not latency, so every
+/// index it builds runs requests that leave `wall_time_ms` unset under a budget
+/// that a scheduling stall on a shared runner cannot reach. Requests that
+/// narrow `wall_time_ms` keep their own bound, so the deadline tests and the
+/// negative corpus still prove the 250 ms product budget, and
+/// `representative_cold_and_warm_queries_stay_below_the_contract_target`
+/// proves latency from the diagnostics rather than from the deadline.
+const CONTRACT_TEST_WALL_TIME: Duration = Duration::from_secs(10);
+
+fn contract_index_from(database: &Path, supergraph: Value) -> LadybugSearchIndex {
+    index_from_supergraph(database, supergraph)
+        .with_contract_test_wall_time(CONTRACT_TEST_WALL_TIME)
+}
 
 fn fixture(name: &str) -> Value {
     let path = format!(
@@ -44,7 +57,7 @@ fn target_of(target: &Value) -> SearchTarget {
 fn contract_index() -> (tempfile::TempDir, LadybugSearchIndex) {
     let directory = tempfile::tempdir().unwrap();
     let index = tokio::task::block_in_place(|| {
-        index_from_supergraph(
+        contract_index_from(
             &directory.path().join("graph.db"),
             fixture("supergraph.json"),
         )
@@ -94,41 +107,34 @@ async fn frozen_positive_cases_reproduce_the_contract_results() {
     let (_directory, index) = contract_index();
 
     let positive = fixture("positive.json");
-    let (mut matched, mut mismatched, mut overran, mut retried) =
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut matched, mut mismatched) = (Vec::new(), Vec::new());
 
     for case in positive["cases"].as_array().expect("cases") {
         let id = case["id"].as_str().expect("id").to_owned();
-        let request = request_json(&request_for(case));
+        let request = request_for(case);
         let authorized = target_of(&case["target"]);
         let permit = QueryReadPermit::for_contract_test(authorized);
         let expected = case["expectedResult"].clone();
-        let (outcome, retried_once) = query_within_wall_budget(&index, &permit, &request).await;
-        if retried_once {
-            retried.push(id.clone());
-        }
-        match outcome.map(|result| result.outcome) {
+        let outcome = index
+            .query(
+                &permit,
+                &request_json(&request),
+                QueryCancellation::default(),
+            )
+            .await
+            .map(|result| result.outcome);
+        match outcome {
             Ok(outcome) if outcome.to_json() == expected => matched.push(id),
             Ok(outcome) => mismatched.push((id, outcome.to_json(), expected)),
-            Err(GraphQueryFailure::Contract(error))
-                if error.code == QueryCode::WallTimeExceeded =>
-            {
-                overran.push((id, error))
-            }
             Err(error) => mismatched.push((id, json!({"error": format!("{error:?}")}), expected)),
         }
     }
 
     eprintln!(
-        "v1 conformance: {} matched, {} mismatched, {} overran, {} retried once {retried:?}",
+        "v1 conformance: {} matched, {} mismatched",
         matched.len(),
-        mismatched.len(),
-        overran.len(),
-        retried.len()
+        mismatched.len()
     );
-    for (id, error) in &overran {
-        eprintln!("  {id}\n    overran  {error:?}");
-    }
     for (id, actual, expected) in &mismatched {
         eprintln!(
             "  {id}\n    expected {}\n    actual   {}",
@@ -136,56 +142,13 @@ async fn frozen_positive_cases_reproduce_the_contract_results() {
             serde_json::to_string(actual).unwrap_or_default()
         );
     }
-    // Every frozen positive case reproduces the contract's exact result. A
-    // semantic mismatch is asserted first so it can never hide behind a
-    // contention message.
+    // Every frozen positive case reproduces the contract's exact result.
     assert_eq!(
         mismatched.len(),
         0,
         "a case the slice admits no longer reproduces the contract"
     );
-    // A wall-time overrun says nothing about the result bytes, so it is
-    // reported as what it is instead of as a semantic mismatch. The budget
-    // itself is proven by the deadline tests below and by the negative corpus;
-    // the error text is printed above so a spurious engine interrupt that
-    // maps to the same code stays visible.
-    assert!(
-        overran.is_empty(),
-        "wall-time budget exceeded twice for {:?}: runner contention, not query semantics",
-        overran.iter().map(|(id, _)| id).collect::<Vec<_>>()
-    );
     assert_eq!(matched.len(), 20, "matched: {matched:?}");
-}
-
-/// Runs one frozen case, retrying once when the only failure is the 250 ms
-/// product wall-time budget, and reports whether the retry happened. The
-/// corpus runs its queries back to back while sibling tests share the
-/// four-vCPU CI runner, and the two-hop traversal cases sit close enough to
-/// that budget that a scheduling stall tips them over. One retry clears a
-/// transient stall; a query that needs more than the budget on a quiet worker
-/// still fails on the second attempt. The second attempt queues behind the
-/// interrupted first job on the store's single worker, so it sees slightly
-/// less than the full budget: that biases toward a reported overrun, never
-/// toward a false pass.
-async fn query_within_wall_budget(
-    index: &LadybugSearchIndex,
-    permit: &QueryReadPermit,
-    request: &[u8],
-) -> (Result<GraphQueryResult, GraphQueryFailure>, bool) {
-    let first = index
-        .query(permit, request, QueryCancellation::default())
-        .await;
-    match first {
-        Err(GraphQueryFailure::Contract(ref error))
-            if error.code == QueryCode::WallTimeExceeded =>
-        {
-            let second = index
-                .query(permit, request, QueryCancellation::default())
-                .await;
-            (second, true)
-        }
-        other => (other, false),
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -257,12 +220,14 @@ async fn frozen_issue_354_hardening_corpus_conforms_through_real_ladybug() {
     let permit = QueryReadPermit::for_contract_test(target);
 
     for case in corpus["positiveCases"].as_array().expect("positiveCases") {
-        let (outcome, retried_once) =
-            query_within_wall_budget(&index, &permit, &request_json(&request_for(case))).await;
-        if retried_once {
-            eprintln!("{}: retried once", case["id"]);
-        }
-        let outcome = outcome.unwrap_or_else(|error| panic!("{}: {error:?}", case["id"]));
+        let outcome = index
+            .query(
+                &permit,
+                &request_json(&request_for(case)),
+                QueryCancellation::default(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{}: {error:?}", case["id"]));
         assert_eq!(
             outcome.outcome.to_json(),
             case["expectedResult"],
@@ -811,7 +776,7 @@ async fn expansion_budget_does_not_truncate_cartesian_results() {
         }));
     }
     let index = tokio::task::block_in_place(|| {
-        index_from_supergraph(&directory.path().join("graph.db"), supergraph)
+        contract_index_from(&directory.path().join("graph.db"), supergraph)
     });
     let target = SearchTarget::Thread(ThreadId::new(41).unwrap());
     let permit = QueryReadPermit::for_contract_test(target);
@@ -885,7 +850,7 @@ async fn endpoint_normalization_never_scans_an_unrelated_target() {
         }));
     }
     let index = tokio::task::block_in_place(|| {
-        index_from_supergraph(&directory.path().join("graph.db"), supergraph)
+        contract_index_from(&directory.path().join("graph.db"), supergraph)
     });
     let target = SearchTarget::Thread(ThreadId::new(41).unwrap());
     let permit = QueryReadPermit::for_contract_test(target);
@@ -1029,7 +994,7 @@ async fn cancellation_and_outer_deadline_leave_the_store_reusable() {
 async fn cancellation_interrupts_only_its_owned_in_flight_job() {
     let directory = tempfile::tempdir().unwrap();
     let index = Arc::new(tokio::task::block_in_place(|| {
-        index_from_supergraph(
+        contract_index_from(
             &directory.path().join("graph.db"),
             fixture("supergraph.json"),
         )

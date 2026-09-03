@@ -5319,56 +5319,66 @@ mod tests {
         use std::{fs, os::unix::fs::PermissionsExt};
 
         let directory = tempfile::tempdir().unwrap();
+        // Written by the escaped child once it owns its own session and before
+        // it writes anything: the witness that an escaped writer exists.
+        let forked = directory.path().join("escaped-writer-forked");
+        // Written by the escaped child once its capture pipe is closed.
         let marker = directory.path().join("escaped-writer-closed");
         let fixture = directory.path().join("setsid-fixture");
         fs::write(
             &fixture,
-            "#!/bin/sh\nperl -MPOSIX=setsid -e '$SIG{PIPE}=\"IGNORE\"; if (fork() == 0) { setsid(); while (syswrite(STDOUT, \"x\" x 4096)) {} open(my $f, \">\", $ENV{RELAYER_ESCAPE_MARKER}); print $f \"closed\"; exit 0; } exit 0;'\n",
+            "#!/bin/sh\nperl -MPOSIX=setsid -e '$SIG{PIPE}=\"IGNORE\"; if (fork() == 0) { setsid(); open(my $w, \">\", $ENV{RELAYER_ESCAPE_FORKED}); close($w); while (syswrite(STDOUT, \"x\" x 4096)) {} open(my $f, \">\", $ENV{RELAYER_ESCAPE_MARKER}); print $f \"closed\"; exit 0; } exit 0;'\n",
         )
         .unwrap();
         let mut permissions = fs::metadata(&fixture).unwrap().permissions();
         permissions.set_mode(0o700);
         fs::set_permissions(&fixture, permissions).unwrap();
+        let bound = SNAPSHOT_TIMEOUT;
         let started = Instant::now();
         let result = run_bounded_command_with(
             fixture.as_os_str(),
             directory.path(),
             &[],
-            Duration::from_millis(500),
+            bound,
             |command| {
+                command.env("RELAYER_ESCAPE_FORKED", &forked);
                 command.env("RELAYER_ESCAPE_MARKER", &marker);
             },
         );
-        // Reaching `OutputTooLarge` needs sixty-four 4 KiB writes from the
-        // escaped child inside the 500 ms bound. `Timeout` means the fixture
-        // leader was not reaped within that bound, which on a contended runner
-        // happens when `sh` and `perl` start slowly; the leader exits right
-        // after its fork, so write speed decides `Ok` against `OutputTooLarge`
-        // and never `Timeout`. Either way the parent bounded the run and moved
-        // on, which is the contract here.
-        // The marker check below is what proves the descendant lost its
-        // writable capture storage.
-        assert!(matches!(
-            result,
-            Ok(_) | Err(GitRunError::OutputTooLarge) | Err(GitRunError::Timeout(_))
-        ));
-        // Hang guard: the escaped writer never closes its pipe, so a parent
-        // that waited on it would never return. The guard proves the parent
-        // moved on and does not need to be tight to do so; the `Timeout` path
-        // alone spends the 500 ms bound plus reader and cleanup time.
-        assert!(started.elapsed() < Duration::from_secs(5));
-        // The escaped writer is a starved child on a busy machine; give it
-        // generous time to observe its closed pipe. The loop returns as soon
-        // as the marker appears, so a passing run never waits this long.
-        for _ in 0..1000 {
-            if marker.exists() {
-                break;
+        let elapsed = started.elapsed();
+        match result {
+            // The leader exits right after its fork, so write speed decides
+            // whether the escaped child fills the capture bound first.
+            Ok(_) | Err(GitRunError::OutputTooLarge) => {}
+            // Under suite contention the bound can expire before `sh` and
+            // `perl` reach the fork. The group is then killed whole, no escaped
+            // writer exists, and there is nothing to prove; the descriptor
+            // holder test returns early the same way.
+            Err(GitRunError::Timeout(_))
+                if !retry_cleanup_until(Instant::now() + Duration::from_secs(1), || {
+                    forked.exists()
+                }) =>
+            {
+                return;
             }
-            thread::sleep(Duration::from_millis(5));
+            // A `Timeout` after the fork means the parent did not observe the
+            // leader's exit while only the escaped writer still held the pipe:
+            // leader-exit detection must never wait on that writer.
+            Err(error) => panic!("parent did not observe the leader's exit: {error:?}"),
         }
+        // The parent returns as soon as it observes the leader's exit and
+        // finishes its bounded cleanup; a parent that waited on the escaped
+        // writer's pipe would never return, because that writer never closes it.
         assert!(
-            marker.exists(),
-            "escaped writer never observed its closed pipe (or the fixture never reached its fork before the bound)"
+            elapsed < bound + Duration::from_secs(1),
+            "parent took {elapsed:?} to move on"
+        );
+        // The escaped writer is a starved child on a busy machine; the poll
+        // returns as soon as the marker appears, so a passing run never waits
+        // this long.
+        assert!(
+            retry_cleanup_until(Instant::now() + Duration::from_secs(5), || marker.exists()),
+            "escaped writer never observed its closed pipe"
         );
     }
 
