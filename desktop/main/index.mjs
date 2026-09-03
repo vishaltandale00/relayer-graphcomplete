@@ -30,6 +30,7 @@ import { inspectCodexBrowserMcpRuntime } from "./services/codex-browser-mcp-runt
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { installElectronMainErrorAdapter } from "./services/electron-main-error-adapter.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
+import { settleShutdownWithin } from "./services/update-restart.mjs";
 import { GraphCompleteRuntimeService, productTemporalFeatures } from "./services/graphcomplete-runtime.mjs";
 import {
   inspectPrimeAgentRuntime,
@@ -347,6 +348,20 @@ if (primaryInstance) {
     ...(fatal ? { reason: new Error("Relayer is closing after a fatal service failure.") } : {}),
   });
 
+  const UPDATE_RESTART_SHUTDOWN_BUDGET_MS = 10_000;
+
+  async function settleShutdownForUpdateRestart() {
+    await settleShutdownWithin({
+      shutdown: shutdownServices,
+      budgetMs: UPDATE_RESTART_SHUTDOWN_BUDGET_MS,
+      onTimeout: (budgetMs) => console.error(
+        `Relayer services did not stop within ${budgetMs}ms. `
+        + "Continuing with the update restart; child processes were already terminated.",
+      ),
+      onError: (error) => console.error("Relayer shutdown failed before the update restart:", error),
+    });
+  }
+
   async function shutdownServices() {
     shutdownPromise ??= (async () => {
       const results = [];
@@ -567,7 +582,7 @@ if (primaryInstance) {
       setAppearance: (value) => { appearance = value; },
       beforeUpdateInstall: async () => {
         if (!await confirmQuit()) return false;
-        await shutdownServices();
+        await settleShutdownForUpdateRestart();
         shutdownComplete = true;
         return true;
       },
