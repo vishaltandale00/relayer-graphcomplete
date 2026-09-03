@@ -239,6 +239,12 @@ export async function captureInstalledUpdateState({ port, outputPath, targetVers
         version: document.querySelector("#currentVersion")?.textContent || "",
         status: document.querySelector("#updateStatus")?.textContent || "",
         channel: document.querySelector("#updateChannel")?.value || "",
+        // When the section is present and correct but something sits on top of
+        // it, name that element. Otherwise the failure only reports
+        // "visible: false" and every candidate overlay stays a guess.
+        topmost: topmost
+          ? topmost.tagName.toLowerCase() + "#" + (topmost.id || "-") + "." + (topmost.className || "-")
+          : "none",
       };
     })()`, (state) => (
       state.visible && state.version === `Current version ${targetVersion}` &&
