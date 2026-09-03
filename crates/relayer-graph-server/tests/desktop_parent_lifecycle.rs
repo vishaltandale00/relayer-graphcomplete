@@ -19,7 +19,10 @@ fn reads_private_control_token_from_stdin_and_exits_with_desktop_parent() {
     ));
     fs::create_dir_all(&root).unwrap();
 
-    let executable = env!("CARGO_BIN_EXE_relayer-graph-server");
+    let executable = option_env!("CARGO_BIN_EXE_relayer-graph-server")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("CARGO_BIN_EXE_relayer-graph-server").map(Into::into))
+        .expect("Cargo must provide the relayer-graph-server test executable");
     let mut child = Command::new(executable)
         .args([
             "--database",
