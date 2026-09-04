@@ -463,6 +463,66 @@ describe("agent-facing graph objects", () => {
     expect(() => node.detailAuthoring.setComponent("late", html`<p>Too late</p>`)).toThrow("finalized");
   });
 
+  it("clears a checkpointed package when the author explicitly empties the builder", async () => {
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({
+        node: { id: 12, clientKey: "cleared-node", kind: "concept", icon: "box", title: "Cleared", detail: "Markdown only", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Cleared", "Markdown only", "concept", "cleared-node");
+    node.detailAuthoring.setComponent("summary", html`<p>Checkpointed</p>`);
+    expect(node.detailAuthoring.checkpoint().components).toHaveLength(1);
+    node.detailAuthoring.clear();
+    expect(node.detailAuthoring.checkpoint().components).toHaveLength(0);
+
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const accepted = await client.submitNode(node);
+
+    expect(requests).toHaveLength(1);
+    expect(Object.hasOwn(requests[0]!, "authoredDetail")).toBe(true);
+    expect(requests[0]!.authoredDetail).toBeNull();
+    expect(accepted.authoredDetail).toBeUndefined();
+    expect(node.ref?.authoredDetail).toBeUndefined();
+    expect((await client.checkpointNodeDetail(node)).components).toHaveLength(0);
+    expect(() => node.detailAuthoring.clear()).toThrow("finalized");
+  });
+
+  it("rejects a server that retains a package the author explicitly cleared", async () => {
+    const retained = {
+      version: 1,
+      components: [{ id: "summary", order: 0, html: "<p>Checkpointed</p>", css: "" }],
+      mounts: [],
+      assets: [],
+      integritySha256: "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: { id: 13, clientKey: "stale-node", kind: "concept", icon: "box", title: "Cleared", detail: "Markdown only", authoredDetail: retained, state: "draft" },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const node = new NodeObject("box", "Cleared", "Markdown only", "concept", "stale-node");
+    node.detailAuthoring.setComponent("summary", html`<p>Checkpointed</p>`).clear();
+
+    await expect(new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node))
+      .rejects.toMatchObject({ code: "invalid_node_response" });
+  });
+
+  it("authoring again after clear submits a package instead of a clear", async () => {
+    let request: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      request = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return nodeResponse(init, { id: 14, kind: "concept", icon: "box", title: "Again", detail: "Fallback", state: "draft" });
+    }));
+    const node = new NodeObject("box", "Again", "Fallback", "concept", "again-node");
+    node.detailAuthoring.setComponent("summary", html`<p>First</p>`).clear().setComponent("summary", html`<p>Second</p>`);
+
+    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node);
+
+    const submitted = request?.authoredDetail as { components: { html: string }[] };
+    expect(submitted.components).toHaveLength(1);
+    expect(submitted.components[0]?.html).toBe("<p>Second</p>");
+  });
+
   it("accepts and snapshots a valid authored detail package retained by the server", async () => {
     const retained = {
       version: 1,

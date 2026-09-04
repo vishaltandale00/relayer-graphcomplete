@@ -418,6 +418,7 @@ mod tests {
                 title: title.into(),
                 detail: format!("Accepted detail for {title}"),
                 authored_detail: None,
+                authored_detail_omitted: None,
                 state: ExportRecordState::Accepted,
             }],
             edges: vec![],

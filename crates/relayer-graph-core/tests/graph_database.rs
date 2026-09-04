@@ -197,6 +197,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                         title: "Queue".into(),
                         detail: "A queue".into(),
                         authored_detail: None,
+                        authored_detail_omitted: false,
                     }],
                     edges: vec![],
                     actions: vec![],
@@ -248,6 +249,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     title: "Path".into(),
                     detail: "Invoke this path".into(),
                     authored_detail: None,
+                    authored_detail_omitted: false,
                 }],
                 edges: vec![],
                 actions: vec![ImportedAction {
@@ -312,6 +314,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     title: "Destination".into(),
                     detail: "Imported result".into(),
                     authored_detail: None,
+                    authored_detail_omitted: false,
                 }],
                 edges: vec![],
                 actions: vec![],
@@ -411,6 +414,37 @@ async fn imported_conversation_reconnects_the_canonical_authored_detail_to_its_n
 }
 
 #[tokio::test]
+async fn imported_conversation_notes_an_authored_detail_the_export_omitted() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    let layer = &mut input.turns[0].accepted_view.as_mut().unwrap().layers[0];
+    let original_detail = layer.nodes[0].detail.clone();
+    layer.nodes[0].authored_detail_omitted = true;
+    // Context snapshots of the same node never carry the marker; the import
+    // identity check must still treat both as one portable node.
+    let accepted_node = layer.nodes[0].clone();
+    input.turns[0].contexts.push(ImportedInteractionContext {
+        id: "context-action".into(),
+        target: ImportedNode {
+            authored_detail_omitted: false,
+            ..accepted_node
+        },
+        source_interaction_node_id: "source-interaction".into(),
+        source_layer_id: "source-layer".into(),
+        annotations: vec![],
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+    let node = &receipt.turns[0].output.as_ref().unwrap().root_layer.nodes[0];
+
+    assert_eq!(node.authored_detail, None);
+    assert_eq!(
+        node.detail,
+        format!("{original_detail}\n\n{IMPORTED_AUTHORED_DETAIL_OMITTED_NOTE}")
+    );
+}
+
+#[tokio::test]
 async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_turns() {
     let database = GraphDatabase::in_memory().await.unwrap();
     let mut input = imported_conversation("interaction-1");
@@ -422,6 +456,7 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
         title: "Queue".into(),
         detail: "A queue".into(),
         authored_detail: None,
+        authored_detail_omitted: false,
     };
     input.turns[0].interaction_node_id = Some("interaction-1".into());
     input.turns[0].contexts = vec![ImportedInteractionContext {
@@ -669,6 +704,7 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
         title: "Worker".into(),
         detail: "A worker".into(),
         authored_detail: None,
+        authored_detail_omitted: false,
     });
     // Two input actions, both genuinely authored by node-1.
     for id in ["input-action-1", "input-action-2"] {
@@ -4454,6 +4490,61 @@ async fn draft_resubmission_without_authored_detail_preserves_checkpointed_packa
     accept_single_node(&writer, interaction, resubmitted).await;
     let accepted = writer.get_node(checkpointed.id).await.unwrap();
     assert_eq!(accepted.authored_detail.as_ref(), Some(&package));
+}
+
+#[tokio::test]
+async fn draft_resubmission_can_explicitly_clear_a_checkpointed_package() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let package = serde_json::json!({
+        "version": 1,
+        "components": [{"id":"summary","order":0,"html":"<p>Checkpointed</p>","css":""}],
+        "mounts": [],
+        "assets": [],
+        "integritySha256": "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac"
+    });
+    let draft = NodeDraft {
+        client_key: "answer".into(),
+        kind: "concept".into(),
+        icon: "box".into(),
+        title: "Checkpointed".into(),
+        detail: "Legacy fallback".into(),
+    };
+    let checkpointed = writer
+        .submit_node_with_authored_detail(&draft, Some(&package))
+        .await
+        .unwrap();
+
+    let cleared = writer
+        .submit_node_with_authored_detail_update(
+            &NodeDraft {
+                title: "Markdown only".into(),
+                ..draft.clone()
+            },
+            AuthoredDetailUpdate::Clear,
+        )
+        .await
+        .unwrap();
+    assert_eq!(cleared.id, checkpointed.id);
+    assert_eq!(cleared.title, "Markdown only");
+    assert_eq!(cleared.authored_detail, None);
+
+    // Retain after a clear stays cleared; a later package replaces it again.
+    let retained = writer.submit_node(&draft).await.unwrap();
+    assert_eq!(retained.authored_detail, None);
+    let replaced = writer
+        .submit_node_with_authored_detail_update(&draft, AuthoredDetailUpdate::Replace(&package))
+        .await
+        .unwrap();
+    assert_eq!(replaced.authored_detail.as_ref(), Some(&package));
+
+    let cleared_again = writer
+        .submit_node_with_authored_detail_update(&draft, AuthoredDetailUpdate::Clear)
+        .await
+        .unwrap();
+    accept_single_node(&writer, interaction, cleared_again).await;
+    let accepted = writer.get_node(checkpointed.id).await.unwrap();
+    assert_eq!(accepted.authored_detail, None);
 }
 
 #[tokio::test]

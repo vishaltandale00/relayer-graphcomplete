@@ -230,6 +230,7 @@ fn imported_conversation(project_id: Option<ProjectId>) -> ImportedConversation 
                         title: "Imported queue".into(),
                         detail: "A queue".into(),
                         authored_detail: None,
+                        authored_detail_omitted: false,
                     }],
                     edges: vec![],
                     actions: vec![],

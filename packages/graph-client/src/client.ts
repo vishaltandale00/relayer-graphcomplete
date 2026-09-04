@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { isProxy } from "node:util/types";
-import { DetailCompilationError, NodeDetailAuthoring, beginNodeDetailAuthoringFinalization, cancelNodeDetailAuthoringFinalization, compileAuthenticatedNodeDetail, finalizedNodeDetailAuthoring, freezeNodeDetailAuthoring, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, snapshotRetainedCompiledNodeDetail, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
+import { DetailCompilationError, NodeDetailAuthoring, beginNodeDetailAuthoringFinalization, cancelNodeDetailAuthoringFinalization, compileAuthenticatedNodeDetail, finalizedNodeDetailAuthoring, freezeNodeDetailAuthoring, isNodeDetailAuthoringCleared, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, snapshotRetainedCompiledNodeDetail, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
 import { isRelayerIconName } from "./icons.js";
 import { applyAcceptedNodeResponse } from "./node-response.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
@@ -81,6 +81,11 @@ export class RelayerGraphClient {
     let authoredDetail: CompiledNodeDetail | undefined;
     try {
       authoredDetail = await this.finalizeNodeDetail(node, envelope);
+      // Three-state wire contract: a package replaces the draft's checkpointed
+      // package, `null` clears it (only after an explicit `clear()`), and an
+      // untouched empty builder omits the field so the graph retains it.
+      const submitsPackage = authoredDetail.components.length > 0;
+      const clearsPackage = !submitsPackage && isNodeDetailAuthoringCleared(envelope.detailAuthoring);
       const body = await this.request<unknown>("/api/graph/nodes", {
         method: "POST",
         body: JSON.stringify({
@@ -89,13 +94,14 @@ export class RelayerGraphClient {
           icon: envelope.icon,
           title: envelope.title,
           detail: envelope.detail,
-          ...(authoredDetail.components.length === 0 ? {} : { authoredDetail }),
+          ...(submitsPackage ? { authoredDetail } : clearsPackage ? { authoredDetail: null } : {}),
         }),
       });
       const accepted = validatedSubmittedNodeResponse(
         body,
         envelope.clientKey,
-        authoredDetail.components.length === 0 ? undefined : authoredDetail,
+        submitsPackage ? authoredDetail : undefined,
+        clearsPackage,
       );
       acceptedDetail.resolve(accepted.authoredDetail ?? authoredDetail);
       applyAcceptedNodeResponse(envelope.owner.object, accepted);
@@ -455,6 +461,7 @@ function validatedSubmittedNodeResponse(
   value: unknown,
   expectedClientKey: string,
   expectedAuthoredDetail?: CompiledNodeDetail,
+  clearedAuthoredDetail = false,
 ): GraphNode {
   try {
     const envelope = snapshotNodeResponseRecord(
@@ -501,6 +508,12 @@ function validatedSubmittedNodeResponse(
       return invalidNodeResponse("node.state", "Node state must be draft, accepted, or stopped");
     }
     const hasAuthoredDetail = candidate.optionalFields.has("authoredDetail");
+    if (clearedAuthoredDetail && hasAuthoredDetail) {
+      return invalidNodeResponse(
+        "node.authoredDetail",
+        "Node authored detail must be absent after this client cleared it",
+      );
+    }
     const acceptedAuthoredDetail = expectedAuthoredDetail === undefined && hasAuthoredDetail
       ? snapshotRetainedCompiledNodeDetail(fields.authoredDetail)
       : expectedAuthoredDetail;

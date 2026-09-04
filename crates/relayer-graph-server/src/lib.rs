@@ -8,7 +8,7 @@ use axum::{
 };
 use relayer_graph_core::query::{QueryError, preflight_public_request_json};
 use relayer_graph_core::{
-    ActionDraft, ActionId, ActionKind, CompletionOutput, CurrentTransition,
+    ActionDraft, ActionId, ActionKind, AuthoredDetailUpdate, CompletionOutput, CurrentTransition,
     CurrentTransitionReceipt, EdgeDraft, GraphAction, GraphDatabase, GraphError, GraphNode,
     GraphWriter, ImportedConversationStage, ImportedTurn, InteractionContextAction,
     InteractionContextDraft, InteractionContextTarget, InteractionInput, InteractionInputNode,
@@ -1192,8 +1192,29 @@ async fn revoke_capability(
 struct SubmitNodeRequest {
     #[serde(flatten)]
     draft: NodeDraft,
-    #[serde(default)]
-    authored_detail: Option<Value>,
+    /// Three-state: absent retains the draft's checkpointed package, `null`
+    /// clears it, and a package replaces it.
+    #[serde(default, deserialize_with = "deserialize_nullable_authored_detail")]
+    authored_detail: Option<Option<Value>>,
+}
+
+fn deserialize_nullable_authored_detail<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<Value>::deserialize(deserializer).map(Some)
+}
+
+impl SubmitNodeRequest {
+    fn authored_detail_update(&self) -> AuthoredDetailUpdate<'_> {
+        match &self.authored_detail {
+            None => AuthoredDetailUpdate::Retain,
+            Some(None) => AuthoredDetailUpdate::Clear,
+            Some(Some(package)) => AuthoredDetailUpdate::Replace(package),
+        }
+    }
 }
 
 async fn submit_node(
@@ -1206,7 +1227,7 @@ async fn submit_node(
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
-        .submit_node_with_authored_detail(&input.draft, input.authored_detail.as_ref())
+        .submit_node_with_authored_detail_update(&input.draft, input.authored_detail_update())
         .await?;
     Ok(Json(json!({"node": node})))
 }
@@ -1777,6 +1798,57 @@ mod tests {
         assert_eq!(resubmitted["node"]["title"], "Revised answer");
         assert_eq!(resubmitted["node"]["authoredDetail"], package);
 
+        let retained = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/nodes/{node_id}"))
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(retained.status(), StatusCode::OK);
+        let retained: Value =
+            serde_json::from_slice(&to_bytes(retained.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(retained["node"]["clientKey"], "answer");
+        assert_eq!(retained["node"]["title"], "Revised answer");
+        assert_eq!(retained["node"]["authoredDetail"], package);
+
+        // `authoredDetail: null` is the explicit clear; absence retains.
+        let cleared = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/nodes")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(
+                        json!({
+                            "clientKey": "answer",
+                            "kind": "concept",
+                            "icon": "box",
+                            "title": "Markdown only",
+                            "detail": "Markdown fallback",
+                            "authoredDetail": null
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cleared.status(), StatusCode::OK);
+        let cleared: Value =
+            serde_json::from_slice(&to_bytes(cleared.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(cleared["node"]["id"], node_id);
+        assert_eq!(cleared["node"]["title"], "Markdown only");
+        assert!(cleared["node"].get("authoredDetail").is_none());
+
         let fetched = app
             .oneshot(
                 Request::builder()
@@ -1792,8 +1864,8 @@ mod tests {
             serde_json::from_slice(&to_bytes(fetched.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(fetched["node"]["clientKey"], "answer");
-        assert_eq!(fetched["node"]["title"], "Revised answer");
-        assert_eq!(fetched["node"]["authoredDetail"], package);
+        assert_eq!(fetched["node"]["title"], "Markdown only");
+        assert!(fetched["node"].get("authoredDetail").is_none());
     }
 
     #[tokio::test]

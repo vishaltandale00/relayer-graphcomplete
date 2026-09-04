@@ -369,7 +369,23 @@ pub struct ExportNode {
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authored_detail: Option<serde_json::Value>,
+    /// Present when the accepted node carried an authored detail package that
+    /// export deliberately left out. The Markdown `detail` fallback remains.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_detail_omitted: Option<ExportAuthoredDetailOmission>,
     pub state: ExportRecordState,
+}
+
+/// Why an accepted node's authored detail package is absent from its export record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExportAuthoredDetailOmission {
+    /// A configured private project path was detected in the package, in raw
+    /// or decoded form, and the integrity-bound package cannot be rewritten.
+    PrivatePath,
+    /// A reason this build does not know; newer producers may add reasons.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -678,6 +694,7 @@ impl ConversationExportValidator {
                 title: context.target.title.clone(),
                 detail: context.target.detail.clone(),
                 authored_detail: None,
+                authored_detail_omitted: None,
                 state: context.target.state,
             };
             register_node_definition(
@@ -1997,6 +2014,13 @@ fn validate_layer(resolved: &ExportResolvedLayer, path: &str) -> Result<(), Expo
         require_string(&node.icon, format!("{path}.nodes[{index}].icon"))?;
         require_string(&node.title, format!("{path}.nodes[{index}].title"))?;
         require_string(&node.detail, format!("{path}.nodes[{index}].detail"))?;
+        if node.authored_detail.is_some() && node.authored_detail_omitted.is_some() {
+            return Err(ExportValidationError::new(
+                "authored_detail_omission_conflict",
+                format!("{path}.nodes[{index}].authoredDetailOmitted"),
+                "A node cannot both carry an authored detail package and record its omission.",
+            ));
+        }
     }
     for (index, edge) in resolved.edges.iter().enumerate() {
         require_id(&edge.id, "edge", format!("{path}.edges[{index}].id"))?;

@@ -6,7 +6,7 @@ use crate::{
     graph::{
         InteractionScope, completion,
         database::initialize_completion,
-        model::{LayerCandidate, validate_authored_detail},
+        model::{AuthoredDetailUpdate, LayerCandidate, validate_authored_detail},
     },
     storage::{
         GraphConnection,
@@ -98,17 +98,34 @@ impl GraphWriter {
             .await
     }
 
+    /// Submit a draft without mentioning its authored detail: an existing
+    /// checkpointed package is retained.
     pub async fn submit_node(&self, draft: &NodeDraft) -> Result<GraphNode, GraphError> {
-        self.submit_node_with_authored_detail(draft, None).await
+        self.submit_node_with_authored_detail_update(draft, AuthoredDetailUpdate::Retain)
+            .await
     }
 
+    /// Submit a draft with an optional replacement package. `None` retains the
+    /// existing package; use [`Self::submit_node_with_authored_detail_update`]
+    /// with [`AuthoredDetailUpdate::Clear`] to remove one.
     pub async fn submit_node_with_authored_detail(
         &self,
         draft: &NodeDraft,
         authored_detail: Option<&serde_json::Value>,
     ) -> Result<GraphNode, GraphError> {
-        if let Some(authored_detail) = authored_detail {
-            validate_authored_detail(authored_detail)?;
+        let update =
+            authored_detail.map_or(AuthoredDetailUpdate::Retain, AuthoredDetailUpdate::Replace);
+        self.submit_node_with_authored_detail_update(draft, update)
+            .await
+    }
+
+    pub async fn submit_node_with_authored_detail_update(
+        &self,
+        draft: &NodeDraft,
+        authored_detail: AuthoredDetailUpdate<'_>,
+    ) -> Result<GraphNode, GraphError> {
+        if let AuthoredDetailUpdate::Replace(package) = authored_detail {
+            validate_authored_detail(package)?;
         }
         let canonical_icon = draft.validate()?;
         let normalized_draft = NodeDraft {
@@ -146,7 +163,7 @@ impl GraphWriter {
             Some(_) => unreachable!("accepted nodes returned above"),
             None => {
                 nodes
-                    .insert_draft(&self.scope, draft, authored_detail)
+                    .insert_draft(&self.scope, draft, authored_detail.replacement())
                     .await?
             }
         };

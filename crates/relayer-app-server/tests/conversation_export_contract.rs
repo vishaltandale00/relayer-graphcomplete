@@ -108,6 +108,7 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
                 "assets": [],
                 "integritySha256": "49b27b37e787326e0cc4bd1c62a67f65daf3a9184e1c7f792d8ec091b50456ad"
             })),
+            authored_detail_omitted: None,
             state: ExportRecordState::Accepted,
         }],
         edges: vec![],

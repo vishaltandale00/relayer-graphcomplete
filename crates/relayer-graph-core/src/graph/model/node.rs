@@ -22,6 +22,31 @@ pub struct GraphNode {
     pub state: RecordState,
 }
 
+/// How one draft submission treats the node's checkpointed authored detail.
+///
+/// The wire contract is three-state: a request that omits `authoredDetail`
+/// retains whatever the draft already holds (legacy clients never mention the
+/// field), `authoredDetail: null` clears it, and a package replaces it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoredDetailUpdate<'a> {
+    /// Keep the draft's current package untouched.
+    Retain,
+    /// Remove the draft's checkpointed package.
+    Clear,
+    /// Validate this package and store it in place of any earlier one.
+    Replace(&'a Value),
+}
+
+impl<'a> AuthoredDetailUpdate<'a> {
+    /// The package that a brand-new draft row should start with.
+    pub fn replacement(self) -> Option<&'a Value> {
+        match self {
+            Self::Replace(package) => Some(package),
+            Self::Retain | Self::Clear => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InteractionInvocation {

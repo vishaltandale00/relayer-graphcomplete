@@ -425,6 +425,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                     title: context.target.title,
                     detail: context.target.detail,
                     authored_detail: None,
+                    authored_detail_omitted: false,
                 },
                 source_interaction_node_id: context.source.interaction_node_id,
                 source_layer_id: context.source.layer_id,
@@ -502,6 +503,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                             title: node.title,
                             detail: node.detail,
                             authored_detail: node.authored_detail,
+                            authored_detail_omitted: node.authored_detail_omitted.is_some(),
                         })
                         .collect(),
                     edges: resolved

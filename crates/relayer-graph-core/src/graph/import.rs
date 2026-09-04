@@ -129,6 +129,9 @@ pub struct ImportedNodePlacement {
     pub y: f64,
 }
 
+/// Markdown appended to an imported node whose export omitted its authored detail.
+pub const IMPORTED_AUTHORED_DETAIL_OMITTED_NOTE: &str = "_Visual detail omitted from the exported conversation because it contained a private project path._";
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportedNode {
@@ -141,6 +144,10 @@ pub struct ImportedNode {
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authored_detail: Option<serde_json::Value>,
+    /// The export left out an authored detail package this node once carried.
+    /// Import keeps the Markdown fallback and notes the omission inside it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub authored_detail_omitted: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -368,9 +375,14 @@ impl crate::GraphDatabase {
                 .map(serde_json::to_string)
                 .transpose()
                 .map_err(|error| GraphError::Internal(error.to_string()))?;
+            let detail = if node.authored_detail_omitted && node.authored_detail.is_none() {
+                format!("{}\n\n{IMPORTED_AUTHORED_DETAIL_OMITTED_NOTE}", node.detail)
+            } else {
+                node.detail
+            };
             let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,'accepted',?8,?9)")
                 .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(node.kind).bind(node.icon)
-                .bind(node.title).bind(node.detail).bind(authored_detail).bind(owner)
+                .bind(node.title).bind(detail).bind(authored_detail).bind(owner)
                 .bind(node.client_key.as_deref().unwrap_or(&portable_id)).execute(&mut *tx).await?;
             node_ids.insert(portable_id, result.last_insert_rowid());
         }
@@ -1110,6 +1122,11 @@ fn register_imported_node(
     if let Some(existing) = definitions.get_mut(&node.id) {
         let incoming_authored_detail = node.authored_detail.take();
         let existing_authored_detail = existing.authored_detail.take();
+        // Context snapshots of a node carry neither its package nor the marker
+        // that export omitted one; only the accepted-view copy does. Compare the
+        // remaining identity fields, then merge both package-related fields.
+        let incoming_omitted = std::mem::take(&mut node.authored_detail_omitted);
+        let existing_omitted = std::mem::take(&mut existing.authored_detail_omitted);
         if existing != &node
             || matches!(
                 (&existing_authored_detail, &incoming_authored_detail),
@@ -1117,11 +1134,14 @@ fn register_imported_node(
             )
         {
             existing.authored_detail = existing_authored_detail;
+            existing.authored_detail_omitted = existing_omitted;
             return Err(GraphError::Internal(
                 "imported node snapshot changed for one portable ID".into(),
             ));
         }
         existing.authored_detail = existing_authored_detail.or(incoming_authored_detail);
+        existing.authored_detail_omitted =
+            (existing_omitted || incoming_omitted) && existing.authored_detail.is_none();
         return Ok(());
     }
     definitions.insert(node.id.clone(), node);

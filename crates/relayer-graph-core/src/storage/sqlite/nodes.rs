@@ -1,8 +1,8 @@
 use sqlx::{FromRow, SqliteConnection};
 
 use crate::{
-    ActionId, ActionKind, GraphError, GraphNode, InteractionInvocation, NodeDraft, NodeId,
-    ProjectId, RecordState, ThreadId, graph::InteractionScope,
+    ActionId, ActionKind, AuthoredDetailUpdate, GraphError, GraphNode, InteractionInvocation,
+    NodeDraft, NodeId, ProjectId, RecordState, ThreadId, graph::InteractionScope,
 };
 
 pub(crate) struct NodeTable<'connection> {
@@ -497,20 +497,23 @@ impl<'connection> NodeTable<'connection> {
         &mut self,
         id: NodeId,
         draft: &NodeDraft,
-        authored_detail: Option<&serde_json::Value>,
+        authored_detail: AuthoredDetailUpdate<'_>,
     ) -> Result<GraphNode, GraphError> {
-        let authored_detail = authored_detail
+        let retain = matches!(authored_detail, AuthoredDetailUpdate::Retain);
+        let replacement = authored_detail
+            .replacement()
             .map(serde_json::to_string)
             .transpose()
             .expect("serde_json::Value must serialize");
         sqlx::query(
-            "UPDATE nodes SET kind=?1,icon=?2,title=?3,detail=?4,authored_detail=COALESCE(?5,authored_detail) WHERE id=?6",
+            "UPDATE nodes SET kind=?1,icon=?2,title=?3,detail=?4,authored_detail=CASE WHEN ?5 THEN authored_detail ELSE ?6 END WHERE id=?7",
         )
         .bind(&draft.kind)
         .bind(&draft.icon)
         .bind(&draft.title)
         .bind(&draft.detail)
-        .bind(&authored_detail)
+        .bind(retain)
+        .bind(&replacement)
         .bind(id.value())
         .execute(&mut *self.connection)
         .await?;

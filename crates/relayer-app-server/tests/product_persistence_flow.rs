@@ -5,7 +5,8 @@ use axum::{
     response::IntoResponse,
 };
 use relayer_app_server::conversation_export::{
-    ConversationExportRecord, ExportCompletionStatus, ExportTurnOrigin, decode_export_jsonl,
+    ConversationExportRecord, ExportAuthoredDetailOmission, ExportCompletionStatus,
+    ExportTurnOrigin, decode_export_jsonl,
 };
 use relayer_app_server::{
     CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig, RelayerRuntimeConfig,
@@ -2963,6 +2964,10 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         "Accepted durable detail [project-path]"
     );
     assert!(exported_answer.authored_detail.is_none());
+    assert_eq!(
+        exported_answer.authored_detail_omitted,
+        Some(ExportAuthoredDetailOmission::PrivatePath)
+    );
     let exported_invoke = accepted_view
         .layers
         .iter()

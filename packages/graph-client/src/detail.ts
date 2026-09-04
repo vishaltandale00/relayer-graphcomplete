@@ -341,6 +341,8 @@ interface AuthoringState {
   frozen: boolean;
   finalization: symbol | undefined;
   finalizedDetail: CompiledNodeDetail | undefined;
+  /** The author emptied the builder on purpose; the next submit clears the draft's package. */
+  cleared: boolean;
 }
 
 interface DomIdentityRecord {
@@ -358,6 +360,7 @@ export class NodeDetailAuthoring {
       frozen: false,
       finalization: undefined,
       finalizedDetail: undefined,
+      cleared: false,
     });
   }
 
@@ -366,6 +369,20 @@ export class NodeDetailAuthoring {
     if (state.frozen) throw new Error("Node Detail authoring is finalized and cannot be mutated");
     const existing = state.components.get(id);
     state.components.set(id, { markup, styles, order: existing?.order ?? state.components.size });
+    state.cleared = false;
+    return this;
+  }
+
+  /**
+   * Remove every component and ask the graph to drop this draft's checkpointed
+   * package on the next submit. An untouched empty builder never clears; only an
+   * explicit call does. Authoring again after `clear()` submits a package instead.
+   */
+  clear(): this {
+    const state = authoringState(this);
+    if (state.frozen) throw new Error("Node Detail authoring is finalized and cannot be mutated");
+    state.components.clear();
+    state.cleared = true;
     return this;
   }
 
@@ -386,6 +403,7 @@ export function createOwnedNodeDetailAuthoring(owner: NodeObject): NodeDetailAut
     frozen: false,
     finalization: undefined,
     finalizedDetail: undefined,
+    cleared: false,
   });
   return authoring;
 }
@@ -638,6 +656,11 @@ export function freezeNodeDetailAuthoring(authoring: NodeDetailAuthoring, detail
 /** Return the immutable package already compiled for this exact builder. @internal */
 export function finalizedNodeDetailAuthoring(authoring: NodeDetailAuthoring): CompiledNodeDetail | undefined {
   return authoringState(authoring).finalizedDetail;
+}
+
+/** Whether the author explicitly emptied this builder since it last held a component. @internal */
+export function isNodeDetailAuthoringCleared(authoring: NodeDetailAuthoring): boolean {
+  return authoringState(authoring).cleared;
 }
 
 /** @internal */
