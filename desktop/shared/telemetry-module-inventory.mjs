@@ -52,6 +52,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/renderer/src/thread-model.js",
     "desktop/renderer/src/threads.js",
     "desktop/renderer/src/ui.js",
+    "desktop/renderer/src/update-indicator-model.js",
     "desktop/renderer/src/updates.js",
     "desktop/renderer/src/workspace-navigation.js",
     "desktop/renderer/theme-bootstrap.js",

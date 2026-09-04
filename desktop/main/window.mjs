@@ -113,7 +113,9 @@ export function createWindowFactory({
     });
     await window.loadURL(productOrigin);
     if (updater.status().phase !== "development") {
-      setTimeout(() => { void updater.check().catch(() => undefined); }, 5_000);
+      // The updater owns both scheduled discoveries, so the launch check takes
+      // the same in-flight guard as the poll and fires once per process.
+      updater.startPolling?.();
     }
     return window;
   };

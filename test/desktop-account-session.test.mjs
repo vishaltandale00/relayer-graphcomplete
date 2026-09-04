@@ -84,7 +84,7 @@ async function fakeAuth0({ clientId = "desktop-client", tokenHandler } = {}) {
   return { issuer, clientId, requests, privateKey };
 }
 
-async function fixture({ auth0, channel = "stable", portsByChannel, openExternal, now = () => 1_900_000_000_000, timeoutMs = 2_000, beforeCredentialCommit, telemetry, emit } = {}) {
+async function fixture({ auth0, channel = "stable", portsByChannel, openExternal, now = () => 1_900_000_000_000, timeoutMs = 2_000, beforeCredentialCommit, telemetry, emit, presentWindow } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "relayer-account-"));
   directories.push(directory);
   const encrypted = [];
@@ -109,6 +109,7 @@ async function fixture({ auth0, channel = "stable", portsByChannel, openExternal
     beforeCredentialCommit,
     telemetry,
     emit,
+    presentWindow,
   });
   return { directory, service, encrypted };
 }
@@ -207,6 +208,75 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     expect(encrypted.at(-1)).toContain("rotated-refresh-token");
     expect(await readFile(join(directory, "account.json"), "utf8")).not.toContain("rotated-refresh-token");
     await expect(callbackFromLauncher(launchUrl)).rejects.toThrow();
+    await service.close();
+  });
+
+  it("brings Relayer back for every settled callback and leaves a superseded one in the browser", async () => {
+    const auth0 = await fakeAuth0();
+    let launchUrl;
+    const openExternal = async (value) => { launchUrl = value; };
+
+    // Success: the user finished in the browser, so the app comes forward.
+    const succeededPresent = vi.fn();
+    const succeeded = await fixture({ auth0, openExternal, presentWindow: succeededPresent });
+    await succeeded.service.start();
+    await succeeded.service.login();
+    expect(succeededPresent).not.toHaveBeenCalled();
+    expect((await callbackFromLauncher(launchUrl)).status).toBe(200);
+    await expect(succeeded.service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
+    expect(succeededPresent).toHaveBeenCalledOnce();
+    await succeeded.service.close();
+
+    // Cancellation: the error belongs in the app, not in a browser tab.
+    const cancelledPresent = vi.fn();
+    const cancelled = await fixture({ auth0, openExternal, presentWindow: cancelledPresent });
+    await cancelled.service.start();
+    await cancelled.service.login();
+    expect((await cancellationFromLauncher(launchUrl)).status).toBe(400);
+    await expect(cancelled.service.waitForIdle()).resolves.toEqual({ status: "signed-out", channel: "stable" });
+    expect(cancelledPresent).toHaveBeenCalledOnce();
+    await cancelled.service.close();
+
+    // A callback that does carry this attempt's state but is malformed is this
+    // attempt's business, so it still fails closed and still returns.
+    const malformedPresent = vi.fn();
+    const malformed = await fixture({ auth0, openExternal, presentWindow: malformedPresent });
+    await malformed.service.start();
+    await malformed.service.login();
+    const malformedCallback = new URL(new URL(launchUrl).searchParams.get("redirect_uri"));
+    malformedCallback.search = new URLSearchParams({
+      state: new URL(launchUrl).searchParams.get("state"),
+      code: "authorization-code",
+      extra: "unexpected",
+    });
+    expect(await rawCallback(malformedCallback)).toBe(400);
+    await expect(malformed.service.waitForIdle()).resolves.toMatchObject({ status: "error" });
+    expect(malformedPresent).toHaveBeenCalledOnce();
+    await malformed.service.close();
+
+    // Nothing came back from the browser, so nothing yanks the user out of
+    // whatever they moved on to while the attempt aged out.
+    const timedOutPresent = vi.fn();
+    const timedOut = await fixture({ auth0, openExternal, timeoutMs: 10, presentWindow: timedOutPresent });
+    await timedOut.service.start();
+    await timedOut.service.login();
+    await expect(timedOut.service.waitForIdle()).resolves.toMatchObject({ status: "error" });
+    expect(timedOutPresent).not.toHaveBeenCalled();
+    await timedOut.service.close();
+  });
+
+  it("survives a window that cannot be presented", async () => {
+    const auth0 = await fakeAuth0();
+    let launchUrl;
+    const { service } = await fixture({
+      auth0,
+      openExternal: async (value) => { launchUrl = value; },
+      presentWindow: () => { throw new Error("window is gone"); },
+    });
+    await service.start();
+    await service.login();
+    expect((await callbackFromLauncher(launchUrl)).status).toBe(200);
+    await expect(service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
     await service.close();
   });
 
@@ -316,46 +386,95 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await service.close();
   });
 
-  it("fails closed on state mismatch and rejects the late valid callback", async () => {
+  it("refuses a foreign state without cancelling or presenting the attempt that owns the listener", async () => {
     const auth0 = await fakeAuth0();
     let launchUrl;
-    const { service } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; } });
+    const presentWindow = vi.fn();
+    const { service } = await fixture({
+      auth0,
+      openExternal: async (value) => { launchUrl = value; },
+      presentWindow,
+    });
     await service.start();
     await service.login();
+
+    // A state this attempt did not issue cannot authenticate, so it is refused.
+    // It also is not this attempt's callback, so it must not end it.
     expect((await callbackFromLauncher(launchUrl, { state: randomBytes(32).toString("base64url") })).status).toBe(400);
-    await expect(service.waitForIdle()).resolves.toEqual({
-      status: "error", channel: "stable", reason: "authentication-failed",
-    });
-    await expect(callbackFromLauncher(launchUrl)).rejects.toThrow();
+    expect(await service.account()).toEqual({ status: "signing-in", channel: "stable" });
+    expect(presentWindow).not.toHaveBeenCalled();
     expect(auth0.requests.filter(({ url }) => url === "/oauth/token")).toHaveLength(0);
+
+    // The attempt still owns its listener and still completes.
+    expect((await callbackFromLauncher(launchUrl)).status).toBe(200);
+    await expect(service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
+    expect(presentWindow).toHaveBeenCalledOnce();
     await service.close();
   });
 
-  it("fails the active attempt closed for wrong callback path, method, or host", async () => {
+  it("does not let a replaced login's stale callback cancel or present its replacement", async () => {
+    const auth0 = await fakeAuth0();
+    const launches = [];
+    const presentWindow = vi.fn();
+    const { service } = await fixture({
+      auth0,
+      openExternal: async (value) => { launches.push(value); },
+      presentWindow,
+    });
+    await service.start();
+    await service.login();
+    await service.login();
+    expect(launches).toHaveLength(2);
+    const [first, second] = launches;
+    // Same loopback port, different state: the replacement owns the listener.
+    expect(new URL(new URL(first).searchParams.get("redirect_uri")).port)
+      .toBe(new URL(new URL(second).searchParams.get("redirect_uri")).port);
+
+    expect((await callbackFromLauncher(first)).status).toBe(400);
+    expect(await service.account()).toEqual({ status: "signing-in", channel: "stable" });
+    expect(presentWindow).not.toHaveBeenCalled();
+    expect(auth0.requests.filter(({ url }) => url === "/oauth/token")).toHaveLength(0);
+
+    expect((await callbackFromLauncher(second)).status).toBe(200);
+    await expect(service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
+    expect(presentWindow).toHaveBeenCalledOnce();
+    await service.close();
+  });
+
+  it("refuses a request that is not this attempt's callback without settling or presenting it", async () => {
     const auth0 = await fakeAuth0();
     let launchUrl;
-    const { service } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; } });
+    const presentWindow = vi.fn();
+    const { service } = await fixture({
+      auth0,
+      openExternal: async (value) => { launchUrl = value; },
+      presentWindow,
+    });
     await service.start();
+    await service.login();
+    const launcher = new URL(launchUrl);
+    const callback = new URL(launcher.searchParams.get("redirect_uri"));
+    callback.search = new URLSearchParams({
+      code: "authorization-code",
+      state: launcher.searchParams.get("state"),
+    });
     for (const mutation of [
-      (callback) => ({ path: `/other${callback.search}` }),
+      // The browser's own probe for the callback page carries no state at all.
+      () => ({ path: "/favicon.ico" }),
+      (target) => ({ path: `/other${target.search}` }),
       () => ({ method: "POST" }),
       () => ({ host: "attacker.example" }),
     ]) {
-      await service.login();
-      const launched = launchUrl;
-      const launcher = new URL(launched);
-      const callback = new URL(launcher.searchParams.get("redirect_uri"));
-      callback.search = new URLSearchParams({
-        code: "authorization-code",
-        state: launcher.searchParams.get("state"),
-      });
       expect(await rawCallback(callback, mutation(callback))).toBe(400);
-      await expect(service.waitForIdle()).resolves.toEqual({
-        status: "error", channel: "stable", reason: "authentication-failed",
-      });
-      await expect(callbackFromLauncher(launched)).rejects.toThrow();
+      expect(await service.account()).toEqual({ status: "signing-in", channel: "stable" });
+      expect(presentWindow).not.toHaveBeenCalled();
     }
     expect(auth0.requests.filter(({ url }) => url === "/oauth/token")).toHaveLength(0);
+
+    // None of them disturbed the listener, so the real callback still lands.
+    expect((await callbackFromLauncher(launchUrl)).status).toBe(200);
+    await expect(service.waitForIdle()).resolves.toMatchObject({ status: "signed-in" });
+    expect(presentWindow).toHaveBeenCalledOnce();
     await service.close();
   });
 

@@ -88,6 +88,8 @@ Threads pin a harness-configuration identity, not an immutable copy of catalog o
 
 Provider removal uses atomic admission and draining. Marking a definition `removal_pending` immediately blocks new attempts through it while already admitted work finishes. Credential deletion and the non-secret historical tombstone occur only after the last execution reference is released. Family deletion needs no drain because a sent attempt no longer consults family membership.
 
+A pending managed connection reserves its provider name until it settles, so the reservation is owned in the main process rather than in renderer memory. The renderer that began an attempt owns it, and the attempt is cancelled when that renderer's contents are destroyed. A failed browser handoff cancels the attempt it created. A check that cannot reach a verdict keeps the attempt pending for a bounded run of consecutive attempts, after which it settles and frees the name; only a disconnected account means the login is still open. Issue #448 tracks the two ways an attempt can still outlive its owner.
+
 Every execution attempt has an immutable receipt and a durable effect boundary: `none`, `partial_output`, `graph_write`, `tool_effect`, or fail-closed `unknown`. For an ordinary message, a model-related failure returns the same interaction to an editable unsent state, including failures after partial output, graph writes, tool effects, or an unknown boundary. For an input-assisted Send, failure or stop instead restores its snapshotted attachments to the thread draft without reopening or retrying that immutable attempt; retry requires a new explicit Send and a new root interaction. A draft edit committed after the failed attempt was reserved wins over restoration for the same occurrence. Both paths deliberately accept duplicate-effect risk: durable graph writes remain authoritative, and only the product binding and transient execution capability state are cleared. Pre-execution model failures also persist the exact provider, model, family, and harness-policy snapshot available at failure time; adapter implementation version `0` records that provider admission did not complete. Non-model failures remain failed and inspectable. Trace events conservatively raise the boundary for streamed output and tool starts, observable graph neighbors raise it for graph writes, and an accepted graph discovered while recovering a harness failure is adopted without rerunning the harness. Attempt finalization and the matching interaction transition commit in one SQLite transaction, while startup converts any genuinely interrupted running attempt to terminal `unknown` and reconciles graph-authoritative acceptance first. Issue #158 may later replace this accepted duplicate-risk behavior with effect-aware replay protection.
 
 This contract applies equally to `codex.basic`, `prime.agent`, and future harness implementations. It adds no scheduler and does not change `complete(inputGraph)` or graph acceptance authority.
@@ -296,8 +298,8 @@ effort remote revocation, without signing the browser out. See
 
 After provider setup, the optional account decision is a dedicated full-screen
 onboarding step. The desktop workspace is not revealed until the user signs in or
-explicitly continues without an account. Once resolved, a viewport-anchored
-bottom-right control starts sign-in directly while signed out and opens Account
+explicitly continues without an account. Once resolved, a sidebar-footer control
+beside Settings starts sign-in directly while signed out and opens Account
 settings for an existing account. The Account panel contains only concise status
 and the applicable sign-in or logout action. Stable or Preview is not part of the
 account UX; callback-pool diagnostics remain main-owned.

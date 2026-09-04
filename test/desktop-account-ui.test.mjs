@@ -8,6 +8,7 @@ import {
   normalizeDesktopAccountState,
   revealDesktopWorkspace,
 } from "../desktop/renderer/src/desktop-account.js";
+import { updateIndicatorName } from "../desktop/renderer/src/update-indicator-model.js";
 
 function classList(...initial) {
   const values = new Set(initial);
@@ -40,6 +41,7 @@ function element() {
 function fixture() {
   const elements = {
     accountButton: element(),
+    accountLabel: element(),
     onboarding: { ...element(), classList: classList("hidden") },
     onboardingChannel: element(),
     onboardingStatus: element(),
@@ -74,6 +76,37 @@ function fixture() {
   };
 }
 
+describe("desktop update indicator naming", () => {
+  // The naming decision only. That renderUpdate applies it, and that activating
+  // the control opens the details instead of performing the nested action, is
+  // proven against the real DOM in the Chromium evidence capture.
+  it("names the one indicator button truthfully in every phase it is visible", () => {
+    // The control is shown for these four phases, so a fixed name would both
+    // misreport a failure and hide that a verified update is staged.
+    expect(updateIndicatorName({ phase: "available", availableVersion: "0.2.31" }))
+      .toBe("Version 0.2.31 available. Open update details");
+    expect(updateIndicatorName({ phase: "downloading", percent: 42 }))
+      .toBe("Downloading update · 42%. Open update details");
+    expect(updateIndicatorName({ phase: "ready" })).toBe("Update ready to install. Open update details");
+    expect(updateIndicatorName({ phase: "failed" })).toBe("Update failed. Open update details");
+
+    // The button opens the popover; restart, retry and download are the nested
+    // action inside it, so no name may promise them.
+    for (const phase of ["available", "downloading", "ready", "failed"]) {
+      const name = updateIndicatorName({ phase });
+      expect(name).toContain("Open update details");
+      expect(name).not.toMatch(/restart|try again|download update/i);
+    }
+    // Only the available phase may say an update is available.
+    for (const phase of ["downloading", "ready", "failed"]) {
+      expect(updateIndicatorName({ phase })).not.toMatch(/available/i);
+    }
+    // Hidden and unknown phases fall back to a name that claims nothing.
+    expect(updateIndicatorName({ phase: "idle" })).toBe("Application update status");
+    expect(updateIndicatorName(undefined)).toBe("Application update status");
+  });
+});
+
 describe("desktop account presentation", () => {
   it("releases the startup visibility gate before showing the workspace during recovery", () => {
     const body = { classList: classList("desktop-account-pending") };
@@ -92,7 +125,7 @@ describe("desktop account presentation", () => {
 
     expect(elements.onboarding.classList.contains("hidden")).toBe(false);
     expect(showWorkspace).not.toHaveBeenCalled();
-    expect(elements.accountButton.textContent).toBe("Sign in");
+    expect(elements.accountLabel.textContent).toBe("Sign in");
     expect(elements.onboardingStatus.textContent).toContain("privacy-filtered error reports");
 
     elements.onboardingNotNow.onclick();
@@ -128,7 +161,7 @@ describe("desktop account presentation", () => {
       accessToken: "secret",
     });
 
-    expect(elements.accountButton.textContent).toBe("Account");
+    expect(elements.accountLabel.textContent).toBe("Account");
     expect(elements.settingsStatus.textContent).toBe("Signed in");
     expect(elements.settingsLogout.classList.contains("hidden")).toBe(false);
     expect(elements.settingsSignIn.classList.contains("hidden")).toBe(true);
@@ -150,7 +183,7 @@ describe("desktop account presentation", () => {
     });
   });
 
-  it("starts sign-in directly from the bottom-right control and opens settings only for an existing account", async () => {
+  it("starts sign-in directly from the sidebar-footer control and opens settings only for an existing account", async () => {
     const { controller, elements, openSettings, api, changed } = fixture();
     await controller.start();
 
@@ -184,7 +217,7 @@ describe("desktop account presentation", () => {
     elements.settingsSignIn.onclick();
 
     expect(api.login).toHaveBeenCalledOnce();
-    expect(elements.accountButton.textContent).toBe("Signing in…");
+    expect(elements.accountLabel.textContent).toBe("Signing in…");
     expect(elements.accountButton.disabled).toBe(true);
     expect(elements.onboardingSignIn.disabled).toBe(true);
     expect(elements.settingsSignIn.disabled).toBe(true);
@@ -232,7 +265,7 @@ describe("desktop account presentation", () => {
     expect(showWorkspace).toHaveBeenCalledOnce();
   });
 
-  it("uses a full onboarding surface and anchors the account control to the app viewport", async () => {
+  it("uses a full onboarding surface and seats the account control in the sidebar footer", async () => {
     const [html, css] = await Promise.all([
       readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
@@ -242,8 +275,9 @@ describe("desktop account presentation", () => {
     expect(html).toContain('<section class="desktop-account-onboarding hidden" id="desktopAccountOnboarding"');
     expect(html).not.toContain('<dialog class="desktop-account-onboarding"');
     expect(html).toContain('id="desktopAccountOnboardingNotNow">Continue without an account</button>');
-    expect(sidebarFooter).not.toContain('id="desktopAccountButton"');
-    expect(html).toContain('class="desktop-account-corner-control hidden" id="desktopAccountButton"');
+    expect(sidebarFooter).toContain('id="desktopAccountButton"');
+    expect(sidebarFooter).toContain('class="footer-button account-footer-button hidden"');
+    expect(html).not.toContain("desktop-account-corner-control");
     const accountPanel = html.slice(html.indexOf('id="accountSettingsPanel"'), html.indexOf('id="providerSettingsPanel"'));
     expect(accountPanel).toContain('id="desktopAccountStatus"');
     expect(accountPanel).toContain('id="desktopAccountSignIn"');
@@ -253,6 +287,39 @@ describe("desktop account presentation", () => {
     expect(accountPanel).not.toContain("desktopAccountChannel");
     expect(accountPanel).not.toContain("Release channel");
     expect(css).toContain(".desktop-account-onboarding{position:fixed;inset:0;");
-    expect(css).toContain(".desktop-account-corner-control{position:fixed;right:16px;bottom:14px;");
+    // The optional-account step was the last surface carrying a coloured wash.
+    expect(css).toContain("padding:32px;background:var(--bg)");
+    expect(css).not.toContain("radial-gradient(circle at 50% 40%,#f7f4ef");
+    // Nothing floats over the workspace any more, and the control keeps its
+    // glyph when the sidebar collapses to icons.
+    expect(css).not.toContain("desktop-account-corner-control");
+    // Both footer marks are drawn in the sidebar's stroked-SVG idiom, so the
+    // pair no longer mixes a glyph with a drawn icon at different weights.
+    expect(css).toContain(".sidebar-footer .footer-button svg{width:16px;height:16px");
+    expect(sidebarFooter.match(/<svg viewBox="0 0 20 20"/g)).toHaveLength(2);
+    expect(css).toContain("stroke:currentColor");
+    expect(css).not.toContain("account-footer-button:before");
+    // The label collapses through the rule every other footer control uses,
+    // leaving the mark visible on the icon-only rail.
+    expect(sidebarFooter).toContain('<span id="desktopAccountLabel">Sign in</span>');
+    expect(sidebarFooter).toContain("<svg viewBox=\"0 0 20 20\"");
+    expect(css).toContain("body.sidebar-collapsed .footer-button span");
+    // Two controls do not fit the 58px collapsed rail side by side.
+    expect(css).toContain("body.sidebar-collapsed .sidebar-footer{flex-direction:column");
+    // Nor do Settings, Account and the update indicator fit the 210px rail the
+    // 980px breakpoint switches to, so the footer drops its labels there and
+    // the circular indicator keeps its diameter instead of being squashed.
+    expect(css).toContain("@media(max-width:980px){.sidebar-footer .footer-button span:not([aria-hidden]){display:none}");
+    expect(css).toContain(".update-button{margin-left:auto;flex:none");
+    // A busy label must not wrap inside a 34px control. Whether it actually
+    // does is layout, which jsdom cannot answer: capture-provider-ux-video.mjs
+    // measures the rendered footer, and this only pins the rule it depends on.
+    expect(css).toContain("white-space:nowrap;overflow:hidden;text-overflow:ellipsis");
+    // Hiding the label must never take a decorative mark with it, and the
+    // footer controls keep a name once their label is gone.
+    expect(css).toContain("body.sidebar-collapsed .footer-button span:not([aria-hidden])");
+    expect(sidebarFooter).toContain('id="settingsButton" type="button" title="Settings" aria-label="Settings"');
+    expect(sidebarFooter).not.toContain("⚙");
+    expect(sidebarFooter).toContain('id="updateButton" type="button" title="Application update status" aria-label="Application update status"');
   });
 });

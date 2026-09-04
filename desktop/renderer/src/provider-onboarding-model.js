@@ -45,17 +45,27 @@ export function resumableProviderDefinitions(providerStatus) {
   ));
 }
 
+// The visible label is short so the control scans; the accessible name has to
+// carry the operation and the exact provider, so several recovery controls on
+// one screen are told apart. Same promise the Settings provider cards make.
+export function providerOnboardingRecoveryName(recovery, providerLabel) {
+  const description = recovery?.kind === "repair_execution"
+    ? "Repair execution configurations"
+    : "Refresh models and set up defaults";
+  return providerLabel ? `${description} for ${providerLabel}` : description;
+}
+
 export function providerOnboardingRecoveryAction(projection) {
   if (projection?.blockingReason?.code === "provider_no_available_execution_configurations") {
     return Object.freeze({
       kind: "repair_execution",
-      label: "Repair execution configurations",
+      label: "Repair",
     });
   }
   if (projection?.blockingReason?.code !== "provider_no_eligible_execution_models") return null;
   return Object.freeze({
     kind: "refresh_models",
-    label: "Refresh models and set up defaults",
+    label: "Refresh models",
   });
 }
 

@@ -19,6 +19,32 @@ function publicDefinition(definition) {
   return Object.freeze({ ...definition });
 }
 
+// A completion failure that settled the pending attempt. The browser leg is
+// over, so its outcome belongs back in Relayer. Owned by this module rather
+// than stamped onto the provider's error: a frozen error cannot be marked, and
+// marking after cleanup lets a cleanup rejection replace the real failure.
+export class TerminalConnectionFailure extends Error {
+  constructor(cause) {
+    super(cause instanceof Error ? cause.message : String(cause ?? "Provider connection failed."));
+    this.name = "TerminalConnectionFailure";
+    this.cause = cause;
+  }
+}
+
+// Only a failure that settled the attempt is terminal. An unknown connection
+// never had one, and a transient failure leaves the attempt live.
+export function isTerminalConnectionFailure(error) {
+  return error instanceof TerminalConnectionFailure;
+}
+
+// A managed adapter collapses every runtime, process, protocol, and parse
+// failure into one `unavailable` result or a thrown check, so a failed check
+// is not evidence that the browser login is still in progress: a missing
+// executable reads exactly like a slow one. Tolerate a short run of them, so a
+// hiccup mid-login costs nothing, then settle and release the provider name
+// for the retry. Only `disconnected` means the login is genuinely still open.
+export const MAX_TRANSIENT_ACCOUNT_CHECKS = 3;
+
 export class ProviderDefinitionService {
   constructor({
     registry,
@@ -32,6 +58,7 @@ export class ProviderDefinitionService {
     idGenerator = randomUUID,
     initialRuntimes = new Map(),
     retry = {},
+    maxTransientAccountChecks = MAX_TRANSIENT_ACCOUNT_CHECKS,
     diagnostics = null,
     onRuntimeReady = () => {},
     onRuntimeRemoved = () => {},
@@ -51,6 +78,7 @@ export class ProviderDefinitionService {
     this.canRemove = canRemove;
     this.idGenerator = idGenerator;
     this.retry = retry;
+    this.maxTransientAccountChecks = maxTransientAccountChecks;
     this.diagnostics = diagnostics;
     this.onRuntimeReady = onRuntimeReady;
     this.onRuntimeRemoved = onRuntimeRemoved;
@@ -298,31 +326,70 @@ export class ProviderDefinitionService {
   }
 
   async completeConnection(connectionId, { signal } = {}) {
+    // Build the failure before cleanup runs, so cleanup cannot replace it.
+    const settle = async (cause) => {
+      const failure = new TerminalConnectionFailure(cause);
+      try {
+        await this.#cancelPendingConnection(connectionId);
+      } catch {
+        // The connection failure is the outcome; a cleanup problem cannot
+        // become the reported one.
+      }
+      return failure;
+    };
     return this.#serialized(async () => {
       const pending = this.pendingConnections.get(connectionId);
       if (!pending) throw new Error("Unknown pending provider connection.");
       signal?.throwIfAborted();
+      // completeConnection is the caller's poll. "pending" is how this contract
+      // says keep polling, so a connect whose account check has not succeeded
+      // yet stays pending instead of rejecting: rejecting ends the caller's
+      // loop and releases its ownership while this attempt still holds the
+      // provider name, which then blocks the retry.
+      const stillPending = (retrying) => Object.freeze({
+        status: "pending",
+        connectionId,
+        providerDefinition: publicDefinition(pending.candidate),
+        login: Object.freeze({ ...(pending.login ?? {}) }),
+        retrying,
+      });
+      const settleFailedCheck = async (cause, category) => {
+        await this.diagnostics?.write({
+          category,
+          adapterId: pending.candidate.adapterId,
+          providerId: pending.candidate.id,
+          ...providerDiagnosticDetails(cause),
+        }).catch(() => undefined);
+        return settle(cause);
+      };
       let account;
       try {
         account = await pending.runtime.credentials.account({ signal });
       } catch (error) {
-        if (pending.reconnect === true) {
-          await this.diagnostics?.write({
-            category: "managed_provider_reconnect_failed",
-            adapterId: pending.candidate.adapterId,
-            providerId: pending.candidate.id,
-            ...providerDiagnosticDetails(error),
-          }).catch(() => undefined);
-          await this.#cancelPendingConnection(connectionId);
+        // An abort is the caller withdrawing the check, not a provider fault,
+        // so it settles at once rather than spending the budget.
+        const aborted = signal?.aborted === true || error?.name === "AbortError";
+        if (!aborted && pending.reconnect !== true && this.#toleratesFailedCheck(pending)) {
+          return stillPending("account-check-failed");
         }
-        throw error;
+        throw await settleFailedCheck(
+          error,
+          pending.reconnect === true ? "managed_provider_reconnect_failed" : "provider_connection_failed",
+        );
       }
       if (account?.status !== "connected") {
         if (account?.status === "unavailable") {
-          const error = new Error("Provider login is unavailable.");
-          if (pending.reconnect === true) await this.#cancelPendingConnection(connectionId);
-          throw error;
+          if (pending.reconnect !== true && this.#toleratesFailedCheck(pending)) {
+            return stillPending("login-unavailable");
+          }
+          throw await settleFailedCheck(
+            new Error("Provider login is unavailable."),
+            pending.reconnect === true ? "managed_provider_reconnect_failed" : "provider_connection_failed",
+          );
         }
+        // The login is genuinely still open. A later hiccup starts its own
+        // budget rather than inheriting this attempt's history.
+        pending.failedChecks = 0;
         return Object.freeze({
           status: "pending",
           connectionId,
@@ -369,10 +436,17 @@ export class ProviderDefinitionService {
         if (runtimeRegistrationAttempted && pending.reconnect !== true) {
           try { await this.onRuntimeRemoved(pending.candidate); } catch { /* preserve the connection failure */ }
         }
-        await this.#cancelPendingConnection(connectionId);
-        throw error;
+        throw await settle(error);
       }
     });
+  }
+
+  // Counts consecutive checks that could not reach a verdict. Returns whether
+  // this attempt may stay pending; exhausting the budget settles it, which
+  // releases the reserved provider name so the retry is admitted.
+  #toleratesFailedCheck(pending) {
+    pending.failedChecks = (pending.failedChecks ?? 0) + 1;
+    return pending.failedChecks < this.maxTransientAccountChecks;
   }
 
   async cancelConnection(connectionId) {
@@ -405,10 +479,19 @@ export class ProviderDefinitionService {
       ]);
       return true;
     }
-    await pending.runtime.close?.();
     this.runtimes.delete(connectionId);
-    await this.removeRuntimeState(pending.candidate);
-    if (pending.candidate.credentialReference) await this.credentialStore.delete(pending.candidate.credentialReference);
+    // Independent teardown stages. Run sequentially, a rejecting close() would
+    // skip runtime-state and credential removal while the runtime is already
+    // gone from both collections that could revisit it, stranding exactly the
+    // state this cleanup exists to reclaim. The reconnect branch above settles
+    // its stages for the same reason.
+    await Promise.allSettled([
+      pending.runtime.close?.(),
+      this.removeRuntimeState(pending.candidate),
+      pending.candidate.credentialReference
+        ? this.credentialStore.delete(pending.candidate.credentialReference)
+        : undefined,
+    ]);
     return true;
   }
 

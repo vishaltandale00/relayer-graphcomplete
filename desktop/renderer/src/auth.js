@@ -7,6 +7,7 @@ import { normalizeProviderDescriptor, providerConnectionErrors, providerCreation
 import {
   providerOnboardingCompletionIntent,
   providerOnboardingRecoveryAction,
+  providerOnboardingRecoveryName,
   createProviderOnboardingProjectionGate,
   createProviderConnectionCancellationState,
   reconcileProviderOnboardingState,
@@ -213,7 +214,11 @@ function renderOnboardingChoices({ focus } = {}) {
   const recovery = providerOnboardingRecoveryAction(onboardingProjection);
   const recoveryButton = $("#refreshOnboardingProviderModels");
   recoveryButton.classList.toggle("hidden", recovery === null);
-  recoveryButton.textContent = recovery?.label ?? "Refresh models and set up defaults";
+  recoveryButton.textContent = recovery?.label ?? "Refresh models";
+  recoveryButton.setAttribute(
+    "aria-label",
+    providerOnboardingRecoveryName(recovery, onboardingProjection?.provider?.label),
+  );
   bindOnboardingChoices({ focus });
 }
 
@@ -241,7 +246,7 @@ async function prepareFamilyStep(definition, { preserveIntent = false } = {}) {
   $("#providerSetupForm").classList.add("hidden");
   $("#providerFamilyStep").classList.remove("hidden");
   const hasCompatibleHarness = onboardingProjection.harnesses.some((harness) => harness.selectable);
-  $("#providerFamilyBack").textContent = hasCompatibleHarness ? "← All providers" : "← Connect another provider";
+  $("#providerFamilyBack").textContent = hasCompatibleHarness ? "← Back" : "← Add a provider";
   renderOnboardingChoices();
   setStatus(onboardingProjection.blockingReason?.message
     ?? "Choose a compatible harness and explicitly confirm a default family.");

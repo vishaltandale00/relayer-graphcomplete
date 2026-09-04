@@ -192,6 +192,9 @@ export function providerDefinitionsMarkup(definitions, defaults = {}, descriptor
     const canReconnect = canLogout && status.lifecycle === "unavailable";
     const canRecoverFamily = ["refresh_models", "repair_execution"].includes(status.recovery);
     const recoveryLabel = status.recovery === "repair_execution"
+      ? "Repair"
+      : "Refresh models";
+    const recoveryDescription = status.recovery === "repair_execution"
       ? "Repair execution configurations"
       : "Refresh models and set up defaults";
     return `<article class="provider-definition-card ${escapeHtmlAttribute(status.lifecycle)}" data-provider-definition="${escapeHtmlAttribute(definition.id)}">
@@ -201,7 +204,7 @@ export function providerDefinitionsMarkup(definitions, defaults = {}, descriptor
         ${isDefault ? `<span class="default-badge">Default provider</span>` : ""}
         <span class="push"></span>
         ${canReconnect ? `<button type="button" class="secondary" data-provider-reconnect="${escapeHtmlAttribute(definition.id)}">Reconnect</button>` : ""}
-        ${canRecoverFamily ? `<button type="button" class="secondary" data-provider-family-recovery="${escapeHtmlAttribute(definition.id)}">${recoveryLabel}</button>` : ""}
+        ${canRecoverFamily ? `<button type="button" class="secondary" data-provider-family-recovery="${escapeHtmlAttribute(definition.id)}" aria-label="${escapeHtmlAttribute(`${recoveryDescription} for ${definition.label}`)}">${recoveryLabel}</button>` : ""}
         ${canLogout && !canReconnect ? `<button type="button" class="secondary" data-provider-logout="${escapeHtmlAttribute(definition.id)}" ${!["active", "needs_model_setup", "needs_execution_setup"].includes(status.lifecycle) ? "disabled" : ""}>Sign out</button>` : ""}
         <button type="button" class="secondary" data-provider-rename="${escapeHtmlAttribute(definition.id)}" ${status.lifecycle === "removal_pending" ? "disabled" : ""}>Rename</button>
         <button type="button" class="secondary danger-action" data-provider-remove="${escapeHtmlAttribute(definition.id)}" ${isDefault || status.lifecycle === "removal_pending" ? "disabled" : ""}>${status.lifecycle === "removal_pending" ? "Removing…" : "Remove"}</button>

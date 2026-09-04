@@ -237,9 +237,35 @@ describe("provider and harness renderer markup", () => {
       },
     }], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
     expect(markup).toContain("Needs execution setup");
-    expect(markup).toContain("Repair execution configurations");
+    expect(markup).toContain(">Repair</button>");
     expect(markup).not.toContain("codex-basic");
     expect(markup).not.toContain("prime-agent");
+  });
+
+  // First-run's equivalent promise is exercised in provider-onboarding-model,
+  // against the decision auth.js calls, rather than this Settings-card path.
+  it("names both Settings recovery actions by operation and exact provider", () => {
+    const card = (id, label, code, message) => ({
+      id, adapterId: "openai-api", label,
+      lifecycleState: "active", connected: true,
+      unavailableReason: { code, message },
+    });
+    const markup = providerDefinitionsMarkup([
+      card("openai-work", "OpenAI Work", "provider_no_available_execution_configurations",
+        "This provider currently has no available execution configurations."),
+      card("openai-lab", "OpenAI Lab", "provider_no_eligible_execution_models",
+        "This provider currently has no eligible execution models."),
+    ], {}, [{ adapterId: "openai-api", connection: { mode: "secret-fields" } }]);
+
+    const names = [...markup.matchAll(/data-provider-family-recovery="[^"]*" aria-label="([^"]*)">([^<]*)</g)]
+      .map(([, accessibleName, visible]) => ({ accessibleName, visible }));
+
+    // Two cards, two short labels, two names that tell them apart.
+    expect(names).toEqual([
+      { accessibleName: "Repair execution configurations for OpenAI Work", visible: "Repair" },
+      { accessibleName: "Refresh models and set up defaults for OpenAI Lab", visible: "Refresh models" },
+    ]);
+    expect(new Set(names.map(({ accessibleName }) => accessibleName)).size).toBe(2);
   });
 
   it("shows only harnesses usable through a currently connected provider and eligible model", () => {

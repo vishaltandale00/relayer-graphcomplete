@@ -1,4 +1,42 @@
 import { inspectFolder } from "../services/folder-service.mjs";
+import { isTerminalConnectionFailure } from "../providers/provider-definition-service.mjs";
+
+// Sign-in continues in the browser, so the browser has to come forward.
+// Relying on the platform default left users looking at an unchanged
+// Relayer window while the real next step sat behind it.
+const BROWSER_HANDOFF = Object.freeze({ activate: true });
+
+// connect() and reconnect() create the pending attempt before the browser is
+// handed the URL. If that handoff fails, nothing downstream ever sees the
+// attempt, so it would keep owning the provider name and reject the retry.
+async function handOffToBrowser(shell, providerDefinitions, result) {
+  if (!result.login?.authUrl) return;
+  try {
+    await shell.openExternal(result.login.authUrl, BROWSER_HANDOFF);
+  } catch (error) {
+    const connectionId = result.connectionId ?? result.providerDefinition?.id;
+    if (connectionId) {
+      await Promise.resolve(providerDefinitions.cancelConnection(connectionId)).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
+// A pending attempt owns the provider name, but the poll that settles it and
+// the ownership that cancels it live only in renderer memory. macOS keeps main
+// running after the last window closes, and `activate` builds a new window with
+// new contents that cannot discover the attempt, so a closed window would hold
+// the name until the app restarts. Bind the attempt to the contents that began
+// it and cancel it when they go.
+function bindConnectionToRenderer(providerDefinitions, contents, connectionId, onFired) {
+  if (typeof contents?.once !== "function") return () => {};
+  const cancel = () => {
+    onFired();
+    void Promise.resolve(providerDefinitions.cancelConnection(connectionId)).catch(() => undefined);
+  };
+  contents.once("destroyed", cancel);
+  return () => contents.removeListener?.("destroyed", cancel);
+}
 
 const MAX_COMPOSER_DRAFT_BYTES = 1024 * 1024;
 const MAX_FOLLOWUP_DRAFTS = 256;
@@ -56,18 +94,47 @@ export function registerDesktopIpc({
   tutorial,
   updater,
   getWindow,
+  presentWindow = () => {},
   getAppearance,
   setAppearance,
   beforeUpdateInstall = async () => {},
   onUpdateInstallFailure = async () => {},
 }) {
   const normalizeAppearance = (value) => value === "light" ? "light" : "dark";
+  // A change notification is an announcement, never a step of the operation it
+  // reports. Sending into contents that were destroyed mid-flight must not turn
+  // a settled connection into a rejection, nor pre-empt the browser return.
+  const notifyProvidersChanged = (change) => {
+    try {
+      getWindow()?.webContents.send("relayer:providers-changed", change);
+    } catch {
+      // The window is gone; the operation it would have described is not.
+    }
+  };
+  const rendererBindings = new Map();
+  const releaseConnection = (connectionId) => {
+    const unbind = rendererBindings.get(connectionId);
+    if (!unbind) return;
+    rendererBindings.delete(connectionId);
+    unbind();
+  };
+  const bindConnection = (contents, result) => {
+    if (result?.status !== "pending" || !result?.connectionId) return;
+    const { connectionId } = result;
+    releaseConnection(connectionId);
+    rendererBindings.set(connectionId, bindConnectionToRenderer(
+      providerDefinitions,
+      contents,
+      connectionId,
+      () => rendererBindings.delete(connectionId),
+    ));
+  };
 
   if (credentials) {
     ipcMain.handle("relayer:account-read", () => credentials.account());
     ipcMain.handle("relayer:account-login", async () => {
       const result = await credentials.login();
-      if (result?.authUrl) await shell.openExternal(result.authUrl);
+      if (result?.authUrl) await shell.openExternal(result.authUrl, BROWSER_HANDOFF);
       return result?.authUrl
         ? { status: "pending", loginId: result?.loginId ?? null }
         : result;
@@ -92,11 +159,12 @@ export function registerDesktopIpc({
       hasCompletedOnboarding,
     };
   });
-  ipcMain.handle("relayer:provider-connect", async (_event, input) => {
+  ipcMain.handle("relayer:provider-connect", async (event, input) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const result = await providerDefinitions.connect(input);
-    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl);
-    getWindow()?.webContents.send("relayer:providers-changed", {
+    await handOffToBrowser(shell, providerDefinitions, result);
+    bindConnection(event?.sender, result);
+    notifyProvidersChanged({
       kind: result.status === "connected" ? "connected" : "connection_pending",
       providerId: result.providerDefinition.id,
     });
@@ -104,34 +172,60 @@ export function registerDesktopIpc({
   });
   ipcMain.handle("relayer:provider-connect-complete", async (_event, { connectionId }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
-    const result = await providerDefinitions.completeConnection(connectionId);
-    getWindow()?.webContents.send("relayer:providers-changed", {
+    // Connect and reconnect both settle here. Every terminal outcome of the
+    // browser leg belongs back in Relayer, on the same terms as account
+    // sign-in: a success, and a failure such as catalog discovery or runtime
+    // registration, which the renderer would otherwise report behind the
+    // browser. Only a still-pending attempt is unfinished and presents nothing.
+    const returnToRelayer = () => {
+      try { presentWindow(); } catch {
+        // Window presentation is a courtesy and cannot fail a connection.
+      }
+    };
+    let result;
+    try {
+      result = await providerDefinitions.completeConnection(connectionId);
+    } catch (error) {
+      // Settled or never ours; either way this renderer no longer guards it.
+      releaseConnection(connectionId);
+      // Only a failure that settled the attempt is terminal. An unknown or
+      // stale connection never owned one, and a transient failure such as a
+      // temporary account check leaves the attempt live in the browser, so
+      // neither may pull focus out of it.
+      if (isTerminalConnectionFailure(error)) returnToRelayer();
+      throw error;
+    }
+    if (result.status !== "pending") releaseConnection(connectionId);
+    notifyProvidersChanged({
       kind: result.status === "connected" ? "connected" : "connection_pending",
       providerId: result.providerDefinition.id,
     });
+    if (result.status === "connected") returnToRelayer();
     return result;
   });
   ipcMain.handle("relayer:provider-connect-cancel", async (_event, { connectionId }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    releaseConnection(connectionId);
     return { cancelled: await providerDefinitions.cancelConnection(connectionId) };
   });
   ipcMain.handle("relayer:provider-rename", async (_event, { id, label }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const definition = await providerDefinitions.rename(id, label);
-    getWindow()?.webContents.send("relayer:providers-changed", { kind: "renamed", providerId: definition.id });
+    notifyProvidersChanged({ kind: "renamed", providerId: definition.id });
     return definition;
   });
   ipcMain.handle("relayer:provider-logout", async (_event, { id }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const account = await providerDefinitions.logout(id);
-    getWindow()?.webContents.send("relayer:providers-changed", { kind: "logged_out", providerId: id });
+    notifyProvidersChanged({ kind: "logged_out", providerId: id });
     return account;
   });
-  ipcMain.handle("relayer:provider-reconnect", async (_event, { id }) => {
+  ipcMain.handle("relayer:provider-reconnect", async (event, { id }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const result = await providerDefinitions.reconnect(id);
-    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl);
-    getWindow()?.webContents.send("relayer:providers-changed", {
+    await handOffToBrowser(shell, providerDefinitions, result);
+    bindConnection(event?.sender, result);
+    notifyProvidersChanged({
       kind: "reconnect_pending",
       providerId: result.providerDefinition.id,
     });
@@ -140,7 +234,7 @@ export function registerDesktopIpc({
   ipcMain.handle("relayer:provider-remove", async (_event, { id }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const definition = await providerDefinitions.remove(id);
-    getWindow()?.webContents.send("relayer:providers-changed", { kind: "removal_requested", providerId: definition.id });
+    notifyProvidersChanged({ kind: "removal_requested", providerId: definition.id });
     return definition;
   });
   ipcMain.handle("relayer:provider-onboarding-complete", async () => {

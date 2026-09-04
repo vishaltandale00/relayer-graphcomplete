@@ -445,8 +445,11 @@ describe("desktop environment rail", () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain("--inspector:340px");
     expect(styles).toContain("grid-template-columns:minmax(0,1fr) var(--inspector)");
-    expect(styles).toContain("padding:0 12px 0 0");
-    expect(styles).toContain("padding:0 12px 12px");
+    // The workspace grid clears the window chrome instead of starting flush
+    // against it, and the top inset matches the right one.
+    expect(styles).toContain("padding:12px 12px 0 0");
+    expect(styles).toContain("padding:12px 12px 12px");
+    expect(styles).not.toContain("padding:0 12px 0 0");
     expect(styles).toContain('html[data-theme="light"] .workspace-breadcrumb.root-annotation-only{background:transparent}');
     expect(styles).toContain(".environment-panel{grid-column:2;grid-row:1 / 3");
     expect(styles).toContain(".interaction-banner{grid-column:1;grid-row:2;margin:8px 0 12px 12px");

@@ -1956,6 +1956,108 @@ describe("desktop skeleton", () => {
     expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
   });
 
+  const pollUpdater = ({ isPackaged = true } = {}) => {
+    const autoUpdater = Object.assign(new EventEmitter(), {
+      checkForUpdates: vi.fn(async () => undefined),
+      downloadUpdate: vi.fn(async () => undefined),
+      setFeedURL: vi.fn(),
+      quitAndInstall: vi.fn(),
+    });
+    let scheduled = null;
+    let launch = null;
+    const setPollTimer = vi.fn((callback, interval) => {
+      scheduled = { callback, interval, cleared: false };
+      return scheduled;
+    });
+    const clearPollTimer = vi.fn((timer) => { timer.cleared = true; });
+    const setLaunchTimer = vi.fn((callback, delay) => {
+      launch = { callback, delay, cleared: false };
+      return launch;
+    });
+    const clearLaunchTimer = vi.fn((timer) => { timer.cleared = true; });
+    const updater = createDesktopUpdater({
+      autoUpdater,
+      app: { isPackaged, getVersion: () => "0.2.0" },
+      emit: vi.fn(),
+      updateBaseUrl: DESKTOP_UPDATE_BASE_URL,
+      pollIntervalMs: 1_000,
+      launchCheckDelayMs: 50,
+      setPollTimer,
+      clearPollTimer,
+      setLaunchTimer,
+      clearLaunchTimer,
+    });
+    return {
+      autoUpdater, updater, setPollTimer, clearPollTimer, setLaunchTimer,
+      tick: () => scheduled?.callback(),
+      fireLaunch: () => launch?.callback(),
+      scheduled: () => scheduled,
+      launch: () => launch,
+    };
+  };
+
+  it("polls for updates on a schedule without disturbing one already in flight", async () => {
+    const development = pollUpdater({ isPackaged: false });
+    expect(development.updater.startPolling()).toBe(false);
+    expect(development.setPollTimer).not.toHaveBeenCalled();
+
+    const packaged = pollUpdater();
+    expect(packaged.updater.startPolling()).toBe(true);
+    expect(packaged.scheduled().interval).toBe(1_000);
+    // Starting twice must not stack a second timer on the first.
+    expect(packaged.updater.startPolling()).toBe(false);
+    expect(packaged.setPollTimer).toHaveBeenCalledOnce();
+
+    await packaged.tick();
+    expect(packaged.autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+
+    // Every phase where the update is already the user's business is skipped,
+    // and a poll never resets the progress the user is watching.
+    for (const [event, payload] of [
+      ["checking-for-update", undefined],
+      ["update-available", { version: "0.2.1" }],
+      ["download-progress", { percent: 42 }],
+      ["update-downloaded", { version: "0.2.1" }],
+    ]) {
+      packaged.autoUpdater.emit(event, payload);
+      await packaged.tick();
+      expect(packaged.autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+    }
+    expect(packaged.updater.status()).toMatchObject({ phase: "ready", percent: 100 });
+
+    // A failure is not in flight, so the next poll retries it.
+    packaged.autoUpdater.emit("error", new Error("offline"));
+    await packaged.tick();
+    expect(packaged.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2);
+
+    expect(packaged.updater.stopPolling()).toBe(true);
+    expect(packaged.clearPollTimer).toHaveBeenCalledOnce();
+    expect(packaged.updater.stopPolling()).toBe(false);
+  });
+
+  it("guards the launch check and never repeats it when a window is recreated", async () => {
+    const launched = pollUpdater();
+    expect(launched.updater.startPolling()).toBe(true);
+    expect(launched.launch().delay).toBe(50);
+    await launched.fireLaunch();
+    expect(launched.autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+
+    // Recreating a window restarts nothing: the launch check is once per
+    // process, so a staged update cannot be reset back to checking.
+    launched.updater.stopPolling();
+    expect(launched.updater.startPolling()).toBe(true);
+    expect(launched.setLaunchTimer).toHaveBeenCalledOnce();
+
+    // A launch check that does fire takes the same in-flight guard as the poll,
+    // so an update the user is already holding is left alone.
+    const staged = pollUpdater();
+    staged.updater.startPolling();
+    staged.autoUpdater.emit("update-downloaded", { version: "0.2.1" });
+    await staged.fireLaunch();
+    expect(staged.autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+    expect(staged.updater.status()).toMatchObject({ phase: "ready", percent: 100 });
+  });
+
   it("suppresses macOS updates below the manifest's Darwin kernel floor", async () => {
     const updateInfo = { version: "0.3.0", minimumSystemVersion: "22.4.0" };
     const unsupportedHosts = [

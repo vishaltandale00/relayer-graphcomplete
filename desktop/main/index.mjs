@@ -278,8 +278,9 @@ if (primaryInstance) {
         if (!safeStorage.isEncryptionAvailable()) throw new Error("Operating-system credential encryption is unavailable.");
         return safeStorage.decryptString(Buffer.from(value, "base64"));
       },
-      openExternal: (url) => shell.openExternal(url),
+      openExternal: (url) => shell.openExternal(url, { activate: true }),
       emit: (state) => mainWindow?.webContents.send("relayer:account-changed", state),
+      presentWindow: () => { primaryInstance?.presentPrimaryWindow(); },
       telemetry: accountTelemetry,
     });
   }
@@ -332,7 +333,7 @@ if (primaryInstance) {
     desktopDirectory,
     getAppearance: () => appearance,
     updater,
-    openExternal: (url) => shell.openExternal(url),
+    openExternal: (url) => shell.openExternal(url, { activate: true }),
     issueErrorReporter,
   });
 
@@ -365,6 +366,7 @@ if (primaryInstance) {
   async function shutdownServices() {
     shutdownPromise ??= (async () => {
       const results = [];
+      updater.stopPolling();
       try {
         electronMainErrorAdapter?.close();
       } catch (error) {
@@ -562,6 +564,7 @@ if (primaryInstance) {
       shell,
       nativeTheme,
       credentials: accountService,
+      presentWindow: () => { primaryInstance?.presentPrimaryWindow(); },
       accountChannel: {
         setChannel: (nextChannel) => setDesktopAuthenticatedErrorChannel({
           reporting: authenticatedErrorReporting,
