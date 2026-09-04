@@ -5314,90 +5314,97 @@ mod tests {
         );
     }
 
-    /// Bound for the escaped-writer fixture. Test-local on purpose: the product
-    /// inspection timeout is a separate knob, and changing it must not alter
-    /// how often this test skips or how wide its post-fork window is.
+    /// Bound for one attempt of the escaped-writer fixture. Test-local on
+    /// purpose: the product inspection timeout is a separate knob, and changing
+    /// it must not alter how this test behaves under contention.
     #[cfg(unix)]
     const ESCAPED_WRITER_BOUND: Duration = Duration::from_secs(2);
+    /// Attempts before a bound that keeps expiring is a failure. A parent that
+    /// waits on the escaped writer, or on the reader draining its pipe, expires
+    /// on every attempt; a fixture starved by suite contention does not.
+    #[cfg(unix)]
+    const ESCAPED_WRITER_ATTEMPTS: usize = 3;
 
     #[test]
     #[cfg(unix)]
     fn setsid_descendant_cannot_retain_writable_capture_storage() {
-        use std::{fs, os::unix::fs::PermissionsExt, time::SystemTime};
+        use std::{fs, os::unix::fs::PermissionsExt};
 
         let directory = tempfile::tempdir().unwrap();
-        // Written by the escaped child right after `setsid()`. The perl parent
-        // waits for it before exiting, so the leader cannot exit, and the
-        // group cannot be killed, before the child has left the group.
-        let forked = directory.path().join("escaped-writer-forked");
-        // Written by the shell leader after perl returns, just before it exits.
-        let leader_exited = directory.path().join("leader-exited");
-        // Written by the escaped child once its capture pipe is closed. The
-        // child paces its writes so the 256 KiB capture cap cannot be reached
-        // inside the bound: the only healthy outcome is then `Ok`, and a parent
-        // that waited on the pipe or its reader surfaces as `Timeout`.
-        let marker = directory.path().join("escaped-writer-closed");
         let fixture = directory.path().join("setsid-fixture");
+        // The child writes the fork witness right after `setsid()`, and the
+        // perl parent waits for it before exiting, so the leader cannot exit,
+        // and the group cannot be killed, before the child has left the group.
+        // The child paces its writes so the 256 KiB capture cap cannot be
+        // reached inside the bound: `Ok` is then the only healthy outcome, and
+        // a parent that waited on the pipe or its reader surfaces as `Timeout`.
+        // The child writes the marker once its capture pipe is closed.
         fs::write(
             &fixture,
-            "#!/bin/sh\nperl -MPOSIX=setsid -e '$SIG{PIPE}=\"IGNORE\"; if (fork() == 0) { setsid(); open(my $w, \">\", $ENV{RELAYER_ESCAPE_FORKED}); close($w); while (syswrite(STDOUT, \"x\" x 4096)) { select(undef, undef, undef, 0.05); } open(my $f, \">\", $ENV{RELAYER_ESCAPE_MARKER}); print $f \"closed\"; exit 0; } select(undef, undef, undef, 0.005) until -e $ENV{RELAYER_ESCAPE_FORKED}; exit 0;'\ntouch \"$RELAYER_LEADER_EXITED\"\n",
+            "#!/bin/sh\nperl -MPOSIX=setsid -e '$SIG{PIPE}=\"IGNORE\"; if (fork() == 0) { setsid(); open(my $w, \">\", $ENV{RELAYER_ESCAPE_FORKED}); close($w); while (syswrite(STDOUT, \"x\" x 4096)) { select(undef, undef, undef, 0.05); } open(my $f, \">\", $ENV{RELAYER_ESCAPE_MARKER}); print $f \"closed\"; exit 0; } select(undef, undef, undef, 0.005) until -e $ENV{RELAYER_ESCAPE_FORKED}; exit 0;'\n",
         )
         .unwrap();
         let mut permissions = fs::metadata(&fixture).unwrap().permissions();
         permissions.set_mode(0o700);
         fs::set_permissions(&fixture, permissions).unwrap();
-        let started = Instant::now();
-        let started_at = SystemTime::now();
-        let result = run_bounded_command_with(
-            fixture.as_os_str(),
-            directory.path(),
-            &[],
-            ESCAPED_WRITER_BOUND,
-            |command| {
-                command.env("RELAYER_ESCAPE_FORKED", &forked);
-                command.env("RELAYER_LEADER_EXITED", &leader_exited);
-                command.env("RELAYER_ESCAPE_MARKER", &marker);
-            },
-        );
-        let elapsed = started.elapsed();
-        if let Err(GitRunError::Timeout(_)) = &result {
-            // The bound expired. Only a leader that exited inside the bound and
-            // still went unobserved is a failure; anything else is the fixture
-            // being starved under suite contention, which proves nothing and is
-            // reported so a permanently skipping runner shows in the log.
-            if !retry_cleanup_until(Instant::now() + Duration::from_secs(1), || forked.exists()) {
-                eprintln!("setsid fixture skipped: bound expired before the fixture forked");
-                return;
-            }
-            let exited_within_bound = fs::metadata(&leader_exited)
-                .and_then(|metadata| metadata.modified())
-                .is_ok_and(|modified| modified <= started_at + ESCAPED_WRITER_BOUND);
-            if !exited_within_bound {
+
+        for attempt in 1..=ESCAPED_WRITER_ATTEMPTS {
+            let forked = directory
+                .path()
+                .join(format!("escaped-writer-forked-{attempt}"));
+            let marker = directory
+                .path()
+                .join(format!("escaped-writer-closed-{attempt}"));
+            let started = Instant::now();
+            let result = run_bounded_command_with(
+                fixture.as_os_str(),
+                directory.path(),
+                &[],
+                ESCAPED_WRITER_BOUND,
+                |command| {
+                    command.env("RELAYER_ESCAPE_FORKED", &forked);
+                    command.env("RELAYER_ESCAPE_MARKER", &marker);
+                },
+            );
+            let elapsed = started.elapsed();
+            if let Err(GitRunError::Timeout(_)) = &result {
+                // The parent did not observe the leader's exit inside the
+                // bound. One attempt cannot say whether the fixture was starved
+                // (sh and perl starting late, or the leader descheduled after
+                // the child escaped) or the parent waited on the escaped
+                // writer, so nothing is classified: the fixture runs again, and
+                // only a bound that expires every time is reported. An escaped
+                // child from this attempt holds a pipe whose read end the
+                // parent already dropped, so it exits on its next write.
                 eprintln!(
-                    "setsid fixture skipped: leader was starved past the bound after forking"
+                    "setsid fixture attempt {attempt} of {ESCAPED_WRITER_ATTEMPTS}: bound expired, escaped writer present: {}",
+                    forked.exists()
                 );
-                return;
+                continue;
             }
+            // The leader exits only after the child escaped, so the parent's
+            // own observation of that exit is the proof; anything else is a
+            // runner defect and is reported as what it is.
+            assert!(
+                result.is_ok(),
+                "parent did not observe the leader's exit within the bound: {result:?}"
+            );
+            assert!(forked.exists(), "leader exited before the child escaped");
+            // Cleanup and reader join after leader exit stay bounded.
+            assert!(
+                elapsed < ESCAPED_WRITER_BOUND + Duration::from_secs(1),
+                "parent took {elapsed:?} to move on"
+            );
+            // The escaped writer is a starved child on a busy machine; the poll
+            // returns as soon as the marker appears.
+            assert!(
+                retry_cleanup_until(Instant::now() + Duration::from_secs(5), || marker.exists()),
+                "escaped writer never observed its closed pipe"
+            );
+            return;
         }
-        // The leader exits only after the child escaped and the paced writer
-        // cannot fill the capture cap, so `Ok` is the only outcome a healthy
-        // parent can produce; a parent that waited on the escaped writer's
-        // pipe, or on the reader draining it, surfaces as `Timeout` above.
-        assert!(
-            result.is_ok(),
-            "parent did not observe the leader's exit within the bound: {result:?}"
-        );
-        assert!(forked.exists(), "leader exited before the child escaped");
-        // Cleanup and reader join after leader exit stay bounded.
-        assert!(
-            elapsed < ESCAPED_WRITER_BOUND + Duration::from_secs(1),
-            "parent took {elapsed:?} to move on"
-        );
-        // The escaped writer is a starved child on a busy machine; the poll
-        // returns as soon as the marker appears.
-        assert!(
-            retry_cleanup_until(Instant::now() + Duration::from_secs(5), || marker.exists()),
-            "escaped writer never observed its closed pipe"
+        panic!(
+            "parent did not observe the leader's exit within {ESCAPED_WRITER_BOUND:?} in any of {ESCAPED_WRITER_ATTEMPTS} attempts"
         );
     }
 

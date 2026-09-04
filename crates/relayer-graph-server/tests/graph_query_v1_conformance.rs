@@ -31,9 +31,12 @@ use std::{path::Path, sync::Arc, time::Duration};
 /// limit, so the deadline tests and the negative corpus, which narrow
 /// explicitly, still prove the 250 ms budget. Latency is proven separately:
 /// `representative_cold_and_warm_queries_stay_below_the_contract_target`
-/// samples one light case once, and
+/// samples one light case once,
 /// `frozen_positive_cases_stay_below_the_contract_target_on_their_best_warm_run`
-/// takes the best of several warm runs on every positive case. The route
+/// takes the best of several warm runs on every positive case, and
+/// `frozen_traversal_cases_stay_below_the_contract_target_on_their_best_cold_run`
+/// takes the best of several first executions on fresh indexes for the
+/// traversal cases. The route
 /// tests in `graph_search_route.rs` drive default-budget queries through the
 /// transport and are outside this file's scope.
 const CONTRACT_TEST_WALL_TIME: Duration = Duration::from_secs(10);
@@ -1234,6 +1237,62 @@ async fn frozen_positive_cases_stay_below_the_contract_target_on_their_best_warm
             slow.push(format!(
                 "{id}: best of {} warm runs took {best} us",
                 LATENCY_SAMPLES + 1
+            ));
+        }
+    }
+    assert!(slow.is_empty(), "{}", slow.join("\n"));
+}
+
+/// The traversal cases that overran in the load sweeps: the ones a client's
+/// first request is most likely to trip over. First-execution coverage is
+/// deliberately narrowed to these five: the other positive cases sit an order
+/// of magnitude below the target even cold, and each cold sample costs a fresh
+/// index build.
+const COLD_LATENCY_CASES: [&str; 5] = [
+    "one-hop-connected",
+    "two-hop-connected",
+    "layer-action-path",
+    "reused-content-occurrence",
+    "reverse-directed-path",
+];
+const COLD_LATENCY_SAMPLES: usize = 3;
+
+/// A client's first request against a fresh store sees the engine cold, and a
+/// warm best-of-N cannot see a first-execution regression. Each traversal case
+/// runs once on its own fresh index, several indexes over, and the best cold
+/// run must stay inside the contract target: a single-request, no-retry
+/// checkpoint, made contention-resistant the same way as the warm one. "Cold"
+/// here is the first query on an index that was just rebuilt in-process, the
+/// path a reconciled reopen takes, not a reopen of an existing file. Quiet
+/// best is 16 to 46 ms; under 28 hogs on 14 cores the two-hop case
+/// measured about 190 ms, so every sample is printed for diagnosis.
+#[tokio::test(flavor = "multi_thread")]
+async fn frozen_traversal_cases_stay_below_the_contract_target_on_their_best_cold_run() {
+    let positive = fixture("positive.json");
+    let cases = positive["cases"].as_array().expect("cases");
+    let mut slow = Vec::new();
+    for id in COLD_LATENCY_CASES {
+        let case = cases.iter().find(|case| case["id"] == id).expect(id);
+        let permit = QueryReadPermit::for_contract_test(target_of(&case["target"]));
+        let request = request_json(&request_for(case));
+        let mut samples = Vec::with_capacity(COLD_LATENCY_SAMPLES);
+        for _ in 0..COLD_LATENCY_SAMPLES {
+            let (_directory, index) = contract_index();
+            let result = index
+                .query(&permit, &request, QueryCancellation::default())
+                .await
+                .unwrap_or_else(|error| panic!("{id}: {error:?}"));
+            assert!(
+                result.diagnostics.cold,
+                "{id}: the first query on a fresh index was not cold"
+            );
+            samples.push(result.diagnostics.elapsed_micros);
+        }
+        let best = samples.iter().copied().min().unwrap_or(u128::MAX);
+        eprintln!("{id}: cold runs {samples:?} us, best {best} us");
+        if best >= 250_000 {
+            slow.push(format!(
+                "{id}: best of {COLD_LATENCY_SAMPLES} cold runs took {best} us"
             ));
         }
     }
