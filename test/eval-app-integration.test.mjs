@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
+  AUTHORED_VISUAL_NODE_DETAILS_PREFERENCE,
   H3_PACKAGE_MANAGER,
   H3_AUTONOMOUS_FIX_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
@@ -21,9 +22,11 @@ import {
   graphMemorySearchQuery,
   taskSystemFixtureFactory,
 } from "@relayer/eval-runner";
+import { css, html, NodeObject } from "@relayer/graph-client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  acceptedTopologyNodes,
   EvalService,
   evalCases,
   resolveEvalCasePrompts,
@@ -31,6 +34,7 @@ import {
   semanticChildDiscoveryIsBounded,
   semanticChildDiscoveryObservation,
   validateCandidateTrace,
+  visualNodeDetailCheck,
 } from "../desktop/eval-main/eval-service.mjs";
 import {
   GraphCompleteRuntimeService,
@@ -39,6 +43,8 @@ import {
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { recursiveCompleteFixtureFactory } from "./support/recursive-complete-fixture.mjs";
 import { lantern2x2FixtureFactory } from "./support/lantern-2x2-fixture.mjs";
+import { renderPersonalPresentationGuidance } from "../packages/harness-host/src/implementations/personal-presentation-guidance.ts";
+import { buildAcceptedReviewTopology } from "../desktop/eval-main/simulated-user-judge.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const services = [];
@@ -166,14 +172,154 @@ describe("Relayer Eval application service", () => {
     }).stable).toBe(true);
   });
 
-  it("records zero child use without failing a recursion-enabled observational cell", () => {
-    const checks = recursiveCompleteChecks({
-      harnessConfiguration: { implementation: "codex.basic", complete: { agentAuthored: true } },
+  it("keeps visual-comparison child creation observational while checking every observed child", () => {
+    const execution = {
+      harnessConfiguration: {
+        implementation: "codex.basic",
+        complete: { agentAuthored: true },
+        settings: { personalPresentationVersion: "personal-presentation-v3" },
+      },
       harnessConfigurationDigest: "sha256:config",
       turns: [{ candidateTrace: { completionBrokerAvailable: true } }],
       semanticChildren: [],
-    }, { requireChildWhenEnabled: false });
-    expect(checks.filter((check) => !check.passed)).toEqual([]);
+    };
+    expect(recursiveCompleteChecks(execution).filter((check) => !check.passed)).toEqual([]);
+
+    const observed = recursiveCompleteChecks({
+      ...execution,
+      semanticChildren: [{
+        sourceInteractionId: 1,
+        sourceActionId: 2,
+        interactionId: 3,
+        graphNodeId: 4,
+        acceptedNodes: [{ id: 5, title: "Plain child", detail: "Plain" }],
+        projectionObservations: [],
+      }],
+    });
+    expect(observed.find((check) => check.name.endsWith(":child-terminal"))?.passed).toBe(false);
+    expect(observed.find((check) => check.name.endsWith(":child-execution"))?.passed).toBe(false);
+    expect(observed.find((check) => check.name.endsWith(":child-trace"))?.passed).toBe(false);
+    expect(observed.find((check) => check.name.includes(":visual-node-detail:"))?.passed).toBe(false);
+  });
+
+  it("requires authored visual output on every V3 treatment node", () => {
+    const plainOutput = { rootLayer: { nodes: [{ title: "Plain" }] } };
+    const compiledNode = new NodeObject("layout-template", "Visual", "Fallback", "concept", "visual-check");
+    compiledNode.detailAuthoring.setComponent(
+      "main",
+      html`<section><p>Visual</p></section>`,
+      css`section { display: grid; } p { margin: 0; }`,
+    );
+    const compiledDetail = compiledNode.detailAuthoring.checkpoint();
+    const visualOutput = { rootLayer: { nodes: [
+      { title: "First visual", authoredDetail: compiledDetail },
+      { title: "Second visual", authoredDetail: compiledDetail },
+    ] } };
+    const partialVisualOutput = { rootLayer: { nodes: [
+      { title: "Visual", authoredDetail: compiledDetail },
+      { title: "Plain" },
+    ] } };
+    const malformedOutput = { rootLayer: { nodes: [{ title: "Malformed", authoredDetail: { version: 1 } }] } };
+    expect(visualNodeDetailCheck(plainOutput, "personal-presentation-v2").passed).toBe(true);
+    expect(visualNodeDetailCheck(visualOutput, "personal-presentation-v2").passed).toBe(false);
+    expect(visualNodeDetailCheck(plainOutput, "personal-presentation-v3").passed).toBe(false);
+    expect(visualNodeDetailCheck(partialVisualOutput, "personal-presentation-v3").passed).toBe(false);
+    expect(visualNodeDetailCheck(malformedOutput, "personal-presentation-v3").passed).toBe(false);
+    expect(visualNodeDetailCheck(visualOutput, "personal-presentation-v3").passed).toBe(true);
+    const acceptedClosure = acceptedTopologyNodes({ layers: [
+      { nodes: [{ id: 1, title: "Root", authoredDetail: compiledDetail }] },
+      { nodes: [{ id: 2, title: "Nested" }] },
+      { nodes: [{ id: 1, title: "Root", authoredDetail: compiledDetail }] },
+    ] });
+    expect(acceptedClosure).toHaveLength(2);
+    expect(visualNodeDetailCheck(
+      { rootLayer: { nodes: acceptedClosure } },
+      "personal-presentation-v3",
+    ).passed).toBe(false);
+  });
+
+  it("preserves authored details through accepted descendant loading", async () => {
+    const compiledNode = new NodeObject("layout-template", "Root", "Fallback", "concept", "root-visual");
+    compiledNode.detailAuthoring.setComponent("main", html`<p>Root visual</p>`, css`p { margin: 0; }`);
+    const authoredDetail = compiledNode.detailAuthoring.checkpoint();
+    const layers = new Map([
+      ["10", {
+        layer: { id: 10, nodes: [1], edges: [], state: "accepted" },
+        nodes: [{ id: 1, title: "Root", detail: "Fallback", authoredDetail, state: "accepted" }],
+        edges: [],
+        actions: [{ id: 11, sourceNodeId: 1, kind: "navigate", relation: "expand", targetLayerId: 20, state: "accepted" }],
+      }],
+      ["20", {
+        layer: { id: 20, nodes: [2], edges: [], state: "accepted" },
+        nodes: [{ id: 2, title: "Plain descendant", detail: "Plain", state: "accepted" }],
+        edges: [],
+        actions: [],
+      }],
+    ]);
+    const topology = await buildAcceptedReviewTopology({
+      turnId: 1,
+      rootLayerId: 10,
+      loadLayer: async (layerId) => layers.get(String(layerId)),
+    });
+    const nodes = acceptedTopologyNodes(topology);
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0].authoredDetail).toEqual(authoredDetail);
+    expect(visualNodeDetailCheck(
+      { rootLayer: { nodes } },
+      "personal-presentation-v3",
+    ).passed).toBe(false);
+  });
+
+  it("fails a plain semantic child under V3", () => {
+    const checks = recursiveCompleteChecks({
+      harnessConfiguration: {
+        implementation: "fixture.task-system",
+        complete: { agentAuthored: true },
+        settings: { personalPresentationVersion: "personal-presentation-v3" },
+      },
+      harnessConfigurationDigest: "sha256:config",
+      turns: [{ candidateTrace: { completionBrokerAvailable: true } }],
+      semanticChildren: [{
+        sourceInteractionId: 1,
+        sourceActionId: 2,
+        interactionId: 3,
+        graphNodeId: 4,
+        acceptedNodes: [{ id: 5, title: "Plain child", detail: "Plain" }],
+        projectionObservations: [],
+      }],
+    });
+    expect(checks.find(({ name }) => (
+      name === "agent-authored-complete:child-3:visual-node-detail:authored-output"
+    ))?.passed).toBe(false);
+  });
+
+  it("renders the complete V3 Node Detail recipe without losing executable guidance", () => {
+    const rendered = renderPersonalPresentationGuidance({
+      attachment: { interactionNodeId: 1, versionInteractionNodeId: 3, rootLayerId: 4 },
+      graph: {
+        nodeId: 3,
+        rootLayerId: 4,
+        rootAction: { id: 5, sourceNodeId: 3, kind: "navigate", relation: "expand", label: "Profile", targetLayerId: 4, state: "accepted" },
+        layers: [{
+          layer: { id: 4, nodes: [6], edges: [], state: "accepted" },
+          nodes: [{
+            id: 6,
+            kind: "presentation-preference",
+            icon: "layout-template",
+            title: "Authored visual Node Details",
+            detail: AUTHORED_VISUAL_NODE_DETAILS_PREFERENCE,
+            state: "accepted",
+          }],
+          edges: [],
+          actions: [],
+        }],
+      },
+    });
+    expect(rendered).toContain(AUTHORED_VISUAL_NODE_DETAILS_PREFERENCE);
+    expect(rendered).not.toContain("visual assets");
+    for (const fragment of ["html", "css", "detailCapability", "setComponent", "checkpointNodeDetail", "submitNode", "graph.addAction"]) {
+      expect(rendered).toContain(fragment);
+    }
   });
 
   it("rejects discontinuous child projections and duplicate trace scope markers", async () => {
@@ -249,16 +395,16 @@ describe("Relayer Eval application service", () => {
         cookie: { name: "unused", value: "unused" },
       },
       configurationPaths: [
-        join(repositoryRoot, "harnesses", "codex-eval-complete-disabled.yaml"),
-        join(repositoryRoot, "harnesses", "codex-eval-complete-enabled.yaml"),
+        join(repositoryRoot, "harnesses", "codex-eval-visual-node-details-control.yaml"),
+        join(repositoryRoot, "harnesses", "codex-eval-visual-node-details-treatment.yaml"),
       ],
     }).open();
 
     await expect(evalService.createRun({
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
-        "codex-eval-complete-disabled",
-        "codex-eval-complete-enabled",
+        "codex-eval-visual-node-details-control",
+        "codex-eval-visual-node-details-treatment",
       ],
       judgeConfigurationName: "deterministic-graph-contract",
     })).rejects.toThrow("requires explicit confirmation");
@@ -459,20 +605,20 @@ describe("Relayer Eval application service", () => {
     }
   }, 90_000);
 
-  it("rejects a recursive comparison whose exact off cell grants Complete authority", async () => {
+  it("rejects a visual-detail comparison whose control lacks recursive Complete authority", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-authority-drift-test-"));
     directories.push(dataDirectory);
-    const disabledPath = join(dataDirectory, "codex-eval-complete-disabled.yaml");
-    const enabledPath = join(dataDirectory, "codex-eval-complete-enabled.yaml");
-    await writeFile(disabledPath, recursiveComparisonConfiguration(
-      "codex-eval-complete-disabled",
-      true,
-      "personal-presentation-v1",
-    ));
-    await writeFile(enabledPath, recursiveComparisonConfiguration(
-      "codex-eval-complete-enabled",
-      true,
+    const controlPath = join(dataDirectory, "codex-eval-visual-node-details-control.yaml");
+    const treatmentPath = join(dataDirectory, "codex-eval-visual-node-details-treatment.yaml");
+    await writeFile(controlPath, recursiveComparisonConfiguration(
+      "codex-eval-visual-node-details-control",
+      false,
       "personal-presentation-v2",
+    ));
+    await writeFile(treatmentPath, recursiveComparisonConfiguration(
+      "codex-eval-visual-node-details-treatment",
+      true,
+      "personal-presentation-v3",
     ));
     const evalService = await new EvalService({
       stateFile: join(dataDirectory, "test-runs.json"),
@@ -480,40 +626,40 @@ describe("Relayer Eval application service", () => {
         origin: "http://127.0.0.1:1",
         cookie: { name: "unused", value: "unused" },
       },
-      configurationPaths: [disabledPath, enabledPath],
+      configurationPaths: [controlPath, treatmentPath],
     }).open();
 
     await expect(evalService.createRun({
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
-        "codex-eval-complete-disabled",
-        "codex-eval-complete-enabled",
+        "codex-eval-visual-node-details-control",
+        "codex-eval-visual-node-details-treatment",
       ],
       judgeConfigurationName: "deterministic-graph-contract",
-    })).rejects.toThrow("approved V1/off and V2/on experience pair");
+    })).rejects.toThrow("approved V2 control and V3 treatment presentation versions");
   });
 
   it("runs an authority-isolated agent-authored Complete pair and preserves child evidence outside human turns", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-test-"));
     directories.push(dataDirectory);
-    const disabledPath = join(dataDirectory, "codex-eval-complete-disabled.yaml");
-    const enabledPath = join(dataDirectory, "codex-eval-complete-enabled.yaml");
-    await writeFile(disabledPath, recursiveComparisonConfiguration(
-      "codex-eval-complete-disabled",
-      false,
-      "personal-presentation-v1",
-    ));
-    await writeFile(enabledPath, recursiveComparisonConfiguration(
-      "codex-eval-complete-enabled",
+    const controlPath = join(dataDirectory, "codex-eval-visual-node-details-control.yaml");
+    const treatmentPath = join(dataDirectory, "codex-eval-visual-node-details-treatment.yaml");
+    await writeFile(controlPath, recursiveComparisonConfiguration(
+      "codex-eval-visual-node-details-control",
       true,
       "personal-presentation-v2",
+    ));
+    await writeFile(treatmentPath, recursiveComparisonConfiguration(
+      "codex-eval-visual-node-details-treatment",
+      true,
+      "personal-presentation-v3",
     ));
     const observed = { fireAndForget: true, childDelayMs: 100 };
     const recursiveFactory = recursiveCompleteFixtureFactory(observed);
     const runtime = new GraphCompleteRuntimeService({
       userDataDirectory: dataDirectory,
       graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-      configurationPaths: [disabledPath, enabledPath],
+      configurationPaths: [controlPath, treatmentPath],
       temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
       additionalImplementations: {
         "fixture.task-system": (context) => (
@@ -546,7 +692,7 @@ describe("Relayer Eval application service", () => {
       webDirectory: join(repositoryRoot, "desktop", "renderer"),
       permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
       runtimeSession: await runtime.start(),
-      defaultHarnessConfiguration: "codex-eval-complete-disabled",
+      defaultHarnessConfiguration: "codex-eval-visual-node-details-control",
       allowHarnessOverride: true,
     });
     services.push(product);
@@ -577,7 +723,7 @@ describe("Relayer Eval application service", () => {
     const evalService = await new EvalService({
       stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
       productSession,
-      configurationPaths: [disabledPath, enabledPath],
+      configurationPaths: [controlPath, treatmentPath],
       candidateTraceExporter: (interactionId, targetDirectory, correlation) => (
         runtime.exportCandidateTrace(interactionId, targetDirectory, correlation)
       ),
@@ -587,8 +733,8 @@ describe("Relayer Eval application service", () => {
     await expect(evalService.createRun({
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
-        "codex-eval-complete-enabled",
-        "codex-eval-complete-disabled",
+        "codex-eval-visual-node-details-treatment",
+        "codex-eval-visual-node-details-control",
       ],
       judgeConfigurationName: "deterministic-graph-contract",
     })).rejects.toThrow("exact ordered Codex pair");
@@ -596,8 +742,8 @@ describe("Relayer Eval application service", () => {
     const created = await evalService.createRun({
       testCaseIds: ["empty-project.recursive-complete.comparison"],
       harnessConfigurationNames: [
-        "codex-eval-complete-disabled",
-        "codex-eval-complete-enabled",
+        "codex-eval-visual-node-details-control",
+        "codex-eval-visual-node-details-treatment",
       ],
       judgeConfigurationName: "deterministic-graph-contract",
     });
@@ -617,26 +763,39 @@ describe("Relayer Eval application service", () => {
         semanticChildren: execution.semanticChildren,
       })),
     }, null, 2)).toBe("passed");
-    const control = completed.executions.find((execution) => execution.harnessConfigurationName.endsWith("disabled"));
-    const treatment = completed.executions.find((execution) => execution.harnessConfigurationName.endsWith("enabled"));
+    const control = completed.executions.find((execution) => (
+      execution.harnessConfigurationName === "codex-eval-visual-node-details-control"
+    ));
+    const treatment = completed.executions.find((execution) => (
+      execution.harnessConfigurationName === "codex-eval-visual-node-details-treatment"
+    ));
     expect(completed.comparison).toMatchObject({
-      kind: "agent-authored-complete-pair",
+      kind: "visual-node-details-pair",
       passed: true,
-      check: { name: "agent-authored-complete:controlled-pair", passed: true },
+      check: { name: "visual-node-details:controlled-pair", passed: true },
     });
     expect(treatment.modelResolution).toEqual(control.modelResolution);
+    expect(control.turns[0].personalPresentationVersionId).not.toBe(treatment.turns[0].personalPresentationVersionId);
+    expect(control.turns[0].personalPresentationVersionKey).toBe("personal-presentation-v2");
+    expect(treatment.turns[0].personalPresentationVersionKey).toBe("personal-presentation-v3");
     expect(control.turns).toHaveLength(1);
     expect(control.turns[0].candidateTrace).toMatchObject({
       status: "complete",
-      completionBrokerAvailable: false,
+      completionBrokerAvailable: true,
     });
-    expect(control.semanticChildren).toEqual([]);
+    expect(control.semanticChildren).toHaveLength(1);
+    expect(control.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "turn-1:visual-node-detail:authored-output", passed: true }),
+    ]));
     expect(treatment.turns).toHaveLength(1);
     expect(treatment.turns[0].candidateTrace).toMatchObject({
       status: "complete",
       completionBrokerAvailable: true,
     });
     expect(treatment.semanticChildren).toHaveLength(1);
+    expect(treatment.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "turn-1:visual-node-detail:authored-output", passed: true }),
+    ]));
     expect(observed.fireAndForgetStarted).toBe(true);
     expect(treatment.semanticChildren[0]).toMatchObject({
       status: "accepted",

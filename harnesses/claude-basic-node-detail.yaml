@@ -1,0 +1,31 @@
+schemaVersion: 1
+name: claude-basic-node-detail
+implementation: claude.basic
+implementationVersion: 1
+revision: 2
+permissionBindings:
+  ask:
+    approvalMode: default
+  auto:
+    approvalMode: acceptEdits
+  full:
+    approvalMode: bypassPermissions
+modelRules:
+  allow:
+    - adapterId: claude-subscription
+      modelIdExact: sonnet
+    - adapterId: claude-subscription
+      modelIdExact: opus
+    - adapterId: claude-subscription
+      modelIdExact: fable
+    - adapterId: anthropic-api
+      modelIdRegex: "^claude-"
+  deny: []
+executionAccessContracts: [managed-runtime@1, secret@1]
+modelDefaults:
+  familyPolicy:
+    id: claude-default-family
+    version: 1
+graphCapabilityProfile:
+  search: query-v1
+settings: {}

@@ -8,7 +8,7 @@ use axum::{
 };
 use relayer_graph_core::query::{QueryError, preflight_public_request_json};
 use relayer_graph_core::{
-    ActionDraft, ActionId, ActionKind, CompletionOutput, CurrentTransition,
+    ActionDraft, ActionId, ActionKind, AuthoredDetailUpdate, CompletionOutput, CurrentTransition,
     CurrentTransitionReceipt, EdgeDraft, GraphAction, GraphDatabase, GraphError, GraphNode,
     GraphWriter, ImportedConversationStage, ImportedTurn, InteractionContextAction,
     InteractionContextDraft, InteractionContextTarget, InteractionInput, InteractionInputNode,
@@ -1187,17 +1187,47 @@ async fn revoke_capability(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmitNodeRequest {
+    #[serde(flatten)]
+    draft: NodeDraft,
+    /// Three-state: absent retains the draft's checkpointed package, `null`
+    /// clears it, and a package replaces it.
+    #[serde(default, deserialize_with = "deserialize_nullable_authored_detail")]
+    authored_detail: Option<Option<Value>>,
+}
+
+fn deserialize_nullable_authored_detail<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<Value>::deserialize(deserializer).map(Some)
+}
+
+impl SubmitNodeRequest {
+    fn authored_detail_update(&self) -> AuthoredDetailUpdate<'_> {
+        match &self.authored_detail {
+            None => AuthoredDetailUpdate::Retain,
+            Some(None) => AuthoredDetailUpdate::Clear,
+            Some(Some(package)) => AuthoredDetailUpdate::Replace(package),
+        }
+    }
+}
+
 async fn submit_node(
     State(state): State<ServerState>,
     headers: HeaderMap,
-    Json(input): Json<NodeDraft>,
+    Json(input): Json<SubmitNodeRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let authority = session(&state, &headers)?;
     let node = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
-        .submit_node(&input)
+        .submit_node_with_authored_detail_update(&input.draft, input.authored_detail_update())
         .await?;
     Ok(Json(json!({"node": node})))
 }
@@ -1685,6 +1715,158 @@ mod tests {
         http::Request,
     };
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn node_api_round_trips_and_preserves_the_canonical_authored_detail_package() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Question")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let graph_token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
+        let app = router(state);
+        let package = json!({
+            "version": 1,
+            "components": [{"id":"overview","order":0,"html":"<p>Accepted</p>","css":"p{color:#fff}"}],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "6c34582a24f665dfcf9efa843fdb254a646de79c505d76c80863f81ed8dfe659"
+        });
+
+        let submitted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/nodes")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(
+                        json!({
+                            "clientKey": "answer",
+                            "kind": "concept",
+                            "icon": "box",
+                            "title": "Answer",
+                            "detail": "Legacy fallback",
+                            "authoredDetail": package
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(submitted.status(), StatusCode::OK);
+        let submitted: Value =
+            serde_json::from_slice(&to_bytes(submitted.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        let node_id = submitted["node"]["id"].as_i64().unwrap();
+        assert_eq!(submitted["node"]["clientKey"], "answer");
+        assert_eq!(submitted["node"]["authoredDetail"], package);
+
+        let resubmitted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/nodes")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(
+                        json!({
+                            "clientKey": "answer",
+                            "kind": "concept",
+                            "icon": "box",
+                            "title": "Revised answer",
+                            "detail": "Revised fallback"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resubmitted.status(), StatusCode::OK);
+        let resubmitted: Value =
+            serde_json::from_slice(&to_bytes(resubmitted.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(resubmitted["node"]["id"], node_id);
+        assert_eq!(resubmitted["node"]["title"], "Revised answer");
+        assert_eq!(resubmitted["node"]["authoredDetail"], package);
+
+        let retained = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/nodes/{node_id}"))
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(retained.status(), StatusCode::OK);
+        let retained: Value =
+            serde_json::from_slice(&to_bytes(retained.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(retained["node"]["clientKey"], "answer");
+        assert_eq!(retained["node"]["title"], "Revised answer");
+        assert_eq!(retained["node"]["authoredDetail"], package);
+
+        // `authoredDetail: null` is the explicit clear; absence retains.
+        let cleared = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/nodes")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(
+                        json!({
+                            "clientKey": "answer",
+                            "kind": "concept",
+                            "icon": "box",
+                            "title": "Markdown only",
+                            "detail": "Markdown fallback",
+                            "authoredDetail": null
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cleared.status(), StatusCode::OK);
+        let cleared: Value =
+            serde_json::from_slice(&to_bytes(cleared.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(cleared["node"]["id"], node_id);
+        assert_eq!(cleared["node"]["title"], "Markdown only");
+        assert!(cleared["node"].get("authoredDetail").is_none());
+
+        let fetched = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/nodes/{node_id}"))
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fetched.status(), StatusCode::OK);
+        let fetched: Value =
+            serde_json::from_slice(&to_bytes(fetched.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(fetched["node"]["clientKey"], "answer");
+        assert_eq!(fetched["node"]["title"], "Markdown only");
+        assert!(fetched["node"].get("authoredDetail").is_none());
+    }
 
     #[tokio::test]
     async fn graph_capability_can_discard_an_owned_orphan_layer() {
@@ -3307,9 +3489,27 @@ mod tests {
             serde_json::from_slice(&to_bytes(valid.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         let layer_id = valid["layer"]["id"].as_i64().unwrap();
+        assert_eq!(valid["layer"]["clientKey"], "root");
         assert_eq!(valid["layer"]["layout"]["version"], 1);
         assert_eq!(valid["layer"]["layout"]["placements"][0]["x"], 0.25);
 
+        writer
+            .add_action(&ActionDraft {
+                client_key: "continue".into(),
+                source_node_id: answer.id,
+                source_layer_id: LayerId::new(layer_id),
+                kind: ActionKind::Invoke,
+                relation: None,
+                label: "Continue".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: Some("Continue from here".into()),
+                input: None,
+            })
+            .await
+            .unwrap();
         writer
             .add_action(&ActionDraft {
                 client_key: "response".into(),
@@ -3350,6 +3550,16 @@ mod tests {
         assert_eq!(
             completed["rootLayer"]["layer"]["layout"],
             valid["layer"]["layout"]
+        );
+        assert_eq!(completed["rootLayer"]["layer"]["clientKey"], "root");
+        assert_eq!(completed["rootLayer"]["nodes"][0]["clientKey"], "answer");
+        assert_eq!(
+            completed["rootLayer"]["actions"][0]["clientKey"],
+            "continue"
+        );
+        assert_eq!(
+            completed["rootLayer"]["actions"][0]["sourceLayerClientKey"],
+            "root"
         );
 
         let terminal_broker_read = app

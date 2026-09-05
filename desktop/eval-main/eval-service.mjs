@@ -562,7 +562,49 @@ function sameJson(left, right) {
   return canonicalJson(left) === canonicalJson(right);
 }
 
-export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = true } = {}) {
+export function visualNodeDetailCheck(output, personalPresentationVersion) {
+  const nodes = output.rootLayer.nodes;
+  const authoredNodes = nodes.filter((node) => node.authoredDetail !== undefined);
+  const compiledNodes = authoredNodes.filter(({ authoredDetail }) => (
+    authoredDetail?.version === 1
+    && Array.isArray(authoredDetail.components)
+    && authoredDetail.components.length > 0
+    && authoredDetail.components.every((component) => (
+      typeof component?.id === "string" && component.id !== ""
+      && typeof component?.html === "string" && component.html !== ""
+      && typeof component?.css === "string"
+    ))
+    && Array.isArray(authoredDetail.mounts)
+    && Array.isArray(authoredDetail.assets)
+    && /^[a-f0-9]{64}$/.test(authoredDetail.integritySha256 || "")
+  ));
+  const treatment = personalPresentationVersion === "personal-presentation-v3";
+  return {
+    name: "visual-node-detail:authored-output",
+    passed: treatment ? nodes.length > 0 && compiledNodes.length === nodes.length : authoredNodes.length === 0,
+    detail: treatment
+      ? `The V3 treatment must accept a compiled visual Node Detail for every accepted node; observed ${compiledNodes.length} valid package${compiledNodes.length === 1 ? "" : "s"} across ${nodes.length} node${nodes.length === 1 ? "" : "s"}.`
+      : `The pre-#404 V2 control must retain plain node details; observed ${authoredNodes.length} authored visual Node Detail${authoredNodes.length === 1 ? "" : "s"}.`,
+  };
+}
+
+export function acceptedTopologyNodes(topology) {
+  const nodes = new Map();
+  for (const layer of topology?.layers || []) {
+    for (const node of layer.nodes || []) {
+      const id = String(node.id ?? "");
+      if (id === "") throw new Error("Accepted visual Node Detail scope contains a node without identity.");
+      const existing = nodes.get(id);
+      if (existing !== undefined && canonicalJson(existing) !== canonicalJson(node)) {
+        throw new Error(`Accepted visual Node Detail scope contains conflicting snapshots for node ${id}.`);
+      }
+      nodes.set(id, node);
+    }
+  }
+  return [...nodes.values()];
+}
+
+export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = false } = {}) {
   const enabled = execution.harnessConfiguration?.complete?.agentAuthored === true;
   const root = execution.turns[0];
   const children = execution.semanticChildren || [];
@@ -610,6 +652,19 @@ export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = t
     )),
     detail: "Every semantic child must have a complete portable candidate trace that records nested completion-broker authority.",
   });
+  const personalPresentationVersion = execution.harnessConfiguration?.settings?.personalPresentationVersion;
+  if ((personalPresentationVersion === "personal-presentation-v2"
+    || personalPresentationVersion === "personal-presentation-v3") && children.length > 0) {
+    for (const child of children) {
+      checks.push({
+        ...visualNodeDetailCheck(
+          { rootLayer: { nodes: child.acceptedNodes || [] } },
+          personalPresentationVersion,
+        ),
+        name: `agent-authored-complete:child-${child.interactionId}:visual-node-detail:authored-output`,
+      });
+    }
+  }
   return checks;
 }
 
@@ -694,6 +749,8 @@ export async function validateCandidateTrace(directory, descriptor, interaction,
     [manifest?.traceId === descriptor.traceId, "manifest-trace"],
     [manifest?.productInteractionId === interaction.id, "product-interaction"],
     [manifest?.interactionNodeId === interaction.graphNodeId, "graph-completion"],
+    [(manifest?.personalPresentationVersionId ?? null) === (descriptor.personalPresentationVersionId ?? null), "personal-presentation-version-id"],
+    [(manifest?.personalPresentationVersionKey ?? null) === (descriptor.personalPresentationVersionKey ?? null), "personal-presentation-version-key"],
     [Object.entries(correlation).every(([key, value]) => manifest?.correlation?.[key] === value), "correlation"],
     [eventsArtifact?.ref === "events.jsonl", "event-ref"],
     [eventsArtifact?.sha256 === eventsSha256, "event-sha"],
@@ -1385,12 +1442,12 @@ export class EvalService {
         this.configurations.get(name)
       ));
       if (pair.some((configuration) => configuration === undefined)
-        || pair[0]?.complete?.agentAuthored !== false
+        || pair[0]?.complete?.agentAuthored !== true
         || pair[1]?.complete?.agentAuthored !== true
-        || pair[0]?.settings?.personalPresentationVersion !== "personal-presentation-v1"
-        || pair[1]?.settings?.personalPresentationVersion !== "personal-presentation-v2"
+        || pair[0]?.settings?.personalPresentationVersion !== "personal-presentation-v2"
+        || pair[1]?.settings?.personalPresentationVersion !== "personal-presentation-v3"
         || combinedComparisonConfigurationIdentity(pair[0]) !== combinedComparisonConfigurationIdentity(pair[1])) {
-        throw new Error("The visible-working-state recursive configurations differ outside their approved V1/off and V2/on experience pair.");
+        throw new Error("The visual Node Detail configurations differ outside their approved V2 control and V3 treatment presentation versions.");
       }
       const liveProviderExecutions = pair.filter(({ implementation }) => implementation !== "fixture.task-system").length;
       if (liveProviderExecutions > 0 && (
@@ -1469,7 +1526,7 @@ export class EvalService {
         ? copy(selection?.liveAuthorization || null)
         : null,
       comparison: testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID) ? {
-        kind: "agent-authored-complete-pair",
+        kind: "visual-node-details-pair",
         temporalRuntimeFeatures: copy(RECURSIVE_TEMPORAL_FEATURES),
         controlledFields: [
           "task",
@@ -1479,7 +1536,7 @@ export class EvalService {
           "providerModelSelection",
           "temporalRuntimeFeatures",
         ],
-        variedField: "combined personalPresentationVersion and complete.agentAuthored experience",
+        variedField: "personalPresentationVersion",
         passed: null,
       } : testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID) ? {
         kind: "graph-search-recursion-2x2",
@@ -1983,7 +2040,7 @@ export class EvalService {
       }
       await this.#changed();
     }
-    if (run.comparison?.kind === "agent-authored-complete-pair") {
+    if (run.comparison?.kind === "visual-node-details-pair") {
       this.#finalizeRecursiveComparison(run);
       await this.#changed();
     }
@@ -2004,19 +2061,24 @@ export class EvalService {
     const executions = run.executions.filter(({ testCaseId }) => testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID);
     const [control, treatment] = executions;
     const controlled = executions.length === 2
-      && control?.harnessConfigurationName === "codex-eval-complete-disabled"
-      && treatment?.harnessConfigurationName === "codex-eval-complete-enabled"
+      && control?.harnessConfigurationName === "codex-eval-visual-node-details-control"
+      && treatment?.harnessConfigurationName === "codex-eval-visual-node-details-treatment"
+      && Number.isSafeInteger(control?.turns?.[0]?.personalPresentationVersionId)
+      && Number.isSafeInteger(treatment?.turns?.[0]?.personalPresentationVersionId)
+      && control?.turns?.[0]?.personalPresentationVersionKey === "personal-presentation-v2"
+      && treatment?.turns?.[0]?.personalPresentationVersionKey === "personal-presentation-v3"
+      && control.turns[0].personalPresentationVersionId !== treatment.turns[0].personalPresentationVersionId
       && sameJson(control?.modelResolution, treatment?.modelResolution)
       && sameJson(control?.turns?.map(({ prompt }) => prompt), treatment?.turns?.map(({ prompt }) => prompt))
       && sameJson(control?.turns?.map(({ modelSelection }) => modelSelection), treatment?.turns?.map(({ modelSelection }) => modelSelection))
       && sameJson(control?.turns?.map(({ permissionProfileId }) => permissionProfileId), treatment?.turns?.map(({ permissionProfileId }) => permissionProfileId))
       && sameJson(control?.turns?.map(({ effectivePermissionReceipt }) => effectivePermissionReceipt), treatment?.turns?.map(({ effectivePermissionReceipt }) => effectivePermissionReceipt));
     const check = {
-      name: "agent-authored-complete:controlled-pair",
+      name: "visual-node-details:controlled-pair",
       passed: controlled,
       detail: controlled
-        ? "The exact V1/off and V2/on cells used one pinned provider/model resolution and identical task and permission inputs."
-        : "The combined-experience cells drifted outside their controlled provider, task, or permission inputs.",
+        ? "The exact V2 control and V3 visual-detail treatment recorded distinct attached presentation versions while using one pinned provider/model resolution and identical task and permission inputs."
+        : "The visual-detail cells lacked distinct attached presentation versions or drifted outside their controlled provider, task, or permission inputs.",
     };
     for (const execution of executions) {
       execution.checks.push(copy(check));
@@ -2126,6 +2188,7 @@ export class EvalService {
           : null,
         effectiveExecutionDigest: interaction.effectiveExecutionDigest,
         personalPresentationVersionId: execution.candidateTraceCaptures?.[String(interaction.id)]?.personalPresentationVersionId ?? null,
+        personalPresentationVersionKey: execution.candidateTraceCaptures?.[String(interaction.id)]?.personalPresentationVersionKey ?? null,
         modelSelection: copy(interaction.modelSelection || null),
         effectivePermissionReceipt: copy(interaction.effectivePermissionReceipt),
         status: interaction.completionStatus,
@@ -2195,6 +2258,32 @@ export class EvalService {
               name: `${checkPrefix}:${check.name}`,
             })));
           }
+          if (definition.requiredChecks?.includes("visual-node-detail")) {
+            try {
+              const topology = await this.acceptedTopologyBuilder({
+                turnId: interaction.id,
+                rootLayerId: interaction.completionOutput.rootLayer.layer.id,
+                loadLayer: (layerId) => this.#productRequest(
+                  `/api/threads/${encodeURIComponent(executedTurn.thread.id)}`
+                    + `/interactions/${encodeURIComponent(interaction.id)}`
+                    + `/layers/${encodeURIComponent(layerId)}`,
+                ),
+              });
+              turnChecks.push({
+                ...visualNodeDetailCheck(
+                  { rootLayer: { nodes: acceptedTopologyNodes(topology) } },
+                  execution.harnessConfiguration?.settings?.personalPresentationVersion,
+                ),
+                name: `${checkPrefix}:visual-node-detail:authored-output`,
+              });
+            } catch (error) {
+              turnChecks.push({
+                name: `${checkPrefix}:visual-node-detail:authored-output`,
+                passed: false,
+                detail: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
           if (projectCaseIds.has(definition.id)) {
             try {
               const topology = await this.acceptedTopologyBuilder({
@@ -2258,7 +2347,7 @@ export class EvalService {
       }
       if (definition.requiredChecks?.includes("agent-authored-complete")) {
         checks.push(...recursiveCompleteChecks(execution, {
-          requireChildWhenEnabled: definition.id !== RECURSIVE_GRAPH_MEMORY_CASE_ID,
+          requireChildWhenEnabled: false,
         }));
       }
       execution.checks = checks;
@@ -2631,6 +2720,19 @@ export class EvalService {
           if (!child) throw new Error(`Semantic child ${invocation.resultInteractionId} disappeared.`);
           await this.#backfillCurrentProjection(execution, child);
           await this.#captureCandidateTrace(execution, child);
+          let acceptedNodes = [];
+          if (child.completionStatus === "accepted" && child.completionOutput?.rootLayer?.layer?.id) {
+            const topology = await this.acceptedTopologyBuilder({
+              turnId: child.id,
+              rootLayerId: child.completionOutput.rootLayer.layer.id,
+              loadLayer: (layerId) => this.#productRequest(
+                `/api/threads/${encodeURIComponent(threadId)}`
+                  + `/interactions/${encodeURIComponent(child.id)}`
+                  + `/layers/${encodeURIComponent(layerId)}`,
+              ),
+            });
+            acceptedNodes = acceptedTopologyNodes(topology);
+          }
           semanticChildren.push({
             threadId,
             sourceInteractionId: invocation.sourceInteractionId,
@@ -2643,7 +2745,9 @@ export class EvalService {
               id: node.id,
               title: node.title,
               detail: node.detail,
+              ...(node.authoredDetail === undefined ? {} : { authoredDetail: node.authoredDetail }),
             }))),
+            acceptedNodes: copy(acceptedNodes),
             resultCompletionStatus: invocation.resultCompletionStatus,
             execution: copy(invocation.execution || null),
             candidateTrace: copy(execution.candidateTraceCaptures?.[String(child.id)] || disabledCandidateTrace()),

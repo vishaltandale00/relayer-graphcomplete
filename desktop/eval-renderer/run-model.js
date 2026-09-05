@@ -13,8 +13,8 @@ export function runPanelCopy(run) {
 
 export const recursiveCompleteCaseId = "empty-project.recursive-complete.comparison";
 export const recursiveCompleteHarnessPair = Object.freeze([
-  "codex-eval-complete-disabled",
-  "codex-eval-complete-enabled",
+  "codex-eval-visual-node-details-control",
+  "codex-eval-visual-node-details-treatment",
 ]);
 export const recursiveGraphMemoryCaseId = "empty-project.recursive-graph-memory.launch-readiness";
 export const recursiveGraphMemoryHarnessQuartet = Object.freeze([
@@ -68,7 +68,7 @@ export function authorizeRecursiveCompleteSelection(selection, confirmLiveRun) {
   }
   if (!selection.testCaseIds.includes(recursiveCompleteCaseId)) return structuredClone(selection);
   const confirmed = confirmLiveRun(
-    "Run two live Codex root cells for the agent-authored Complete comparison? The enabled root may launch additional agent-authored child execution. All of these use paid/live inference through the connected product provider.",
+    "Run two live Codex root cells for the visual Node Details comparison? Both recursive cells may launch additional agent-authored child execution. All of these use paid/live inference through the connected product provider.",
   );
   if (!confirmed) return null;
   return {

@@ -15,7 +15,9 @@ fn json_line(bytes: &[u8]) -> serde_json::Value {
 fn qualification_mode_proves_lock_shutdown_and_reopen() {
     let temp = tempfile::tempdir().unwrap();
     let database = temp.path().join("ladybug");
-    let executable = std::env::var("CARGO_BIN_EXE_relayer-graph-server")
+    let executable = option_env!("CARGO_BIN_EXE_relayer-graph-server")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("CARGO_BIN_EXE_relayer-graph-server").map(Into::into))
         .expect("Cargo must provide the relayer-graph-server test executable");
 
     let created = Command::new(&executable)

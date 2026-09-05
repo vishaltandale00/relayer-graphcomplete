@@ -1,0 +1,26 @@
+{
+  "name": "@relayer/visual-assets",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit && npm run test:built",
+    "test:built": "npm run build && node test/built-package-smoke.mjs"
+  },
+  "dependencies": {
+    "sax": "^1.6.1",
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "@types/sax": "^1.2.7"
+  }
+}

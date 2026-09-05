@@ -1,4 +1,5 @@
 import type { RelayerIconName } from "./icons.js";
+import type { CompiledNodeDetail } from "./detail.js";
 
 export type GraphId = number;
 
@@ -9,11 +10,14 @@ export type RecordState = "draft" | "accepted" | "stopped";
 
 export interface GraphNode {
   readonly id: GraphId;
+  /** Stable author-assigned identity; absent only in projections written before client keys were exposed. */
+  readonly clientKey?: string;
   readonly leasedActionId?: GraphId | null;
   readonly kind: string;
   readonly icon: string;
   readonly title: string;
   readonly detail: string;
+  readonly authoredDetail?: CompiledNodeDetail;
   readonly state: RecordState;
 }
 
@@ -36,6 +40,8 @@ export interface LayerLayout {
 
 export interface GraphLayer {
   readonly id: GraphId;
+  /** Stable author-assigned identity; absent only in projections written before client keys were exposed. */
+  readonly clientKey?: string;
   readonly nodes: readonly GraphId[];
   readonly edges: readonly GraphId[];
   /** Null or absent only for accepted layers created before authored layouts were introduced. */
@@ -55,8 +61,12 @@ export interface InputOption {
 
 export interface GraphAction {
   readonly id: GraphId;
+  /** Stable author-assigned identity; absent only in projections written before client keys were exposed. */
+  readonly clientKey?: string;
   readonly sourceNodeId: GraphId;
   readonly sourceLayerId?: GraphId | null;
+  /** Stable identity of sourceLayerId; absent for legacy projections and actions without a source layer. */
+  readonly sourceLayerClientKey?: string;
   readonly kind: ActionKind;
   readonly relation?: NavigateRelation | null;
   readonly label: string;

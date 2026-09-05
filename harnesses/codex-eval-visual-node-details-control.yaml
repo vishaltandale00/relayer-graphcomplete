@@ -1,10 +1,10 @@
 schemaVersion: 1
-name: codex-eval-complete-disabled
+name: codex-eval-visual-node-details-control
 implementation: codex.basic
 implementationVersion: 1
 revision: 1
 complete:
-  agentAuthored: false
+  agentAuthored: true
 permissionBindings:
   ask:
     sandboxMode: workspace-write
@@ -33,6 +33,6 @@ modelDefaults:
     version: 2
 settings:
   modelReasoningEffort: medium
-  personalPresentationVersion: personal-presentation-v1
+  personalPresentationVersion: personal-presentation-v2
   promptProfile: layered-navigation-multi-agent-v1
   skipGitRepoCheck: true

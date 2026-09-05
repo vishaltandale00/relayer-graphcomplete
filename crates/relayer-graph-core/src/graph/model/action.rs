@@ -244,8 +244,12 @@ impl ActionKind {
 #[serde(rename_all = "camelCase")]
 pub struct GraphAction {
     pub id: ActionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub source_node_id: NodeId,
     pub source_layer_id: Option<LayerId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_layer_client_key: Option<String>,
     pub kind: ActionKind,
     pub relation: Option<NavigateRelation>,
     pub label: String,

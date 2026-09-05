@@ -5,7 +5,8 @@ use axum::{
     response::IntoResponse,
 };
 use relayer_app_server::conversation_export::{
-    ConversationExportRecord, ExportCompletionStatus, ExportTurnOrigin, decode_export_jsonl,
+    ConversationExportRecord, ExportAuthoredDetailOmission, ExportCompletionStatus,
+    ExportTurnOrigin, decode_export_jsonl,
 };
 use relayer_app_server::{
     CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig, RelayerRuntimeConfig,
@@ -2604,14 +2605,29 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         .writer_for_subgraph(graph_interaction.id)
         .await
         .unwrap();
+    let authored_detail = json!({
+        "version": 1,
+        "components": [{
+            "id":"overview",
+            "order":0,
+            "html":"<p>Accepted /private/var/folders/project/tokenizer</p>",
+            "css":"/* /var/folders/project/tokenizer */ p{color:#fff}"
+        }],
+        "mounts": [],
+        "assets": [],
+        "integritySha256": "383447f86c6c16bb8688e982ad8ce92aa597aecb1b512edd7d9b2c2ce0652e04"
+    });
     let answer = writer
-        .submit_node(&NodeDraft {
-            client_key: "answer".into(),
-            kind: "concept /var/folders/project/tokenizer".into(),
-            icon: "file".into(),
-            title: "Finding /var/folders/project/tokenizer".into(),
-            detail: "Accepted durable detail /var/folders/project/tokenizer".into(),
-        })
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept /var/folders/project/tokenizer".into(),
+                icon: "file".into(),
+                title: "Finding /var/folders/project/tokenizer".into(),
+                detail: "Accepted durable detail /var/folders/project/tokenizer".into(),
+            },
+            Some(&authored_detail),
+        )
         .await
         .unwrap();
     let nested_node = writer
@@ -2943,7 +2959,15 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
     assert!(exported_answer.kind.contains("[project-path]"));
     assert_eq!(exported_answer.icon, "file");
     assert!(exported_answer.title.contains("[project-path]"));
-    assert!(exported_answer.detail.contains("[project-path]"));
+    assert_eq!(
+        exported_answer.detail,
+        "Accepted durable detail [project-path]"
+    );
+    assert!(exported_answer.authored_detail.is_none());
+    assert_eq!(
+        exported_answer.authored_detail_omitted,
+        Some(ExportAuthoredDetailOmission::PrivatePath)
+    );
     let exported_invoke = accepted_view
         .layers
         .iter()
@@ -6102,7 +6126,9 @@ fn exits_when_desktop_control_pipe_closes() {
     fs::create_dir_all(&root).unwrap();
     let permissions = permission_catalog();
 
-    let executable = std::env::var("CARGO_BIN_EXE_relayer-app-server")
+    let executable = option_env!("CARGO_BIN_EXE_relayer-app-server")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("CARGO_BIN_EXE_relayer-app-server").map(Into::into))
         .expect("Cargo must provide the relayer-app-server test executable");
     let mut child = Command::new(executable)
         .args([
@@ -6532,7 +6558,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 29);
+    assert_eq!(applied_migrations, 30);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");

@@ -37,7 +37,8 @@ pub use input::{
 };
 pub(crate) use layer::validate_authored_layout;
 pub use layer::{GraphLayer, LayerDraft, LayerLayout, NodePlacement, ResolvedLayer};
-pub use node::{GraphNode, InteractionInvocation, NodeDraft};
+pub(crate) use node::validate_authored_detail;
+pub use node::{AuthoredDetailUpdate, GraphNode, InteractionInvocation, NodeDraft};
 pub use record_state::RecordState;
 
 pub(crate) use layer::{LayerCandidate, validate_connected};

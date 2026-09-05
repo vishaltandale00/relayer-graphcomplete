@@ -129,6 +129,45 @@ mod tests {
     use std::borrow::Cow;
 
     #[tokio::test]
+    async fn schema_16_nodes_reopen_without_an_authored_detail_package() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("sqlite://{}", file.path().display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let pre_authored_details = Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 16)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        pre_authored_details.run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO nodes(id,project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (1,1,1,'user-interaction','user','Legacy','Legacy','accepted',NULL,NULL),(2,1,1,'concept','box','Legacy answer','Markdown only','accepted',1,'answer')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let database = GraphDatabase::open(file.path()).await.unwrap();
+        let node = database
+            .writer_for_subgraph(NodeId::new(1).unwrap())
+            .await
+            .unwrap()
+            .get_node(NodeId::new(2).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(node.detail, "Markdown only");
+        assert_eq!(node.authored_detail, None);
+    }
+
+    #[tokio::test]
     async fn schema_9_graph_reopens_and_accepts_a_personal_presentation_attachment() {
         let file = tempfile::NamedTempFile::new().unwrap();
         let url = format!("sqlite://{}", file.path().display());

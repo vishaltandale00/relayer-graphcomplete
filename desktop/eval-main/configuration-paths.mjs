@@ -36,8 +36,8 @@ export function evalHarnessConfigurationPaths({
     ...(graphSearchQualified ? [join(harnessDirectory, "fixture-graph-memory.yaml")] : []),
     join(harnessDirectory, "codex-basic.yaml"),
     join(harnessDirectory, "codex-basic-high.yaml"),
-    join(harnessDirectory, "codex-eval-complete-disabled.yaml"),
-    join(harnessDirectory, "codex-eval-complete-enabled.yaml"),
+    join(harnessDirectory, "codex-eval-visual-node-details-control.yaml"),
+    join(harnessDirectory, "codex-eval-visual-node-details-treatment.yaml"),
     ...(graphSearchQualified ? [
       join(harnessDirectory, "codex-eval-lantern-search-disabled-recursion-disabled.yaml"),
       join(harnessDirectory, "codex-eval-lantern-search-query-v1-recursion-disabled.yaml"),
@@ -49,6 +49,7 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "claude-basic.yaml"),
     join(harnessDirectory, "codex-layered-personal-presentation-v0.yaml"),
     join(harnessDirectory, "codex-layered-personal-presentation-v1.yaml"),
+    join(harnessDirectory, "codex-layered-personal-presentation-v2.yaml"),
   ];
   if (!isPackaged && packageAvailable(primeAgentPackage)) {
     paths.push(

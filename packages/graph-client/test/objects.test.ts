@@ -1,12 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, type ActionObject } from "../src/index.js";
+import { DETAIL_AUTHORING_LIMITS, EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, html, type ActionObject } from "../src/index.js";
+import { assetRef } from "../src/detail.js";
 import { edgeId, layerId, nodeId } from "../src/objects.js";
+
+function nodeResponse(init: RequestInit, node: Record<string, unknown>): Response {
+  const request = JSON.parse(String(init.body)) as Record<string, unknown>;
+  return new Response(JSON.stringify({
+    node: {
+      ...node,
+      clientKey: request.clientKey,
+      ...(Object.hasOwn(request, "authoredDetail") ? { authoredDetail: request.authoredDetail } : {}),
+    },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
 
 describe("agent-facing graph objects", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("does not require the model to invent durable IDs", () => {
-    const node = new NodeObject("queue", "Queue", "Waiting work", "concept", "queue");
+  it("does not require the model to invent durable IDs", async () => {
+    const node = new NodeObject("box", "Queue", "Waiting work", "concept", "queue");
     const edge = new EdgeObject([node, 9], "queue-worker");
     const layer = new LayerObject(
       [node, 9],
@@ -17,15 +29,634 @@ describe("agent-facing graph objects", () => {
     expect(() => nodeId(node)).toThrow("must be submitted");
     expect(() => edgeId(edge)).toThrow("must be created");
     expect(() => layerId(layer)).toThrow("must be submitted");
-    node.ref = { id: 10, kind: "concept", icon: "queue", title: "Queue", detail: "Waiting work", state: "draft" };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: { id: 10, kind: "concept", icon: "box", title: "Queue", detail: "Waiting work", state: "draft" },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node);
     edge.ref = { id: 20, endpoints: [9, 10], state: "draft" };
     layer.ref = { id: 30, nodes: [10, 9], edges: [20], state: "draft" };
     expect([nodeId(node), edgeId(edge), layerId(layer)]).toEqual([10, 20, 30]);
   });
 
-  it("serializes a versioned authored layout from node references", async () => {
+  it("owns authored detail through the draft node lifecycle and submits it exactly once", async () => {
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return nodeResponse(init, {
+        id: 10, kind: "concept", icon: "box", title: "Draft", detail: "Legacy fallback", state: "draft",
+      });
+    }));
+    const node = new NodeObject("box", "Draft", "Legacy fallback", "concept", "draft-node");
+    node.detailAuthoring.setComponent("summary", html`<p>Checkpoint one</p>`);
+    const checkpoint = node.detailAuthoring.checkpoint();
+    node.detailAuthoring.setComponent("summary", html`<p>Submitted detail</p>`);
+
+    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node);
+
+    expect(checkpoint.components[0]?.html).toBe("<p>Checkpoint one</p>");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      clientKey: "draft-node",
+      detail: "Legacy fallback",
+      authoredDetail: {
+        version: 1,
+        components: [{ id: "summary", order: 0, html: "<p>Submitted detail</p>", css: "" }],
+      },
+    });
+    expect(node.ref?.clientKey).toBe("draft-node");
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Too late</p>`))
+      .toThrow("finalized and cannot be mutated");
+  });
+
+  it("returns the exact accepted authored detail package from the node interface", async () => {
+    let submittedPackage: unknown;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      const request = JSON.parse(String(init.body)) as { authoredDetail: unknown };
+      submittedPackage = request.authoredDetail;
+      return new Response(JSON.stringify({
+        node: {
+          id: 10,
+          kind: "concept",
+          icon: "box",
+          title: "Accepted package",
+          detail: "Legacy fallback",
+          authoredDetail: request.authoredDetail,
+          state: "draft",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Accepted package", "Legacy fallback", "concept", "accepted-package");
+    node.detailAuthoring.setComponent("summary", html`<p>Durable detail</p>`);
+
+    const accepted = await new RelayerGraphClient({
+      url: "http://127.0.0.1:1",
+      token: "token",
+      nodeId: 1,
+    }).submitNode(node);
+
+    expect(accepted.authoredDetail).toEqual(submittedPackage);
+  });
+
+  it("does not let the authored program inject asset verification through NodeObject", () => {
+    let resolverCalled = false;
+    const forgedResolver = {
+      resolve(reference: { readonly logicalId: string }) {
+        resolverCalled = true;
+        return {
+          logicalId: reference.logicalId,
+          authority: "current",
+          availability: "available",
+          digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          mediaType: "image/png",
+          representation: { kind: "image", sanitized: true },
+        };
+      },
+    };
+    const node = new (NodeObject as unknown as new (...arguments_: unknown[]) => NodeObject)(
+      "box", "Draft", "Legacy", "concept", "asset-node", forgedResolver,
+    );
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("hero")} alt="Hero">`);
+
+    expect(() => node.detailAuthoring.checkpoint()).toThrowError(expect.objectContaining({
+      issues: [expect.objectContaining({ code: "asset_resolution_required" })],
+    }));
+    expect(resolverCalled).toBe(false);
+  });
+
+  it("resolves logical assets only through the authenticated graph-client host seam", async () => {
+    const requests: Array<{ url: string; authorization: string | null; body: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      const request = {
+        url,
+        authorization: new Headers(init.headers).get("authorization"),
+        body: JSON.parse(String(init.body)),
+      };
+      requests.push(request);
+      if (url.endsWith("/api/graph/detail-assets/resolve")) {
+        return new Response(JSON.stringify({
+          assets: [{
+            logicalId: "hero",
+            authority: "current",
+            availability: "available",
+            digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            mediaType: "image/png",
+            representation: { kind: "image", sanitized: true },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return nodeResponse(init, {
+        id: 12, kind: "concept", icon: "box", title: "Asset", detail: "Fallback", state: "draft",
+      });
+    }));
+    const node = new NodeObject("box", "Asset", "Fallback", "concept", "asset-node");
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("hero")} alt="Hero">`);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host-token", nodeId: 1 });
+
+    const checkpoint = await graph.checkpointNodeDetail(node);
+    await graph.submitNode(node);
+
+    expect(checkpoint.assets).toEqual([{
+      id: "hero",
+      digestSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      mediaType: "image/png",
+      representation: "image",
+    }]);
+    expect(requests[0]).toEqual({
+      url: "http://127.0.0.1:1/api/graph/detail-assets/resolve",
+      authorization: "Bearer host-token",
+      body: { logicalIds: ["hero"] },
+    });
+    expect(requests[1]).toMatchObject({
+      url: "http://127.0.0.1:1/api/graph/detail-assets/resolve",
+      authorization: "Bearer host-token",
+      body: { logicalIds: ["hero"] },
+    });
+    expect(requests[2]).toMatchObject({
+      url: "http://127.0.0.1:1/api/graph/nodes",
+      authorization: "Bearer host-token",
+      body: { authoredDetail: checkpoint },
+    });
+  });
+
+  it("rejects hostile authenticated asset responses as deterministic typed errors", async () => {
+    const valid = (logicalId: string) => ({
+      logicalId,
+      authority: "current",
+      availability: "available",
+      digestSha256: "a".repeat(64),
+      mediaType: "image/png",
+      representation: { kind: "image", sanitized: true },
+    });
+    const cases: readonly {
+      readonly name: string;
+      readonly logicalIds: readonly string[];
+      readonly body: unknown;
+      readonly path: string;
+    }[] = [
+      { name: "null body", logicalIds: ["hero"], body: null, path: "response" },
+      { name: "missing assets", logicalIds: ["hero"], body: {}, path: "assets" },
+      { name: "extra response field", logicalIds: ["hero"], body: { assets: [valid("hero")], extra: true }, path: "response" },
+      { name: "missing record", logicalIds: ["hero"], body: { assets: [] }, path: "assets" },
+      { name: "extra record", logicalIds: ["hero"], body: { assets: [valid("hero"), valid("extra")] }, path: "assets" },
+      { name: "duplicate record", logicalIds: ["hero", "logo"], body: { assets: [valid("hero"), valid("hero")] }, path: "assets[1].logicalId" },
+      { name: "wrong identity", logicalIds: ["hero"], body: { assets: [valid("other")] }, path: "assets[0].logicalId" },
+      { name: "non-object record", logicalIds: ["hero"], body: { assets: [null] }, path: "assets[0]" },
+      { name: "extra record field", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), injected: true }] }, path: "assets[0]" },
+      { name: "invalid authority", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), authority: "root" }] }, path: "assets[0].authority" },
+      { name: "invalid availability", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), availability: "maybe" }] }, path: "assets[0].availability" },
+      { name: "invalid digest", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), digestSha256: "A".repeat(64) }] }, path: "assets[0].digestSha256" },
+      { name: "invalid media", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), mediaType: "text/html" }] }, path: "assets[0].mediaType" },
+      { name: "unsupported gif", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), mediaType: "image/gif" }] }, path: "assets[0].mediaType" },
+      { name: "unsupported webp", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), mediaType: "image/webp" }] }, path: "assets[0].mediaType" },
+      { name: "invalid representation", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), representation: { kind: "video", sanitized: true } }] }, path: "assets[0].representation.kind" },
+      { name: "non-boolean sanitization", logicalIds: ["hero"], body: { assets: [{ ...valid("hero"), representation: { kind: "image", sanitized: "true" } }] }, path: "assets[0].representation.sanitized" },
+    ];
+
+    for (const [caseIndex, hostile] of cases.entries()) {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify(hostile.body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      const node = new NodeObject("box", hostile.name, "Fallback", "concept", `hostile-${caseIndex}`);
+      for (const [assetIndex, logicalId] of hostile.logicalIds.entries()) {
+        node.detailAuthoring.setComponent(`visual-${assetIndex}`, html`<img asset=${assetRef(logicalId)} alt="Visual">`);
+      }
+      const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host-token", nodeId: 1 });
+
+      await expect(graph.checkpointNodeDetail(node)).rejects.toMatchObject({
+        name: "GraphApiError",
+        status: 200,
+        code: "invalid_detail_asset_response",
+        path: hostile.path,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("rejects malformed logical asset IDs before authenticated transport", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host-token", nodeId: 1 });
+    const invalidIds = [" ", "nul\0asset", "é".repeat(65)];
+
+    for (const [index, logicalId] of invalidIds.entries()) {
+      const node = new NodeObject("box", "Asset", "Fallback", "concept", `invalid-asset-${index}`);
+      node.detailAuthoring.setComponent("visual", html`<span asset=${assetRef(logicalId)} aria-hidden="true"></span>`);
+      await expect(graph.checkpointNodeDetail(node)).rejects.toThrowError(expect.objectContaining({
+        issues: [expect.objectContaining({ code: "asset_identity_invalid", componentId: "visual" })],
+      }));
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("bounds and deduplicates logical asset references before authenticated transport", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { logicalIds: readonly string[] };
+      requests.push(body);
+      return new Response(JSON.stringify({
+        assets: body.logicalIds.map((logicalId) => ({
+          logicalId,
+          authority: "current",
+          availability: "available",
+          digestSha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          mediaType: "image/png",
+          representation: { kind: "image", sanitized: true },
+        })),
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "host-token", nodeId: 1 });
+    const deduped = new NodeObject("box", "Assets", "Fallback", "concept", "deduped-assets");
+    deduped.detailAuthoring.setComponent("first", html`<span asset=${assetRef("shared")} aria-hidden="true"></span>`);
+    deduped.detailAuthoring.setComponent("second", html`<span asset=${assetRef("shared")} aria-hidden="true"></span>`);
+
+    await graph.checkpointNodeDetail(deduped);
+
+    expect(requests).toEqual([{ logicalIds: ["shared"] }]);
+
+    const excessive = new NodeObject("box", "Assets", "Fallback", "concept", "excessive-assets");
+    for (let index = 0; index <= DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage; index += 1) {
+      excessive.detailAuthoring.setComponent(`asset-${index}`, html`<span asset=${assetRef(`asset-${index}`)} aria-hidden="true"></span>`);
+    }
+    await expect(graph.checkpointNodeDetail(excessive)).rejects.toThrowError(expect.objectContaining({
+      issues: [expect.objectContaining({ code: "asset_package_limit_exceeded" })],
+    }));
+    expect(requests).toHaveLength(1);
+
+    const excessiveReferences = new NodeObject("box", "Assets", "Fallback", "concept", "excessive-asset-references");
+    for (let index = 0; index <= DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage; index += 1) {
+      excessiveReferences.detailAuthoring.setComponent(`reference-${index}`, html`<span asset=${assetRef("shared")} aria-hidden="true"></span>`);
+    }
+    await expect(graph.checkpointNodeDetail(excessiveReferences)).rejects.toThrowError(expect.objectContaining({
+      issues: [expect.objectContaining({ code: "asset_reference_limit_exceeded" })],
+    }));
+    expect(requests).toHaveLength(1);
+  });
+
+  it("freezes before a failed submit and retries with byte-identical authored detail", async () => {
+    let resolverRequests = 0;
+    let nodeRequests = 0;
+    const submittedBodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/api/graph/detail-assets/resolve")) {
+        resolverRequests += 1;
+        return new Response(JSON.stringify({
+          assets: [{
+            logicalId: "retry-hero",
+            authority: "current",
+            availability: "available",
+            digestSha256: resolverRequests === 1
+              ? "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              : "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            mediaType: "image/png",
+            representation: { kind: "image", sanitized: true },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      nodeRequests += 1;
+      submittedBodies.push(String(init.body));
+      if (nodeRequests === 1) {
+        return new Response(JSON.stringify({ error: { code: "temporary_failure", message: "retry" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return nodeResponse(init, {
+        id: 13, kind: "concept", icon: "box", title: "Retry", detail: "Fallback", state: "draft",
+      });
+    }));
+    const node = new NodeObject("box", "Retry", "Fallback", "concept", "retry-node");
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("retry-hero")} alt="Retry hero">`);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    await expect(graph.submitNode(node)).rejects.toMatchObject({ status: 503, code: "temporary_failure" });
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Drift</p>`)).toThrow("finalized");
+    await expect(graph.submitNode(node)).resolves.toMatchObject({ id: 13 });
+
+    expect(resolverRequests).toBe(1);
+    expect(submittedBodies).toHaveLength(2);
+    expect(submittedBodies[1]).toBe(submittedBodies[0]);
+  });
+
+  it("reuses the frozen package when a replacement client retries the same node", async () => {
+    const submittedBodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      submittedBodies.push(String(init.body));
+      if (submittedBodies.length === 1) {
+        return new Response(JSON.stringify({ error: { code: "temporary_failure", message: "retry" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return nodeResponse(init, {
+        id: 131, kind: "concept", icon: "box", title: "Retry", detail: "Fallback", state: "draft",
+      });
+    }));
+    const node = new NodeObject("box", "Retry", "Fallback", "concept", "replacement-client-retry");
+    node.detailAuthoring.setComponent("content", html`<p>Compiled once</p>`);
+
+    await expect(new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node))
+      .rejects.toMatchObject({ status: 503, code: "temporary_failure" });
+    const retryClient = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    await expect(retryClient.submitNode(node))
+      .resolves.toMatchObject({ id: 131 });
+
+    expect(submittedBodies).toHaveLength(2);
+    expect(submittedBodies[1]).toBe(submittedBodies[0]);
+    await expect(retryClient.checkpointNodeDetail(node)).resolves.toEqual(
+      JSON.parse(submittedBodies[0]!).authoredDetail,
+    );
+    expect(node.detailAuthoring.checkpoint()).toEqual(JSON.parse(submittedBodies[0]!).authoredDetail);
+  });
+
+  it("single-flights first finalization and transport across concurrent submissions", async () => {
+    let releaseResolution!: () => void;
+    const resolutionGate = new Promise<void>((resolve) => { releaseResolution = resolve; });
+    let resolverRequests = 0;
+    const submittedBodies: string[] = [];
+    const mutationResults: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/api/graph/detail-assets/resolve")) {
+        resolverRequests += 1;
+        const requestNumber = resolverRequests;
+        await resolutionGate;
+        return new Response(JSON.stringify({
+          assets: [{
+            logicalId: "single-flight-logo",
+            authority: "current",
+            availability: "available",
+            digestSha256: requestNumber === 1 ? "a".repeat(64) : "b".repeat(64),
+            mediaType: "image/png",
+            representation: { kind: "image", sanitized: true },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      submittedBodies.push(String(init.body));
+      try {
+        node.detailAuthoring.setComponent("late", html`<p>Drift</p>`);
+        mutationResults.push("mutated");
+      } catch {
+        mutationResults.push("frozen");
+      }
+      return nodeResponse(init, {
+        id: 14, kind: "concept", icon: "box", title: "Concurrent", detail: "Fallback", state: "draft",
+      });
+    }));
+    const node = new NodeObject("box", "Concurrent", "Fallback", "concept", "concurrent-node");
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("single-flight-logo")} alt="Logo">`);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    const submissions = [graph.submitNode(node), graph.submitNode(node)];
+    await vi.waitFor(() => expect(resolverRequests).toBeGreaterThan(0));
+    expect(() => node.detailAuthoring.setComponent("during-resolution", html`<p>Drift</p>`)).toThrow("finalized");
+    releaseResolution();
+    await expect(Promise.all(submissions)).resolves.toHaveLength(2);
+
+    expect(resolverRequests).toBe(1);
+    expect(submittedBodies).toHaveLength(1);
+    expect(mutationResults).toEqual(["frozen"]);
+  });
+
+  it("drops failed compilation finalization so the unfrozen author can repair", async () => {
+    let nodeRequests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      nodeRequests += 1;
+      return nodeResponse(init, {
+        id: 15, kind: "concept", icon: "box", title: "Repair", detail: "Fallback", state: "draft",
+      });
+    }));
+    const node = new NodeObject("box", "Repair", "Fallback", "concept", "repair-node");
+    node.detailAuthoring.setComponent("content", html`<script>unsafe()</script>`);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    await expect(graph.submitNode(node)).rejects.toThrowError(expect.objectContaining({
+      issues: [expect.objectContaining({ code: "unsafe_html_element" })],
+    }));
+    node.detailAuthoring.setComponent("content", html`<p>Repaired</p>`);
+    await expect(graph.submitNode(node)).resolves.toMatchObject({ id: 15 });
+
+    expect(nodeRequests).toBe(1);
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Drift</p>`)).toThrow("finalized");
+  });
+
+  it("keeps the legacy string-only submit request backward compatible while locking its empty builder", async () => {
     let request: Record<string, unknown> | undefined;
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      request = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        node: { id: 11, kind: "concept", icon: "box", title: "Legacy", detail: "Markdown detail", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Legacy", "Markdown detail", "concept", "legacy-node");
+
+    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node);
+
+    expect(request).toEqual({
+      clientKey: "legacy-node",
+      kind: "concept",
+      icon: "box",
+      title: "Legacy",
+      detail: "Markdown detail",
+    });
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Too late</p>`)).toThrow("finalized");
+  });
+
+  it("clears a checkpointed package when the author explicitly empties the builder", async () => {
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({
+        node: { id: 12, clientKey: "cleared-node", kind: "concept", icon: "box", title: "Cleared", detail: "Markdown only", state: "draft" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Cleared", "Markdown only", "concept", "cleared-node");
+    node.detailAuthoring.setComponent("summary", html`<p>Checkpointed</p>`);
+    expect(node.detailAuthoring.checkpoint().components).toHaveLength(1);
+    node.detailAuthoring.clear();
+    expect(node.detailAuthoring.checkpoint().components).toHaveLength(0);
+
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const accepted = await client.submitNode(node);
+
+    expect(requests).toHaveLength(1);
+    expect(Object.hasOwn(requests[0]!, "authoredDetail")).toBe(true);
+    expect(requests[0]!.authoredDetail).toBeNull();
+    expect(accepted.authoredDetail).toBeUndefined();
+    expect(node.ref?.authoredDetail).toBeUndefined();
+    expect((await client.checkpointNodeDetail(node)).components).toHaveLength(0);
+    expect(() => node.detailAuthoring.clear()).toThrow("finalized");
+  });
+
+  it("rejects a server that retains a package the author explicitly cleared", async () => {
+    const retained = {
+      version: 1,
+      components: [{ id: "summary", order: 0, html: "<p>Checkpointed</p>", css: "" }],
+      mounts: [],
+      assets: [],
+      integritySha256: "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: { id: 13, clientKey: "stale-node", kind: "concept", icon: "box", title: "Cleared", detail: "Markdown only", authoredDetail: retained, state: "draft" },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const node = new NodeObject("box", "Cleared", "Markdown only", "concept", "stale-node");
+    node.detailAuthoring.setComponent("summary", html`<p>Checkpointed</p>`).clear();
+
+    await expect(new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node))
+      .rejects.toMatchObject({ code: "invalid_node_response" });
+  });
+
+  it("authoring again after clear submits a package instead of a clear", async () => {
+    let request: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      request = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return nodeResponse(init, { id: 14, kind: "concept", icon: "box", title: "Again", detail: "Fallback", state: "draft" });
+    }));
+    const node = new NodeObject("box", "Again", "Fallback", "concept", "again-node");
+    node.detailAuthoring.setComponent("summary", html`<p>First</p>`).clear().setComponent("summary", html`<p>Second</p>`);
+
+    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node);
+
+    const submitted = request?.authoredDetail as { components: { html: string }[] };
+    expect(submitted.components).toHaveLength(1);
+    expect(submitted.components[0]?.html).toBe("<p>Second</p>");
+  });
+
+  it("accepts and snapshots a valid authored detail package retained by the server", async () => {
+    const retained = {
+      version: 1,
+      components: [{ id: "summary", order: 0, html: "<p>Checkpointed</p>", css: "" }],
+      mounts: [],
+      assets: [],
+      integritySha256: "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: {
+        id: 16,
+        clientKey: "retained-node",
+        kind: "concept",
+        icon: "box",
+        title: "Revised",
+        detail: "Revised fallback",
+        authoredDetail: retained,
+        state: "draft",
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const node = new NodeObject("box", "Revised", "Revised fallback", "concept", "retained-node");
+
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const accepted = await client.submitNode(node);
+
+    expect(accepted.authoredDetail).toEqual(retained);
+    expect(Object.isFrozen(accepted.authoredDetail)).toBe(true);
+    expect(Object.isFrozen(accepted.authoredDetail?.components)).toBe(true);
+    expect(node.ref?.authoredDetail).toBe(accepted.authoredDetail);
+    expect(await client.checkpointNodeDetail(node)).toBe(accepted.authoredDetail);
+  });
+
+  it("settles a concurrent checkpoint with the server-retained authored detail", async () => {
+    const retained = {
+      version: 1,
+      components: [{ id: "summary", order: 0, html: "<p>Checkpointed</p>", css: "" }],
+      mounts: [],
+      assets: [],
+      integritySha256: "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac",
+    };
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      await responseGate;
+      return new Response(JSON.stringify({
+        node: {
+          id: 18,
+          clientKey: "concurrent-retained-node",
+          kind: "concept",
+          icon: "box",
+          title: "Revised",
+          detail: "Revised fallback",
+          authoredDetail: retained,
+          state: "draft",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const node = new NodeObject("box", "Revised", "Revised fallback", "concept", "concurrent-retained-node");
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    const submission = client.submitNode(node);
+    const checkpoint = client.checkpointNodeDetail(node);
+    releaseResponse();
+    const accepted = await submission;
+
+    expect(await checkpoint).toBe(accepted.authoredDetail);
+    expect(await client.checkpointNodeDetail(node)).toBe(accepted.authoredDetail);
+  });
+
+  it("rejects a corrupt authored detail package retained by the server", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: {
+        id: 17,
+        clientKey: "corrupt-retained-node",
+        kind: "concept",
+        icon: "box",
+        title: "Revised",
+        detail: "Revised fallback",
+        authoredDetail: {
+          version: 1,
+          components: [{ id: "summary", order: 0, html: "<p>Forged</p>", css: "" }],
+          mounts: [],
+          assets: [],
+          integritySha256: "0".repeat(64),
+        },
+        state: "draft",
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const node = new NodeObject("box", "Revised", "Revised fallback", "concept", "corrupt-retained-node");
+
+    await expect(new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitNode(node))
+      .rejects.toMatchObject({ code: "invalid_node_response" });
+  });
+
+  it("rejects a submitted node projection with a different stable client key", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      node: {
+        id: 12,
+        clientKey: "substituted-node",
+        kind: "concept",
+        icon: "box",
+        title: "Stable",
+        detail: "Stable identity",
+        state: "draft",
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const node = new NodeObject("box", "Stable", "Stable identity", "concept", "original-node");
+
+    await expect(new RelayerGraphClient({
+      url: "http://127.0.0.1:1",
+      token: "token",
+      nodeId: 1,
+    }).submitNode(node)).rejects.toMatchObject({
+      code: "invalid_node_response",
+      path: "node.clientKey",
+    });
+  });
+
+  it("serializes a versioned authored layout from node references", async () => {
+    let request: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/api/graph/nodes")) {
+        const input = JSON.parse(String(init.body)) as Record<string, string>;
+        return new Response(JSON.stringify({
+          node: {
+            id: input.clientKey === "left" ? 10 : 11,
+            kind: input.kind,
+            icon: input.icon,
+            title: input.title,
+            detail: input.detail,
+            state: "draft",
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
       request = JSON.parse(String(init.body)) as Record<string, unknown>;
       return new Response(JSON.stringify({
         layer: { id: 30, nodes: [10, 11], edges: [], layout: request?.layout, state: "draft" },
@@ -33,8 +664,6 @@ describe("agent-facing graph objects", () => {
     }));
     const left = new NodeObject("box", "Left", "Left detail", "concept", "left");
     const right = new NodeObject("box", "Right", "Right detail", "concept", "right");
-    left.ref = { id: 10, kind: "concept", icon: "box", title: "Left", detail: "Left detail", state: "draft" };
-    right.ref = { id: 11, kind: "concept", icon: "box", title: "Right", detail: "Right detail", state: "draft" };
     const layer = new LayerObject(
       [left, right],
       [],
@@ -42,7 +671,10 @@ describe("agent-facing graph objects", () => {
       "comparison",
     );
 
-    await new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }).submitLayer(layer);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    await graph.submitNode(left);
+    await graph.submitNode(right);
+    await graph.submitLayer(layer);
 
     expect(request).toMatchObject({
       clientKey: "comparison",

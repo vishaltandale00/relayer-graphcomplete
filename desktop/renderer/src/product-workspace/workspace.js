@@ -16,6 +16,7 @@ import {
 import { createRelayerIcon } from "./icons.js";
 import { graphLayoutSignature, projectLayerNodePositions } from "./graph-layout.js";
 import { renderMarkdown } from "./markdown.js";
+import { mountCompiledNodeDetail } from "./node-detail-runtime.js";
 import { productWorkspaceMarkup } from "./view.js";
 import {
   confirmationRestorationKey,
@@ -77,6 +78,78 @@ export const GRAPH_MIN_ZOOM = 0.4;
 export const GRAPH_MAX_ZOOM = 2;
 export const COMPOSER_MIN_HEIGHT = 42;
 export const COMPOSER_MAX_HEIGHT = 126;
+
+function appendCompatibilityNodeDetail(container, node) {
+  const compatibility = container.ownerDocument.createElement("div");
+  compatibility.className = "node-detail-compatibility-content";
+  renderMarkdown(compatibility, node?.detail || node?.summary || node?.content || "No details supplied.");
+  container.append(compatibility);
+}
+
+export async function renderProductNodeDetail({
+  container,
+  node,
+  mountKey,
+  existing,
+  compatibilityIssue,
+  resolveAsset,
+  resolveAction,
+  onNavigate,
+  onInvoke,
+  onInput,
+  capabilityState,
+}) {
+  if (!node?.authoredDetail) {
+    existing?.dispose?.();
+    container.replaceChildren();
+    renderMarkdown(container, node?.detail || node?.summary || node?.content || "No details supplied.");
+    return Object.freeze({ authored: false, status: "legacy" });
+  }
+  if (compatibilityIssue) {
+    existing?.dispose?.();
+    container.replaceChildren();
+    const fallback = container.ownerDocument.createElement("p");
+    fallback.className = "node-detail-runtime-fallback";
+    fallback.setAttribute("role", "status");
+    fallback.textContent = compatibilityIssue;
+    container.append(fallback);
+    appendCompatibilityNodeDetail(container, node);
+    return Object.freeze({ authored: false, status: "fallback", error: compatibilityIssue });
+  }
+  const adapters = { resolveAction, onNavigate, onInvoke, onInput };
+  if (existing?.authored === true
+    && existing.status === "mounted"
+    && existing.mountKey === mountKey
+    && existing.host?.isConnected) {
+    await existing.updateAdapters(adapters);
+    for (const [id, state] of Object.entries(capabilityState ?? {})) {
+      existing.updateCapability(id, state);
+    }
+    return existing;
+  }
+  existing?.dispose?.();
+  container.replaceChildren();
+  const host = container.ownerDocument.createElement("div");
+  host.className = "node-detail-runtime-host";
+  host.dataset.nodeDetailRuntime = "";
+  host.setAttribute("aria-label", `${node.title || "Selected node"} authored detail`);
+  container.append(host);
+  const runtime = await mountCompiledNodeDetail({
+    host,
+    detail: node.authoredDetail,
+    resolveAsset,
+    resolveAction,
+    onNavigate,
+    onInvoke,
+    onInput,
+    capabilityState,
+  });
+  if (runtime.status !== "mounted") {
+    appendCompatibilityNodeDetail(container, node);
+    return Object.freeze({ authored: false, mountKey, host, ...runtime });
+  }
+  return Object.freeze({ authored: true, mountKey, host, ...runtime });
+}
 
 const GRAPH_NODE_HALF_WIDTH = 82;
 const GRAPH_NODE_TOP = 28;
@@ -1230,6 +1303,37 @@ export function actionReviewKind(action) {
   ) ? "navigate-action" : "invoke-action";
 }
 
+export function resolveCompiledNodeDetailAction(actions, reference, node) {
+  if (!reference?.clientKey
+    || reference.sourceNode?.clientKey !== node?.clientKey
+    || !reference.sourceLayer?.clientKey) return undefined;
+  return (actions || []).find((action) => (
+    action.clientKey === reference.clientKey
+    && action.sourceNodeId != null
+    && String(action.sourceNodeId) === String(node.id)
+    && action.sourceLayerId != null
+    && action.sourceLayerClientKey === reference.sourceLayer.clientKey
+  ));
+}
+
+export function compiledNodeDetailCoversActions(detail, actions, node) {
+  const boundActionIds = new Set((detail?.mounts ?? [])
+    .filter((mount) => mount.kind === "capability" && mount.capability.kind !== "link")
+    .map((mount) => {
+      const action = resolveCompiledNodeDetailAction(actions, mount.capability.action, node);
+      if (mount.capability.kind === "input" && action?.kind === "input") return action.id;
+      if (mount.capability.kind === "invoke" && action?.kind === "invoke") return action.id;
+      if ((mount.capability.kind === "expand" || mount.capability.kind === "reference")
+        && action?.kind === "navigate"
+        && action.relation === mount.capability.kind
+        && action.targetLayerId != null) return action.id;
+      return undefined;
+    })
+    .filter((id) => id != null)
+    .map(String));
+  return (actions ?? []).every((action) => boundActionIds.has(String(action.id)));
+}
+
 export function captureGraphViewState(
   nodes,
   camera,
@@ -1365,6 +1469,7 @@ export function createProductWorkspace({
   onNavigateLayer = async () => {},
   onNavigateResolvedInvoke = async () => {},
   onInvokeAction = async () => {},
+  resolveNodeDetailAsset = async () => undefined,
   onDecideApproval = async () => {},
   annotationApi = null,
   contextDraftApi = null,
@@ -1407,6 +1512,7 @@ export function createProductWorkspace({
   let composerContextState = createComposerContextState();
   let contextEditor = null;
   let nodeSelectionSequence = 0;
+  let mountedAuthoredDetail = null;
   let openComposerContextKey = null;
   let contextPopoverOpen = false;
   const contextNodeOverrides = new Map();
@@ -4727,109 +4833,255 @@ export function createProductWorkspace({
     ));
     $("#detailKind").textContent = node.kind;
     $("#detailTitle").textContent = node.title;
-    renderMarkdown($("#detailContent"), node.detail || node.summary || node.content || "No details supplied.");
     const actions = (state.actions || []).filter((action) => String(action.sourceNodeId) === String(node.id));
     const inputActions = actions.filter((action) => action.kind === "input" && action.control);
     const ordinaryActions = actions.filter((action) => action.kind !== "input");
-    renderNodeInputActions(state, node, inputActions);
-    $("#detailActions").classList.toggle("hidden", !ordinaryActions.length);
-    $("#detailActions").replaceChildren(...ordinaryActions.map((action) => {
-      const presentation = actionPresentation(action);
-      const button = graphDocument.createElement("button");
-      button.type = "button";
-      button.className = `action-control action-${presentation.variant}`;
-      button.dataset.actionId = String(action.id);
-      button.dataset.reviewRef = `action-${action.id}`;
-      button.dataset.reviewKind = actionReviewKind(action);
-      button.dataset.reviewActionId = String(action.id);
-      if (action.targetLayerId != null) {
-        button.dataset.reviewTargetLayerId = String(action.targetLayerId);
-      }
-      if (presentation.icon) {
-        button.append(createRelayerIcon(presentation.icon, { class: "relayer-action-icon" }));
-      }
-      const copy = graphDocument.createElement("span");
-      copy.className = "action-copy";
-      const label = graphDocument.createElement(presentation.variant === "card" ? "strong" : "span");
-      label.className = "action-label";
-      label.textContent = presentation.label;
-      copy.append(label);
-      if (presentation.description) {
-        const description = graphDocument.createElement("small");
-        description.textContent = presentation.description;
-        copy.append(description);
-      }
-      button.append(copy);
-      const wrapper = graphDocument.createElement("span");
-      wrapper.className = "action-annotation-wrap";
-      wrapper.append(button);
-      if (annotationEnabled) {
-        const anchor = subjectAnchor("action", {
-          actionId: action.id,
-          nodeId: node.id,
-          sourceLayerId: action.sourceLayerId,
-        }, state, getThread());
-        const count = annotationCount(anchor);
-        const badge = graphDocument.createElement("button");
-        badge.type = "button";
-        badge.className = "annotation-count-badge action-annotation-badge";
-        badge.textContent = count ? String(count) : "✎";
-        badge.setAttribute("aria-label", count
-          ? `Open ${count} action comment${count === 1 ? "" : "s"}`
-          : "Add action comment");
-        badge.onclick = (event) => {
-          event.stopPropagation();
-          openAnnotationSubject(state, anchor, {
-            title: presentation.label,
-            kind: "ACTION",
-            origin: event.currentTarget,
-          });
+    const visibleLayer = state.visibleLayer ?? interaction?.completionOutput?.rootLayer;
+    const resolveAuthoredAction = (reference) => resolveCompiledNodeDetailAction(
+      actions,
+      reference,
+      node,
+    );
+    const authoredCapabilityState = {};
+    for (const mount of node.authoredDetail?.mounts ?? []) {
+      if (mount.kind !== "capability" || mount.capability.kind === "link") continue;
+      const action = resolveAuthoredAction(mount.capability.action);
+      if (!action) {
+        authoredCapabilityState[mount.id] = { disabled: true, error: "This action is unavailable in the accepted detail." };
+      } else if (action.kind === "invoke") {
+        const invoked = actionWasInvoked(
+          state.actionInvocations,
+          state.pendingActionInvocations,
+          state.currentInteractionId,
+          action.id,
+        );
+        authoredCapabilityState[mount.id] = {
+          disabled: actionActivationPresentation(action, {
+            invoked,
+            retryable: actionCanRetry(state.actionInvocations, action.id),
+            canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
+          }).disabled,
         };
-        wrapper.append(badge);
+      } else if (action.kind === "input") {
+        const occurrence = interaction?.graphNodeId != null && visibleLayer?.layer?.id != null
+          ? createInputOccurrence(interaction.graphNodeId, visibleLayer.layer.id, action.id)
+          : null;
+        const attachment = occurrence && inputDraftController
+          ? committedInputAttachment(inputDraftController.current(getThread()?.id), occurrence)
+          : null;
+        authoredCapabilityState[mount.id] = {
+          value: initialInputStageValue(action, attachment),
+          disabled: mode === "review"
+            || !inputDraftController
+            || !loadedInputDraftThreads.has(String(getThread()?.id))
+            || occurrence === null,
+        };
       }
-      return wrapper;
-    }));
-    [...$("#detailActions").querySelectorAll(".action-control")].forEach((button, index) => {
-      const action = ordinaryActions[index];
-      const invoked = actionWasInvoked(
-        state.actionInvocations,
-        state.pendingActionInvocations,
-        state.currentInteractionId,
-        action.id,
-      );
-      const retryable = actionCanRetry(state.actionInvocations, action.id);
-      const activation = actionActivationPresentation(action, {
-        invoked,
-        retryable,
-        canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
-      });
-      button.querySelector(".action-label").textContent = activation.label;
-      button.disabled = activation.disabled;
-      button.classList.toggle("invoked", invoked);
-      button.classList.toggle("retryable", activation.retryableInvoke);
-      button.onclick = async () => {
+    }
+    let authoredDetailRuntime;
+    const authoredDetailMountKey = [
+      getThread()?.id,
+      node.id,
+      visibleLayer?.layer?.id,
+      node.authoredDetail?.integritySha256 ?? "legacy",
+    ].map(String).join(":");
+    const authoredDetailCompatibilityIssue = node.authoredDetail
+      && !compiledNodeDetailCoversActions(node.authoredDetail, actions, node)
+      ? "This authored detail does not bind every accepted node action."
+      : null;
+    const authoredDetail = await renderProductNodeDetail({
+      container: $("#detailContent"),
+      node,
+      mountKey: authoredDetailMountKey,
+      existing: mountedAuthoredDetail,
+      compatibilityIssue: authoredDetailCompatibilityIssue,
+      resolveAsset: (asset) => resolveNodeDetailAsset(asset, { node, state, thread: getThread() }),
+      resolveAction: resolveAuthoredAction,
+      capabilityState: authoredCapabilityState,
+      onNavigate: async (action) => {
+        if (!await prepareNodeContextSelectionChange()) return;
+        await onNavigateLayer(action.targetLayerId, {
+          action,
+          sourceNode: node,
+          beforeCommit: collapseContextPreviews,
+        });
+      },
+      onInvoke: async (action) => {
+        const activation = actionActivationPresentation(action, {
+          invoked: actionWasInvoked(
+            state.actionInvocations,
+            state.pendingActionInvocations,
+            state.currentInteractionId,
+            action.id,
+          ),
+          retryable: actionCanRetry(state.actionInvocations, action.id),
+          canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
+        });
         if (activation.navigational) {
           if (!await prepareNodeContextSelectionChange()) return;
-          button.disabled = true;
-          try {
-            await navigateWorkspaceAction({
-              action,
-              activation,
-              sourceNode: node,
-              collapseContextPreviews,
-              onNavigateResolvedInvoke,
-              onNavigateLayer,
-            });
-          } finally {
-            if (button.isConnected) button.disabled = false;
-          }
+          await navigateWorkspaceAction({
+            action,
+            activation,
+            sourceNode: node,
+            collapseContextPreviews,
+            onNavigateResolvedInvoke,
+            onNavigateLayer,
+          });
+        } else {
+          await onInvokeAction(action);
+        }
+      },
+      onInput: async (action, value, context) => {
+        const thread = getThread();
+        const interactionNodeId = currentInteraction(state, thread)?.graphNodeId;
+        const layerId = currentLayerId(state, thread);
+        const issue = validateInputStage(action, value);
+        if (issue) {
+          authoredDetailRuntime?.updateCapability(context.mountId, { error: issue.message });
           return;
         }
-        button.disabled = true;
-        button.classList.add("invoked");
-        await onInvokeAction(action);
-      };
+        if (!inputDraftController || interactionNodeId == null || layerId == null) {
+          authoredDetailRuntime?.updateCapability(context.mountId, {
+            disabled: true,
+            error: "Input editing is unavailable in this view.",
+          });
+          return;
+        }
+        const occurrence = createInputOccurrence(interactionNodeId, layerId, action.id);
+        authoredDetailRuntime?.updateCapability(context.mountId, { busy: true, error: null });
+        try {
+          const draft = await inputDraftController.commit(thread.id, occurrence, action, value);
+          const attachment = committedInputAttachment(draft, occurrence);
+          markInputCompositionChanged(thread.id);
+          authoredDetailRuntime?.updateCapability(context.mountId, {
+            busy: false,
+            value: initialInputStageValue(action, attachment),
+            error: null,
+          });
+          renderComposerContexts();
+        } catch (error) {
+          authoredDetailRuntime?.updateCapability(context.mountId, {
+            busy: false,
+            error: error?.message || "Input could not be committed.",
+          });
+        }
+      },
     });
+    authoredDetailRuntime = authoredDetail;
+    if (requestSequence !== nodeSelectionSequence
+      || String(getThread()?.id) !== sourceThreadId) {
+      if (authoredDetail !== mountedAuthoredDetail) authoredDetail.dispose?.();
+      return false;
+    }
+    mountedAuthoredDetail = authoredDetail.authored ? authoredDetail : null;
+    if (authoredDetail.authored) {
+      $("#nodeInputActions").replaceChildren();
+      $("#nodeInputActions").classList.add("hidden");
+      $("#detailActions").replaceChildren();
+      $("#detailActions").classList.add("hidden");
+    } else {
+      renderNodeInputActions(state, node, inputActions);
+      $("#detailActions").classList.toggle("hidden", !ordinaryActions.length);
+    }
+    if (!authoredDetail.authored) {
+      $("#detailActions").replaceChildren(...ordinaryActions.map((action) => {
+        const presentation = actionPresentation(action);
+        const button = graphDocument.createElement("button");
+        button.type = "button";
+        button.className = `action-control action-${presentation.variant}`;
+        button.dataset.actionId = String(action.id);
+        button.dataset.reviewRef = `action-${action.id}`;
+        button.dataset.reviewKind = actionReviewKind(action);
+        button.dataset.reviewActionId = String(action.id);
+        if (action.targetLayerId != null) {
+          button.dataset.reviewTargetLayerId = String(action.targetLayerId);
+        }
+        if (presentation.icon) {
+          button.append(createRelayerIcon(presentation.icon, { class: "relayer-action-icon" }));
+        }
+        const copy = graphDocument.createElement("span");
+        copy.className = "action-copy";
+        const label = graphDocument.createElement(presentation.variant === "card" ? "strong" : "span");
+        label.className = "action-label";
+        label.textContent = presentation.label;
+        copy.append(label);
+        if (presentation.description) {
+          const description = graphDocument.createElement("small");
+          description.textContent = presentation.description;
+          copy.append(description);
+        }
+        button.append(copy);
+        const wrapper = graphDocument.createElement("span");
+        wrapper.className = "action-annotation-wrap";
+        wrapper.append(button);
+        if (annotationEnabled) {
+          const anchor = subjectAnchor("action", {
+            actionId: action.id,
+            nodeId: node.id,
+            sourceLayerId: action.sourceLayerId,
+          }, state, getThread());
+          const count = annotationCount(anchor);
+          const badge = graphDocument.createElement("button");
+          badge.type = "button";
+          badge.className = "annotation-count-badge action-annotation-badge";
+          badge.textContent = count ? String(count) : "✎";
+          badge.setAttribute("aria-label", count
+            ? `Open ${count} action comment${count === 1 ? "" : "s"}`
+            : "Add action comment");
+          badge.onclick = (event) => {
+            event.stopPropagation();
+            openAnnotationSubject(state, anchor, {
+              title: presentation.label,
+              kind: "ACTION",
+              origin: event.currentTarget,
+            });
+          };
+          wrapper.append(badge);
+        }
+        return wrapper;
+      }));
+      [...$("#detailActions").querySelectorAll(".action-control")].forEach((button, index) => {
+        const action = ordinaryActions[index];
+        const invoked = actionWasInvoked(
+          state.actionInvocations,
+          state.pendingActionInvocations,
+          state.currentInteractionId,
+          action.id,
+        );
+        const retryable = actionCanRetry(state.actionInvocations, action.id);
+        const activation = actionActivationPresentation(action, {
+          invoked,
+          retryable,
+          canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
+        });
+        button.querySelector(".action-label").textContent = activation.label;
+        button.disabled = activation.disabled;
+        button.classList.toggle("invoked", invoked);
+        button.classList.toggle("retryable", activation.retryableInvoke);
+        button.onclick = async () => {
+          if (activation.navigational) {
+            if (!await prepareNodeContextSelectionChange()) return;
+            button.disabled = true;
+            try {
+              await navigateWorkspaceAction({
+                action,
+                activation,
+                sourceNode: node,
+                collapseContextPreviews,
+                onNavigateResolvedInvoke,
+                onNavigateLayer,
+              });
+            } finally {
+              if (button.isConnected) button.disabled = false;
+            }
+            return;
+          }
+          button.disabled = true;
+          button.classList.add("invoked");
+          await onInvokeAction(action);
+        };
+      });
+    }
     $$('[data-node]').forEach((element) => {
       element.classList.toggle("selected", element.dataset.node === String(id));
     });
@@ -4846,6 +5098,8 @@ export function createProductWorkspace({
     disposed = true;
     nodeSelectionSequence += 1;
     contextEditor = null;
+    mountedAuthoredDetail?.dispose?.();
+    mountedAuthoredDetail = null;
     releaseSendAttempt();
     if (contextDraftSendWarning.open) {
       closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });

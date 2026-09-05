@@ -106,6 +106,8 @@ pub struct ImportedResolvedLayer {
 #[serde(rename_all = "camelCase")]
 pub struct ImportedLayer {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub nodes: Vec<String>,
     pub edges: Vec<String>,
     #[serde(default)]
@@ -127,14 +129,25 @@ pub struct ImportedNodePlacement {
     pub y: f64,
 }
 
+/// Markdown appended to an imported node whose export omitted its authored detail.
+pub const IMPORTED_AUTHORED_DETAIL_OMITTED_NOTE: &str = "_Visual detail omitted from the exported conversation because it contained a private project path._";
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportedNode {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub kind: String,
     pub icon: String,
     pub title: String,
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_detail: Option<serde_json::Value>,
+    /// The export left out an authored detail package this node once carried.
+    /// Import keeps the Markdown fallback and notes the omission inside it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub authored_detail_omitted: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -148,6 +161,8 @@ pub struct ImportedEdge {
 #[serde(rename_all = "camelCase")]
 pub struct ImportedAction {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
     pub source_node_id: String,
     pub source_layer_id: Option<String>,
     pub kind: String,
@@ -351,9 +366,24 @@ impl crate::GraphDatabase {
                 ));
             }
             let owner = node_owners[&portable_id];
-            let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,'accepted',?7,?8)")
+            if let Some(authored_detail) = node.authored_detail.as_ref() {
+                crate::graph::model::validate_authored_detail(authored_detail)?;
+            }
+            let authored_detail = node
+                .authored_detail
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| GraphError::Internal(error.to_string()))?;
+            let detail = if node.authored_detail_omitted && node.authored_detail.is_none() {
+                format!("{}\n\n{IMPORTED_AUTHORED_DETAIL_OMITTED_NOTE}", node.detail)
+            } else {
+                node.detail
+            };
+            let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,'accepted',?8,?9)")
                 .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(node.kind).bind(node.icon)
-                .bind(node.title).bind(node.detail).bind(owner).bind(&portable_id).execute(&mut *tx).await?;
+                .bind(node.title).bind(detail).bind(authored_detail).bind(owner)
+                .bind(node.client_key.as_deref().unwrap_or(&portable_id)).execute(&mut *tx).await?;
             node_ids.insert(portable_id, result.last_insert_rowid());
         }
 
@@ -386,7 +416,7 @@ impl crate::GraphDatabase {
                 let result = sqlx::query("INSERT INTO layers(project_id,thread_id,layout_schema_version,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,'accepted',?4,?5)")
                     .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value())
                     .bind(resolved.layer.layout.as_ref().map(|layout| i64::from(layout.version)))
-                    .bind(owner).bind(&resolved.layer.id)
+                    .bind(owner).bind(resolved.layer.client_key.as_deref().unwrap_or(&resolved.layer.id))
                     .execute(&mut *tx).await?;
                 layer_ids.insert(resolved.layer.id, result.last_insert_rowid());
             }
@@ -1087,14 +1117,31 @@ async fn load_turn(
 
 fn register_imported_node(
     definitions: &mut HashMap<String, ImportedNode>,
-    node: ImportedNode,
+    mut node: ImportedNode,
 ) -> Result<(), GraphError> {
-    if let Some(existing) = definitions.get(&node.id) {
-        if existing != &node {
+    if let Some(existing) = definitions.get_mut(&node.id) {
+        let incoming_authored_detail = node.authored_detail.take();
+        let existing_authored_detail = existing.authored_detail.take();
+        // Context snapshots of a node carry neither its package nor the marker
+        // that export omitted one; only the accepted-view copy does. Compare the
+        // remaining identity fields, then merge both package-related fields.
+        let incoming_omitted = std::mem::take(&mut node.authored_detail_omitted);
+        let existing_omitted = std::mem::take(&mut existing.authored_detail_omitted);
+        if existing != &node
+            || matches!(
+                (&existing_authored_detail, &incoming_authored_detail),
+                (Some(left), Some(right)) if left != right
+            )
+        {
+            existing.authored_detail = existing_authored_detail;
+            existing.authored_detail_omitted = existing_omitted;
             return Err(GraphError::Internal(
                 "imported node snapshot changed for one portable ID".into(),
             ));
         }
+        existing.authored_detail = existing_authored_detail.or(incoming_authored_detail);
+        existing.authored_detail_omitted =
+            (existing_omitted || incoming_omitted) && existing.authored_detail.is_none();
         return Ok(());
     }
     definitions.insert(node.id.clone(), node);
@@ -1136,7 +1183,7 @@ async fn insert_action(
         .bind(context.nodes[&action.source_node_id]).bind(action.source_layer_id.as_ref().map(|id| context.layers[id]))
         .bind(&action.kind).bind(&action.relation).bind(&action.label).bind(&action.variant).bind(&action.icon).bind(&action.description)
         .bind(action.target_layer_id.as_ref().map(|id| context.layers[id])).bind(&action.interaction_text)
-        .bind(response).bind(owner).bind(&action.id)
+        .bind(response).bind(owner).bind(action.client_key.as_deref().unwrap_or(&action.id))
         .execute(&mut **tx).await?;
     let action_id = result.last_insert_rowid();
     if let Some(input) = input {

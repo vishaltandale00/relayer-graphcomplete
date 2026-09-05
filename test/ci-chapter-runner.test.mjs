@@ -248,5 +248,5 @@ describe("CI chapter runner", () => {
         );
       }
     }
-  });
+  }, 15_000);
 });

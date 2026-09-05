@@ -82,8 +82,8 @@ describe("Eval harness configuration availability", () => {
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
-      "codex-eval-complete-disabled.yaml",
-      "codex-eval-complete-enabled.yaml",
+      "codex-eval-visual-node-details-control.yaml",
+      "codex-eval-visual-node-details-treatment.yaml",
       "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
       "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
       "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
@@ -93,6 +93,7 @@ describe("Eval harness configuration availability", () => {
       "claude-basic.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
+      "codex-layered-personal-presentation-v2.yaml",
       "prime-agent-basic.yaml",
       "prime-agent-deep.yaml",
       "prime-agent-layered-navigation-luna.yaml",
@@ -111,8 +112,8 @@ describe("Eval harness configuration availability", () => {
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
-      "codex-eval-complete-disabled.yaml",
-      "codex-eval-complete-enabled.yaml",
+      "codex-eval-visual-node-details-control.yaml",
+      "codex-eval-visual-node-details-treatment.yaml",
       "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
       "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
       "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
@@ -122,6 +123,7 @@ describe("Eval harness configuration availability", () => {
       "claude-basic.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
+      "codex-layered-personal-presentation-v2.yaml",
     ]);
   });
 
@@ -138,8 +140,8 @@ describe("Eval harness configuration availability", () => {
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
-      "codex-eval-complete-disabled.yaml",
-      "codex-eval-complete-enabled.yaml",
+      "codex-eval-visual-node-details-control.yaml",
+      "codex-eval-visual-node-details-treatment.yaml",
       "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
       "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
       "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
@@ -149,6 +151,7 @@ describe("Eval harness configuration availability", () => {
       "claude-basic.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
+      "codex-layered-personal-presentation-v2.yaml",
     ]);
     expect(packageAvailable).not.toHaveBeenCalled();
   });
@@ -267,21 +270,20 @@ describe("Eval harness configuration availability", () => {
     expect(treatment).toEqual(control);
   });
 
-  it("keeps the combined visible-work comparison identical except for name, personalization, and Complete", async () => {
+  it("keeps the visual-detail comparison identical except for name and presentation version", async () => {
     const catalog = await loadHarnessConfigurations([
-      resolve(repositoryRoot, "harnesses/codex-eval-complete-disabled.yaml"),
-      resolve(repositoryRoot, "harnesses/codex-eval-complete-enabled.yaml"),
+      resolve(repositoryRoot, "harnesses/codex-eval-visual-node-details-control.yaml"),
+      resolve(repositoryRoot, "harnesses/codex-eval-visual-node-details-treatment.yaml"),
     ]);
-    const control = structuredClone(catalog.get("codex-eval-complete-disabled"));
-    const treatment = structuredClone(catalog.get("codex-eval-complete-enabled"));
-    expect(control?.complete).toEqual({ agentAuthored: false });
+    const control = structuredClone(catalog.get("codex-eval-visual-node-details-control"));
+    const treatment = structuredClone(catalog.get("codex-eval-visual-node-details-treatment"));
+    expect(control?.complete).toEqual({ agentAuthored: true });
     expect(treatment?.complete).toEqual({ agentAuthored: true });
-    expect(control?.settings.personalPresentationVersion).toBe("personal-presentation-v1");
-    expect(treatment?.settings.personalPresentationVersion).toBe("personal-presentation-v2");
+    expect(control?.settings.personalPresentationVersion).toBe("personal-presentation-v2");
+    expect(treatment?.settings.personalPresentationVersion).toBe("personal-presentation-v3");
     if (control) {
       control.name = "comparison";
-      control.complete = { agentAuthored: true };
-      control.settings.personalPresentationVersion = "personal-presentation-v2";
+      control.settings.personalPresentationVersion = "personal-presentation-v3";
     }
     if (treatment) treatment.name = "comparison";
     expect(treatment).toEqual(control);

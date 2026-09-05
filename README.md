@@ -47,6 +47,8 @@ The implemented basic loop is:
 5. `graph.submit(interactionNode)` recursively validates typed `expand` and `reference` navigation, exact source-layer provenance, layer size, and complete authored layouts, then atomically returns the current authored closure. Temporal `advance` uses the same validation and acceptance boundary while preserving the exact prior current through graph-native navigation. Flat answers remain valid. See [ADR 0005](docs/decisions/0005-layered-navigation-contract.md) and [ADR 0008](docs/decisions/0008-temporal-current-and-completion-brokers.md).
 6. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
 
+`NodeObject` also creates and owns a typed `detailAuthoring` builder while the node remains a client-side draft. Graph-action mounts derive source-node provenance from that owner, and their draft source layer must contain that exact node; authored capability calls cannot provide another node. Authors may checkpoint stable HTML/CSS components through `RelayerGraphClient.checkpointNodeDetail` before `submitNode`; there is no author-controlled finalize operation. Checkpoint and first-submit finalization snapshot the complete authored component program from ordinary own data descriptors, so later builder, template, capability, action, or layer mutation cannot alter that in-flight package. The first submit is single-flight per client and node: it registers shared submission and detail-finalization promises before executing envelope, compiler, or transport work, compiles only from that snapshot, freezes the builder, and sends one transport request. The immutable compiled package is retained by the builder so a replacement client can retry the same object after transport failure without recompilation. Successful node envelopes and every node field are snapshotted once from exact ordinary own data descriptors before validation. The same snapshot creates one frozen accepted value in code-owned private state, exposed through a non-configurable read-only `ref` projection and cached for concurrent calls and retries. Resolution or compilation failure removes the matching pending placeholders and leaves an unfrozen builder repairable. Agent-facing visual asset interpolation remains deferred until its authenticated resolver is connected; every development and packaged agent resource exposes the same HTML, CSS, and capability surface. Public compiler calls cannot seed the client's private finalization map. Product and Eval copy one self-contained `resources/graph-client/index.js`, with no compiler or host-bridge sibling modules. Rust integrity-checks and persists the canonical package beside the legacy fallback, conversation export/import carries that same package without a renderer-only shape, and Product mounts it through the constrained Node Detail runtime. Resubmitting a draft without mentioning `authoredDetail` retains its checkpointed package; `detailAuthoring.clear()` is the explicit way to drop it, and conversation export records `authoredDetailOmitted` when a private project path forces it to leave a package out.
+
 Independent self-assessment will later add an optional review gate to this same loop.
 
 Issue #55's accepted, not-yet-implemented invoke-resolution contract extends this
@@ -270,23 +272,24 @@ Relayer Eval is a separate internal application and profile. Its dashboard confi
 npm run eval-app:dev
 ```
 
-The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
+The default `fixture-task-system` harness is the safe deterministic path: it exercises the real Rust app server, Node harness host, graph client, product workspace, and Eval UI without credentials or inference. `npm run eval-app:dev` still needs the native Rust/Ladybug build prerequisites below because the application is built before Electron starts. `codex-basic`, `codex-basic-high`, and the other provider-backed configurations are paid live-Eval paths; selecting one and approving a run is explicit, and live runs are excluded from `npm run check`. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
 
-The dashboard also exposes the non-default **Visible working state · recursive
-comparison** case and its required Codex pair:
+The dashboard also exposes the non-default **Visual Node Details · recursive
+baseline** case and its required Codex pair:
 
-- `codex-eval-complete-disabled`
-- `codex-eval-complete-enabled`
+- `codex-eval-visual-node-details-control`
+- `codex-eval-visual-node-details-treatment`
 
-Selecting that case isolates and selects both configurations. It is deliberately a
-combined product-experience comparison, not an isolated causal measurement: the off
-cell pins V1 and disables agent-authored Complete, while the on cell pins V2 and enables
-it. They hold the Codex harness implementation, provider/model settings, permissions,
-natural task, and temporal runtime substrate fixed. The execution dossier
+Selecting that case isolates and selects both configurations. Both cells retain the
+established recursive Complete authority, graph pointers and navigation, and input
+actions. The control pins the pre-#404 V2 presentation. The treatment pins V3, which
+adds only the authored visual Node Detail preference. They hold the Codex harness
+implementation, provider/model settings, permissions, natural task, and temporal runtime
+substrate fixed. The execution dossier
 separates semantic children from human turns and exposes each child's source
 action, attached provider execution, successful settlement, terminal projection,
 and candidate trace. The deterministic fixture proves this comparison path without
-inference. A live run starts two Codex subscription root executions and the enabled
+inference. A live run starts two Codex subscription root executions and either recursive
 root may start additional agent-authored child execution. That scope must be confirmed
 explicitly in the dashboard; the treatment is pinned to the control's resolved
 provider and model before it starts.
@@ -336,10 +339,15 @@ The living [Product Requirements](docs/prd/index.html) webpage records what is v
 
 ## Development
 
-Requires Node.js 22.8 or newer.
+Requires Node.js 22.8 or newer. The repository pins Rust and Cargo to 1.98.0 in [rust-toolchain.toml](rust-toolchain.toml), with `rustfmt` and `clippy` included for the CI-authoritative checks. Run the explicit prerequisite doctor with `npm run doctor:dev` before a native build or Eval Desktop session; it reports actionable setup failures without changing the repository's check/build/test policy.
+
+The pinned `lbug` 0.18.0 dependency is compiled from its bundled native Ladybug source by `.cargo/config.toml`; this is intentional and keeps development aligned with the qualified native dependency contract. It is not a small Rust-only build. CMake 3.15 or newer is required by the pinned source; CMake 4.4.3 is the known-good local version. Native compilation also requires a C++20 toolchain: Xcode Command Line Tools (or full Xcode) plus `xcrun --find clang++` on macOS, Visual Studio C++ tools or LLVM `clang-cl` plus either Ninja or a supported Visual Studio CMake generator on Windows, and make plus a C++20 compiler on Linux. Full Xcode is needed for macOS signing/release work, while the command-line tools are sufficient for an unsigned local build.
+
+Ladybug source compilation is disk-heavy. The doctor reports free space for the repository, `CARGO_TARGET_DIR`, and the temporary directory; 10 GiB is an advisory warning threshold based on local observation, not a versioned repository requirement or CI gate. Inspect those exact paths before compilation and use a larger reserve when possible. To relocate build output, set `CARGO_TARGET_DIR` to an inspected path before running the command. Do not delete unrelated user data or caches as a setup step; inspect the target volume first, for example `df -h "$PWD" "${CARGO_TARGET_DIR:-$PWD/target}" "${TMPDIR:-/tmp}"`.
 
 ```sh
 npm install
+npm run doctor:dev
 npm run check
 npm run build
 ```

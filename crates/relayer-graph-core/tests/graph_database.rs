@@ -160,6 +160,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                 interaction_node_id: interaction_node_id.into(),
                 root_action: ImportedAction {
                     id: "action-1".into(),
+                    client_key: None,
                     source_node_id: interaction_node_id.into(),
                     source_layer_id: None,
                     kind: "navigate".into(),
@@ -176,6 +177,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                 layers: vec![ImportedResolvedLayer {
                     layer: ImportedLayer {
                         id: "layer-1".into(),
+                        client_key: None,
                         nodes: vec!["node-1".into()],
                         edges: vec![],
                         layout: Some(ImportedLayerLayout {
@@ -189,10 +191,13 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                     },
                     nodes: vec![ImportedNode {
                         id: "node-1".into(),
+                        client_key: None,
                         kind: "concept".into(),
                         icon: "box".into(),
                         title: "Queue".into(),
                         detail: "A queue".into(),
+                        authored_detail: None,
+                        authored_detail_omitted: false,
                     }],
                     edges: vec![],
                     actions: vec![],
@@ -214,6 +219,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
             interaction_node_id: "interaction-1".into(),
             root_action: ImportedAction {
                 id: "root-action-1".into(),
+                client_key: Some("authored-root-action-1".into()),
                 source_node_id: "interaction-1".into(),
                 source_layer_id: None,
                 kind: "navigate".into(),
@@ -230,20 +236,25 @@ fn imported_invoke_conversation() -> ImportedConversation {
             layers: vec![ImportedResolvedLayer {
                 layer: ImportedLayer {
                     id: "layer-1".into(),
+                    client_key: Some("authored-layer-1".into()),
                     nodes: vec!["node-1".into()],
                     edges: vec![],
                     layout: None,
                 },
                 nodes: vec![ImportedNode {
                     id: "node-1".into(),
+                    client_key: Some("authored-node-1".into()),
                     kind: "concept".into(),
                     icon: "box".into(),
                     title: "Path".into(),
                     detail: "Invoke this path".into(),
+                    authored_detail: None,
+                    authored_detail_omitted: false,
                 }],
                 edges: vec![],
                 actions: vec![ImportedAction {
                     id: "invoke-action-1".into(),
+                    client_key: Some("authored-invoke-action-1".into()),
                     source_node_id: "node-1".into(),
                     source_layer_id: Some("layer-1".into()),
                     kind: "invoke".into(),
@@ -273,6 +284,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
             interaction_node_id: "interaction-2".into(),
             root_action: ImportedAction {
                 id: "root-action-2".into(),
+                client_key: None,
                 source_node_id: "interaction-2".into(),
                 source_layer_id: None,
                 kind: "navigate".into(),
@@ -289,16 +301,20 @@ fn imported_invoke_conversation() -> ImportedConversation {
             layers: vec![ImportedResolvedLayer {
                 layer: ImportedLayer {
                     id: "layer-2".into(),
+                    client_key: None,
                     nodes: vec!["node-2".into()],
                     edges: vec![],
                     layout: None,
                 },
                 nodes: vec![ImportedNode {
                     id: "node-2".into(),
+                    client_key: None,
                     kind: "concept".into(),
                     icon: "box".into(),
                     title: "Destination".into(),
                     detail: "Imported result".into(),
+                    authored_detail: None,
+                    authored_detail_omitted: false,
                 }],
                 edges: vec![],
                 actions: vec![],
@@ -364,15 +380,83 @@ async fn imported_conversation_is_materialized_read_only_and_removable() {
 }
 
 #[tokio::test]
+async fn imported_conversation_reconnects_the_canonical_authored_detail_to_its_node() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    input.turns[0].accepted_view.as_mut().unwrap().layers[0].nodes[0].authored_detail = Some(
+        serde_json::json!({
+            "version": 1,
+            "components": [{"id":"overview","order":0,"html":"<p>Accepted</p>","css":"p{color:#fff}"}],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "6c34582a24f665dfcf9efa843fdb254a646de79c505d76c80863f81ed8dfe659"
+        }),
+    );
+    let accepted_node = input.turns[0].accepted_view.as_ref().unwrap().layers[0].nodes[0].clone();
+    input.turns[0].contexts.push(ImportedInteractionContext {
+        id: "context-action".into(),
+        target: ImportedNode {
+            authored_detail: None,
+            ..accepted_node
+        },
+        source_interaction_node_id: "source-interaction".into(),
+        source_layer_id: "source-layer".into(),
+        annotations: vec!["Legacy context projection omits authored detail".into()],
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+    let node = &receipt.turns[0].output.as_ref().unwrap().root_layer.nodes[0];
+
+    assert_eq!(
+        node.authored_detail.as_ref().unwrap()["components"][0]["id"],
+        "overview"
+    );
+}
+
+#[tokio::test]
+async fn imported_conversation_notes_an_authored_detail_the_export_omitted() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    let layer = &mut input.turns[0].accepted_view.as_mut().unwrap().layers[0];
+    let original_detail = layer.nodes[0].detail.clone();
+    layer.nodes[0].authored_detail_omitted = true;
+    // Context snapshots of the same node never carry the marker; the import
+    // identity check must still treat both as one portable node.
+    let accepted_node = layer.nodes[0].clone();
+    input.turns[0].contexts.push(ImportedInteractionContext {
+        id: "context-action".into(),
+        target: ImportedNode {
+            authored_detail_omitted: false,
+            ..accepted_node
+        },
+        source_interaction_node_id: "source-interaction".into(),
+        source_layer_id: "source-layer".into(),
+        annotations: vec![],
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+    let node = &receipt.turns[0].output.as_ref().unwrap().root_layer.nodes[0];
+
+    assert_eq!(node.authored_detail, None);
+    assert_eq!(
+        node.detail,
+        format!("{original_detail}\n\n{IMPORTED_AUTHORED_DETAIL_OMITTED_NOTE}")
+    );
+}
+
+#[tokio::test]
 async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_turns() {
     let database = GraphDatabase::in_memory().await.unwrap();
     let mut input = imported_conversation("interaction-1");
     let target = ImportedNode {
         id: "node-1".into(),
+        client_key: None,
         kind: "concept".into(),
         icon: "box".into(),
         title: "Queue".into(),
         detail: "A queue".into(),
+        authored_detail: None,
+        authored_detail_omitted: false,
     };
     input.turns[0].interaction_node_id = Some("interaction-1".into());
     input.turns[0].contexts = vec![ImportedInteractionContext {
@@ -453,6 +537,7 @@ async fn imported_unanswered_input_action_keeps_its_authored_payload() {
         .actions
         .push(ImportedAction {
             id: "unanswered-input".into(),
+            client_key: None,
             source_node_id: "node-1".into(),
             source_layer_id: Some("layer-1".into()),
             kind: "input".into(),
@@ -510,6 +595,7 @@ async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable()
         .actions
         .push(ImportedAction {
             id: "input-action-1".into(),
+            client_key: None,
             source_node_id: "node-1".into(),
             source_layer_id: Some("layer-1".into()),
             kind: "input".into(),
@@ -612,15 +698,19 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
         });
     resolved.nodes.push(ImportedNode {
         id: "node-2".into(),
+        client_key: None,
         kind: "concept".into(),
         icon: "box".into(),
         title: "Worker".into(),
         detail: "A worker".into(),
+        authored_detail: None,
+        authored_detail_omitted: false,
     });
     // Two input actions, both genuinely authored by node-1.
     for id in ["input-action-1", "input-action-2"] {
         resolved.actions.push(ImportedAction {
             id: id.into(),
+            client_key: None,
             source_node_id: "node-1".into(),
             source_layer_id: Some("layer-1".into()),
             kind: "input".into(),
@@ -719,6 +809,7 @@ async fn imported_submitted_input_value_must_satisfy_the_accepted_action() {
     for id in ["input-action-1", "input-action-2"] {
         resolved.actions.push(ImportedAction {
             id: id.into(),
+            client_key: None,
             source_node_id: "node-1".into(),
             source_layer_id: Some("layer-1".into()),
             kind: "input".into(),
@@ -835,6 +926,23 @@ async fn imported_action_origin_reconstructs_resolved_invoke_navigation() {
         .iter()
         .find(|action| action.kind == ActionKind::Invoke)
         .unwrap();
+
+    assert_eq!(
+        source_layer.layer.client_key.as_deref(),
+        Some("authored-layer-1")
+    );
+    assert_eq!(
+        source_layer.nodes[0].client_key.as_deref(),
+        Some("authored-node-1")
+    );
+    assert_eq!(
+        invoke.client_key.as_deref(),
+        Some("authored-invoke-action-1")
+    );
+    assert_eq!(
+        invoke.source_layer_client_key.as_deref(),
+        Some("authored-layer-1")
+    );
 
     assert_eq!(
         invoke.target_layer_id.map(LayerId::value),
@@ -4274,6 +4382,240 @@ async fn accepted_completion_survives_database_reopen() {
     assert_eq!(output.node_id, interaction.id);
     assert_eq!(output.root_layer.nodes[0].title, "persisted");
     assert_eq!(output.root_layer.layer.layout, layer.layout);
+}
+
+#[tokio::test]
+async fn accepted_authored_detail_survives_caller_mutation_and_database_reopen() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let interaction = database
+        .create_interaction(Some(project(1)), thread(1), "Show the architecture")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let mut authored_detail = serde_json::json!({
+        "version": 1,
+        "components": [{
+            "id": "overview",
+            "order": 0,
+            "html": "<section><img data-gc-asset=\"m_asset\"></section>",
+            "css": "section{display:grid}"
+        }],
+        "mounts": [{
+            "id": "m_asset",
+            "componentId": "overview",
+            "kind": "asset",
+            "host": "img",
+            "assetId": "architecture-diagram"
+        }],
+        "assets": [{
+            "id": "architecture-diagram",
+            "digestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "mediaType": "image/png",
+            "representation": "image"
+        }],
+        "integritySha256": "d9080b60296e82a0084b817742756b226fee981d41c37a7e27983a3bcb682b25"
+    });
+    let answer = writer
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Architecture".into(),
+                detail: "Legacy fallback".into(),
+            },
+            Some(&authored_detail),
+        )
+        .await
+        .unwrap();
+    authored_detail["components"][0]["html"] = serde_json::json!("mutated after submit");
+    accept_single_node(&writer, interaction.clone(), answer.clone()).await;
+    drop(writer);
+    drop(database);
+
+    let reopened = GraphDatabase::open(file.path()).await.unwrap();
+    let persisted = reopened
+        .writer_for_subgraph(interaction.id)
+        .await
+        .unwrap()
+        .get_node(answer.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        persisted.authored_detail.as_ref().unwrap()["components"][0]["html"],
+        "<section><img data-gc-asset=\"m_asset\"></section>"
+    );
+    assert_eq!(persisted.detail, "Legacy fallback");
+}
+
+#[tokio::test]
+async fn draft_resubmission_without_authored_detail_preserves_checkpointed_package() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let package = serde_json::json!({
+        "version": 1,
+        "components": [{"id":"summary","order":0,"html":"<p>Checkpointed</p>","css":""}],
+        "mounts": [],
+        "assets": [],
+        "integritySha256": "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac"
+    });
+    let checkpointed = writer
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Checkpointed".into(),
+                detail: "Legacy fallback".into(),
+            },
+            Some(&package),
+        )
+        .await
+        .unwrap();
+
+    let resubmitted = writer
+        .submit_node(&NodeDraft {
+            client_key: "answer".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Revised title".into(),
+            detail: "Revised fallback".into(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(resubmitted.id, checkpointed.id);
+    assert_eq!(resubmitted.authored_detail.as_ref(), Some(&package));
+    accept_single_node(&writer, interaction, resubmitted).await;
+    let accepted = writer.get_node(checkpointed.id).await.unwrap();
+    assert_eq!(accepted.authored_detail.as_ref(), Some(&package));
+}
+
+#[tokio::test]
+async fn draft_resubmission_can_explicitly_clear_a_checkpointed_package() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let package = serde_json::json!({
+        "version": 1,
+        "components": [{"id":"summary","order":0,"html":"<p>Checkpointed</p>","css":""}],
+        "mounts": [],
+        "assets": [],
+        "integritySha256": "546706eb23bcfd7a1ab4d17bbce3b21e92686f5a8b9316a45ba63c6919b8f4ac"
+    });
+    let draft = NodeDraft {
+        client_key: "answer".into(),
+        kind: "concept".into(),
+        icon: "box".into(),
+        title: "Checkpointed".into(),
+        detail: "Legacy fallback".into(),
+    };
+    let checkpointed = writer
+        .submit_node_with_authored_detail(&draft, Some(&package))
+        .await
+        .unwrap();
+
+    let cleared = writer
+        .submit_node_with_authored_detail_update(
+            &NodeDraft {
+                title: "Markdown only".into(),
+                ..draft.clone()
+            },
+            AuthoredDetailUpdate::Clear,
+        )
+        .await
+        .unwrap();
+    assert_eq!(cleared.id, checkpointed.id);
+    assert_eq!(cleared.title, "Markdown only");
+    assert_eq!(cleared.authored_detail, None);
+
+    // Retain after a clear stays cleared; a later package replaces it again.
+    let retained = writer.submit_node(&draft).await.unwrap();
+    assert_eq!(retained.authored_detail, None);
+    let replaced = writer
+        .submit_node_with_authored_detail_update(&draft, AuthoredDetailUpdate::Replace(&package))
+        .await
+        .unwrap();
+    assert_eq!(replaced.authored_detail.as_ref(), Some(&package));
+
+    let cleared_again = writer
+        .submit_node_with_authored_detail_update(&draft, AuthoredDetailUpdate::Clear)
+        .await
+        .unwrap();
+    accept_single_node(&writer, interaction, cleared_again).await;
+    let accepted = writer.get_node(checkpointed.id).await.unwrap();
+    assert_eq!(accepted.authored_detail, None);
+}
+
+#[tokio::test]
+async fn authored_detail_rejects_a_package_with_corrupt_canonical_integrity() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let package = serde_json::json!({
+        "version": 1,
+        "components": [{"id":"summary","order":0,"html":"<p>Tampered</p>","css":""}],
+        "mounts": [],
+        "assets": [],
+        "integritySha256": "6c34582a24f665dfcf9efa843fdb254a646de79c505d76c80863f81ed8dfe659"
+    });
+
+    let error = writer
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "tampered".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Tampered".into(),
+                detail: "Legacy fallback".into(),
+            },
+            Some(&package),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        GraphError::Validation { code: "authored_detail_integrity_mismatch", path, .. }
+            if path == "authoredDetail.integritySha256"
+    ));
+}
+
+#[tokio::test]
+async fn authored_detail_rejects_rehashed_noncanonical_asset_schema() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let package = serde_json::json!({
+        "version": 1,
+        "components": [],
+        "mounts": [],
+        "assets": [{
+            "id": "asset",
+            "digestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "mediaType": "image/gif",
+            "representation": "image"
+        }],
+        "integritySha256": "e9263fa99f0603d9990363996c0220d5d4544df0c60c8becc5ce8d9eaa64d8ed"
+    });
+
+    let error = writer
+        .submit_node_with_authored_detail(
+            &NodeDraft {
+                client_key: "unsupported".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Unsupported".into(),
+                detail: "Legacy fallback".into(),
+            },
+            Some(&package),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        GraphError::Validation { code: "authored_detail_invalid", path, .. }
+            if path == "authoredDetail"
+    ));
 }
 
 #[tokio::test]

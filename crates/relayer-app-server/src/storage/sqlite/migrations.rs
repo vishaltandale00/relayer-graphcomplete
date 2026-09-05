@@ -198,14 +198,14 @@ mod tests {
         );
         pool.close().await;
 
-        // Opening the store runs migrations 24 through 29.
+        // Opening the store runs migrations 24 through 30.
         let store = SqliteProductStore::open(file.path()).await.unwrap();
         let version: i64 =
             sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations WHERE success=1")
                 .fetch_one(&store.pool)
                 .await
                 .unwrap();
-        assert_eq!(version, 29);
+        assert_eq!(version, 30);
 
         let pinned_after: Vec<(i64, String, i64, i64)> = sqlx::query(
             "SELECT interaction_id,version_key,version_interaction_node_id,root_layer_id FROM interaction_personal_presentation_pins ORDER BY interaction_id",

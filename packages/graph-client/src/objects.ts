@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { createOwnedNodeDetailAuthoring, NodeDetailAuthoring } from "./detail.js";
+import { acceptedNodeResponse } from "./node-response.js";
 import type { GraphAction, GraphEdge, GraphId, GraphLayer, GraphNode, InputControl, InputOption, NavigateRelation } from "./types.js";
 
 export class NodeObject {
   readonly clientKey: string;
-  ref?: GraphNode;
+  readonly detailAuthoring: NodeDetailAuthoring;
+  declare readonly ref: GraphNode | undefined;
 
   constructor(
     public icon: string,
@@ -13,6 +16,12 @@ export class NodeObject {
     clientKey: string = randomUUID(),
   ) {
     this.clientKey = clientKey;
+    this.detailAuthoring = createOwnedNodeDetailAuthoring(this);
+    Object.defineProperty(this, "ref", {
+      configurable: false,
+      enumerable: true,
+      get: () => acceptedNodeResponse(this),
+    });
   }
 }
 

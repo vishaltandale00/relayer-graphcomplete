@@ -618,7 +618,12 @@ export async function buildAcceptedReviewTopology({ turnId, presentingInteractio
       }
       throw new Error(`Unknown accepted action kind: ${action.kind}`);
     });
-    const nodes = resolved.nodes.map((node) => ({ id: String(node.id), title: node.title, detail: node.detail }));
+    const nodes = resolved.nodes.map((node) => ({
+      id: String(node.id),
+      title: node.title,
+      detail: node.detail,
+      ...(node.authoredDetail === undefined ? {} : { authoredDetail: structuredClone(node.authoredDetail) }),
+    }));
     layers.push({
       id: layerId,
       nodeIds: resolvedNodeIds,

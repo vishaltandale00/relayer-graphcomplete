@@ -184,6 +184,7 @@ describe("desktop skeleton", () => {
     const desktopMain = await readFile(new URL("../desktop/main/index.mjs", import.meta.url), "utf8");
     const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
     const desktopManifest = await readFile(new URL("../desktop/package.json", import.meta.url), "utf8");
+    const packageScripts = JSON.parse(packageManifest).scripts;
     const vitestConfiguration = await readFile(new URL("../vitest.config.js", import.meta.url), "utf8");
     const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
     const desktopWindow = await readFile(new URL("../desktop/main/window.mjs", import.meta.url), "utf8");
@@ -197,6 +198,10 @@ describe("desktop skeleton", () => {
       prd.indexOf('</section>', prd.indexOf('<section class="status-tracker"')),
     );
     const prdServer = await readFile(new URL("../docs/prd/server.mjs", import.meta.url), "utf8");
+    expect(html).toContain("style-src 'self'");
+    expect(html).not.toContain("style-src 'self' 'unsafe-inline'");
+    expect(html).toContain("img-src 'self' data: blob:");
+    expect(packageScripts["test:desktop:node-detail-csp"]).toContain("scripts/test-node-detail-csp.mjs");
     expect(html).toContain("Connect a provider");
     expect(html).toContain('id="providerSetupOptions"');
     expect(html).toContain('id="newProviderDefinition"');
@@ -285,7 +290,7 @@ describe("desktop skeleton", () => {
     expect(packaging).toContain('win: {\n      icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg")');
     expect(desktopPreload).toContain("platform: process.platform");
     expect(rendererMain).toContain('desktop?.platform === "win32"');
-    expect(packaging).toContain('"packages/graph-client/dist"');
+    expect(packaging).toContain('"packages/graph-client/agent-resource"');
     expect(desktopMain).toContain('"graph-client", "index.js"');
     expect(desktopMain).toContain("codexBasicClientModuleUrl: graphClientModuleUrl");
     expect(desktopMain).not.toContain("bundledCodexBinary");
@@ -410,7 +415,7 @@ describe("desktop skeleton", () => {
     expect(evalPackaging).toContain('"main/single-instance.mjs"');
     expect(evalPackaging).toContain('{ from: resolve(desktopRoot, "renderer"), to: "renderer" }');
     expect(evalPackaging).toContain('ladybugNoticesExtraResource(repositoryRoot)');
-    expect(evalPackaging).toContain('"packages/graph-client/dist"');
+    expect(evalPackaging).toContain('"packages/graph-client/agent-resource"');
     expect(evalMain).toContain("GraphCompleteRuntimeService");
     expect(evalMain).toContain("RelayerAppServerService");
     expect(evalMain).toContain("allowHarnessOverride: true");
@@ -4013,7 +4018,8 @@ describe("desktop skeleton", () => {
     const markdown = await readFile(new URL("../desktop/renderer/src/product-workspace/markdown.js", import.meta.url), "utf8");
 
     expect(html).toContain('<script src="./vendor/marked.umd.js"></script>');
-    expect(workspace).toContain('renderMarkdown($("#detailContent")');
+    expect(workspace).toContain("renderProductNodeDetail({");
+    expect(workspace).toContain("renderMarkdown(container");
     expect(workspace).not.toContain('<small>${escapeHtml(node.kind)}</small>');
     expect(markdown).toContain("ALLOWED_MARKDOWN_ELEMENTS");
     expect(markdown).toContain("DANGEROUS_MARKDOWN_ELEMENTS");

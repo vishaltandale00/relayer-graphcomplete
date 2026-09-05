@@ -197,6 +197,7 @@ export interface HarnessTraceDescriptor {
   readonly redactionCount?: number;
   readonly error?: string;
   readonly personalPresentationVersionId?: number;
+  readonly personalPresentationVersionKey?: string;
 }
 
 export interface HarnessGraphScope {

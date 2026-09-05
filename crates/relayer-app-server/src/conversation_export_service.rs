@@ -10,14 +10,14 @@ use crate::{
         ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
         EXPORT_VERSION_V1, ExportAcceptedView, ExportAction, ExportActionKind, ExportActionVariant,
         ExportAdmittedExecutionModelPlan, ExportAdmittedExecutionModelRoute, ExportAttemptOutcome,
-        ExportCompletionReceipt, ExportCompletionStatus, ExportContextSource,
-        ExportContextTargetSnapshot, ExportConversation, ExportEdge, ExportInputActionSnapshot,
-        ExportInputControl, ExportInputOption, ExportInputSource, ExportInteractionContext,
-        ExportLayer, ExportLayerLayout, ExportModelSelection, ExportNavigateRelation, ExportNode,
-        ExportNodePlacement, ExportPermissionReceipt, ExportProducer, ExportRecordState,
-        ExportResolvedLayer, ExportSubmittedInput, ExportSubmittedInputValue,
-        ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES,
-        validate_export_records,
+        ExportAuthoredDetailOmission, ExportCompletionReceipt, ExportCompletionStatus,
+        ExportContextSource, ExportContextTargetSnapshot, ExportConversation, ExportEdge,
+        ExportInputActionSnapshot, ExportInputControl, ExportInputOption, ExportInputSource,
+        ExportInteractionContext, ExportLayer, ExportLayerLayout, ExportModelSelection,
+        ExportNavigateRelation, ExportNode, ExportNodePlacement, ExportPermissionReceipt,
+        ExportProducer, ExportRecordState, ExportResolvedLayer, ExportSubmittedInput,
+        ExportSubmittedInputValue, ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES,
+        MAX_JSONL_LINE_BYTES, validate_export_records,
     },
     product::{
         ActionInvocation, DurableInteractionInput, Interaction, InteractionId, ProductError,
@@ -994,6 +994,7 @@ fn export_layer(
     Ok(ExportResolvedLayer {
         layer: ExportLayer {
             id: ids.layer(resolved.layer.id.value()),
+            client_key: resolved.layer.client_key.clone(),
             nodes: resolved
                 .layer
                 .nodes
@@ -1036,14 +1037,47 @@ fn export_node(
     redactor: &ProjectPathRedactor,
 ) -> Result<ExportNode, ConversationExportBuildError> {
     ensure_accepted(node.state, "node", node.id.value())?;
+    let authored_detail = node
+        .authored_detail
+        .as_ref()
+        .and_then(|detail| portable_authored_detail(detail, redactor));
+    let authored_detail_omitted = (node.authored_detail.is_some() && authored_detail.is_none())
+        .then_some(ExportAuthoredDetailOmission::PrivatePath);
     Ok(ExportNode {
         id: ids.node(node.id.value()),
+        client_key: node.client_key.clone(),
         kind: redactor.text(&node.kind),
         icon: redactor.text(&node.icon),
         title: redactor.text(&node.title),
         detail: redactor.text(&node.detail),
+        authored_detail,
+        authored_detail_omitted,
         state: ExportRecordState::Accepted,
     })
+}
+
+fn portable_authored_detail(
+    authored_detail: &serde_json::Value,
+    redactor: &ProjectPathRedactor,
+) -> Option<serde_json::Value> {
+    (!json_contains_private_project_path(authored_detail, redactor))
+        .then(|| authored_detail.clone())
+}
+
+fn json_contains_private_project_path(
+    value: &serde_json::Value,
+    redactor: &ProjectPathRedactor,
+) -> bool {
+    match value {
+        serde_json::Value::String(text) => redactor.contains_private_path(text),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| json_contains_private_project_path(value, redactor)),
+        serde_json::Value::Object(values) => values
+            .values()
+            .any(|value| json_contains_private_project_path(value, redactor)),
+        _ => false,
+    }
 }
 
 fn export_edge(
@@ -1095,6 +1129,7 @@ fn export_action(
     };
     Ok(ExportAction {
         id: ids.action(action.id.value()),
+        client_key: action.client_key.clone(),
         source_node_id: ids.node(action.source_node_id.value()),
         source_layer_id: action.source_layer_id.map(|id| ids.layer(id.value())),
         kind,
@@ -1243,7 +1278,43 @@ impl ProjectPathRedactor {
         Self { project_paths }
     }
 
+    /// Redact every configured private path from Markdown-class text.
+    ///
+    /// Raw occurrences are replaced in place and every other byte is kept
+    /// exactly. When a path survives only behind an encoding, each
+    /// whitespace-delimited token that hides one is replaced whole, so
+    /// unrelated text is never decoded or rewritten; if a match still spans
+    /// tokens, the whole value collapses to the marker rather than leaking.
     fn text(&self, value: &str) -> String {
+        let replaced = self.replace_raw(value);
+        if !self.contains_private_path(&replaced) {
+            return replaced;
+        }
+        let mut redacted = String::with_capacity(replaced.len());
+        let mut rest = replaced.as_str();
+        while let Some(character) = rest.chars().next() {
+            if character.is_whitespace() {
+                redacted.push(character);
+                rest = &rest[character.len_utf8()..];
+                continue;
+            }
+            let token_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            let (token, after) = rest.split_at(token_end);
+            if self.contains_private_path(token) {
+                redacted.push_str("[project-path]");
+            } else {
+                redacted.push_str(token);
+            }
+            rest = after;
+        }
+        if self.contains_private_path(&redacted) {
+            "[project-path]".to_owned()
+        } else {
+            redacted
+        }
+    }
+
+    fn replace_raw(&self, value: &str) -> String {
         self.project_paths
             .iter()
             .fold(value.to_owned(), |text, path| {
@@ -1251,9 +1322,312 @@ impl ProjectPathRedactor {
             })
     }
 
+    fn contains_raw(&self, value: &str) -> bool {
+        self.project_paths.iter().any(|path| value.contains(path))
+    }
+
+    /// The single private-path matcher shared by Markdown redaction and the
+    /// authored-detail portability check. It matches the raw string and every
+    /// bounded decoding round of HTML character references, percent-encoding,
+    /// CSS escapes, and invisible code points.
+    fn contains_private_path(&self, value: &str) -> bool {
+        if self.project_paths.is_empty() {
+            return false;
+        }
+        let mut candidate = value.to_owned();
+        for _ in 0..NORMALIZATION_ROUNDS {
+            if self.contains_raw(&candidate) {
+                return true;
+            }
+            let mut changed = false;
+            // Check after every individual step: a later decoder in the same
+            // round may legitimately consume bytes (CSS `\w` -> `w`) that a
+            // path exposed by an earlier decoder still needed.
+            for step in DECODING_STEPS {
+                let (next, step_changed) = step(&candidate);
+                if step_changed && self.contains_raw(&next) {
+                    return true;
+                }
+                changed |= step_changed;
+                candidate = next;
+            }
+            if !changed {
+                return false;
+            }
+        }
+        // A path hidden behind an impractically deep chain of encodings must not
+        // escape merely because the bounded decoder stopped making progress.
+        true
+    }
+
     fn optional(&self, value: Option<&str>) -> Option<String> {
         value.map(|value| self.text(value))
     }
+}
+
+const NORMALIZATION_ROUNDS: usize = 16;
+
+/// Every decoding an authored string can hide a private path behind, applied
+/// one step at a time so a match exposed by one step is never consumed by the
+/// next before it is checked.
+type DecodingStep = fn(&str) -> (String, bool);
+
+const DECODING_STEPS: [DecodingStep; 4] = [
+    strip_invisible_code_points,
+    decode_html_character_references_once,
+    percent_decode_once,
+    decode_css_escapes_once,
+];
+
+/// Code points that render as nothing and so can split a path without
+/// changing what a reader sees: Unicode format controls (general category Cf,
+/// which includes zero-width spaces and joiners, bidi marks and isolates, the
+/// soft hyphen, the byte-order mark, and tag characters), the combining
+/// grapheme joiner, and the variation selectors.
+fn is_invisible_code_point(character: char) -> bool {
+    matches!(
+        u32::from(character),
+        0x00AD
+            | 0x034F
+            | 0x0600..=0x0605
+            | 0x061C
+            | 0x06DD
+            | 0x070F
+            | 0x0890..=0x0891
+            | 0x08E2
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x202A..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x206F
+            | 0xFE00..=0xFE0F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x13430..=0x1343F
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0001
+            | 0xE0020..=0xE007F
+            | 0xE0100..=0xE01EF
+    )
+}
+
+fn strip_invisible_code_points(value: &str) -> (String, bool) {
+    let visible: String = value
+        .chars()
+        .filter(|character| !is_invisible_code_point(*character))
+        .collect();
+    let changed = visible.len() != value.len();
+    (visible, changed)
+}
+
+fn percent_decode_once(value: &str) -> (String, bool) {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut changed = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let Some(byte) = hex_pair(bytes[index + 1], bytes[index + 2])
+        {
+            decoded.push(byte);
+            index += 3;
+            changed = true;
+            continue;
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    (String::from_utf8_lossy(&decoded).into_owned(), changed)
+}
+
+fn hex_pair(high: u8, low: u8) -> Option<u8> {
+    let high = char::from(high).to_digit(16)?;
+    let low = char::from(low).to_digit(16)?;
+    u8::try_from(high * 16 + low).ok()
+}
+
+fn css_newline_len(rest: &str) -> Option<usize> {
+    if rest.starts_with("\r\n") {
+        Some(2)
+    } else if matches!(rest.chars().next(), Some('\n' | '\r' | '\u{c}')) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+/// Decode CSS escapes the way a stylesheet tokenizer would: hex escapes of one
+/// to six digits swallow one following whitespace (CRLF counts as one), an
+/// escaped newline is a line continuation, and any other escaped code point is
+/// itself.
+fn decode_css_escapes_once(value: &str) -> (String, bool) {
+    let mut decoded = String::with_capacity(value.len());
+    let mut changed = false;
+    let mut index = 0;
+    while index < value.len() {
+        let character = value[index..]
+            .chars()
+            .next()
+            .expect("index is on a char boundary");
+        if character != '\\' {
+            decoded.push(character);
+            index += character.len_utf8();
+            continue;
+        }
+        let rest = &value[index + 1..];
+        if let Some(newline_len) = css_newline_len(rest) {
+            index += 1 + newline_len;
+            changed = true;
+            continue;
+        }
+        let hex_len = rest
+            .bytes()
+            .take(6)
+            .take_while(u8::is_ascii_hexdigit)
+            .count();
+        if hex_len > 0 {
+            let code_point = u32::from_str_radix(&rest[..hex_len], 16)
+                .ok()
+                .and_then(char::from_u32)
+                .filter(|code_point| *code_point != '\0')
+                .unwrap_or('\u{fffd}');
+            decoded.push(code_point);
+            let after_hex = &rest[hex_len..];
+            let whitespace_len = css_newline_len(after_hex).unwrap_or(usize::from(matches!(
+                after_hex.as_bytes().first(),
+                Some(b' ' | b'\t')
+            )));
+            index += 1 + hex_len + whitespace_len;
+            changed = true;
+            continue;
+        }
+        match rest.chars().next() {
+            Some(escaped) => {
+                decoded.push(escaped);
+                index += 1 + escaped.len_utf8();
+                changed = true;
+            }
+            None => {
+                decoded.push('\\');
+                index += 1;
+            }
+        }
+    }
+    (decoded, changed)
+}
+
+fn decode_html_character_references_once(value: &str) -> (String, bool) {
+    let mut decoded = String::with_capacity(value.len());
+    let mut remaining = value;
+    let mut changed = false;
+    while let Some(offset) = remaining.find('&') {
+        decoded.push_str(&remaining[..offset]);
+        let entity = &remaining[offset..];
+        if let Some((character, consumed)) = decode_html_character_reference(&entity[1..]) {
+            decoded.push(character);
+            remaining = &entity[consumed + 1..];
+            changed = true;
+            continue;
+        }
+        decoded.push('&');
+        remaining = &entity[1..];
+    }
+    decoded.push_str(remaining);
+    (decoded, changed)
+}
+
+fn decode_html_character_reference(entity: &str) -> Option<(char, usize)> {
+    if let Some(numeric) = entity.strip_prefix('#') {
+        let (digits, radix, prefix_len) = numeric
+            .strip_prefix('x')
+            .or_else(|| numeric.strip_prefix('X'))
+            .map_or((numeric, 10, 1), |digits| (digits, 16, 2));
+        let digit_count = digits
+            .bytes()
+            .take_while(|byte| match radix {
+                10 => byte.is_ascii_digit(),
+                16 => byte.is_ascii_hexdigit(),
+                _ => unreachable!(),
+            })
+            .count();
+        if digit_count == 0 {
+            return None;
+        }
+        let character = u32::from_str_radix(&digits[..digit_count], radix)
+            .ok()
+            .and_then(char::from_u32)?;
+        let numeric_len = prefix_len + digit_count;
+        let consumed = numeric_len + usize::from(entity.as_bytes().get(numeric_len) == Some(&b';'));
+        return Some((character, consumed));
+    }
+    // Lowercase a bounded ASCII-safe prefix: entity names are ASCII, and
+    // `to_ascii_lowercase` preserves byte offsets, so `;` positions line up.
+    let prefix: String = entity
+        .chars()
+        .take(32)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if let Some(end) = prefix.find(';').filter(|end| *end <= 31)
+        && let Some(character) = decode_named_html_character(&prefix[..end])
+    {
+        return Some((character, end + 1));
+    }
+    // HTML also decodes a handful of legacy names without a semicolon.
+    let legacy = ["amp", "lt", "gt", "quot", "nbsp"]
+        .into_iter()
+        .find(|name| prefix.starts_with(name))?;
+    Some((decode_named_html_character(legacy)?, legacy.len()))
+}
+
+fn decode_named_html_character(name: &str) -> Option<char> {
+    let character = match name {
+        "amp" => '&',
+        "apos" => '\'',
+        "ast" => '*',
+        "bsol" => '\\',
+        "colon" => ':',
+        "comma" => ',',
+        "commat" => '@',
+        "dollar" => '$',
+        "equals" => '=',
+        "excl" => '!',
+        "grave" => '`',
+        "gt" => '>',
+        "hyphen" | "minus" => '-',
+        "lbrack" | "lsqb" => '[',
+        "lpar" => '(',
+        "lowbar" => '_',
+        "lrm" => '\u{200e}',
+        "lt" => '<',
+        "nbsp" => '\u{a0}',
+        "negativemediumspace"
+        | "negativethickspace"
+        | "negativethinspace"
+        | "negativeverythinspace"
+        | "zerowidthspace" => '\u{200b}',
+        "nobreak" | "wj" => '\u{2060}',
+        "num" => '#',
+        "percnt" => '%',
+        "period" => '.',
+        "plus" => '+',
+        "quest" => '?',
+        "quot" => '"',
+        "rbrack" | "rsqb" => ']',
+        "rlm" => '\u{200f}',
+        "rpar" => ')',
+        "semi" => ';',
+        "shy" => '\u{ad}',
+        "sol" => '/',
+        "vert" => '|',
+        "zwj" => '\u{200d}',
+        "zwnj" => '\u{200c}',
+        _ => return None,
+    };
+    Some(character)
 }
 
 fn injective_portable_option_keys<'a>(
@@ -1391,11 +1765,13 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
 mod tests {
     use super::{
         ContextInput, ImportedExportContext, PortableIds, ProjectPathRedactor, RuntimeContextInput,
-        TurnExportContext, completion_status, export_action, export_contexts,
+        TurnExportContext, completion_status, export_action, export_contexts, export_node,
         export_submitted_inputs, export_turn, portable_interaction_input_bytes,
     };
     use crate::{
-        conversation_export::{ExportCompletionStatus, ExportTurnOrigin},
+        conversation_export::{
+            ExportAuthoredDetailOmission, ExportCompletionStatus, ExportTurnOrigin,
+        },
         product::{
             ActionInvocation, DurableInteractionInput, Interaction, InteractionContextIntent,
             InteractionContextTarget as ProductInteractionContextTarget, InteractionId,
@@ -1419,6 +1795,347 @@ mod tests {
             completion_status("stopped").unwrap(),
             ExportCompletionStatus::Stopped
         );
+    }
+
+    #[test]
+    fn degrades_authored_detail_containing_a_windows_project_path() {
+        let project_path = r#"C:\Users\Vishal\"quoted project"#;
+        let package = serde_json::json!({
+            "version": 1,
+            "components": [{
+                "id":"summary",
+                "order":0,
+                "html":format!("<code>{project_path}\\src\\main.rs</code>"),
+                "css":format!("/* {project_path} */")
+            }],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        });
+        let node = GraphNode {
+            id: NodeId::new(1).unwrap(),
+            client_key: Some("private-detail".into()),
+            leased_action_id: None,
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Private detail".into(),
+            detail: "Fallback".into(),
+            authored_detail: Some(package.clone()),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_node(
+            &node,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some(project_path)),
+        )
+        .unwrap();
+
+        assert!(exported.authored_detail.is_none());
+        assert_eq!(exported.detail, "Fallback");
+    }
+
+    #[test]
+    fn preserves_unrelated_html_entities_in_authored_detail() {
+        let package = serde_json::json!({
+            "version": 1,
+            "components": [{
+                "id":"summary",
+                "order":0,
+                "html":"<pre><code>&lt;tag&gt;&amp;text</code></pre>",
+                "css":""
+            }],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        });
+        let node = GraphNode {
+            id: NodeId::new(1).unwrap(),
+            client_key: Some("portable-detail".into()),
+            leased_action_id: None,
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Portable detail".into(),
+            detail: "Fallback".into(),
+            authored_detail: Some(package.clone()),
+            state: RecordState::Accepted,
+        };
+
+        for project_path in [None, Some("/private/project")] {
+            let exported = export_node(
+                &node,
+                &mut PortableIds::default(),
+                &ProjectPathRedactor::new(project_path),
+            )
+            .unwrap();
+
+            assert_eq!(exported.authored_detail.as_ref(), Some(&package));
+            assert_eq!(exported.authored_detail_omitted, None);
+            assert_eq!(exported.detail, "Fallback");
+        }
+    }
+
+    fn authored_node(package: serde_json::Value) -> GraphNode {
+        GraphNode {
+            id: NodeId::new(1).unwrap(),
+            client_key: Some("encoded-detail".into()),
+            leased_action_id: None,
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Encoded detail".into(),
+            detail: "Portable fallback".into(),
+            authored_detail: Some(package),
+            state: RecordState::Accepted,
+        }
+    }
+
+    #[test]
+    fn degrades_authored_detail_hidden_behind_sibling_encodings_and_records_the_omission() {
+        let project_path = "/Users/x";
+        let encodings: [(&str, serde_json::Value); 8] = [
+            (
+                "uppercase legacy entity",
+                serde_json::json!({"html":"<code>&AMP;#47;Users&AMP;#47;x/src</code>","css":""}),
+            ),
+            (
+                "semicolon-less legacy entity",
+                serde_json::json!({"html":"<code>&amp#47;Users&amp#47;x/src</code>","css":""}),
+            ),
+            (
+                "css hex escapes",
+                serde_json::json!({"html":"<p>Path</p>","css":"p::before{content:\"\\2f Users\\2f x\"}"}),
+            ),
+            (
+                "css escapes split by CRLF",
+                serde_json::json!({"html":"<p>Path</p>","css":"p::before{content:\"\\2f\r\nUsers\\2fx\"}"}),
+            ),
+            (
+                "zero-width space inside the path",
+                serde_json::json!({"html":"<code>/Users\u{200b}/x</code>","css":""}),
+            ),
+            (
+                "left-to-right mark inside the path",
+                serde_json::json!({"html":"<code>/Users\u{200e}/x</code>","css":""}),
+            ),
+            (
+                "invisible named character references",
+                serde_json::json!({"html":"<code>/Users&ZeroWidthSpace;/x and /Users&lrm;/x</code>","css":""}),
+            ),
+            (
+                "percent-encoded query parameter",
+                serde_json::json!({"html":"<a data-gc-capability=\"open\">Open</a>","css":""}),
+            ),
+        ];
+        for (label, component) in encodings {
+            let mut package = serde_json::json!({
+                "version": 1,
+                "components": [{"id":"summary","order":0,"html":component["html"],"css":component["css"]}],
+                "mounts": [],
+                "assets": [],
+                "integritySha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            });
+            if label.starts_with("percent") {
+                package["mounts"] = serde_json::json!([{
+                    "id":"open","componentId":"summary","kind":"capability","host":"a",
+                    "capability":{"kind":"link","href":"https://e.example/?file=%2FUsers%2Fx%2Fsrc"}
+                }]);
+            }
+            let exported = export_node(
+                &authored_node(package),
+                &mut PortableIds::default(),
+                &ProjectPathRedactor::new(Some(project_path)),
+            )
+            .unwrap();
+
+            assert!(exported.authored_detail.is_none(), "{label} must degrade");
+            assert_eq!(
+                exported.authored_detail_omitted,
+                Some(ExportAuthoredDetailOmission::PrivatePath),
+                "{label} must record the omission"
+            );
+            assert_eq!(
+                exported.detail, "Portable fallback",
+                "{label} keeps the fallback"
+            );
+            let serialized = serde_json::to_string(&exported).unwrap();
+            assert!(
+                !serialized.contains("Users/x"),
+                "{label} must not leak the path"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_encoded_text_that_is_not_a_private_path() {
+        let redactor = ProjectPathRedactor::new(Some("/Users/x"));
+        for text in [
+            "Q&amp;A with &lt;tags&gt; and 100%25 coverage",
+            "url(\"data:image/svg+xml,%3Csvg%3E\")",
+            "p::before{content:\"\\2014\"}",
+            "/Users/y is a different tree",
+        ] {
+            assert!(!redactor.contains_private_path(text), "{text}");
+            assert_eq!(redactor.text(text), text);
+        }
+    }
+
+    #[test]
+    fn markdown_redaction_removes_encoded_private_paths_through_the_shared_matcher() {
+        let redactor = ProjectPathRedactor::new(Some("/Users/x"));
+        assert_eq!(redactor.text("see /Users/x/src"), "see [project-path]/src");
+        // Only the offending tokens change; unrelated encoded text keeps its exact bytes.
+        assert_eq!(
+            redactor.text("Q&amp;A \\*kept\\* [l](https://e.example/?q=a%20b) see &#47;Users&#47;x&#47;src and %2FUsers%2Fx too"),
+            "Q&amp;A \\*kept\\* [l](https://e.example/?q=a%20b) see [project-path] and [project-path] too"
+        );
+        assert_eq!(redactor.text("/Users\u{200b}/x"), "[project-path]");
+        assert_eq!(redactor.text("/Users\u{200e}/x"), "[project-path]");
+        // A path that only assembles across tokens collapses the whole value.
+        let spaced = ProjectPathRedactor::new(Some("/Users/x/My Project"));
+        assert_eq!(
+            spaced.text("see %2FUsers%2Fx%2FMy Project now"),
+            "[project-path]"
+        );
+        assert_eq!(
+            spaced.text("see %2FUsers%2Fx%2FMy%20Project now"),
+            "see [project-path] now"
+        );
+    }
+
+    #[test]
+    fn degrades_authored_detail_without_mutating_its_fallback() {
+        let project_path = r#"C:\p"#;
+        let package = serde_json::json!({
+            "version": 1,
+            "components": [
+                {"id":project_path,"order":0,"html":"<p>Private</p>","css":""},
+                {"id":"[project-path]","order":1,"html":"<p>Portable</p>","css":""}
+            ],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        });
+        let node = GraphNode {
+            id: NodeId::new(1).unwrap(),
+            client_key: Some("private-detail".into()),
+            leased_action_id: None,
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Private detail".into(),
+            detail: "Portable fallback".into(),
+            authored_detail: Some(package),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_node(
+            &node,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some(project_path)),
+        )
+        .unwrap();
+
+        assert!(exported.authored_detail.is_none());
+        assert_eq!(exported.detail, "Portable fallback");
+    }
+
+    #[test]
+    fn degrades_authored_detail_containing_an_html_entity_encoded_project_path() {
+        let project_path = "/private/A&B";
+        let package = serde_json::json!({
+            "version": 1,
+            "components": [{
+                "id":"summary",
+                "order":0,
+                "html":"<code>/private/A&amp;B/src/main.rs</code>",
+                "css":""
+            }],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        });
+        let node = GraphNode {
+            id: NodeId::new(1).unwrap(),
+            client_key: Some("private-detail".into()),
+            leased_action_id: None,
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Private detail".into(),
+            detail: "Portable fallback".into(),
+            authored_detail: Some(package),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_node(
+            &node,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some(project_path)),
+        )
+        .unwrap();
+
+        assert!(exported.authored_detail.is_none());
+        assert_eq!(exported.detail, "Portable fallback");
+        assert!(
+            !serde_json::to_string(&exported)
+                .unwrap()
+                .contains("/private/A&amp;B")
+        );
+    }
+
+    #[test]
+    fn degrades_nested_numeric_and_named_html_character_references() {
+        for (project_path, html) in [
+            (
+                "/private/A&B",
+                "&lt;code&gt;&amp;#47;private&amp;#47;A&amp;amp;B/src/main.rs&lt;/code&gt;",
+            ),
+            (
+                "/private/A&B",
+                "<code>&sol;private&sol;A&amp;B/src/main.rs</code>",
+            ),
+            (
+                "/private/A&B",
+                "<code>&#x2f;private&#47;A&amp;B/src/main.rs</code>",
+            ),
+            (
+                "/private/A&B",
+                "<code>&amp;#47private&amp;#47A&amp;B/src/main.rs</code>",
+            ),
+            (
+                r"C:\workspace",
+                r"<code>C&#58&#92workspace\src\main.rs</code>",
+            ),
+        ] {
+            let node = GraphNode {
+                id: NodeId::new(1).unwrap(),
+                client_key: Some("private-detail".into()),
+                leased_action_id: None,
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Private detail".into(),
+                detail: "Portable fallback".into(),
+                authored_detail: Some(serde_json::json!({
+                    "version": 1,
+                    "components": [{"id":"summary","order":0,"html":html,"css":""}],
+                    "mounts": [],
+                    "assets": [],
+                    "integritySha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                })),
+                state: RecordState::Accepted,
+            };
+
+            let exported = export_node(
+                &node,
+                &mut PortableIds::default(),
+                &ProjectPathRedactor::new(Some(project_path)),
+            )
+            .unwrap();
+
+            assert!(
+                exported.authored_detail.is_none(),
+                "retained encoded HTML: {html}"
+            );
+            assert_eq!(exported.detail, "Portable fallback");
+        }
     }
 
     #[test]
@@ -1628,23 +2345,39 @@ mod tests {
             completion_error: Some("failed".into()),
             latest_attempt: None,
         };
-        let target = InteractionInputNode::from(GraphNode {
+        let target_node = GraphNode {
             id: NodeId::new(20).unwrap(),
+            client_key: Some("target".into()),
             kind: "concept".into(),
             icon: "file".into(),
             title: "Target".into(),
             detail: "Immutable".into(),
+            authored_detail: Some(serde_json::json!({
+                "version": 1,
+                "components": [{
+                    "id":"summary",
+                    "order":0,
+                    "html":"<code>/workspace/project/private.txt</code>",
+                    "css":""
+                }],
+                "mounts": [],
+                "assets": [],
+                "integritySha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            })),
             state: RecordState::Accepted,
             leased_action_id: None,
-        });
+        };
+        let target = InteractionInputNode::from(target_node.clone());
         let runtime = RuntimeContextInput {
             input: InteractionInput {
                 interaction: InteractionInputNode::from(GraphNode {
                     id: NodeId::new(10).unwrap(),
+                    client_key: None,
                     kind: "user-interaction".into(),
                     icon: "user".into(),
                     title: "Use context".into(),
                     detail: "Use context".into(),
+                    authored_detail: None,
                     state: RecordState::Accepted,
                     leased_action_id: None,
                 }),
@@ -1694,6 +2427,18 @@ mod tests {
             exported[0].annotations,
             ["Inspect [project-path]/src", "Second"]
         );
+        let exported_target = export_node(
+            &target_node,
+            &mut ids,
+            &ProjectPathRedactor::new(Some("/workspace/project")),
+        )
+        .unwrap();
+        assert!(exported_target.authored_detail.is_none());
+        assert_eq!(exported_target.detail, exported[0].target.detail);
+        assert_eq!(exported_target.id, exported[0].target.id);
+        assert_eq!(exported_target.kind, exported[0].target.kind);
+        assert_eq!(exported_target.icon, exported[0].target.icon);
+        assert_eq!(exported_target.title, exported[0].target.title);
         let intent = InteractionContextIntent {
             target: ProductInteractionContextTarget {
                 node_id: 20,
@@ -1785,8 +2530,10 @@ mod tests {
     fn resolved_invoke_exports_its_authored_shape() {
         let action = GraphAction {
             id: ActionId::new(1).unwrap(),
+            client_key: Some("continue".into()),
             source_node_id: NodeId::new(2).unwrap(),
             source_layer_id: Some(LayerId::new(3).unwrap()),
+            source_layer_client_key: Some("source".into()),
             kind: ActionKind::Invoke,
             relation: None,
             label: "Continue".into(),
@@ -1817,8 +2564,10 @@ mod tests {
     fn unanswered_input_action_exports_its_authored_payload() {
         let action = GraphAction {
             id: ActionId::new(1).unwrap(),
+            client_key: Some("choose".into()),
             source_node_id: NodeId::new(2).unwrap(),
             source_layer_id: Some(LayerId::new(3).unwrap()),
+            source_layer_client_key: Some("source".into()),
             kind: ActionKind::Input,
             relation: None,
             label: "Choose".into(),
@@ -1875,8 +2624,10 @@ mod tests {
         assert_eq!(authored_key_with_internal_space.len(), 128);
         let action = GraphAction {
             id: ActionId::new(1).unwrap(),
+            client_key: Some("choose".into()),
             source_node_id: NodeId::new(2).unwrap(),
             source_layer_id: Some(LayerId::new(3).unwrap()),
+            source_layer_client_key: Some("source".into()),
             kind: ActionKind::Input,
             relation: None,
             label: "Choose".into(),

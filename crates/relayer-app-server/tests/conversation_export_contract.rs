@@ -9,6 +9,7 @@ fn action(
 ) -> ExportAction {
     ExportAction {
         id: id.into(),
+        client_key: None,
         source_node_id: source_node_id.into(),
         source_layer_id: source_layer_id.map(Into::into),
         kind: ExportActionKind::Navigate,
@@ -27,6 +28,7 @@ fn action(
 fn invoke(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction {
     ExportAction {
         id: id.into(),
+        client_key: None,
         source_node_id: source_node_id.into(),
         source_layer_id: Some(source_layer_id.into()),
         kind: ExportActionKind::Invoke,
@@ -45,6 +47,7 @@ fn invoke(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction
 fn input(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction {
     ExportAction {
         id: id.into(),
+        client_key: None,
         source_node_id: source_node_id.into(),
         source_layer_id: Some(source_layer_id.into()),
         kind: ExportActionKind::Input,
@@ -78,6 +81,7 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
     ExportResolvedLayer {
         layer: ExportLayer {
             id: id.into(),
+            client_key: None,
             nodes: vec![node_id.into()],
             edges: vec![],
             layout: Some(ExportLayerLayout {
@@ -92,15 +96,40 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
         },
         nodes: vec![ExportNode {
             id: node_id.into(),
+            client_key: None,
             kind: "concept".into(),
             icon: "file".into(),
             title: format!("Node {node_id}"),
             detail: "Durable accepted detail".into(),
+            authored_detail: Some(serde_json::json!({
+                "version": 1,
+                "components": [{"id":"summary","order":0,"html":"<p>Durable</p><a data-gc-capability=\"open\">Open</a>","css":""}],
+                "mounts": [{"id":"open","componentId":"summary","kind":"capability","host":"a","capability":{"kind":"link","href":"https://example.com"}}],
+                "assets": [],
+                "integritySha256": "49b27b37e787326e0cc4bd1c62a67f65daf3a9184e1c7f792d8ec091b50456ad"
+            })),
+            authored_detail_omitted: None,
             state: ExportRecordState::Accepted,
         }],
         edges: vec![],
         actions,
     }
+}
+
+#[test]
+fn canonical_authored_detail_survives_export_record_serialization() {
+    let records = records();
+    validate_export_records(&records).unwrap();
+    let encoded = serde_json::to_vec(&records[1]).unwrap();
+    let decoded: ConversationExportRecord = serde_json::from_slice(&encoded).unwrap();
+    let ConversationExportRecord::Turn(turn) = decoded else {
+        panic!("second record must be a turn")
+    };
+    let view = turn.accepted_view.unwrap();
+    let package = view.layers[0].nodes[0].authored_detail.as_ref().unwrap();
+    assert_eq!(package["components"][0]["id"], "summary");
+    assert_eq!(package["components"][0]["order"], 0);
+    assert_eq!(package["mounts"][0]["capability"]["kind"], "link");
 }
 
 fn accepted_view() -> ExportAcceptedView {

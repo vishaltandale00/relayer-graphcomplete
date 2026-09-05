@@ -372,6 +372,7 @@ mod tests {
     ) -> ExportAction {
         ExportAction {
             id: id.into(),
+            client_key: None,
             source_node_id: source_node_id.into(),
             source_layer_id: source_layer_id.map(Into::into),
             kind,
@@ -403,6 +404,7 @@ mod tests {
         ExportResolvedLayer {
             layer: ExportLayer {
                 id: layer_id.into(),
+                client_key: None,
                 nodes: vec![node_id.into()],
                 edges: vec![],
                 layout: None,
@@ -410,10 +412,13 @@ mod tests {
             },
             nodes: vec![ExportNode {
                 id: node_id.into(),
+                client_key: None,
                 kind: "concept".into(),
                 icon: "file".into(),
                 title: title.into(),
                 detail: format!("Accepted detail for {title}"),
+                authored_detail: None,
+                authored_detail_omitted: None,
                 state: ExportRecordState::Accepted,
             }],
             edges: vec![],

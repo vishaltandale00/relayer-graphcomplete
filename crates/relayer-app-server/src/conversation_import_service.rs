@@ -419,10 +419,13 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                 id: context.id,
                 target: ImportedNode {
                     id: context.target.id,
+                    client_key: None,
                     kind: context.target.kind,
                     icon: context.target.icon,
                     title: context.target.title,
                     detail: context.target.detail,
+                    authored_detail: None,
+                    authored_detail_omitted: false,
                 },
                 source_interaction_node_id: context.source.interaction_node_id,
                 source_layer_id: context.source.layer_id,
@@ -471,6 +474,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                 .map(|resolved| ImportedResolvedLayer {
                     layer: ImportedLayer {
                         id: resolved.layer.id,
+                        client_key: resolved.layer.client_key,
                         nodes: resolved.layer.nodes,
                         edges: resolved.layer.edges,
                         layout: resolved.layer.layout.map(|layout| {
@@ -493,10 +497,13 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                         .into_iter()
                         .map(|node| ImportedNode {
                             id: node.id,
+                            client_key: node.client_key,
                             kind: node.kind,
                             icon: node.icon,
                             title: node.title,
                             detail: node.detail,
+                            authored_detail: node.authored_detail,
+                            authored_detail_omitted: node.authored_detail_omitted.is_some(),
                         })
                         .collect(),
                     edges: resolved
@@ -518,6 +525,7 @@ fn import_action(action: ExportAction) -> ImportedAction {
     let input = action.input.map(import_input_action);
     ImportedAction {
         id: action.id,
+        client_key: action.client_key,
         source_node_id: action.source_node_id,
         source_layer_id: action.source_layer_id,
         kind: match action.kind {

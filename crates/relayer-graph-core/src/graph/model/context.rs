@@ -101,11 +101,13 @@ mod tests {
     fn normalized_input_nodes_omit_invoke_lease_authority() {
         let normalized = InteractionInputNode::from(GraphNode {
             id: NodeId::new(1).unwrap(),
+            client_key: None,
             leased_action_id: Some(ActionId::new(2).unwrap()),
             kind: "user-interaction".into(),
             icon: "user".into(),
             title: "Question".into(),
             detail: "Compare these".into(),
+            authored_detail: None,
             state: RecordState::Accepted,
         });
 
