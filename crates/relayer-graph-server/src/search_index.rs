@@ -37,7 +37,9 @@ use tokio::sync::{Notify, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as
 use relayer_graph_core::{
     AcceptedGraphPublication, DEFAULT_SEARCH_INDEX_BUDGET, GraphError, SearchIndex,
     SearchIndexFuture, SearchIndexRevision, SearchIndexWrite, SearchTarget,
-    query::{PreparedQuery, QueryCode, QueryError, QueryReadPermit, prepare_request_json},
+    query::{
+        PreparedQuery, QueryCode, QueryError, QueryLimits, QueryReadPermit, prepare_request_json,
+    },
 };
 
 pub use self::query::QueryOutcome;
@@ -50,6 +52,8 @@ pub struct LadybugSearchIndex {
     runtime: Arc<LadybugRuntime>,
     #[cfg(feature = "crash-test-support")]
     post_commit_crash_hook: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
+    #[cfg(feature = "crash-test-support")]
+    contract_test_wall_time: Option<Duration>,
 }
 
 struct LadybugRuntime {
@@ -287,6 +291,8 @@ impl LadybugSearchIndex {
             }),
             #[cfg(feature = "crash-test-support")]
             post_commit_crash_hook: None,
+            #[cfg(feature = "crash-test-support")]
+            contract_test_wall_time: None,
         }
     }
 
@@ -297,6 +303,37 @@ impl LadybugSearchIndex {
     ) -> Self {
         self.post_commit_crash_hook = Some(hook);
         self
+    }
+
+    /// Replace the contract's wall-time ceiling with `ceiling` for this index.
+    /// The caller's budget is narrowed from that ceiling exactly as production
+    /// narrows from the 250 ms product limit, so a request that asks for less
+    /// still gets less and one that asks for more is clamped to `ceiling`.
+    /// Frozen-corpus conformance asserts result bytes, not latency, and a
+    /// scheduling stall on a shared runner must not read as a semantic
+    /// mismatch; the deadline tests and the budget-precedence corpus narrow
+    /// explicitly and keep proving the product budget.
+    #[cfg(feature = "crash-test-support")]
+    #[doc(hidden)]
+    pub fn with_contract_test_wall_time(mut self, ceiling: Duration) -> Self {
+        self.contract_test_wall_time = Some(ceiling);
+        self
+    }
+
+    /// The limits one query runs under: the preflight value graph core
+    /// produced, unless a contract-test ceiling replaces the wall-time limit
+    /// it was narrowed from. The deadline and the worker always see the same
+    /// value.
+    fn limits_for(&self, prepared: &PreparedQuery) -> QueryLimits {
+        #[cfg(feature = "crash-test-support")]
+        if let Some(ceiling) = self.contract_test_wall_time {
+            return QueryLimits {
+                wall_time: ceiling,
+                ..QueryLimits::default()
+            }
+            .narrowed(prepared.budget());
+        }
+        prepared.limits().clone()
     }
 
     #[cfg(feature = "crash-test-support")]
@@ -402,12 +439,12 @@ impl LadybugSearchIndex {
         let operation = self.runtime.operations.clone().read_owned().await;
         self.query_readiness(readiness_target)?;
         let store = self.current_store();
+        let limits = self.limits_for(&prepared);
         let started = Instant::now();
-        let deadline = started + prepared.limits().wall_time;
+        let deadline = started + limits.wall_time;
         let cold = self.runtime.query_count.fetch_add(1, Ordering::AcqRel) == 0;
         let parameters = prepared.parameters().clone();
         let plan = prepared.plan().clone();
-        let limits = prepared.limits().clone();
         let worker_plan = plan.clone();
         let worker_limits = limits.clone();
         let worker_cancellation = cancellation.clone();
