@@ -95,6 +95,11 @@ impl PreparedQuery {
         &self.limits
     }
 
+    /// The budget exactly as the caller asked for it, before narrowing.
+    pub fn budget(&self) -> &QueryBudget {
+        &self.request.budget
+    }
+
     pub fn plan(&self) -> &QueryPlan {
         &self.plan
     }
