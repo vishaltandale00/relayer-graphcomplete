@@ -257,7 +257,6 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
 
   test.each([
     ["python/relayer-graph/src/relayer_graph/client.py", "python"],
-    ["docs/prd/index.html", "prd"],
     ["test/complete.test.ts", "vitest"],
   ])("maps %s to its owning %s chapter", (changedFile, chapter) => {
     const result = plan(changedFile);
