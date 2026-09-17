@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <!-- PROTOTYPE (throwaway): public shared-thread page. Three shells around the unmodified ProductWorkspace,
+       switchable via ?variant=A|B|C. See src/share-prototype/main.js. Not linked from the product. -->
+  <title>Shared thread · Relayer (prototype)</title>
+  <link rel="icon" href="./assets/relayer-logo.svg" />
+  <script src="./theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./src/share-prototype/prototype.css" />
+</head>
+<body class="share-page" data-variant="A">
+  <header class="share-topbar" id="shareTopbar">
+    <a class="share-brand" href="#" aria-label="Relayer"><span class="logo" role="img" aria-hidden="true"></span><span class="share-brand-name">Relayer</span></a>
+    <div class="share-topbar-title" id="shareTopbarTitle"></div>
+    <span class="share-badge" id="shareBadge">Shared snapshot · read-only</span>
+    <a class="share-install" id="shareInstall" href="#" rel="noopener">Install Relayer</a>
+  </header>
+
+  <section class="share-hero" id="shareHero" aria-labelledby="shareHeroTitle">
+    <small class="share-hero-eyebrow">Shared from Relayer</small>
+    <h1 id="shareHeroTitle"></h1>
+    <p class="share-hero-meta" id="shareHeroMeta"></p>
+  </section>
+
+  <div class="share-body">
+    <aside class="share-transcript" id="shareTranscript" aria-label="Turns"></aside>
+    <div class="share-workspace-host" id="shareWorkspaceHost">
+      <section class="thread-view" id="threadView"></section>
+    </div>
+  </div>
+
+  <footer class="share-footer" id="shareFooter">
+    <span>This is a frozen, read-only snapshot of one Relayer thread.</span>
+    <a href="#" id="shareFooterInstall">Get Relayer to explore your own</a>
+  </footer>
+
+  <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+
+  <nav class="proto-switcher" id="protoSwitcher" aria-label="Prototype variant switcher">
+    <button type="button" id="protoPrev" aria-label="Previous variant">‹</button>
+    <span class="proto-label" id="protoLabel"></span>
+    <button type="button" id="protoNext" aria-label="Next variant">›</button>
+    <span class="proto-sep"></span>
+    <label class="proto-thread">thread <select id="protoThread"><option value="1">1 · time</option><option value="2">2 · attention</option></select></label>
+    <label class="proto-thread">cta <select id="protoCta"><option value="1">1 · inline row</option><option value="2">2 · app card</option><option value="3">3 · quiet</option></select></label>
+    <label class="proto-thread">share <select id="protoShare"><option value="1">1 · button + menu</option><option value="2">2 · menu only</option><option value="3">3 · icon + menu</option></select></label>
+    <label class="proto-thread"><input type="checkbox" id="protoSignedIn" /> signed in</label>
+    <label class="proto-thread">theme <select id="protoTheme"><option value="dark">dark</option><option value="light">light</option></select></label>
+  </nav>
+
+  <script src="./vendor/lucide.min.js"></script>
+  <script src="./vendor/marked.umd.js"></script>
+  <script type="module" src="./src/share-prototype/main.js"></script>
+</body>
+</html>

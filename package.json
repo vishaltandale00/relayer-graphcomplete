@@ -27,6 +27,7 @@
   },
   "scripts": {
     "prepare:renderer": "node scripts/prepare-renderer-vendor.mjs",
+    "prototype:share": "node desktop/renderer/src/share-prototype/serve.mjs",
     "prepare:desktop-runtime": "npm run prepare:renderer && npm run build:packages",
     "prebuild": "npm run prepare:renderer",
     "precheck": "npm run prepare:renderer",
