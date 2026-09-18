@@ -1,0 +1,320 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Relayer shared-thread snapshots (issue #457, phase 0). One private bucket for snapshots and viewer
+  assets, one DynamoDB table of share rows, one Lambda behind an HTTP API, one CloudFront distribution on
+  the share subdomain, and one GitHub-OIDC deploy role scoped to code and asset updates only. The Lambda
+  ships with placeholder code; phase 4 replaces it through the deploy role.
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: share.relayerlabs.ai
+    Description: Public hostname for shared pages. DNS lives in Cloudflare; add a CNAME to the distribution domain after creation.
+  CertificateArn:
+    Type: String
+    Description: ACM certificate ARN in us-east-1 covering DomainName (request it first; see README).
+  GitHubOwnerId:
+    Type: String
+    Default: "9222298"
+    Description: Immutable GitHub owner id, matching infra/aws/desktop-release-authority trust policies.
+  GitHubRepositoryId:
+    Type: String
+    Default: "1327816644"
+    Description: Immutable GitHub repository id.
+  GitHubEnvironment:
+    Type: String
+    Default: share-service
+    Description: Protected GitHub environment whose OIDC subject may assume the deploy role.
+  Auth0Issuer:
+    Type: String
+    Default: https://auth.relayerlabs.ai/
+    Description: Issuer of the desktop ID tokens the share API verifies (ADR 0008).
+  Auth0ClientId:
+    Type: String
+    Description: Auth0 Native Application client id; the expected audience of desktop ID tokens.
+  InstallRedirectUrl:
+    Type: String
+    Default: https://app.relayerlabs.ai/desktop/login
+    Description: Where the public page's install call to action sends visitors (issue #458).
+
+Resources:
+  # ----- Storage -----
+  ShareBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub relayer-share-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  ShareBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ShareBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudFrontReadsViewerAssetsOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${ShareBucket.Arn}/assets/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+  SharesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: relayer-shares
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: shareId
+          AttributeType: S
+        - AttributeName: ownerHash
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: shareId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: byOwner
+          KeySchema:
+            - AttributeName: ownerHash
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # ----- Compute -----
+  ShareFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: relayer-share-service
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: relayer-share-service
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SnapshotObjects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub ${ShareBucket.Arn}/snapshots/*
+              - Sid: ShareRows
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt SharesTable.Arn
+                  - !Sub ${SharesTable.Arn}/index/byOwner
+
+  ShareFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: relayer-share-service
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      Handler: index.handler
+      Role: !GetAtt ShareFunctionRole.Arn
+      MemorySize: 512
+      Timeout: 15
+      Environment:
+        Variables:
+          SHARE_BUCKET: !Ref ShareBucket
+          SHARES_TABLE: !Ref SharesTable
+          PUBLIC_ORIGIN: !Sub https://${DomainName}
+          AUTH0_ISSUER: !Ref Auth0Issuer
+          AUTH0_CLIENT_ID: !Ref Auth0ClientId
+          INSTALL_REDIRECT_URL: !Ref InstallRedirectUrl
+          SNAPSHOT_MAX_BYTES: "16777216"
+          SHARES_PER_OWNER_PER_DAY: "20"
+      Code:
+        ZipFile: |
+          // Placeholder until phase 4 deploys the real service through the deploy role.
+          exports.handler = async () => ({
+            statusCode: 503,
+            headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+            body: "Relayer share service is not deployed yet.",
+          });
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: relayer-share-service
+      ProtocolType: HTTP
+
+  HttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ShareFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  HttpApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: $default
+      Target: !Sub integrations/${HttpApiIntegration}
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+
+  HttpApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ShareFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+
+  # ----- Edge -----
+  AssetsOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: relayer-share-assets
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Relayer shared-thread pages
+        Aliases: [!Ref DomainName]
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: api
+            DomainName: !Sub ${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+          - Id: assets
+            DomainName: !GetAtt ShareBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt AssetsOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: api
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # AWS managed: CachingDisabled + AllViewerExceptHostHeader
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+        CacheBehaviors:
+          - PathPattern: /assets/*
+            TargetOriginId: assets
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            # AWS managed: CachingOptimized (assets live under a per-commit hashed prefix)
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+
+  # ----- Deploy authority (GitHub OIDC), mirrors infra/aws/desktop-release-authority -----
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: relayer-graphcomplete-share-deploy
+      Description: Relayer GraphComplete share-service deployer via GitHub OIDC
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:vishaltandale00@${GitHubOwnerId}/relayer-graphcomplete@${GitHubRepositoryId}:environment:${GitHubEnvironment}
+      Policies:
+        - PolicyName: relayer-graphcomplete-share-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: UpdateServiceCode
+                Effect: Allow
+                Action:
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                Resource: !GetAtt ShareFunction.Arn
+              - Sid: PublishViewerAssets
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub ${ShareBucket.Arn}/assets/*
+              - Sid: InvalidateEdge
+                Effect: Allow
+                Action: cloudfront:CreateInvalidation
+                Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+Outputs:
+  DistributionDomainName:
+    Description: Point the Cloudflare CNAME for DomainName at this (DNS only, not proxied).
+    Value: !GetAtt Distribution.DomainName
+  DistributionId:
+    Value: !Ref Distribution
+  ApiEndpoint:
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  ShareBucketName:
+    Value: !Ref ShareBucket
+  SharesTableName:
+    Value: !Ref SharesTable
+  ShareFunctionName:
+    Value: !Ref ShareFunction
+  DeployRoleArn:
+    Description: Set as the SHARE_SERVICE_DEPLOY_ROLE_ARN variable on the share-service GitHub environment.
+    Value: !GetAtt DeployRole.Arn
