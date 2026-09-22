@@ -1,6 +1,6 @@
 # ADR 0008: Direct Auth0 optional desktop account
 
-Status: accepted
+Status: accepted; share-service scope amended by [ADR 0011](0011-shared-thread-snapshot-service.md)
 
 ## Context
 

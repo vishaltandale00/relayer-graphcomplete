@@ -1,0 +1,58 @@
+{
+  "verifiedAt": "2026-09-19T18:20:28.095962+00:00",
+  "account": "647746916062",
+  "region": "us-east-1",
+  "stackName": "relayer-share-service",
+  "stackStatus": "UPDATE_COMPLETE",
+  "templateSha256": "ef6ebd5cda391f7c94dab19b77c3c8c7d85514c3ff206feb44b6054dce8eebad",
+  "liveTemplateMatchesLocal": true,
+  "outputs": {
+    "DeployRoleArn": "arn:aws:iam::647746916062:role/relayer-graphcomplete-share-deploy",
+    "DistributionId": "E7QZHRPBL8L04",
+    "ApiEndpoint": "https://f20xjiljx0.execute-api.us-east-1.amazonaws.com",
+    "SharesTableName": "relayer-shares",
+    "PageFunctionName": "relayer-share-pages",
+    "ShareBucketName": "relayer-share-647746916062",
+    "DistributionDomainName": "d34hcs8vryczbq.cloudfront.net",
+    "ShareFunctionName": "relayer-share-service"
+  },
+  "publicOrigin": "https://share.relayerlabs.ai",
+  "dns": {
+    "type": "CNAME",
+    "target": "d34hcs8vryczbq.cloudfront.net",
+    "proxy": "DNS only"
+  },
+  "probes": {
+    "publicPage": {
+      "status": 503,
+      "cacheControl": "no-store"
+    },
+    "publicApi": {
+      "status": 503,
+      "cacheControl": "no-store"
+    },
+    "directFunction": {
+      "status": 403,
+      "cacheControl": null
+    },
+    "assetViaCloudFront": {
+      "status": 200,
+      "cacheControl": "no-store"
+    },
+    "assetDirectS3": {
+      "status": 403,
+      "cacheControl": null
+    },
+    "snapshotDirectS3": {
+      "status": 403,
+      "cacheControl": null
+    }
+  },
+  "syntheticObjectsRemoved": true,
+  "github": {
+    "environment": "share-service",
+    "allowedBranch": "main",
+    "variablesVerified": 5
+  },
+  "runtimeFeatureProof": "Not implemented; placeholders only. 16MiB service transport still requires phase4 proof."
+}
