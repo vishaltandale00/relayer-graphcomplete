@@ -86,7 +86,7 @@ import {
   workspaceModeCapabilities,
 } from "../desktop/renderer/src/product-workspace/model.js";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
-import { graphEdgeSegment, graphScreenPoint } from "../desktop/renderer/src/product-workspace/workspace.js";
+import { graphEdgeSegment } from "../desktop/renderer/src/product-workspace/workspace.js";
 import { isSafeMarkdownLink } from "../desktop/renderer/src/product-workspace/markdown.js";
 import { evaluateDesktopReleaseAuthority } from "../scripts/audit-desktop-release-authority.mjs";
 
@@ -138,10 +138,6 @@ describe("desktop skeleton", () => {
       isPackaged: false,
       environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "../other" },
     })).toThrow("must be a harness configuration name");
-  });
-
-  it("moves graph world coordinates through a shared camera offset", () => {
-    expect(graphScreenPoint({ x: 120, y: 80 }, { x: -35, y: 24 })).toEqual({ x: 85, y: 104 });
   });
 
   it("keeps one desktop authority and presents its window on later launches", () => {

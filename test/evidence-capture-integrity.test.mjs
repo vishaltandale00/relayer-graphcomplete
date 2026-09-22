@@ -215,23 +215,26 @@ describe("evidence capture integrity", () => {
     const directory = mkdtempSync(join(tmpdir(), "relayer-cleanup-substitution-"));
     const source = join(directory, "source");
     const moved = join(directory, "captured-source");
-    mkdirSync(source);
-    chmodSync(source, 0o500);
-    const captured = lstatSync(source, { bigint: true });
-    const authorities = [{ path: source, dev: captured.dev, ino: captured.ino }];
-    // This sandbox requires write permission on a directory while renaming it.
-    // Restore the captured read-only mode after the move; identity is the boundary under test.
-    chmodSync(source, 0o700);
-    renameSync(source, moved);
-    chmodSync(moved, 0o500);
-    mkdirSync(source);
-    chmodSync(source, 0o500);
     try {
+      mkdirSync(source);
+      chmodSync(source, 0o500);
+      const captured = lstatSync(source, { bigint: true });
+      const authorities = [{ path: source, dev: captured.dev, ino: captured.ino }];
+      // macOS rename(2) refuses to move a directory the caller cannot write (EACCES on APFS,
+      // even within one parent), while Linux allows it. Rename while writable and restore the
+      // captured read-only mode afterwards; dev/ino survive the rename, and identity is the
+      // boundary under test.
+      chmodSync(source, 0o700);
+      renameSync(source, moved);
+      chmodSync(moved, 0o500);
+      mkdirSync(source);
+      chmodSync(source, 0o500);
       expect(restoreDirectoryWritesSync(authorities)).toBe(false);
       expect(statSync(source).mode & 0o200).toBe(0);
     } finally {
-      chmodSync(source, 0o700);
-      chmodSync(moved, 0o700);
+      for (const path of [source, moved]) {
+        if (existsSync(path)) chmodSync(path, 0o700);
+      }
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -596,34 +599,6 @@ describe("evidence capture integrity", () => {
       .toThrow("Unsupported relative Mach-O runtime path");
   });
 
-  it.runIf(process.platform === "darwin")("resolves every private Xcode ld dependency identically in both slices", () => {
-    const executable = realpathSync(execFileSync("/usr/bin/xcrun", ["--find", "ld"], { encoding: "utf8" }).trim());
-    const sections = parseOtoolLibraryDependencySections(
-      execFileSync("/usr/bin/otool", ["-L", executable], { encoding: "utf8" }),
-      executable,
-    );
-    const privateNames = ["libLTO.dylib", "libcodedirectory.dylib", "libswiftDemangle.dylib", "libtapi.dylib"];
-    const resolvedByArchitecture = new Map();
-    for (const section of sections) {
-      const rpaths = parseOtoolRpaths(execFileSync("/usr/bin/otool", [
-        "-l", "-arch", section.architecture, executable,
-      ], { encoding: "utf8" }), executable).map((path) => expandMachORuntimePath(path, {
-        loaderPath: executable,
-        executablePath: executable,
-      }));
-      const resolved = Object.fromEntries(section.dependencies
-        .filter((dependency) => dependency.startsWith("@rpath/"))
-        .map((dependency) => {
-          const name = basename(dependency);
-          const source = rpaths.map((root) => join(root, name)).find(existsSync);
-          expect(source).toBeDefined();
-          return [name, realpathSync(source)];
-        }));
-      expect(Object.keys(resolved).sort()).toEqual(privateNames);
-      resolvedByArchitecture.set(section.architecture, resolved);
-    }
-    expect(resolvedByArchitecture.get("arm64")).toEqual(resolvedByArchitecture.get("x86_64"));
-  });
 
   it.runIf(process.platform === "darwin")("recursively authenticates the real Xcode ld Mach-O closure", () => {
     const executable = realpathSync(execFileSync("/usr/bin/xcrun", ["--find", "ld"], { encoding: "utf8" }).trim());

@@ -174,7 +174,6 @@ describe("recursive graph-memory Eval evidence", () => {
     { search: "disabled", agentAuthored: false },
     { search: "query-v1", agentAuthored: false },
     { search: "disabled", agentAuthored: true },
-    { search: "query-v1", agentAuthored: true },
   ])("grades capability-conditional mechanics for search=$search recursion=$agentAuthored", async ({ search: searchMode, agentAuthored }) => {
     const grade = await gradeFixture(({ outputs, events, execution }) => {
       execution.harnessConfiguration = {

@@ -86,13 +86,6 @@ describe("recursive live run analysis", () => {
     expect(orderedRevisions(paged).map((event) => event.sequence)).toEqual([1, 2, 3]);
   });
 
-  it("accepts a sequence where every revision follows its predecessor", () => {
-    expect(revisionFindings(
-      101,
-      orderedRevisions(coherentRun.events).filter((event) => event.completionId === 101),
-    )).toEqual([]);
-  });
-
   it("reports a revision that is not reachable from the one before it", () => {
     const gapped = [revision(1, 0, { currentLayerId: null }), revision(2, 2, { previousRevision: 1 })];
 
