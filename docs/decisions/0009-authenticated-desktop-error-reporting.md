@@ -1,6 +1,6 @@
 # ADR 0009: Authenticated desktop error reporting
 
-Status: accepted; share-service scope amended by [ADR 0011](0011-shared-thread-snapshot-service.md)
+Status: accepted; share-service network scope and planned oversize-failure exception amended by [ADR 0011](0011-shared-thread-snapshot-service.md)
 
 ## Context
 
@@ -50,6 +50,13 @@ V1 reports only:
 Handled operation failures are not reported in V1. Validation feedback, permission
 denial, user cancellation, handled retry, provider disconnection, authentication
 state, warnings, informational events, and success are also excluded.
+
+ADR 0011 names one planned exception: an oversized shared-thread snapshot shows
+a generic error and support code, and reports to Sentry through Electron main.
+It does not expand reporting to other handled or validation failures. Existing
+account and privacy boundaries remain in force. The event schema is undecided;
+this exception is not implemented or verified. See
+[ADR 0011](0011-shared-thread-snapshot-service.md#share-title-and-snapshot-boundary).
 
 The accepted record contains only stable failure code or sanitized class, a
 code-owned message, approved frames, fixed component and operation identifiers,
@@ -115,6 +122,6 @@ unsigned development package cannot satisfy it.
 - The bounded queue has deterministic retention, overflow, corruption, and account-
   replacement behavior.
 - V1 deliberately excludes handled terminal operation failures until a later product
-  decision names them.
+  decision names them. ADR 0011 names the planned oversized-share exception.
 - Default verification remains deterministic, local, and free of paid inference.
 - Packaged and symbolication claims are release-candidate and target-specific.

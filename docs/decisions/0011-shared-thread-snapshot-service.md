@@ -28,6 +28,30 @@ Snapshot bytes stay inline in streamed HTML; no browser snapshot-fetch authority
 is needed. Use a CSP with `connect-src 'none'`, safe JSON embedding, no third-party
 scripts, and no-index metadata.
 
+## Share title and snapshot boundary
+
+Both signed-in and newly signed-in users enter a separate share title before
+creating a link. The field starts blank; `Create link` remains disabled until it
+contains non-whitespace text. The chosen title replaces the original title in
+the published snapshot, page, browser tab, and preview. Local thread metadata is
+unchanged. Publish the share title and project name unchanged; the content
+redaction boundary does not scrub these user-selected public metadata fields.
+Published titles cannot be renamed: a changed title requires a new share.
+
+`Create link` freezes the accepted history at that moment. Retries reuse the same
+frozen snapshot instead of exporting newly accepted records.
+
+An oversized snapshot fails without publication or truncation. The desktop shows
+a generic error message and support code without exposing the size-limit reason,
+and reports the failure to Sentry through Electron main. This is a named, planned
+exception to ADR 0009's exclusion of handled failures and validation feedback;
+it does not authorize reports for other validation failures. Existing account,
+privacy, and transport boundaries still apply. The exact event fields remain
+undecided, including whether snapshot byte size is admitted. Resolve that schema
+before implementing or claiming proof of this reporting path. This decision does
+not authorize publishing share titles, project names, or conversation content in
+telemetry. The public viewer remains outside reporting.
+
 ## Upload and publication boundary
 
 `POST /shares` authenticates and reserves an owner-bound upload. It returns a
