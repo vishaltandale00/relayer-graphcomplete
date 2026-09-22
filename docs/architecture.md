@@ -421,3 +421,19 @@ Release configuration resolves through one fail-closed contract. The contract se
 Preview publication is a separate Linux job after the signed target matrix settles. It is reachable only from a version-matching `desktop-vX.Y.Z` tag and a protected GitHub environment using short-lived AWS OIDC credentials. Each successful target publishes through its own job, so a failed or disabled target cannot block another. The publisher revalidates target-specific candidate provenance, checksums, blockmaps, and feed metadata; writes immutable release/history objects; verifies the public CDN bytes; and changes the applicable Preview pointer last with an S3 precondition. Manual candidate builds cannot publish. Windows candidate execution is temporarily disabled until its publisher identity is configured. Windows publication remains excluded until Azure signing succeeds. Stable additionally requires the interactive updater canary.
 
 Stable promotion is a separate protected workflow on `main`. It requires committed screenshot-backed evidence that an older Preview installation discovered, installed, and relaunched into the exact candidate. The promoter revalidates the immutable Preview receipt and all hosted bytes, rejects non-increasing versions, writes immutable Stable history, and conditionally changes `latest-mac.yml` without rebuilding or re-signing. A retry can only recover the same byte-identical promotion. At this stage, release recovery means withdrawing a bad feed pointer before installation or issuing a forward-fix version; automatic application downgrades and local-data migration recovery are not updater responsibilities.
+
+## Planned shared thread snapshots
+
+The optional share service hosts immutable conversation-export v1 snapshots,
+up to 16 MiB each. Rust owns export scrubbing; Electron main owns Auth0 and
+short-lived signed uploads to private S3 staging. A small HTTP API reserves and
+finalizes uploads, lists shares, and accepts owner deletion. It never transports
+the snapshot body through API Gateway. DynamoDB stores owner hashes and share
+state; finalization validates the exact object before publication.
+
+A separate Lambda streams safe inline snapshot HTML through a CloudFront-protected
+function URL. The stripped browser shell reuses the production graph workspace.
+CloudFront reads only viewer assets from S3. Page reads check deletion and bypass
+caches. Public code is outside desktop telemetry and has no reporting client.
+These are planned service boundaries, not implemented product capabilities. See
+[ADR 0011](decisions/0011-shared-thread-snapshot-service.md) and PRD section 8.4.

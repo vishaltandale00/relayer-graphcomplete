@@ -1,6 +1,6 @@
 # ADR 0009: Authenticated desktop error reporting
 
-Status: accepted
+Status: accepted; share-service scope amended by [ADR 0011](0011-shared-thread-snapshot-service.md)
 
 ## Context
 
