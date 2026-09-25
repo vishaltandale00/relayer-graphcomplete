@@ -173,4 +173,33 @@ describe("share publication coordinator", () => {
       snapshotBytes: null,
     });
   });
+
+  it("keeps an in-flight retry bound to its immutable generation and rejects overlap", async () => {
+    let account = { ownerKey: "owner-a", authorization: "Bearer one", generation: 1 };
+    let retryResolve;
+    let call = 0;
+    const publish = vi.fn(async () => {
+      call += 1;
+      if (call === 1) throw Object.assign(new Error("offline"), { code: "share_service_failed" });
+      return new Promise((resolve) => { retryResolve = resolve; });
+    });
+    const coordinator = createSharePublishCoordinator({
+      exportSnapshot: async () => snapshot,
+      accountSession: async () => account,
+      sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
+      publish,
+      createReferenceId: () => "SHR-ABCDEF12",
+    });
+    await coordinator.create({ threadId: 42, title: "Public title" });
+    const oldRetry = coordinator.retry("SHR-ABCDEF12");
+    await vi.waitFor(() => expect(retryResolve).toBeTypeOf("function"));
+    account = { ownerKey: "owner-a", authorization: "Bearer two", generation: 2 };
+    await expect(coordinator.retry("SHR-ABCDEF12")).resolves.toMatchObject({
+      code: "share_attempt_unavailable",
+      retryable: false,
+    });
+    retryResolve({ url: "https://share.example.test/t/stale" });
+    await expect(oldRetry).resolves.toMatchObject({ code: "share_sign_in_required" });
+    expect(publish).toHaveBeenCalledTimes(2);
+  });
 });
