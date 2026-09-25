@@ -9,6 +9,7 @@ Read `README.md`, `docs/architecture.md`, and the applicable architecture decisi
 - Preserve explicit draft, accepted, and stopped states.
 - Use deterministic rules for integrity and authority, not as substitutes for model judgment.
 - Do not use paid inference in the default test suite.
+- Before a cold native build or provisioning a fresh coding worker, check for compatible, trusted build caches using `docs/agents/ci.md`. Prefer the repository's verified Ladybug and runtime artifact workflows. Validate artifact identities and hashes before reuse; compile from source when artifacts are missing or incompatible. Cached artifacts accelerate builds but never replace required tests. Record the reason when cache restoration or verification fails.
 - Run `npm run check` and `npm run build` before committing.
 - Pull-request CI and integration-train conventions are documented in `docs/agents/ci.md`.
 
