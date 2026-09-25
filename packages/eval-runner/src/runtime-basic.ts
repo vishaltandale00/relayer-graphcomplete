@@ -17,6 +17,7 @@ import {
   graphMemorySearchTitle,
 } from "./fixtures/graph-memory.js";
 import type { TestExecutionPlan } from "./run-plan.js";
+import { isNaturalGraphMemoryQueryShape } from "./cases/natural-graph-memory-query.js";
 
 export const basicEvalCaseId = "empty-project.task-system.two-turn";
 export const basicEvalPrompt = "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.";
@@ -687,7 +688,7 @@ function matchesNaturalGraphMemorySearch(
     && Object.keys(parameter).length === 2
     && parameter.type === "string"
     && parameter.value === graphMemorySearchTitle
-    && isNaturalGraphMemoryQueryShape(request.query, parameterName)
+    && isNaturalGraphMemoryQueryShape(request.query, parameterName, "i")
     && !JSON.stringify({ query: request.query, parameters: request.parameters }).includes("GRAPH_MEMORY_ANCHOR:");
 }
 
@@ -697,28 +698,6 @@ function matchesNaturalGraphMemoryBudget(budget: Readonly<Record<string, unknown
     || (Number.isSafeInteger(resultRows) && (resultRows as number) >= 1 && (resultRows as number) <= 8);
 }
 
-function isNaturalGraphMemoryQueryShape(query: string, parameterName: string): boolean {
-  const identifier = "[A-Za-z_][A-Za-z0-9_]*";
-  const layer = `(?<layer>${identifier})`;
-  const content = `(?<content>${identifier})`;
-  const relationship = `\\[\\s*(?:${identifier}\\s*)?:\\s*CONTAINS(?:\\s*\\{[^}]*\\})?\\s*\\]`;
-  const contains = `\\s*-\\s*${relationship}\\s*->\\s*`;
-  const containedBy = `\\s*<-\\s*${relationship}\\s*-\\s*`;
-  const layerNode = `\\(\\s*${layer}\\s*:\\s*Layer\\s*\\)`;
-  const contentNode = `\\(\\s*${content}\\s*:\\s*Content\\s*\\)`;
-  const escapedParameter = parameterName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const titleProperty = "\\k<content>\\s*\\.\\s*title";
-  const parameter = `\\$${escapedParameter}`;
-  const predicate = `\\s+WHERE\\s+(?:${titleProperty}\\s*=\\s*${parameter}|${parameter}\\s*=\\s*${titleProperty})`;
-  const projection = `\\s+RETURN\\s+(?:DISTINCT\\s+)?\\k<layer>(?:\\s+AS\\s+${identifier})?`;
-  const orderingExpression = `${identifier}(?:\\s*\\.\\s*${identifier})?`;
-  const ordering = `(?:\\s+ORDER\\s+BY\\s+${orderingExpression}(?:\\s+(?:ASC|DESC))?)?`;
-  const limit = "(?:\\s+LIMIT\\s+[1-8])?\\s*;?\\s*$";
-  const pathBinding = `(?:${identifier}\\s*=\\s*)?`;
-  const forward = new RegExp(`^\\s*MATCH\\s+${pathBinding}${layerNode}${contains}${contentNode}${predicate}${projection}${ordering}${limit}`, "i");
-  const reverse = new RegExp(`^\\s*MATCH\\s+${pathBinding}${contentNode}${containedBy}${layerNode}${predicate}${projection}${ordering}${limit}`, "i");
-  return forward.test(query) || reverse.test(query);
-}
 
 export function parseReportedReplayRepairEvidence(output: CompletionOutput): ReportedReplayRepairEvidence | undefined {
   const prefix = "GRAPH_REPAIR_EVIDENCE=";
