@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ActionId, ActionKind, GraphError, InputAction, LayerId, NodeId,
-    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId, SearchTarget,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
     SubmittedInputValue, ThreadId, graph::InteractionScope, graph::completion,
     storage::sqlite::actions::ActionTable, storage::sqlite::imports::ImportTable,
     storage::sqlite::input_children::validate_value,
@@ -907,57 +907,25 @@ impl crate::GraphDatabase {
     }
 
     pub async fn remove_imported_conversation(&self, import_id: &str) -> Result<(), GraphError> {
-        let metadata: Option<(Option<i64>, i64)> = {
+        let target_and_thread = {
             let mut connection = self.storage.acquire().await?;
-            sqlx::query_as("SELECT project_id,thread_id FROM graph_imports WHERE import_id=?1")
-                .bind(import_id)
-                .fetch_optional(&mut *connection)
+            ImportTable::new(&mut connection)
+                .removal_target(import_id)
                 .await?
         };
-        let Some((project_id, thread_id)) = metadata else {
+        let Some((target, thread_id)) = target_and_thread else {
             return Ok(());
         };
-        let project_id = project_id.and_then(ProjectId::new);
-        let thread_id = ThreadId::new(thread_id)
-            .ok_or_else(|| GraphError::Internal("graph import has an invalid thread".into()))?;
-        let target = SearchTarget::new(project_id, thread_id);
         let _order = self.order_writes_to(target).await;
         let _publication = self.enter_search_publication().await;
         let mut tx = self.storage.begin_write().await?;
-        let still_present: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM graph_imports WHERE import_id=?1)")
-                .bind(import_id)
-                .fetch_one(&mut *tx)
-                .await?;
         let mut indexed = false;
-        if still_present {
-            let externally_referenced: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM actions a \
-                 JOIN layers target ON target.id=a.target_layer_id \
-                 WHERE target.thread_id=?1 AND a.thread_id<>?1)",
-            )
-            .bind(thread_id.value())
-            .fetch_one(&mut *tx)
+        let current_ids = ImportTable::new(&mut tx)
+            .prepare_removal(import_id, thread_id)
             .await?;
-            if externally_referenced {
-                return Err(GraphError::Forbidden(
-                    "imported conversation is referenced by another thread".into(),
-                ));
-            }
-            let current_ids: Vec<i64> = sqlx::query_scalar(
-                "SELECT state.interaction_node_id FROM completion_states state \
-                 JOIN nodes n ON n.id=state.interaction_node_id \
-                 WHERE n.thread_id=?1 AND state.current_layer_id IS NOT NULL \
-                 ORDER BY state.interaction_node_id",
-            )
-            .bind(thread_id.value())
-            .fetch_all(&mut *tx)
-            .await?;
+        if let Some(current_ids) = current_ids {
             let mut publications = Vec::with_capacity(current_ids.len());
-            for id in current_ids {
-                let node_id = NodeId::new(id).ok_or_else(|| {
-                    GraphError::Internal("imported completion has an invalid interaction".into())
-                })?;
+            for node_id in current_ids {
                 let scope = crate::storage::sqlite::nodes::NodeTable::new(&mut tx)
                     .interaction_scope(node_id)
                     .await?;
@@ -976,29 +944,8 @@ impl crate::GraphDatabase {
                     .await?,
                 );
             }
-            for statement in [
-                "DELETE FROM graph_projection_outbox WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
-                "DELETE FROM current_revisions WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
-                "DELETE FROM completion_authorities WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
-                "DELETE FROM completion_states WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
-                "DELETE FROM interaction_input_children WHERE parent_interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
-                "DELETE FROM completions WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
-                "DELETE FROM layer_actions WHERE layer_id IN (SELECT id FROM layers WHERE thread_id=?1)",
-                "DELETE FROM actions WHERE thread_id=?1",
-                "DELETE FROM layer_edges WHERE layer_id IN (SELECT id FROM layers WHERE thread_id=?1)",
-                "DELETE FROM layer_nodes WHERE layer_id IN (SELECT id FROM layers WHERE thread_id=?1)",
-                "DELETE FROM layers WHERE thread_id=?1",
-                "DELETE FROM edges WHERE thread_id=?1",
-                "DELETE FROM nodes WHERE thread_id=?1",
-            ] {
-                sqlx::query(statement)
-                    .bind(thread_id.value())
-                    .execute(&mut *tx)
-                    .await?;
-            }
-            sqlx::query("DELETE FROM graph_imports WHERE import_id=?1")
-                .bind(import_id)
-                .execute(&mut *tx)
+            ImportTable::new(&mut tx)
+                .delete_canonical(import_id, thread_id)
                 .await?;
             // Exercise every canonical foreign-key boundary before the first
             // derived deletion. These SQLite writes remain uncommitted while
