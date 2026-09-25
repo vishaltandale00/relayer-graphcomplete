@@ -32,6 +32,16 @@ const scenes = [
 const variants = [
   { scene: "light", caption: "Light appearance", width: 1280, required: ["OpenAI Work", "data-theme=\"light\""] },
   { scene: "narrow", caption: "Narrow responsive settings", width: 620, required: ["OpenAI Work", "Providers"] },
+  { scene: "account-navigation-mobile", caption: "Account navigation at 620px", width: 620, required: ["Navigation", "Account"] },
+  { scene: "account-navigation-mobile-closed", caption: "Account navigation closed at 620px", width: 620, required: ["Navigation", "Account"] },
+  { scene: "account-navigation-mobile-light", caption: "Light appearance with Account navigation open", width: 620, required: ["Navigation", "Account", 'data-theme="light"'] },
+  { scene: "account-navigation-mobile-forced-colors", caption: "Forced colors with Account navigation open", width: 620, required: ["Navigation", "Account"] },
+  { scene: "account-navigation-760", caption: "Account navigation at the 760px breakpoint", width: 760, required: ["Navigation", "Account"] },
+  { scene: "account-navigation-761", caption: "Expanded sidebar at 761px", width: 761, required: ["Account", "Settings"] },
+  { scene: "account-navigation-collapsed", caption: "Collapsed sidebar account navigation", width: 1280, required: ["Navigation", "Account"] },
+  { scene: "account-navigation-thread", caption: "Account navigation from a saved thread", width: 1280, required: ["Navigation", "Account"] },
+  { scene: "account-navigation-expanded-980", caption: "Expanded Account footer at 980px", width: 980, required: ["Account", "Settings"] },
+  { scene: "account-navigation-expanded-1280", caption: "Expanded Account footer at 1280px", width: 1280, required: ["Account", "Settings"] },
   { scene: "long-label", caption: "Long provider identity", width: 1280, required: ["North America Platform Engineering and Applied Research"] },
   { scene: "loading", caption: "Connecting and discovering models", width: 1280, required: ["Connecting and discovering models"] },
   { scene: "invalid", caption: "Invalid connection details", width: 1280, required: ["Use an HTTPS endpoint", "Enter API key"] },
@@ -110,7 +120,7 @@ function cdpClient(webSocketUrl) {
   });
 }
 
-async function captureBrowserScene(url, frame, profile, width = 1280) {
+async function captureBrowserScene(url, frame, profile, width = 1280, { forcedColors = false } = {}) {
   await mkdir(profile, { recursive: true });
   const child = spawn(chrome, [
     "--headless=new",
@@ -141,6 +151,11 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
         deviceScaleFactor: 1,
         mobile: false,
       });
+      if (forcedColors) {
+        await cdp.call("Emulation.setEmulatedMedia", {
+          features: [{ name: "forced-colors", value: "active" }],
+        });
+      }
       await cdp.call("Page.reload", { ignoreCache: true });
       const deadline = Date.now() + 12_000;
       let readiness = "pending";
@@ -173,6 +188,35 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
             compactBackVisible: visible("#settingsCompactBackButton"),
             compactSelectVisible: visible("#settingsCompactSelect"),
             compactSelectValue: compactSelect?.value ?? null,
+            accountNavigationJourney: (() => {
+              if (!location.search.includes("account-navigation-")) return null;
+              const trigger = document.querySelector("#shellNavigationTrigger");
+              const panel = document.querySelector("#shellNavigationPanel");
+              const menuAccount = document.querySelector("#shellNavigationAccount");
+              const footerAccount = document.querySelector("#desktopAccountButton");
+              const triggerRect = trigger?.getBoundingClientRect();
+              const panelRect = panel?.getBoundingClientRect();
+              const scene = new URLSearchParams(location.search).get("scene");
+              const forcedColorsActive = matchMedia("(forced-colors: active)").matches;
+              const expanded = scene.startsWith("account-navigation-expanded-");
+              if (expanded || scene === "account-navigation-761") {
+                return !visible("#shellNavigationTrigger") && visible("#desktopAccountButton");
+              }
+              const closed = scene.endsWith("-closed");
+              if (closed) return visible("#shellNavigationTrigger") && panel.classList.contains("hidden");
+              return visible("#shellNavigationTrigger")
+                && panel.classList.contains("hidden") === closed
+                && (closed || visible("#shellNavigationAccount"))
+                && menuAccount.disabled
+                && menuAccount.textContent === "Signing in…"
+                && footerAccount.disabled
+                && footerAccount.textContent.includes("Signing in…")
+                && (scene.endsWith("-forced-colors") ? forcedColorsActive : !forcedColorsActive)
+                && triggerRect.left >= 0 && triggerRect.right <= innerWidth
+                && triggerRect.top >= 0 && triggerRect.bottom <= innerHeight
+                && (closed || (panelRect.left >= 0 && panelRect.right <= innerWidth
+                  && panelRect.top >= 0 && panelRect.bottom <= innerHeight));
+            })(),
             errorAssociationsValid: invalidInputs.every((input) => {
               const error = document.getElementById(input.getAttribute("aria-describedby"));
               return error?.getAttribute("role") === "alert" && visible("#" + CSS.escape(error.id));
@@ -694,7 +738,7 @@ async function requestJson(request) {
 }
 
 function productState(scene) {
-  const recovery = scene === "recovery" || scene === "flow";
+  const recovery = scene === "recovery" || scene === "flow" || scene === "account-navigation-thread";
   const retryAccepted = scene === "flow" && flowState.retrySubmitted;
   const failedSelection = {
     familyId: scene === "flow" ? 404 : 11,
@@ -863,12 +907,17 @@ await mkdir(motionDirectory, { recursive: true });
 
 try {
   for (const [scene, caption] of scenes) {
-    const url = `http://127.0.0.1:${port}/evidence.html?scene=${encodeURIComponent(scene)}&caption=${encodeURIComponent(caption)}${scene === "recovery" ? "&threadId=1" : ""}`;
+    const thread = scene === "recovery" || scene === "account-navigation-thread" ? "&threadId=1" : "";
+    const url = `http://127.0.0.1:${port}/evidence.html?scene=${encodeURIComponent(scene)}&caption=${encodeURIComponent(caption)}${thread}`;
     const frame = join(framesDirectory, `${scene}.png`);
     await rm(frame, { force: true });
     const { dom, audit } = await captureBrowserScene(url, frame, join(browserProfile, scene));
     const { size } = await stat(frame);
-    if (size < 20_000) throw new Error(`Evidence frame ${scene} is unexpectedly small (${size} bytes).`);
+    if (size < 20_000) {
+      await writeFile(join(framesDirectory, `${scene}.html`), dom);
+      await writeFile(join(framesDirectory, `${scene}.audit.json`), JSON.stringify(audit, null, 2));
+      throw new Error(`Evidence frame ${scene} is unexpectedly small (${size} bytes).`);
+    }
     if (!dom.includes('data-evidence-ready="true"')) {
       await writeFile(join(framesDirectory, `${scene}.html`), dom);
       const reported = dom.match(/data-evidence-error="([^"]+)"/)?.[1];
@@ -907,9 +956,12 @@ try {
   }
 
   for (const { scene, caption, width, required } of variants) {
-    const url = `http://127.0.0.1:${port}/evidence.html?scene=${encodeURIComponent(scene)}&caption=${encodeURIComponent(caption)}`;
+    const thread = scene === "account-navigation-thread" ? "&threadId=1" : "";
+    const url = `http://127.0.0.1:${port}/evidence.html?scene=${encodeURIComponent(scene)}&caption=${encodeURIComponent(caption)}${thread}`;
     const frame = join(variantsDirectory, `${scene}.png`);
-    const { dom, audit } = await captureBrowserScene(url, frame, join(browserProfile, `variant-${scene}`), width);
+    const { dom, audit } = await captureBrowserScene(url, frame, join(browserProfile, `variant-${scene}`), width, {
+      forcedColors: scene.endsWith("-forced-colors"),
+    });
     const { size } = await stat(frame);
     if (size < 15_000) throw new Error(`Evidence variant ${scene} is unexpectedly small (${size} bytes).`);
     if (!dom.includes('data-evidence-ready="true"')) {
@@ -922,6 +974,9 @@ try {
     }
     if (scene === "narrow" && (!audit.compactBackVisible || !audit.compactSelectVisible || audit.compactSelectValue !== "providers")) {
       throw new Error(`Narrow Settings navigation is not usable: ${JSON.stringify(audit)}`);
+    }
+    if (scene.startsWith("account-navigation-") && !audit.accountNavigationJourney) {
+      throw new Error(`Account navigation journey failed at ${scene}: ${JSON.stringify(audit)}`);
     }
     if (["error", "invalid"].includes(scene) && !audit.errorAssociationsValid) {
       throw new Error("Authentication errors are not visibly associated ARIA alerts.");

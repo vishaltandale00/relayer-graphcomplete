@@ -40,6 +40,13 @@
   </section>
 
   <div class="app-shell hidden" id="appShell">
+    <div class="shell-navigation">
+      <button class="shell-navigation-trigger" id="shellNavigationTrigger" type="button" aria-expanded="false" aria-controls="shellNavigationPanel" aria-label="Navigation">☰ <span>Navigation</span></button>
+      <nav class="shell-navigation-panel hidden" id="shellNavigationPanel" aria-label="Application navigation">
+        <button type="button" id="shellNavigationSettings">Settings</button>
+        <button type="button" id="shellNavigationAccount" class="hidden">Account</button>
+      </nav>
+    </div>
     <aside class="sidebar">
       <button class="titlebar-toggle" id="collapseSidebar" title="Collapse sidebar" aria-label="Collapse sidebar">
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="3"></rect><path d="M7.5 3v14"></path></svg>

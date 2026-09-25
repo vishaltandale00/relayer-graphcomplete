@@ -56,6 +56,7 @@ import {
   persistPendingNewThreadDraft,
 } from "./composer-drafts.js";
 import { projectComposerGate } from "./project-composer-navigation.js";
+import { createShellNavigation } from "./shell-navigation.js";
 const PROJECT_COMPOSER_DESTINATION_SELECTOR = [
   "#settingsButton",
   "[data-thread]",
@@ -250,6 +251,7 @@ function bindEvents() {
     const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
     $("#collapseSidebar").title = label;
     $("#collapseSidebar").setAttribute("aria-label", label);
+    shellNavigation?.sync();
   };
   $("#settingsButton").onclick = async () => {
     projectComposerGate.invalidate();
@@ -374,11 +376,21 @@ function bindEvents() {
   });
 }
 
+let shellNavigation;
+
 async function boot() {
   assertRelayerIconRendererReady();
   if (evalReview) viewState.evalContext = await evalReview.context();
   applyPlatformCopy();
   bindEvents();
+  shellNavigation = createShellNavigation({
+    trigger: $("#shellNavigationTrigger"),
+    panel: $("#shellNavigationPanel"),
+    settingsButton: $("#settingsButton"),
+    accountButton: $("#shellNavigationAccount"),
+    enabled: !evalReview,
+  });
+  if (evalReview) $("#shellNavigationAccount").classList.add("hidden");
   await initializeComposerDrafts();
   window.addEventListener("focus", () => {
     void refreshCurrentEnvironment({ force: true, minimumAgeMs: 1_000 }).catch(() => {});

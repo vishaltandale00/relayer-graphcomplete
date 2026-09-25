@@ -28,8 +28,19 @@ export function setMainView(view, { moveFocus = false } = {}) {
   $("#settingsSidebarContent").classList.toggle("hidden", view !== "settings");
   if (view === "settings") setSettingsTab(viewState.settingsTab);
   if (moveFocus) {
-    if (view === "settings") $(`[data-settings-tab="${viewState.settingsTab}"]`)?.focus();
-    else $("#settingsButton").focus();
+    const narrow = window.matchMedia?.("(max-width: 760px)").matches;
+    if (view === "settings") {
+      if (narrow) $("#settingsCompactSelect")?.focus();
+      else $(`[data-settings-tab="${viewState.settingsTab}"]`)?.focus();
+    } else {
+      const navigationTrigger = $("#shellNavigationTrigger");
+      if ((narrow || document.body?.classList.contains("sidebar-collapsed"))
+        && navigationTrigger && !navigationTrigger.classList.contains("hidden")) {
+        navigationTrigger.focus();
+      } else {
+        $("#settingsButton")?.focus();
+      }
+    }
   }
   onboardingTutorialController()?.presentationChanged();
 }

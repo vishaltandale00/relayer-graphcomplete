@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ACCOUNT_ONBOARDING_PREFERENCE_KEY,
   createDesktopAccountController,
+  initializeDesktopAccountUi,
   normalizeDesktopAccountState,
   revealDesktopWorkspace,
 } from "../desktop/renderer/src/desktop-account.js";
@@ -40,8 +41,9 @@ function element() {
 
 function fixture() {
   const elements = {
-    accountButton: element(),
+    accountButton: { ...element(), classList: classList("hidden") },
     accountLabel: element(),
+    additionalAccountButtons: [{ ...element(), classList: classList("hidden") }],
     onboarding: { ...element(), classList: classList("hidden") },
     onboardingChannel: element(),
     onboardingStatus: element(),
@@ -108,6 +110,59 @@ describe("desktop update indicator naming", () => {
 });
 
 describe("desktop account presentation", () => {
+  it("hides both Account entry points when the desktop account API is absent", async () => {
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    const footerAccount = element();
+    const navigationAccount = element();
+    const elements = new Map([
+      ["desktopAccountButton", footerAccount],
+      ["shellNavigationAccount", navigationAccount],
+    ]);
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: { getElementById: (id) => elements.get(id) ?? null },
+    });
+    const showWorkspace = vi.fn();
+    try {
+      await initializeDesktopAccountUi({ desktop: {}, showWorkspace });
+      expect(footerAccount.classList.contains("hidden")).toBe(true);
+      expect(navigationAccount.classList.contains("hidden")).toBe(true);
+      expect(showWorkspace).toHaveBeenCalledOnce();
+    } finally {
+      if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+      else delete globalThis.document;
+    }
+  });
+
+  it("keeps footer and fallback controls on one state and action path", async () => {
+    const fixtureState = fixture();
+    const { controller, elements, api, openSettings, changed } = fixtureState;
+    let finishLogin;
+    api.login = vi.fn(() => new Promise((resolve) => { finishLogin = resolve; }));
+    await controller.start({ offerOnboarding: true });
+    expect(elements.additionalAccountButtons[0].classList.contains("hidden")).toBe(true);
+    elements.onboardingNotNow.onclick();
+    expect(elements.accountButton.classList.contains("hidden")).toBe(false);
+    expect(elements.additionalAccountButtons[0].classList.contains("hidden")).toBe(false);
+
+    elements.additionalAccountButtons[0].onclick();
+    expect(api.login).toHaveBeenCalledOnce();
+    expect(elements.accountLabel.textContent).toBe("Signing in…");
+    expect(elements.accountButton.disabled).toBe(true);
+    expect(elements.additionalAccountButtons[0].disabled).toBe(true);
+
+    changed({ status: "signed-in", channel: "stable", subject: "auth0|pseudonymous-123" });
+    expect(elements.accountLabel.textContent).toBe("Account");
+    expect(elements.additionalAccountButtons[0].textContent).toBe("Account");
+    elements.additionalAccountButtons[0].onclick();
+    expect(openSettings).toHaveBeenCalledOnce();
+
+    finishLogin({ status: "signed-in", channel: "stable", subject: "auth0|pseudonymous-123" });
+    await Promise.resolve();
+    expect(elements.accountButton.disabled).toBe(false);
+    expect(elements.additionalAccountButtons[0].disabled).toBe(false);
+  });
+
   it("releases the startup visibility gate before showing the workspace during recovery", () => {
     const body = { classList: classList("desktop-account-pending") };
     const showApplication = vi.fn();

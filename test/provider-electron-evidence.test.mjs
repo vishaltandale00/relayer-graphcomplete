@@ -104,6 +104,10 @@ describe("provider browser evidence", () => {
         .filter((name) => name.endsWith(".png"))
         .sort();
       expect(variants).toEqual([
+        "account-navigation-760.png", "account-navigation-761.png", "account-navigation-collapsed.png",
+        "account-navigation-expanded-1280.png", "account-navigation-expanded-980.png",
+        "account-navigation-mobile-closed.png", "account-navigation-mobile-forced-colors.png",
+        "account-navigation-mobile-light.png", "account-navigation-mobile.png", "account-navigation-thread.png",
         "authorization.png", "error.png", "invalid.png", "light.png", "loading.png", "long-label.png",
         "narrow.png", "no-compatible.png", "refresh-models.png", "removed.png", "repair-execution.png",
         "stale.png", "unavailable.png",

@@ -86,12 +86,16 @@ originally anchored to the bottom-right of the viewport, outside sidebar layout;
 customer feedback reported that a control floating over the workspace read as
 detached from the app, and the floating pill forced the node-context dock to
 reserve a lane it would otherwise collide with. When the sidebar collapses to
-icons the control keeps its glyph and drops its label, like Settings. Its
-ordinary
-label never includes Stable or Preview. While signed out, clicking `Sign in`
-starts the browser flow directly; an existing or uncertain account opens Account
-settings instead. That panel contains only concise account status and the
-applicable sign-in or logout action. Release channel is not part of account UX;
+icons the control keeps its glyph and drops its label, like Settings. At widths
+of 760px or less, the sidebar is hidden; a keyboard-operable shell Navigation
+disclosure then keeps Settings and Account reachable. The disclosure also
+appears when the sidebar is collapsed, and is absent from a wide expanded shell.
+The footer control and the disclosure's Account action share presentation state
+and behavior. Account never appears in a floating overlay. Its ordinary label
+never includes Stable or Preview. While signed out or in an error state,
+activating Account starts the browser flow directly; an existing or uncertain
+account opens Account settings. That panel contains only concise account status
+and the applicable sign-in or logout action. Release channel is not part of account UX;
 main-owned diagnostics retain callback selection. No account state gates
 projects, threads, interactions, providers, models, harnesses, permissions,
 updates, or exports after the user resolves the onboarding choice.
