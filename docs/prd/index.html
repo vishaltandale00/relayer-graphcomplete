@@ -1140,6 +1140,9 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </ul>
 <h3>3.7 Verification</h3>
 <p>Choice-driven tests cover each scope, Git option, and permission profile. Permission tests cover catalog defaulting, unavailable-profile fallback, no-profile failure, the exact thread-create request, pinned persistence, and the Full access disclosure. They also cover creation failure, revoked permission, duplicate projects, project moves, and both fork options. Filesystem and Git tests use temporary repositories. They must not change a user checkout.</p>
+<p>Checkpoint: <code>test/node-detail-runtime.test.mjs</code> exercises real workspace construction, rendering, and disposal without a saved thread while its input-draft controller is active.</p>
+<p>It settles thread A's deferred draft load in the empty view, then verifies A's draft returns only with A.</p>
+<p>This maps SCP-015 and SCP-016 without relaxing identity checks.</p>
 <p>Project-row tests cover idle, hover, pointer exit, keyboard focus, long names, and empty projects. They assert one stable action target.</p>
 <p>Interaction tests prove exact project selection and no pre-Send thread creation. They cover same-project focus and cross-project draft preservation.</p>
 <p>Draft tests cover saved follow-ups, pending New Thread text, navigation, restart, successful Send, and explicit clearing. These tests use local deterministic fixtures.</p>

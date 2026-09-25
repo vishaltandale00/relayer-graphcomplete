@@ -647,7 +647,7 @@ describe("compiled Node Detail product runtime", () => {
       edges: [],
       actions,
     };
-    const thread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
+    let thread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
     const state = {
       status: "accepted",
       currentInteractionId: 5,
@@ -687,13 +687,14 @@ describe("compiled Node Detail product runtime", () => {
       })),
       detach: vi.fn(),
     };
+    const showEmpty = vi.fn();
     const workspace = createProductWorkspace({
       root: window.document,
       getState: () => state,
       getThread: () => thread,
       selection,
       showThread: () => {},
-      showEmpty: () => {},
+      showEmpty,
       onNavigateLayer,
       onInvokeAction,
       inputDraftApi,
@@ -782,6 +783,91 @@ describe("compiled Node Detail product runtime", () => {
     window.document.querySelector("#detailActions [data-action-id='11']").click();
     await window.happyDOM.waitUntilComplete();
     expect(onNavigateLayer).toHaveBeenCalledWith(91, expect.objectContaining({ action: actions[0], sourceNode: node }));
+
+    const send = window.document.querySelector("#sendInteraction");
+    thread = undefined;
+    expect(() => workspace.render()).not.toThrow();
+    expect(showEmpty).toHaveBeenCalled();
+    expect(send.disabled).toBe(true);
+    expect(inputDraftApi.get).not.toHaveBeenCalledWith(undefined);
+    expect(inputDraftApi.commit).toHaveBeenCalledTimes(1);
+
+    thread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
+    expect(() => workspace.render()).not.toThrow();
+    expect(send.disabled).toBe(false);
     workspace.dispose();
+
+    const delayedDraft = deferred();
+    let delayedThread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
+    const delayedInputDraftApi = {
+      get: vi.fn(() => delayedDraft.promise),
+      commit: vi.fn(),
+      detach: vi.fn(),
+    };
+    const delayedWorkspace = createProductWorkspace({
+      root: window.document,
+      getState: () => state,
+      getThread: () => delayedThread,
+      selection: { ...selection },
+      showThread: () => {},
+      showEmpty: vi.fn(),
+      onNavigateLayer,
+      onInvokeAction,
+      inputDraftApi: delayedInputDraftApi,
+    });
+    delayedWorkspace.render();
+    await vi.waitFor(() => expect(delayedInputDraftApi.get).toHaveBeenCalledWith(3));
+    delayedThread = undefined;
+    expect(() => delayedWorkspace.render()).not.toThrow();
+    expect(window.document.querySelector("#composerContextTray").children).toHaveLength(0);
+    delayedDraft.resolve({
+      threadId: 3,
+      revision: 5,
+      attachments: [{
+        occurrence: { presentingInteractionNodeId: 50, presentingLayerId: 99, actionId: 13 },
+        sourceNodeId: 7,
+        action: { control: "text", prompt: "Draft answer" },
+        value: { text: "saved answer" },
+        draftRevision: 4,
+        committedAt: "2026-09-01T00:00:02Z",
+      }],
+      updatedAt: "2026-09-01T00:00:02Z",
+    });
+    await window.happyDOM.waitUntilComplete();
+    expect(delayedInputDraftApi.commit).not.toHaveBeenCalled();
+    expect(delayedInputDraftApi.detach).not.toHaveBeenCalled();
+    expect(delayedInputDraftApi.get).not.toHaveBeenCalledWith(undefined);
+    delayedThread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
+    expect(() => delayedWorkspace.render()).not.toThrow();
+    await window.happyDOM.waitUntilComplete();
+    expect(delayedInputDraftApi.get).toHaveBeenCalledTimes(1);
+    expect(window.document.querySelector(".composer-input-pill").getAttribute("aria-label"))
+      .toBe("Inspect Draft answer");
+    expect(window.document.querySelector(".composer-input-pill").textContent).toContain("saved answer");
+    delayedThread = undefined;
+    expect(() => delayedWorkspace.dispose()).not.toThrow();
+
+    const noThreadInputDraftApi = {
+      get: vi.fn(),
+      commit: vi.fn(),
+      detach: vi.fn(),
+    };
+    let noThreadWorkspace;
+    expect(() => {
+      noThreadWorkspace = createProductWorkspace({
+        root: window.document,
+        getState: () => state,
+        getThread: () => undefined,
+        selection: { ...selection },
+        showThread: () => {},
+        showEmpty: vi.fn(),
+        onNavigateLayer,
+        onInvokeAction,
+        inputDraftApi: noThreadInputDraftApi,
+      });
+    }).not.toThrow();
+    expect(() => noThreadWorkspace.render()).not.toThrow();
+    expect(() => noThreadWorkspace.dispose()).not.toThrow();
+    expect(noThreadInputDraftApi.get).not.toHaveBeenCalled();
   });
 });
