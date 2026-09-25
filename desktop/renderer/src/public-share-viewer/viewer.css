@@ -7,38 +7,6 @@
   background: var(--bg);
 }
 
-.public-share-topbar {
-  box-sizing: border-box;
-  min-height: 58px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px clamp(16px, 4vw, 48px);
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-}
-
-.public-share-brand,
-.public-share-install-link {
-  color: var(--text);
-  text-decoration: none;
-}
-
-.public-share-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  font-weight: 700;
-  letter-spacing: -.01em;
-}
-
-.public-share-brand img {
-  border-radius: 7px;
-  background: #f7f0e5;
-}
-
-.public-share-topbar-meta,
 .public-share-download-actions {
   display: flex;
   align-items: center;
@@ -51,31 +19,11 @@
   gap: 4px;
 }
 
-.public-share-read-only,
-.public-share-platform-note,
-.public-share-eyebrow {
+.public-share-platform-note {
   color: var(--muted);
   font-size: 10px;
   letter-spacing: .07em;
   text-transform: uppercase;
-}
-
-.public-share-read-only {
-  color: var(--green);
-}
-
-.public-share-install-link {
-  padding: 7px 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.public-share-install-link:hover,
-.public-share-install-link:focus-visible {
-  color: var(--text);
-  background: var(--hover);
 }
 
 .public-share-main {
@@ -230,10 +178,6 @@
   font-size: 10px;
 }
 
-html[data-theme="light"] .public-share-topbar {
-  background: rgba(255, 255, 255, .92);
-}
-
 html[data-theme="light"] .public-share-download-card,
 html[data-theme="light"] .public-share-error {
   background: #fff;
@@ -279,19 +223,6 @@ html[data-theme="light"] .public-share-error {
 }
 
 @media (max-width: 760px) {
-  .public-share-topbar {
-    min-height: 52px;
-    padding-inline: 12px;
-  }
-
-  .public-share-topbar-meta {
-    gap: 7px;
-  }
-
-  .public-share-read-only {
-    display: none;
-  }
-
   .public-share-main {
     padding: 12px 8px 24px;
   }

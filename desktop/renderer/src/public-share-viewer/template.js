@@ -115,16 +115,6 @@ export function renderPublicViewerTemplate({
   <link rel="stylesheet" href="${viewerStyles}">
 </head>
 <body class="public-share-shell">
-  <header class="public-share-topbar">
-    <a class="public-share-brand" href="${install}" target="_blank" rel="noopener noreferrer" aria-label="Relayer, open desktop download">
-      <img src="${logo}" alt="" width="24" height="24">
-      <span>Relayer</span>
-    </a>
-    <div class="public-share-topbar-meta">
-      <span class="public-share-read-only">Read-only snapshot</span>
-      <a class="public-share-install-link" href="${install}" target="_blank" rel="noopener noreferrer">Open Relayer</a>
-    </div>
-  </header>
   <main class="public-share-main">
     <aside class="public-share-download-card" aria-labelledby="publicShareDownloadTitle">
       <div class="public-share-download-copy">

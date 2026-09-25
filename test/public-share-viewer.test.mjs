@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Window } from "happy-dom";
+import { readFileSync } from "node:fs";
 
 import { createPublicViewerAdapter } from "../desktop/renderer/src/public-share-viewer/adapter.js";
 import { bootPublicViewer } from "../desktop/renderer/src/public-share-viewer/main.js";
@@ -186,6 +187,16 @@ describe("public share HTML boundary", () => {
     expect(html).toContain('src="/vendor/marked.umd.js"');
     expect(html).toContain('src="/vendor/lucide.min.js"');
     expect(html).not.toContain("fetch(");
+    expect(html).not.toContain("public-share-topbar");
+    expect(html).not.toContain(">Open Relayer</a>");
+  });
+
+  it("keeps the static shell aligned with the generated no-top-bar contract", () => {
+    const html = readFileSync(new URL("../desktop/renderer/public-share.html", import.meta.url), "utf8");
+    expect(html).not.toContain("public-share-topbar");
+    expect(html).not.toContain(">Open Relayer</a>");
+    expect(html).toContain('class="public-share-download-card"');
+    expect(html).toContain("Explore this thread, then build your own.");
   });
 
   it("keeps the install destination fixed and rejects unsafe asset bases", () => {
