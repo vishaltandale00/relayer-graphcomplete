@@ -1,0 +1,37 @@
+from pathlib import Path
+import json,hashlib,shutil
+base=Path('/Users/vishal/.codex/worker-pilot/evidence/factory-355-live-qwen')
+run=base/'4b0aa326-1db8-4b72-b732-2ebffeea363c'
+out=base/'publish';out.mkdir(exist_ok=True)
+events=[json.loads(s) for s in (run/'trace.ndjson').read_text().splitlines()]
+allowed={'call_QnXIJhxZjCsSd7RI13w6y6MD','call_1kAyXAR1Iz1am3lAcAMM1Pem','call_dbazImGHzv8DGTTZ4cmwCH0N','call_DIp5IRdHRZZTYQ6EvVRv7YqX'}
+selected=[]
+for i,x in enumerate(events):
+ e=x['event'];d=e.get('data',{}); entry=None
+ if e['type'] in ['model.call.started','model.call.completed','usage']:
+  entry=x
+ elif e['type'] in ['tool.call.started','tool.call.completed'] and d.get('toolCallId') in allowed:
+  entry=x
+ elif e['type']=='tool.call.started' and d.get('toolCallId')=='call_bhhHbiS81rLqKhqRWXVOT81N':
+  entry=x
+ elif d.get('eventType')=='rlm_child_update' and d.get('child',{}).get('status')=='done':
+  child=d['child'];entry={**x,'event':{'type':e['type'],'data':{'eventType':d['eventType'],'child':{k:child[k] for k in ['id','status','modelId','providerDefinitionId','adapterId','adapterImplementationVersion','durationMs','tokenCount','toolUseCount'] if k in child}}}}
+ if entry:selected.append({'sourceEventIndex':i,**entry})
+(out/'selected-trace.ndjson').write_text('\n'.join(json.dumps(x) for x in selected)+'\n')
+r=json.loads((run/'summary.json').read_text());r.pop('childEvents');r['helper']={'modelId':'qwen/qwen3.8-flash','nativeChildId':'sub-d880d125','status':'done','tokenCount':8300,'durationMs':26379,'replyDelivery':'Lead read the completed child session log; clean native message delivery was not established.'};r['rootModelCalls']=22;r['elapsedSeconds']=151.377;r['rawTraceSha256']=hashlib.sha256((run/'trace.ndjson').read_bytes()).hexdigest();r['rawTracePublication']='Withheld: contains child private transcript dumps. Selected trace retains routing, usage, search/extraction/submission proof.'
+(out/'summary.json').write_text(json.dumps(r,indent=2)+'\n')
+for name in ['identity.json']:
+ shutil.copyfile(run/name,out/name)
+result=next(run.rglob('result.json'));shutil.copyfile(result,out/'result.json')
+for name in ['case-treatment.json','run-family-v1.mjs','prepare-runtime.mjs','select-evidence.py','build.log','native-revalidation.log','runtime-preflight.log','live-attempt-1.log','live-attempt-2.log']:
+ shutil.copyfile(base/name,out/(name+'.txt' if name.endswith(('.mjs','.py')) else name))
+history=out/'historical';history.mkdir(exist_ok=True)
+for name in ['npm-run-check.log','npm-run-check-retry.log','npm-run-build.log','npm-run-eval-graph-memory.log']:
+ p=Path('/Volumes/2T-SSD/worktrees/factory-355/worker-pilot/evidence/factory-355')/name
+ shutil.copyfile(p,history/name)
+key=json.loads(Path('/Users/vishal/ProjectsDev/relayer-graphcomplete/live-run.local.json').read_text())['runs']['prime-openrouter']['auth']['apiKey']
+for p in out.rglob('*'):
+ if p.is_file() and key.encode() in p.read_bytes():raise SystemExit('Secret scan failed; publication prohibited.')
+manifest={str(p.relative_to(out)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(out.rglob('*')) if p.is_file()}
+(out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+print(json.dumps({'files':len(manifest),'selectedEvents':len(selected),'keyScan':'clear','bytes':sum(p.stat().st_size for p in out.rglob('*') if p.is_file())}))

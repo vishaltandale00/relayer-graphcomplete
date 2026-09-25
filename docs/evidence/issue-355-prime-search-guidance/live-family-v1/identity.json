@@ -1,0 +1,48 @@
+{
+  "sourceCommit": "34b629ca48de11150faa02451e1780aa48f1a8bd",
+  "wrapperSha256": "fea9b4a3af1d3b54542c54d1a603526b3bf2293df98b451504a8bf37642ff590",
+  "derivedSha256": "1a78218b53f2e71251234df30435c00afe1b1c73b52c01132236c3cc8a3a842a",
+  "harnessSha256": "be0c4d6c08e8e06beb35fd5a1c36b77c1e53f2f65325b4604089f763695c9788",
+  "graphBinarySha256": "dbcb1bcaf45359884c214c44e82e20ea906852dfef98714574131df8894dab44",
+  "runtimeRecipeDigest": "1386de54589d64956a9f569144752c441d84c45ff0906c3fd7b9e596f1fe72bd",
+  "configurationDigest": "sha256:5f1f8c85da4b43a98c8ea4f49c6061316e75ee100bc388faa589a6f309b60d75",
+  "modelIds": [
+    "openai/gpt-6-luna",
+    "qwen/qwen3.8-flash"
+  ],
+  "models": [
+    {
+      "id": "openai/gpt-6-luna",
+      "pricing": {
+        "prompt": "0.0000001",
+        "completion": "0.0000005",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000001",
+        "input_cache_write": "0.000000125",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.0000002",
+            "completion": "0.00000075",
+            "input_cache_read": "0.00000002",
+            "input_cache_write": "0.00000025"
+          }
+        ]
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-flash",
+      "pricing": {
+        "prompt": "0.00000015",
+        "completion": "0.00000047",
+        "input_cache_read": "0.000000016",
+        "input_cache_write": "0.0000002"
+      }
+    }
+  ],
+  "before": {
+    "usage": 0,
+    "limit": 50,
+    "remaining": 50
+  }
+}

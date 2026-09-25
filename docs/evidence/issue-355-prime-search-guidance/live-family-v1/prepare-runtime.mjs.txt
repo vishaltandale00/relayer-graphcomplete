@@ -1,0 +1,17 @@
+import {writeFile, mkdir} from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+const root='/Volumes/2T-SSD/worktrees/factory-355';
+const out='/Users/vishal/.codex/worker-pilot/evidence/factory-355-live-qwen';
+const load=p=>import(pathToFileURL(`${root}/${p}`).href);
+const {createManagedRuntimeInstaller}=await load('desktop/main/managed-runtimes/installer.mjs');
+const {assemblePrimeManagedRuntime,checkPrimeManagedRuntime,createPrimeReviewedTreeCopier}=await load('desktop/main/services/prime-managed-runtime.mjs');
+const {PRIME_AGENT_ASSET_SHA256,PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256}=await load('desktop/main/services/prime-agent-runtime.mjs');
+const copyReviewedTrees=createPrimeReviewedTreeCopier({appRoot:root,pythonClientRoot:`${root}/python/relayer-graph/src`,expectedClosureSha256:PRIME_AGENT_REPOSITORY_DEPENDENCY_CLOSURE_SHA256,expectedPythonClientSha256:PRIME_AGENT_ASSET_SHA256.pythonPackageTree});
+const installer=createManagedRuntimeInstaller({root:'/Volumes/2T-SSD/prime-live-355-runtime',assembleRecipe:context=>assemblePrimeManagedRuntime(context,{copyReviewedTrees})});
+console.log('Preparing exact reviewed Prime managed runtime; no provider calls.');
+const runtime=await installer.prepare('prime@0.8.1');
+const readiness=await checkPrimeManagedRuntime({runtime});
+if(readiness.available!==true) throw new Error('Managed kernel readiness failed');
+await mkdir(out,{recursive:true});
+await writeFile(`${out}/runtime.json`,JSON.stringify({runtime,readiness,checkedAt:new Date().toISOString()},null,2)+'\n',{mode:0o600});
+console.log(JSON.stringify({ready:true,recipeId:runtime.recipeId,recipeDigest:runtime.recipeDigest}));

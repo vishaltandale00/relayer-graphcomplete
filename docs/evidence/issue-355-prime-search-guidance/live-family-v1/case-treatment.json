@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "caseId": "prime-family.graph-memory-delegation.v1",
+  "sourceCommit": "34b629ca48de11150faa02451e1780aa48f1a8bd",
+  "originalSha256": "eaaa671c227a2ccbd1678f2acd3cb675dcb8c32639e76c79c5c5dc08a751e381",
+  "derivedSha256": "1a78218b53f2e71251234df30435c00afe1b1c73b52c01132236c3cc8a3a842a",
+  "promptAddition": " Before performing that follow-up, use Prime native rlm model discovery to select qwen/qwen3.8-flash and launch one helper on that exact model. Ask the helper to explain, in one sentence, why supporting references should point at an earlier accepted layer; tell it not to read or write graph records. Wait for its actual reply, then carry out the requested graph search and supporting reference yourself. Do not treat a spawn handle as the reply.",
+  "changes": [
+    "case identity",
+    "second persisted interaction prompt"
+  ],
+  "scope": "Supplemental Prime model-family/search test. Admission and execution access injected; no desktop or stock CLI claim."
+}

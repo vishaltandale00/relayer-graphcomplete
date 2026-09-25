@@ -1,0 +1,804 @@
+{
+  "schemaVersion": 3,
+  "execution": {
+    "testRunId": "4b0aa326-1db8-4b72-b732-2ebffeea363c",
+    "testCaseId": "prime-family.graph-memory-delegation.v1",
+    "harnessConfigurationName": "prime-agent-basic",
+    "harnessConfiguration": {
+      "schemaVersion": 1,
+      "name": "prime-agent-basic",
+      "implementation": "prime.agent",
+      "implementationVersion": 1,
+      "revision": 3,
+      "permissionBindings": {
+        "ask": {
+          "boundary": "workspace-write@1",
+          "reviewer": "user",
+          "networkAccessEnabled": true
+        },
+        "auto": {
+          "boundary": "workspace-write@1",
+          "reviewer": "automatic",
+          "networkAccessEnabled": true
+        },
+        "full": {}
+      },
+      "modelRules": {
+        "allow": [
+          {
+            "adapterId": "openai-api",
+            "modelIdRegex": ".*"
+          },
+          {
+            "adapterId": "anthropic-api",
+            "modelIdRegex": ".*"
+          },
+          {
+            "adapterId": "openrouter",
+            "modelIdRegex": ".*"
+          },
+          {
+            "adapterId": "vercel-ai-router",
+            "modelIdRegex": ".*"
+          }
+        ],
+        "deny": []
+      },
+      "executionAccessContracts": [
+        "secret@1"
+      ],
+      "complete": {
+        "agentAuthored": true
+      },
+      "graphCapabilityProfile": {
+        "search": "query-v1"
+      },
+      "settings": {
+        "thinkingLevel": "medium",
+        "rlmMaxDepth": 1,
+        "prewarmIpythonKernel": true
+      }
+    },
+    "harnessConfigurationDigest": "sha256:5f1f8c85da4b43a98c8ea4f49c6061316e75ee100bc388faa589a6f309b60d75",
+    "judgeConfiguration": {
+      "name": "none"
+    }
+  },
+  "createdAt": "2026-09-25T17:58:30.375Z",
+  "turns": [
+    {
+      "interactionNodeId": 1,
+      "prompt": "Explain when newly saved graph content becomes available to future requests. Include exactly one section titled Freshness acknowledged.",
+      "output": {
+        "nodeId": 1,
+        "rootAction": {
+          "id": 1,
+          "clientKey": "freshness-root-expand",
+          "sourceNodeId": 1,
+          "sourceLayerId": null,
+          "kind": "navigate",
+          "relation": "expand",
+          "label": "Availability overview",
+          "variant": "pill",
+          "icon": null,
+          "description": null,
+          "targetLayerId": 1,
+          "interactionText": null,
+          "state": "accepted"
+        },
+        "rootLayer": {
+          "layer": {
+            "id": 1,
+            "clientKey": "freshness-root-layer",
+            "nodes": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "edges": [
+              1,
+              2,
+              3
+            ],
+            "layout": {
+              "version": 1,
+              "placements": [
+                {
+                  "nodeId": 2,
+                  "x": 0.12,
+                  "y": 0.5
+                },
+                {
+                  "nodeId": 3,
+                  "x": 0.38,
+                  "y": 0.5
+                },
+                {
+                  "nodeId": 4,
+                  "x": 0.64,
+                  "y": 0.5
+                },
+                {
+                  "nodeId": 5,
+                  "x": 0.88,
+                  "y": 0.5
+                }
+              ]
+            },
+            "state": "accepted"
+          },
+          "nodes": [
+            {
+              "id": 2,
+              "clientKey": "freshness-root-brief",
+              "leasedActionId": null,
+              "kind": "concept",
+              "icon": "info",
+              "title": "Freshness acknowledged",
+              "detail": "New graph content becomes eligible for later requests only after the graph accepts it as published content. Draft saves alone do not make it searchable. Later visibility is limited by request scope and index availability.",
+              "state": "accepted"
+            },
+            {
+              "id": 3,
+              "clientKey": "freshness-root-draft",
+              "leasedActionId": null,
+              "kind": "concept",
+              "icon": "pencil-line",
+              "title": "Saving creates a draft",
+              "detail": "Authoring nodes and layers stores work as drafts. A draft is not part of the published graph, so future searches must not treat it as available context.",
+              "state": "accepted"
+            },
+            {
+              "id": 4,
+              "clientKey": "freshness-root-publish",
+              "leasedActionId": null,
+              "kind": "concept",
+              "icon": "upload",
+              "title": "Successful submission is the boundary",
+              "detail": "After graph.submit succeeds and the content is accepted and published, it can be considered for later requests. A failed or incomplete submission does not establish that boundary.",
+              "state": "accepted"
+            },
+            {
+              "id": 5,
+              "clientKey": "freshness-root-future",
+              "leasedActionId": null,
+              "kind": "concept",
+              "icon": "search",
+              "title": "Future requests have limits",
+              "detail": "A later request can see accepted published records only within its authorized graph scope. Search requires the graph index; if Ladybug is unavailable, search errors rather than falling back to stale SQLite data.",
+              "state": "accepted"
+            }
+          ],
+          "edges": [
+            {
+              "id": 1,
+              "endpoints": [
+                2,
+                3
+              ],
+              "state": "accepted"
+            },
+            {
+              "id": 2,
+              "endpoints": [
+                3,
+                4
+              ],
+              "state": "accepted"
+            },
+            {
+              "id": 3,
+              "endpoints": [
+                4,
+                5
+              ],
+              "state": "accepted"
+            }
+          ],
+          "actions": [
+            {
+              "id": 2,
+              "clientKey": "freshness-detail-expand",
+              "sourceNodeId": 2,
+              "sourceLayerId": 1,
+              "sourceLayerClientKey": "freshness-root-layer",
+              "kind": "navigate",
+              "relation": "expand",
+              "label": "Publication lifecycle",
+              "variant": "pill",
+              "icon": null,
+              "description": null,
+              "targetLayerId": 2,
+              "interactionText": null,
+              "state": "accepted"
+            }
+          ]
+        }
+      },
+      "checks": [
+        {
+          "name": "interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "visible-layer",
+          "passed": true,
+          "detail": "4 complete visible nodes."
+        },
+        {
+          "name": "exact-edges",
+          "passed": true,
+          "detail": "3 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "connected",
+          "passed": true,
+          "detail": "4/4 nodes connected."
+        },
+        {
+          "name": "natural-memory-search-target",
+          "passed": true,
+          "detail": "The first accepted root contains one human-readable Freshness acknowledged search target and no machine marker in visible content."
+        }
+      ],
+      "passed": true
+    },
+    {
+      "interactionNodeId": 9,
+      "prompt": "Find your earlier Freshness acknowledged explanation and link the original as supporting context in a concise follow-up. Do not recreate or paraphrase it. Before performing that follow-up, use Prime native rlm model discovery to select qwen/qwen3.8-flash and launch one helper on that exact model. Ask the helper to explain, in one sentence, why supporting references should point at an earlier accepted layer; tell it not to read or write graph records. Wait for its actual reply, then carry out the requested graph search and supporting reference yourself. Do not treat a spawn handle as the reply.",
+      "output": {
+        "nodeId": 9,
+        "rootAction": {
+          "id": 4,
+          "clientKey": "freshness-followup-root-expand",
+          "sourceNodeId": 9,
+          "sourceLayerId": null,
+          "kind": "navigate",
+          "relation": "expand",
+          "label": "Concise supporting follow-up",
+          "variant": "pill",
+          "icon": null,
+          "description": null,
+          "targetLayerId": 3,
+          "interactionText": null,
+          "state": "accepted"
+        },
+        "rootLayer": {
+          "layer": {
+            "id": 3,
+            "clientKey": "freshness-followup-layer",
+            "nodes": [
+              10
+            ],
+            "edges": [],
+            "layout": {
+              "version": 1,
+              "placements": [
+                {
+                  "nodeId": 10,
+                  "x": 0.5,
+                  "y": 0.5
+                }
+              ]
+            },
+            "state": "accepted"
+          },
+          "nodes": [
+            {
+              "id": 10,
+              "clientKey": "freshness-followup-node",
+              "leasedActionId": null,
+              "kind": "concept",
+              "icon": "link-2",
+              "title": "Earlier explanation linked",
+              "detail": "The earlier accepted freshness explanation is linked here as supporting context; it is not repeated.",
+              "state": "accepted"
+            }
+          ],
+          "edges": [],
+          "actions": [
+            {
+              "id": 3,
+              "clientKey": "freshness-followup-original-reference",
+              "sourceNodeId": 10,
+              "sourceLayerId": 3,
+              "sourceLayerClientKey": "freshness-followup-layer",
+              "kind": "navigate",
+              "relation": "reference",
+              "label": "View the original explanation",
+              "variant": "pill",
+              "icon": null,
+              "description": null,
+              "targetLayerId": 1,
+              "interactionText": null,
+              "state": "accepted"
+            }
+          ]
+        }
+      },
+      "checks": [
+        {
+          "name": "interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "visible-layer",
+          "passed": true,
+          "detail": "1 complete visible nodes."
+        },
+        {
+          "name": "exact-edges",
+          "passed": true,
+          "detail": "0 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "connected",
+          "passed": true,
+          "detail": "1/1 nodes connected."
+        },
+        {
+          "name": "search-returned-prior-root",
+          "passed": true,
+          "detail": "The one audited graph.search call returned exactly the first accepted root Layer identity."
+        },
+        {
+          "name": "search-request-contract",
+          "passed": true,
+          "detail": "The provider formulated one bounded parameterized query for the natural topic without a machine marker."
+        },
+        {
+          "name": "typed-reference-target",
+          "passed": true,
+          "detail": "The second accepted root contains the audited typed reference action targeting that exact searched Layer."
+        },
+        {
+          "name": "ack-search-submit-order",
+          "passed": true,
+          "detail": "Server response order proves first submit acknowledgement before second-turn search, the matching reference action, and second submit acknowledgement."
+        }
+      ],
+      "graphMemoryEvidence": {
+        "secondTurnStartSequence": 25,
+        "searchedLayerIds": [
+          1
+        ],
+        "searchSequence": 32,
+        "searchRequest": {
+          "queryContractVersion": 1,
+          "query": "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $title RETURN l AS layer ORDER BY layer ASC",
+          "parameters": {
+            "title": {
+              "type": "string",
+              "value": "Freshness acknowledged"
+            }
+          },
+          "budget": {}
+        },
+        "referenceActionId": 3,
+        "referenceActionSequence": 35,
+        "auditEvents": [
+          {
+            "method": "GET",
+            "path": "/api/graph/nodes/1/output",
+            "status": 404,
+            "errorCodes": [
+              "completion_not_found"
+            ],
+            "sequence": 1
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/input",
+            "status": 200,
+            "sequence": 2
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/personal-presentation",
+            "status": 404,
+            "errorCodes": [
+              "personal_presentation_not_attached"
+            ],
+            "sequence": 3
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/nodes/1",
+            "status": 200,
+            "sequence": 4
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/current",
+            "status": 404,
+            "errorCodes": [
+              "feature_disabled"
+            ],
+            "sequence": 5
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/input",
+            "status": 200,
+            "sequence": 6
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/nodes",
+            "status": 422,
+            "sequence": 7
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/nodes",
+            "status": 200,
+            "recordKind": "node",
+            "recordId": 2,
+            "recordState": "draft",
+            "sequence": 8
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/nodes",
+            "status": 200,
+            "recordKind": "node",
+            "recordId": 3,
+            "recordState": "draft",
+            "sequence": 9
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/nodes",
+            "status": 200,
+            "recordKind": "node",
+            "recordId": 4,
+            "recordState": "draft",
+            "sequence": 10
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/nodes",
+            "status": 200,
+            "recordKind": "node",
+            "recordId": 5,
+            "recordState": "draft",
+            "sequence": 11
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/edges",
+            "status": 200,
+            "recordKind": "edge",
+            "recordId": 1,
+            "recordState": "draft",
+            "sequence": 12
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/edges",
+            "status": 200,
+            "recordKind": "edge",
+            "recordId": 2,
+            "recordState": "draft",
+            "sequence": 13
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/edges",
+            "status": 200,
+            "recordKind": "edge",
+            "recordId": 3,
+            "recordState": "draft",
+            "sequence": 14
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/layers",
+            "status": 200,
+            "recordKind": "layer",
+            "recordId": 1,
+            "recordState": "draft",
+            "sequence": 15
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/nodes",
+            "status": 200,
+            "recordKind": "node",
+            "recordId": 6,
+            "recordState": "draft",
+            "sequence": 16
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/nodes",
+            "status": 200,
+            "recordKind": "node",
+            "recordId": 7,
+            "recordState": "draft",
+            "sequence": 17
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/nodes",
+            "status": 200,
+            "recordKind": "node",
+            "recordId": 8,
+            "recordState": "draft",
+            "sequence": 18
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/edges",
+            "status": 200,
+            "recordKind": "edge",
+            "recordId": 4,
+            "recordState": "draft",
+            "sequence": 19
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/edges",
+            "status": 200,
+            "recordKind": "edge",
+            "recordId": 5,
+            "recordState": "draft",
+            "sequence": 20
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/layers",
+            "status": 200,
+            "recordKind": "layer",
+            "recordId": 2,
+            "recordState": "draft",
+            "sequence": 21
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/actions",
+            "status": 200,
+            "recordKind": "action",
+            "recordId": 1,
+            "recordState": "draft",
+            "actionKind": "navigate",
+            "actionRelation": "expand",
+            "actionSourceNodeId": 1,
+            "actionSourceLayerId": null,
+            "actionTargetLayerId": 1,
+            "sequence": 22
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/actions",
+            "status": 200,
+            "recordKind": "action",
+            "recordId": 2,
+            "recordState": "draft",
+            "actionKind": "navigate",
+            "actionRelation": "expand",
+            "actionSourceNodeId": 2,
+            "actionSourceLayerId": 1,
+            "actionTargetLayerId": 2,
+            "sequence": 23
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/submit",
+            "status": 200,
+            "completionNodeId": 1,
+            "completionRootLayerId": 1,
+            "sequence": 24
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/nodes/1/output",
+            "status": 200,
+            "sequence": 25
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/nodes/9/output",
+            "status": 404,
+            "errorCodes": [
+              "completion_not_found"
+            ],
+            "sequence": 26
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/personal-presentation",
+            "status": 404,
+            "errorCodes": [
+              "personal_presentation_not_attached"
+            ],
+            "sequence": 27
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/input",
+            "status": 200,
+            "sequence": 28
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/nodes/9",
+            "status": 200,
+            "sequence": 29
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/current",
+            "status": 404,
+            "errorCodes": [
+              "feature_disabled"
+            ],
+            "sequence": 30
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/input",
+            "status": 200,
+            "sequence": 31
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/search",
+            "status": 200,
+            "queryContractVersion": 1,
+            "query": "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $title RETURN l AS layer ORDER BY layer ASC",
+            "parameters": {
+              "title": {
+                "type": "string",
+                "value": "Freshness acknowledged"
+              }
+            },
+            "budget": {},
+            "searchLayerIds": [
+              1
+            ],
+            "resultTruncated": false,
+            "sequence": 32
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/nodes",
+            "status": 200,
+            "recordKind": "node",
+            "recordId": 10,
+            "recordState": "draft",
+            "sequence": 33
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/layers",
+            "status": 200,
+            "recordKind": "layer",
+            "recordId": 3,
+            "recordState": "draft",
+            "sequence": 34
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/actions",
+            "status": 200,
+            "recordKind": "action",
+            "recordId": 3,
+            "recordState": "draft",
+            "actionKind": "navigate",
+            "actionRelation": "reference",
+            "actionSourceNodeId": 10,
+            "actionSourceLayerId": 3,
+            "actionTargetLayerId": 1,
+            "sequence": 35
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/submit",
+            "status": 422,
+            "errorCodes": [
+              "root_action_count"
+            ],
+            "sequence": 36
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/actions",
+            "status": 200,
+            "recordKind": "action",
+            "recordId": 4,
+            "recordState": "draft",
+            "actionKind": "navigate",
+            "actionRelation": "expand",
+            "actionSourceNodeId": 9,
+            "actionSourceLayerId": null,
+            "actionTargetLayerId": 3,
+            "sequence": 37
+          },
+          {
+            "method": "POST",
+            "path": "/api/graph/submit",
+            "status": 200,
+            "completionNodeId": 9,
+            "completionRootLayerId": 3,
+            "sequence": 38
+          },
+          {
+            "method": "GET",
+            "path": "/api/graph/nodes/9/output",
+            "status": 200,
+            "sequence": 39
+          }
+        ]
+      },
+      "passed": true
+    }
+  ],
+  "sessionChecks": [
+    {
+      "name": "single-harness-object",
+      "passed": true,
+      "detail": "Harness factory called 1 time for 2 interactions."
+    },
+    {
+      "name": "distinct-interaction-capabilities",
+      "passed": true,
+      "detail": "Each interaction used a distinct node and opaque capability token."
+    },
+    {
+      "name": "revoked-interaction-capabilities",
+      "passed": true,
+      "detail": "The eval runtime revoked every graph capability after its Complete call settled."
+    },
+    {
+      "name": "same-provider-session",
+      "passed": true,
+      "detail": "Both interactions persisted the same non-empty deterministic fixture-session identity."
+    }
+  ],
+  "deterministicPassed": true,
+  "passed": true
+}

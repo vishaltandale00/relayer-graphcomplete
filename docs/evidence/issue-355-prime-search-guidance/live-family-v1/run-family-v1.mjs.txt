@@ -1,0 +1,68 @@
+// Supplemental live case v1. Real Prime and graph runtime; injected admission.
+// This is NOT the stock eval:graph-memory:live CLI or desktop admission proof.
+import {readFile,writeFile,mkdir,appendFile} from 'node:fs/promises';
+import {createHash,randomUUID} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {pathToFileURL,fileURLToPath} from 'node:url';
+const root='/Volumes/2T-SSD/worktrees/factory-355';
+process.env.RELAYER_PRIME_PYTHON_CLIENT_ROOT=`${root}/python/relayer-graph/src`;
+process.env.PYTHONPATH=process.env.RELAYER_PRIME_PYTHON_CLIENT_ROOT;
+const base='/Users/vishal/.codex/worker-pilot/evidence/factory-355-live-qwen';
+const load=p=>import(pathToFileURL(`${root}/${p}`).href);
+const hash=b=>createHash('sha256').update(b).digest('hex');
+execFileSync('git',['diff','--quiet','HEAD'],{cwd:root});
+const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
+if(sourceCommit!=='34b629ca48de11150faa02451e1780aa48f1a8bd') throw new Error('Unexpected source commit');
+const originalPath=`${root}/packages/eval-runner/dist/runtime-basic.js`;
+const original=await readFile(originalPath,'utf8');
+const caseId='prime-family.graph-memory-delegation.v1';
+const oldPrompt='Do not recreate or paraphrase it.';
+const instruction=' Before performing that follow-up, use Prime native rlm model discovery to select qwen/qwen3.8-flash and launch one helper on that exact model. Ask the helper to explain, in one sentence, why supporting references should point at an earlier accepted layer; tell it not to read or write graph records. Wait for its actual reply, then carry out the requested graph search and supporting reference yourself. Do not treat a spawn handle as the reply.';
+if(original.split(oldPrompt).length!==2) throw new Error('Prompt anchor is not unique');
+const derived=original.replace('export const graphMemoryEvalCaseId = "graph-memory.prior-accepted-reference";',`export const graphMemoryEvalCaseId = ${JSON.stringify(caseId)};`).replace(oldPrompt,oldPrompt+instruction);
+const derivedPath=`${root}/packages/eval-runner/dist/prime-family-live-v1.js`;
+await writeFile(derivedPath,derived);
+await writeFile(`${base}/derived-case-v1.js`,derived);
+await writeFile(`${base}/case-treatment.json`,JSON.stringify({version:1,caseId,sourceCommit,originalSha256:hash(original),derivedSha256:hash(derived),promptAddition:instruction,changes:['case identity','second persisted interaction prompt'],scope:'Supplemental Prime model-family/search test. Admission and execution access injected; no desktop or stock CLI claim.'},null,2)+'\n');
+if(process.argv.includes('--prepare-only')) {console.log('Derived case prepared without credentials or inference.');process.exit(0);}
+const {runtime,readiness}=JSON.parse(await readFile(`${base}/runtime.json`,'utf8'));
+if(readiness.available!==true) throw new Error('Runtime was not ready');
+const profile=JSON.parse(await readFile('/Users/vishal/ProjectsDev/relayer-graphcomplete/live-run.local.json','utf8')).runs['prime-openrouter'];
+const key=profile.auth.apiKey;
+const modelIds=['openai/gpt-6-luna','qwen/qwen3.8-flash'];
+if(profile.modelId!==modelIds[0]||profile.verificationHelperModelId!==modelIds[1]) throw new Error('Unexpected model selection');
+const sanitize=s=>String(s).split(key).join('[REDACTED]').replace(/Bearer\s+[^\s"']+/gi,'Bearer [REDACTED]');
+const account=async()=>{const r=await fetch('https://openrouter.ai/api/v1/key',{headers:{Authorization:`Bearer ${key}`}});if(!r.ok)throw new Error(`Key metadata HTTP ${r.status}`);const {data}=await r.json();return {usage:data.usage,limit:data.limit,remaining:data.limit_remaining};};
+const before=await account();
+const catalog=await (await fetch('https://openrouter.ai/api/v1/models')).json();
+const models=modelIds.map(id=>{const m=catalog.data.find(m=>m.id===id);if(!m||!m.supported_parameters.includes('tools'))throw new Error('Selected model unavailable or tools unsupported');return m;});
+const runId=randomUUID();const out=`${base}/${runId}`;await mkdir(out,{recursive:true});
+const {createPrimeAgentFactory,loadHarnessConfigurations,digestHarnessConfiguration}=await load('packages/harness-host/dist/index.js');
+const {runBasicRuntimeEval,graphMemoryEvalCaseId}=await import(pathToFileURL(derivedPath).href);
+if(graphMemoryEvalCaseId!==caseId) throw new Error('Derived case identity mismatch');
+const configs=await loadHarnessConfigurations([`${root}/harnesses/prime-agent-basic.yaml`]);
+const configuration=configs.get('prime-agent-basic');
+const route=id=>({providerId:'openrouter-live',adapterId:'openrouter',accessContract:'secret@1',adapterImplementationVersion:'2',modelId:id});
+const roster=modelIds.map(route);const orchestrator=roster[0];
+const modelPlan={familyId:1,familyRevision:1,orchestrator,roster,harnessPolicyDigest:hash(JSON.stringify(configuration)),digest:hash(JSON.stringify(roster))};
+const access={kind:'secret',contract:'secret@1',providerId:'openrouter-live',adapterId:'openrouter',adapterImplementationVersion:'2',endpoint:'https://openrouter.ai/api/v1',fields:{'api-key':key},modelCapabilities:Object.fromEntries(models.map(m=>[m.id,{contextWindow:m.context_length,maxOutputTokens:m.top_provider.max_completion_tokens}]))};
+const factory=createPrimeAgentFactory({resolvePrimeRuntime:async()=>({...runtime,moduleUrl:pathToFileURL(runtime.modulePath).href})});
+const events=[];let turn=0;const harnesses=new Set();let traceWrites=Promise.resolve();
+function capture(sink,label){return new Proxy(sink,{get(target,prop){const value=Reflect.get(target,prop);if(prop==='emit')return event=>{const entry=JSON.parse(sanitize(JSON.stringify({time:new Date().toISOString(),turn,stream:label,event})));events.push(entry);traceWrites=traceWrites.then(()=>appendFile(`${out}/trace.ndjson`,JSON.stringify(entry)+'\n',{mode:0o600}));return target.emit(event);};if(prop==='openStream')return input=>capture(target.openStream(input),input.providerStreamId??input.name);return typeof value==='function'?value.bind(target):value;}});}
+const wrapped=async context=>{const h=await factory(context);harnesses.add(h);return new Proxy(h,{get(target,prop){if(prop==='complete')return (ctx,signal)=>{turn++;return target.complete({...ctx,model:{providerId:orchestrator.providerId,adapterId:orchestrator.adapterId,modelId:orchestrator.modelId},modelPlan,access,accessBundle:{byProviderId:{'openrouter-live':access}},trace:capture(ctx.trace,'root')},signal);};const value=Reflect.get(target,prop);return typeof value==='function'?value.bind(target):value;}});};
+const binary=`${root}/target/debug/relayer-graph-server`;
+const identities={sourceCommit,wrapperSha256:hash(await readFile(fileURLToPath(import.meta.url))),derivedSha256:hash(derived),harnessSha256:hash(await readFile(`${root}/packages/harness-host/dist/implementations/prime-agent.js`)),graphBinarySha256:hash(await readFile(binary)),runtimeRecipeDigest:runtime.recipeDigest,configurationDigest:digestHarnessConfiguration(configuration),modelIds,models:models.map(m=>({id:m.id,pricing:m.pricing})),before};
+await writeFile(`${out}/identity.json`,JSON.stringify(identities,null,2)+'\n',{mode:0o600});
+console.log(JSON.stringify({runId,caseId,modelIds,phase:'starting-live'}));
+const timer=setTimeout(()=>{console.log('Live attempt reached 15-minute deadline; interrupting harness.');for(const h of harnesses)h.forceShutdown?.();},15*60*1000);
+let result;let failure;
+try{result=await runBasicRuntimeEval({outputDirectory:out,keepState:false,serverBinary:binary,execution:{testRunId:runId,testCaseId:graphMemoryEvalCaseId,harnessConfigurationName:configuration.name,harnessConfiguration:configuration,harnessConfigurationDigest:digestHarnessConfiguration(configuration),judgeConfiguration:{name:'none'}},implementations:{'prime.agent':wrapped}});}
+catch(e){failure=sanitize(e?.stack??e);}
+finally{clearTimeout(timer);await traceWrites;}
+const after=await account().catch(()=>null);
+const childEvents=events.filter(x=>x.event.data?.eventType==='rlm_child_update').map(x=>x.event.data.child);
+const summary={runId,caseId,graphMemoryPassed:result?.passed??false,failure,childEvents,before,after,accountUsageDelta:after?after.usage-before.usage:null,graphBinaryUnchanged:identities.graphBinarySha256===hash(await readFile(binary)),scope:'Supplemental explicit-delegation treatment; injected admission. Child execution verdict requires review of child route, completion and usage.'};
+await writeFile(`${out}/summary.json`,JSON.stringify(summary,null,2)+'\n',{mode:0o600});
+await writeFile(`${base}/latest.json`,JSON.stringify({runId,out})+'\n');
+console.log(JSON.stringify({runId,out,graphMemoryPassed:summary.graphMemoryPassed,failure,accountUsageDelta:summary.accountUsageDelta,childUpdates:childEvents.length}));
+if(failure||!result?.passed)process.exitCode=1;

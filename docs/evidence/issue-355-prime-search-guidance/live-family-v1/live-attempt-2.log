@@ -1,0 +1,2 @@
+{"runId":"4b0aa326-1db8-4b72-b732-2ebffeea363c","caseId":"prime-family.graph-memory-delegation.v1","modelIds":["openai/gpt-6-luna","qwen/qwen3.8-flash"],"phase":"starting-live"}
+{"runId":"4b0aa326-1db8-4b72-b732-2ebffeea363c","out":"/Users/vishal/.codex/worker-pilot/evidence/factory-355-live-qwen/4b0aa326-1db8-4b72-b732-2ebffeea363c","graphMemoryPassed":true,"accountUsageDelta":0.010381005,"childUpdates":363}
