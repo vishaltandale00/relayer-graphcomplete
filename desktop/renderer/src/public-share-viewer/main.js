@@ -33,6 +33,7 @@ function snapshotLiteral(documentRef) {
 
 function showRenderFailure(documentRef, reload) {
   documentRef.querySelector("#publicViewerHost")?.classList.add("hidden");
+  documentRef.querySelector(".public-share-download-card")?.classList.add("hidden");
   const error = documentRef.querySelector("#publicShareError");
   error?.classList.remove("hidden");
   const button = documentRef.querySelector("#publicShareReload");

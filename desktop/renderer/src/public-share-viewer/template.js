@@ -138,7 +138,6 @@ export function renderPublicViewerTemplate({
       <button class="public-share-reload" id="publicShareReload" type="button">Reload</button>
     </section>
   </main>
-  <footer class="public-share-footer"><span>Shared from Relayer</span><span>Read-only · No account required</span></footer>
   <script type="application/json" id="relayerPublicSnapshot">${snapshotLiteral}</script>
   <script src="${lucideScript}"></script>
   <script src="${markedScript}"></script>

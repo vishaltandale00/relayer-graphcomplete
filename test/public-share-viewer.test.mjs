@@ -189,14 +189,22 @@ describe("public share HTML boundary", () => {
     expect(html).not.toContain("fetch(");
     expect(html).not.toContain("public-share-topbar");
     expect(html).not.toContain(">Open Relayer</a>");
+    expect(html).not.toContain("public-share-footer");
   });
 
   it("keeps the static shell aligned with the generated no-top-bar contract", () => {
     const html = readFileSync(new URL("../desktop/renderer/public-share.html", import.meta.url), "utf8");
     expect(html).not.toContain("public-share-topbar");
     expect(html).not.toContain(">Open Relayer</a>");
+    expect(html).not.toContain("public-share-footer");
     expect(html).toContain('class="public-share-download-card"');
     expect(html).toContain("Explore this thread, then build your own.");
+  });
+
+  it("lets the production workspace own the complete browser viewport", () => {
+    const styles = readFileSync(new URL("../desktop/renderer/src/public-share-viewer/viewer.css", import.meta.url), "utf8");
+    expect(styles).toMatch(/\.public-share-main\s*{[^}]*height: 100vh;/s);
+    expect(styles).toMatch(/\.public-share-workspace-host\s*{[^}]*height: 100%;[^}]*border: 0;[^}]*border-radius: 0;/s);
   });
 
   it("keeps the install destination fixed and rejects unsafe asset bases", () => {
@@ -218,6 +226,24 @@ describe("public share HTML boundary", () => {
     expect(publicViewerCsp()).toContain("connect-src 'none'");
     expect(publicViewerCsp()).toContain("script-src 'self'");
     expect(publicViewerCsp()).toContain("frame-ancestors 'none'");
+  });
+
+  it("gives a render failure exclusive ownership of the viewport", async () => {
+    const windowRef = new Window({ url: `https://share.example.test/t/${"a".repeat(32)}` });
+    windowRef.document.write(renderPublicViewerTemplate({ snapshot: "not-jsonl" }));
+    const reload = vi.fn();
+    const onRenderError = vi.fn();
+    try {
+      expect(bootPublicViewer({ documentRef: windowRef.document, windowRef, reload, onRenderError })).toBeNull();
+      expect(onRenderError).toHaveBeenCalledOnce();
+      expect(windowRef.document.querySelector("#publicViewerHost")?.classList.contains("hidden")).toBe(true);
+      expect(windowRef.document.querySelector(".public-share-download-card")?.classList.contains("hidden")).toBe(true);
+      expect(windowRef.document.querySelector("#publicShareError")?.classList.contains("hidden")).toBe(false);
+      windowRef.document.querySelector("#publicShareReload")?.click();
+      expect(reload).toHaveBeenCalledOnce();
+    } finally {
+      await windowRef.close();
+    }
   });
 
   it("boots the real ProductWorkspace at the first turn without changing the page URL", async () => {
