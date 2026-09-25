@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 
 import { bindAutonomousCaseSnapshot } from "../cases/catalog.js";
 import { createAutonomousCaseSnapshot } from "../cases/contracts.js";
-import type { EvalCheck } from "../runtime-basic.js";
+import type { EvalCheck } from "../cases/graph-checks.js";
 import type { CommandResult, CommandRunner, ProjectEvalThreadDefinition } from "./h3.js";
 
 export const calibrationCaseIds = Object.freeze({
