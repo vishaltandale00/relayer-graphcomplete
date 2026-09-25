@@ -1,0 +1,20 @@
+captured_at=2026-09-25T06:22:40Z
+base=61ce7b0cc50ee819eb54568cb8fc7165bf6c1e01
+branch=codex/factory-355
+node=v22.23.2
+source_sha256=c4be6fe01edb6f9bbaa0b202878c0d8a64fd5914f312d5aa58d9ee1972f69007  packages/harness-host/src/implementations/prime-agent.ts
+test_sha256=62c2fa02c1a48882fc7bc64933f2113d8a9babfa94739a1ad66eb9a4b0dcd714  packages/harness-host/test/prime-agent.test.ts
+evidence_sha256=45243b30bf59f10b57f753680cb965cc40c77ea0f3dde2245030ba17d2891220  docs/evidence/issue-355-prime-search-guidance/README.md
+
+status:
+ M packages/harness-host/src/implementations/prime-agent.ts
+ M packages/harness-host/test/prime-agent.test.ts
+?? docs/evidence/issue-355-prime-search-guidance/
+?? worker-pilot/
+
+diff_stat:
+ .../src/implementations/prime-agent.ts             | 17 ++++++
+ packages/harness-host/test/prime-agent.test.ts     | 65 ++++++++++++++++++++++
+ 2 files changed, 82 insertions(+)
+
+diff_check:

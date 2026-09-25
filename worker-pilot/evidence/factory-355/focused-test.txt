@@ -1,0 +1,20 @@
+Focused implementation checkpoint
+
+Source base: 61ce7b0cc50ee819eb54568cb8fc7165bf6c1e01
+Branch: codex/factory-355
+Node: v22.23.2
+Python used by contract test: 3.14.3
+
+Command:
+  /Users/vishal/.nvm/versions/node/v22.23.2/bin/npm exec vitest -- run packages/harness-host/test/prime-agent.test.ts
+
+Observed result on the current edited workspace snapshot:
+  Test Files  1 passed (1)
+  Tests       52 passed (52)
+  Duration    684ms
+
+The passing test includes one Python subprocess that executes the emitted prompt example against eight deterministic envelopes. Valid two-row response -> first exact cell's layer:42 -> integer target 42. Truncated, missing rows, empty rows, empty first row, non-layer, layer:0, and malformed layer identity all raise before returning a target. Search-disabled and omitted profiles emit no search guidance.
+
+The earlier exploratory execution failed because the fixture had not stubbed the relayer_graph import; the fixture was corrected, and the passing run above is after that correction. A later assertion initially used asymmetric matchers nested in toEqual; it was replaced with exact expected error strings before the passing run.
+
+Not run in this focused phase: npm run check, npm run build, or npm run eval:graph-memory. The parent reserved those heavy gates for the next slot.
