@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createSharePublishCoordinator } from "../desktop/main/services/share-publish-coordinator.mjs";
+import { ShareSnapshotExportError } from "../desktop/main/services/relayer-app-server.mjs";
 
 const snapshot = new TextEncoder().encode(`${JSON.stringify({
   recordType: "header",
@@ -17,7 +18,7 @@ describe("share publication coordinator", () => {
       .mockResolvedValueOnce({ url: "https://share.example.test/t/abc" });
     const coordinator = createSharePublishCoordinator({
       exportSnapshot: vi.fn(async () => snapshot),
-      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret" }),
+      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret", generation: 1 }),
       sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
       publish,
       createAttemptId: () => "00112233445566778899aabbccddeeff",
@@ -39,20 +40,20 @@ describe("share publication coordinator", () => {
   });
 
   it("rejects retry after an account transition without invoking publication", async () => {
-    let ownerKey = "owner-a";
+    let account = { ownerKey: "owner-a", authorization: "Bearer secret", generation: 1 };
     const publish = vi.fn(async () => {
       throw Object.assign(new Error("offline"), { code: "share_upload_failed", failureStage: "upload" });
     });
     const coordinator = createSharePublishCoordinator({
       exportSnapshot: async () => snapshot,
-      accountSession: async () => ({ ownerKey, authorization: "Bearer secret" }),
+      accountSession: async () => account,
       sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
       publish,
       createAttemptId: () => "00112233445566778899aabbccddeeff",
       createReferenceId: () => "SHR-ABCDEF12",
     });
     await coordinator.create({ threadId: 42, title: "Public title" });
-    ownerKey = "owner-b";
+    account = { ownerKey: "owner-b", authorization: "Bearer secret", generation: 2 };
     await expect(coordinator.retry("SHR-ABCDEF12")).resolves.toMatchObject({
       status: "failed",
       code: "share_attempt_unavailable",
@@ -69,10 +70,10 @@ describe("share publication coordinator", () => {
     });
     const coordinator = createSharePublishCoordinator({
       exportSnapshot: async () => { throw error; },
-      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret" }),
+      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret", generation: 1 }),
       sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
       publish: vi.fn(),
-      reportHandledShareFailure: report,
+      issueHandledShareFailureReporter: () => ({ report }),
       createReferenceId: () => "SHR-ABCDEF12",
     });
     await coordinator.create({ threadId: 42, title: "Public title" });
@@ -87,7 +88,7 @@ describe("share publication coordinator", () => {
   });
 
   it("revalidates account authority after export and closes arbitrary dependency codes", async () => {
-    let currentAccount = { ownerKey: "owner-a", authorization: "Bearer old" };
+    let currentAccount = { ownerKey: "owner-a", authorization: "Bearer old", generation: 1 };
     let releaseExport;
     const publish = vi.fn();
     const coordinator = createSharePublishCoordinator({
@@ -99,20 +100,77 @@ describe("share publication coordinator", () => {
     });
     const pending = coordinator.create({ threadId: 42, title: "Public title" });
     await vi.waitFor(() => expect(releaseExport).toBeTypeOf("function"));
-    currentAccount = null;
+    currentAccount = { ownerKey: "owner-a", authorization: "Bearer replacement", generation: 2 };
     releaseExport();
     await expect(pending).resolves.toMatchObject({ code: "share_sign_in_required", retryable: false });
     expect(publish).not.toHaveBeenCalled();
 
     const closed = createSharePublishCoordinator({
       exportSnapshot: async () => snapshot,
-      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret" }),
+      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret", generation: 1 }),
       sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
       publish: async () => { throw { code: "private:///Users/person/token" }; },
       createReferenceId: () => "SHR-ABCDEF12",
     });
     await expect(closed.create({ threadId: 42, title: "Public title" })).resolves.toMatchObject({
       code: "share_service_failed",
+    });
+  });
+
+  it("binds publication and failure reporting to the initiating account generation", async () => {
+    let currentAccount = { ownerKey: "owner-a", authorization: "Bearer old", generation: 1 };
+    let releasePublish;
+    let failImmediately = false;
+    const report = vi.fn();
+    const reporters = new Map([[1, {
+      report: async (record) => {
+        if (currentAccount.generation === 1) await report(record);
+      },
+    }]]);
+    const coordinator = createSharePublishCoordinator({
+      exportSnapshot: async () => snapshot,
+      accountSession: async () => currentAccount,
+      sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
+      publish: () => failImmediately
+        ? Promise.reject(Object.assign(new Error("offline"), { code: "share_upload_failed", failureStage: "upload" }))
+        : new Promise((_resolve, reject) => {
+        releasePublish = () => reject(Object.assign(new Error("offline"), {
+          code: "share_upload_failed",
+          failureStage: "upload",
+        }));
+        }),
+      issueHandledShareFailureReporter: ({ generation }) => reporters.get(generation) ?? null,
+      createReferenceId: () => "SHR-ABCDEF12",
+    });
+    const pending = coordinator.create({ threadId: 42, title: "Public title" });
+    await vi.waitFor(() => expect(releasePublish).toBeTypeOf("function"));
+    currentAccount = { ownerKey: "owner-b", authorization: "Bearer new", generation: 2 };
+    reporters.delete(1);
+    releasePublish();
+    await expect(pending).resolves.toMatchObject({ code: "share_upload_failed" });
+    expect(report).not.toHaveBeenCalled();
+
+    currentAccount = { ownerKey: "owner-a", authorization: "Bearer same-owner", generation: 3 };
+    failImmediately = true;
+    await expect(coordinator.retry("SHR-ABCDEF12")).resolves.toMatchObject({ code: "share_upload_failed" });
+  });
+
+  it("classifies the real exporter error at the export stage", async () => {
+    const report = vi.fn();
+    const coordinator = createSharePublishCoordinator({
+      exportSnapshot: async () => { throw new ShareSnapshotExportError("share_export_failed"); },
+      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret", generation: 1 }),
+      sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
+      publish: vi.fn(),
+      issueHandledShareFailureReporter: () => ({ report }),
+      createReferenceId: () => "SHR-ABCDEF12",
+    });
+    await coordinator.create({ threadId: 42, title: "Public title" });
+    expect(report).toHaveBeenCalledWith({
+      code: "share.export_failed",
+      failureStage: "export",
+      attemptReferenceId: "SHR-ABCDEF12",
+      snapshotBytes: null,
     });
   });
 });

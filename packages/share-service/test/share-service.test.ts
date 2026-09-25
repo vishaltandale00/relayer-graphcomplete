@@ -11,11 +11,14 @@ import {
   InMemorySharePageCache,
   InMemoryShareRepository,
   MAX_SNAPSHOT_BYTES,
+  ObjectStoreError,
   SnapshotValidationError,
   validateSnapshotBytes,
   type FinalizeResult,
   type ReserveResult,
   type ShareAttemptInput,
+  type ShareObjectStore,
+  type ShareRepository,
   type ShareServiceError,
 } from "../src/index.js";
 
@@ -238,6 +241,82 @@ describe("share-service reservation and publication", () => {
       shareId: reservation.shareId,
       snapshotBytes: SNAPSHOT,
     });
+  });
+
+  it("reconciles a retained immutable object after a pre-commit repository failure", async () => {
+    const current = fixture();
+    let failBeforeCommit = true;
+    const repository = new Proxy(current.repository, {
+      get(target, property, receiver) {
+        if (property === "publishIfEligible") {
+          return async (input: Parameters<ShareRepository["publishIfEligible"]>[0]) => {
+            if (failBeforeCommit) {
+              failBeforeCommit = false;
+              throw new Error("DynamoDB unavailable before commit");
+            }
+            return target.publishIfEligible(input);
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    let copied = false;
+    const objectStore = new Proxy(current.objectStore, {
+      get(target, property, receiver) {
+        if (property === "copyIfMatch") {
+          return async (input: Parameters<ShareObjectStore["copyIfMatch"]>[0]) => {
+            if (copied) throw new ObjectStoreError("destination_exists");
+            copied = true;
+            return target.copyIfMatch(input);
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const service = createShareService({
+      authenticator: current.authenticator,
+      repository,
+      objectStore,
+      publicOrigin: "https://share.example.test",
+      installRedirectUrl: INSTALL_URL,
+      assetManifest: ASSET_MANIFEST,
+      now: () => NOW,
+      randomShareId: () => "b".repeat(32),
+    });
+    const identity = await identityFor(current.authenticator, "auth0|precommit-recovery");
+    const reservation = await service.reserve(identity, snapshotInput("attempt-precommit-recovery"));
+    await current.objectStore.putStaging(reservation.upload!.key, SNAPSHOT);
+
+    await expect(service.finalize(identity, reservation.shareId))
+      .rejects.toMatchObject({ status: 503, code: "storage_unavailable" });
+    await expect(service.finalize(identity, reservation.shareId)).resolves.toMatchObject({
+      status: "created",
+      shareId: reservation.shareId,
+    });
+    expect(await current.repository.listPublished(identity.ownerHash)).toHaveLength(1);
+  });
+
+  it("rejects finalization after the reservation upload policy expires", async () => {
+    let currentTime = NOW;
+    const current = fixture();
+    const service = createShareService({
+      authenticator: current.authenticator,
+      repository: current.repository,
+      objectStore: current.objectStore,
+      publicOrigin: "https://share.example.test",
+      installRedirectUrl: INSTALL_URL,
+      assetManifest: ASSET_MANIFEST,
+      now: () => currentTime,
+      stagingTtlMs: 1_000,
+      randomShareId: () => "c".repeat(32),
+    });
+    const identity = await identityFor(current.authenticator, "auth0|expired-reservation");
+    const reservation = await service.reserve(identity, snapshotInput("attempt-expired-reservation"));
+    currentTime += 1_001;
+    await expect(service.finalize(identity, reservation.shareId))
+      .rejects.toMatchObject({ status: 410, code: "reservation_expired" });
   });
 
   it("does not charge quota for invalid JSON, mismatched bytes, or object-store failure", async () => {

@@ -32,7 +32,8 @@ function referenceId() {
 function exactAccount(value) {
   if (!value || typeof value !== "object"
     || typeof value.ownerKey !== "string" || !value.ownerKey
-    || typeof value.authorization !== "string" || !value.authorization) {
+    || typeof value.authorization !== "string" || !value.authorization
+    || !Number.isSafeInteger(value.generation) || value.generation < 1) {
     const error = new Error("share_sign_in_required");
     error.code = "share_sign_in_required";
     throw error;
@@ -109,7 +110,7 @@ export function createSharePublishCoordinator({
   accountSession,
   sourceThreadIdentity,
   publish,
-  reportHandledShareFailure = async () => {},
+  issueHandledShareFailureReporter = () => null,
   createAttemptId = attemptId,
   createReferenceId = referenceId,
 } = {}) {
@@ -117,7 +118,7 @@ export function createSharePublishCoordinator({
     || typeof accountSession !== "function"
     || typeof sourceThreadIdentity !== "function"
     || typeof publish !== "function"
-    || typeof reportHandledShareFailure !== "function") {
+    || typeof issueHandledShareFailureReporter !== "function") {
     throw new TypeError("Share publication coordinator dependencies are invalid.");
   }
   const attempts = new Map();
@@ -127,16 +128,16 @@ export function createSharePublishCoordinator({
     while (attempts.size > MAX_ATTEMPTS) attempts.delete(attempts.keys().next().value);
   }
 
-  async function report(error, reference) {
+  async function report(error, reference, reporter) {
     const record = telemetryRecord(error, reference);
-    if (record) await reportHandledShareFailure(record).catch(() => undefined);
+    if (record && reporter) await Promise.resolve(reporter.report(record)).catch(() => undefined);
   }
 
   async function run(record) {
     try {
       const assertAuthority = async () => {
         const current = exactAccount(await accountSession());
-        if (current.ownerKey !== record.ownerKey) {
+        if (current.ownerKey !== record.ownerKey || current.generation !== record.generation) {
           const error = new Error("share_sign_in_required");
           error.code = "share_sign_in_required";
           throw error;
@@ -163,7 +164,7 @@ export function createSharePublishCoordinator({
       record.completed = true;
       return Object.freeze({ status: "created", attemptReferenceId: record.reference, url: result.url });
     } catch (error) {
-      await report(error, record.reference);
+      await report(error, record.reference, record.failureReporter);
       return closedFailure(error, record.reference);
     }
   }
@@ -171,11 +172,13 @@ export function createSharePublishCoordinator({
   return Object.freeze({
     async create({ threadId, title, signal } = {}) {
       const reference = createReferenceId();
+      let failureReporter = null;
       try {
         if (!Number.isSafeInteger(threadId) || threadId <= 0 || typeof title !== "string") {
           throw new TypeError("Share creation input is invalid.");
         }
         const account = exactAccount(await accountSession());
+        failureReporter = issueHandledShareFailureReporter({ generation: account.generation });
         const sourceThreadId = await sourceThreadIdentity(threadId);
         if (typeof sourceThreadId !== "string" || !sourceThreadId.trim()) {
           throw new TypeError("Share source-thread identity is invalid.");
@@ -183,7 +186,7 @@ export function createSharePublishCoordinator({
         signal?.throwIfAborted();
         const snapshotBytes = new Uint8Array(await exportSnapshot(threadId, title, { signal }));
         const currentAccount = exactAccount(await accountSession());
-        if (currentAccount.ownerKey !== account.ownerKey) {
+        if (currentAccount.ownerKey !== account.ownerKey || currentAccount.generation !== account.generation) {
           const error = new Error("share_sign_in_required");
           error.code = "share_sign_in_required";
           throw error;
@@ -192,6 +195,8 @@ export function createSharePublishCoordinator({
           reference,
           attemptId: createAttemptId(),
           ownerKey: account.ownerKey,
+          generation: account.generation,
+          failureReporter,
           threadId,
           sourceThreadId,
           title,
@@ -202,7 +207,7 @@ export function createSharePublishCoordinator({
         remember(record);
         return run(record);
       } catch (error) {
-        await report(error, reference);
+        await report(error, reference, failureReporter);
         return closedFailure(error, reference);
       }
     },
@@ -217,9 +222,11 @@ export function createSharePublishCoordinator({
         if (account.ownerKey !== record.ownerKey) {
           return Object.freeze({ status: "failed", attemptReferenceId: reference, code: "share_attempt_unavailable", retryable: false });
         }
+        record.generation = account.generation;
+        record.failureReporter = issueHandledShareFailureReporter({ generation: account.generation });
         return run(record);
       } catch (error) {
-        await report(error, reference);
+        await report(error, reference, record?.failureReporter);
         return closedFailure(error, reference);
       }
     },

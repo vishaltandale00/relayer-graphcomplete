@@ -999,6 +999,9 @@ export function createShareService(options: ShareServiceOptions): ShareService {
       const current = await options.repository.findShare(shareId);
       if (!current || current.ownerHash !== identity.ownerHash || current.status === "deleted") return notFound();
       if (current.status === "published") return toFinalizeResult(current, origin, "already-created");
+      if (Date.parse(current.uploadPolicy.expiresAt) <= now()) {
+        throw new ShareServiceError(410, "reservation_expired");
+      }
       let staged: StoredShareObject | null;
       try {
         staged = await options.objectStore.read(current.stagingKey);
@@ -1027,9 +1030,23 @@ export function createShareService(options: ShareServiceOptions): ShareService {
           if (raced?.ownerHash === identity.ownerHash && raced.status === "published") {
             return toFinalizeResult(raced, origin, "already-created");
           }
-          throw new ShareServiceError(409, "finalization_in_progress");
+          let retained: StoredShareObject | null;
+          try {
+            retained = await options.objectStore.read(current.finalKey);
+          } catch {
+            throw new ShareServiceError(503, "storage_unavailable");
+          }
+          if (!retained) throw new ShareServiceError(409, "finalization_in_progress");
+          const retainedValidation = validateSnapshotBytes(retained.bytes);
+          if (retainedValidation.byteLength !== current.byteLength
+            || retainedValidation.lineCount !== current.lineCount
+            || retainedValidation.sha256 !== current.snapshotSha256) {
+            throw new ShareServiceError(409, "finalization_conflict");
+          }
+          copied = retained;
+        } else {
+          throw new ShareServiceError(503, "storage_unavailable");
         }
-        throw new ShareServiceError(503, "storage_unavailable");
       }
       const publishedAtMs = now();
       let decision: PublishDecision;

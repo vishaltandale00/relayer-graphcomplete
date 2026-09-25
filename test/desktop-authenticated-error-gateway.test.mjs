@@ -408,6 +408,23 @@ describe("authenticated desktop error gateway", () => {
     await gateway.close();
   });
 
+  it("revokes a handled-share failure capability on account-generation change", async () => {
+    const { gateway, send } = await fixture();
+    const record = {
+      code: "share.upload_failed",
+      failureStage: "upload",
+      attemptReferenceId: "SHR-55667788",
+      snapshotBytes: null,
+    };
+    await gateway.transitionIdentity({ generation: 1, subject: "auth0|first" });
+    const reporter = gateway.issueHandledShareFailureReporter({ generation: 1 });
+    expect(gateway.issueHandledShareFailureReporter({ generation: 2 })).toBeNull();
+    await gateway.transitionIdentity({ generation: 2, subject: "auth0|replacement" });
+    await expect(reporter.report(record)).resolves.toEqual({ accepted: false, reason: "stale-capability" });
+    expect(send).not.toHaveBeenCalled();
+    await gateway.close();
+  });
+
   it("deduplicates by attempt, stage, and code while containing delivery failure", async () => {
     const send = vi.fn(async () => { throw new Error("offline"); });
     const { gateway, queuePath, decrypt } = await fixture({ send });

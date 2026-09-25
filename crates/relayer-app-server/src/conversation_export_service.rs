@@ -1725,14 +1725,10 @@ fn redact_share_secrets(value: &str) -> String {
         .replace_all(&redacted, "Bearer [redacted-secret]")
         .into_owned();
     redacted = jwt_secret_regex()
-        .replace_all(&redacted, |captures: &regex::Captures<'_>| {
-            format!("{}[redacted-secret]{}", &captures[1], &captures[3])
-        })
+        .replace_all(&redacted, "$1[redacted-secret]")
         .into_owned();
     provider_secret_regex()
-        .replace_all(&redacted, |captures: &regex::Captures<'_>| {
-            format!("{}[redacted-secret]{}", &captures[1], &captures[3])
-        })
+        .replace_all(&redacted, "$1[redacted-secret]")
         .into_owned()
 }
 
@@ -1769,7 +1765,7 @@ fn jwt_secret_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
         Regex::new(
-            r"(^|[^A-Za-z0-9_-])(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,})([^A-Za-z0-9_-]|$)",
+            r"(^|[^A-Za-z0-9_-])(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,})",
         )
         .expect("valid JWT redaction regex")
     })
@@ -1779,7 +1775,7 @@ fn provider_secret_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
         Regex::new(
-            r"(?i)(^|[^A-Za-z0-9_])((?:sk-(?:ant-)?[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[a-z](?:\.xox[a-z])?-[A-Za-z0-9-]{10,}|AKIA[A-Z0-9]{16}|ASIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|(?:rk|sk)_(?:live|test)_[A-Za-z0-9]{12,}))([^A-Za-z0-9_]|$)",
+            r"(?i)(^|[^A-Za-z0-9_])((?:sk-(?:ant-)?[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[a-z](?:\.xox[a-z])?-[A-Za-z0-9-]{10,}|AKIA[A-Z0-9]{16}|ASIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|(?:rk|sk)_(?:live|test)_[A-Za-z0-9]{12,}))",
         )
         .expect("valid provider secret redaction regex")
     })
@@ -2434,6 +2430,12 @@ mod tests {
         assert!(!redacted.contains(jwt));
         assert!(!redacted.contains("secret bytes"));
         assert!(redacted.matches("[redacted-secret]").count() >= 3);
+        let adjacent = redactor.text("sk-proj-12345678901234567890 sk-proj-09876543210987654321");
+        assert_eq!(adjacent.matches("[redacted-secret]").count(), 2);
+        assert!(!adjacent.contains("sk-proj-"));
+        let adjacent_jwts = redactor.text(&format!("{jwt} {jwt}"));
+        assert_eq!(adjacent_jwts.matches("[redacted-secret]").count(), 2);
+        assert!(!adjacent_jwts.contains("eyJ"));
     }
 
     #[test]

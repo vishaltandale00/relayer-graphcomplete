@@ -58,11 +58,25 @@ export function bootPublicViewer({
   onRenderError = () => {},
 } = {}) {
   const stopTheme = setTheme(documentRef, windowRef);
+  let host;
+  let linkObserver;
+  let onLinkClick;
   try {
     const snapshot = parsePublicSnapshot(snapshotLiteral(documentRef));
     const adapter = createPublicViewerAdapter(snapshot);
-    const host = documentRef.querySelector("#publicViewerHost");
+    host = documentRef.querySelector("#publicViewerHost");
     if (!host) throw new Error("Public viewer host is missing.");
+    onLinkClick = (event) => {
+      const link = event.target?.closest?.('a[href^="https://"], a[href^="http://"]');
+      if (!link || !host.contains(link)) return;
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noreferrer noopener");
+    };
+    host.addEventListener("click", onLinkClick, true);
+    if (typeof windowRef?.MutationObserver === "function") {
+      linkObserver = new windowRef.MutationObserver(() => securePublicLinks(host));
+      linkObserver.observe(host, { childList: true, subtree: true });
+    }
     let workspace;
     const render = () => {
       workspace.render();
@@ -114,11 +128,15 @@ export function bootPublicViewer({
       workspace,
       render,
       dispose() {
+        linkObserver?.disconnect();
+        host.removeEventListener("click", onLinkClick, true);
         workspace.dispose();
         stopTheme();
       },
     });
   } catch (error) {
+    linkObserver?.disconnect();
+    host?.removeEventListener("click", onLinkClick, true);
     stopTheme();
     onRenderError(error);
     showRenderFailure(documentRef, reload);

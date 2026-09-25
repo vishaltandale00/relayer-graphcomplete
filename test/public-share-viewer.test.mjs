@@ -240,11 +240,10 @@ describe("public share HTML boundary", () => {
       expect(viewer.adapter.selection.currentInteractionId).toBe("turn:1");
       expect(windowRef.document.querySelector("#publicViewerHost")?.classList.contains("hidden")).toBe(false);
       expect(windowRef.document.body.textContent).toContain("Environment");
-      viewer.adapter.selection.selectedNodeId = viewer.adapter.state.nodes[0].id;
-      viewer.render();
-      expect(windowRef.document.querySelector('a[href="https://example.test/docs"]')).toMatchObject({
+      windowRef.document.querySelector(".graph-node")?.click();
+      await vi.waitFor(() => expect(windowRef.document.querySelector('a[href="https://example.test/docs"]')).toMatchObject({
         target: "_blank",
-      });
+      }));
       await viewer.adapter.navigateLayer("layer:nested", {
         action: viewer.adapter.state.actions[0],
         sourceNode: viewer.adapter.state.nodes[0],

@@ -423,6 +423,39 @@ export function createAuthenticatedErrorGateway({
     });
   }
 
+  async function reportHandledShareFailure(boundIdentity, record, stillAuthorized) {
+    if (closed || identity !== boundIdentity || !stillAuthorized()) {
+      return Object.freeze({ accepted: false, reason: "stale-capability" });
+    }
+    const sanitized = validateShareFailureRecord(record);
+    if (!sanitized) return Object.freeze({ accepted: false, reason: "invalid-record" });
+    const dedupeKey = [
+      boundIdentity.userId,
+      sanitized.attemptReferenceId,
+      sanitized.failureStage,
+      sanitized.code,
+    ].join("\0");
+    if (handledShareFailureKeys.has(dedupeKey)) {
+      return Object.freeze({ accepted: true, delivery: "deduplicated" });
+    }
+    handledShareFailureKeys.add(dedupeKey);
+    while (handledShareFailureKeys.size > 512) {
+      handledShareFailureKeys.delete(handledShareFailureKeys.values().next().value);
+    }
+    const event = Object.freeze({
+      user: Object.freeze({ id: boundIdentity.userId }),
+      release,
+      environment: currentEnvironment,
+      os,
+      architecture,
+      component: "electron-main",
+      ...sanitized,
+    });
+    const result = await deliver(boundIdentity, event, stillAuthorized);
+    if (result.accepted === false) handledShareFailureKeys.delete(dedupeKey);
+    return result;
+  }
+
   return Object.freeze({
     async transitionIdentity(next) {
       if (next === null) {
@@ -517,38 +550,30 @@ export function createAuthenticatedErrorGateway({
       });
     },
 
+    issueHandledShareFailureReporter({ generation } = {}) {
+      if (closed || identity === null) return null;
+      if (!Number.isSafeInteger(generation) || generation < 1) {
+        throw new TypeError("Share failure reporter identity is invalid.");
+      }
+      if (identity.generation !== generation) return null;
+      const boundIdentity = identity;
+      const state = { active: true };
+      reporters.add(state);
+      return Object.freeze({
+        report: (record) => reportHandledShareFailure(boundIdentity, record, () => state.active),
+        revoke() {
+          state.active = false;
+          reporters.delete(state);
+        },
+      });
+    },
+
     async reportHandledShareFailure(record) {
       if (closed || identity === null) {
         return Object.freeze({ accepted: false, reason: "unverified-account" });
       }
-      const sanitized = validateShareFailureRecord(record);
-      if (!sanitized) return Object.freeze({ accepted: false, reason: "invalid-record" });
       const boundIdentity = identity;
-      const dedupeKey = [
-        boundIdentity.userId,
-        sanitized.attemptReferenceId,
-        sanitized.failureStage,
-        sanitized.code,
-      ].join("\0");
-      if (handledShareFailureKeys.has(dedupeKey)) {
-        return Object.freeze({ accepted: true, delivery: "deduplicated" });
-      }
-      handledShareFailureKeys.add(dedupeKey);
-      while (handledShareFailureKeys.size > 512) {
-        handledShareFailureKeys.delete(handledShareFailureKeys.values().next().value);
-      }
-      const event = Object.freeze({
-        user: Object.freeze({ id: boundIdentity.userId }),
-        release,
-        environment: currentEnvironment,
-        os,
-        architecture,
-        component: "electron-main",
-        ...sanitized,
-      });
-      const result = await deliver(boundIdentity, event, () => true);
-      if (result.accepted === false) handledShareFailureKeys.delete(dedupeKey);
-      return result;
+      return reportHandledShareFailure(boundIdentity, record, () => true);
     },
 
     async retireIdentity() {

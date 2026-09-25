@@ -18,6 +18,7 @@ export class ShareSnapshotExportError extends Error {
     super(code);
     this.name = "ShareSnapshotExportError";
     this.code = code;
+    this.failureStage = "export";
     this.snapshotBytes = snapshotBytes;
   }
 }
