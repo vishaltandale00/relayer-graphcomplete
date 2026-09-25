@@ -47,6 +47,22 @@ function securePublicLinks(host) {
   }
 }
 
+export function fitPublicTurnPopover(host, windowRef) {
+  const banner = host.querySelector(".interaction-banner");
+  const popover = host.querySelector(".turn-popover");
+  if (!banner || !popover || !Number.isFinite(windowRef?.innerHeight)) return;
+  const rowHeight = 52;
+  const borderHeight = 2;
+  const popoverGap = 8;
+  const viewportGap = 12;
+  const availableHeight = windowRef.innerHeight
+    - banner.getBoundingClientRect().bottom
+    - popoverGap
+    - viewportGap;
+  const visibleRows = Math.max(1, Math.min(5, Math.floor((availableHeight - borderHeight) / rowHeight)));
+  popover.style.maxHeight = `${visibleRows * rowHeight + borderHeight}px`;
+}
+
 /**
  * Mount the production public viewer into the server-rendered shell. This is
  * exported for the deterministic fixture harness; the browser entry point
@@ -62,6 +78,7 @@ export function bootPublicViewer({
   let host;
   let linkObserver;
   let onLinkClick;
+  let onResize;
   try {
     const snapshot = parsePublicSnapshot(snapshotLiteral(documentRef));
     const adapter = createPublicViewerAdapter(snapshot);
@@ -82,6 +99,7 @@ export function bootPublicViewer({
     const render = () => {
       workspace.render();
       securePublicLinks(host);
+      fitPublicTurnPopover(host, windowRef);
     };
     workspace = createProductWorkspace({
       root: host,
@@ -129,6 +147,8 @@ export function bootPublicViewer({
       throw new Error("Public viewer download card host is missing.");
     }
     workspaceLayout.append(downloadCard);
+    onResize = () => fitPublicTurnPopover(host, windowRef);
+    windowRef?.addEventListener?.("resize", onResize);
     render();
     return Object.freeze({
       adapter,
@@ -137,6 +157,7 @@ export function bootPublicViewer({
       dispose() {
         linkObserver?.disconnect();
         host.removeEventListener("click", onLinkClick, true);
+        windowRef?.removeEventListener?.("resize", onResize);
         workspace.dispose();
         stopTheme();
       },
@@ -144,6 +165,7 @@ export function bootPublicViewer({
   } catch (error) {
     linkObserver?.disconnect();
     host?.removeEventListener("click", onLinkClick, true);
+    windowRef?.removeEventListener?.("resize", onResize);
     stopTheme();
     onRenderError(error);
     showRenderFailure(documentRef, reload);

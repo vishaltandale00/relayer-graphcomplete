@@ -3,7 +3,10 @@ import { Window } from "happy-dom";
 import { readFileSync } from "node:fs";
 
 import { createPublicViewerAdapter } from "../desktop/renderer/src/public-share-viewer/adapter.js";
-import { bootPublicViewer } from "../desktop/renderer/src/public-share-viewer/main.js";
+import {
+  bootPublicViewer,
+  fitPublicTurnPopover,
+} from "../desktop/renderer/src/public-share-viewer/main.js";
 import {
   parsePublicSnapshot,
   PublicSnapshotError,
@@ -205,6 +208,28 @@ describe("public share HTML boundary", () => {
     const styles = readFileSync(new URL("../desktop/renderer/src/public-share-viewer/viewer.css", import.meta.url), "utf8");
     expect(styles).toMatch(/\.public-share-main\s*{[^}]*height: 100vh;/s);
     expect(styles).toMatch(/\.public-share-workspace-host\s*{[^}]*height: 100%;[^}]*border: 0;[^}]*border-radius: 0;/s);
+  });
+
+  it("aligns the turn picker to the interaction card with five visible rows", () => {
+    const styles = readFileSync(new URL("../desktop/renderer/src/public-share-viewer/viewer.css", import.meta.url), "utf8");
+    expect(styles).toMatch(/\.public-share-shell \.interaction-banner\s*{[^}]*position: relative;/s);
+    expect(styles).toMatch(/\.public-share-shell \.turn-picker\s*{[^}]*position: static;/s);
+    expect(styles).toMatch(/\.public-share-shell \.turn-popover\s*{[^}]*right: 0;[^}]*left: 0;[^}]*width: auto;[^}]*52px \* 5/s);
+  });
+
+  it("quantizes a short viewport to complete turn rows", async () => {
+    const windowRef = new Window({ url: "https://share.example.test" });
+    windowRef.document.body.innerHTML = '<div id="host"><div class="interaction-banner"></div><div class="turn-popover"></div></div>';
+    const host = windowRef.document.querySelector("#host");
+    const banner = host.querySelector(".interaction-banner");
+    banner.getBoundingClientRect = () => ({ bottom: 200 });
+    Object.defineProperty(windowRef, "innerHeight", { configurable: true, value: 440 });
+    try {
+      fitPublicTurnPopover(host, windowRef);
+      expect(host.querySelector(".turn-popover").style.maxHeight).toBe("210px");
+    } finally {
+      await windowRef.close();
+    }
   });
 
   it("keeps the install destination fixed and rejects unsafe asset bases", () => {
