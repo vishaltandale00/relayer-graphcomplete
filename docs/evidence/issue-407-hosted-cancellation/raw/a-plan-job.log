@@ -1,0 +1,434 @@
+Plan affected verification	Set up job	﻿2026-09-25T10:33:56.0066707Z Current runner version: '2.337.0'
+Plan affected verification	Set up job	2026-09-25T10:33:56.0085874Z ##[group]Runner Image Provisioner
+Plan affected verification	Set up job	2026-09-25T10:33:56.0086494Z Hosted Compute Agent
+Plan affected verification	Set up job	2026-09-25T10:33:56.0086860Z Version: 20260828.587
+Plan affected verification	Set up job	2026-09-25T10:33:56.0087278Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+Plan affected verification	Set up job	2026-09-25T10:33:56.0087771Z Build Date: 2026-08-28T16:44:25Z
+Plan affected verification	Set up job	2026-09-25T10:33:56.0088181Z Worker ID: {963da0ab-a2df-46f1-94ed-3a3f91833cb9}
+Plan affected verification	Set up job	2026-09-25T10:33:56.0088627Z Azure Region: centralus
+Plan affected verification	Set up job	2026-09-25T10:33:56.0088991Z ##[endgroup]
+Plan affected verification	Set up job	2026-09-25T10:33:56.0089794Z ##[group]Operating System
+Plan affected verification	Set up job	2026-09-25T10:33:56.0090199Z Ubuntu
+Plan affected verification	Set up job	2026-09-25T10:33:56.0090515Z 24.04.5
+Plan affected verification	Set up job	2026-09-25T10:33:56.0090829Z LTS
+Plan affected verification	Set up job	2026-09-25T10:33:56.0091189Z ##[endgroup]
+Plan affected verification	Set up job	2026-09-25T10:33:56.0091553Z ##[group]Runner Image
+Plan affected verification	Set up job	2026-09-25T10:33:56.0092026Z Image: ubuntu-24.04
+Plan affected verification	Set up job	2026-09-25T10:33:56.0092506Z Version: 20260920.314.1
+Plan affected verification	Set up job	2026-09-25T10:33:56.0093116Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260920.314/images/ubuntu/Ubuntu2404-Readme.md
+Plan affected verification	Set up job	2026-09-25T10:33:56.0094207Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260920.314
+Plan affected verification	Set up job	2026-09-25T10:33:56.0094797Z ##[endgroup]
+Plan affected verification	Set up job	2026-09-25T10:33:56.0095438Z ##[group]GITHUB_TOKEN Permissions
+Plan affected verification	Set up job	2026-09-25T10:33:56.0096658Z Contents: read
+Plan affected verification	Set up job	2026-09-25T10:33:56.0097037Z Metadata: read
+Plan affected verification	Set up job	2026-09-25T10:33:56.0097364Z ##[endgroup]
+Plan affected verification	Set up job	2026-09-25T10:33:56.0098910Z Secret source: Actions
+Plan affected verification	Set up job	2026-09-25T10:33:56.0099467Z Cache mode: write
+Plan affected verification	Set up job	2026-09-25T10:33:56.0099993Z Prepare workflow directory
+Plan affected verification	Set up job	2026-09-25T10:33:56.0318565Z Prepare all required actions
+Plan affected verification	Set up job	2026-09-25T10:33:56.0359871Z Getting action download info
+Plan affected verification	Set up job	2026-09-25T10:33:56.2599850Z Download action repository 'actions/checkout@v7' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+Plan affected verification	Set up job	2026-09-25T10:33:56.3580729Z Download action repository 'actions/setup-node@v7' (SHA:820762786026740c76f36085b0efc47a31fe5020)
+Plan affected verification	Set up job	2026-09-25T10:33:56.4536312Z Download action repository 'actions/cache@v5' (SHA:caa296126883cff596d87d8935842f9db880ef25)
+Plan affected verification	Set up job	2026-09-25T10:33:56.6353824Z Complete job name: Plan affected verification
+Plan affected verification	Check out source and base history	﻿2026-09-25T10:33:56.6818447Z ##[group]Run actions/checkout@v7
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6818891Z with:
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6819127Z   fetch-depth: 0
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6819420Z   repository: vishaltandale00/relayer-graphcomplete
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6821470Z   token: ***
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6821700Z   ssh-strict: true
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6821938Z   ssh-user: git
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6822184Z   persist-credentials: true
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6822738Z   clean: true
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6822986Z   sparse-checkout-cone-mode: true
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6823274Z   fetch-tags: false
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6823517Z   show-progress: true
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6823762Z   lfs: false
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6823989Z   submodules: false
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6824233Z   set-safe-directory: true
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6824513Z   allow-unsafe-pr-checkout: false
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.6824886Z ##[endgroup]
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7470152Z Syncing repository: vishaltandale00/relayer-graphcomplete
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7471318Z ##[group]Getting Git version info
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7471764Z Working directory is '/home/runner/work/relayer-graphcomplete/relayer-graphcomplete'
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7472725Z [command]/usr/bin/git version
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7538103Z git version 2.55.0
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7549723Z ##[endgroup]
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7556220Z Temporarily overriding HOME='/home/runner/work/_temp/c798cea7-9323-485b-a96b-39b5241aa556' before making global git config changes
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7557184Z Adding repository directory to the temporary git global config as a safe directory
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7559206Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/relayer-graphcomplete/relayer-graphcomplete
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7601566Z Deleting the contents of '/home/runner/work/relayer-graphcomplete/relayer-graphcomplete'
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7603691Z ##[group]Determining repository object format
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7604634Z ##[endgroup]
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7605017Z ##[group]Initializing the repository
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7607172Z [command]/usr/bin/git init /home/runner/work/relayer-graphcomplete/relayer-graphcomplete
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7701551Z hint: Using 'master' as the name for the initial branch. This default branch name
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7702511Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7703125Z hint: to use in all of your new repositories, which will suppress this warning,
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7703513Z hint: call:
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7703729Z hint:
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7704016Z hint: 	git config --global init.defaultBranch <name>
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7704363Z hint:
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7704830Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7705545Z hint: 'development'. The just-created branch can be renamed via this command:
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7705931Z hint:
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7706154Z hint: 	git branch -m <name>
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7706406Z hint:
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7706734Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7707552Z Initialized empty Git repository in /home/runner/work/relayer-graphcomplete/relayer-graphcomplete/.git/
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7711296Z [command]/usr/bin/git remote add origin https://github.com/vishaltandale00/relayer-graphcomplete
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7750114Z ##[endgroup]
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7750544Z ##[group]Disabling automatic garbage collection
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7751932Z [command]/usr/bin/git config --local gc.auto 0
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7774618Z ##[endgroup]
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7775400Z ##[group]Setting up auth
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7775692Z Removing SSH command configuration
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7778123Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.7800270Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8084835Z Removing HTTP extra header
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8088653Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8111743Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8270148Z Removing includeIf entries pointing to credentials config files
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8273954Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8303097Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8465954Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8493542Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/relayer-graphcomplete/relayer-graphcomplete/.git.path /home/runner/work/_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8516985Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/relayer-graphcomplete/relayer-graphcomplete/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8544255Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8567806Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8588716Z ##[endgroup]
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8589125Z ##[group]Fetching the repository
+Plan affected verification	Check out source and base history	2026-09-25T10:33:56.8593514Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/* +7a2b3d0aae5a8885903d8ce1f87819d1b7a4cd1a:refs/remotes/pull/484/merge
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1564338Z From https://github.com/vishaltandale00/relayer-graphcomplete
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1565879Z  * [new branch]      agent/desktop-skeleton-prd               -> origin/agent/desktop-skeleton-prd
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1568057Z  * [new branch]      agent/harness-host-prime-agent-lifecycle -> origin/agent/harness-host-prime-agent-lifecycle
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1569326Z  * [new branch]      agent/relayer-app-server                 -> origin/agent/relayer-app-server
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1570425Z  * [new branch]      claude/customer-feedback-issues-f07a5a   -> origin/claude/customer-feedback-issues-f07a5a
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1571756Z  * [new branch]      claude/fix-search-inventory-multiplicity -> origin/claude/fix-search-inventory-multiplicity
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1573216Z  * [new branch]      claude/issue-434-investigation-e5cac1    -> origin/claude/issue-434-investigation-e5cac1
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1574678Z  * [new branch]      claude/npm-check-performance-41d374      -> origin/claude/npm-check-performance-41d374
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1575836Z  * [new branch]      claude/prime-agent-picker-fix            -> origin/claude/prime-agent-picker-fix
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1577461Z  * [new branch]      claude/update-harness-configs-228f4e     -> origin/claude/update-harness-configs-228f4e
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1578952Z  * [new branch]      claude/vigorous-merkle-94b778            -> origin/claude/vigorous-merkle-94b778
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1580430Z  * [new branch]      codex/add-graph-presentation-guidance    -> origin/codex/add-graph-presentation-guidance
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1581950Z  * [new branch]      codex/agent-verification-workflow        -> origin/codex/agent-verification-workflow
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1583540Z  * [new branch]      codex/arm64-canary-evidence              -> origin/codex/arm64-canary-evidence
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1584453Z  * [new branch]      codex/arm64-desktop-canary               -> origin/codex/arm64-desktop-canary
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1585656Z  * [new branch]      codex/cache-first-agent-guidance         -> origin/codex/cache-first-agent-guidance
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1586567Z  * [new branch]      codex/codex-5-6-default-family           -> origin/codex/codex-5-6-default-family
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1587477Z  * [new branch]      codex/commit-intel-canary-evidence       -> origin/codex/commit-intel-canary-evidence
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1588436Z  * [new branch]      codex/conversation-jsonl-eval-import     -> origin/codex/conversation-jsonl-eval-import
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1589292Z  * [new branch]      codex/desktop-0.2.10                     -> origin/codex/desktop-0.2.10
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1590015Z  * [new branch]      codex/desktop-0.2.11                     -> origin/codex/desktop-0.2.11
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1590978Z  * [new branch]      codex/desktop-0.2.24-preview             -> origin/codex/desktop-0.2.24-preview
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1592077Z  * [new branch]      codex/desktop-0.2.8                      -> origin/codex/desktop-0.2.8
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1592978Z  * [new branch]      codex/desktop-0.2.9                      -> origin/codex/desktop-0.2.9
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1593758Z  * [new branch]      codex/desktop-intel-windows-releases     -> origin/codex/desktop-intel-windows-releases
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1594590Z  * [new branch]      codex/desktop-preview-0.2.14             -> origin/codex/desktop-preview-0.2.14
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1595360Z  * [new branch]      codex/desktop-preview-0.2.17             -> origin/codex/desktop-preview-0.2.17
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1596121Z  * [new branch]      codex/desktop-preview-0.2.4              -> origin/codex/desktop-preview-0.2.4
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1596876Z  * [new branch]      codex/desktop-preview-0.2.5              -> origin/codex/desktop-preview-0.2.5
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1597717Z  * [new branch]      codex/desktop-preview-0.2.6              -> origin/codex/desktop-preview-0.2.6
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1598720Z  * [new branch]      codex/desktop-preview-0.2.7              -> origin/codex/desktop-preview-0.2.7
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1599523Z  * [new branch]      codex/desktop-release-foundation         -> origin/codex/desktop-release-foundation
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1600373Z  * [new branch]      codex/desktop-updater-e2e-evidence       -> origin/codex/desktop-updater-e2e-evidence
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1601194Z  * [new branch]      codex/disable-windows-release            -> origin/codex/disable-windows-release
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1601912Z  * [new branch]      codex/factory-355                        -> origin/codex/factory-355
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1602686Z  * [new branch]      codex/factory-356                        -> origin/codex/factory-356
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1603321Z  * [new branch]      codex/factory-357                        -> origin/codex/factory-357
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1603957Z  * [new branch]      codex/factory-407                        -> origin/codex/factory-407
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1604595Z  * [new branch]      codex/factory-408                        -> origin/codex/factory-408
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1605233Z  * [new branch]      codex/factory-418                        -> origin/codex/factory-418
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1605866Z  * [new branch]      codex/factory-452                        -> origin/codex/factory-452
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1606495Z  * [new branch]      codex/factory-453                        -> origin/codex/factory-453
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1607198Z  * [new branch]      codex/fast-ci-apple-silicon              -> origin/codex/fast-ci-apple-silicon
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1607972Z  * [new branch]      codex/fix-desktop-s3-missing-object      -> origin/codex/fix-desktop-s3-missing-object
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1608773Z  * [new branch]      codex/fix-family-save-identity           -> origin/codex/fix-family-save-identity
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1609526Z  * [new branch]      codex/fix-first-message-enter            -> origin/codex/fix-first-message-enter
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1610328Z  * [new branch]      codex/fix-intel-canary-dmg-assessment    -> origin/codex/fix-intel-canary-dmg-assessment
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1611222Z  * [new branch]      codex/fix-intel-canary-evidence          -> origin/codex/fix-intel-canary-evidence
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1612084Z  * [new branch]      codex/fix-intel-canary-relaunch          -> origin/codex/fix-intel-canary-relaunch
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1612980Z  * [new branch]      codex/fix-intel-release-app-path         -> origin/codex/fix-intel-release-app-path
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1613758Z  * [new branch]      codex/fix-prime-release-closure          -> origin/codex/fix-prime-release-closure
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1614514Z  * [new branch]      codex/graph-workspace-polish             -> origin/codex/graph-workspace-polish
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1615364Z  * [new branch]      codex/graphcomplete-architecture-synthesis -> origin/codex/graphcomplete-architecture-synthesis
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1616237Z  * [new branch]      codex/graphcomplete-auth0-account        -> origin/codex/graphcomplete-auth0-account
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1617116Z  * [new branch]      codex/harness-approval-lifecycle         -> origin/codex/harness-approval-lifecycle
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1617929Z  * [new branch]      codex/harnesses-usable-now-settings      -> origin/codex/harnesses-usable-now-settings
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1618800Z  * [new branch]      codex/httpcore-cancellation-pool         -> origin/codex/httpcore-cancellation-pool
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1619569Z  * [new branch]      codex/human-eval-annotations             -> origin/codex/human-eval-annotations
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1620368Z  * [new branch]      codex/interactive-onboarding-tutorial    -> origin/codex/interactive-onboarding-tutorial
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1621598Z  * [new branch]      codex/issue-116-multi-agent-layered-navigation -> origin/codex/issue-116-multi-agent-layered-navigation
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1623102Z  * [new branch]      codex/issue-128-environment-rail         -> origin/codex/issue-128-environment-rail
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1624597Z  * [new branch]      codex/issue-147-provider-platform        -> origin/codex/issue-147-provider-platform
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1625892Z  * [new branch]      codex/issue-159-interaction-context      -> origin/codex/issue-159-interaction-context
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1627108Z  * [new branch]      codex/issue-174-prime-verification       -> origin/codex/issue-174-prime-verification
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1627817Z  * [new branch]      codex/issue-191                          -> origin/codex/issue-191
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1628507Z  * [new branch]      codex/issue-205-durable-drafts           -> origin/codex/issue-205-durable-drafts
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1629233Z  * [new branch]      codex/issue-206-prototype                -> origin/codex/issue-206-prototype
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1629949Z  * [new branch]      codex/issue-206-send-warning             -> origin/codex/issue-206-send-warning
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1630698Z  * [new branch]      codex/issue-208-node-details-dock        -> origin/codex/issue-208-node-details-dock
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1631496Z  * [new branch]      codex/issue-209-node-input-actions       -> origin/codex/issue-209-node-input-actions
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1632589Z  * [new branch]      codex/issue-214-node-input-contract      -> origin/codex/issue-214-node-input-contract
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1633464Z  * [new branch]      codex/issue-218-node-context-lifecycle   -> origin/codex/issue-218-node-context-lifecycle
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1634276Z  * [new branch]      codex/issue-230-sentry-gateway-v2        -> origin/codex/issue-230-sentry-gateway-v2
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1635141Z  * [new branch]      codex/issue-242-personal-presentation-graphs -> origin/codex/issue-242-personal-presentation-graphs
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1635996Z  * [new branch]      codex/issue-249-harness-browser          -> origin/codex/issue-249-harness-browser
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1636857Z  * [new branch]      codex/issue-268-recursive-complete       -> origin/codex/issue-268-recursive-complete
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1637611Z  * [new branch]      codex/issue-277                          -> origin/codex/issue-277
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1639056Z  * [new branch]      codex/issue-278-api-contract-lab         -> origin/codex/issue-278-api-contract-lab
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1643873Z  * [new branch]      codex/issue-279-remove-onboarding-harness -> origin/codex/issue-279-remove-onboarding-harness
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1645450Z  * [new branch]      codex/issue-295-input-roundtrip-eval     -> origin/codex/issue-295-input-roundtrip-eval
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1646673Z  * [new branch]      codex/issue-309-input-judge              -> origin/codex/issue-309-input-judge
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1647939Z  * [new branch]      codex/issue-34-advanced-harness-selector -> origin/codex/issue-34-advanced-harness-selector
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1649189Z  * [new branch]      codex/issue-35-permissions               -> origin/codex/issue-35-permissions
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1650377Z  * [new branch]      codex/issue-353-project-new-thread       -> origin/codex/issue-353-project-new-thread
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1651658Z  * [new branch]      codex/issue-354-query-v1-hardening       -> origin/codex/issue-354-query-v1-hardening
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1653123Z  * [new branch]      codex/issue-36-recursive-navigation      -> origin/codex/issue-36-recursive-navigation
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1654419Z  * [new branch]      codex/issue-360-ci-fail-fast             -> origin/codex/issue-360-ci-fail-fast
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1655408Z  * [new branch]      codex/issue-360-rust-build-speed         -> origin/codex/issue-360-rust-build-speed
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1656405Z  * [new branch]      codex/issue-360-sccache-canary           -> origin/codex/issue-360-sccache-canary
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1657287Z  * [new branch]      codex/issue-360-warm-cache-levers        -> origin/codex/issue-360-warm-cache-levers
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1658326Z  * [new branch]      codex/issue-361-provider-connection-recovery -> origin/codex/issue-361-provider-connection-recovery
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1659832Z  * [new branch]      codex/issue-375-managed-runtime          -> origin/codex/issue-375-managed-runtime
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1661373Z  * [new branch]      codex/issue-376-harness-readiness        -> origin/codex/issue-376-harness-readiness
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1662967Z  * [new branch]      codex/issue-377-prime-managed-runtime    -> origin/codex/issue-377-prime-managed-runtime
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1664319Z  * [new branch]      codex/issue-52-graph-search              -> origin/codex/issue-52-graph-search
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1665581Z  * [new branch]      codex/issue-52-ladybug-search            -> origin/codex/issue-52-ladybug-search
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1666826Z  * [new branch]      codex/issue-52-prime-search              -> origin/codex/issue-52-prime-search
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1668125Z  * [new branch]      codex/issue-52-query-executor            -> origin/codex/issue-52-query-executor
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1669454Z  * [new branch]      codex/issue-52-search-off-defaults       -> origin/codex/issue-52-search-off-defaults
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1670747Z  * [new branch]      codex/issue-55-invoke-leases             -> origin/codex/issue-55-invoke-leases
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1671626Z  * [new branch]      codex/issue-56-navigation-history        -> origin/codex/issue-56-navigation-history
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1672727Z  * [new branch]      codex/issue-73-inspector-fit-recovery    -> origin/codex/issue-73-inspector-fit-recovery
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1673661Z  * [new branch]      codex/issue-85-ask-profile-evidence      -> origin/codex/issue-85-ask-profile-evidence
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1674526Z  * [new branch]      codex/judge-shell-guidance               -> origin/codex/judge-shell-guidance
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1675408Z  * [new branch]      codex/ladybug-license-receipt-policy     -> origin/codex/ladybug-license-receipt-policy
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1676374Z  * [new branch]      codex/layered-complete-underlying-task   -> origin/codex/layered-complete-underlying-task
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1677769Z  * [new branch]      codex/matt-pocock-skill-setup            -> origin/codex/matt-pocock-skill-setup
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1679102Z  * [new branch]      codex/navigation-breadcrumbs             -> origin/codex/navigation-breadcrumbs
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1680659Z  * [new branch]      codex/node-redis-command-queue-race-278  -> origin/codex/node-redis-command-queue-race-278
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1681780Z  * [new branch]      codex/parallel-ci-build                  -> origin/codex/parallel-ci-build
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1682802Z  * [new branch]      codex/pin-intel-canary-views             -> origin/codex/pin-intel-canary-views
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1683860Z  * [new branch]      codex/postmortem-desktop-0.2.15-state-migration -> origin/codex/postmortem-desktop-0.2.15-state-migration
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1684871Z  * [new branch]      codex/prd-asd-ste100                     -> origin/codex/prd-asd-ste100
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1685712Z  * [new branch]      codex/prime-agent-harness                -> origin/codex/prime-agent-harness
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1686714Z  * [new branch]      codex/prime-claude-presentation-guidance -> origin/codex/prime-claude-presentation-guidance
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1687801Z  * [new branch]      codex/prime-provider-routing-fixes       -> origin/codex/prime-provider-routing-fixes
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1688829Z  * [new branch]      codex/product-codex-layered-harness      -> origin/codex/product-codex-layered-harness
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1689863Z  * [new branch]      codex/prototype-219-node-input-state     -> origin/codex/prototype-219-node-input-state
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1690973Z  * [new branch]      codex/prototype-portable-evidence-contract -> origin/codex/prototype-portable-evidence-contract
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1691988Z  * [new branch]      codex/record-arm64-stable                -> origin/codex/record-arm64-stable
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1693038Z  * [new branch]      codex/record-intel-stable-promotion      -> origin/codex/record-intel-stable-promotion
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1694038Z  * [new branch]      codex/reservation-capacity-case          -> origin/codex/reservation-capacity-case
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1695223Z  * [new branch]      codex/reuse-desktop-preview-candidate    -> origin/codex/reuse-desktop-preview-candidate
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1696211Z  * [new branch]      codex/settings-sidebar-tabs              -> origin/codex/settings-sidebar-tabs
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1697143Z  * [new branch]      codex/share-service-16mib-setup          -> origin/codex/share-service-16mib-setup
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1698077Z  * [new branch]      codex/shared-eval-product-ux             -> origin/codex/shared-eval-product-ux
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1699005Z  * [new branch]      codex/simplify-desktop-account           -> origin/codex/simplify-desktop-account
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1699919Z  * [new branch]      codex/simulated-user-judge               -> origin/codex/simulated-user-judge
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1701138Z  * [new branch]      codex/stable-promotion-evidence          -> origin/codex/stable-promotion-evidence
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1702678Z  * [new branch]      codex/test-depth-01-provider-authority   -> origin/codex/test-depth-01-provider-authority
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1704293Z  * [new branch]      codex/test-depth-02-model-selection-onboarding -> origin/codex/test-depth-02-model-selection-onboarding
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1705987Z  * [new branch]      codex/test-depth-03-harness-host-lifecycle -> origin/codex/test-depth-03-harness-host-lifecycle
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1707701Z  * [new branch]      codex/test-depth-04-native-harness-matrices -> origin/codex/test-depth-04-native-harness-matrices
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1709433Z  * [new branch]      codex/test-depth-05-eval-review-contracts -> origin/codex/test-depth-05-eval-review-contracts
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1710889Z  * [new branch]      codex/test-necessity-review              -> origin/codex/test-necessity-review
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1712582Z  * [new branch]      codex/tournament-operations-case-278     -> origin/codex/tournament-operations-case-278
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1714141Z  * [new branch]      codex/unblock-preview-0.2.19             -> origin/codex/unblock-preview-0.2.19
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1715568Z  * [new branch]      codex/unit-test-consolidation            -> origin/codex/unit-test-consolidation
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1717516Z  * [new branch]      codex/unit-test-consolidation-iteration2-backup -> origin/codex/unit-test-consolidation-iteration2-backup
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1719566Z  * [new branch]      codex/verification-portfolio-inventory   -> origin/codex/verification-portfolio-inventory
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1721131Z  * [new branch]      codex/verify-407-with-356                -> origin/codex/verify-407-with-356
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1723004Z  * [new branch]      cursor/capability-eval-interaction-variants-5ef5 -> origin/cursor/capability-eval-interaction-variants-5ef5
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1724868Z  * [new branch]      cursor/setup-dev-environment-b2af        -> origin/cursor/setup-dev-environment-b2af
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1726317Z  * [new branch]      fix/ladybug-evidence-history             -> origin/fix/ladybug-evidence-history
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1727710Z  * [new branch]      fix/packaged-bundle-permissions          -> origin/fix/packaged-bundle-permissions
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1729109Z  * [new branch]      fix/sandboxed-preload-bridge             -> origin/fix/sandboxed-preload-bridge
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1730404Z  * [new branch]      fix/sentry-cli-arg-order                 -> origin/fix/sentry-cli-arg-order
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1731666Z  * [new branch]      fix/window-closed-destroyed              -> origin/fix/window-closed-destroyed
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1732973Z  * [new branch]      infra/share-service                      -> origin/infra/share-service
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1733915Z  * [new branch]      main                                     -> origin/main
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1734910Z  * [new branch]      prototype/share-slice-1                  -> origin/prototype/share-slice-1
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1736149Z  * [new branch]      prototype/share-thread-viewer            -> origin/prototype/share-thread-viewer
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1737528Z  * [new branch]      research/verification-runtime-gates      -> origin/research/verification-runtime-gates
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1738765Z  * [new tag]         desktop-v0.2.0                           -> desktop-v0.2.0
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1739593Z  * [new tag]         desktop-v0.2.1                           -> desktop-v0.2.1
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1740428Z  * [new tag]         desktop-v0.2.10                          -> desktop-v0.2.10
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1741271Z  * [new tag]         desktop-v0.2.11                          -> desktop-v0.2.11
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1742106Z  * [new tag]         desktop-v0.2.12                          -> desktop-v0.2.12
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1743064Z  * [new tag]         desktop-v0.2.13                          -> desktop-v0.2.13
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1743901Z  * [new tag]         desktop-v0.2.14                          -> desktop-v0.2.14
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1744741Z  * [new tag]         desktop-v0.2.15                          -> desktop-v0.2.15
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1745573Z  * [new tag]         desktop-v0.2.16                          -> desktop-v0.2.16
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1746398Z  * [new tag]         desktop-v0.2.17                          -> desktop-v0.2.17
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1747224Z  * [new tag]         desktop-v0.2.18                          -> desktop-v0.2.18
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1748042Z  * [new tag]         desktop-v0.2.19                          -> desktop-v0.2.19
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1748859Z  * [new tag]         desktop-v0.2.2                           -> desktop-v0.2.2
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1749683Z  * [new tag]         desktop-v0.2.20                          -> desktop-v0.2.20
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1750501Z  * [new tag]         desktop-v0.2.21                          -> desktop-v0.2.21
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1751309Z  * [new tag]         desktop-v0.2.22                          -> desktop-v0.2.22
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1752108Z  * [new tag]         desktop-v0.2.23                          -> desktop-v0.2.23
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1753020Z  * [new tag]         desktop-v0.2.24                          -> desktop-v0.2.24
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1753822Z  * [new tag]         desktop-v0.2.25                          -> desktop-v0.2.25
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1754712Z  * [new tag]         desktop-v0.2.26                          -> desktop-v0.2.26
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1755506Z  * [new tag]         desktop-v0.2.28                          -> desktop-v0.2.28
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1756321Z  * [new tag]         desktop-v0.2.29                          -> desktop-v0.2.29
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1757137Z  * [new tag]         desktop-v0.2.3                           -> desktop-v0.2.3
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1757946Z  * [new tag]         desktop-v0.2.30                          -> desktop-v0.2.30
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1758760Z  * [new tag]         desktop-v0.2.4                           -> desktop-v0.2.4
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1759558Z  * [new tag]         desktop-v0.2.5                           -> desktop-v0.2.5
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1760363Z  * [new tag]         desktop-v0.2.6                           -> desktop-v0.2.6
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1761170Z  * [new tag]         desktop-v0.2.7                           -> desktop-v0.2.7
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1761979Z  * [new tag]         desktop-v0.2.8                           -> desktop-v0.2.8
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1762894Z  * [new tag]         desktop-v0.2.9                           -> desktop-v0.2.9
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1763736Z  * [new ref]         7a2b3d0aae5a8885903d8ce1f87819d1b7a4cd1a -> pull/484/merge
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1765400Z ##[endgroup]
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1765928Z ##[group]Determining the checkout info
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1766582Z ##[endgroup]
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1766993Z [command]/usr/bin/git sparse-checkout disable
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1768131Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1769463Z ##[group]Checking out the ref
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.1770078Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/484/merge
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3423599Z Note: switching to 'refs/remotes/pull/484/merge'.
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3424200Z 
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3424554Z You are in 'detached HEAD' state. You can look around, make experimental
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3425660Z changes and commit them, and you can discard any commits you make in this
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3426502Z state without impacting any branches by switching back to a branch.
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3427004Z 
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3427304Z If you want to create a new branch to retain commits you create, you may
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3428068Z do so (now or later) by using -c with the switch command. Example:
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3428532Z 
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3428670Z   git switch -c <new-branch-name>
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3428943Z 
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3429074Z Or undo this operation with:
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3429313Z 
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3429419Z   git switch -
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3429582Z 
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3429930Z Turn off this advice by setting config variable advice.detachedHead to false
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3430489Z 
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3431106Z HEAD is now at 7a2b3d0 Merge 5436731ae1d364323b6f8f88bb5673e3c5c585b0 into 61ce7b0cc50ee819eb54568cb8fc7165bf6c1e01
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3445487Z ##[endgroup]
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3481023Z [command]/usr/bin/git log -1 --format=%H
+Plan affected verification	Check out source and base history	2026-09-25T10:34:00.3500658Z 7a2b3d0aae5a8885903d8ce1f87819d1b7a4cd1a
+Plan affected verification	Set up pinned Node	﻿2026-09-25T10:34:00.3708659Z ##[group]Run actions/setup-node@v7
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.3709052Z with:
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.3709320Z   node-version-file: .node-version
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.3709693Z   check-latest: false
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.3713873Z   token: ***
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.3714155Z   package-manager-cache: true
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.3714501Z ##[endgroup]
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.4486451Z Node version file is not JSON file
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.4487410Z Resolved .node-version as 22.23.2
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.4504501Z Found in cache @ /opt/hostedtoolcache/node/22.23.2/x64
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.4506769Z ##[group]Environment details
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.7557862Z node: v22.23.2
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.7558542Z npm: 10.9.8
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.7558985Z yarn: 1.22.22
+Plan affected verification	Set up pinned Node	2026-09-25T10:34:00.7560191Z ##[endgroup]
+Plan affected verification	Verify Node toolchain	﻿2026-09-25T10:34:00.7685226Z ##[group]Run node scripts/check-node-version.mjs
+Plan affected verification	Verify Node toolchain	2026-09-25T10:34:00.7686060Z [36;1mnode scripts/check-node-version.mjs[0m
+Plan affected verification	Verify Node toolchain	2026-09-25T10:34:00.7920550Z shell: /usr/bin/bash -e {0}
+Plan affected verification	Verify Node toolchain	2026-09-25T10:34:00.7921196Z ##[endgroup]
+Plan affected verification	Verify Node toolchain	2026-09-25T10:34:00.8193629Z Node toolchain verified: 22.23.2 matches .node-version.
+Plan affected verification	Derive affected-module plan	﻿2026-09-25T10:34:00.8285706Z ##[group]Run mode="$(node scripts/ci/select-mode.mjs)"
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:00.8286371Z [36;1mmode="$(node scripts/ci/select-mode.mjs)"[0m
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:00.8286964Z [36;1mnode scripts/ci/plan-affected.mjs \[0m
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:00.8287565Z [36;1m  --base "61ce7b0cc50ee819eb54568cb8fc7165bf6c1e01" \[0m
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:00.8288197Z [36;1m  --head "5436731ae1d364323b6f8f88bb5673e3c5c585b0" \[0m
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:00.8288857Z [36;1m  --mode "$mode"[0m
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:00.8339965Z shell: /usr/bin/bash -e {0}
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:00.8340480Z ##[endgroup]
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:07.4886249Z info: syncing channel updates for 1.98.0-x86_64-unknown-linux-gnu
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:07.4886774Z info: latest update on 2026-08-20 for version 1.98.0 (88d9e12ae 2026-08-18)
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:07.4887032Z info: downloading 5 components
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:07.4887364Z warn: the missing active toolchain `1.98.0-x86_64-unknown-linux-gnu` has been auto-installed
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:07.4888188Z warn: this might cause rustup commands to take longer time to finish than expected
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:07.4888983Z info: you may opt out with `RUSTUP_AUTO_INSTALL=0` or `rustup set auto-install disable`
+Plan affected verification	Derive affected-module plan	2026-09-25T10:34:07.4904162Z {"version":1,"mode":"full","reasons":[".github/workflows/ci.yml: full-portfolio input","docs/evidence/issue-356-import-removal-storage/README.md: full-portfolio input","docs/evidence/issue-407-ci-cancellation/README.md: full-portfolio input"],"changedPaths":[".github/workflows/ci.yml","crates/relayer-graph-core/src/graph/import.rs","crates/relayer-graph-core/src/storage/sqlite/imports.rs","crates/relayer-graph-core/tests/graph_database.rs","docs/agents/ci.md","docs/evidence/issue-356-import-removal-storage/README.md","docs/evidence/issue-407-ci-cancellation/README.md","test/ci-required-check.test.mjs"],"rustPackages":["relayer-app-server","relayer-graph-core","relayer-graph-server","relayer-telemetry-capability"],"npmWorkspaces":["@relayer/eval-runner","@relayer/graph-client","@relayer/harness-host","relayer-desktop"],"npmBuildWorkspaces":["@relayer/eval-runner","@relayer/graph-client","@relayer/harness-host","relayer-desktop"],"vitestFiles":[],"vitestRustPackages":["relayer-app-server","relayer-graph-server"],"runtimeRustPackages":["relayer-app-server","relayer-graph-server"],"rustCrash":true,"runtimePackagesKey":"relayer-app-server.relayer-graph-server","rootTypeScript":true,"chapters":{"rust":true,"typescript":true,"vitest":true,"python":true,"receipts":true,"prd":true,"packaging":true}}
+Plan affected verification	Identify Rust acceleration inputs	﻿2026-09-25T10:34:07.5064469Z ##[group]Run rustc --version --verbose
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5064774Z [36;1mrustc --version --verbose[0m
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5065182Z [36;1mecho "release=$(rustc --version --verbose | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"[0m
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5149691Z shell: /usr/bin/bash -e {0}
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5150268Z ##[endgroup]
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5516566Z rustc 1.98.0 (88d9e12ae 2026-08-18)
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5517095Z binary: rustc
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5517431Z commit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5517745Z commit-date: 2026-08-18
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5517924Z host: x86_64-unknown-linux-gnu
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5518083Z release: 1.98.0
+Plan affected verification	Identify Rust acceleration inputs	2026-09-25T10:34:07.5518225Z LLVM version: 22.1.8
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	﻿2026-09-25T10:34:07.6392911Z ##[group]Run actions/cache/restore@v5
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.6393168Z with:
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.6393306Z   path: /home/runner/work/_temp/lbug-prebuilt
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.6393613Z   key: lbug-prebuilt-Linux-X64-1.98.0-v1-22b7980c76c4957140bc3414146756b5f90d604713be2ba2f5d37892100c7edf
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.6393889Z   lookup-only: true
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.6394016Z   enableCrossOsArchive: false
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.6394162Z   fail-on-cache-miss: false
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.6394312Z ##[endgroup]
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.8537447Z Cache hit for: lbug-prebuilt-Linux-X64-1.98.0-v1-22b7980c76c4957140bc3414146756b5f90d604713be2ba2f5d37892100c7edf
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.8538219Z Lookup only - skipping download
+Plan affected verification	Look up trusted prebuilt Ladybug bundle	2026-09-25T10:34:07.8586165Z Cache found and can be restored from key: lbug-prebuilt-Linux-X64-1.98.0-v1-22b7980c76c4957140bc3414146756b5f90d604713be2ba2f5d37892100c7edf
+Plan affected verification	Look up trusted Rust runtime bundle	﻿2026-09-25T10:34:07.9857426Z ##[group]Run actions/cache/restore@v5
+Plan affected verification	Look up trusted Rust runtime bundle	2026-09-25T10:34:07.9857621Z with:
+Plan affected verification	Look up trusted Rust runtime bundle	2026-09-25T10:34:07.9857768Z   path: /home/runner/work/_temp/relayer-rust-runtime
+Plan affected verification	Look up trusted Rust runtime bundle	2026-09-25T10:34:07.9858234Z   key: rust-runtime-Linux-X64-1.98.0-debug-default-v1-82ea170cc655d46fe77c4b5a22936343c4fc1a9d7b21403df17e07f671a0b33c-relayer-app-server.relayer-graph-server
+Plan affected verification	Look up trusted Rust runtime bundle	2026-09-25T10:34:07.9858689Z   lookup-only: true
+Plan affected verification	Look up trusted Rust runtime bundle	2026-09-25T10:34:07.9858826Z   enableCrossOsArchive: false
+Plan affected verification	Look up trusted Rust runtime bundle	2026-09-25T10:34:07.9858973Z   fail-on-cache-miss: false
+Plan affected verification	Look up trusted Rust runtime bundle	2026-09-25T10:34:07.9859113Z ##[endgroup]
+Plan affected verification	Look up trusted Rust runtime bundle	2026-09-25T10:34:08.2282578Z Cache not found for input keys: rust-runtime-Linux-X64-1.98.0-debug-default-v1-82ea170cc655d46fe77c4b5a22936343c4fc1a9d7b21403df17e07f671a0b33c-relayer-app-server.relayer-graph-server
+Plan affected verification	Publish acceleration lookups	﻿2026-09-25T10:34:08.2360351Z ##[group]Run echo "lbug_cached=true" >> "$GITHUB_OUTPUT"
+Plan affected verification	Publish acceleration lookups	2026-09-25T10:34:08.2360598Z [36;1mecho "lbug_cached=true" >> "$GITHUB_OUTPUT"[0m
+Plan affected verification	Publish acceleration lookups	2026-09-25T10:34:08.2360806Z [36;1mecho "runtime_cache_hit=false" >> "$GITHUB_OUTPUT"[0m
+Plan affected verification	Publish acceleration lookups	2026-09-25T10:34:08.2412828Z shell: /usr/bin/bash -e {0}
+Plan affected verification	Publish acceleration lookups	2026-09-25T10:34:08.2412978Z ##[endgroup]
+Plan affected verification	Post Set up pinned Node	﻿2026-09-25T10:34:08.2568386Z Post job cleanup.
+Plan affected verification	Post Check out source and base history	﻿2026-09-25T10:34:08.3434017Z Post job cleanup.
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.3978737Z [command]/usr/bin/git version
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4008794Z git version 2.55.0
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4029985Z Temporarily overriding HOME='/home/runner/work/_temp/29faca18-a4cc-4d3e-907c-a48271e36232' before making global git config changes
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4031142Z Adding repository directory to the temporary git global config as a safe directory
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4033599Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/relayer-graphcomplete/relayer-graphcomplete
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4057224Z Removing SSH command configuration
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4061073Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4086907Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4257199Z Removing HTTP extra header
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4259721Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4281633Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4449597Z Removing includeIf entries pointing to credentials config files
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4453191Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4472366Z includeif.gitdir:/home/runner/work/relayer-graphcomplete/relayer-graphcomplete/.git.path
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4473031Z includeif.gitdir:/home/runner/work/relayer-graphcomplete/relayer-graphcomplete/.git/worktrees/*.path
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4473430Z includeif.gitdir:/github/workspace/.git.path
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4473705Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4477905Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/relayer-graphcomplete/relayer-graphcomplete/.git.path
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4493864Z /home/runner/work/_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4500483Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/relayer-graphcomplete/relayer-graphcomplete/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-d9f37384\-5e68\-45ef\-9635\-8dbb3e755edb\.config
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4525764Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/relayer-graphcomplete/relayer-graphcomplete/.git/worktrees/*.path
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4541755Z /home/runner/work/_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4547719Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/relayer-graphcomplete/relayer-graphcomplete/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-d9f37384\-5e68\-45ef\-9635\-8dbb3e755edb\.config
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4576969Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4592787Z /github/runner_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4597314Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-d9f37384\-5e68\-45ef\-9635\-8dbb3e755edb\.config
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4622356Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4638383Z /github/runner_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4644200Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-d9f37384\-5e68\-45ef\-9635\-8dbb3e755edb\.config
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4670120Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Plan affected verification	Post Check out source and base history	2026-09-25T10:34:08.4835227Z Removing credentials config '/home/runner/work/_temp/git-credentials-d9f37384-5e68-45ef-9635-8dbb3e755edb.config'
+Plan affected verification	Complete job	﻿2026-09-25T10:34:08.4959177Z Evaluate and set job outputs
+Plan affected verification	Complete job	2026-09-25T10:34:08.4968872Z Set output 'plan'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4970030Z Set output 'mode'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4970525Z Set output 'rust'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4970912Z Set output 'rust_crash'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4971094Z Set output 'rust_runtime'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4971278Z Set output 'typescript'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4971452Z Set output 'vitest'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4971617Z Set output 'python'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4971785Z Set output 'receipts'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4971952Z Set output 'prd'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4972115Z Set output 'packaging'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4972473Z Set output 'lbug_cached'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4972657Z Set output 'runtime_cache_hit'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4972877Z Set output 'runtime_packages_key'
+Plan affected verification	Complete job	2026-09-25T10:34:08.4973267Z Cleaning up orphan processes

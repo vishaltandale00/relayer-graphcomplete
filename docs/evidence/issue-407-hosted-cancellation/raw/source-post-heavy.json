@@ -1,0 +1,111 @@
+{
+  "kind": "combined-post-heavy-source-and-native-receipt",
+  "baseCommit": "e17fea2f27d570dec7c564e93b8d6975602a48ca",
+  "combinedTreeBeforeAndAfter": "19bf24a33787f0e640fb18ab5f2dbef73389b496",
+  "sourceUnchanged": true,
+  "sourceFiles": {
+    "crates/relayer-graph-core/src/graph/import.rs": {
+      "sha256": "1bf0f3e7a718818b66aa3f21d5e94cfda65c358daff9762aefbc14ff53f7a070",
+      "blob": "fda832728da0eac14c8e07e47097ec3c39e210fa"
+    },
+    "crates/relayer-graph-core/src/storage/sqlite/imports.rs": {
+      "sha256": "d13f1d54ac9b83a28080101b450e75f07982d6554a6a7574b3bd2c16808df83c",
+      "blob": "d367a0a746c6368aab486eab48ec26588083fee6"
+    },
+    "crates/relayer-graph-core/tests/graph_database.rs": {
+      "sha256": "fd3a15d390947d921e56548136807b9d2da39f2beb4ee957844a4fa3f331bad6",
+      "blob": "1b578f0a0289df0ae9dcb1795735493615ac6ea3"
+    },
+    "docs/evidence/issue-356-import-removal-storage/README.md": {
+      "sha256": "13d641b31563b0e6086ef981577b2a24ce3e8c5bdb5229df625240f62b8532cf",
+      "blob": "3f1135b9cce42d60686d87394b3e68e524b8f6bd"
+    }
+  },
+  "workflowBlobSameAsReviewed407": "f2c37df5e7202a6340b22c8934a206f3cac96be8",
+  "firstFullCheck": {
+    "exitCode": 1,
+    "failures": [
+      "evidence-capture-integrity.test.mjs: sealed Homebrew Node closure could not write temporary Mach-O output (No space left on device)",
+      "graph-operation-recorder.test.mjs: expected waiting but received exported",
+      "workspace-navigation-integration.test.mjs: expected targetLayerId null but received 303"
+    ],
+    "vitest": {
+      "passed": 2265,
+      "failed": 3,
+      "skipped": 3
+    }
+  },
+  "isolatedDiagnostic": {
+    "command": "npx vitest run test/workspace-navigation-integration.test.mjs -t 'retries a one-shot canonical root failure after the result is already terminal'",
+    "passed": 1,
+    "skipped": 28
+  },
+  "oneUnchangedFullCheckRetry": {
+    "exitCode": 0,
+    "env": {
+      "tmpdir": "/Volumes/2T-SSD/tmp/verify-407-with-356"
+    },
+    "vitest": {
+      "filesPassed": 172,
+      "filesSkipped": 1,
+      "testsPassed": 2268,
+      "testsSkipped": 3
+    }
+  },
+  "build": {
+    "exitCode": 0,
+    "node": "v22.23.2",
+    "cargoTargetDir": "/Volumes/2T-SSD/cargo/relayer-graphcomplete"
+  },
+  "nativeBinariesBefore": [
+    [
+      "4c00255e2899289e2f18708d38c800c56f84e87385f7e76e208985e2e8d3ebd2",
+      "target/debug/relayer-app-server"
+    ],
+    [
+      "6a3126695d3178bb04380d6b0603c46ded49ba60ae8a13a9a0c840a6dfe19373",
+      "target/debug/relayer-graph-server"
+    ]
+  ],
+  "nativeBinariesAfter": {
+    "relayer-app-server": {
+      "path": "target/debug/relayer-app-server",
+      "sha256": "4c00255e2899289e2f18708d38c800c56f84e87385f7e76e208985e2e8d3ebd2",
+      "size": 69925664,
+      "mtime": "2026-09-25T09:56:40.180Z"
+    },
+    "relayer-graph-server": {
+      "path": "target/debug/relayer-graph-server",
+      "sha256": "6a3126695d3178bb04380d6b0603c46ded49ba60ae8a13a9a0c840a6dfe19373",
+      "size": 108640424,
+      "mtime": "2026-09-25T09:56:31.684Z"
+    }
+  },
+  "nativeBinaryHashesUnchanged": true,
+  "logFiles": {
+    "npm-ci.log": {
+      "sha256": "b6893ad08f647f8b92750d8a2e1804c3eb83327c98f0b7143350979247c8fdb6",
+      "bytes": 1636
+    },
+    "electron-install.log": {
+      "sha256": "124360e98f6b432d3e93fa9631c52a502ffd3e1208f9c56dd60ca9e73589acd4",
+      "bytes": 24
+    },
+    "check.log": {
+      "sha256": "4ee351140c08843f7bdf5ab0ee01b0f4b886357af33d9bf1100ed9f9b68fee94",
+      "bytes": 93447
+    },
+    "check-retry.log": {
+      "sha256": "b0c4242c97b3a3e27e10ed85694c66d2ea43cf6818b11d77d8ce12ebc60ec81f",
+      "bytes": 91934
+    },
+    "build.log": {
+      "sha256": "386c672daa6cf2f30de0824c95c4d19c08ba416c571ae2ce52c458969a52e229",
+      "bytes": 1953
+    },
+    "diagnostic-workspace-navigation.log": {
+      "sha256": "9d039a89b3ea675121e6c5e6c6d0b7dfdebc6c66a68f92a968a82bb6b1dacbb6",
+      "bytes": 243
+    }
+  }
+}

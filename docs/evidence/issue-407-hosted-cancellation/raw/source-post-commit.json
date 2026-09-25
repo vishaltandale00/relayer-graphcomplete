@@ -1,0 +1,30 @@
+{
+  "kind": "combined-post-commit-proof-receipt",
+  "commit": "2db633c42734524ac7267b0c3f7ec90081b2af6b",
+  "parent": "e17fea2f27d570dec7c564e93b8d6975602a48ca",
+  "tree": "19bf24a33787f0e640fb18ab5f2dbef73389b496",
+  "workflowBlob": "f2c37df5e7202a6340b22c8934a206f3cac96be8",
+  "workflowByteIdenticalTo407": true,
+  "preHeavyTree": "19bf24a33787f0e640fb18ab5f2dbef73389b496",
+  "postHeavyTree": "19bf24a33787f0e640fb18ab5f2dbef73389b496",
+  "gates": {
+    "firstCheck": {
+      "exitCode": 1,
+      "logSha256": "4ee351140c08843f7bdf5ab0ee01b0f4b886357af33d9bf1100ed9f9b68fee94"
+    },
+    "isolatedWorkspaceAssertion": {
+      "passed": 1,
+      "logSha256": "9d039a89b3ea675121e6c5e6c6d0b7dfdebc6c66a68f92a968a82bb6b1dacbb6"
+    },
+    "oneUnchangedCheckRetry": {
+      "exitCode": 0,
+      "logSha256": "b0c4242c97b3a3e27e10ed85694c66d2ea43cf6818b11d77d8ce12ebc60ec81f",
+      "tmpdir": "/Volumes/2T-SSD/tmp/verify-407-with-356"
+    },
+    "build": {
+      "exitCode": 0,
+      "logSha256": "386c672daa6cf2f30de0824c95c4d19c08ba416c571ae2ce52c458969a52e229"
+    }
+  },
+  "nativeBinaryHashesUnchanged": true
+}

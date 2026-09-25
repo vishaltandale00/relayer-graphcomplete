@@ -1,0 +1,2 @@
+✓ Request to cancel workflow 36124809995 submitted.
+CANCEL_B_EXIT=0

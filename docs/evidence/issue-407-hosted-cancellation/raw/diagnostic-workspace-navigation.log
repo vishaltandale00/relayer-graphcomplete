@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/verify-407-with-356
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 28 skipped (29)
+   Start at  06:25:46
+   Duration  262ms (transform 137ms, setup 0ms, import 70ms, tests 106ms, environment 0ms)
+

@@ -1,0 +1,49 @@
+{
+  "kind": "combined-hosted-proof-precommit-receipt",
+  "issue407": {
+    "reviewedCommit": "e17fea2f27d570dec7c564e93b8d6975602a48ca",
+    "tree": "b91192e49b0b20a3f1a27135626316bed7ed58c0",
+    "pr": 478
+  },
+  "issue356": {
+    "reviewedCommit": "d693d3b168ba5c33d45c315d46534f9b81865e90",
+    "base": "61ce7b0cc50ee819eb54568cb8fc7165bf6c1e01",
+    "pr": 481,
+    "url": "https://github.com/vishaltandale00/relayer-graphcomplete/pull/481"
+  },
+  "combined": {
+    "branch": "codex/verify-407-with-356",
+    "worktree": "/Volumes/2T-SSD/worktrees/verify-407-with-356",
+    "stagedTree": "19bf24a33787f0e640fb18ab5f2dbef73389b496",
+    "patchSha256": "e60284896d6ef3db6667260ed7fedea5f8935f47427397b4800db982593abfc8",
+    "paths": {
+      "crates/relayer-graph-core/src/graph/import.rs": {
+        "blob": "fda832728da0eac14c8e07e47097ec3c39e210fa",
+        "sha256": "1bf0f3e7a718818b66aa3f21d5e94cfda65c358daff9762aefbc14ff53f7a070"
+      },
+      "crates/relayer-graph-core/src/storage/sqlite/imports.rs": {
+        "blob": "d367a0a746c6368aab486eab48ec26588083fee6",
+        "sha256": "d13f1d54ac9b83a28080101b450e75f07982d6554a6a7574b3bd2c16808df83c"
+      },
+      "crates/relayer-graph-core/tests/graph_database.rs": {
+        "blob": "1b578f0a0289df0ae9dcb1795735493615ac6ea3",
+        "sha256": "fd3a15d390947d921e56548136807b9d2da39f2beb4ee957844a4fa3f331bad6"
+      },
+      "docs/evidence/issue-356-import-removal-storage/README.md": {
+        "blob": "3f1135b9cce42d60686d87394b3e68e524b8f6bd",
+        "sha256": "13d641b31563b0e6086ef981577b2a24ce3e8c5bdb5229df625240f62b8532cf"
+      }
+    },
+    "workflowBlobH": "f2c37df5e7202a6340b22c8934a206f3cac96be8",
+    "workflowBlobCombined": "f2c37df5e7202a6340b22c8934a206f3cac96be8",
+    "workflowByteIdentical": true,
+    "conflicts": false,
+    "committed": false,
+    "pushed": false,
+    "remoteCIStarted": false
+  },
+  "requiredBeforeCommit": [
+    "npm run check",
+    "npm run build"
+  ]
+}

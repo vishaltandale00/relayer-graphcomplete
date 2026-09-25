@@ -1,0 +1,2 @@
+4c00255e2899289e2f18708d38c800c56f84e87385f7e76e208985e2e8d3ebd2  target/debug/relayer-app-server
+6a3126695d3178bb04380d6b0603c46ded49ba60ae8a13a9a0c840a6dfe19373  target/debug/relayer-graph-server

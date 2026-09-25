@@ -1,0 +1,2 @@
+✓ Request to cancel workflow 36124510010 submitted.
+CANCEL_BOOTSTRAP_EXIT=0
