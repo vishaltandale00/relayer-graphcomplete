@@ -1,0 +1,906 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "capturedAt": "2026-09-25T13:53:32.650Z",
+  "sourceCommit": "61ce7b0cc50ee819eb54568cb8fc7165bf6c1e01",
+  "sourceHashesBeforeCapture": [
+    {
+      "file": "scripts/test-interaction-context-lifecycle.mjs",
+      "sha256": "744a9763f96ab29f88f94c8c4dd115a02fe63e7f9cedfec3c79dc8680f28a6ec"
+    },
+    {
+      "file": "scripts/test-desktop-context-draft-warning.mjs",
+      "sha256": "ccc309a3f1d5dc71e9080e6c0ea16ea03ac5e64bee3b140fa229bd2c9690d212"
+    },
+    {
+      "file": "scripts/capture-interaction-context-evidence.mjs",
+      "sha256": "99702049393216048de75ca3d7c2cfeff30fbcfa76c488a4d313d44495b28114"
+    }
+  ],
+  "sourceHashesAfterCapture": [
+    {
+      "file": "scripts/test-interaction-context-lifecycle.mjs",
+      "sha256": "744a9763f96ab29f88f94c8c4dd115a02fe63e7f9cedfec3c79dc8680f28a6ec"
+    },
+    {
+      "file": "scripts/test-desktop-context-draft-warning.mjs",
+      "sha256": "ccc309a3f1d5dc71e9080e6c0ea16ea03ac5e64bee3b140fa229bd2c9690d212"
+    },
+    {
+      "file": "scripts/capture-interaction-context-evidence.mjs",
+      "sha256": "99702049393216048de75ca3d7c2cfeff30fbcfa76c488a4d313d44495b28114"
+    }
+  ],
+  "workingTreeDirty": true,
+  "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
+  "paidInferenceCalls": 0,
+  "runtime": "real Electron BrowserWindow + production renderer + Rust app/graph servers + SQLite",
+  "harness": "fixture-task-system (deterministic zero-inference implementation)",
+  "viewport": {
+    "width": 1480,
+    "height": 920
+  },
+  "recordingPixelDimensions": [
+    {
+      "width": 2960,
+      "height": 1840
+    },
+    {
+      "width": 2960,
+      "height": 1840
+    }
+  ],
+  "thread": {
+    "id": 1,
+    "interactionIds": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "statuses": [
+      "accepted",
+      "accepted",
+      "accepted",
+      "accepted"
+    ]
+  },
+  "draftJourney": {
+    "restoredDrafts": [
+      {
+        "id": "32108ec7-5931-41c9-86e2-b7da868da3d2",
+        "revision": 1,
+        "text": "Keep queue claims in their original order.",
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        }
+      },
+      {
+        "id": "8938da1b-68dd-4a96-a07d-c414a516699e",
+        "revision": 1,
+        "text": "Keep both workers available for queued tasks.",
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        }
+      }
+    ],
+    "freshDraftAfterDiscard": {
+      "id": "1cf73891-a40a-46fa-b46d-6db34fda7686",
+      "revision": 1,
+      "text": "Review worker availability before sending.",
+      "target": {
+        "nodeId": 29,
+        "sourceInteractionNodeId": 27,
+        "sourceLayerId": 10
+      }
+    },
+    "confirmedDraftText": "Keep queue claims in their original order.",
+    "owningHistoryTurn": 3,
+    "submittedInteractionId": 4,
+    "submittedContexts": [
+      {
+        "id": 16,
+        "type": "interaction.context",
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 28,
+          "kind": "concept",
+          "icon": "list",
+          "title": "Incoming queue",
+          "detail": "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.",
+          "state": "accepted"
+        },
+        "annotations": [
+          "Keep queue claims in their original order."
+        ]
+      }
+    ],
+    "interactionIdsBeforeWarning": [
+      1,
+      2,
+      3
+    ],
+    "interactionIdsAfterOverride": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "completeStateSnapshots": {
+      "draftBBeforeConfirm": {
+        "id": "8938da1b-68dd-4a96-a07d-c414a516699e",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Keep both workers available for queued tasks.",
+        "revision": 1,
+        "createdAt": "1790344405001",
+        "updatedAt": "1790344405001"
+      },
+      "draftBAfterConfirm": {
+        "id": "8938da1b-68dd-4a96-a07d-c414a516699e",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Keep both workers available for queued tasks.",
+        "revision": 1,
+        "createdAt": "1790344405001",
+        "updatedAt": "1790344405001"
+      },
+      "confirmedABeforeDiscard": {
+        "draftId": "32108ec7-5931-41c9-86e2-b7da868da3d2",
+        "threadId": 1,
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 28,
+          "kind": "concept",
+          "icon": "list",
+          "title": "Incoming queue",
+          "detail": "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.",
+          "state": "accepted"
+        },
+        "annotation": "Keep queue claims in their original order.",
+        "draftRevision": 1,
+        "confirmationRevision": 1,
+        "confirmedAt": "1790344408608"
+      },
+      "confirmedAAfterDiscard": {
+        "draftId": "32108ec7-5931-41c9-86e2-b7da868da3d2",
+        "threadId": 1,
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 28,
+          "kind": "concept",
+          "icon": "list",
+          "title": "Incoming queue",
+          "detail": "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.",
+          "state": "accepted"
+        },
+        "annotation": "Keep queue claims in their original order.",
+        "draftRevision": 1,
+        "confirmationRevision": 1,
+        "confirmedAt": "1790344408608"
+      },
+      "freshDraftAtWarning": {
+        "id": "1cf73891-a40a-46fa-b46d-6db34fda7686",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 1,
+        "createdAt": "1790344409648",
+        "updatedAt": "1790344409648"
+      },
+      "freshDraftAfterGoBack": {
+        "id": "1cf73891-a40a-46fa-b46d-6db34fda7686",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 1,
+        "createdAt": "1790344409648",
+        "updatedAt": "1790344409648"
+      },
+      "freshDraftAfterOverride": {
+        "id": "1cf73891-a40a-46fa-b46d-6db34fda7686",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 1,
+        "createdAt": "1790344409648",
+        "updatedAt": "1790344409648"
+      },
+      "freshDraftAfterHistoricalRestoration": {
+        "id": "1cf73891-a40a-46fa-b46d-6db34fda7686",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 1,
+        "createdAt": "1790344409648",
+        "updatedAt": "1790344409648"
+      }
+    }
+  },
+  "warningPresentation": {
+    "x": 751,
+    "y": 634.75,
+    "width": 352,
+    "height": 221.25
+  },
+  "assertions": {
+    "nodeDetailsOpened": true,
+    "nodeSwitchSavedAndRestoredDraft": true,
+    "closeWaitedForDraftSave": true,
+    "draftDiscardedFromDock": true,
+    "multipleAnnotationsAddedAndOrdered": true,
+    "compactComposerPopoverVisible": true,
+    "compactComposerPopoverAvoidsNodeDetails": true,
+    "multipleNodePillStripScrolls": true,
+    "confirmedPreviewIsReadOnly": true,
+    "annotationDeletedFromExplicitPreview": true,
+    "messageAndContextSent": true,
+    "historyPillAndPopoverVisible": true,
+    "historicalTargetNodeReopened": true,
+    "annotationOnlyInteractionSent": true,
+    "servicesAndWindowRestarted": true,
+    "persistedContextVisibleAfterRestart": true,
+    "targetNodeReopenedAfterRestart": true,
+    "twoOccurrenceBoundDraftsSurviveFullRestart": true,
+    "separateDraftRestorationAfterRestart": true,
+    "confirmingOneDraftPreservesTheOther": true,
+    "discardingOneDraftPreservesConfirmedContext": true,
+    "omissionWarningAndGoBackPreserveDraft": true,
+    "warningAndGoBackCreateNoInteraction": true,
+    "explicitOverrideSubmitsConfirmedContextOnly": true,
+    "explicitOverrideAddsExactlyOneInteraction": true,
+    "omittedDraftRestoresInNextComposer": true
+  },
+  "screenshots": [
+    {
+      "file": "grouped-composer.png",
+      "sha256": "9e558d6f64d34788e53dda988a8dccc715aad998d26cf68b06e3e3aa76e73744"
+    },
+    {
+      "file": "restarted-context.png",
+      "sha256": "a5ff98d13240a199b8b9fd5a0343d5d3eade30243196fb00c437a4c10da6445f"
+    },
+    {
+      "file": "two-drafts-restored.png",
+      "sha256": "5023b3fcca981a95b99561421816f7413130eef37d99676882f13eab4c21c61e"
+    },
+    {
+      "file": "second-draft-restored.png",
+      "sha256": "2fd7576655e54e0cae3a9000195de7ff2065275da17d15404b94e149b610d43b"
+    },
+    {
+      "file": "confirmed-draft-with-other-draft.png",
+      "sha256": "77f59ea4957c635cfe292840cf84712765ffc5b07bd260ec840c90ca78ecda60"
+    },
+    {
+      "file": "draft-omission-warning.png",
+      "sha256": "d8b881c84721ad36405dbe2d427cd06640630eb2fb08b2969ae3d97a9826a393"
+    },
+    {
+      "file": "draft-after-override.png",
+      "sha256": "6388288106076042fa14ac6af04a4298ade92571f56b6465b459f2fbcc71847b"
+    }
+  ],
+  "recording": {
+    "mode": "two continuous direct-renderer recordings with an explicit full-restart discontinuity; no screenshot interpolation or injected captions",
+    "segments": [
+      {
+        "file": "interaction-context-before-restart.mp4",
+        "sha256": "148eba237f8575a0fefea782a81ad0673f2fdbdd68b10e57a0abcee192b25437",
+        "capture": "Continuous sampled frames directly from the real Electron BrowserWindow; no generated or interpolated frames.",
+        "captureRateFps": 10,
+        "frameCount": 17,
+        "maximumFrameGapMs": 199,
+        "startedAtUtc": "2026-09-25T13:53:23.403Z",
+        "endedAtUtc": "2026-09-25T13:53:26.484Z",
+        "wallClockDurationMs": 3081,
+        "frameTimestamps": [
+          {
+            "frameNumber": 0,
+            "capturedAtUtc": "2026-09-25T13:53:23.488Z",
+            "elapsedMs": 85
+          },
+          {
+            "frameNumber": 1,
+            "capturedAtUtc": "2026-09-25T13:53:23.674Z",
+            "elapsedMs": 271
+          },
+          {
+            "frameNumber": 2,
+            "capturedAtUtc": "2026-09-25T13:53:23.851Z",
+            "elapsedMs": 448
+          },
+          {
+            "frameNumber": 3,
+            "capturedAtUtc": "2026-09-25T13:53:24.028Z",
+            "elapsedMs": 625
+          },
+          {
+            "frameNumber": 4,
+            "capturedAtUtc": "2026-09-25T13:53:24.206Z",
+            "elapsedMs": 803
+          },
+          {
+            "frameNumber": 5,
+            "capturedAtUtc": "2026-09-25T13:53:24.405Z",
+            "elapsedMs": 1002
+          },
+          {
+            "frameNumber": 6,
+            "capturedAtUtc": "2026-09-25T13:53:24.580Z",
+            "elapsedMs": 1177
+          },
+          {
+            "frameNumber": 7,
+            "capturedAtUtc": "2026-09-25T13:53:24.760Z",
+            "elapsedMs": 1357
+          },
+          {
+            "frameNumber": 8,
+            "capturedAtUtc": "2026-09-25T13:53:24.936Z",
+            "elapsedMs": 1533
+          },
+          {
+            "frameNumber": 9,
+            "capturedAtUtc": "2026-09-25T13:53:25.114Z",
+            "elapsedMs": 1711
+          },
+          {
+            "frameNumber": 10,
+            "capturedAtUtc": "2026-09-25T13:53:25.294Z",
+            "elapsedMs": 1891
+          },
+          {
+            "frameNumber": 11,
+            "capturedAtUtc": "2026-09-25T13:53:25.489Z",
+            "elapsedMs": 2086
+          },
+          {
+            "frameNumber": 12,
+            "capturedAtUtc": "2026-09-25T13:53:25.666Z",
+            "elapsedMs": 2263
+          },
+          {
+            "frameNumber": 13,
+            "capturedAtUtc": "2026-09-25T13:53:25.850Z",
+            "elapsedMs": 2447
+          },
+          {
+            "frameNumber": 14,
+            "capturedAtUtc": "2026-09-25T13:53:26.027Z",
+            "elapsedMs": 2624
+          },
+          {
+            "frameNumber": 15,
+            "capturedAtUtc": "2026-09-25T13:53:26.207Z",
+            "elapsedMs": 2804
+          },
+          {
+            "frameNumber": 16,
+            "capturedAtUtc": "2026-09-25T13:53:26.381Z",
+            "elapsedMs": 2978
+          }
+        ],
+        "events": [
+          {
+            "name": "journey recording started with the graph ready and Node Details closed",
+            "recordedAtUtc": "2026-09-25T13:53:23.524Z",
+            "elapsedMs": 121,
+            "framesCapturedBeforeEvent": 1
+          },
+          {
+            "name": "opened Incoming queue Node Details for draft A",
+            "recordedAtUtc": "2026-09-25T13:53:23.529Z",
+            "elapsedMs": 126,
+            "framesCapturedBeforeEvent": 1
+          },
+          {
+            "name": "opened the draft A editor",
+            "recordedAtUtc": "2026-09-25T13:53:23.531Z",
+            "elapsedMs": 128,
+            "framesCapturedBeforeEvent": 1
+          },
+          {
+            "name": "typed and durably saved draft A on Incoming queue",
+            "recordedAtUtc": "2026-09-25T13:53:23.936Z",
+            "elapsedMs": 533,
+            "framesCapturedBeforeEvent": 3
+          },
+          {
+            "name": "switched from Incoming queue to Two-worker pool",
+            "recordedAtUtc": "2026-09-25T13:53:24.292Z",
+            "elapsedMs": 889,
+            "framesCapturedBeforeEvent": 5
+          },
+          {
+            "name": "typed and durably saved draft B on Two-worker pool",
+            "recordedAtUtc": "2026-09-25T13:53:25.022Z",
+            "elapsedMs": 1619,
+            "framesCapturedBeforeEvent": 9
+          },
+          {
+            "name": "restored draft A after saving B",
+            "recordedAtUtc": "2026-09-25T13:53:25.382Z",
+            "elapsedMs": 1979,
+            "framesCapturedBeforeEvent": 11
+          },
+          {
+            "name": "restored draft B after saving and restoring A",
+            "recordedAtUtc": "2026-09-25T13:53:25.736Z",
+            "elapsedMs": 2333,
+            "framesCapturedBeforeEvent": 13
+          },
+          {
+            "name": "both complete durable drafts are present before service/window restart",
+            "recordedAtUtc": "2026-09-25T13:53:26.096Z",
+            "elapsedMs": 2693,
+            "framesCapturedBeforeEvent": 15
+          }
+        ],
+        "stream": {
+          "codec_name": "h264",
+          "width": 2960,
+          "height": 1840,
+          "pix_fmt": "yuv420p",
+          "side_data_list": [
+            {}
+          ]
+        },
+        "encodedDurationSeconds": 1.7,
+        "playbackDecoded": true
+      },
+      {
+        "file": "interaction-context-after-restart.mp4",
+        "sha256": "09544d2c8e1f4240aa185964fabb6234a2ff77f77b27aaca3f2ee5c59d9b1159",
+        "capture": "Continuous sampled frames directly from the real Electron BrowserWindow; no generated or interpolated frames.",
+        "captureRateFps": 10,
+        "frameCount": 25,
+        "maximumFrameGapMs": 229,
+        "startedAtUtc": "2026-09-25T13:53:27.417Z",
+        "endedAtUtc": "2026-09-25T13:53:32.064Z",
+        "wallClockDurationMs": 4647,
+        "frameTimestamps": [
+          {
+            "frameNumber": 0,
+            "capturedAtUtc": "2026-09-25T13:53:27.501Z",
+            "elapsedMs": 84
+          },
+          {
+            "frameNumber": 1,
+            "capturedAtUtc": "2026-09-25T13:53:27.715Z",
+            "elapsedMs": 298
+          },
+          {
+            "frameNumber": 2,
+            "capturedAtUtc": "2026-09-25T13:53:27.903Z",
+            "elapsedMs": 486
+          },
+          {
+            "frameNumber": 3,
+            "capturedAtUtc": "2026-09-25T13:53:28.098Z",
+            "elapsedMs": 681
+          },
+          {
+            "frameNumber": 4,
+            "capturedAtUtc": "2026-09-25T13:53:28.285Z",
+            "elapsedMs": 868
+          },
+          {
+            "frameNumber": 5,
+            "capturedAtUtc": "2026-09-25T13:53:28.482Z",
+            "elapsedMs": 1065
+          },
+          {
+            "frameNumber": 6,
+            "capturedAtUtc": "2026-09-25T13:53:28.675Z",
+            "elapsedMs": 1258
+          },
+          {
+            "frameNumber": 7,
+            "capturedAtUtc": "2026-09-25T13:53:28.888Z",
+            "elapsedMs": 1471
+          },
+          {
+            "frameNumber": 8,
+            "capturedAtUtc": "2026-09-25T13:53:29.065Z",
+            "elapsedMs": 1648
+          },
+          {
+            "frameNumber": 9,
+            "capturedAtUtc": "2026-09-25T13:53:29.248Z",
+            "elapsedMs": 1831
+          },
+          {
+            "frameNumber": 10,
+            "capturedAtUtc": "2026-09-25T13:53:29.431Z",
+            "elapsedMs": 2014
+          },
+          {
+            "frameNumber": 11,
+            "capturedAtUtc": "2026-09-25T13:53:29.606Z",
+            "elapsedMs": 2189
+          },
+          {
+            "frameNumber": 12,
+            "capturedAtUtc": "2026-09-25T13:53:29.835Z",
+            "elapsedMs": 2418
+          },
+          {
+            "frameNumber": 13,
+            "capturedAtUtc": "2026-09-25T13:53:30.017Z",
+            "elapsedMs": 2600
+          },
+          {
+            "frameNumber": 14,
+            "capturedAtUtc": "2026-09-25T13:53:30.212Z",
+            "elapsedMs": 2795
+          },
+          {
+            "frameNumber": 15,
+            "capturedAtUtc": "2026-09-25T13:53:30.394Z",
+            "elapsedMs": 2977
+          },
+          {
+            "frameNumber": 16,
+            "capturedAtUtc": "2026-09-25T13:53:30.591Z",
+            "elapsedMs": 3174
+          },
+          {
+            "frameNumber": 17,
+            "capturedAtUtc": "2026-09-25T13:53:30.768Z",
+            "elapsedMs": 3351
+          },
+          {
+            "frameNumber": 18,
+            "capturedAtUtc": "2026-09-25T13:53:30.941Z",
+            "elapsedMs": 3524
+          },
+          {
+            "frameNumber": 19,
+            "capturedAtUtc": "2026-09-25T13:53:31.116Z",
+            "elapsedMs": 3699
+          },
+          {
+            "frameNumber": 20,
+            "capturedAtUtc": "2026-09-25T13:53:31.298Z",
+            "elapsedMs": 3881
+          },
+          {
+            "frameNumber": 21,
+            "capturedAtUtc": "2026-09-25T13:53:31.482Z",
+            "elapsedMs": 4065
+          },
+          {
+            "frameNumber": 22,
+            "capturedAtUtc": "2026-09-25T13:53:31.658Z",
+            "elapsedMs": 4241
+          },
+          {
+            "frameNumber": 23,
+            "capturedAtUtc": "2026-09-25T13:53:31.831Z",
+            "elapsedMs": 4414
+          },
+          {
+            "frameNumber": 24,
+            "capturedAtUtc": "2026-09-25T13:53:32.021Z",
+            "elapsedMs": 4604
+          }
+        ],
+        "events": [
+          {
+            "name": "Electron BrowserWindow and app services reopened after explicit recording discontinuity",
+            "recordedAtUtc": "2026-09-25T13:53:27.537Z",
+            "elapsedMs": 120,
+            "framesCapturedBeforeEvent": 1
+          },
+          {
+            "name": "restored draft A after full service/window restart",
+            "recordedAtUtc": "2026-09-25T13:53:27.556Z",
+            "elapsedMs": 139,
+            "framesCapturedBeforeEvent": 1
+          },
+          {
+            "name": "restored draft B after full service/window restart",
+            "recordedAtUtc": "2026-09-25T13:53:28.070Z",
+            "elapsedMs": 653,
+            "framesCapturedBeforeEvent": 3
+          },
+          {
+            "name": "confirmed A while the full B record remained unchanged",
+            "recordedAtUtc": "2026-09-25T13:53:28.652Z",
+            "elapsedMs": 1235,
+            "framesCapturedBeforeEvent": 6
+          },
+          {
+            "name": "discarded B while the full confirmed A record remained unchanged",
+            "recordedAtUtc": "2026-09-25T13:53:29.290Z",
+            "elapsedMs": 1873,
+            "framesCapturedBeforeEvent": 10
+          },
+          {
+            "name": "created fresh B after discarding the original B",
+            "recordedAtUtc": "2026-09-25T13:53:29.692Z",
+            "elapsedMs": 2275,
+            "framesCapturedBeforeEvent": 12
+          },
+          {
+            "name": "first omission warning opened with fresh B named",
+            "recordedAtUtc": "2026-09-25T13:53:29.721Z",
+            "elapsedMs": 2304,
+            "framesCapturedBeforeEvent": 12
+          },
+          {
+            "name": "Go back restored composition without changing B or interactions",
+            "recordedAtUtc": "2026-09-25T13:53:30.578Z",
+            "elapsedMs": 3161,
+            "framesCapturedBeforeEvent": 16
+          },
+          {
+            "name": "second omission warning opened before explicit override",
+            "recordedAtUtc": "2026-09-25T13:53:31.067Z",
+            "elapsedMs": 3650,
+            "framesCapturedBeforeEvent": 19
+          },
+          {
+            "name": "explicit override submitted exactly A and no other context",
+            "recordedAtUtc": "2026-09-25T13:53:31.408Z",
+            "elapsedMs": 3991,
+            "framesCapturedBeforeEvent": 21
+          },
+          {
+            "name": "restored fresh B on its exact historical occurrence after override",
+            "recordedAtUtc": "2026-09-25T13:53:31.422Z",
+            "elapsedMs": 4005,
+            "framesCapturedBeforeEvent": 21
+          }
+        ],
+        "stream": {
+          "codec_name": "h264",
+          "width": 2960,
+          "height": 1840,
+          "pix_fmt": "yuv420p",
+          "side_data_list": [
+            {}
+          ]
+        },
+        "encodedDurationSeconds": 2.5,
+        "playbackDecoded": true
+      }
+    ],
+    "discontinuity": {
+      "startsAtUtc": "2026-09-25T13:53:26.484Z",
+      "endsAtUtc": "2026-09-25T13:53:27.417Z",
+      "durationMs": 933,
+      "restartOperationStartedAtUtc": "2026-09-25T13:53:26.905Z",
+      "restartOperationEndedAtUtc": "2026-09-25T13:53:27.417Z",
+      "reason": "Recording stopped and the first segment was encoded; then the Electron BrowserWindow and Rust app/graph services were stopped and reopened; recording resumed only on the reopened window.",
+      "beforeSegment": "interaction-context-before-restart.mp4",
+      "afterSegment": "interaction-context-after-restart.mp4"
+    },
+    "eventCheckpoints": [
+      {
+        "caption": "1. Selecting a graph node opens its full Node Details without covering the graph or composer",
+        "capturedAtUtc": "2026-09-25T13:53:10.765Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "2. The node's + opens its saved annotation editor in the bottom third of Node Details",
+        "capturedAtUtc": "2026-09-25T13:53:11.521Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "3. A failed save stays in Node Details with the draft intact and an inline retryable error",
+        "capturedAtUtc": "2026-09-25T13:53:12.293Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "4. While the draft save is held, Node Details stays on the source node with the exact text visible",
+        "capturedAtUtc": "2026-09-25T13:53:13.121Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "5. After persistence settles, switching opens the next node without carrying the editor across",
+        "capturedAtUtc": "2026-09-25T13:53:13.545Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "6. Returning to the source node restores the exact unconfirmed draft in its Node Details dock",
+        "capturedAtUtc": "2026-09-25T13:53:13.935Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "7. While Close waits on a held save, the exact draft remains visible in Node Details",
+        "capturedAtUtc": "2026-09-25T13:53:14.332Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "8. After persistence settles, Node Details closes and the graph and composer remain usable",
+        "capturedAtUtc": "2026-09-25T13:53:14.764Z",
+        "selector": "#graphStage"
+      },
+      {
+        "caption": "9. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
+        "capturedAtUtc": "2026-09-25T13:53:15.207Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "10. The × control discards only this unconfirmed draft while the confirmed node context remains attached",
+        "capturedAtUtc": "2026-09-25T13:53:15.996Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "11. After discard, the temporary editor is gone and the confirmed collapsed pill is unchanged",
+        "capturedAtUtc": "2026-09-25T13:53:16.418Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "12. Confirmed annotations stay read-only in an explicitly opened compact preview",
+        "capturedAtUtc": "2026-09-25T13:53:16.874Z",
+        "selector": ".composer-context-preview"
+      },
+      {
+        "caption": "13. Multiple attached-node pills scroll horizontally within the available composer width",
+        "capturedAtUtc": "2026-09-25T13:53:17.453Z",
+        "selector": ".composer-context-pills"
+      },
+      {
+        "caption": "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+        "capturedAtUtc": "2026-09-25T13:53:18.276Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "15. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+        "capturedAtUtc": "2026-09-25T13:53:19.251Z",
+        "selector": "#interactionContextPopover"
+      },
+      {
+        "caption": "16. Clicking the connected node reopens its full Node Details from history",
+        "capturedAtUtc": "2026-09-25T13:53:19.644Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "17. A connected node with a non-empty annotation enables send even when message text is empty",
+        "capturedAtUtc": "2026-09-25T13:53:20.073Z",
+        "selector": "#threadComposerShell"
+      },
+      {
+        "caption": "18. Annotation-only history has no derived message label; the context pill preserves the actual input",
+        "capturedAtUtc": "2026-09-25T13:53:20.736Z",
+        "selector": "#interactionBanner"
+      },
+      {
+        "caption": "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+        "capturedAtUtc": "2026-09-25T13:53:23.015Z",
+        "selector": "#interactionContextPopover"
+      },
+      {
+        "caption": "20. The persisted context still reopens the exact target node after restart",
+        "capturedAtUtc": "2026-09-25T13:53:23.399Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "21. After a full service and window restart, the first exact unconfirmed draft restores on its node",
+        "capturedAtUtc": "2026-09-25T13:53:28.066Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "22. Selecting the other node restores its separate exact unconfirmed draft after restart",
+        "capturedAtUtc": "2026-09-25T13:53:28.451Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "23. Confirming the first draft leaves the other occurrence's durable draft unchanged",
+        "capturedAtUtc": "2026-09-25T13:53:29.218Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "24. Send names the remaining unconfirmed Two-worker pool draft before omitting it",
+        "capturedAtUtc": "2026-09-25T13:53:30.556Z",
+        "selector": "#contextDraftSendWarning"
+      },
+      {
+        "caption": "25. Go back restores the editable message and leaves the exact draft intact",
+        "capturedAtUtc": "2026-09-25T13:53:31.044Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "26. The accepted follow-up clears the composer; the omitted draft remains on its original historical node occurrence",
+        "capturedAtUtc": "2026-09-25T13:53:31.990Z",
+        "selector": "#nodeContextDock"
+      }
+    ],
+    "historicalStillMontage": {
+      "file": "interaction-context-still-montage-historical.mp4",
+      "sha256": "5145a85c7ca72d154ddd84aa37a4ffbaf89b63b8c83772a73ec4978fde5efcd3",
+      "role": "Retained from the prior evidence snapshot. This timed still-frame montage is historical and does not prove the missing interaction transitions."
+    }
+  }
+}

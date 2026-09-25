@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain } from "electron";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -12,6 +14,7 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-context-draft-warning-"));
+const noThreadEvidenceDirectory = process.env.RELAYER_NO_THREAD_COMPOSER_EVIDENCE_DIR;
 const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
 const graphServerBinary = join(repositoryRoot, "target", "debug", "relayer-graph-server");
 const appServerBinary = join(repositoryRoot, "target", "debug", "relayer-app-server");
@@ -27,6 +30,8 @@ let productSession;
 let mainWindow;
 let keepaliveWindow;
 let exitCode = 1;
+// Minimal renderer draft bridge also added in the #207 warning-runner fixture.
+let composerDraftState = { pendingNewThread: null, threadFollowups: {} };
 
 app.setName("Relayer Context Draft Warning Smoke");
 const electronProfileDirectory = join(dataDirectory, "electron-profile");
@@ -57,6 +62,11 @@ function registerIpc() {
     subject: "fixture|node-details-warning",
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
+  ipcMain.handle("relayer:composer-drafts-read", () => composerDraftState);
+  ipcMain.handle("relayer:composer-drafts-write", (_event, value) => {
+    composerDraftState = value;
+    return composerDraftState;
+  });
   ipcMain.handle("relayer:provider-status", () => ({
     adapters: [],
     definitions: [],
@@ -81,6 +91,8 @@ function unregisterIpc() {
   for (const channel of [
     "relayer:account-read",
     "relayer:appearance-read",
+    "relayer:composer-drafts-read",
+    "relayer:composer-drafts-write",
     "relayer:provider-status",
     "relayer:update-status",
     "relayer:folder-choose",
@@ -111,6 +123,181 @@ async function waitFor(label, check, timeoutMs = 20_000) {
     })`).catch(() => null)
     : null;
   throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(diagnostic)}`);
+}
+
+async function captureOrdinaryNewThreadEvidence(threadId) {
+  const savedDraftText = "Keep this unsent follow-up with the saved thread.";
+  const activeInteractionId = await evaluate(`(async () => {
+    const { viewState } = await import('./src/state.js');
+    return viewState.currentInteractionId;
+  })()`);
+  const draftScopeKey = `${threadId}:${activeInteractionId ?? "none"}`;
+  await setPrompt(savedDraftText);
+  await waitFor("saved-thread follow-up persisted before New Thread", () => (
+    composerDraftState.threadFollowups[draftScopeKey] === savedDraftText
+  ));
+  if (!noThreadEvidenceDirectory) {
+    await click("#newThread", { focus: true });
+    await waitFor("ordinary New Thread button navigation", () => evaluate(`(
+      !document.querySelector('#newThreadView')?.classList.contains('hidden')
+      && document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('#newThreadPrompt')?.value === ''
+    )`));
+    const selection = await evaluate(`(async () => {
+      const { activeThread, viewState } = await import('./src/state.js');
+      return { currentThreadId: viewState.currentThreadId, activeThreadId: activeThread()?.id ?? null };
+    })()`);
+    await click(`[data-thread="${threadId}"]`, { focus: true });
+    await waitFor("ordinary saved-thread return", () => evaluate(`(
+      !document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('#threadPrompt')?.value === ${JSON.stringify(savedDraftText)}
+    )`));
+    return { passed: true, ...selection, savedDraftPreserved: true, windowRestarted: false };
+  }
+
+  mkdirSync(noThreadEvidenceDirectory, { recursive: true });
+  await waitFor("transient test notification clears before visual recording", () => evaluate(`(
+    document.querySelector('#toast')?.classList.contains('hidden') === true
+  )`));
+  const beforeNewThreadScreenshot = await mainWindow.webContents.capturePage();
+  const beforeNewThreadPng = beforeNewThreadScreenshot.toPNG();
+  const beforeNewThreadScreenshotFile = join(noThreadEvidenceDirectory, "saved-thread-draft-before-new-thread.png");
+  await writeFile(beforeNewThreadScreenshotFile, beforeNewThreadPng);
+  const framesDirectory = join(dataDirectory, "ordinary-new-thread-frames");
+  mkdirSync(framesDirectory, { recursive: true });
+  const frames = [];
+  const recordingStartedAt = performance.now();
+  let recording = true;
+  const capture = async () => {
+    while (recording) {
+      const image = await mainWindow.webContents.capturePage();
+      const file = join(framesDirectory, `${String(frames.length + 1).padStart(4, "0")}.png`);
+      const capturedAtMs = performance.now() - recordingStartedAt;
+      await writeFile(file, image.toPNG());
+      frames.push({ file, capturedAtMs });
+      await sleep(67);
+    }
+  };
+  const capturePromise = capture();
+  await sleep(1400);
+  const savedThreadBeforeClickAtMs = performance.now() - recordingStartedAt;
+  await click("#newThread", { focus: true });
+  await waitFor("ordinary New Thread button navigation", () => evaluate(`(
+    !document.querySelector('#newThreadView')?.classList.contains('hidden')
+    && document.querySelector('#threadView')?.classList.contains('hidden')
+    && document.querySelector('#newThreadPrompt')?.value === ''
+  )`));
+  const newThreadVisibleAtMs = performance.now() - recordingStartedAt;
+  const newThreadViewScreenshot = await mainWindow.webContents.capturePage();
+  const newThreadPng = newThreadViewScreenshot.toPNG();
+  await writeFile(join(noThreadEvidenceDirectory, "ordinary-new-thread-view.png"), newThreadPng);
+  const selection = await evaluate(`(async () => {
+    const { activeThread, viewState } = await import('./src/state.js');
+    return { currentThreadId: viewState.currentThreadId, activeThreadId: activeThread()?.id ?? null };
+  })()`);
+  await sleep(1800);
+  const newThreadHeldUntilAtMs = performance.now() - recordingStartedAt;
+  await click(`[data-thread="${threadId}"]`, { focus: true });
+  await waitFor("ordinary saved-thread return", () => evaluate(`(
+    !document.querySelector('#threadView')?.classList.contains('hidden')
+    && document.querySelector('#threadPrompt')?.value === ${JSON.stringify(savedDraftText)}
+  )`));
+  const savedThreadRestoredAtMs = performance.now() - recordingStartedAt;
+  await sleep(1800);
+  const savedThreadHeldUntilAtMs = performance.now() - recordingStartedAt;
+  recording = false;
+  await capturePromise;
+  // Recording begins only after the saved thread's persisted follow-up is visible;
+  // measure that readable state from the first captured frame through the click.
+  const beforeClickHoldMs = savedThreadBeforeClickAtMs;
+  const newThreadHoldMs = newThreadHeldUntilAtMs - newThreadVisibleAtMs;
+  const restoredThreadHoldMs = savedThreadHeldUntilAtMs - savedThreadRestoredAtMs;
+  const minimumReadableHoldMs = 1400;
+  if (beforeClickHoldMs < minimumReadableHoldMs || newThreadHoldMs < minimumReadableHoldMs || restoredThreadHoldMs < minimumReadableHoldMs) {
+    throw new Error(`Ordinary New Thread recording did not hold each readable state long enough: ${JSON.stringify({ beforeClickHoldMs, newThreadHoldMs, restoredThreadHoldMs, minimumReadableHoldMs })}`);
+  }
+  if (frames.length < 3) throw new Error(`Ordinary New Thread recording captured too few timestamped frames: ${frames.length}`);
+  const videoFile = join(noThreadEvidenceDirectory, "ordinary-new-thread-transition.mp4");
+  const concatFile = join(framesDirectory, "frames.concat");
+  const concatLines = ["ffconcat version 1.0"];
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index];
+    const nextTimestamp = frames[index + 1]?.capturedAtMs ?? savedThreadHeldUntilAtMs;
+    const durationSeconds = Math.max(0.001, (nextTimestamp - frame.capturedAtMs) / 1000);
+    concatLines.push(`file '${frame.file}'`, `duration ${durationSeconds.toFixed(6)}`);
+  }
+  concatLines.push(`file '${frames.at(-1).file}'`);
+  await writeFile(concatFile, `${concatLines.join("\n")}\n`);
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "concat", "-safe", "0", "-i", concatFile,
+    "-fps_mode", "vfr", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+    videoFile,
+  ], { stdio: "inherit" });
+  const videoProbe = JSON.parse(execFileSync("ffprobe", [
+    "-v", "error", "-show_entries", "format=duration:stream=codec_name,width,height",
+    "-of", "json", videoFile,
+  ], { encoding: "utf8" }));
+  const videoDurationMs = Number(videoProbe.format.duration) * 1000;
+  const expectedDurationMs = savedThreadHeldUntilAtMs;
+  if (Math.abs(videoDurationMs - expectedDurationMs) > 250) {
+    throw new Error(`Ordinary New Thread video timing differs from captured timestamps: ${JSON.stringify({ videoDurationMs, expectedDurationMs })}`);
+  }
+  execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", videoFile, "-f", "null", "-"], {
+    stdio: "inherit",
+  });
+  const videoBytes = await readFile(videoFile);
+  const screenshotBytes = await readFile(join(noThreadEvidenceDirectory, "ordinary-new-thread-view.png"));
+  mainWindow.destroy();
+  mainWindow = undefined;
+  await openThreadWindow(threadId);
+  await waitFor("saved-thread follow-up restored after renderer window restart", () => evaluate(`(
+    document.querySelector('#threadPrompt')?.value === ${JSON.stringify(savedDraftText)}
+  )`));
+  mainWindow.setSize(1280, 1100);
+  await sleep(160);
+  const restartedScreenshot = await mainWindow.webContents.capturePage();
+  const restartedScreenshotFile = join(noThreadEvidenceDirectory, "saved-thread-draft-after-window-restart.png");
+  const restartedPng = restartedScreenshot.toPNG();
+  await writeFile(restartedScreenshotFile, restartedPng);
+  return {
+    passed: true,
+    ...selection,
+    savedDraftPreserved: true,
+    windowRestarted: true,
+    appProcessRestarted: false,
+    servicesRestarted: false,
+    frames: frames.length,
+    recording: {
+      timestampSource: "performance.now() at completion of each Electron capturePage request",
+      capturedAtMs: frames.map(({ capturedAtMs }) => Number(capturedAtMs.toFixed(1))),
+      beforeClickHoldMs: Number(beforeClickHoldMs.toFixed(1)),
+      newThreadHoldMs: Number(newThreadHoldMs.toFixed(1)),
+      restoredThreadHoldMs: Number(restoredThreadHoldMs.toFixed(1)),
+      minimumReadableHoldMs,
+      measuredTimelineMs: Number(savedThreadHeldUntilAtMs.toFixed(1)),
+      videoDurationMs: Number(videoDurationMs.toFixed(1)),
+    },
+    video: {
+      file: videoFile,
+      sha256: createHash("sha256").update(videoBytes).digest("hex"),
+      durationSeconds: Number(Number(videoProbe.format.duration).toFixed(3)),
+      stream: videoProbe.streams[0],
+      playbackDecoded: true,
+    },
+    screenshot: {
+      file: join(noThreadEvidenceDirectory, "ordinary-new-thread-view.png"),
+      sha256: createHash("sha256").update(screenshotBytes).digest("hex"),
+    },
+    beforeNewThreadScreenshot: {
+      file: beforeNewThreadScreenshotFile,
+      sha256: createHash("sha256").update(beforeNewThreadPng).digest("hex"),
+    },
+    afterWindowRestartScreenshot: {
+      file: restartedScreenshotFile,
+      sha256: createHash("sha256").update(restartedPng).digest("hex"),
+    },
+  };
 }
 
 async function productRequest(path, options = {}) {
@@ -1052,6 +1239,7 @@ async function run() {
   }
   const noDrafts = await productRequest(`/api/threads/${withoutDraft.thread.id}/context-drafts`);
   if (noDrafts.drafts.length !== 0) throw new Error("The no-draft fixture unexpectedly gained a draft.");
+  const ordinaryNewThread = await captureOrdinaryNewThreadEvidence(withoutDraft.thread.id);
 
   process.stdout.write(`RELAYER_CONTEXT_DRAFT_WARNING_SMOKE ${JSON.stringify({
     passed: true,
@@ -1064,6 +1252,7 @@ async function run() {
     workspaceDisposalCancelPassed: true,
     newThreadCancelPassed: true,
     newThreadRestorationPassed: true,
+    ordinaryNewThreadButton: ordinaryNewThread,
     failureRecovered: true,
     repeatActivationPassed: true,
     overrideContexts: requests[1].body.contexts,

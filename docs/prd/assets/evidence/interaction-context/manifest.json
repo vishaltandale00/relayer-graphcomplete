@@ -1,9 +1,37 @@
 {
   "schemaVersion": 1,
   "passed": true,
-  "capturedAt": "2026-08-28T16:36:23.518Z",
-  "sourceCommit": "edaa442fb01c65756072ee2944b6131dd4949e7c",
-  "workingTreeDirty": false,
+  "capturedAt": "2026-09-25T16:02:15.894Z",
+  "sourceCommit": "61ce7b0cc50ee819eb54568cb8fc7165bf6c1e01",
+  "sourceHashesBeforeCapture": [
+    {
+      "file": "scripts/test-interaction-context-lifecycle.mjs",
+      "sha256": "744a9763f96ab29f88f94c8c4dd115a02fe63e7f9cedfec3c79dc8680f28a6ec"
+    },
+    {
+      "file": "scripts/test-desktop-context-draft-warning.mjs",
+      "sha256": "2b370a49e174094c34983cc0afa06f8194b62ff7dc20a6d78832365def825950"
+    },
+    {
+      "file": "scripts/capture-interaction-context-evidence.mjs",
+      "sha256": "b45134851e8426156b983c96ed6fd43066b9fe875191922a5a8023f9c219cc5a"
+    }
+  ],
+  "sourceHashesAfterCapture": [
+    {
+      "file": "scripts/test-interaction-context-lifecycle.mjs",
+      "sha256": "744a9763f96ab29f88f94c8c4dd115a02fe63e7f9cedfec3c79dc8680f28a6ec"
+    },
+    {
+      "file": "scripts/test-desktop-context-draft-warning.mjs",
+      "sha256": "2b370a49e174094c34983cc0afa06f8194b62ff7dc20a6d78832365def825950"
+    },
+    {
+      "file": "scripts/capture-interaction-context-evidence.mjs",
+      "sha256": "b45134851e8426156b983c96ed6fd43066b9fe875191922a5a8023f9c219cc5a"
+    }
+  ],
+  "workingTreeDirty": true,
   "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
   "paidInferenceCalls": 0,
   "runtime": "real Electron BrowserWindow + production renderer + Rust app/graph servers + SQLite",
@@ -12,18 +40,282 @@
     "width": 1480,
     "height": 920
   },
+  "recordingPixelDimensions": [
+    {
+      "width": 2960,
+      "height": 1840
+    },
+    {
+      "width": 2960,
+      "height": 1840
+    }
+  ],
   "thread": {
     "id": 1,
     "interactionIds": [
       1,
       2,
-      3
+      3,
+      4
     ],
     "statuses": [
       "accepted",
       "accepted",
+      "accepted",
       "accepted"
     ]
+  },
+  "draftJourney": {
+    "restoredDrafts": [
+      {
+        "id": "a85b90a6-d357-4e80-9fba-998d71482f56",
+        "revision": 2,
+        "text": "Keep queue claims in their original order.",
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        }
+      },
+      {
+        "id": "a430035e-7d63-4c3b-a7cb-f32dc2486c99",
+        "revision": 2,
+        "text": "Keep both workers available for queued tasks.",
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        }
+      }
+    ],
+    "freshDraftAfterDiscard": {
+      "id": "c484b484-4e5b-4e02-88cb-ed44ffcf8599",
+      "revision": 2,
+      "text": "Review worker availability before sending.",
+      "target": {
+        "nodeId": 29,
+        "sourceInteractionNodeId": 27,
+        "sourceLayerId": 10
+      }
+    },
+    "confirmedDraftText": "Keep queue claims in their original order.",
+    "owningHistoryTurn": 3,
+    "submittedInteractionId": 4,
+    "submittedContexts": [
+      {
+        "id": 16,
+        "type": "interaction.context",
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 28,
+          "kind": "concept",
+          "icon": "list",
+          "title": "Incoming queue",
+          "detail": "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.",
+          "state": "accepted"
+        },
+        "annotations": [
+          "Keep queue claims in their original order."
+        ]
+      }
+    ],
+    "interactionIdsBeforeWarning": [
+      1,
+      2,
+      3
+    ],
+    "interactionIdsAfterOverride": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "completeStateSnapshots": {
+      "draftBBeforeConfirm": {
+        "id": "a430035e-7d63-4c3b-a7cb-f32dc2486c99",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Keep both workers available for queued tasks.",
+        "revision": 2,
+        "createdAt": "1790352094178",
+        "updatedAt": "1790352095709"
+      },
+      "draftBAfterConfirm": {
+        "id": "a430035e-7d63-4c3b-a7cb-f32dc2486c99",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Keep both workers available for queued tasks.",
+        "revision": 2,
+        "createdAt": "1790352094178",
+        "updatedAt": "1790352095709"
+      },
+      "confirmedABeforeDiscard": {
+        "draftId": "a85b90a6-d357-4e80-9fba-998d71482f56",
+        "threadId": 1,
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 28,
+          "kind": "concept",
+          "icon": "list",
+          "title": "Incoming queue",
+          "detail": "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.",
+          "state": "accepted"
+        },
+        "annotation": "Keep queue claims in their original order.",
+        "draftRevision": 2,
+        "confirmationRevision": 1,
+        "confirmedAt": "1790352112083"
+      },
+      "confirmedAAfterDiscard": {
+        "draftId": "a85b90a6-d357-4e80-9fba-998d71482f56",
+        "threadId": 1,
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 28,
+          "kind": "concept",
+          "icon": "list",
+          "title": "Incoming queue",
+          "detail": "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.",
+          "state": "accepted"
+        },
+        "annotation": "Keep queue claims in their original order.",
+        "draftRevision": 2,
+        "confirmationRevision": 1,
+        "confirmedAt": "1790352112083"
+      },
+      "freshDraftAtWarning": {
+        "id": "c484b484-4e5b-4e02-88cb-ed44ffcf8599",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 2,
+        "createdAt": "1790352118290",
+        "updatedAt": "1790352119873"
+      },
+      "freshDraftAfterGoBack": {
+        "id": "c484b484-4e5b-4e02-88cb-ed44ffcf8599",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 2,
+        "createdAt": "1790352118290",
+        "updatedAt": "1790352119873"
+      },
+      "freshDraftAfterOverride": {
+        "id": "c484b484-4e5b-4e02-88cb-ed44ffcf8599",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 2,
+        "createdAt": "1790352118290",
+        "updatedAt": "1790352119873"
+      },
+      "freshDraftAfterHistoricalRestoration": {
+        "id": "c484b484-4e5b-4e02-88cb-ed44ffcf8599",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 2,
+        "createdAt": "1790352118290",
+        "updatedAt": "1790352119873"
+      }
+    }
+  },
+  "warningPresentation": {
+    "x": 751,
+    "y": 634.75,
+    "width": 352,
+    "height": 221.25
+  },
+  "secondWarningPresentation": {
+    "x": 751,
+    "y": 634.75,
+    "width": 352,
+    "height": 221.25
   },
   "assertions": {
     "nodeDetailsOpened": true,
@@ -42,53 +334,2269 @@
     "annotationOnlyInteractionSent": true,
     "servicesAndWindowRestarted": true,
     "persistedContextVisibleAfterRestart": true,
-    "targetNodeReopenedAfterRestart": true
+    "targetNodeReopenedAfterRestart": true,
+    "twoOccurrenceBoundDraftsSurviveFullRestart": true,
+    "separateDraftRestorationAfterRestart": true,
+    "confirmingOneDraftPreservesTheOther": true,
+    "discardingOneDraftPreservesConfirmedContext": true,
+    "omissionWarningAndGoBackPreserveDraft": true,
+    "warningAndGoBackCreateNoInteraction": true,
+    "explicitOverrideSubmitsConfirmedContextOnly": true,
+    "explicitOverrideAddsExactlyOneInteraction": true,
+    "omittedDraftRestoresInNextComposer": true
   },
   "screenshots": [
     {
       "file": "grouped-composer.png",
-      "sha256": "584868ec3bea9323a84860750e3661e680374a9ed672c3e2d30789fdc983e0d2"
+      "sha256": "c650f063a10b0bd3dc9624ead4e5d453483ec8ea1177cbd41dad6b75f463c2a6"
     },
     {
       "file": "restarted-context.png",
-      "sha256": "cea062009b9b4e195ade602be06c71d850ac0ff3f924bbcd43c3d37baf109a8b"
+      "sha256": "a5ff98d13240a199b8b9fd5a0343d5d3eade30243196fb00c437a4c10da6445f"
+    },
+    {
+      "file": "two-drafts-restored.png",
+      "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+    },
+    {
+      "file": "second-draft-restored.png",
+      "sha256": "a7a4411a520440267217fd47caa10d8c2063b4e6cba2440778d4572a4611fdc5"
+    },
+    {
+      "file": "confirmed-draft-with-other-draft.png",
+      "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+    },
+    {
+      "file": "draft-omission-warning.png",
+      "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+    },
+    {
+      "file": "draft-after-override.png",
+      "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
     }
   ],
-  "video": {
-    "file": "interaction-context.mp4",
-    "sha256": "f0d62a99b3fe5ab7f0edb652c069e6834b4675fd87b7439306090e5e50165f56",
-    "durationSeconds": 94.433,
-    "stream": {
-      "codec_name": "h264",
-      "width": 1480,
-      "height": 920,
-      "pix_fmt": "yuv420p",
-      "side_data_list": [
-        {}
-      ]
+  "recording": {
+    "mode": "two continuous direct-renderer recordings with a captured frame at every required visible boundary, timestamp-derived variable frame durations, and an explicit full-restart discontinuity; no screenshot interpolation or injected captions",
+    "segments": [
+      {
+        "file": "interaction-context-before-restart.mp4",
+        "sha256": "2c9bbfd72282f7b9e8aacb762e2b9be48e044c7e884034b1668950cf5d9f677d",
+        "capture": "Continuous sampled frames directly from the real Electron BrowserWindow; no generated or interpolated frames.",
+        "frameTiming": "variable frame rate; frame durations follow actual next-frame capture timestamps",
+        "frameCount": 97,
+        "maximumFrameGapMs": 197,
+        "maximumPresentationTimingErrorMs": 0,
+        "capturedSpanMs": 16285,
+        "videoDurationErrorMs": 114,
+        "startedAtUtc": "2026-09-25T16:01:25.409Z",
+        "endedAtUtc": "2026-09-25T16:01:41.875Z",
+        "wallClockDurationMs": 16466,
+        "frameTimestamps": [
+          {
+            "frameNumber": 0,
+            "capturedAtUtc": "2026-09-25T16:01:25.489Z",
+            "elapsedMs": 80,
+            "sha256": "729511697f91efb5a1a5e332057e4318a4825a916f9d4feeedaa4a74dbe48b44"
+          },
+          {
+            "frameNumber": 1,
+            "capturedAtUtc": "2026-09-25T16:01:25.606Z",
+            "elapsedMs": 197,
+            "sha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144"
+          },
+          {
+            "frameNumber": 2,
+            "capturedAtUtc": "2026-09-25T16:01:25.725Z",
+            "elapsedMs": 316,
+            "sha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144"
+          },
+          {
+            "frameNumber": 3,
+            "capturedAtUtc": "2026-09-25T16:01:25.897Z",
+            "elapsedMs": 488,
+            "sha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144"
+          },
+          {
+            "frameNumber": 4,
+            "capturedAtUtc": "2026-09-25T16:01:26.077Z",
+            "elapsedMs": 668,
+            "sha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144"
+          },
+          {
+            "frameNumber": 5,
+            "capturedAtUtc": "2026-09-25T16:01:26.254Z",
+            "elapsedMs": 845,
+            "sha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144"
+          },
+          {
+            "frameNumber": 6,
+            "capturedAtUtc": "2026-09-25T16:01:26.430Z",
+            "elapsedMs": 1021,
+            "sha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144"
+          },
+          {
+            "frameNumber": 7,
+            "capturedAtUtc": "2026-09-25T16:01:26.603Z",
+            "elapsedMs": 1194,
+            "sha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144"
+          },
+          {
+            "frameNumber": 8,
+            "capturedAtUtc": "2026-09-25T16:01:26.780Z",
+            "elapsedMs": 1371,
+            "sha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144"
+          },
+          {
+            "frameNumber": 9,
+            "capturedAtUtc": "2026-09-25T16:01:26.954Z",
+            "elapsedMs": 1545,
+            "sha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144"
+          },
+          {
+            "frameNumber": 10,
+            "capturedAtUtc": "2026-09-25T16:01:27.137Z",
+            "elapsedMs": 1728,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 11,
+            "capturedAtUtc": "2026-09-25T16:01:27.261Z",
+            "elapsedMs": 1852,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 12,
+            "capturedAtUtc": "2026-09-25T16:01:27.393Z",
+            "elapsedMs": 1984,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 13,
+            "capturedAtUtc": "2026-09-25T16:01:27.568Z",
+            "elapsedMs": 2159,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 14,
+            "capturedAtUtc": "2026-09-25T16:01:27.743Z",
+            "elapsedMs": 2334,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 15,
+            "capturedAtUtc": "2026-09-25T16:01:27.917Z",
+            "elapsedMs": 2508,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 16,
+            "capturedAtUtc": "2026-09-25T16:01:28.098Z",
+            "elapsedMs": 2689,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 17,
+            "capturedAtUtc": "2026-09-25T16:01:28.282Z",
+            "elapsedMs": 2873,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 18,
+            "capturedAtUtc": "2026-09-25T16:01:28.456Z",
+            "elapsedMs": 3047,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 19,
+            "capturedAtUtc": "2026-09-25T16:01:28.634Z",
+            "elapsedMs": 3225,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 20,
+            "capturedAtUtc": "2026-09-25T16:01:28.808Z",
+            "elapsedMs": 3399,
+            "sha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585"
+          },
+          {
+            "frameNumber": 21,
+            "capturedAtUtc": "2026-09-25T16:01:28.926Z",
+            "elapsedMs": 3517,
+            "sha256": "cd651918a7c07efd236f4e0e1c36d54f76227a3ac7dc645dcf1248bdaa0617ea"
+          },
+          {
+            "frameNumber": 22,
+            "capturedAtUtc": "2026-09-25T16:01:29.100Z",
+            "elapsedMs": 3691,
+            "sha256": "cd651918a7c07efd236f4e0e1c36d54f76227a3ac7dc645dcf1248bdaa0617ea"
+          },
+          {
+            "frameNumber": 23,
+            "capturedAtUtc": "2026-09-25T16:01:29.280Z",
+            "elapsedMs": 3871,
+            "sha256": "cd651918a7c07efd236f4e0e1c36d54f76227a3ac7dc645dcf1248bdaa0617ea"
+          },
+          {
+            "frameNumber": 24,
+            "capturedAtUtc": "2026-09-25T16:01:29.463Z",
+            "elapsedMs": 4054,
+            "sha256": "19762209eea8eb03ad84008ed4a50c72b027bd2eb5ab12dfe824c87b7c9ec3b2"
+          },
+          {
+            "frameNumber": 25,
+            "capturedAtUtc": "2026-09-25T16:01:29.639Z",
+            "elapsedMs": 4230,
+            "sha256": "19762209eea8eb03ad84008ed4a50c72b027bd2eb5ab12dfe824c87b7c9ec3b2"
+          },
+          {
+            "frameNumber": 26,
+            "capturedAtUtc": "2026-09-25T16:01:29.820Z",
+            "elapsedMs": 4411,
+            "sha256": "cd651918a7c07efd236f4e0e1c36d54f76227a3ac7dc645dcf1248bdaa0617ea"
+          },
+          {
+            "frameNumber": 27,
+            "capturedAtUtc": "2026-09-25T16:01:29.995Z",
+            "elapsedMs": 4586,
+            "sha256": "cd651918a7c07efd236f4e0e1c36d54f76227a3ac7dc645dcf1248bdaa0617ea"
+          },
+          {
+            "frameNumber": 28,
+            "capturedAtUtc": "2026-09-25T16:01:30.174Z",
+            "elapsedMs": 4765,
+            "sha256": "cd651918a7c07efd236f4e0e1c36d54f76227a3ac7dc645dcf1248bdaa0617ea"
+          },
+          {
+            "frameNumber": 29,
+            "capturedAtUtc": "2026-09-25T16:01:30.352Z",
+            "elapsedMs": 4943,
+            "sha256": "0cf8654371db9fab4abcf9e91ea01d41d1affb7d1c231c78928a0452ac2f03d5"
+          },
+          {
+            "frameNumber": 30,
+            "capturedAtUtc": "2026-09-25T16:01:30.528Z",
+            "elapsedMs": 5119,
+            "sha256": "0cf8654371db9fab4abcf9e91ea01d41d1affb7d1c231c78928a0452ac2f03d5"
+          },
+          {
+            "frameNumber": 31,
+            "capturedAtUtc": "2026-09-25T16:01:30.714Z",
+            "elapsedMs": 5305,
+            "sha256": "0cf8654371db9fab4abcf9e91ea01d41d1affb7d1c231c78928a0452ac2f03d5"
+          },
+          {
+            "frameNumber": 32,
+            "capturedAtUtc": "2026-09-25T16:01:30.836Z",
+            "elapsedMs": 5427,
+            "sha256": "028863b3dfd9a4a69ab5218e22327c3467297adff2420bb400e0d09fe627da2e"
+          },
+          {
+            "frameNumber": 33,
+            "capturedAtUtc": "2026-09-25T16:01:30.955Z",
+            "elapsedMs": 5546,
+            "sha256": "028863b3dfd9a4a69ab5218e22327c3467297adff2420bb400e0d09fe627da2e"
+          },
+          {
+            "frameNumber": 34,
+            "capturedAtUtc": "2026-09-25T16:01:31.132Z",
+            "elapsedMs": 5723,
+            "sha256": "028863b3dfd9a4a69ab5218e22327c3467297adff2420bb400e0d09fe627da2e"
+          },
+          {
+            "frameNumber": 35,
+            "capturedAtUtc": "2026-09-25T16:01:31.305Z",
+            "elapsedMs": 5896,
+            "sha256": "028863b3dfd9a4a69ab5218e22327c3467297adff2420bb400e0d09fe627da2e"
+          },
+          {
+            "frameNumber": 36,
+            "capturedAtUtc": "2026-09-25T16:01:31.483Z",
+            "elapsedMs": 6074,
+            "sha256": "0cf8654371db9fab4abcf9e91ea01d41d1affb7d1c231c78928a0452ac2f03d5"
+          },
+          {
+            "frameNumber": 37,
+            "capturedAtUtc": "2026-09-25T16:01:31.661Z",
+            "elapsedMs": 6252,
+            "sha256": "0cf8654371db9fab4abcf9e91ea01d41d1affb7d1c231c78928a0452ac2f03d5"
+          },
+          {
+            "frameNumber": 38,
+            "capturedAtUtc": "2026-09-25T16:01:31.858Z",
+            "elapsedMs": 6449,
+            "sha256": "028863b3dfd9a4a69ab5218e22327c3467297adff2420bb400e0d09fe627da2e"
+          },
+          {
+            "frameNumber": 39,
+            "capturedAtUtc": "2026-09-25T16:01:32.034Z",
+            "elapsedMs": 6625,
+            "sha256": "028863b3dfd9a4a69ab5218e22327c3467297adff2420bb400e0d09fe627da2e"
+          },
+          {
+            "frameNumber": 40,
+            "capturedAtUtc": "2026-09-25T16:01:32.209Z",
+            "elapsedMs": 6800,
+            "sha256": "028863b3dfd9a4a69ab5218e22327c3467297adff2420bb400e0d09fe627da2e"
+          },
+          {
+            "frameNumber": 41,
+            "capturedAtUtc": "2026-09-25T16:01:32.375Z",
+            "elapsedMs": 6966,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 42,
+            "capturedAtUtc": "2026-09-25T16:01:32.492Z",
+            "elapsedMs": 7083,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 43,
+            "capturedAtUtc": "2026-09-25T16:01:32.671Z",
+            "elapsedMs": 7262,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 44,
+            "capturedAtUtc": "2026-09-25T16:01:32.850Z",
+            "elapsedMs": 7441,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 45,
+            "capturedAtUtc": "2026-09-25T16:01:33.028Z",
+            "elapsedMs": 7619,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 46,
+            "capturedAtUtc": "2026-09-25T16:01:33.202Z",
+            "elapsedMs": 7793,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 47,
+            "capturedAtUtc": "2026-09-25T16:01:33.376Z",
+            "elapsedMs": 7967,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 48,
+            "capturedAtUtc": "2026-09-25T16:01:33.553Z",
+            "elapsedMs": 8144,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 49,
+            "capturedAtUtc": "2026-09-25T16:01:33.734Z",
+            "elapsedMs": 8325,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 50,
+            "capturedAtUtc": "2026-09-25T16:01:33.905Z",
+            "elapsedMs": 8496,
+            "sha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa"
+          },
+          {
+            "frameNumber": 51,
+            "capturedAtUtc": "2026-09-25T16:01:34.025Z",
+            "elapsedMs": 8616,
+            "sha256": "de5ff904a6dcbbb71128463a762dd5121a461523073e728afa39fc8247e24211"
+          },
+          {
+            "frameNumber": 52,
+            "capturedAtUtc": "2026-09-25T16:01:34.202Z",
+            "elapsedMs": 8793,
+            "sha256": "de5ff904a6dcbbb71128463a762dd5121a461523073e728afa39fc8247e24211"
+          },
+          {
+            "frameNumber": 53,
+            "capturedAtUtc": "2026-09-25T16:01:34.381Z",
+            "elapsedMs": 8972,
+            "sha256": "de5ff904a6dcbbb71128463a762dd5121a461523073e728afa39fc8247e24211"
+          },
+          {
+            "frameNumber": 54,
+            "capturedAtUtc": "2026-09-25T16:01:34.562Z",
+            "elapsedMs": 9153,
+            "sha256": "dbd3bbbb084229742bb57a05f4f05e8d3220cc88cf03d83f0e4baea04b88de28"
+          },
+          {
+            "frameNumber": 55,
+            "capturedAtUtc": "2026-09-25T16:01:34.746Z",
+            "elapsedMs": 9337,
+            "sha256": "dbd3bbbb084229742bb57a05f4f05e8d3220cc88cf03d83f0e4baea04b88de28"
+          },
+          {
+            "frameNumber": 56,
+            "capturedAtUtc": "2026-09-25T16:01:34.926Z",
+            "elapsedMs": 9517,
+            "sha256": "de5ff904a6dcbbb71128463a762dd5121a461523073e728afa39fc8247e24211"
+          },
+          {
+            "frameNumber": 57,
+            "capturedAtUtc": "2026-09-25T16:01:35.118Z",
+            "elapsedMs": 9709,
+            "sha256": "511d3b38c6f8ee0e77a6e4c275237dead53bdb1f1fad728ce58a86f00de08b7d"
+          },
+          {
+            "frameNumber": 58,
+            "capturedAtUtc": "2026-09-25T16:01:35.294Z",
+            "elapsedMs": 9885,
+            "sha256": "511d3b38c6f8ee0e77a6e4c275237dead53bdb1f1fad728ce58a86f00de08b7d"
+          },
+          {
+            "frameNumber": 59,
+            "capturedAtUtc": "2026-09-25T16:01:35.474Z",
+            "elapsedMs": 10065,
+            "sha256": "97368ac7e1ec433e238ca4ec922dcacb715d221a4ba65b0061cb457afae8978a"
+          },
+          {
+            "frameNumber": 60,
+            "capturedAtUtc": "2026-09-25T16:01:35.658Z",
+            "elapsedMs": 10249,
+            "sha256": "97368ac7e1ec433e238ca4ec922dcacb715d221a4ba65b0061cb457afae8978a"
+          },
+          {
+            "frameNumber": 61,
+            "capturedAtUtc": "2026-09-25T16:01:35.821Z",
+            "elapsedMs": 10412,
+            "sha256": "97368ac7e1ec433e238ca4ec922dcacb715d221a4ba65b0061cb457afae8978a"
+          },
+          {
+            "frameNumber": 62,
+            "capturedAtUtc": "2026-09-25T16:01:35.939Z",
+            "elapsedMs": 10530,
+            "sha256": "68632876a0d4674a3d43a5d65b213c5aa715eda74b4d970f0edfa7cc37e60a28"
+          },
+          {
+            "frameNumber": 63,
+            "capturedAtUtc": "2026-09-25T16:01:36.115Z",
+            "elapsedMs": 10706,
+            "sha256": "68632876a0d4674a3d43a5d65b213c5aa715eda74b4d970f0edfa7cc37e60a28"
+          },
+          {
+            "frameNumber": 64,
+            "capturedAtUtc": "2026-09-25T16:01:36.291Z",
+            "elapsedMs": 10882,
+            "sha256": "68632876a0d4674a3d43a5d65b213c5aa715eda74b4d970f0edfa7cc37e60a28"
+          },
+          {
+            "frameNumber": 65,
+            "capturedAtUtc": "2026-09-25T16:01:36.471Z",
+            "elapsedMs": 11062,
+            "sha256": "97368ac7e1ec433e238ca4ec922dcacb715d221a4ba65b0061cb457afae8978a"
+          },
+          {
+            "frameNumber": 66,
+            "capturedAtUtc": "2026-09-25T16:01:36.651Z",
+            "elapsedMs": 11242,
+            "sha256": "97368ac7e1ec433e238ca4ec922dcacb715d221a4ba65b0061cb457afae8978a"
+          },
+          {
+            "frameNumber": 67,
+            "capturedAtUtc": "2026-09-25T16:01:36.825Z",
+            "elapsedMs": 11416,
+            "sha256": "97368ac7e1ec433e238ca4ec922dcacb715d221a4ba65b0061cb457afae8978a"
+          },
+          {
+            "frameNumber": 68,
+            "capturedAtUtc": "2026-09-25T16:01:37.002Z",
+            "elapsedMs": 11593,
+            "sha256": "68632876a0d4674a3d43a5d65b213c5aa715eda74b4d970f0edfa7cc37e60a28"
+          },
+          {
+            "frameNumber": 69,
+            "capturedAtUtc": "2026-09-25T16:01:37.178Z",
+            "elapsedMs": 11769,
+            "sha256": "68632876a0d4674a3d43a5d65b213c5aa715eda74b4d970f0edfa7cc37e60a28"
+          },
+          {
+            "frameNumber": 70,
+            "capturedAtUtc": "2026-09-25T16:01:37.356Z",
+            "elapsedMs": 11947,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 71,
+            "capturedAtUtc": "2026-09-25T16:01:37.473Z",
+            "elapsedMs": 12064,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 72,
+            "capturedAtUtc": "2026-09-25T16:01:37.653Z",
+            "elapsedMs": 12244,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 73,
+            "capturedAtUtc": "2026-09-25T16:01:37.835Z",
+            "elapsedMs": 12426,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 74,
+            "capturedAtUtc": "2026-09-25T16:01:38.013Z",
+            "elapsedMs": 12604,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 75,
+            "capturedAtUtc": "2026-09-25T16:01:38.194Z",
+            "elapsedMs": 12785,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 76,
+            "capturedAtUtc": "2026-09-25T16:01:38.377Z",
+            "elapsedMs": 12968,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 77,
+            "capturedAtUtc": "2026-09-25T16:01:38.553Z",
+            "elapsedMs": 13144,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 78,
+            "capturedAtUtc": "2026-09-25T16:01:38.730Z",
+            "elapsedMs": 13321,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 79,
+            "capturedAtUtc": "2026-09-25T16:01:38.891Z",
+            "elapsedMs": 13482,
+            "sha256": "bd3c34c5fc23f6aaa6d6093268b4ff6af616a0156a71f849e65d2ae2cb24dfe4"
+          },
+          {
+            "frameNumber": 80,
+            "capturedAtUtc": "2026-09-25T16:01:39.008Z",
+            "elapsedMs": 13599,
+            "sha256": "bd3c34c5fc23f6aaa6d6093268b4ff6af616a0156a71f849e65d2ae2cb24dfe4"
+          },
+          {
+            "frameNumber": 81,
+            "capturedAtUtc": "2026-09-25T16:01:39.197Z",
+            "elapsedMs": 13788,
+            "sha256": "bd3c34c5fc23f6aaa6d6093268b4ff6af616a0156a71f849e65d2ae2cb24dfe4"
+          },
+          {
+            "frameNumber": 82,
+            "capturedAtUtc": "2026-09-25T16:01:39.373Z",
+            "elapsedMs": 13964,
+            "sha256": "bd3c34c5fc23f6aaa6d6093268b4ff6af616a0156a71f849e65d2ae2cb24dfe4"
+          },
+          {
+            "frameNumber": 83,
+            "capturedAtUtc": "2026-09-25T16:01:39.550Z",
+            "elapsedMs": 14141,
+            "sha256": "bd3c34c5fc23f6aaa6d6093268b4ff6af616a0156a71f849e65d2ae2cb24dfe4"
+          },
+          {
+            "frameNumber": 84,
+            "capturedAtUtc": "2026-09-25T16:01:39.729Z",
+            "elapsedMs": 14320,
+            "sha256": "bd3c34c5fc23f6aaa6d6093268b4ff6af616a0156a71f849e65d2ae2cb24dfe4"
+          },
+          {
+            "frameNumber": 85,
+            "capturedAtUtc": "2026-09-25T16:01:39.908Z",
+            "elapsedMs": 14499,
+            "sha256": "bd3c34c5fc23f6aaa6d6093268b4ff6af616a0156a71f849e65d2ae2cb24dfe4"
+          },
+          {
+            "frameNumber": 86,
+            "capturedAtUtc": "2026-09-25T16:01:40.082Z",
+            "elapsedMs": 14673,
+            "sha256": "bd3c34c5fc23f6aaa6d6093268b4ff6af616a0156a71f849e65d2ae2cb24dfe4"
+          },
+          {
+            "frameNumber": 87,
+            "capturedAtUtc": "2026-09-25T16:01:40.262Z",
+            "elapsedMs": 14853,
+            "sha256": "c7635b030f49022711238a84f8d4e47cc530c048d22d164f6cc042c0e5b26c70"
+          },
+          {
+            "frameNumber": 88,
+            "capturedAtUtc": "2026-09-25T16:01:40.417Z",
+            "elapsedMs": 15008,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 89,
+            "capturedAtUtc": "2026-09-25T16:01:40.534Z",
+            "elapsedMs": 15125,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 90,
+            "capturedAtUtc": "2026-09-25T16:01:40.714Z",
+            "elapsedMs": 15305,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 91,
+            "capturedAtUtc": "2026-09-25T16:01:40.893Z",
+            "elapsedMs": 15484,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 92,
+            "capturedAtUtc": "2026-09-25T16:01:41.073Z",
+            "elapsedMs": 15664,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 93,
+            "capturedAtUtc": "2026-09-25T16:01:41.248Z",
+            "elapsedMs": 15839,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 94,
+            "capturedAtUtc": "2026-09-25T16:01:41.423Z",
+            "elapsedMs": 16014,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 95,
+            "capturedAtUtc": "2026-09-25T16:01:41.600Z",
+            "elapsedMs": 16191,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          },
+          {
+            "frameNumber": 96,
+            "capturedAtUtc": "2026-09-25T16:01:41.774Z",
+            "elapsedMs": 16365,
+            "sha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d"
+          }
+        ],
+        "encodedFrameTimestampsMs": [
+          0,
+          117,
+          236,
+          408,
+          588,
+          765,
+          941,
+          1114,
+          1291,
+          1465,
+          1648,
+          1772,
+          1904,
+          2079,
+          2254,
+          2428,
+          2609,
+          2793,
+          2967,
+          3145,
+          3319,
+          3437,
+          3611,
+          3791,
+          3974,
+          4150,
+          4331,
+          4506,
+          4685,
+          4863,
+          5039,
+          5225,
+          5347,
+          5466,
+          5643,
+          5816,
+          5994,
+          6172,
+          6369,
+          6545,
+          6720,
+          6886,
+          7003,
+          7182,
+          7361,
+          7539,
+          7713,
+          7887,
+          8064,
+          8245,
+          8416,
+          8536,
+          8713,
+          8892,
+          9073,
+          9257,
+          9437,
+          9629,
+          9805,
+          9985,
+          10169,
+          10332,
+          10450,
+          10626,
+          10802,
+          10982,
+          11162,
+          11336,
+          11513,
+          11689,
+          11867,
+          11984,
+          12164,
+          12346,
+          12524,
+          12705,
+          12888,
+          13064,
+          13241,
+          13402,
+          13519,
+          13708,
+          13884,
+          14061,
+          14240,
+          14419,
+          14593,
+          14773,
+          14928,
+          15045,
+          15225,
+          15404,
+          15584,
+          15759,
+          15934,
+          16111,
+          16285
+        ],
+        "events": [
+          {
+            "name": "journey recording started with the graph ready and Node Details closed",
+            "recordedAtUtc": "2026-09-25T16:01:25.642Z",
+            "elapsedMs": 233,
+            "framesCapturedBeforeEvent": 1,
+            "capturedFrameNumber": 1,
+            "capturedFramePresentationMs": 117,
+            "capturedFrameAtUtc": "2026-09-25T16:01:25.606Z",
+            "capturedFrameSha256": "34f14f3abadc58a67e4304a63d53d465d2031398e80efcbc08371102863e1144",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "opened Incoming queue Node Details for draft A",
+            "recordedAtUtc": "2026-09-25T16:01:27.305Z",
+            "elapsedMs": 1896,
+            "framesCapturedBeforeEvent": 11,
+            "capturedFrameNumber": 11,
+            "capturedFramePresentationMs": 1772,
+            "capturedFrameAtUtc": "2026-09-25T16:01:27.261Z",
+            "capturedFrameSha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "opened the draft A editor",
+            "recordedAtUtc": "2026-09-25T16:01:28.848Z",
+            "elapsedMs": 3439,
+            "framesCapturedBeforeEvent": 20,
+            "capturedFrameNumber": 20,
+            "capturedFramePresentationMs": 3319,
+            "capturedFrameAtUtc": "2026-09-25T16:01:28.808Z",
+            "capturedFrameSha256": "4dde6bb778424fb6602f86a6ba5dbf0c6e38add9f7ce928d1f64370c9085d585",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "typed and durably saved draft A on Incoming queue",
+            "recordedAtUtc": "2026-09-25T16:01:30.880Z",
+            "elapsedMs": 5471,
+            "framesCapturedBeforeEvent": 32,
+            "capturedFrameNumber": 32,
+            "capturedFramePresentationMs": 5347,
+            "capturedFrameAtUtc": "2026-09-25T16:01:30.836Z",
+            "capturedFrameSha256": "028863b3dfd9a4a69ab5218e22327c3467297adff2420bb400e0d09fe627da2e",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "switched from Incoming queue to Two-worker pool",
+            "recordedAtUtc": "2026-09-25T16:01:32.420Z",
+            "elapsedMs": 7011,
+            "framesCapturedBeforeEvent": 41,
+            "capturedFrameNumber": 41,
+            "capturedFramePresentationMs": 6886,
+            "capturedFrameAtUtc": "2026-09-25T16:01:32.375Z",
+            "capturedFrameSha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "opened the draft B editor",
+            "recordedAtUtc": "2026-09-25T16:01:33.945Z",
+            "elapsedMs": 8536,
+            "framesCapturedBeforeEvent": 50,
+            "capturedFrameNumber": 50,
+            "capturedFramePresentationMs": 8416,
+            "capturedFrameAtUtc": "2026-09-25T16:01:33.905Z",
+            "capturedFrameSha256": "de2d2556e803b54a1475ae11a058f15a6f2634565925747565c36a5981803caa",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "typed and durably saved draft B on Two-worker pool",
+            "recordedAtUtc": "2026-09-25T16:01:35.862Z",
+            "elapsedMs": 10453,
+            "framesCapturedBeforeEvent": 61,
+            "capturedFrameNumber": 61,
+            "capturedFramePresentationMs": 10332,
+            "capturedFrameAtUtc": "2026-09-25T16:01:35.821Z",
+            "capturedFrameSha256": "97368ac7e1ec433e238ca4ec922dcacb715d221a4ba65b0061cb457afae8978a",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "restored draft A after saving B",
+            "recordedAtUtc": "2026-09-25T16:01:37.397Z",
+            "elapsedMs": 11988,
+            "framesCapturedBeforeEvent": 70,
+            "capturedFrameNumber": 70,
+            "capturedFramePresentationMs": 11867,
+            "capturedFrameAtUtc": "2026-09-25T16:01:37.356Z",
+            "capturedFrameSha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "restored draft B after saving and restoring A",
+            "recordedAtUtc": "2026-09-25T16:01:38.933Z",
+            "elapsedMs": 13524,
+            "framesCapturedBeforeEvent": 79,
+            "capturedFrameNumber": 79,
+            "capturedFramePresentationMs": 13402,
+            "capturedFrameAtUtc": "2026-09-25T16:01:38.891Z",
+            "capturedFrameSha256": "bd3c34c5fc23f6aaa6d6093268b4ff6af616a0156a71f849e65d2ae2cb24dfe4",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "both complete durable drafts are present before service/window restart",
+            "recordedAtUtc": "2026-09-25T16:01:40.459Z",
+            "elapsedMs": 15050,
+            "framesCapturedBeforeEvent": 88,
+            "capturedFrameNumber": 88,
+            "capturedFramePresentationMs": 14928,
+            "capturedFrameAtUtc": "2026-09-25T16:01:40.417Z",
+            "capturedFrameSha256": "5ecaca5b48f2cbb459e18cf159b29ba27889d16416b0e07b8679ad4d281b576d",
+            "visibleHoldMs": 1400
+          }
+        ],
+        "stream": {
+          "codec_name": "h264",
+          "width": 2960,
+          "height": 1840,
+          "pix_fmt": "yuv420p",
+          "side_data_list": [
+            {}
+          ]
+        },
+        "encodedDurationSeconds": 16.171,
+        "playbackDecoded": true
+      },
+      {
+        "file": "interaction-context-after-restart.mp4",
+        "sha256": "37f9ece0fbbde62fb53467f001a5113fbef4a4a0d7700ff21fe3e155b1c74898",
+        "capture": "Continuous sampled frames directly from the real Electron BrowserWindow; no generated or interpolated frames.",
+        "frameTiming": "variable frame rate; frame durations follow actual next-frame capture timestamps",
+        "frameCount": 154,
+        "maximumFrameGapMs": 231,
+        "maximumPresentationTimingErrorMs": 0,
+        "capturedSpanMs": 25956,
+        "videoDurationErrorMs": 126,
+        "startedAtUtc": "2026-09-25T16:01:45.975Z",
+        "endedAtUtc": "2026-09-25T16:02:12.056Z",
+        "wallClockDurationMs": 26081,
+        "frameTimestamps": [
+          {
+            "frameNumber": 0,
+            "capturedAtUtc": "2026-09-25T16:01:46.060Z",
+            "elapsedMs": 85,
+            "sha256": "6cdd4cca536ed915739170f65506a3f6274268560e26eac8547297c2d4a61e53"
+          },
+          {
+            "frameNumber": 1,
+            "capturedAtUtc": "2026-09-25T16:01:46.176Z",
+            "elapsedMs": 201,
+            "sha256": "01ed9493c9538845430dec9f3d5f18c7903342113a17976267ff76301c384563"
+          },
+          {
+            "frameNumber": 2,
+            "capturedAtUtc": "2026-09-25T16:01:46.291Z",
+            "elapsedMs": 316,
+            "sha256": "54df26663792ee9929f08e05418e7097a702df08abaf1db597b61623e4adcdec"
+          },
+          {
+            "frameNumber": 3,
+            "capturedAtUtc": "2026-09-25T16:01:46.474Z",
+            "elapsedMs": 499,
+            "sha256": "f12d36976bc26fafa43e1927ad94306cec55f6d1a14b679ba9866ed457a42d38"
+          },
+          {
+            "frameNumber": 4,
+            "capturedAtUtc": "2026-09-25T16:01:46.658Z",
+            "elapsedMs": 683,
+            "sha256": "1dd224c257db4792db975799abc7270cf3fc994f5ce9d3c98f93f454fcc49d59"
+          },
+          {
+            "frameNumber": 5,
+            "capturedAtUtc": "2026-09-25T16:01:46.843Z",
+            "elapsedMs": 868,
+            "sha256": "de4d37f29534849b79a62ce6d2e58819223ae0909c0566c4acdccecf32015951"
+          },
+          {
+            "frameNumber": 6,
+            "capturedAtUtc": "2026-09-25T16:01:47.019Z",
+            "elapsedMs": 1044,
+            "sha256": "e32490c79ab03e85ea6166d3d2d2335a128a6031c1e32a53ca618f157e9d4538"
+          },
+          {
+            "frameNumber": 7,
+            "capturedAtUtc": "2026-09-25T16:01:47.193Z",
+            "elapsedMs": 1218,
+            "sha256": "e32490c79ab03e85ea6166d3d2d2335a128a6031c1e32a53ca618f157e9d4538"
+          },
+          {
+            "frameNumber": 8,
+            "capturedAtUtc": "2026-09-25T16:01:47.364Z",
+            "elapsedMs": 1389,
+            "sha256": "e32490c79ab03e85ea6166d3d2d2335a128a6031c1e32a53ca618f157e9d4538"
+          },
+          {
+            "frameNumber": 9,
+            "capturedAtUtc": "2026-09-25T16:01:47.537Z",
+            "elapsedMs": 1562,
+            "sha256": "e32490c79ab03e85ea6166d3d2d2335a128a6031c1e32a53ca618f157e9d4538"
+          },
+          {
+            "frameNumber": 10,
+            "capturedAtUtc": "2026-09-25T16:01:47.721Z",
+            "elapsedMs": 1746,
+            "sha256": "e32490c79ab03e85ea6166d3d2d2335a128a6031c1e32a53ca618f157e9d4538"
+          },
+          {
+            "frameNumber": 11,
+            "capturedAtUtc": "2026-09-25T16:01:47.849Z",
+            "elapsedMs": 1874,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 12,
+            "capturedAtUtc": "2026-09-25T16:01:47.976Z",
+            "elapsedMs": 2001,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 13,
+            "capturedAtUtc": "2026-09-25T16:01:48.149Z",
+            "elapsedMs": 2174,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 14,
+            "capturedAtUtc": "2026-09-25T16:01:48.323Z",
+            "elapsedMs": 2348,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 15,
+            "capturedAtUtc": "2026-09-25T16:01:48.497Z",
+            "elapsedMs": 2522,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 16,
+            "capturedAtUtc": "2026-09-25T16:01:48.674Z",
+            "elapsedMs": 2699,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 17,
+            "capturedAtUtc": "2026-09-25T16:01:48.851Z",
+            "elapsedMs": 2876,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 18,
+            "capturedAtUtc": "2026-09-25T16:01:49.027Z",
+            "elapsedMs": 3052,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 19,
+            "capturedAtUtc": "2026-09-25T16:01:49.204Z",
+            "elapsedMs": 3229,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 20,
+            "capturedAtUtc": "2026-09-25T16:01:49.435Z",
+            "elapsedMs": 3460,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 21,
+            "capturedAtUtc": "2026-09-25T16:01:49.609Z",
+            "elapsedMs": 3634,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 22,
+            "capturedAtUtc": "2026-09-25T16:01:49.785Z",
+            "elapsedMs": 3810,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 23,
+            "capturedAtUtc": "2026-09-25T16:01:49.969Z",
+            "elapsedMs": 3994,
+            "sha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00"
+          },
+          {
+            "frameNumber": 24,
+            "capturedAtUtc": "2026-09-25T16:01:50.095Z",
+            "elapsedMs": 4120,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 25,
+            "capturedAtUtc": "2026-09-25T16:01:50.209Z",
+            "elapsedMs": 4234,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 26,
+            "capturedAtUtc": "2026-09-25T16:01:50.384Z",
+            "elapsedMs": 4409,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 27,
+            "capturedAtUtc": "2026-09-25T16:01:50.561Z",
+            "elapsedMs": 4586,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 28,
+            "capturedAtUtc": "2026-09-25T16:01:50.742Z",
+            "elapsedMs": 4767,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 29,
+            "capturedAtUtc": "2026-09-25T16:01:50.918Z",
+            "elapsedMs": 4943,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 30,
+            "capturedAtUtc": "2026-09-25T16:01:51.091Z",
+            "elapsedMs": 5116,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 31,
+            "capturedAtUtc": "2026-09-25T16:01:51.266Z",
+            "elapsedMs": 5291,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 32,
+            "capturedAtUtc": "2026-09-25T16:01:51.443Z",
+            "elapsedMs": 5468,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 33,
+            "capturedAtUtc": "2026-09-25T16:01:51.618Z",
+            "elapsedMs": 5643,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 34,
+            "capturedAtUtc": "2026-09-25T16:01:51.795Z",
+            "elapsedMs": 5820,
+            "sha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6"
+          },
+          {
+            "frameNumber": 35,
+            "capturedAtUtc": "2026-09-25T16:01:51.988Z",
+            "elapsedMs": 6013,
+            "sha256": "a7a4411a520440267217fd47caa10d8c2063b4e6cba2440778d4572a4611fdc5"
+          },
+          {
+            "frameNumber": 36,
+            "capturedAtUtc": "2026-09-25T16:01:52.171Z",
+            "elapsedMs": 6196,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 37,
+            "capturedAtUtc": "2026-09-25T16:01:52.284Z",
+            "elapsedMs": 6309,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 38,
+            "capturedAtUtc": "2026-09-25T16:01:52.396Z",
+            "elapsedMs": 6421,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 39,
+            "capturedAtUtc": "2026-09-25T16:01:52.570Z",
+            "elapsedMs": 6595,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 40,
+            "capturedAtUtc": "2026-09-25T16:01:52.744Z",
+            "elapsedMs": 6769,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 41,
+            "capturedAtUtc": "2026-09-25T16:01:52.921Z",
+            "elapsedMs": 6946,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 42,
+            "capturedAtUtc": "2026-09-25T16:01:53.096Z",
+            "elapsedMs": 7121,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 43,
+            "capturedAtUtc": "2026-09-25T16:01:53.272Z",
+            "elapsedMs": 7297,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 44,
+            "capturedAtUtc": "2026-09-25T16:01:53.445Z",
+            "elapsedMs": 7470,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 45,
+            "capturedAtUtc": "2026-09-25T16:01:53.622Z",
+            "elapsedMs": 7647,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 46,
+            "capturedAtUtc": "2026-09-25T16:01:53.796Z",
+            "elapsedMs": 7821,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 47,
+            "capturedAtUtc": "2026-09-25T16:01:53.976Z",
+            "elapsedMs": 8001,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 48,
+            "capturedAtUtc": "2026-09-25T16:01:54.150Z",
+            "elapsedMs": 8175,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 49,
+            "capturedAtUtc": "2026-09-25T16:01:54.332Z",
+            "elapsedMs": 8357,
+            "sha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb"
+          },
+          {
+            "frameNumber": 50,
+            "capturedAtUtc": "2026-09-25T16:01:54.449Z",
+            "elapsedMs": 8474,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 51,
+            "capturedAtUtc": "2026-09-25T16:01:54.562Z",
+            "elapsedMs": 8587,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 52,
+            "capturedAtUtc": "2026-09-25T16:01:54.740Z",
+            "elapsedMs": 8765,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 53,
+            "capturedAtUtc": "2026-09-25T16:01:54.915Z",
+            "elapsedMs": 8940,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 54,
+            "capturedAtUtc": "2026-09-25T16:01:55.090Z",
+            "elapsedMs": 9115,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 55,
+            "capturedAtUtc": "2026-09-25T16:01:55.267Z",
+            "elapsedMs": 9292,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 56,
+            "capturedAtUtc": "2026-09-25T16:01:55.442Z",
+            "elapsedMs": 9467,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 57,
+            "capturedAtUtc": "2026-09-25T16:01:55.618Z",
+            "elapsedMs": 9643,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 58,
+            "capturedAtUtc": "2026-09-25T16:01:55.792Z",
+            "elapsedMs": 9817,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 59,
+            "capturedAtUtc": "2026-09-25T16:01:55.968Z",
+            "elapsedMs": 9993,
+            "sha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d"
+          },
+          {
+            "frameNumber": 60,
+            "capturedAtUtc": "2026-09-25T16:01:56.085Z",
+            "elapsedMs": 10110,
+            "sha256": "c6e9d88c2565869ca63729fa2bc40ac7500b188059541f3c5f9307222a533e51"
+          },
+          {
+            "frameNumber": 61,
+            "capturedAtUtc": "2026-09-25T16:01:56.199Z",
+            "elapsedMs": 10224,
+            "sha256": "c6e9d88c2565869ca63729fa2bc40ac7500b188059541f3c5f9307222a533e51"
+          },
+          {
+            "frameNumber": 62,
+            "capturedAtUtc": "2026-09-25T16:01:56.374Z",
+            "elapsedMs": 10399,
+            "sha256": "c6e9d88c2565869ca63729fa2bc40ac7500b188059541f3c5f9307222a533e51"
+          },
+          {
+            "frameNumber": 63,
+            "capturedAtUtc": "2026-09-25T16:01:56.549Z",
+            "elapsedMs": 10574,
+            "sha256": "c6e9d88c2565869ca63729fa2bc40ac7500b188059541f3c5f9307222a533e51"
+          },
+          {
+            "frameNumber": 64,
+            "capturedAtUtc": "2026-09-25T16:01:56.720Z",
+            "elapsedMs": 10745,
+            "sha256": "c6e9d88c2565869ca63729fa2bc40ac7500b188059541f3c5f9307222a533e51"
+          },
+          {
+            "frameNumber": 65,
+            "capturedAtUtc": "2026-09-25T16:01:56.896Z",
+            "elapsedMs": 10921,
+            "sha256": "c6e9d88c2565869ca63729fa2bc40ac7500b188059541f3c5f9307222a533e51"
+          },
+          {
+            "frameNumber": 66,
+            "capturedAtUtc": "2026-09-25T16:01:57.074Z",
+            "elapsedMs": 11099,
+            "sha256": "c7bab685ee3b80c72e23c10d2a63d0b833511d2927e90f1f0b77ff5f18b1d004"
+          },
+          {
+            "frameNumber": 67,
+            "capturedAtUtc": "2026-09-25T16:01:57.248Z",
+            "elapsedMs": 11273,
+            "sha256": "c7bab685ee3b80c72e23c10d2a63d0b833511d2927e90f1f0b77ff5f18b1d004"
+          },
+          {
+            "frameNumber": 68,
+            "capturedAtUtc": "2026-09-25T16:01:57.424Z",
+            "elapsedMs": 11449,
+            "sha256": "c7bab685ee3b80c72e23c10d2a63d0b833511d2927e90f1f0b77ff5f18b1d004"
+          },
+          {
+            "frameNumber": 69,
+            "capturedAtUtc": "2026-09-25T16:01:57.600Z",
+            "elapsedMs": 11625,
+            "sha256": "c7bab685ee3b80c72e23c10d2a63d0b833511d2927e90f1f0b77ff5f18b1d004"
+          },
+          {
+            "frameNumber": 70,
+            "capturedAtUtc": "2026-09-25T16:01:57.776Z",
+            "elapsedMs": 11801,
+            "sha256": "c7bab685ee3b80c72e23c10d2a63d0b833511d2927e90f1f0b77ff5f18b1d004"
+          },
+          {
+            "frameNumber": 71,
+            "capturedAtUtc": "2026-09-25T16:01:57.949Z",
+            "elapsedMs": 11974,
+            "sha256": "c7bab685ee3b80c72e23c10d2a63d0b833511d2927e90f1f0b77ff5f18b1d004"
+          },
+          {
+            "frameNumber": 72,
+            "capturedAtUtc": "2026-09-25T16:01:58.070Z",
+            "elapsedMs": 12095,
+            "sha256": "bb7774db46a3d9d1bb424b9930701e8db69a1a18e369e5c7ae2bbe98546715a2"
+          },
+          {
+            "frameNumber": 73,
+            "capturedAtUtc": "2026-09-25T16:01:58.185Z",
+            "elapsedMs": 12210,
+            "sha256": "bb7774db46a3d9d1bb424b9930701e8db69a1a18e369e5c7ae2bbe98546715a2"
+          },
+          {
+            "frameNumber": 74,
+            "capturedAtUtc": "2026-09-25T16:01:58.361Z",
+            "elapsedMs": 12386,
+            "sha256": "bb7774db46a3d9d1bb424b9930701e8db69a1a18e369e5c7ae2bbe98546715a2"
+          },
+          {
+            "frameNumber": 75,
+            "capturedAtUtc": "2026-09-25T16:01:58.539Z",
+            "elapsedMs": 12564,
+            "sha256": "16ad3e59ee67c5bba3cdf9c8057e1e963ad93503c61f4a59b7b7641390550669"
+          },
+          {
+            "frameNumber": 76,
+            "capturedAtUtc": "2026-09-25T16:01:58.715Z",
+            "elapsedMs": 12740,
+            "sha256": "16ad3e59ee67c5bba3cdf9c8057e1e963ad93503c61f4a59b7b7641390550669"
+          },
+          {
+            "frameNumber": 77,
+            "capturedAtUtc": "2026-09-25T16:01:58.897Z",
+            "elapsedMs": 12922,
+            "sha256": "16ad3e59ee67c5bba3cdf9c8057e1e963ad93503c61f4a59b7b7641390550669"
+          },
+          {
+            "frameNumber": 78,
+            "capturedAtUtc": "2026-09-25T16:01:59.073Z",
+            "elapsedMs": 13098,
+            "sha256": "bb7774db46a3d9d1bb424b9930701e8db69a1a18e369e5c7ae2bbe98546715a2"
+          },
+          {
+            "frameNumber": 79,
+            "capturedAtUtc": "2026-09-25T16:01:59.247Z",
+            "elapsedMs": 13272,
+            "sha256": "bb7774db46a3d9d1bb424b9930701e8db69a1a18e369e5c7ae2bbe98546715a2"
+          },
+          {
+            "frameNumber": 80,
+            "capturedAtUtc": "2026-09-25T16:01:59.423Z",
+            "elapsedMs": 13448,
+            "sha256": "bb7774db46a3d9d1bb424b9930701e8db69a1a18e369e5c7ae2bbe98546715a2"
+          },
+          {
+            "frameNumber": 81,
+            "capturedAtUtc": "2026-09-25T16:01:59.615Z",
+            "elapsedMs": 13640,
+            "sha256": "4ca178506fa4949cc35e3dd115ac0ec251fb113aaa3eee25fe82e4e1addc4107"
+          },
+          {
+            "frameNumber": 82,
+            "capturedAtUtc": "2026-09-25T16:01:59.792Z",
+            "elapsedMs": 13817,
+            "sha256": "4ca178506fa4949cc35e3dd115ac0ec251fb113aaa3eee25fe82e4e1addc4107"
+          },
+          {
+            "frameNumber": 83,
+            "capturedAtUtc": "2026-09-25T16:01:59.950Z",
+            "elapsedMs": 13975,
+            "sha256": "4ca178506fa4949cc35e3dd115ac0ec251fb113aaa3eee25fe82e4e1addc4107"
+          },
+          {
+            "frameNumber": 84,
+            "capturedAtUtc": "2026-09-25T16:02:00.067Z",
+            "elapsedMs": 14092,
+            "sha256": "4ca178506fa4949cc35e3dd115ac0ec251fb113aaa3eee25fe82e4e1addc4107"
+          },
+          {
+            "frameNumber": 85,
+            "capturedAtUtc": "2026-09-25T16:02:00.245Z",
+            "elapsedMs": 14270,
+            "sha256": "84e372c0fe73a9a377c27151821de103f30656497ef3ef9032106d49bbda01e5"
+          },
+          {
+            "frameNumber": 86,
+            "capturedAtUtc": "2026-09-25T16:02:00.421Z",
+            "elapsedMs": 14446,
+            "sha256": "84e372c0fe73a9a377c27151821de103f30656497ef3ef9032106d49bbda01e5"
+          },
+          {
+            "frameNumber": 87,
+            "capturedAtUtc": "2026-09-25T16:02:00.597Z",
+            "elapsedMs": 14622,
+            "sha256": "4ca178506fa4949cc35e3dd115ac0ec251fb113aaa3eee25fe82e4e1addc4107"
+          },
+          {
+            "frameNumber": 88,
+            "capturedAtUtc": "2026-09-25T16:02:00.770Z",
+            "elapsedMs": 14795,
+            "sha256": "4ca178506fa4949cc35e3dd115ac0ec251fb113aaa3eee25fe82e4e1addc4107"
+          },
+          {
+            "frameNumber": 89,
+            "capturedAtUtc": "2026-09-25T16:02:00.946Z",
+            "elapsedMs": 14971,
+            "sha256": "4ca178506fa4949cc35e3dd115ac0ec251fb113aaa3eee25fe82e4e1addc4107"
+          },
+          {
+            "frameNumber": 90,
+            "capturedAtUtc": "2026-09-25T16:02:01.125Z",
+            "elapsedMs": 15150,
+            "sha256": "84e372c0fe73a9a377c27151821de103f30656497ef3ef9032106d49bbda01e5"
+          },
+          {
+            "frameNumber": 91,
+            "capturedAtUtc": "2026-09-25T16:02:01.299Z",
+            "elapsedMs": 15324,
+            "sha256": "84e372c0fe73a9a377c27151821de103f30656497ef3ef9032106d49bbda01e5"
+          },
+          {
+            "frameNumber": 92,
+            "capturedAtUtc": "2026-09-25T16:02:01.477Z",
+            "elapsedMs": 15502,
+            "sha256": "84e372c0fe73a9a377c27151821de103f30656497ef3ef9032106d49bbda01e5"
+          },
+          {
+            "frameNumber": 93,
+            "capturedAtUtc": "2026-09-25T16:02:01.629Z",
+            "elapsedMs": 15654,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 94,
+            "capturedAtUtc": "2026-09-25T16:02:01.747Z",
+            "elapsedMs": 15772,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 95,
+            "capturedAtUtc": "2026-09-25T16:02:01.927Z",
+            "elapsedMs": 15952,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 96,
+            "capturedAtUtc": "2026-09-25T16:02:02.109Z",
+            "elapsedMs": 16134,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 97,
+            "capturedAtUtc": "2026-09-25T16:02:02.293Z",
+            "elapsedMs": 16318,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 98,
+            "capturedAtUtc": "2026-09-25T16:02:02.475Z",
+            "elapsedMs": 16500,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 99,
+            "capturedAtUtc": "2026-09-25T16:02:02.656Z",
+            "elapsedMs": 16681,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 100,
+            "capturedAtUtc": "2026-09-25T16:02:02.839Z",
+            "elapsedMs": 16864,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 101,
+            "capturedAtUtc": "2026-09-25T16:02:03.024Z",
+            "elapsedMs": 17049,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 102,
+            "capturedAtUtc": "2026-09-25T16:02:03.204Z",
+            "elapsedMs": 17229,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 103,
+            "capturedAtUtc": "2026-09-25T16:02:03.388Z",
+            "elapsedMs": 17413,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 104,
+            "capturedAtUtc": "2026-09-25T16:02:03.582Z",
+            "elapsedMs": 17607,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 105,
+            "capturedAtUtc": "2026-09-25T16:02:03.765Z",
+            "elapsedMs": 17790,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 106,
+            "capturedAtUtc": "2026-09-25T16:02:03.957Z",
+            "elapsedMs": 17982,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 107,
+            "capturedAtUtc": "2026-09-25T16:02:04.072Z",
+            "elapsedMs": 18097,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 108,
+            "capturedAtUtc": "2026-09-25T16:02:04.178Z",
+            "elapsedMs": 18203,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 109,
+            "capturedAtUtc": "2026-09-25T16:02:04.351Z",
+            "elapsedMs": 18376,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 110,
+            "capturedAtUtc": "2026-09-25T16:02:04.525Z",
+            "elapsedMs": 18550,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 111,
+            "capturedAtUtc": "2026-09-25T16:02:04.699Z",
+            "elapsedMs": 18724,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 112,
+            "capturedAtUtc": "2026-09-25T16:02:04.872Z",
+            "elapsedMs": 18897,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 113,
+            "capturedAtUtc": "2026-09-25T16:02:05.046Z",
+            "elapsedMs": 19071,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 114,
+            "capturedAtUtc": "2026-09-25T16:02:05.218Z",
+            "elapsedMs": 19243,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 115,
+            "capturedAtUtc": "2026-09-25T16:02:05.392Z",
+            "elapsedMs": 19417,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 116,
+            "capturedAtUtc": "2026-09-25T16:02:05.566Z",
+            "elapsedMs": 19591,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 117,
+            "capturedAtUtc": "2026-09-25T16:02:05.745Z",
+            "elapsedMs": 19770,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 118,
+            "capturedAtUtc": "2026-09-25T16:02:05.919Z",
+            "elapsedMs": 19944,
+            "sha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347"
+          },
+          {
+            "frameNumber": 119,
+            "capturedAtUtc": "2026-09-25T16:02:06.055Z",
+            "elapsedMs": 20080,
+            "sha256": "d284c506b412e0dec2c10e0a4e1a2eb1a7196da3b4505024530d82179c4ee654"
+          },
+          {
+            "frameNumber": 120,
+            "capturedAtUtc": "2026-09-25T16:02:06.176Z",
+            "elapsedMs": 20201,
+            "sha256": "d284c506b412e0dec2c10e0a4e1a2eb1a7196da3b4505024530d82179c4ee654"
+          },
+          {
+            "frameNumber": 121,
+            "capturedAtUtc": "2026-09-25T16:02:06.356Z",
+            "elapsedMs": 20381,
+            "sha256": "d284c506b412e0dec2c10e0a4e1a2eb1a7196da3b4505024530d82179c4ee654"
+          },
+          {
+            "frameNumber": 122,
+            "capturedAtUtc": "2026-09-25T16:02:06.540Z",
+            "elapsedMs": 20565,
+            "sha256": "d284c506b412e0dec2c10e0a4e1a2eb1a7196da3b4505024530d82179c4ee654"
+          },
+          {
+            "frameNumber": 123,
+            "capturedAtUtc": "2026-09-25T16:02:06.723Z",
+            "elapsedMs": 20748,
+            "sha256": "d284c506b412e0dec2c10e0a4e1a2eb1a7196da3b4505024530d82179c4ee654"
+          },
+          {
+            "frameNumber": 124,
+            "capturedAtUtc": "2026-09-25T16:02:06.904Z",
+            "elapsedMs": 20929,
+            "sha256": "d284c506b412e0dec2c10e0a4e1a2eb1a7196da3b4505024530d82179c4ee654"
+          },
+          {
+            "frameNumber": 125,
+            "capturedAtUtc": "2026-09-25T16:02:07.086Z",
+            "elapsedMs": 21111,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 126,
+            "capturedAtUtc": "2026-09-25T16:02:07.267Z",
+            "elapsedMs": 21292,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 127,
+            "capturedAtUtc": "2026-09-25T16:02:07.445Z",
+            "elapsedMs": 21470,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 128,
+            "capturedAtUtc": "2026-09-25T16:02:07.627Z",
+            "elapsedMs": 21652,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 129,
+            "capturedAtUtc": "2026-09-25T16:02:07.810Z",
+            "elapsedMs": 21835,
+            "sha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239"
+          },
+          {
+            "frameNumber": 130,
+            "capturedAtUtc": "2026-09-25T16:02:08.028Z",
+            "elapsedMs": 22053,
+            "sha256": "850bf0de7f6028295fda7a3830ed4e0fd5006cd6b77dc6678197c8b46a7f0530"
+          },
+          {
+            "frameNumber": 131,
+            "capturedAtUtc": "2026-09-25T16:02:08.206Z",
+            "elapsedMs": 22231,
+            "sha256": "48fd2265ddf1b4d1fa3b08512e34bee24e8f9240b92ab6b1e8b6112ef56dfec5"
+          },
+          {
+            "frameNumber": 132,
+            "capturedAtUtc": "2026-09-25T16:02:08.357Z",
+            "elapsedMs": 22382,
+            "sha256": "2b83e87f396a71a0a306815817c4c6979e01f9e03f936f6c23e1d988128d6c27"
+          },
+          {
+            "frameNumber": 133,
+            "capturedAtUtc": "2026-09-25T16:02:08.475Z",
+            "elapsedMs": 22500,
+            "sha256": "3901b9a9cb8a5fb457eb078c0de4ca6108a8a9e2b668bf2da125c2ae72d3f913"
+          },
+          {
+            "frameNumber": 134,
+            "capturedAtUtc": "2026-09-25T16:02:08.650Z",
+            "elapsedMs": 22675,
+            "sha256": "2613cf3f791b367af996516565a81146f1ffac57dd202d5e4d004cc5c863a9da"
+          },
+          {
+            "frameNumber": 135,
+            "capturedAtUtc": "2026-09-25T16:02:08.823Z",
+            "elapsedMs": 22848,
+            "sha256": "2613cf3f791b367af996516565a81146f1ffac57dd202d5e4d004cc5c863a9da"
+          },
+          {
+            "frameNumber": 136,
+            "capturedAtUtc": "2026-09-25T16:02:08.997Z",
+            "elapsedMs": 23022,
+            "sha256": "2613cf3f791b367af996516565a81146f1ffac57dd202d5e4d004cc5c863a9da"
+          },
+          {
+            "frameNumber": 137,
+            "capturedAtUtc": "2026-09-25T16:02:09.170Z",
+            "elapsedMs": 23195,
+            "sha256": "2613cf3f791b367af996516565a81146f1ffac57dd202d5e4d004cc5c863a9da"
+          },
+          {
+            "frameNumber": 138,
+            "capturedAtUtc": "2026-09-25T16:02:09.350Z",
+            "elapsedMs": 23375,
+            "sha256": "2613cf3f791b367af996516565a81146f1ffac57dd202d5e4d004cc5c863a9da"
+          },
+          {
+            "frameNumber": 139,
+            "capturedAtUtc": "2026-09-25T16:02:09.534Z",
+            "elapsedMs": 23559,
+            "sha256": "2613cf3f791b367af996516565a81146f1ffac57dd202d5e4d004cc5c863a9da"
+          },
+          {
+            "frameNumber": 140,
+            "capturedAtUtc": "2026-09-25T16:02:09.706Z",
+            "elapsedMs": 23731,
+            "sha256": "2613cf3f791b367af996516565a81146f1ffac57dd202d5e4d004cc5c863a9da"
+          },
+          {
+            "frameNumber": 141,
+            "capturedAtUtc": "2026-09-25T16:02:09.902Z",
+            "elapsedMs": 23927,
+            "sha256": "badf20cc5164946f799ee1c54e1368638104c08275609be15d1792e07d69ac4a"
+          },
+          {
+            "frameNumber": 142,
+            "capturedAtUtc": "2026-09-25T16:02:10.016Z",
+            "elapsedMs": 24041,
+            "sha256": "c530854692a0d16d7f7ff82fd4c87081afed62fb6b731c45657e98544b3e9873"
+          },
+          {
+            "frameNumber": 143,
+            "capturedAtUtc": "2026-09-25T16:02:10.194Z",
+            "elapsedMs": 24219,
+            "sha256": "c530854692a0d16d7f7ff82fd4c87081afed62fb6b731c45657e98544b3e9873"
+          },
+          {
+            "frameNumber": 144,
+            "capturedAtUtc": "2026-09-25T16:02:10.373Z",
+            "elapsedMs": 24398,
+            "sha256": "c530854692a0d16d7f7ff82fd4c87081afed62fb6b731c45657e98544b3e9873"
+          },
+          {
+            "frameNumber": 145,
+            "capturedAtUtc": "2026-09-25T16:02:10.550Z",
+            "elapsedMs": 24575,
+            "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
+          },
+          {
+            "frameNumber": 146,
+            "capturedAtUtc": "2026-09-25T16:02:10.725Z",
+            "elapsedMs": 24750,
+            "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
+          },
+          {
+            "frameNumber": 147,
+            "capturedAtUtc": "2026-09-25T16:02:10.900Z",
+            "elapsedMs": 24925,
+            "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
+          },
+          {
+            "frameNumber": 148,
+            "capturedAtUtc": "2026-09-25T16:02:11.077Z",
+            "elapsedMs": 25102,
+            "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
+          },
+          {
+            "frameNumber": 149,
+            "capturedAtUtc": "2026-09-25T16:02:11.256Z",
+            "elapsedMs": 25281,
+            "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
+          },
+          {
+            "frameNumber": 150,
+            "capturedAtUtc": "2026-09-25T16:02:11.483Z",
+            "elapsedMs": 25508,
+            "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
+          },
+          {
+            "frameNumber": 151,
+            "capturedAtUtc": "2026-09-25T16:02:11.658Z",
+            "elapsedMs": 25683,
+            "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
+          },
+          {
+            "frameNumber": 152,
+            "capturedAtUtc": "2026-09-25T16:02:11.833Z",
+            "elapsedMs": 25858,
+            "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
+          },
+          {
+            "frameNumber": 153,
+            "capturedAtUtc": "2026-09-25T16:02:12.016Z",
+            "elapsedMs": 26041,
+            "sha256": "5424eadab9732a01bd1a7eb3917616749d549be237e37d3e678cec3d2c59ff88"
+          }
+        ],
+        "encodedFrameTimestampsMs": [
+          0,
+          116,
+          231,
+          414,
+          598,
+          783,
+          959,
+          1133,
+          1304,
+          1477,
+          1661,
+          1789,
+          1916,
+          2089,
+          2263,
+          2437,
+          2614,
+          2791,
+          2967,
+          3144,
+          3375,
+          3549,
+          3725,
+          3909,
+          4035,
+          4149,
+          4324,
+          4501,
+          4682,
+          4858,
+          5031,
+          5206,
+          5383,
+          5558,
+          5735,
+          5928,
+          6111,
+          6224,
+          6336,
+          6510,
+          6684,
+          6861,
+          7036,
+          7212,
+          7385,
+          7562,
+          7736,
+          7916,
+          8090,
+          8272,
+          8389,
+          8502,
+          8680,
+          8855,
+          9030,
+          9207,
+          9382,
+          9558,
+          9732,
+          9908,
+          10025,
+          10139,
+          10314,
+          10489,
+          10660,
+          10836,
+          11014,
+          11188,
+          11364,
+          11540,
+          11716,
+          11889,
+          12010,
+          12125,
+          12301,
+          12479,
+          12655,
+          12837,
+          13013,
+          13187,
+          13363,
+          13555,
+          13732,
+          13890,
+          14007,
+          14185,
+          14361,
+          14537,
+          14710,
+          14886,
+          15065,
+          15239,
+          15417,
+          15569,
+          15687,
+          15867,
+          16049,
+          16233,
+          16415,
+          16596,
+          16779,
+          16964,
+          17144,
+          17328,
+          17522,
+          17705,
+          17897,
+          18012,
+          18118,
+          18291,
+          18465,
+          18639,
+          18812,
+          18986,
+          19158,
+          19332,
+          19506,
+          19685,
+          19859,
+          19995,
+          20116,
+          20296,
+          20480,
+          20663,
+          20844,
+          21026,
+          21207,
+          21385,
+          21567,
+          21750,
+          21968,
+          22146,
+          22297,
+          22415,
+          22590,
+          22763,
+          22937,
+          23110,
+          23290,
+          23474,
+          23646,
+          23842,
+          23956,
+          24134,
+          24313,
+          24490,
+          24665,
+          24840,
+          25017,
+          25196,
+          25423,
+          25598,
+          25773,
+          25956
+        ],
+        "events": [
+          {
+            "name": "Electron BrowserWindow and app services reopened after explicit recording discontinuity",
+            "recordedAtUtc": "2026-09-25T16:01:46.211Z",
+            "elapsedMs": 236,
+            "framesCapturedBeforeEvent": 1,
+            "capturedFrameNumber": 1,
+            "capturedFramePresentationMs": 116,
+            "capturedFrameAtUtc": "2026-09-25T16:01:46.176Z",
+            "capturedFrameSha256": "01ed9493c9538845430dec9f3d5f18c7903342113a17976267ff76301c384563",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "restored draft A after full service/window restart",
+            "recordedAtUtc": "2026-09-25T16:01:47.889Z",
+            "elapsedMs": 1914,
+            "framesCapturedBeforeEvent": 11,
+            "capturedFrameNumber": 11,
+            "capturedFramePresentationMs": 1789,
+            "capturedFrameAtUtc": "2026-09-25T16:01:47.849Z",
+            "capturedFrameSha256": "a18d88760d7ef66a2158fdfad5ab4efcb8cb2fad5a5de0ec6c9968226a2cdb00",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "restored draft B after full service/window restart",
+            "recordedAtUtc": "2026-09-25T16:01:50.136Z",
+            "elapsedMs": 4161,
+            "framesCapturedBeforeEvent": 24,
+            "capturedFrameNumber": 24,
+            "capturedFramePresentationMs": 4035,
+            "capturedFrameAtUtc": "2026-09-25T16:01:50.095Z",
+            "capturedFrameSha256": "1968b16fccd827e268ed40d294d824d27233202742492196f8a2544ab162b8a6",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "confirmed A while the full B record remained unchanged",
+            "recordedAtUtc": "2026-09-25T16:01:52.324Z",
+            "elapsedMs": 6349,
+            "framesCapturedBeforeEvent": 37,
+            "capturedFrameNumber": 37,
+            "capturedFramePresentationMs": 6224,
+            "capturedFrameAtUtc": "2026-09-25T16:01:52.284Z",
+            "capturedFrameSha256": "5713eac8a8449c0fbec1c783fa7e2eb693d0f424c322b815cf03c654c2897afb",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "restored B editor before discard",
+            "recordedAtUtc": "2026-09-25T16:01:54.489Z",
+            "elapsedMs": 8514,
+            "framesCapturedBeforeEvent": 50,
+            "capturedFrameNumber": 50,
+            "capturedFramePresentationMs": 8389,
+            "capturedFrameAtUtc": "2026-09-25T16:01:54.449Z",
+            "capturedFrameSha256": "cbb0b6a627270f985df956f9b1e24fccf58c495d0df861456b2eecfd755da66d",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "discarded B leaves its historical node visible with no draft editor",
+            "recordedAtUtc": "2026-09-25T16:01:56.124Z",
+            "elapsedMs": 10149,
+            "framesCapturedBeforeEvent": 60,
+            "capturedFrameNumber": 60,
+            "capturedFramePresentationMs": 10025,
+            "capturedFrameAtUtc": "2026-09-25T16:01:56.085Z",
+            "capturedFrameSha256": "c6e9d88c2565869ca63729fa2bc40ac7500b188059541f3c5f9307222a533e51",
+            "visibleHoldMs": 1800
+          },
+          {
+            "name": "recreated a fresh empty B editor after discard",
+            "recordedAtUtc": "2026-09-25T16:01:58.112Z",
+            "elapsedMs": 12137,
+            "framesCapturedBeforeEvent": 72,
+            "capturedFrameNumber": 72,
+            "capturedFramePresentationMs": 12010,
+            "capturedFrameAtUtc": "2026-09-25T16:01:58.070Z",
+            "capturedFrameSha256": "bb7774db46a3d9d1bb424b9930701e8db69a1a18e369e5c7ae2bbe98546715a2",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "created fresh B after discarding the original B",
+            "recordedAtUtc": "2026-09-25T16:01:59.991Z",
+            "elapsedMs": 14016,
+            "framesCapturedBeforeEvent": 83,
+            "capturedFrameNumber": 83,
+            "capturedFramePresentationMs": 13890,
+            "capturedFrameAtUtc": "2026-09-25T16:01:59.950Z",
+            "capturedFrameSha256": "4ca178506fa4949cc35e3dd115ac0ec251fb113aaa3eee25fe82e4e1addc4107",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "first omission warning opened with fresh B named",
+            "recordedAtUtc": "2026-09-25T16:02:01.670Z",
+            "elapsedMs": 15695,
+            "framesCapturedBeforeEvent": 93,
+            "capturedFrameNumber": 93,
+            "capturedFramePresentationMs": 15569,
+            "capturedFrameAtUtc": "2026-09-25T16:02:01.629Z",
+            "capturedFrameSha256": "0f4b19af90ef9d9b491f442f55a8ebf477288c02fb19957214405eaefb75e239",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "Go back restored composition without changing B or interactions",
+            "recordedAtUtc": "2026-09-25T16:02:04.108Z",
+            "elapsedMs": 18133,
+            "framesCapturedBeforeEvent": 107,
+            "capturedFrameNumber": 107,
+            "capturedFramePresentationMs": 18012,
+            "capturedFrameAtUtc": "2026-09-25T16:02:04.072Z",
+            "capturedFrameSha256": "0d14d56808fe9b5386ba7bbad7a1d3d56f176300161657145641a7254fe65347",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "second omission warning visibly reopened before explicit override",
+            "recordedAtUtc": "2026-09-25T16:02:06.095Z",
+            "elapsedMs": 20120,
+            "framesCapturedBeforeEvent": 119,
+            "capturedFrameNumber": 119,
+            "capturedFramePresentationMs": 19995,
+            "capturedFrameAtUtc": "2026-09-25T16:02:06.055Z",
+            "capturedFrameSha256": "d284c506b412e0dec2c10e0a4e1a2eb1a7196da3b4505024530d82179c4ee654",
+            "visibleHoldMs": 1800
+          },
+          {
+            "name": "explicit override submitted exactly A and no other context",
+            "recordedAtUtc": "2026-09-25T16:02:08.386Z",
+            "elapsedMs": 22411,
+            "framesCapturedBeforeEvent": 132,
+            "capturedFrameNumber": 132,
+            "capturedFramePresentationMs": 22297,
+            "capturedFrameAtUtc": "2026-09-25T16:02:08.357Z",
+            "capturedFrameSha256": "2b83e87f396a71a0a306815817c4c6979e01f9e03f936f6c23e1d988128d6c27",
+            "visibleHoldMs": 1400
+          },
+          {
+            "name": "restored fresh B on its exact historical occurrence after override",
+            "recordedAtUtc": "2026-09-25T16:02:09.938Z",
+            "elapsedMs": 23963,
+            "framesCapturedBeforeEvent": 141,
+            "capturedFrameNumber": 141,
+            "capturedFramePresentationMs": 23842,
+            "capturedFrameAtUtc": "2026-09-25T16:02:09.902Z",
+            "capturedFrameSha256": "badf20cc5164946f799ee1c54e1368638104c08275609be15d1792e07d69ac4a",
+            "visibleHoldMs": 1400
+          }
+        ],
+        "stream": {
+          "codec_name": "h264",
+          "width": 2960,
+          "height": 1840,
+          "pix_fmt": "yuv420p",
+          "side_data_list": [
+            {}
+          ]
+        },
+        "encodedDurationSeconds": 25.83,
+        "playbackDecoded": true
+      }
+    ],
+    "discontinuity": {
+      "startsAtUtc": "2026-09-25T16:01:41.875Z",
+      "endsAtUtc": "2026-09-25T16:01:45.975Z",
+      "durationMs": 4100,
+      "restartOperationStartedAtUtc": "2026-09-25T16:01:44.497Z",
+      "restartOperationEndedAtUtc": "2026-09-25T16:01:45.975Z",
+      "reason": "Recording stopped and the first segment was encoded; then the Electron BrowserWindow and Rust app/graph services were stopped and reopened; recording resumed only on the reopened window.",
+      "beforeSegment": "interaction-context-before-restart.mp4",
+      "afterSegment": "interaction-context-after-restart.mp4"
     },
-    "playbackDecoded": true,
-    "steps": [
-      "1. Selecting a graph node opens its full Node Details without covering the graph or composer",
-      "2. The node's + opens its saved annotation editor in the bottom third of Node Details",
-      "3. A failed save stays in Node Details with the draft intact and an inline retryable error",
-      "4. While the draft save is held, Node Details stays on the source node with the exact text visible",
-      "5. After persistence settles, switching opens the next node without carrying the editor across",
-      "6. Returning to the source node restores the exact unconfirmed draft in its Node Details dock",
-      "7. While Close waits on a held save, the exact draft remains visible in Node Details",
-      "8. After persistence settles, Node Details closes and the graph and composer remain usable",
-      "9. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
-      "10. The × control discards only this unconfirmed draft while the confirmed node context remains attached",
-      "11. After discard, the temporary editor is gone and the confirmed collapsed pill is unchanged",
-      "12. Confirmed annotations stay read-only in an explicitly opened compact preview",
-      "13. Multiple attached-node pills scroll horizontally within the available composer width",
-      "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
-      "15. The turn banner shows one connected-node pill; its popover restores both annotations in order",
-      "16. Clicking the connected node reopens its full Node Details from history",
-      "17. A connected node with a non-empty annotation enables send even when message text is empty",
-      "18. Annotation-only history has no derived message label; the context pill preserves the actual input",
-      "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
-      "20. The persisted context still reopens the exact target node after restart"
-    ]
+    "eventCheckpoints": [
+      {
+        "caption": "1. Selecting a graph node opens its full Node Details without covering the graph or composer",
+        "capturedAtUtc": "2026-09-25T16:01:12.793Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "2. The node's + opens its saved annotation editor in the bottom third of Node Details",
+        "capturedAtUtc": "2026-09-25T16:01:13.603Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "3. A failed save stays in Node Details with the draft intact and an inline retryable error",
+        "capturedAtUtc": "2026-09-25T16:01:14.414Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "4. While the draft save is held, Node Details stays on the source node with the exact text visible",
+        "capturedAtUtc": "2026-09-25T16:01:15.190Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "5. After persistence settles, switching opens the next node without carrying the editor across",
+        "capturedAtUtc": "2026-09-25T16:01:15.622Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "6. Returning to the source node restores the exact unconfirmed draft in its Node Details dock",
+        "capturedAtUtc": "2026-09-25T16:01:16.031Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "7. While Close waits on a held save, the exact draft remains visible in Node Details",
+        "capturedAtUtc": "2026-09-25T16:01:16.419Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "8. After persistence settles, Node Details closes and the graph and composer remain usable",
+        "capturedAtUtc": "2026-09-25T16:01:16.851Z",
+        "selector": "#graphStage"
+      },
+      {
+        "caption": "9. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
+        "capturedAtUtc": "2026-09-25T16:01:17.287Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "10. The × control discards only this unconfirmed draft while the confirmed node context remains attached",
+        "capturedAtUtc": "2026-09-25T16:01:18.056Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "11. After discard, the temporary editor is gone and the confirmed collapsed pill is unchanged",
+        "capturedAtUtc": "2026-09-25T16:01:18.450Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "12. Confirmed annotations stay read-only in an explicitly opened compact preview",
+        "capturedAtUtc": "2026-09-25T16:01:18.896Z",
+        "selector": ".composer-context-preview"
+      },
+      {
+        "caption": "13. Multiple attached-node pills scroll horizontally within the available composer width",
+        "capturedAtUtc": "2026-09-25T16:01:19.492Z",
+        "selector": ".composer-context-pills"
+      },
+      {
+        "caption": "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+        "capturedAtUtc": "2026-09-25T16:01:20.322Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "15. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+        "capturedAtUtc": "2026-09-25T16:01:21.256Z",
+        "selector": "#interactionContextPopover"
+      },
+      {
+        "caption": "16. Clicking the connected node reopens its full Node Details from history",
+        "capturedAtUtc": "2026-09-25T16:01:21.634Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "17. A connected node with a non-empty annotation enables send even when message text is empty",
+        "capturedAtUtc": "2026-09-25T16:01:22.079Z",
+        "selector": "#threadComposerShell"
+      },
+      {
+        "caption": "18. Annotation-only history has no derived message label; the context pill preserves the actual input",
+        "capturedAtUtc": "2026-09-25T16:01:22.723Z",
+        "selector": "#interactionBanner"
+      },
+      {
+        "caption": "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+        "capturedAtUtc": "2026-09-25T16:01:25.004Z",
+        "selector": "#interactionContextPopover"
+      },
+      {
+        "caption": "20. The persisted context still reopens the exact target node after restart",
+        "capturedAtUtc": "2026-09-25T16:01:25.401Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "21. After a full service and window restart, the first exact unconfirmed draft restores on its node",
+        "capturedAtUtc": "2026-09-25T16:01:49.893Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "22. Selecting the other node restores its separate exact unconfirmed draft after restart",
+        "capturedAtUtc": "2026-09-25T16:01:51.907Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "23. Confirming the first draft leaves the other occurrence's durable draft unchanged",
+        "capturedAtUtc": "2026-09-25T16:01:54.302Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "24. Send names the remaining unconfirmed Two-worker pool draft before omitting it",
+        "capturedAtUtc": "2026-09-25T16:02:03.880Z",
+        "selector": "#contextDraftSendWarning"
+      },
+      {
+        "caption": "25. Go back restores the editable message and leaves the exact draft intact",
+        "capturedAtUtc": "2026-09-25T16:02:05.890Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "26. The accepted follow-up clears the composer; the omitted draft remains on its original historical node occurrence",
+        "capturedAtUtc": "2026-09-25T16:02:11.943Z",
+        "selector": "#nodeContextDock"
+      }
+    ],
+    "historicalStillMontage": {
+      "file": "interaction-context-still-montage-historical.mp4",
+      "sha256": "5145a85c7ca72d154ddd84aa37a4ffbaf89b63b8c83772a73ec4978fde5efcd3",
+      "role": "Retained from the prior evidence snapshot. This timed still-frame montage is historical and does not prove the missing interaction transitions."
+    }
   }
 }
