@@ -225,6 +225,8 @@ unmapped paths still fail open to the full portfolio. Scripts that Vitest import
 owning test files, and `scripts/prepare-ladybug-source.mjs` additionally
 selects packaging because the pinned Ladybug build consumes it and receipts
 because the native-receipt authority imports its hashing helpers.
+Native receipt verification also selects packaging and the packaged-lifecycle
+checkpoint because the pinned packaging module imports that verifier.
 `docs/graph-query-v1.md` is a compile-time input of the graph-core query
 contract tests, so it selects the Rust closure of `relayer-graph-core`.
 `docs/graph-query-v1-errors.json` is the source of the generated
