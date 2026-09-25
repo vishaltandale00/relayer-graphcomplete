@@ -1838,6 +1838,168 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejected_child_snapshot_cannot_poison_non_input_action_materialization() {
+        for (case, non_input_action_id) in [
+            ("navigate", "action:navigate-extra"),
+            ("invoke", "action:invoke"),
+            ("response-root", "action:root-1"),
+        ] {
+            let mut records = forged_input_records(ExportCompletionStatus::Accepted);
+            let input_action = {
+                let ConversationExportRecord::Turn(source) = &mut records[1] else {
+                    unreachable!()
+                };
+                source.accepted_view.as_mut().unwrap().layers[0]
+                    .actions
+                    .iter()
+                    .find(|action| action.id == "action:input")
+                    .unwrap()
+                    .input
+                    .clone()
+                    .unwrap()
+            };
+            if case == "navigate" {
+                let ConversationExportRecord::Turn(source) = &mut records[1] else {
+                    unreachable!()
+                };
+                let view = source.accepted_view.as_mut().unwrap();
+                view.layers[0].actions.push(export_action(
+                    non_input_action_id,
+                    "node:source",
+                    Some("layer:source"),
+                    ExportActionKind::Navigate,
+                    Some("layer:navigate-target"),
+                ));
+                view.layers.push(export_layer(
+                    "layer:navigate-target",
+                    "node:navigate-target",
+                    "Navigate target",
+                    vec![],
+                ));
+            }
+
+            let value = ExportSubmittedInputValue::Text {
+                text: "Keep this valid sibling".into(),
+            };
+            let submitted = |id: &str, action_id: &str| ExportSubmittedInput {
+                id: id.into(),
+                root_turn_id: "turn:3".into(),
+                source: ExportInputSource {
+                    interaction_node_id: "node:interaction-1".into(),
+                    layer_id: "layer:source".into(),
+                    action_id: action_id.into(),
+                    node_id: if action_id == "action:root-1" {
+                        "node:interaction-1".into()
+                    } else {
+                        "node:source".into()
+                    },
+                },
+                action: input_action.clone(),
+                value: value.clone(),
+            };
+            let ConversationExportRecord::Turn(consumer) = &mut records[3] else {
+                unreachable!()
+            };
+            consumer.text = "Keep this accepted turn".into();
+            consumer.submitted_inputs = vec![
+                submitted("input-child:valid", "action:input"),
+                submitted("input-child:poison", non_input_action_id),
+            ];
+            sort_submitted_inputs_canonically(consumer);
+
+            let (_directory, app, _store, _graph, graph_task) = app(true).await;
+            let staged = app
+                .clone()
+                .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
+                .await
+                .unwrap();
+            assert_eq!(
+                staged.status(),
+                StatusCode::OK,
+                "{case}: stage should defer invalid provenance to graph-core"
+            );
+            let staged = response_json(staged).await;
+            let published = app
+                .clone()
+                .oneshot(request(
+                    "PUT",
+                    "write-token",
+                    Body::from(serde_json::json!({"importId": staged["importId"]}).to_string()),
+                ))
+                .await
+                .unwrap();
+            if published.status() != StatusCode::OK {
+                panic!(
+                    "{case}: one poisoned child must not abort valid conversation content: {}",
+                    response_json(published).await
+                );
+            }
+            let published = response_json(published).await;
+            let skipped = published["skippedSubmittedInputs"].as_array().unwrap();
+            assert_eq!(skipped.len(), 1, "{case}");
+            assert_eq!(
+                skipped[0]["submittedInputId"], "input-child:poison",
+                "{case}"
+            );
+
+            let reexported = app
+                .oneshot(request_uri(
+                    "GET",
+                    &format!(
+                        "/api/threads/{}/export",
+                        published["threadId"].as_i64().unwrap()
+                    ),
+                    "write-token",
+                    Body::empty(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(reexported.status(), StatusCode::OK, "{case}");
+            let bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
+                .await
+                .unwrap();
+            let reexported = decode_export_jsonl(&bytes).unwrap();
+            let ConversationExportRecord::Turn(source) = &reexported[1] else {
+                unreachable!()
+            };
+            match case {
+                "response-root" => {
+                    assert_eq!(
+                        source.accepted_view.as_ref().unwrap().root_action.kind,
+                        ExportActionKind::Navigate,
+                        "{case}"
+                    );
+                }
+                "invoke" => assert!(
+                    source.accepted_view.as_ref().unwrap().layers[0]
+                        .actions
+                        .iter()
+                        .any(|action| action.kind == ExportActionKind::Invoke),
+                    "{case}"
+                ),
+                "navigate" => assert!(
+                    source.accepted_view.as_ref().unwrap().layers[0]
+                        .actions
+                        .iter()
+                        .any(|action| action.kind == ExportActionKind::Navigate),
+                    "{case}"
+                ),
+                _ => unreachable!(),
+            }
+            let ConversationExportRecord::Turn(imported) = &reexported[3] else {
+                unreachable!()
+            };
+            assert_eq!(imported.text, "Keep this accepted turn", "{case}");
+            assert_eq!(imported.submitted_inputs.len(), 1, "{case}");
+            assert_eq!(
+                imported.submitted_inputs[0].id, "input-child:valid",
+                "{case}"
+            );
+            graph_task.abort();
+        }
+    }
+
+    #[tokio::test]
     async fn accepted_turn_with_only_rejected_input_is_cleaned_up_before_publish() {
         let records = forged_input_records(ExportCompletionStatus::Accepted);
         let (_directory, app, store, graph, graph_task) = app(true).await;

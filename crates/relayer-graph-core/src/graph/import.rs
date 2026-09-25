@@ -501,14 +501,66 @@ impl crate::GraphDatabase {
             }
         }
 
+        // Old exports omitted authored input payloads and repeated them only on
+        // submitted children. Keep this compatibility fallback scoped to IDs of
+        // payload-less input actions. Prefer an exact-occurrence child whose value
+        // is valid under its snapshot, so an invalid earlier child cannot poison a
+        // later valid answer. If no such child exists, retain the old first-child
+        // fallback so a rejected legacy answer does not erase the authored action.
+        // Deferred children never supply payloads to non-input action construction.
+        let mut legacy_input_action_ids = HashSet::<String>::new();
+        let mut legacy_input_occurrences = HashSet::<(String, String, String, String)>::new();
+        for position in 0..turn_count {
+            let turn = load_turn(&mut tx, import_id, position).await?;
+            let Some(view) = turn.accepted_view else {
+                continue;
+            };
+            for resolved in view.layers {
+                for action in resolved.actions {
+                    if action.kind == "input"
+                        && action.input.is_none()
+                        && let Some(layer_id) = action.source_layer_id
+                    {
+                        legacy_input_action_ids.insert(action.id.clone());
+                        legacy_input_occurrences.insert((
+                            view.interaction_node_id.clone(),
+                            layer_id,
+                            action.id,
+                            action.source_node_id,
+                        ));
+                    }
+                }
+            }
+        }
         let mut input_action_snapshots = HashMap::<String, InputAction>::new();
+        let mut legacy_fallback_snapshots = HashMap::<String, InputAction>::new();
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
             for submitted in turn.submitted_inputs {
-                input_action_snapshots
-                    .entry(submitted.source.action_id)
-                    .or_insert(submitted.action);
+                let occurrence = (
+                    submitted.source.interaction_node_id,
+                    submitted.source.layer_id,
+                    submitted.source.action_id.clone(),
+                    submitted.source.node_id,
+                );
+                if submitted.root_turn_id == turn.source_turn_id
+                    && legacy_input_action_ids.contains(&submitted.source.action_id)
+                {
+                    legacy_fallback_snapshots
+                        .entry(submitted.source.action_id.clone())
+                        .or_insert_with(|| submitted.action.clone());
+                    if legacy_input_occurrences.contains(&occurrence)
+                        && validate_value(0, &submitted.action, &submitted.value).is_ok()
+                    {
+                        input_action_snapshots
+                            .entry(submitted.source.action_id)
+                            .or_insert(submitted.action);
+                    }
+                }
             }
+        }
+        for (action_id, snapshot) in legacy_fallback_snapshots {
+            input_action_snapshots.entry(action_id).or_insert(snapshot);
         }
         let mut action_ids = HashMap::<String, i64>::new();
         let context = InsertContext {

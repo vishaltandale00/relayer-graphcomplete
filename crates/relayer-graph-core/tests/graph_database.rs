@@ -1282,6 +1282,106 @@ async fn imported_duplicate_input_occurrence_drops_only_extra_answer_per_turn() 
 }
 
 #[tokio::test]
+async fn invalid_legacy_child_snapshot_does_not_poison_a_later_valid_answer() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    let legacy_input = InputAction {
+        control: InputControl::Text,
+        prompt: "Legacy question".into(),
+        options: vec![],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    input.turns[0].accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .push(ImportedAction {
+            id: "legacy-input-action".into(),
+            client_key: None,
+            source_node_id: "node-1".into(),
+            source_layer_id: Some("layer-1".into()),
+            kind: "input".into(),
+            relation: None,
+            label: "Legacy input".into(),
+            variant: "pill".into(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: None,
+        });
+
+    let invalid_snapshot = InputAction {
+        control: InputControl::SingleSelect,
+        prompt: "Untrusted snapshot".into(),
+        options: vec![InputOption {
+            key: "known".into(),
+            label: "Known".into(),
+            unsupported_fields: Default::default(),
+        }],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    let valid_value = SubmittedInputValue::Text {
+        text: "Keep this answer".into(),
+    };
+    let submitted =
+        |id: &str, action: InputAction, value: SubmittedInputValue| ImportedSubmittedInput {
+            id: id.into(),
+            root_turn_id: "turn-2".into(),
+            source: ImportedInputSource {
+                interaction_node_id: "interaction-1".into(),
+                layer_id: "layer-1".into(),
+                action_id: "legacy-input-action".into(),
+                node_id: "node-1".into(),
+            },
+            action,
+            value,
+        };
+    input.turns.push(ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "Keep this consuming turn".into(),
+        interaction_node_id: Some("input-root-2".into()),
+        invoke_origin: None,
+        contexts: vec![],
+        submitted_inputs: vec![
+            submitted(
+                "input-invalid-first-snapshot",
+                invalid_snapshot,
+                SubmittedInputValue::Selected {
+                    selected: vec![InputOption {
+                        key: "unknown".into(),
+                        label: "Unknown".into(),
+                        unsupported_fields: Default::default(),
+                    }],
+                },
+            ),
+            submitted(
+                "input-valid-later-snapshot",
+                legacy_input.clone(),
+                valid_value.clone(),
+            ),
+        ],
+        accepted_view: None,
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+    assert_eq!(receipt.skipped_submitted_inputs.len(), 1);
+    assert_eq!(
+        receipt.skipped_submitted_inputs[0].submitted_input_id,
+        "input-invalid-first-snapshot"
+    );
+    let root = NodeId::new(receipt.turns[1].graph_node_id.unwrap()).unwrap();
+    let writer = database.writer_for_subgraph(root).await.unwrap();
+    assert_eq!(
+        writer.interaction_input().await.unwrap().submitted_inputs,
+        vec![SubmittedInput {
+            action: legacy_input,
+            value: valid_value,
+        }]
+    );
+}
+
+#[tokio::test]
 async fn imported_action_origin_reconstructs_resolved_invoke_navigation() {
     let database = GraphDatabase::in_memory().await.unwrap();
     let receipt = database
