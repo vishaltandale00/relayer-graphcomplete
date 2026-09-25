@@ -239,6 +239,10 @@ describe("public share HTML boundary", () => {
       expect(viewer).not.toBeNull();
       expect(viewer.adapter.selection.currentInteractionId).toBe("turn:1");
       expect(windowRef.document.querySelector("#publicViewerHost")?.classList.contains("hidden")).toBe(false);
+      const downloadCard = windowRef.document.querySelector(".public-share-download-card");
+      expect(downloadCard?.parentElement?.classList.contains("workspace-layout")).toBe(true);
+      expect(downloadCard?.textContent).toContain("Relayer for Mac");
+      expect(downloadCard?.textContent).toContain("Download");
       expect(windowRef.document.body.textContent).toContain("Environment");
       windowRef.document.querySelector(".graph-node")?.click();
       await vi.waitFor(() => expect(windowRef.document.querySelector('a[href="https://example.test/docs"]')).toMatchObject({

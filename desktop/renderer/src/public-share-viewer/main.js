@@ -122,6 +122,12 @@ export function bootPublicViewer({
       inputDraftApi: null,
       inputOperatorAvailable: false,
     });
+    const workspaceLayout = host.querySelector(".workspace-layout");
+    const downloadCard = documentRef.querySelector(".public-share-download-card");
+    if (!workspaceLayout || !downloadCard) {
+      throw new Error("Public viewer download card host is missing.");
+    }
+    workspaceLayout.append(downloadCard);
     render();
     return Object.freeze({
       adapter,

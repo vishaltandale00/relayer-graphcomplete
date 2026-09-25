@@ -126,17 +126,19 @@ export function renderPublicViewerTemplate({
     </div>
   </header>
   <main class="public-share-main">
-    <section class="public-share-download-card" aria-labelledby="publicShareDownloadTitle">
-      <div>
-        <span class="public-share-eyebrow">Relayer for Mac</span>
-        <h1 id="publicShareDownloadTitle">Explore this graph in Relayer</h1>
-        <p>Open the desktop app to create, inspect, and continue your own local conversations.</p>
+    <aside class="public-share-download-card" aria-labelledby="publicShareDownloadTitle">
+      <div class="public-share-download-copy">
+        <img src="${logo}" alt="" width="28" height="28">
+        <div>
+          <strong id="publicShareDownloadTitle">Relayer for Mac</strong>
+          <small>Explore this thread, then build your own.</small>
+        </div>
       </div>
       <div class="public-share-download-actions">
         <a class="public-share-primary-action" href="${install}" target="_blank" rel="noopener noreferrer">Download</a>
         <span class="public-share-platform-note">Also for Windows</span>
       </div>
-    </section>
+    </aside>
     <section id="publicViewerHost" class="public-share-workspace-host" aria-label="Shared conversation workspace">
       <section class="thread-view" id="threadView"></section>
     </section>
