@@ -1,8 +1,9 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, readFile, rm, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -11,6 +12,11 @@ import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { startModelCatalogRefreshServer } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import {
+  capturedStateMeetsReadableHold,
+  capturedStateRun,
+  classifyDesktopCaptureText,
+} from "./lib/desktop-capture-evidence.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-context-draft-warning-"));
@@ -125,6 +131,91 @@ async function waitFor(label, check, timeoutMs = 20_000) {
   throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(diagnostic)}`);
 }
 
+function createDesktopCaptureTextRecognizer() {
+  const worker = spawn("swift", [join(repositoryRoot, "scripts", "recognize-desktop-capture-frame.swift")], {
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  const responses = new Map();
+  const lines = createInterface({ input: worker.stdout });
+  let nextRequestId = 0;
+  let readyResolve;
+  let readyReject;
+  let exited = false;
+  const ready = new Promise((resolveReady, rejectReady) => {
+    readyResolve = resolveReady;
+    readyReject = rejectReady;
+  });
+  const failPending = (error) => {
+    if (!exited) {
+      exited = true;
+      readyReject(error);
+      for (const pending of responses.values()) pending.reject(error);
+      responses.clear();
+    }
+  };
+  lines.on("line", (line) => {
+    let response;
+    try {
+      response = JSON.parse(line);
+    } catch (error) {
+      failPending(new Error(`Frame text recognizer returned invalid JSON: ${error.message}`));
+      return;
+    }
+    if (response.ready === true) {
+      readyResolve();
+      return;
+    }
+    const pending = responses.get(response.id);
+    if (!pending) return;
+    responses.delete(response.id);
+    if (response.error) pending.reject(new Error(`Frame text recognition failed: ${response.error}`));
+    else pending.resolve(response.text || "");
+  });
+  worker.once("error", (error) => failPending(error));
+  worker.once("exit", (code, signal) => {
+    if (!exited && code !== 0) {
+      failPending(new Error(`Frame text recognizer exited (${code ?? signal ?? "unknown"})`));
+    }
+  });
+
+  return {
+    ready,
+    async recognize(file) {
+      await ready;
+      if (exited) throw new Error("Frame text recognizer is no longer running.");
+      const id = ++nextRequestId;
+      const result = new Promise((resolveResult, rejectResult) => {
+        responses.set(id, { resolve: resolveResult, reject: rejectResult });
+      });
+      worker.stdin.write(`${JSON.stringify({ id, file })}\n`);
+      return result;
+    },
+    async close() {
+      if (exited) return;
+      worker.stdin.end();
+      await new Promise((resolveExit) => worker.once("exit", resolveExit));
+      exited = true;
+    },
+  };
+}
+
+async function waitForReadableCaptureRun(frames, state, afterIndex, minimumMs, captureFailure) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (captureFailure()) throw captureFailure();
+    const run = capturedStateMeetsReadableHold(
+      frames,
+      state,
+      minimumMs,
+      { afterIndex },
+    );
+    if (run) return run;
+    await sleep(25);
+  }
+  const run = capturedStateRun(frames, state, { afterIndex });
+  throw new Error(`Timed out waiting for ${state} captured frames to hold ${minimumMs}ms: ${JSON.stringify(run)}`);
+}
+
 async function captureOrdinaryNewThreadEvidence(threadId) {
   const savedDraftText = "Keep this unsent follow-up with the saved thread.";
   const activeInteractionId = await evaluate(`(async () => {
@@ -156,73 +247,138 @@ async function captureOrdinaryNewThreadEvidence(threadId) {
   }
 
   mkdirSync(noThreadEvidenceDirectory, { recursive: true });
+  const minimumReadableHoldMs = 1400;
   await waitFor("transient test notification clears before visual recording", () => evaluate(`(
     document.querySelector('#toast')?.classList.contains('hidden') === true
   )`));
-  const beforeNewThreadScreenshot = await mainWindow.webContents.capturePage();
-  const beforeNewThreadPng = beforeNewThreadScreenshot.toPNG();
-  const beforeNewThreadScreenshotFile = join(noThreadEvidenceDirectory, "saved-thread-draft-before-new-thread.png");
-  await writeFile(beforeNewThreadScreenshotFile, beforeNewThreadPng);
   const framesDirectory = join(dataDirectory, "ordinary-new-thread-frames");
   mkdirSync(framesDirectory, { recursive: true });
   const frames = [];
+  const recognizer = createDesktopCaptureTextRecognizer();
+  await recognizer.ready;
+  const beforeNewThreadScreenshot = await mainWindow.webContents.capturePage();
+  const beforeNewThreadScreenshotFile = join(noThreadEvidenceDirectory, "saved-thread-draft-before-new-thread.png");
+  const beforeNewThreadPng = beforeNewThreadScreenshot.toPNG();
+  await writeFile(beforeNewThreadScreenshotFile, beforeNewThreadPng);
+  const beforeScreenshotText = await recognizer.recognize(beforeNewThreadScreenshotFile);
+  const beforeScreenshotState = classifyDesktopCaptureText(beforeScreenshotText);
+  if (beforeScreenshotState !== "saved-thread") {
+    await recognizer.close();
+    throw new Error(`Pre-recording screenshot did not show the saved-thread follow-up: ${JSON.stringify({ beforeScreenshotState, beforeScreenshotText })}`);
+  }
   const recordingStartedAt = performance.now();
   let recording = true;
+  let captureError = null;
   const capture = async () => {
     while (recording) {
       const image = await mainWindow.webContents.capturePage();
       const file = join(framesDirectory, `${String(frames.length + 1).padStart(4, "0")}.png`);
       const capturedAtMs = performance.now() - recordingStartedAt;
-      await writeFile(file, image.toPNG());
-      frames.push({ file, capturedAtMs });
+      const png = image.toPNG();
+      await writeFile(file, png);
+      const recognizedText = await recognizer.recognize(file);
+      frames.push({
+        file,
+        capturedAtMs,
+        state: classifyDesktopCaptureText(recognizedText),
+        recognizedText,
+        sha256: createHash("sha256").update(png).digest("hex"),
+      });
       await sleep(67);
     }
   };
-  const capturePromise = capture();
-  await sleep(1400);
-  const savedThreadBeforeClickAtMs = performance.now() - recordingStartedAt;
-  await click("#newThread", { focus: true });
-  await waitFor("ordinary New Thread button navigation", () => evaluate(`(
-    !document.querySelector('#newThreadView')?.classList.contains('hidden')
-    && document.querySelector('#threadView')?.classList.contains('hidden')
-    && document.querySelector('#newThreadPrompt')?.value === ''
-  )`));
-  const newThreadVisibleAtMs = performance.now() - recordingStartedAt;
-  const newThreadViewScreenshot = await mainWindow.webContents.capturePage();
-  const newThreadPng = newThreadViewScreenshot.toPNG();
-  await writeFile(join(noThreadEvidenceDirectory, "ordinary-new-thread-view.png"), newThreadPng);
-  const selection = await evaluate(`(async () => {
-    const { activeThread, viewState } = await import('./src/state.js');
-    return { currentThreadId: viewState.currentThreadId, activeThreadId: activeThread()?.id ?? null };
-  })()`);
-  await sleep(1800);
-  const newThreadHeldUntilAtMs = performance.now() - recordingStartedAt;
-  await click(`[data-thread="${threadId}"]`, { focus: true });
-  await waitFor("ordinary saved-thread return", () => evaluate(`(
-    !document.querySelector('#threadView')?.classList.contains('hidden')
-    && document.querySelector('#threadPrompt')?.value === ${JSON.stringify(savedDraftText)}
-  )`));
-  const savedThreadRestoredAtMs = performance.now() - recordingStartedAt;
-  await sleep(1800);
-  const savedThreadHeldUntilAtMs = performance.now() - recordingStartedAt;
-  recording = false;
-  await capturePromise;
-  // Recording begins only after the saved thread's persisted follow-up is visible;
-  // measure that readable state from the first captured frame through the click.
-  const beforeClickHoldMs = savedThreadBeforeClickAtMs;
-  const newThreadHoldMs = newThreadHeldUntilAtMs - newThreadVisibleAtMs;
-  const restoredThreadHoldMs = savedThreadHeldUntilAtMs - savedThreadRestoredAtMs;
-  const minimumReadableHoldMs = 1400;
-  if (beforeClickHoldMs < minimumReadableHoldMs || newThreadHoldMs < minimumReadableHoldMs || restoredThreadHoldMs < minimumReadableHoldMs) {
-    throw new Error(`Ordinary New Thread recording did not hold each readable state long enough: ${JSON.stringify({ beforeClickHoldMs, newThreadHoldMs, restoredThreadHoldMs, minimumReadableHoldMs })}`);
+  const capturePromise = capture().catch((error) => { captureError = error; });
+  let stateRuns;
+  let selection;
+  try {
+    const beforeClickRun = await waitForReadableCaptureRun(
+      frames,
+      "saved-thread",
+      -1,
+      minimumReadableHoldMs,
+      () => captureError,
+    );
+    await copyFile(
+      frames[beforeClickRun.firstIndex].file,
+      join(noThreadEvidenceDirectory, "saved-thread-draft-before-new-thread.png"),
+    );
+    await click("#newThread", { focus: true });
+    await waitFor("ordinary New Thread button navigation", () => evaluate(`(
+      !document.querySelector('#newThreadView')?.classList.contains('hidden')
+      && document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('#newThreadPrompt')?.value === ''
+    )`));
+    const newThreadDomVisibleAtMs = performance.now() - recordingStartedAt;
+    const newThreadRun = await waitForReadableCaptureRun(
+      frames,
+      "empty-new-thread",
+      beforeClickRun.lastIndex,
+      minimumReadableHoldMs,
+      () => captureError,
+    );
+    await copyFile(
+      frames[newThreadRun.firstIndex].file,
+      join(noThreadEvidenceDirectory, "ordinary-new-thread-view.png"),
+    );
+    selection = await evaluate(`(async () => {
+      const { activeThread, viewState } = await import('./src/state.js');
+      return { currentThreadId: viewState.currentThreadId, activeThreadId: activeThread()?.id ?? null };
+    })()`);
+    await click(`[data-thread="${threadId}"]`, { focus: true });
+    await waitFor("ordinary saved-thread return", () => evaluate(`(
+      !document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('#threadPrompt')?.value === ${JSON.stringify(savedDraftText)}
+    )`));
+    const restoredThreadDomVisibleAtMs = performance.now() - recordingStartedAt;
+    const restoredThreadRun = await waitForReadableCaptureRun(
+      frames,
+      "saved-thread",
+      newThreadRun.lastIndex,
+      minimumReadableHoldMs,
+      () => captureError,
+    );
+    stateRuns = {
+      beforeClick: beforeClickRun,
+      emptyNewThread: newThreadRun,
+      restoredThread: restoredThreadRun,
+      domReportedAtMs: {
+        emptyNewThread: Number(newThreadDomVisibleAtMs.toFixed(1)),
+        restoredThread: Number(restoredThreadDomVisibleAtMs.toFixed(1)),
+      },
+    };
+  } finally {
+    recording = false;
+    await capturePromise;
   }
+  if (captureError) throw captureError;
   if (frames.length < 3) throw new Error(`Ordinary New Thread recording captured too few timestamped frames: ${frames.length}`);
+  const measuredStateRuns = {
+    beforeClick: capturedStateRun(frames, "saved-thread", {
+      beforeIndex: stateRuns.emptyNewThread.firstIndex - 1,
+    }),
+    emptyNewThread: capturedStateRun(frames, "empty-new-thread", {
+      afterIndex: stateRuns.beforeClick.lastIndex,
+      beforeIndex: stateRuns.restoredThread.firstIndex - 1,
+    }),
+    restoredThread: capturedStateRun(frames, "saved-thread", {
+      afterIndex: stateRuns.emptyNewThread.lastIndex,
+    }),
+  };
+  for (const [stateName, run] of Object.entries(measuredStateRuns)) {
+    if (!run || run.durationMs < minimumReadableHoldMs) {
+      throw new Error(`Ordinary New Thread recording did not capture a readable ${stateName} interval: ${JSON.stringify({ run, minimumReadableHoldMs })}`);
+    }
+  }
+  const beforeClickHoldMs = measuredStateRuns.beforeClick.durationMs;
+  const newThreadHoldMs = measuredStateRuns.emptyNewThread.durationMs;
+  const restoredThreadHoldMs = measuredStateRuns.restoredThread.durationMs;
+  const measuredTimelineMs = frames.at(-1).capturedAtMs;
   const videoFile = join(noThreadEvidenceDirectory, "ordinary-new-thread-transition.mp4");
   const concatFile = join(framesDirectory, "frames.concat");
   const concatLines = ["ffconcat version 1.0"];
   for (let index = 0; index < frames.length; index += 1) {
     const frame = frames[index];
-    const nextTimestamp = frames[index + 1]?.capturedAtMs ?? savedThreadHeldUntilAtMs;
+    const nextTimestamp = frames[index + 1]?.capturedAtMs ?? measuredTimelineMs;
     const durationSeconds = Math.max(0.001, (nextTimestamp - frame.capturedAtMs) / 1000);
     concatLines.push(`file '${frame.file}'`, `duration ${durationSeconds.toFixed(6)}`);
   }
@@ -239,7 +395,7 @@ async function captureOrdinaryNewThreadEvidence(threadId) {
     "-of", "json", videoFile,
   ], { encoding: "utf8" }));
   const videoDurationMs = Number(videoProbe.format.duration) * 1000;
-  const expectedDurationMs = savedThreadHeldUntilAtMs;
+  const expectedDurationMs = measuredTimelineMs;
   if (Math.abs(videoDurationMs - expectedDurationMs) > 250) {
     throw new Error(`Ordinary New Thread video timing differs from captured timestamps: ${JSON.stringify({ videoDurationMs, expectedDurationMs })}`);
   }
@@ -256,10 +412,16 @@ async function captureOrdinaryNewThreadEvidence(threadId) {
   )`));
   mainWindow.setSize(1280, 1100);
   await sleep(160);
-  const restartedScreenshot = await mainWindow.webContents.capturePage();
+  const restoredThreadScreenshot = await mainWindow.webContents.capturePage();
   const restartedScreenshotFile = join(noThreadEvidenceDirectory, "saved-thread-draft-after-window-restart.png");
-  const restartedPng = restartedScreenshot.toPNG();
+  const restartedPng = restoredThreadScreenshot.toPNG();
   await writeFile(restartedScreenshotFile, restartedPng);
+  const restartedScreenshotText = await recognizer.recognize(restartedScreenshotFile);
+  if (classifyDesktopCaptureText(restartedScreenshotText) !== "saved-thread") {
+    await recognizer.close();
+    throw new Error(`Post-recreation screenshot did not show the saved-thread follow-up: ${JSON.stringify(restartedScreenshotText)}`);
+  }
+  await recognizer.close();
   return {
     passed: true,
     ...selection,
@@ -270,12 +432,27 @@ async function captureOrdinaryNewThreadEvidence(threadId) {
     frames: frames.length,
     recording: {
       timestampSource: "performance.now() at completion of each Electron capturePage request",
-      capturedAtMs: frames.map(({ capturedAtMs }) => Number(capturedAtMs.toFixed(1))),
+      frameContentClassifier: "macOS Vision OCR of each captured PNG; visible-state tag must match recognized screenshot text",
+      capturedFrames: frames.map(({ file, capturedAtMs, state, recognizedText, sha256 }) => ({
+        file: file.split("/").at(-1),
+        capturedAtMs: Number(capturedAtMs.toFixed(1)),
+        state,
+        recognizedText,
+        sha256,
+      })),
+      stateIntervals: Object.fromEntries(Object.entries(measuredStateRuns).map(([key, run]) => [key, {
+        firstFrameIndex: run.firstIndex,
+        lastFrameIndex: run.lastIndex,
+        firstCapturedAtMs: Number(run.firstAtMs.toFixed(1)),
+        lastCapturedAtMs: Number(run.lastAtMs.toFixed(1)),
+        durationMs: Number(run.durationMs.toFixed(1)),
+      }])),
       beforeClickHoldMs: Number(beforeClickHoldMs.toFixed(1)),
       newThreadHoldMs: Number(newThreadHoldMs.toFixed(1)),
       restoredThreadHoldMs: Number(restoredThreadHoldMs.toFixed(1)),
       minimumReadableHoldMs,
-      measuredTimelineMs: Number(savedThreadHeldUntilAtMs.toFixed(1)),
+      domReportedAtMs: stateRuns.domReportedAtMs,
+      measuredTimelineMs: Number(measuredTimelineMs.toFixed(1)),
       videoDurationMs: Number(videoDurationMs.toFixed(1)),
     },
     video: {
@@ -296,6 +473,7 @@ async function captureOrdinaryNewThreadEvidence(threadId) {
     afterWindowRestartScreenshot: {
       file: restartedScreenshotFile,
       sha256: createHash("sha256").update(restartedPng).digest("hex"),
+      recognizedText: restartedScreenshotText,
     },
   };
 }
