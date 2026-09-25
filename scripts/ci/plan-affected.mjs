@@ -289,6 +289,14 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
     }
     for (const owner of [...config.chapterOwners, ...config.scriptOwners]) {
       if (matches(path, owner)) {
+        if (
+          (owner.chapters ?? []).length === 0 &&
+          !existsSync(join(repository, path))
+        ) {
+          reasons.push(`${path}: deleted exempted path`);
+          mapped = true;
+          continue;
+        }
         for (const chapter of owner.chapters) chapters[chapter] = true;
         rootTypeScript ||= owner.rootTypeScript === true;
         for (const testPath of owner.vitestFiles ?? [])

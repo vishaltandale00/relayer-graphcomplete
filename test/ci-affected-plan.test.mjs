@@ -1,6 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
@@ -15,12 +24,48 @@ const configPath = join(
   "affected-modules.v1.json",
 );
 
-function plan(...changedFiles) {
-  const args = [plannerPath, "--repository", repositoryRoot];
+function planIn(repository, ...changedFiles) {
+  const args = [plannerPath, "--repository", repository];
   for (const changedFile of changedFiles) {
     args.push("--changed-file", changedFile);
   }
   return JSON.parse(execFileSync(process.execPath, args, { encoding: "utf8" }));
+}
+
+function plan(...changedFiles) {
+  return planIn(repositoryRoot, ...changedFiles);
+}
+
+function withPlannerFixture(run) {
+  const repository = mkdtempSync(join(tmpdir(), "factory-408-planner-"));
+  writeFileSync(
+    join(repository, "package.json"),
+    JSON.stringify({ workspaces: ["packages/*"] }),
+  );
+  mkdirSync(join(repository, "desktop"), { recursive: true });
+  writeFileSync(
+    join(repository, "desktop", "package.json"),
+    JSON.stringify({ name: "relayer-desktop" }),
+  );
+  for (const name of ["eval-runner", "graph-client", "harness-host"]) {
+    mkdirSync(join(repository, "packages", name), { recursive: true });
+    writeFileSync(
+      join(repository, "packages", name, "package.json"),
+      JSON.stringify({ name: `@relayer/${name}` }),
+    );
+  }
+  writeFileSync(
+    join(repository, "Cargo.toml"),
+    '[package]\nname = "factory-408-fixture"\nversion = "0.1.0"\nedition = "2021"\n',
+  );
+  mkdirSync(join(repository, "src"));
+  writeFileSync(join(repository, "src", "lib.rs"), "pub fn fixture() {}\n");
+  execFileSync("cargo", ["generate-lockfile"], { cwd: repository });
+  try {
+    return run(repository);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
 }
 
 function fullPlanWithoutDiff() {
@@ -300,6 +345,37 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
 
     expect(result.mode).toBe("full");
     expect(result.reasons.join(" ")).toContain("deleted test path");
+  });
+
+  test.each([
+    ["exact chapter-owner deletion", "ROADMAP.md", false],
+    ["script-owner deletion", "scripts/test-desktop-first-message.mjs", false],
+    [
+      "prefix member deletion with surviving sibling",
+      "docs/postmortems/entry.md",
+      true,
+    ],
+  ])("fails open for %s", (_label, changedPath, keepSibling) => {
+    withPlannerFixture((repository) => {
+      const changedFile = join(repository, changedPath);
+      mkdirSync(dirname(changedFile), { recursive: true });
+      writeFileSync(changedFile, "fixture\n");
+      if (changedPath === "ROADMAP.md") {
+        const present = planIn(repository, changedPath);
+        expect(present.mode).toBe("affected");
+        expect(Object.values(present.chapters).some(Boolean)).toBe(false);
+      }
+      if (keepSibling)
+        writeFileSync(join(dirname(changedFile), "sibling.md"), "fixture\n");
+      rmSync(changedFile);
+      if (!keepSibling && dirname(changedFile) !== repository)
+        rmSync(dirname(changedFile), { recursive: true, force: true });
+
+      const result = planIn(repository, changedPath);
+      expect(result.mode).toBe("full");
+      expect(result.reasons).toContain(`${changedPath}: deleted exempted path`);
+      expect(Object.values(result.chapters).every(Boolean)).toBe(true);
+    });
   });
 
   test("maps CI-tested scripts to their owning Vitest checkpoints", () => {
