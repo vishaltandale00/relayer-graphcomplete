@@ -1,0 +1,12 @@
+{
+  "reviewedSource": "1434e1051e36ef43ae32371784ce7ee9de589f9f",
+  "captureWorkspace": "88d97ddfcb712875d1ba7ebd09b1c5b48352640121875dced3f2275870836b91",
+  "note": "Production renderer with deterministic fake APIs. GIF is a format conversion of the original nine-second MP4. No application code changes in this evidence commit.",
+  "files": {
+    "graph-collapsed-620.png": "1e8c9d7092b57ccb07b227861eaf520d35de54dfccd6ce774739a8d863cac836",
+    "graph-expanded-620.png": "ba05cca2e84afa8c10cfd73b5ddf59d9d34ff1127496f8e8393bc93bd7a52ff5",
+    "composer-expanded-620.png": "2cc09a3503a65feadd7ed153560a7f4ab50faec941b5060dd6336d84ddbfce07",
+    "sidebar-interaction.mp4": "9edb9019772f011e59b0c39af4d8393c1b88b80d615cd18266f67197e9db3fa4",
+    "sidebar-interaction.gif": "6d14e520def5fb41da562455ae6c0fffb90559e24ad1af378a0425510af4d73c"
+  }
+}
