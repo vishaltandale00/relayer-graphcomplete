@@ -1,4 +1,4 @@
-9c6629d05be72b3cac13e101cfbd3b214e44258ab5c28450b823922bc563a677  ./README.md
+94e84e732a39213bcb32c942195c83a4d7f0f8f8cc595da2a34fe39de0c84ac3  ./README.md
 dae58de3ddfde95b066b259e24d83e50d15aedeafb58b0b20d7b26dd324ef0ef  ./logs/build.command
 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  ./logs/build.exit
 0f04c9a2977c33c40eaaefe7a9499543447c189590bc880038d7d3bf45c3d88b  ./logs/build.log
@@ -25,9 +25,10 @@ c5bcb6d433060a7f9b0fbc21d70064be1a6dbd51db9ab8aa129b096d0e352edf  ./logs/focused
 4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865  ./logs/focused-retry2.exit
 08be9e02e3a2a112308be9ef2dff81126742d29016e7195785b96bae1ca7c50a  ./logs/focused-retry2.log
 5f7c4f11b8083d40f3c5f40759be50a8b17bb4d9cde1b415d2d127418eada0c7  ./media/ordinary-new-thread-transition.mp4
-e7c12e5d1779a9584a57ee422df7a613e797cd0a9a2c42d98e72032c43a2c15c  ./media/ordinary-new-thread-view.png
+e7c12e5d1779a9584a57ee422df7a613e797cd0a9a2c42d98e72032c43a2c15c  ./media/ordinary-new-thread-view-original-failed-capture.png
 508aaab845406a28df672375576f42f814c2266ca603179f1aed5d593d7ebc7f  ./media/saved-thread-draft-after-window-restart.png
 9bdce05432f9f9bfc94a315f41a344766ef4b5d382703d136f5a55e83d7c1600  ./media/saved-thread-draft-before-new-thread.png
+6f3163c3e0e6f0a97fc9ffaefffdebd3b963823d6063ab069670226fecb21207  ./media/video-frame-new-thread-empty-at-2.5s.png
 d2dc48f34b400a31f24aee5e794059d9f2a649d98bf4ec0d8b3ea442e592b0c7  ./source-native.sha256
 0cdc7bb61aa38e1e3148c8355643b2f4a9d2aa41abd3402317ba725fd7d23fb5  ./source-snapshot.txt
 c1322fbf212d9fb629c9d0cab78d7c2121c3a7a86182abd7500962028767335e  ./video-frames.csv
