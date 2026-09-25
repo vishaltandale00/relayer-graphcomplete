@@ -114,10 +114,9 @@ Full captured command output is retained in
 - `npm-check-final.log`
 - `npm-build-final.log`
 
-The changed head passed the [PR #481 CI run](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/36108829010): the stable `check` aggregate, quick deterministic checks, Rust Clippy, fresh Rust tests, crash reconciliation, runtime build, Vitest, TypeScript, Python, receipt integrity, PRD readability, and the macOS arm64 Prime runtime package all passed. The Windows x64 Ladybug qualification was skipped as blocked; the prebuilt Ladybug native library job was skipped because its trusted bundle was available. This refactor does not claim Windows qualification.
+Code commit `d377bd0abd450d56404e1dbb1bc28f10544f9ca8` passed the [PR #481 CI run](https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/36108829010): the stable `check` aggregate, quick deterministic checks, Rust Clippy, fresh Rust tests, crash reconciliation, runtime build, Vitest, TypeScript, Python, receipt integrity, PRD readability, and the macOS arm64 Prime runtime package all passed. The Windows x64 Ladybug qualification was skipped as blocked; the prebuilt Ladybug native library job was skipped because its trusted bundle was available. This refactor does not claim Windows qualification. The later commit `7310dc584311fb400b1565ae170ee97346f2c55e` changed only this evidence document; all executable and test inputs retain the hashes recorded above.
 
 The PR description carries standards and spec review assertions with the exact
-reviewed commit, scope, verdict, and findings. A documentation-only follow-up
-changed the PR head after the first review, so those assertions must be refreshed
-for that head before merge. This evidence document is not itself a merge
-approval.
+reviewed commit, scope, verdict, and findings. Those assertions are refreshed
+against the current head before merge. This evidence document is not itself a
+merge approval.
