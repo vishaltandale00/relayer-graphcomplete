@@ -334,8 +334,10 @@ describe("CI workflow contract", () => {
       "${{ steps.plan.outputs.runtime_packages_key }}",
     );
 
-    // One Ladybug key serves the plan lookup, the prebuilt job, every lane
-    // (through the shared install action), and the runtime fallback.
+    // One feature-independent Ladybug key serves the plan lookup, the
+    // prebuilt job, every lane (through the shared install action), and the
+    // runtime fallback. The verifier, rather than the key, checks that the
+    // restored native bytes match the pinned source and toolchain.
     const lbugKeys = [
       lbugLookup.with.key,
       workflow.jobs["lbug-prebuilt"].steps.find(
@@ -350,6 +352,7 @@ describe("CI workflow contract", () => {
     ].map(normalize);
     expect(new Set(lbugKeys).size).toBe(1);
     expect(lbugKeys[0]).toContain("-v1-${{ hashFiles('Cargo.lock') }}");
+    expect(lbugKeys[0]).not.toMatch(/feature/i);
 
     // One runtime key serves the plan lookup, the trusted save, and the
     // shard restore; it binds the Rust input digest and the sealed package

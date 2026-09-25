@@ -80,6 +80,24 @@ describe("prebuilt Ladybug artifact", () => {
     return copy;
   }
 
+  function replaceProducerFeatures(artifactDirectory, features) {
+    const manifestPath = join(artifactDirectory, "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.lbugFeatures = features;
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+
+  function addProducerFeatureDrift(artifactDirectory) {
+    const manifest = JSON.parse(
+      readFileSync(join(artifactDirectory, "manifest.json"), "utf8"),
+    );
+    const features = manifest.lbugFeatures.includes("extension_tests")
+      ? manifest.lbugFeatures.filter((feature) => feature !== "extension_tests")
+      : [...manifest.lbugFeatures, "extension_tests"].sort();
+    replaceProducerFeatures(artifactDirectory, features);
+    return features;
+  }
+
   test("packages the library, the include tree, and a flat umbrella layout", () => {
     const manifest = JSON.parse(readFileSync(join(bundle, "manifest.json"), "utf8"));
     expect(manifest.kind).toBe("lbug-prebuilt");
@@ -111,8 +129,28 @@ describe("prebuilt Ladybug artifact", () => {
     expect(exported).toContain(`LBUG_INCLUDE_DIR=${join(bundle, "include")}`);
   });
 
-  test("verify rejects a tampered library before any environment is exported", () => {
+  test("verify accepts feature-only producer drift and exports both link paths", () => {
+    const copy = tamperedCopy("different-producer-features");
+    const producerFeatures = addProducerFeatureDrift(copy);
+    const envFile = join(fixture, "github-env-feature-drift");
+    run([
+      "verify",
+      "--repository", repositoryRoot,
+      "--artifact-dir", copy,
+      "--github-env", envFile,
+      ...identity,
+    ]);
+
+    const manifest = JSON.parse(readFileSync(join(copy, "manifest.json"), "utf8"));
+    expect(manifest.lbugFeatures).toEqual(producerFeatures);
+    const exported = readFileSync(envFile, "utf8");
+    expect(exported).toContain(`LBUG_LIBRARY_DIR=${join(copy, "lib")}`);
+    expect(exported).toContain(`LBUG_INCLUDE_DIR=${join(copy, "include")}`);
+  });
+
+  test("verify rejects a tampered library during feature drift before export", () => {
     const copy = tamperedCopy("tampered-lib");
+    addProducerFeatureDrift(copy);
     appendFileSync(join(copy, "lib", "liblbug.a"), "tampered");
     const envFile = join(fixture, "github-env-tampered-lib");
     expect(() =>

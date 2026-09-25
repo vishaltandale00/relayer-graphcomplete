@@ -6,12 +6,12 @@
 // test still compiles and runs freshly against whatever library it links.
 //
 // Identity model: the library is fully determined by the pinned crate source
-// (Cargo.lock checksums), the resolved lbug feature set, the toolchain, and
-// the platform. The commit that produced a bundle is recorded for provenance
-// but is not part of equality, because the bundled source cannot change
-// without a Cargo.lock change. The manifest also carries a digest over every
-// packaged file, so a truncated include tree is rejected before any lane
-// links against it.
+// (Cargo.lock checksums), the toolchain, and the platform. The commit and
+// resolved lbug feature set that produced a bundle are recorded for
+// provenance, but are not part of equality: for the pinned lbug version,
+// features affect Rust/FFI compilation separately from the cached native
+// CMake library. The manifest also carries a digest over every packaged file,
+// so a truncated include tree is rejected before any lane links against it.
 
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -85,9 +85,7 @@ function lbugPackageMetadata(metadata) {
   return lbug;
 }
 
-// The features Cargo resolved for lbug. An optional lbug feature enabled by a
-// workspace crate later would change the build; recording the resolution lets
-// verify reject a bundle built without it and fall back to the source build.
+// The features Cargo resolved for lbug, recorded as producer provenance.
 function lbugResolvedFeatures(metadata) {
   const node = (metadata.resolve?.nodes ?? []).find((candidate) =>
     /#lbug@/.test(candidate.id),
@@ -259,12 +257,6 @@ export function verifyLbugArtifact({
   const lbug = lbugPackageMetadata(metadata);
   if (manifest.lbugVersion !== lbug.version) {
     problems.push(`lbug ${manifest.lbugVersion} does not match pinned ${lbug.version}`);
-  }
-  const expectedFeatures = lbugResolvedFeatures(metadata);
-  if (JSON.stringify(manifest.lbugFeatures ?? null) !== JSON.stringify(expectedFeatures)) {
-    problems.push(
-      `resolved lbug features ${(manifest.lbugFeatures ?? []).join(",") || "none"} do not match ${expectedFeatures.join(",") || "none"}`,
-    );
   }
   const libraryName = manifest.library?.name ?? "liblbug.a";
   const libraryPath = join(artifactDirectory, "lib", libraryName);
