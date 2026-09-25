@@ -42,6 +42,8 @@ const variants = [
   { scene: "account-navigation-thread", caption: "Account navigation from a saved thread", width: 1280, required: ["Navigation", "Account"] },
   { scene: "account-navigation-expanded-980", caption: "Expanded Account footer at 980px", width: 980, required: ["Account", "Settings"] },
   { scene: "account-navigation-expanded-1280", caption: "Expanded Account footer at 1280px", width: 1280, required: ["Account", "Settings"] },
+  { scene: "eval-layout-mobile", caption: "Eval layout without a narrow Navigation header", width: 620, required: [] },
+  { scene: "eval-layout-collapsed", caption: "Eval layout without a collapsed Navigation header", width: 1280, required: [] },
   { scene: "long-label", caption: "Long provider identity", width: 1280, required: ["North America Platform Engineering and Applied Research"] },
   { scene: "loading", caption: "Connecting and discovering models", width: 1280, required: ["Connecting and discovering models"] },
   { scene: "invalid", caption: "Invalid connection details", width: 1280, required: ["Use an HTTPS endpoint", "Enter API key"] },
@@ -216,6 +218,22 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
                 && triggerRect.top >= 0 && triggerRect.bottom <= innerHeight
                 && (closed || (panelRect.left >= 0 && panelRect.right <= innerWidth
                   && panelRect.top >= 0 && panelRect.bottom <= innerHeight));
+            })(),
+            evalNavigationLayout: (() => {
+              const scene = new URLSearchParams(location.search).get("scene");
+              if (!scene.startsWith("eval-layout-")) return null;
+              const mainArea = document.querySelector(".main-area");
+              const bodyMode = document.body.classList.contains("shell-navigation-disabled");
+              const triggerHidden = !visible("#shellNavigationTrigger");
+              const panelHidden = document.querySelector("#shellNavigationPanel").classList.contains("hidden");
+              const mainPaddingTop = getComputedStyle(mainArea).paddingTop;
+              return {
+                passed: bodyMode && triggerHidden && panelHidden && mainPaddingTop === "0px",
+                bodyMode,
+                triggerHidden,
+                panelHidden,
+                mainPaddingTop,
+              };
             })(),
             errorAssociationsValid: invalidInputs.every((input) => {
               const error = document.getElementById(input.getAttribute("aria-describedby"));
@@ -977,6 +995,9 @@ try {
     }
     if (scene.startsWith("account-navigation-") && !audit.accountNavigationJourney) {
       throw new Error(`Account navigation journey failed at ${scene}: ${JSON.stringify(audit)}`);
+    }
+    if (scene.startsWith("eval-layout-") && !audit.evalNavigationLayout?.passed) {
+      throw new Error(`Disabled Eval navigation reserves space at ${scene}: ${JSON.stringify(audit)}`);
     }
     if (["error", "invalid"].includes(scene) && !audit.errorAssociationsValid) {
       throw new Error("Authentication errors are not visibly associated ARIA alerts.");

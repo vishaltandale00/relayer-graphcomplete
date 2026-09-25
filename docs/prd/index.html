@@ -929,6 +929,7 @@ type InteractionModelBinding = {
 <tr><td><code>ACC-002</code></td><td>The same suite occupies callback ports, switches Stable and Preview pools, races concurrent controls, and verifies exact callback failure and listener closure.</td></tr>
 <tr><td><code>ACC-004</code> and <code>ACC-006</code></td><td>Generation tests cover unverifiable restart, logout ordering, stale exchange completion, and a paused credential commit followed by deletion.</td></tr>
 <tr><td><code>ACC-005</code>, <code>ACC-007</code>, and <code>ACC-008</code></td><td>Deterministic mappings: <code>test/desktop-account-ui.test.mjs</code>, <code>test/shell-navigation.test.mjs</code>, and <code>test/settings-navigation.test.mjs</code>. Rendered mappings and chapter assertions: <code>docs/evidence/issue-418-account-navigation/README.md</code>. The provider-UX capture uses fake account state at 620px, 760px, 761px, and collapsed wide widths.</td></tr>
+<tr><td>ACC-008 disabled Eval layout</td><td>The provider-UX capture renders narrow and collapsed Eval modes and asserts the disabled disclosure is hidden and main-area top padding remains zero.</td></tr>
 </tbody>
 </table>
 <table>

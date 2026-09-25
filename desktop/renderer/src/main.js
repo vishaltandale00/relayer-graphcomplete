@@ -380,6 +380,7 @@ let shellNavigation;
 
 async function boot() {
   assertRelayerIconRendererReady();
+  document.body.classList.toggle("shell-navigation-disabled", Boolean(evalReview));
   if (evalReview) viewState.evalContext = await evalReview.context();
   applyPlatformCopy();
   bindEvents();

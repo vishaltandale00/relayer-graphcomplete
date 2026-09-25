@@ -43,7 +43,7 @@ export function createShellNavigation({
     if (!item) return;
     close({ returnFocus: true });
     if (item === settingsItem) settingsButton.click();
-    if (item === accountItem) accountButton.click();
+    if (item === accountItem && accountButton !== accountItem) accountButton.click();
   };
   const onDocumentClick = (event) => {
     if (!panel.classList.contains("hidden")

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Window } from "happy-dom";
 
+import { createDesktopAccountController } from "../desktop/renderer/src/desktop-account.js";
 import { createShellNavigation } from "../desktop/renderer/src/shell-navigation.js";
 
 const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
@@ -80,6 +82,105 @@ function setup({ narrow = false, collapsed = false, enabled = true } = {}) {
 }
 
 describe("shell navigation fallback", () => {
+  it("uses the same production Account button once while a guarded Settings transition is pending", async () => {
+    const browser = new Window({ url: "http://127.0.0.1:3000" });
+    const { document } = browser;
+    document.body.innerHTML = `
+      <button id="shellNavigationTrigger" aria-expanded="false"></button>
+      <nav id="shellNavigationPanel">
+        <button id="shellNavigationSettings">Settings</button>
+        <button id="shellNavigationAccount">Account</button>
+      </nav>
+      <button id="settingsButton">Settings</button>
+      <span id="desktopAccountLabel"></span>
+      <section id="desktopAccountOnboarding" class="hidden"></section>
+      <span id="desktopAccountOnboardingChannel"></span>
+      <span id="desktopAccountOnboardingStatus"></span>
+      <button id="desktopAccountOnboardingSignIn"></button>
+      <button id="desktopAccountOnboardingNotNow"></button>
+      <span id="accountSettingsStatus"></span>
+      <button id="accountSettingsSignIn"></button>
+      <button id="accountSettingsLogout"></button>`;
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+    try {
+      const accountButton = document.querySelector("#shellNavigationAccount");
+      const settingsButton = document.querySelector("#settingsButton");
+      let releaseSave;
+      const pendingSave = new Promise((resolve) => { releaseSave = resolve; });
+      let resolving = false;
+      let sequence = 0;
+      let settingsTransitions = 0;
+      const openSettings = vi.fn(() => settingsButton.click());
+      const api = {
+        read: vi.fn(async () => ({ status: "signed-in", channel: "stable" })),
+        login: vi.fn(),
+        logout: vi.fn(),
+        onChanged: vi.fn(() => () => {}),
+      };
+      const get = (id) => document.querySelector(id);
+      const accountController = createDesktopAccountController({
+        api,
+        storage: { getItem: () => "completed", setItem: vi.fn() },
+        openSettings,
+        showWorkspace: vi.fn(),
+        elements: {
+          accountButton,
+          additionalAccountButtons: [accountButton],
+          accountLabel: get("#desktopAccountLabel"),
+          onboarding: get("#desktopAccountOnboarding"),
+          onboardingChannel: get("#desktopAccountOnboardingChannel"),
+          onboardingStatus: get("#desktopAccountOnboardingStatus"),
+          onboardingSignIn: get("#desktopAccountOnboardingSignIn"),
+          onboardingNotNow: get("#desktopAccountOnboardingNotNow"),
+          settingsStatus: get("#accountSettingsStatus"),
+          settingsSignIn: get("#accountSettingsSignIn"),
+          settingsLogout: get("#accountSettingsLogout"),
+        },
+      });
+      await accountController.start({ offerOnboarding: true });
+      const guardTransition = async () => {
+        const requestSequence = ++sequence;
+        if (resolving) return false;
+        resolving = true;
+        await pendingSave;
+        resolving = false;
+        if (requestSequence !== sequence) return false;
+        settingsTransitions += 1;
+        return true;
+      };
+      settingsButton.addEventListener("click", () => { void guardTransition(); });
+      const trigger = get("#shellNavigationTrigger");
+      const panel = get("#shellNavigationPanel");
+      const mediaQuery = { matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+      createShellNavigation({
+        trigger,
+        panel,
+        settingsButton,
+        accountButton,
+        body: document.body,
+        mediaQuery,
+        windowObject: browser,
+      });
+
+      trigger.click();
+      accountButton.click();
+      expect(openSettings).toHaveBeenCalledOnce();
+      expect(sequence).toBe(1);
+      expect(resolving).toBe(true);
+      expect(settingsTransitions).toBe(0);
+      expect(panel.classList.contains("hidden")).toBe(true);
+      releaseSave();
+      await pendingSave;
+      await Promise.resolve();
+      expect(settingsTransitions).toBe(1);
+    } finally {
+      browser.happyDOM.abort();
+      if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+      else delete globalThis.document;
+    }
+  });
+
   it("appears for collapsed or narrow layouts and closes when neither applies", () => {
     const { trigger, panel, body, mediaQuery, settingsButton, controller } = setup();
     expect(trigger.classList.contains("hidden")).toBe(true);

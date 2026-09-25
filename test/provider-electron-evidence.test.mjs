@@ -108,7 +108,8 @@ describe("provider browser evidence", () => {
         "account-navigation-expanded-1280.png", "account-navigation-expanded-980.png",
         "account-navigation-mobile-closed.png", "account-navigation-mobile-forced-colors.png",
         "account-navigation-mobile-light.png", "account-navigation-mobile.png", "account-navigation-thread.png",
-        "authorization.png", "error.png", "invalid.png", "light.png", "loading.png", "long-label.png",
+        "authorization.png", "error.png", "eval-layout-collapsed.png", "eval-layout-mobile.png",
+        "invalid.png", "light.png", "loading.png", "long-label.png",
         "narrow.png", "no-compatible.png", "refresh-models.png", "removed.png", "repair-execution.png",
         "stale.png", "unavailable.png",
       ]);

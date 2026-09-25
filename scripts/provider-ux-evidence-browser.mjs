@@ -1,5 +1,11 @@
 const scene = new URLSearchParams(location.search).get("scene") ?? "onboarding";
 const caption = new URLSearchParams(location.search).get("caption") ?? "Provider and model setup";
+if (scene.startsWith("eval-layout-")) {
+  window.relayerEvalReview = {
+    context: async () => ({ selectedExecutionId: "evidence", cases: [] }),
+    registerPresentationAdapter() {},
+  };
+}
 
 const adapters = [
   ["codex-subscription", "Codex subscription", "existing-runtime-auth", null],
@@ -186,6 +192,27 @@ async function prepareScene() {
   label.className = "evidence-caption";
   label.textContent = caption;
   document.body.append(label);
+  if (scene === "eval-layout-mobile" || scene === "eval-layout-collapsed") {
+    await waitFor("#appShell:not(.hidden)");
+    await waitForCondition(() => {
+      const onboarding = document.querySelector("#desktopAccountOnboarding");
+      const accountButton = document.querySelector("#desktopAccountButton");
+      return (onboarding && !onboarding.classList.contains("hidden"))
+        || (accountButton && !accountButton.classList.contains("hidden"));
+    }, "optional account step or footer control in Eval capture");
+    const onboarding = document.querySelector("#desktopAccountOnboarding");
+    if (onboarding && !onboarding.classList.contains("hidden")) {
+      document.querySelector("#desktopAccountOnboardingNotNow").click();
+    }
+    await waitForCondition(
+      () => onboarding.classList.contains("hidden")
+        && !document.querySelector("#desktopAccountButton")?.classList.contains("hidden"),
+      "resolved optional account step in Eval capture",
+    );
+    if (scene === "eval-layout-collapsed") document.body.classList.add("sidebar-collapsed");
+    document.body.dataset.evidenceReady = "true";
+    return;
+  }
   if (scene.startsWith("account-navigation-")) {
     await waitFor("#appShell:not(.hidden)");
     await waitForCondition(() => {

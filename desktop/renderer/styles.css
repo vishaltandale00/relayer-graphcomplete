@@ -166,6 +166,6 @@ html[data-theme="light"] .annotation-panel{background:#fafaf9;box-shadow:0 18px 
 .shell-navigation-panel:not(.hidden){display:grid;gap:2px}
 .shell-navigation-panel button{min-height:34px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:var(--text);text-align:left}
 .shell-navigation-panel button:hover,.shell-navigation-panel button:focus-visible{background:var(--hover);outline-color:var(--blue)}
-body.sidebar-collapsed .shell-navigation{display:block}body.sidebar-collapsed .main-area{padding-top:44px}
-@media(max-width:760px){.shell-navigation{display:block;left:76px}.main-area{padding-top:44px}}
+body.sidebar-collapsed .shell-navigation{display:block}body.sidebar-collapsed:not(.shell-navigation-disabled) .main-area{padding-top:44px}
+@media(max-width:760px){.shell-navigation{display:block;left:76px}body:not(.shell-navigation-disabled) .main-area{padding-top:44px}}
 @media(forced-colors:active){.shell-navigation-trigger,.shell-navigation-panel,.shell-navigation-panel button{border:1px solid ButtonText;background:Canvas;color:CanvasText}.shell-navigation-panel button:focus-visible{outline:2px solid Highlight}}
