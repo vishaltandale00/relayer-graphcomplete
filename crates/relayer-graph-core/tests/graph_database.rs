@@ -334,6 +334,10 @@ fn imported_invoke_conversation() -> ImportedConversation {
 #[tokio::test]
 async fn imported_conversation_is_materialized_read_only_and_removable() {
     let database = GraphDatabase::in_memory().await.unwrap();
+    database
+        .remove_imported_conversation("missing-import")
+        .await
+        .unwrap();
     let input = imported_conversation("interaction-1");
     let receipt = database.import_accepted_conversation(&input).await.unwrap();
     let turn = &receipt.turns[0];
@@ -377,6 +381,46 @@ async fn imported_conversation_is_materialized_read_only_and_removable() {
             .await
             .is_err()
     );
+    database
+        .remove_imported_conversation(&input.import_id)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn imported_stage_without_publications_can_be_removed() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    database
+        .begin_imported_conversation(&ImportedConversationStage {
+            import_id: "empty-stage".into(),
+            source_sha256: "source-digest".into(),
+            project_id: None,
+            thread_id: ThreadId::new(7001).unwrap(),
+            created_at: "2026-09-25T00:00:00Z".into(),
+        })
+        .await
+        .unwrap();
+
+    database
+        .remove_imported_conversation("empty-stage")
+        .await
+        .unwrap();
+    // Reusing the same import identity and thread proves the staged row was
+    // removed even though there were no graph publications to inspect.
+    database
+        .begin_imported_conversation(&ImportedConversationStage {
+            import_id: "empty-stage".into(),
+            source_sha256: "source-digest".into(),
+            project_id: None,
+            thread_id: ThreadId::new(7001).unwrap(),
+            created_at: "2026-09-25T00:00:00Z".into(),
+        })
+        .await
+        .unwrap();
+    database
+        .remove_imported_conversation("empty-stage")
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
