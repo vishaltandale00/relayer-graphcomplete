@@ -201,10 +201,23 @@ function validateOrigin(origin, path) {
   const kind = requireString(own(value, "kind", `${path}.kind`), `${path}.kind`);
   if (kind === "user") return { kind };
   if (kind === "action") {
+    const hasCamel = Object.prototype.hasOwnProperty.call(value, "sourceTurnId")
+      || Object.prototype.hasOwnProperty.call(value, "sourceActionId");
+    const hasSnake = Object.prototype.hasOwnProperty.call(value, "source_turn_id")
+      || Object.prototype.hasOwnProperty.call(value, "source_action_id");
+    if (hasCamel && hasSnake) fail("origin_invalid", path, "Action origin fields use mixed naming.");
     return {
       kind,
-      sourceTurnId: requirePortableId(own(value, "sourceTurnId", `${path}.sourceTurnId`), "turn", `${path}.sourceTurnId`),
-      sourceActionId: requirePortableId(own(value, "sourceActionId", `${path}.sourceActionId`), "action", `${path}.sourceActionId`),
+      sourceTurnId: requirePortableId(
+        own(value, hasSnake ? "source_turn_id" : "sourceTurnId", `${path}.sourceTurnId`),
+        "turn",
+        `${path}.sourceTurnId`,
+      ),
+      sourceActionId: requirePortableId(
+        own(value, hasSnake ? "source_action_id" : "sourceActionId", `${path}.sourceActionId`),
+        "action",
+        `${path}.sourceActionId`,
+      ),
     };
   }
   fail("origin_invalid", `${path}.kind`, "Origin kind must be user or action.");

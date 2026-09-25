@@ -229,6 +229,10 @@ pub(crate) fn router(
         .route("/api/threads/{id}", get(threads::get))
         .route("/api/threads/{id}/export", get(threads::export))
         .route(
+            "/api/threads/{id}/share-export",
+            axum::routing::post(threads::share_export),
+        )
+        .route(
             "/api/threads/{thread_id}/context-drafts",
             get(context_drafts::list),
         )

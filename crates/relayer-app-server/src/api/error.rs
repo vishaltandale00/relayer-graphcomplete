@@ -137,6 +137,26 @@ impl From<ConversationExportBuildError> for ApiError {
     fn from(error: ConversationExportBuildError) -> Self {
         match error {
             ConversationExportBuildError::Product(error) => error.into(),
+            ConversationExportBuildError::ShareImportedConversation => Self(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "code": "share_imported_conversation", "error": "Imported conversations cannot be shared." }),
+            ),
+            ConversationExportBuildError::ShareNoAcceptedCompletion => Self(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "code": "share_no_accepted_completion", "error": "The conversation has no accepted completion to share." }),
+            ),
+            ConversationExportBuildError::ShareTitleRequired => Self(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "code": "share_title_required", "error": "A share title is required." }),
+            ),
+            ConversationExportBuildError::ShareTitleTooLong => Self(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "code": "share_title_too_long", "error": "The share title exceeds 120 characters." }),
+            ),
+            ConversationExportBuildError::ShareSnapshotTooLarge { bytes } => Self(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                json!({ "code": "share_snapshot_too_large", "error": "The shared snapshot could not be created.", "snapshotBytes": bytes }),
+            ),
             other => Self::internal(&other.to_string()),
         }
     }

@@ -217,6 +217,8 @@ export interface ShareServiceOptions {
   readonly now?: () => number;
   readonly randomShareId?: () => string;
   readonly stagingTtlMs?: number;
+  /** Deployment composition injects the pinned production viewer renderer. */
+  readonly renderPublicPage?: (page: PublicPageResult) => string;
 }
 
 export interface ShareHttpRequest {
@@ -1124,7 +1126,20 @@ export function createShareService(options: ShareServiceOptions): ShareService {
         return jsonResponse(200, toListItem(record, origin));
       }
       if (request.method === "GET" && parts.length === 2 && parts[0] === "t") {
-        return jsonResponse(200, await publicPage(parts[1]!));
+        const page = await publicPage(parts[1]!);
+        if (options.renderPublicPage) {
+          return Object.freeze({
+            status: 200,
+            headers: Object.freeze({
+              "content-type": "text/html; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+            }),
+            body: options.renderPublicPage(page),
+          });
+        }
+        return jsonResponse(200, page);
       }
       if (request.method === "GET" && parts.length === 3 && parts[0] === "t" && parts[2] === "install") {
         const result = await install(parts[1]!);

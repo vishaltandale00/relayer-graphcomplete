@@ -856,6 +856,7 @@ fn export_contexts(
         .collect()
 }
 
+#[cfg(test)]
 fn export_submitted_inputs(
     interaction: &Interaction,
     evidence: &[SubmittedInputEvidence],
