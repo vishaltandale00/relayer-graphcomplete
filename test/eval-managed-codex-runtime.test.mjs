@@ -124,7 +124,8 @@ describe("Eval managed Codex runtime", () => {
         ok: true,
         json: async () => request.url.endsWith("/api/model-settings")
           ? { defaults: { harnessId: "fixture-task-system" }, families: [] }
-          : {},
+          : request.url.endsWith("/api/internal/provider-definitions") && request.method === "GET"
+            ? [{ id: "eval-openrouter", adapterId: "openrouter" }] : {},
       };
     });
     const provision = createEvalCodexCatalogProvisioner({
@@ -155,7 +156,7 @@ describe("Eval managed Codex runtime", () => {
       provision("codex-layered-personal-presentation-v1"),
     ]);
 
-    expect(fetchImpl).toHaveBeenCalledTimes(5);
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
     expect(requests[0]).toMatchObject({
       url: "http://127.0.0.1:43123/api/model-settings", method: "GET",
       headers: { Cookie: "relayer_session=write-token" },
@@ -164,16 +165,16 @@ describe("Eval managed Codex runtime", () => {
       url: "http://127.0.0.1:43123/api/model-settings/defaults", method: "PUT",
       body: { harnessId: "codex-layered-personal-presentation-v0" },
     });
-    expect(requests[2]).toMatchObject({
+    expect(requests[3]).toMatchObject({
       url: "http://127.0.0.1:43123/api/internal/provider-definitions", method: "PUT",
       headers: { Authorization: "Bearer write-token" },
-      body: [{ id: "codex", adapterId: "codex-subscription", accessContract: "managed-runtime@1" }],
+      body: [{ id: "eval-openrouter", adapterId: "openrouter" }, { id: "codex", adapterId: "codex-subscription", accessContract: "managed-runtime@1" }],
     });
-    expect(requests[3]).toMatchObject({
+    expect(requests[4]).toMatchObject({
       url: "http://127.0.0.1:43123/api/internal/provider-catalog", method: "PUT",
       body: { providerId: "codex", connected: true, models: [{ id: "gpt-5.6-sol", providerDefault: true }] },
     });
-    expect(requests[4]).toMatchObject({
+    expect(requests[5]).toMatchObject({
       url: "http://127.0.0.1:43123/api/model-settings/defaults", method: "PUT",
       body: { harnessId: "fixture-task-system" },
     });

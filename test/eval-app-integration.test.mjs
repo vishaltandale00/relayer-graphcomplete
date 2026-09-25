@@ -192,6 +192,7 @@ describe("Relayer Eval application service", () => {
         sourceActionId: 2,
         interactionId: 3,
         graphNodeId: 4,
+        status: "accepted",
         acceptedNodes: [{ id: 5, title: "Plain child", detail: "Plain" }],
         projectionObservations: [],
       }],
@@ -284,6 +285,7 @@ describe("Relayer Eval application service", () => {
         sourceActionId: 2,
         interactionId: 3,
         graphNodeId: 4,
+        status: "accepted",
         acceptedNodes: [{ id: 5, title: "Plain child", detail: "Plain" }],
         projectionObservations: [],
       }],
@@ -291,6 +293,68 @@ describe("Relayer Eval application service", () => {
     expect(checks.find(({ name }) => (
       name === "agent-authored-complete:child-3:visual-node-detail:authored-output"
     ))?.passed).toBe(false);
+  });
+
+  it("checks stopped semantic children for terminal acceptance without diagnosing authored output", () => {
+    const results = [];
+    for (const personalPresentationVersion of [
+      "personal-presentation-v2",
+      "personal-presentation-v3",
+    ]) {
+      const checks = recursiveCompleteChecks({
+        harnessConfiguration: {
+          name: "stopped-child-fixture",
+          implementation: "fixture.task-system",
+          complete: { agentAuthored: true },
+          settings: { personalPresentationVersion },
+        },
+        harnessConfigurationDigest: "sha256:config",
+        turns: [{ candidateTrace: { completionBrokerAvailable: true } }],
+        semanticChildren: [{
+          sourceInteractionId: 11,
+          sourceActionId: 12,
+          interactionId: 13,
+          graphNodeId: 14,
+          status: "stopped",
+          resultCompletionStatus: "stopped",
+          rootLayerId: null,
+          acceptedNodes: [],
+          projectionObservations: [
+            { sequence: 1, revision: 0, previousRevision: null, lifecycle: "active", currentLayerId: null },
+            { sequence: 2, revision: 1, previousRevision: 0, lifecycle: "stopped", currentLayerId: null },
+          ],
+          execution: {
+            interactionId: 13,
+            graphCompletionId: 14,
+            harnessConfigurationName: "stopped-child-fixture",
+            harnessConfigurationDigest: "sha256:config",
+            modelExecutionDigest: "sha256:model-execution",
+            phase: "settled",
+            attached: true,
+            attachmentSchemaVersion: 1,
+            attachmentProvider: "fixture",
+            settled: true,
+            safeReason: null,
+            settlementNodeId: 14,
+            settlementRootLayerId: null,
+          },
+          candidateTrace: { status: "complete", completionBrokerAvailable: true },
+        }],
+      });
+      const terminal = checks.find(({ name }) => name === "agent-authored-complete:child-terminal");
+      const authoredOutputChecks = checks.filter(({ name }) => name.includes(":visual-node-detail:authored-output"));
+      results.push({ personalPresentationVersion, terminalPassed: terminal?.passed, authoredOutputCheckCount: authoredOutputChecks.length, overallPassed: checks.every(({ passed }) => passed) });
+      expect(terminal?.passed).toBe(false);
+      expect(authoredOutputChecks).toEqual([]);
+      expect(checks.filter(({ passed }) => !passed).map(({ name }) => name)).toEqual([
+        "agent-authored-complete:child-terminal",
+      ]);
+      expect(checks.some(({ passed }) => !passed)).toBe(true);
+    }
+    expect(results).toEqual([
+      { personalPresentationVersion: "personal-presentation-v2", terminalPassed: false, authoredOutputCheckCount: 0, overallPassed: false },
+      { personalPresentationVersion: "personal-presentation-v3", terminalPassed: false, authoredOutputCheckCount: 0, overallPassed: false },
+    ]);
   });
 
   it("renders the complete V3 Node Detail recipe without losing executable guidance", () => {

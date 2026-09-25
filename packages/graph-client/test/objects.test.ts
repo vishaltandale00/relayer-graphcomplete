@@ -332,7 +332,10 @@ describe("agent-facing graph objects", () => {
     const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
 
     await expect(graph.submitNode(node)).rejects.toMatchObject({ status: 503, code: "temporary_failure" });
-    expect(() => node.detailAuthoring.setComponent("late", html`<p>Drift</p>`)).toThrow("finalized");
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Drift</p>`)).toThrowError(expect.objectContaining({
+      code: "detail_finalized",
+      message: "Node Detail authoring is finalized and cannot be mutated",
+    }));
     await expect(graph.submitNode(node)).resolves.toMatchObject({ id: 13 });
 
     expect(resolverRequests).toBe(1);
@@ -410,13 +413,109 @@ describe("agent-facing graph objects", () => {
 
     const submissions = [graph.submitNode(node), graph.submitNode(node)];
     await vi.waitFor(() => expect(resolverRequests).toBeGreaterThan(0));
-    expect(() => node.detailAuthoring.setComponent("during-resolution", html`<p>Drift</p>`)).toThrow("finalized");
+    expect(() => node.detailAuthoring.setComponent("during-resolution", html`<p>Drift</p>`)).toThrowError(expect.objectContaining({
+      code: "detail_finalization_in_progress",
+      message: "Node Detail authoring finalization is in progress; retry after it settles",
+    }));
     releaseResolution();
     await expect(Promise.all(submissions)).resolves.toHaveLength(2);
 
     expect(resolverRequests).toBe(1);
     expect(submittedBodies).toHaveLength(1);
     expect(mutationResults).toEqual(["frozen"]);
+  });
+
+  it("classifies another client's pending finalization and lets that client retry", async () => {
+    let releaseResolution!: () => void;
+    let markResolverStarted!: () => void;
+    const resolutionGate = new Promise<void>((resolve) => { releaseResolution = resolve; });
+    const resolverStarted = new Promise<void>((resolve) => { markResolverStarted = resolve; });
+    let resolverRequests = 0;
+    let nodeRequests = 0;
+    const submittedBodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/api/graph/detail-assets/resolve")) {
+        resolverRequests += 1;
+        markResolverStarted();
+        await resolutionGate;
+        return new Response(JSON.stringify({ assets: [{
+          logicalId: "shared-logo",
+          authority: "current",
+          availability: "available",
+          digestSha256: "d".repeat(64),
+          mediaType: "image/png",
+          representation: { kind: "image", sanitized: true },
+        }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      nodeRequests += 1;
+      submittedBodies.push(String(init.body));
+      return nodeResponse(init, {
+        id: 141 + nodeRequests, kind: "concept", icon: "box", title: "Shared", detail: "Fallback", state: "draft",
+      });
+    }));
+    const node = new NodeObject("box", "Shared", "Fallback", "concept", "shared-node");
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("shared-logo")} alt="Logo">`);
+    const clientA = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const clientB = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    const submissionA = clientA.submitNode(node);
+    await resolverStarted;
+    const pendingError = expect.objectContaining({
+      code: "detail_finalization_in_progress",
+      message: "Node Detail authoring finalization is in progress; retry after it settles",
+    });
+    await expect(clientB.submitNode(node)).rejects.toMatchObject(pendingError);
+    expect(() => node.detailAuthoring.setComponent("during", html`<p>Drift</p>`)).toThrowError(pendingError);
+    expect(() => node.detailAuthoring.clear()).toThrowError(pendingError);
+    expect(resolverRequests).toBe(1);
+    expect(nodeRequests).toBe(0);
+
+    releaseResolution();
+    await expect(submissionA).resolves.toMatchObject({ id: 142 });
+    const permanentError = expect.objectContaining({
+      code: "detail_finalized",
+      message: "Node Detail authoring is finalized and cannot be mutated",
+    });
+    expect(() => node.detailAuthoring.setComponent("late", html`<p>Drift</p>`)).toThrowError(permanentError);
+    expect(() => node.detailAuthoring.clear()).toThrowError(permanentError);
+    await expect(clientB.submitNode(node)).resolves.toMatchObject({ id: 143 });
+
+    expect(resolverRequests).toBe(1);
+    expect(nodeRequests).toBe(2);
+    expect(submittedBodies[1]).toBe(submittedBodies[0]);
+  });
+
+  it("restores editing after resolver failure while another client's submit is rejected", async () => {
+    let failResolution!: () => void;
+    let markResolverStarted!: () => void;
+    const resolutionGate = new Promise<void>((_resolve, reject) => { failResolution = () => reject(new Error("resolver failed")); });
+    const resolverStarted = new Promise<void>((resolve) => { markResolverStarted = resolve; });
+    let nodeRequests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/api/graph/detail-assets/resolve")) {
+        markResolverStarted();
+        await resolutionGate;
+        return new Response("{}", { status: 500 });
+      }
+      nodeRequests += 1;
+      return nodeResponse(init, {
+        id: 144, kind: "concept", icon: "box", title: "Repair", detail: "Fallback", state: "draft",
+      });
+    }));
+    const node = new NodeObject("box", "Repair", "Fallback", "concept", "resolver-repair");
+    node.detailAuthoring.setComponent("visual", html`<img asset=${assetRef("repair-logo")} alt="Logo">`);
+    const clientA = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const clientB = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    const submissionA = clientA.submitNode(node);
+    await resolverStarted;
+    await expect(clientB.submitNode(node)).rejects.toMatchObject({ code: "detail_finalization_in_progress" });
+    failResolution();
+    await expect(submissionA).rejects.toThrow("resolver failed");
+    node.detailAuthoring.clear().setComponent("repaired", html`<p>Repaired</p>`);
+    await expect(clientB.submitNode(node)).resolves.toMatchObject({ id: 144 });
+
+    expect(nodeRequests).toBe(1);
   });
 
   it("drops failed compilation finalization so the unfrozen author can repair", async () => {
