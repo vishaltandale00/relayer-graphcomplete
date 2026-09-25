@@ -290,6 +290,7 @@ impl crate::GraphDatabase {
                 .await?;
         let mut node_ids = HashMap::<String, i64>::new();
         let mut node_owners = HashMap::<String, i64>::new();
+        let mut interaction_turn_positions = HashMap::<String, i64>::new();
         let mut receipts = Vec::with_capacity(usize::try_from(turn_count).unwrap_or(0));
 
         for position in 0..turn_count {
@@ -327,6 +328,7 @@ impl crate::GraphDatabase {
                 ));
             }
             if let Some(view) = &turn.accepted_view {
+                interaction_turn_positions.insert(view.interaction_node_id.clone(), position);
                 for resolved in &view.layers {
                     for node in &resolved.nodes {
                         node_owners.entry(node.id.clone()).or_insert(root);
@@ -709,6 +711,7 @@ impl crate::GraphDatabase {
                 authority_epoch: None,
             };
             let mut child_position = 0i64;
+            let mut accepted_occurrences = HashSet::new();
             for (index, submitted) in turn.submitted_inputs.iter().enumerate() {
                 let resolved = resolve_imported_input_occurrence(
                     &mut tx,
@@ -736,6 +739,43 @@ impl crate::GraphDatabase {
                         continue;
                     }
                 };
+                let Some(&presenting_position) =
+                    interaction_turn_positions.get(&submitted.source.interaction_node_id)
+                else {
+                    skipped_submitted_inputs.push(SkippedSubmittedInput {
+                        source_turn_id: turn.source_turn_id.clone(),
+                        submitted_input_id: submitted.id.clone(),
+                        code: "input_occurrence_not_visible".to_owned(),
+                        path: format!("submittedInputs[{index}].source.interactionNodeId"),
+                        message: "The presenting input occurrence does not belong to an accepted imported turn.".into(),
+                    });
+                    continue;
+                };
+                if presenting_position >= position {
+                    skipped_submitted_inputs.push(SkippedSubmittedInput {
+                        source_turn_id: turn.source_turn_id.clone(),
+                        submitted_input_id: submitted.id.clone(),
+                        code: "input_occurrence_not_visible".to_owned(),
+                        path: format!("submittedInputs[{index}].source.interactionNodeId"),
+                        message: "The presenting input occurrence must belong to an earlier imported turn.".into(),
+                    });
+                    continue;
+                }
+                let occurrence = (
+                    resolution.presenting_interaction_node_id,
+                    resolution.presenting_layer_id,
+                    resolution.action_id,
+                );
+                if !accepted_occurrences.insert(occurrence) {
+                    skipped_submitted_inputs.push(SkippedSubmittedInput {
+                        source_turn_id: turn.source_turn_id.clone(),
+                        submitted_input_id: submitted.id.clone(),
+                        code: "input_attachment_duplicate".to_owned(),
+                        path: format!("submittedInputs[{index}].source"),
+                        message: "A consuming turn may answer an exact presenting input occurrence only once.".into(),
+                    });
+                    continue;
+                }
                 sqlx::query(
                     "INSERT INTO interaction_input_children(parent_interaction_node_id,position,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_snapshot_json,value_snapshot_json,attempt_key,authority_digest,semantic_digest) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'authority-stripped','semantic-read-only')",
                 )

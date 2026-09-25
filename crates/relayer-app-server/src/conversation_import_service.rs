@@ -65,7 +65,7 @@ impl ConversationImportStager {
         header: ConversationExportHeader,
         product: &ProductService,
     ) -> Result<Self, ConversationImportError> {
-        let validator = ConversationExportValidator::new(&header)
+        let validator = ConversationExportValidator::new_for_import(&header)
             .map_err(crate::conversation_export::ExportReadError::from)?;
         let import_id = Uuid::new_v4().to_string();
         let staged = product
