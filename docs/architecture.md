@@ -324,9 +324,11 @@ separator prevents reuse as another product identity. The result is stable acros
 installations for the same Auth0 subject. Renderer presentation state is never an
 authority input.
 
-V1 reports only unhandled process crashes, supervised-child startup failures, and
-supervised-child unexpected exits. Handled operation failures and expected product
-states are excluded. Every adapter emits a closed record with stable component,
+V1 reports unhandled process crashes, supervised-child startup failures, and
+supervised-child unexpected exits. One closed Electron-main exception admits
+share export, oversize, upload, service, and unexpected deletion failures using
+the user-visible attempt reference. Cancellation, sign-in requirements, quota,
+and all other handled or expected product states remain excluded. Every adapter emits a closed record with stable component,
 operation, and failure codes plus a code-owned message. JavaScript frames are
 application-relative, limited to 32, and limited to 256 characters per module
 name. Rust frames name only approved workspace crates and modules. Absolute paths,
@@ -334,6 +336,14 @@ third-party frames, arbitrary maps, and raw errors are rejected. Module names mu
 also occur in the checked-in packaged-module inventory, so a caller cannot encode
 private data inside a valid-looking application path. The final event is validated
 again immediately before transport.
+
+The handled-share schema adds only the reference, closed stage/code, and optional
+oversize byte count. It reuses verified-account admission, the main-owned
+pseudonym, bounded encrypted queue, final transport validation, and recursion
+suppression. Main deduplicates account + reference + stage + code in process;
+the durable publish-attempt owner must preserve the same identity for restart
+deduplication. Renderer and public viewer receive no reporting or network
+authority.
 
 Authenticated transport failures may enter one `safeStorage`-encrypted queue. The
 queue holds at most 32 records and 256 KiB of encrypted bytes. Records expire after
@@ -423,14 +433,21 @@ Stable promotion is a separate protected workflow on `main`. It requires committ
 
 The optional share service hosts immutable conversation-export v1 snapshots,
 up to 16 MiB each. Rust owns export scrubbing; Electron main owns Auth0 and
-short-lived signed uploads to private S3 staging. A small HTTP API reserves and
+one frozen byte sequence plus an owner-bound attempt/reference identity. Renderer
+code receives neither bearer tokens nor direct network authority. Electron main
+owns short-lived signed uploads to private S3 staging. A small HTTP API reserves and
 finalizes uploads, lists shares, and accepts owner deletion. It never transports
 the snapshot body through API Gateway. DynamoDB stores owner hashes and share
-state; finalization validates the exact object before publication.
+state; finalization validates the exact object before publication. Concurrent
+retries of one owner-scoped attempt recover the same immutable result and charge
+the UTC-day quota once.
 
 A separate Lambda streams safe inline snapshot HTML through a CloudFront-protected
 function URL. The stripped browser shell reuses the production graph workspace.
+Its versioned reader starts at the first accepted turn, keeps navigation out of
+the URL, and disables execution while preserving nested layers and Node Details.
 CloudFront reads only viewer assets from S3. Page reads check deletion and bypass
 caches. Public code is outside desktop telemetry and has no reporting client.
 These are planned service boundaries, not implemented product capabilities. See
-[ADR 0011](decisions/0011-shared-thread-snapshot-service.md) and PRD section 8.4.
+[ADR 0011](decisions/0011-shared-thread-snapshot-service.md),
+[ADR 0012](decisions/0012-immutable-shared-thread-snapshots.md), and PRD section 8.4.
