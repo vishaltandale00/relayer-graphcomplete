@@ -76,11 +76,15 @@ function validateProjection(value) {
 }
 
 function validateGatewayEvent(event, projection) {
-  const keys = [
+  const ordinaryKeys = [
     "user", "release", "environment", "os", "architecture", "component",
     "operation", "code", "message", "exceptionClass", "frames",
   ];
-  if (!exactKeys(event, keys)
+  const shareKeys = ordinaryKeys.concat([
+    "attemptReferenceId", "failureStage", "snapshotBytes",
+  ]);
+  const shareFailure = exactKeys(event, shareKeys);
+  if ((!exactKeys(event, ordinaryKeys) && !shareFailure)
     || !exactKeys(event.user, ["id"])
     || event.user.id !== projection.user.id
     || event.release !== projection.release
@@ -101,9 +105,21 @@ function validateGatewayEvent(event, projection) {
     || event.frames.some((frame) => !validGatewayFrame(frame, event.component))) {
     throw new TypeError("Sentry gateway event is invalid.");
   }
+  if (shareFailure && (event.component !== "electron-main"
+    || !/^(?:share-publication|share-deletion)$/u.test(event.operation)
+    || (event.failureStage === "delete") !== (event.operation === "share-deletion")
+    || !/^SHR-[A-Z0-9]{8,32}$/u.test(event.attemptReferenceId)
+    || !/^(?:export|upload|service|delete)$/u.test(event.failureStage)
+    || (event.snapshotBytes !== null
+      && (!Number.isSafeInteger(event.snapshotBytes) || event.snapshotBytes < 0))
+    || event.exceptionClass !== null
+    || event.frames.length !== 0)) {
+    throw new TypeError("Sentry gateway event is invalid.");
+  }
 }
 
 function mapEvent(event) {
+  const shareFailure = Object.hasOwn(event, "attemptReferenceId");
   return {
     level: "error",
     user: { id: event.user.id },
@@ -115,6 +131,11 @@ function mapEvent(event) {
       failure_code: event.code,
       os: event.os,
       architecture: event.architecture,
+      ...(shareFailure ? {
+        attempt_reference: event.attemptReferenceId,
+        failure_stage: event.failureStage,
+        snapshot_bytes: event.snapshotBytes === null ? "none" : String(event.snapshotBytes),
+      } : {}),
     },
     exception: {
       values: [{
@@ -146,6 +167,10 @@ function isApprovedSentryEvent(event, projection) {
     "environment", "event_id", "exception", "level", "release", "tags",
     "timestamp", "user",
   ];
+  const ordinaryTagKeys = ["component", "operation", "failure_code", "os", "architecture"];
+  const shareTagKeys = ordinaryTagKeys.concat([
+    "attempt_reference", "failure_stage", "snapshot_bytes",
+  ]);
   if (!exactKeys(event, topLevelKeys)
     || event.level !== "error"
     || event.release !== projection.release
@@ -156,7 +181,7 @@ function isApprovedSentryEvent(event, projection) {
     || event.timestamp < 0
     || !exactKeys(event.user, ["id"])
     || event.user.id !== projection.user.id
-    || !exactKeys(event.tags, ["component", "operation", "failure_code", "os", "architecture"])
+    || (!exactKeys(event.tags, ordinaryTagKeys) && !exactKeys(event.tags, shareTagKeys))
     || event.tags.os !== projection.os
     || event.tags.architecture !== projection.architecture
     || !Object.hasOwn(COMPONENT_PREFIXES, event.tags.component)
@@ -167,6 +192,13 @@ function isApprovedSentryEvent(event, projection) {
     || !exactKeys(event.exception, ["values"])
     || !Array.isArray(event.exception.values)
     || event.exception.values.length !== 1) return false;
+  if (Object.hasOwn(event.tags, "attempt_reference")
+    && (event.tags.component !== "electron-main"
+      || !/^(?:share-publication|share-deletion)$/u.test(event.tags.operation)
+      || (event.tags.failure_stage === "delete") !== (event.tags.operation === "share-deletion")
+      || !/^SHR-[A-Z0-9]{8,32}$/u.test(event.tags.attempt_reference)
+      || !/^(?:export|upload|service|delete)$/u.test(event.tags.failure_stage)
+      || !/^(?:none|0|[1-9][0-9]*)$/u.test(event.tags.snapshot_bytes))) return false;
   const [exception] = event.exception.values;
   return exactKeys(exception, ["type", "value", "stacktrace"])
     && EXCEPTION_CLASSES.has(exception.type)

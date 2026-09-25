@@ -43,6 +43,7 @@ export async function createDesktopAuthenticatedErrorReporting({
     account,
     issueReporter: (identity) => gateway.issueReporter(identity),
     issueCapability: (identity) => receiver?.issue(identity) ?? null,
+    reportHandledShareFailure: (record) => gateway.reportHandledShareFailure(record),
     updateEnvironment: (environment) => gateway.updateEnvironment(environment),
     close() {
       closePromise ??= (async () => {

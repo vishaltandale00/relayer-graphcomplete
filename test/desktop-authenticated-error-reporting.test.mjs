@@ -36,11 +36,23 @@ describe("desktop authenticated error reporting composition", () => {
 
     expect(reporting.issueReporter({ component: "electron-main", processGeneration: 1 })).toBeNull();
     expect(reporting.issueCapability({ component: "rust-app-server", processGeneration: 1 })).toBeNull();
+    await expect(reporting.reportHandledShareFailure({
+      code: "share.service_failed",
+      failureStage: "service",
+      attemptReferenceId: "SHR-1234ABCD",
+      snapshotBytes: null,
+    })).resolves.toEqual({ accepted: false, reason: "unverified-account" });
     expect(transport.enable).not.toHaveBeenCalled();
 
     await reporting.account.transitionIdentity({ generation: 1, subject: "auth0|person" });
     expect(transport.enable).toHaveBeenCalledOnce();
     expect(reporting.issueReporter({ component: "electron-main", processGeneration: 1 })).not.toBeNull();
+    await expect(reporting.reportHandledShareFailure({
+      code: "share.service_failed",
+      failureStage: "service",
+      attemptReferenceId: "SHR-1234ABCD",
+      snapshotBytes: null,
+    })).resolves.toEqual({ accepted: true, delivery: "sent" });
     const capability = reporting.issueCapability({ component: "rust-app-server", processGeneration: 1 });
     expect(capability.endpoint).toMatch(/^http:\/\/127\.0\.0\.1:/u);
 

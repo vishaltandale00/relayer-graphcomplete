@@ -32,6 +32,46 @@
       "frames": [{ "module": "crates/relayer-graph-server/src/main.rs", "line": 64, "column": 9 }]
     }
   ],
+  "shareFailurePositiveCases": [
+    {
+      "code": "share.snapshot_too_large",
+      "failureStage": "export",
+      "attemptReferenceId": "SHR-A1B2C3D4",
+      "snapshotBytes": 16777217
+    },
+    {
+      "code": "share.export_failed",
+      "failureStage": "export",
+      "attemptReferenceId": "SHR-B1C2D3E4",
+      "snapshotBytes": null
+    },
+    {
+      "code": "share.upload_failed",
+      "failureStage": "upload",
+      "attemptReferenceId": "SHR-C1D2E3F4",
+      "snapshotBytes": null
+    },
+    {
+      "code": "share.service_failed",
+      "failureStage": "service",
+      "attemptReferenceId": "SHR-D1E2F3A4",
+      "snapshotBytes": null
+    },
+    {
+      "code": "share.delete_failed",
+      "failureStage": "delete",
+      "attemptReferenceId": "SHR-E1F2A3B4",
+      "snapshotBytes": null
+    }
+  ],
+  "shareFailureForbiddenCases": [
+    { "field": "title", "value": "private share title" },
+    { "field": "projectName", "value": "private project" },
+    { "field": "conversationContent", "value": "private conversation" },
+    { "field": "credential", "value": "secret credential" },
+    { "field": "rawError", "value": { "message": "private raw error" } },
+    { "field": "request", "value": { "body": "private request" } }
+  ],
   "forbiddenCases": [
     {
       "id": "absolute-raw-path",
