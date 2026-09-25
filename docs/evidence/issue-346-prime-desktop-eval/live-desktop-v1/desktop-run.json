@@ -1,0 +1,1127 @@
+{
+  "schemaVersion": 1,
+  "id": "run-2026-09-25T19-06-11-759Z-c654c155",
+  "createdAt": "2026-09-25T19:06:11.808Z",
+  "completedAt": "2026-09-25T19:07:19.982Z",
+  "bundleRef": "runs/run-2026-09-25T19-06-11-759Z-c654c155/bundle.json",
+  "status": "passed",
+  "testCaseIds": [
+    "graph-memory.prior-accepted-reference"
+  ],
+  "harnessConfigurationNames": [
+    "prime-agent-basic"
+  ],
+  "judgeConfigurationName": "deterministic-graph-contract",
+  "liveAuthorization": null,
+  "comparison": null,
+  "executions": [
+    {
+      "id": "5b7b1a80-60ae-4c70-b15d-db5d24622ba4",
+      "testRunId": "run-2026-09-25T19-06-11-759Z-c654c155",
+      "testCaseId": "graph-memory.prior-accepted-reference",
+      "harnessConfigurationName": "prime-agent-basic",
+      "harnessConfiguration": {
+        "schemaVersion": 1,
+        "name": "prime-agent-basic",
+        "implementation": "prime.agent",
+        "implementationVersion": 1,
+        "revision": 3,
+        "permissionBindings": {
+          "ask": {
+            "boundary": "workspace-write@1",
+            "reviewer": "user",
+            "networkAccessEnabled": true
+          },
+          "auto": {
+            "boundary": "workspace-write@1",
+            "reviewer": "automatic",
+            "networkAccessEnabled": true
+          },
+          "full": {}
+        },
+        "modelRules": {
+          "allow": [
+            {
+              "adapterId": "openai-api",
+              "modelIdRegex": ".*"
+            },
+            {
+              "adapterId": "anthropic-api",
+              "modelIdRegex": ".*"
+            },
+            {
+              "adapterId": "openrouter",
+              "modelIdRegex": ".*"
+            },
+            {
+              "adapterId": "vercel-ai-router",
+              "modelIdRegex": ".*"
+            }
+          ],
+          "deny": []
+        },
+        "executionAccessContracts": [
+          "secret@1"
+        ],
+        "complete": {
+          "agentAuthored": true
+        },
+        "graphCapabilityProfile": {
+          "search": "query-v1"
+        },
+        "settings": {
+          "thinkingLevel": "medium",
+          "rlmMaxDepth": 1,
+          "prewarmIpythonKernel": true
+        }
+      },
+      "harnessConfigurationDigest": "sha256:5f1f8c85da4b43a98c8ea4f49c6061316e75ee100bc388faa589a6f309b60d75",
+      "caseSnapshot": null,
+      "caseSnapshotDigest": null,
+      "judgeConfiguration": {
+        "name": "deterministic-graph-contract"
+      },
+      "status": "passed",
+      "lifecycle": {
+        "status": "complete",
+        "startedAt": "2026-09-25T19:06:11.888Z",
+        "completedAt": "2026-09-25T19:07:19.979Z",
+        "durationMs": 68091
+      },
+      "threadIds": [
+        1
+      ],
+      "turns": [
+        {
+          "threadId": 1,
+          "threadDefinitionId": null,
+          "interactionId": 1,
+          "graphNodeId": 15,
+          "rootLayerId": 5,
+          "permissionProfileId": "auto",
+          "requestedPermissionProfileId": "auto",
+          "permissionProfileOverride": null,
+          "effectiveExecutionDigest": "sha256:d580647194d69f37b1b40781381abaac90cfb75ebed0e01aa30712e706c6fd92",
+          "personalPresentationVersionId": 3,
+          "personalPresentationVersionKey": null,
+          "modelSelection": {
+            "familyId": 3,
+            "providerId": "eval-openrouter",
+            "modelId": "openai/gpt-6-luna"
+          },
+          "effectivePermissionReceipt": {
+            "authority": "bounded",
+            "bindingPresent": true,
+            "disclosure": null,
+            "label": "Approve for me",
+            "permissionProfileId": "auto",
+            "reviewer": "automatic",
+            "schemaVersion": 1,
+            "unconfinedHostAccess": false
+          },
+          "status": "accepted",
+          "prompt": "Explain when newly saved graph content becomes available to future requests. Include exactly one section titled Freshness acknowledged.",
+          "turnIndex": 0,
+          "threadTurnIndex": 0,
+          "deterministicChecks": [
+            {
+              "name": "turn-1:interaction-output",
+              "passed": true,
+              "detail": "Completion output and response action belong to the requested interaction."
+            },
+            {
+              "name": "turn-1:accepted-closure",
+              "passed": true,
+              "detail": "The response action and complete visible closure are accepted."
+            },
+            {
+              "name": "turn-1:resolved-membership",
+              "passed": true,
+              "detail": "Resolved records exactly match the accepted layer references."
+            },
+            {
+              "name": "turn-1:authored-layout",
+              "passed": true,
+              "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+            },
+            {
+              "name": "turn-1:response-action",
+              "passed": true,
+              "detail": "Interaction has one accepted root expansion action."
+            },
+            {
+              "name": "turn-1:visible-layer",
+              "passed": true,
+              "detail": "3 complete visible nodes."
+            },
+            {
+              "name": "turn-1:exact-edges",
+              "passed": true,
+              "detail": "2 visible undirected edges stay inside the layer."
+            },
+            {
+              "name": "turn-1:connected",
+              "passed": true,
+              "detail": "3/3 nodes connected."
+            },
+            {
+              "name": "turn-1:natural-memory-search-target",
+              "passed": true,
+              "detail": "The first accepted root contains one human-readable Freshness acknowledged search target and no machine marker in visible content."
+            }
+          ],
+          "deterministicPassed": true,
+          "judgeResults": [],
+          "candidateTrace": {
+            "status": "complete",
+            "format": "relayer-harness-trace-v1",
+            "traceId": "b6f6d1fc-1d2a-411a-be22-4594bf54b995",
+            "sha256": "sha256:3a02b85407a35409434c38c21a12b3393437ebcdc2261907c7d41f247af6d41e",
+            "byteLength": 1326326,
+            "eventCount": 2044,
+            "coverage": {
+              "prompt": "full",
+              "messages": "full",
+              "reasoningSummaries": "none",
+              "modelCalls": "summary",
+              "toolCalls": "full",
+              "usage": "full",
+              "childStreams": "summary",
+              "nativeArtifacts": "none"
+            },
+            "personalPresentationVersionId": 3,
+            "graphOperations": {
+              "status": "complete",
+              "promotable": true,
+              "format": "relayer-graph-operations-v1",
+              "ref": "graph-operations.jsonl",
+              "sha256": "sha256:4eac168e31e7acd4df3064f633cdf461d0fe96fd25804ed666150ba5a5d68f22",
+              "byteLength": 4193,
+              "eventCount": 22,
+              "truncated": false
+            },
+            "completionBrokerAvailable": true,
+            "ref": "executions/5b7b1a80-60ae-4c70-b15d-db5d24622ba4/turns/1/candidate-trace/manifest.json",
+            "promotable": true
+          }
+        },
+        {
+          "threadId": 1,
+          "threadDefinitionId": null,
+          "interactionId": 2,
+          "graphNodeId": 19,
+          "rootLayerId": 6,
+          "permissionProfileId": "auto",
+          "requestedPermissionProfileId": "auto",
+          "permissionProfileOverride": null,
+          "effectiveExecutionDigest": "sha256:d580647194d69f37b1b40781381abaac90cfb75ebed0e01aa30712e706c6fd92",
+          "personalPresentationVersionId": 3,
+          "personalPresentationVersionKey": null,
+          "modelSelection": {
+            "familyId": 3,
+            "providerId": "eval-openrouter",
+            "modelId": "openai/gpt-6-luna"
+          },
+          "effectivePermissionReceipt": {
+            "authority": "bounded",
+            "bindingPresent": true,
+            "disclosure": null,
+            "label": "Approve for me",
+            "permissionProfileId": "auto",
+            "reviewer": "automatic",
+            "schemaVersion": 1,
+            "unconfinedHostAccess": false
+          },
+          "status": "accepted",
+          "prompt": "Find your earlier Freshness acknowledged explanation and link the original as supporting context in a concise follow-up. Do not recreate or paraphrase it.",
+          "turnIndex": 1,
+          "threadTurnIndex": 1,
+          "deterministicChecks": [
+            {
+              "name": "turn-2:interaction-output",
+              "passed": true,
+              "detail": "Completion output and response action belong to the requested interaction."
+            },
+            {
+              "name": "turn-2:accepted-closure",
+              "passed": true,
+              "detail": "The response action and complete visible closure are accepted."
+            },
+            {
+              "name": "turn-2:resolved-membership",
+              "passed": true,
+              "detail": "Resolved records exactly match the accepted layer references."
+            },
+            {
+              "name": "turn-2:authored-layout",
+              "passed": true,
+              "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+            },
+            {
+              "name": "turn-2:response-action",
+              "passed": true,
+              "detail": "Interaction has one accepted root expansion action."
+            },
+            {
+              "name": "turn-2:visible-layer",
+              "passed": true,
+              "detail": "1 complete visible nodes."
+            },
+            {
+              "name": "turn-2:exact-edges",
+              "passed": true,
+              "detail": "0 visible undirected edges stay inside the layer."
+            },
+            {
+              "name": "turn-2:connected",
+              "passed": true,
+              "detail": "1/1 nodes connected."
+            },
+            {
+              "name": "turn-2:search-returned-prior-root",
+              "passed": true,
+              "detail": "The one audited graph.search call returned exactly the first accepted root Layer identity."
+            },
+            {
+              "name": "turn-2:search-request-contract",
+              "passed": true,
+              "detail": "The provider formulated one bounded parameterized query for the natural topic without a machine marker."
+            },
+            {
+              "name": "turn-2:typed-reference-target",
+              "passed": true,
+              "detail": "The second accepted root contains the audited typed reference action targeting that exact searched Layer."
+            },
+            {
+              "name": "turn-2:ack-search-submit-order",
+              "passed": true,
+              "detail": "Server response order proves first submit acknowledgement before second-turn search, the matching reference action, and second submit acknowledgement."
+            }
+          ],
+          "deterministicPassed": true,
+          "judgeResults": [],
+          "candidateTrace": {
+            "status": "complete",
+            "format": "relayer-harness-trace-v1",
+            "traceId": "f6d95a8e-a122-48d4-b565-d581d34b46cf",
+            "sha256": "sha256:7c51777cd15349c9dc9bc887609dc3e5b9fb75910f6471fcd83ba5a99c601cf8",
+            "byteLength": 567624,
+            "eventCount": 909,
+            "coverage": {
+              "prompt": "full",
+              "messages": "full",
+              "reasoningSummaries": "none",
+              "modelCalls": "summary",
+              "toolCalls": "full",
+              "usage": "full",
+              "childStreams": "summary",
+              "nativeArtifacts": "none"
+            },
+            "personalPresentationVersionId": 3,
+            "graphOperations": {
+              "status": "complete",
+              "promotable": true,
+              "format": "relayer-graph-operations-v1",
+              "ref": "graph-operations.jsonl",
+              "sha256": "sha256:e45958a8f9ebfc1e022bdbbbce832ea3b18c3382872b23d32ee1ecb65fb5e879",
+              "byteLength": 3000,
+              "eventCount": 14,
+              "truncated": false
+            },
+            "completionBrokerAvailable": true,
+            "ref": "executions/5b7b1a80-60ae-4c70-b15d-db5d24622ba4/turns/2/candidate-trace/manifest.json",
+            "promotable": true
+          },
+          "caseEvidence": {
+            "secondTurnStartSequence": 22,
+            "searchedLayerIds": [
+              5
+            ],
+            "searchSequence": 29,
+            "searchRequest": {
+              "queryContractVersion": 1,
+              "query": "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $title RETURN l AS layer ORDER BY layer ASC",
+              "parameters": {
+                "title": {
+                  "type": "string",
+                  "value": "Freshness acknowledged"
+                }
+              }
+            },
+            "referenceActionId": 6,
+            "referenceActionSequence": 32,
+            "auditEvents": [
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/nodes/15/output",
+                "status": 404,
+                "errorCodes": [
+                  "completion_not_found"
+                ],
+                "sequence": 1,
+                "observedAt": "2026-09-25T19:06:16.469Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/nodes/15",
+                "status": 200,
+                "sequence": 2,
+                "observedAt": "2026-09-25T19:06:16.475Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/input",
+                "status": 200,
+                "sequence": 3,
+                "observedAt": "2026-09-25T19:06:16.477Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/personal-presentation",
+                "status": 200,
+                "sequence": 4,
+                "observedAt": "2026-09-25T19:06:16.483Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/current",
+                "status": 200,
+                "sequence": 5,
+                "observedAt": "2026-09-25T19:06:21.308Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/input",
+                "status": 200,
+                "sequence": 6,
+                "observedAt": "2026-09-25T19:06:21.312Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/nodes",
+                "status": 200,
+                "recordKind": "node",
+                "recordId": 16,
+                "recordState": "draft",
+                "sequence": 7,
+                "observedAt": "2026-09-25T19:06:35.778Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/nodes",
+                "status": 422,
+                "sequence": 8,
+                "observedAt": "2026-09-25T19:06:35.794Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/nodes",
+                "status": 200,
+                "recordKind": "node",
+                "recordId": 16,
+                "recordState": "draft",
+                "sequence": 9,
+                "observedAt": "2026-09-25T19:06:39.401Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/nodes",
+                "status": 200,
+                "recordKind": "node",
+                "recordId": 17,
+                "recordState": "draft",
+                "sequence": 10,
+                "observedAt": "2026-09-25T19:06:39.410Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/nodes",
+                "status": 422,
+                "sequence": 11,
+                "observedAt": "2026-09-25T19:06:39.414Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/nodes",
+                "status": 200,
+                "recordKind": "node",
+                "recordId": 16,
+                "recordState": "draft",
+                "sequence": 12,
+                "observedAt": "2026-09-25T19:06:42.532Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/nodes",
+                "status": 200,
+                "recordKind": "node",
+                "recordId": 17,
+                "recordState": "draft",
+                "sequence": 13,
+                "observedAt": "2026-09-25T19:06:42.536Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/nodes",
+                "status": 200,
+                "recordKind": "node",
+                "recordId": 18,
+                "recordState": "draft",
+                "sequence": 14,
+                "observedAt": "2026-09-25T19:06:42.542Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/edges",
+                "status": 200,
+                "recordKind": "edge",
+                "recordId": 7,
+                "recordState": "draft",
+                "sequence": 15,
+                "observedAt": "2026-09-25T19:06:42.545Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/edges",
+                "status": 200,
+                "recordKind": "edge",
+                "recordId": 8,
+                "recordState": "draft",
+                "sequence": 16,
+                "observedAt": "2026-09-25T19:06:42.549Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/layers",
+                "status": 200,
+                "recordKind": "layer",
+                "recordId": 5,
+                "recordState": "draft",
+                "sequence": 17,
+                "observedAt": "2026-09-25T19:06:42.563Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/current/transitions",
+                "status": 200,
+                "sequence": 18,
+                "observedAt": "2026-09-25T19:06:45.895Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/submit",
+                "status": 422,
+                "errorCodes": [
+                  "root_action_count"
+                ],
+                "sequence": 19,
+                "observedAt": "2026-09-25T19:06:47.153Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/actions",
+                "status": 200,
+                "recordKind": "action",
+                "recordId": 5,
+                "recordState": "draft",
+                "actionKind": "navigate",
+                "actionRelation": "expand",
+                "actionSourceNodeId": 15,
+                "actionSourceLayerId": null,
+                "actionTargetLayerId": 5,
+                "sequence": 20,
+                "observedAt": "2026-09-25T19:06:51.295Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/submit",
+                "status": 200,
+                "completionNodeId": 15,
+                "completionRootLayerId": 5,
+                "sequence": 21,
+                "observedAt": "2026-09-25T19:06:52.646Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/nodes/15/output",
+                "status": 200,
+                "sequence": 22,
+                "observedAt": "2026-09-25T19:06:54.383Z",
+                "interactionNodeId": 15
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/nodes/19/output",
+                "status": 404,
+                "errorCodes": [
+                  "completion_not_found"
+                ],
+                "sequence": 23,
+                "observedAt": "2026-09-25T19:06:55.294Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/nodes/19",
+                "status": 200,
+                "sequence": 24,
+                "observedAt": "2026-09-25T19:06:55.302Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/input",
+                "status": 200,
+                "sequence": 25,
+                "observedAt": "2026-09-25T19:06:55.306Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/personal-presentation",
+                "status": 200,
+                "sequence": 26,
+                "observedAt": "2026-09-25T19:06:55.310Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/current",
+                "status": 200,
+                "sequence": 27,
+                "observedAt": "2026-09-25T19:06:58.043Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/input",
+                "status": 200,
+                "sequence": 28,
+                "observedAt": "2026-09-25T19:06:58.048Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/search",
+                "status": 200,
+                "queryContractVersion": 1,
+                "query": "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $title RETURN l AS layer ORDER BY layer ASC",
+                "parameters": {
+                  "title": {
+                    "type": "string",
+                    "value": "Freshness acknowledged"
+                  }
+                },
+                "searchLayerIds": [
+                  5
+                ],
+                "resultTruncated": false,
+                "sequence": 29,
+                "observedAt": "2026-09-25T19:07:01.105Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/nodes",
+                "status": 200,
+                "recordKind": "node",
+                "recordId": 20,
+                "recordState": "draft",
+                "sequence": 30,
+                "observedAt": "2026-09-25T19:07:09.324Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/layers",
+                "status": 200,
+                "recordKind": "layer",
+                "recordId": 6,
+                "recordState": "draft",
+                "sequence": 31,
+                "observedAt": "2026-09-25T19:07:09.330Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/actions",
+                "status": 200,
+                "recordKind": "action",
+                "recordId": 6,
+                "recordState": "draft",
+                "actionKind": "navigate",
+                "actionRelation": "reference",
+                "actionSourceNodeId": 20,
+                "actionSourceLayerId": 6,
+                "actionTargetLayerId": 5,
+                "sequence": 32,
+                "observedAt": "2026-09-25T19:07:09.334Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/actions",
+                "status": 200,
+                "recordKind": "action",
+                "recordId": 7,
+                "recordState": "draft",
+                "actionKind": "navigate",
+                "actionRelation": "expand",
+                "actionSourceNodeId": 19,
+                "actionSourceLayerId": null,
+                "actionTargetLayerId": 6,
+                "sequence": 33,
+                "observedAt": "2026-09-25T19:07:09.340Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/current/transitions",
+                "status": 200,
+                "sequence": 34,
+                "observedAt": "2026-09-25T19:07:13.029Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "POST",
+                "path": "/api/graph/submit",
+                "status": 200,
+                "completionNodeId": 19,
+                "completionRootLayerId": 6,
+                "sequence": 35,
+                "observedAt": "2026-09-25T19:07:13.125Z",
+                "interactionNodeId": 19
+              },
+              {
+                "schemaVersion": 1,
+                "method": "GET",
+                "path": "/api/graph/nodes/19/output",
+                "status": 200,
+                "sequence": 36,
+                "observedAt": "2026-09-25T19:07:14.781Z",
+                "interactionNodeId": 19
+              }
+            ]
+          }
+        }
+      ],
+      "semanticChildren": [],
+      "currentProjectionEvidence": {
+        "cursor": 0,
+        "observations": []
+      },
+      "checks": [
+        {
+          "name": "turn-1:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-1:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-1:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-1:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-1:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-1:visible-layer",
+          "passed": true,
+          "detail": "3 complete visible nodes."
+        },
+        {
+          "name": "turn-1:exact-edges",
+          "passed": true,
+          "detail": "2 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-1:connected",
+          "passed": true,
+          "detail": "3/3 nodes connected."
+        },
+        {
+          "name": "turn-1:natural-memory-search-target",
+          "passed": true,
+          "detail": "The first accepted root contains one human-readable Freshness acknowledged search target and no machine marker in visible content."
+        },
+        {
+          "name": "turn-2:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-2:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-2:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-2:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-2:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-2:visible-layer",
+          "passed": true,
+          "detail": "1 complete visible nodes."
+        },
+        {
+          "name": "turn-2:exact-edges",
+          "passed": true,
+          "detail": "0 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-2:connected",
+          "passed": true,
+          "detail": "1/1 nodes connected."
+        },
+        {
+          "name": "turn-2:search-returned-prior-root",
+          "passed": true,
+          "detail": "The one audited graph.search call returned exactly the first accepted root Layer identity."
+        },
+        {
+          "name": "turn-2:search-request-contract",
+          "passed": true,
+          "detail": "The provider formulated one bounded parameterized query for the natural topic without a machine marker."
+        },
+        {
+          "name": "turn-2:typed-reference-target",
+          "passed": true,
+          "detail": "The second accepted root contains the audited typed reference action targeting that exact searched Layer."
+        },
+        {
+          "name": "turn-2:ack-search-submit-order",
+          "passed": true,
+          "detail": "Server response order proves first submit acknowledgement before second-turn search, the matching reference action, and second submit acknowledgement."
+        }
+      ],
+      "outcomeGrade": {
+        "schemaVersion": 1,
+        "kind": "task_outcome_grade",
+        "status": "completed",
+        "qualified": true,
+        "score": null,
+        "mandatoryGates": [
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-1:interaction-output",
+            "name": "turn-1:interaction-output",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "Completion output and response action belong to the requested interaction.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-1:accepted-closure",
+            "name": "turn-1:accepted-closure",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "The response action and complete visible closure are accepted.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-1:resolved-membership",
+            "name": "turn-1:resolved-membership",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "Resolved records exactly match the accepted layer references.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-1:authored-layout",
+            "name": "turn-1:authored-layout",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "The accepted layer has one finite normalized v1 placement per visible node.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-1:response-action",
+            "name": "turn-1:response-action",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "Interaction has one accepted root expansion action.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-1:visible-layer",
+            "name": "turn-1:visible-layer",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "3 complete visible nodes.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-1:exact-edges",
+            "name": "turn-1:exact-edges",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "2 visible undirected edges stay inside the layer.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-1:connected",
+            "name": "turn-1:connected",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "3/3 nodes connected.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-1:natural-memory-search-target",
+            "name": "turn-1:natural-memory-search-target",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "The first accepted root contains one human-readable Freshness acknowledged search target and no machine marker in visible content.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:interaction-output",
+            "name": "turn-2:interaction-output",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "Completion output and response action belong to the requested interaction.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:accepted-closure",
+            "name": "turn-2:accepted-closure",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "The response action and complete visible closure are accepted.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:resolved-membership",
+            "name": "turn-2:resolved-membership",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "Resolved records exactly match the accepted layer references.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:authored-layout",
+            "name": "turn-2:authored-layout",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "The accepted layer has one finite normalized v1 placement per visible node.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:response-action",
+            "name": "turn-2:response-action",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "Interaction has one accepted root expansion action.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:visible-layer",
+            "name": "turn-2:visible-layer",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "1 complete visible nodes.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:exact-edges",
+            "name": "turn-2:exact-edges",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "0 visible undirected edges stay inside the layer.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:connected",
+            "name": "turn-2:connected",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "1/1 nodes connected.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:search-returned-prior-root",
+            "name": "turn-2:search-returned-prior-root",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "The one audited graph.search call returned exactly the first accepted root Layer identity.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:search-request-contract",
+            "name": "turn-2:search-request-contract",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "The provider formulated one bounded parameterized query for the natural topic without a machine marker.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:typed-reference-target",
+            "name": "turn-2:typed-reference-target",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "The second accepted root contains the audited typed reference action targeting that exact searched Layer.",
+            "evidenceRefs": []
+          },
+          {
+            "schemaVersion": 1,
+            "gateId": "turn-2:ack-search-submit-order",
+            "name": "turn-2:ack-search-submit-order",
+            "mandatory": true,
+            "status": "completed",
+            "passed": true,
+            "detail": "Server response order proves first submit acknowledgement before second-turn search, the matching reference action, and second submit acknowledgement.",
+            "evidenceRefs": []
+          }
+        ],
+        "criteria": []
+      },
+      "presentationGrade": {
+        "schemaVersion": 1,
+        "kind": "graph_presentation_grade",
+        "status": "unjudged",
+        "score": null,
+        "comprehensionScore": null,
+        "renderedScore": null,
+        "rawScore": null,
+        "scoreCeiling": null,
+        "scoreScaleMaximum": 4,
+        "depthDecay": 0.5,
+        "layers": [],
+        "aggregation": [],
+        "worstLayer": null,
+        "hasMateriallyMisleadingLayer": false,
+        "aggregationMethod": "legacy_depth_weighted"
+      },
+      "passed": true,
+      "promotable": true,
+      "error": null,
+      "modelResolution": {
+        "selectedModel": {
+          "harnessId": "prime-agent-basic",
+          "familyId": 3,
+          "providerId": "eval-openrouter",
+          "modelId": "openai/gpt-6-luna"
+        },
+        "productModelSelection": true
+      }
+    }
+  ]
+}
