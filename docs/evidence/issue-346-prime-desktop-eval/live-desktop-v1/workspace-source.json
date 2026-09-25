@@ -1,0 +1,43 @@
+{
+  "baseCommit": "34b629ca48de11150faa02451e1780aa48f1a8bd",
+  "workspaceDigest": "64d1fde2ea46888783a82571bfb2e08f130985ce7813511318e16437f3da2f91",
+  "files": [
+    {
+      "path": "desktop/eval-main/eval-service.mjs",
+      "sha256": "59ef6aed71e291b8d9e13e4678d556d2ccbb4f12e1e5e8394553ecc454afc35b"
+    },
+    {
+      "path": "desktop/eval-main/index.mjs",
+      "sha256": "f318885330cb5c91aa93caaae5c6cadd8acb3c7b4504ed475bbc2cafbe7b5363"
+    },
+    {
+      "path": "desktop/eval-main/managed-codex-runtime.mjs",
+      "sha256": "4d5ccd1ec595f8c7cb0c1a23687875a56bb61eac8c3b4ba107eb8919c530ff1f"
+    },
+    {
+      "path": "desktop/eval-main/prime-provider.mjs",
+      "sha256": "427522a2ccc417374120c2fa94993b44d8f053b4e6197cfa2be322ed2c116a50"
+    },
+    {
+      "path": "desktop/eval-renderer/main.js",
+      "sha256": "af205884c3ddf91e00dec178d911a084a9c087be94c7da2754256896a4a0314a"
+    },
+    {
+      "path": "docs/evidence/issue-346-prime-desktop-eval/README.md",
+      "sha256": "2ef15af7fd7c66d2b32c911d105ae5739c65c9deacc5d680eb4b7fb11ad8e818"
+    },
+    {
+      "path": "test/eval-managed-codex-runtime.test.mjs",
+      "sha256": "123a6a5b719ab31f854ca67834eae5b5246688813db60031732f5ee0d22392b4"
+    },
+    {
+      "path": "test/eval-prime-provider.test.mjs",
+      "sha256": "c6ae76ecb1846cbf2cc80dc1b48d63ff9363ee51289f240ba684299c27f14492"
+    },
+    {
+      "path": "test/eval-service-simulated-user.test.mjs",
+      "sha256": "b6d6fc880fe96c5642558cc4ee9ee42ebebeb17c76819e47ec5c5eae12a789db"
+    }
+  ],
+  "capturedAt": "2026-09-25T18:57:15.751177+00:00"
+}

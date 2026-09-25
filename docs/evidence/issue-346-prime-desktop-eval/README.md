@@ -2,7 +2,7 @@
 
 This change covers the Prime/OpenRouter development portion of #346. It does not
 complete Claude Eval support, packaged installation qualification, or release proof.
-PR #480 remains unproven through Desktop Eval until the live receipt below exists.
+PR #480 now has Desktop Eval evidence on the combined source snapshot identified below.
 The prior supplemental standalone run is not Desktop Eval evidence.
 
 ## Product promises and changed seams
@@ -51,8 +51,32 @@ is `openai/gpt-6-luna` → `qwen/qwen3.8-flash`.
 
 ## Results
 
-Implementation and deterministic verification are in progress. No Desktop Eval
-pass, screenshot, persistent graph, or final adversarial approval is claimed yet.
-Record exact source commit/digest, runtime recipe/receipt, run/thread/interaction
-identities, model plan, checkpoint outcomes, costs and retained graph location
-when those observations exist. Preserve failed attempts and unresolved limits.
+Actual development Desktop Eval passed **21/21** checkpoints on implementation
+commit `c3f4358b9f2a1e3d71fb35b2f8d720ca1ba147ed`, containing PR #480 head
+`34b629ca48de11150faa02451e1780aa48f1a8bd` plus this desktop provider bridge.
+Both turns were accepted. The follow-up searched for and referenced original layer
+5; opening that reference displayed the original graph. The run and graph remained
+available after quitting and reopening Electron with the same persistent profile.
+
+- [Receipt and limitations](live-desktop-v1/receipt.json)
+- [All 21 checkpoint results and original trace hashes](live-desktop-v1/desktop-run.json)
+- [Actual admitted model plans](live-desktop-v1/admitted-plans.json)
+- [Restarted desktop results](live-desktop-v1/desktop-reopened-result.png)
+- [Restarted original graph](live-desktop-v1/desktop-reopened-graph.png)
+- [Sampled navigation video](live-desktop-v1/desktop-navigation-sampled.mp4) — five actual UI captures, not continuous recording.
+- [Evidence hashes](live-desktop-v1/sha256.json)
+
+Full `npm run check` passed (2278 Vitest tests, 3 skipped; separate secret-boundary
+and Python checks passed); `npm run build` passed; 49 focused tests passed.
+The initial cache setup failure is preserved alongside the successful logs.
+Exact-key scan of the published evidence passed. Private credentials, databases,
+and full provider message streams are not published.
+
+Luna made all 19 model calls. Flash was admitted but never invoked, so this run
+proves desktop query-v1 search/reference behavior, not helper delegation.
+The account-key usage delta was approximately **$0.00725945**; it is not an isolated
+request billing receipt. Presentation was manually inspected, with no presentation
+judge score. Packaged/release qualification and Claude support remain outside scope.
+The unavailable-state screenshot checkpoint remains uncaptured; deterministic
+admission tests cover that boundary. Managed permission-boundary excerpts record
+terminal completion and cleanup for both turns.
