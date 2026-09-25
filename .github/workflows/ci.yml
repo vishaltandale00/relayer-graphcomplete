@@ -176,7 +176,7 @@ jobs:
   rust-clippy:
     name: Rust Clippy
     needs: [plan, lbug-prebuilt]
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -233,7 +233,7 @@ jobs:
   rust-tests:
     name: Fresh Rust tests
     needs: [plan, lbug-prebuilt]
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -280,7 +280,7 @@ jobs:
   rust-crash:
     name: Fresh crash reconciliation tests
     needs: [plan, lbug-prebuilt]
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -326,7 +326,7 @@ jobs:
   rust-runtime:
     name: Rust runtime build
     needs: [plan, lbug-prebuilt]
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust_runtime == 'true' && needs.plan.outputs.runtime_cache_hit != 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rust_runtime == 'true' && needs.plan.outputs.runtime_cache_hit != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -424,7 +424,7 @@ jobs:
   rust:
     name: Rust checks and fresh tests
     needs: [plan, rust-clippy, rust-tests, rust-crash, rust-runtime]
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -459,7 +459,7 @@ jobs:
   vitest:
     name: Fresh deterministic Vitest portfolio
     needs: [plan, rust-runtime]
-    if: ${{ always() && needs.plan.outputs.vitest == 'true' && (needs.plan.outputs.rust_runtime != 'true' || needs.plan.outputs.runtime_cache_hit == 'true' || needs['rust-runtime'].result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.outputs.vitest == 'true' && (needs.plan.outputs.rust_runtime != 'true' || needs.plan.outputs.runtime_cache_hit == 'true' || needs['rust-runtime'].result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source and base history
