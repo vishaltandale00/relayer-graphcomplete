@@ -1,0 +1,6 @@
+99d07fb9bc698384f580b324898a081140fb869ee9fc6e825d178bf36a527779  scripts/test-desktop-context-draft-warning.mjs
+8d2669df9cecaa394e761f5fc1cb713d8e99b5d88aea5ba2701eb87681680376  scripts/lib/desktop-capture-evidence.mjs
+323f2b3915b3199efd57d81eea2cd0cdabfdc65390524a2bdfb83cad4d5e2edc  scripts/recognize-desktop-capture-frame.swift
+fdaacc0fecc6706a29d8a4af645ce482ad5a5e059ba97bd375f783cb2037983a  test/desktop-capture-evidence.test.mjs
+362a318385c4dfef93da95cc50f8e5e520725a459d73f44a6473e558fbba92f8  test/node-detail-runtime.test.mjs
+7d3579e0d1aa52a4b4f5b4bab52974e9005fcf1fd7c4db3e19156f425b6f1092  docs/prd/index.html
