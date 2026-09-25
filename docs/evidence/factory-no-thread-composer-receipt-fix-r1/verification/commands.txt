@@ -1,0 +1,27 @@
+Runtime: Node v22.23.2 / npm 10.9.8 / Electron 43.0.0 / Vitest 4.1.10
+Lockfile SHA-256: 9de14f3064af54d7ea1433239ddedcdf875c121a7841c0a5746c1e911dc1fb0d
+CARGO_TARGET_DIR=/Volumes/2T-SSD/cargo/relayer-graphcomplete
+TMPDIR=/Volumes/2T-SSD/worker-pilot/tmp/factory-no-thread-composer
+npm_config_cache=/Volumes/2T-SSD/worker-pilot/npmcache
+
+Red regression:
+  npm exec vitest -- run test/desktop-capture-evidence.test.mjs
+  Exit 1: the new receipt seam did not yet exist; six prior capture-content tests passed.
+
+Focused green:
+  npm exec vitest -- run test/desktop-capture-evidence.test.mjs test/node-detail-runtime.test.mjs
+  Exit 0: 48 passed.
+
+Required full check:
+  npm run check
+  Exit 0: 2,274 tests passed, 3 skipped; one of 174 test files skipped; secret boundary and Python tests passed.
+
+Required build:
+  npm run build
+  Exit 0.
+
+Source-bound desktop capture:
+  RELAYER_NO_THREAD_COMPOSER_EVIDENCE_DIR=<external run media directory> node scripts/run-context-draft-warning-test.mjs
+  Exit 0; inner passed:true, inferenceCalls:0; retained-file receipt was independently checked against the retained screenshot's bytes.
+
+Exact command output logs, including the initial red output and full check/build/capture output, remain in the external run directory. Their contents were not rewritten for publication.

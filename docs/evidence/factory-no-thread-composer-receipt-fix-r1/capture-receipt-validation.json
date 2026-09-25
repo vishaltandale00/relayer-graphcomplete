@@ -1,0 +1,51 @@
+{
+  "outerPassed": true,
+  "inferenceCalls": 0,
+  "innerPassed": true,
+  "frameCount": 18,
+  "actualButtonSelection": {
+    "currentThreadId": null,
+    "activeThreadId": 2
+  },
+  "receiptSha256": "9bdce05432f9f9bfc94a315f41a344766ef4b5d382703d136f5a55e83d7c1600",
+  "retainedFileSha256": "9bdce05432f9f9bfc94a315f41a344766ef4b5d382703d136f5a55e83d7c1600",
+  "receiptMatchesRetainedFile": true,
+  "firstRecordedFrameSha256": "9bdce05432f9f9bfc94a315f41a344766ef4b5d382703d136f5a55e83d7c1600",
+  "stateIntervals": {
+    "beforeClick": {
+      "firstFrameIndex": 0,
+      "lastFrameIndex": 5,
+      "firstCapturedAtMs": 75.4,
+      "lastCapturedAtMs": 1590.8,
+      "durationMs": 1515.4
+    },
+    "emptyNewThread": {
+      "firstFrameIndex": 6,
+      "lastFrameIndex": 11,
+      "firstCapturedAtMs": 1877.6,
+      "lastCapturedAtMs": 3545.8,
+      "durationMs": 1668.1
+    },
+    "restoredThread": {
+      "firstFrameIndex": 12,
+      "lastFrameIndex": 17,
+      "firstCapturedAtMs": 3899.4,
+      "lastCapturedAtMs": 5424.9,
+      "durationMs": 1525.5
+    }
+  },
+  "video": {
+    "file": "/Volumes/2T-SSD/worker-pilot/evidence/factory-no-thread-composer/run-20260925-receipt-fix-r1/media/ordinary-new-thread-transition.mp4",
+    "sha256": "d92f7014d81e1f025c8899d0d6742cd5cae0fd4ab4bdea3ce7b76000fdfdbaec",
+    "durationSeconds": 5.44,
+    "stream": {
+      "codec_name": "h264",
+      "width": 2560,
+      "height": 1720,
+      "side_data_list": [
+        {}
+      ]
+    },
+    "playbackDecoded": true
+  }
+}

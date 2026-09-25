@@ -1,0 +1,3 @@
+a417758ad33077d2ff904116fe4aaa0dce9cfdbcad237c02d5c0b28781f25042  scripts/test-desktop-context-draft-warning.mjs
+1d842eb0cf733dc5641de65ca9d625ff887c1564313c7e002a1222a1b57c1392  scripts/lib/desktop-capture-evidence.mjs
+18e8859e078e46a28bc424eef6188dfa0b4bf7e633cf46f87beae23d21014bf8  test/desktop-capture-evidence.test.mjs
