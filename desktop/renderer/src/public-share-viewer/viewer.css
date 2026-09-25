@@ -1,0 +1,244 @@
+/* Public shell additions. ProductWorkspace graph, inspector, and environment
+   styling remains in the production desktop stylesheet. */
+.public-share-shell {
+  min-height: 100%;
+  height: auto;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.public-share-topbar {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px clamp(16px, 4vw, 48px);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+}
+
+.public-share-brand,
+.public-share-install-link {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.public-share-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+.public-share-brand img {
+  border-radius: 7px;
+  background: #f7f0e5;
+}
+
+.public-share-topbar-meta,
+.public-share-download-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.public-share-read-only,
+.public-share-platform-note,
+.public-share-eyebrow {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.public-share-read-only {
+  color: var(--green);
+}
+
+.public-share-install-link {
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.public-share-install-link:hover,
+.public-share-install-link:focus-visible {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.public-share-main {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 22px clamp(12px, 4vw, 48px) 36px;
+}
+
+.public-share-download-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 0 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--raised);
+}
+
+.public-share-download-card h1 {
+  margin: 5px 0 5px;
+  font-size: clamp(16px, 2.2vw, 21px);
+  letter-spacing: -.02em;
+}
+
+.public-share-download-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.public-share-primary-action {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  padding: 0 14px;
+  border-radius: 7px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.public-share-primary-action:hover,
+.public-share-primary-action:focus-visible {
+  filter: brightness(1.1);
+}
+
+.public-share-workspace-host {
+  min-height: min(780px, calc(100vh - 170px));
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.public-share-workspace-host .thread-view {
+  min-height: min(780px, calc(100vh - 170px));
+}
+
+/* Review mode still renders the shared ProductWorkspace markup. Keep every
+   mutating affordance absent in the public surface, including future controls
+   accidentally added to the desktop shell. */
+.public-share-shell .conversation-settings,
+.public-share-shell .thread-composer-shell,
+.public-share-shell .approval-dock,
+.public-share-shell .node-context-dock,
+.public-share-shell .annotation-panel,
+.public-share-shell #attachNodeContext {
+  display: none !important;
+}
+
+.public-share-shell .workspace-layout {
+  padding-bottom: 12px;
+}
+
+.public-share-error {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-height: 320px;
+  align-content: center;
+  padding: 32px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--raised);
+  text-align: center;
+}
+
+.public-share-error h2,
+.public-share-error p {
+  margin: 0;
+}
+
+.public-share-error p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.public-share-reload {
+  min-height: 34px;
+  margin-top: 6px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+.public-share-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 0 clamp(16px, 4vw, 48px) 24px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+html[data-theme="light"] .public-share-topbar {
+  background: rgba(255, 255, 255, .92);
+}
+
+html[data-theme="light"] .public-share-download-card,
+html[data-theme="light"] .public-share-error {
+  background: #fff;
+}
+
+@media (max-width: 760px) {
+  .public-share-topbar {
+    min-height: 52px;
+    padding-inline: 12px;
+  }
+
+  .public-share-topbar-meta {
+    gap: 7px;
+  }
+
+  .public-share-read-only {
+    display: none;
+  }
+
+  .public-share-main {
+    padding: 12px 8px 24px;
+  }
+
+  .public-share-download-card {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 15px;
+  }
+
+  .public-share-download-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .public-share-workspace-host,
+  .public-share-workspace-host .thread-view {
+    min-height: 700px;
+    border-radius: 12px;
+  }
+
+  .public-share-footer {
+    padding-inline: 12px;
+    flex-direction: column;
+  }
+}

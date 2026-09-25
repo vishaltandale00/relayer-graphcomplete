@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; form-action 'none'">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Shared conversation · Relayer">
+  <meta property="og:description" content="A read-only Relayer conversation snapshot.">
+  <meta property="og:image" content="./assets/relayer-share-og.svg">
+  <title>Shared conversation · Relayer</title>
+  <link rel="icon" href="./assets/relayer-logo.svg">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./src/public-share-viewer/viewer.css">
+</head>
+<body class="public-share-shell">
+  <header class="public-share-topbar">
+    <a class="public-share-brand" href="https://app.relayerlabs.ai/desktop/login" target="_blank" rel="noopener noreferrer" aria-label="Relayer, open desktop download">
+      <img src="./assets/relayer-logo.svg" alt="" width="24" height="24">
+      <span>Relayer</span>
+    </a>
+    <div class="public-share-topbar-meta">
+      <span class="public-share-read-only">Read-only snapshot</span>
+      <a class="public-share-install-link" href="https://app.relayerlabs.ai/desktop/login" target="_blank" rel="noopener noreferrer">Open Relayer</a>
+    </div>
+  </header>
+  <main class="public-share-main">
+    <section class="public-share-download-card" aria-labelledby="publicShareDownloadTitle">
+      <div>
+        <span class="public-share-eyebrow">Relayer for Mac</span>
+        <h1 id="publicShareDownloadTitle">Explore this graph in Relayer</h1>
+        <p>Open the desktop app to create, inspect, and continue your own local conversations.</p>
+      </div>
+      <div class="public-share-download-actions">
+        <a class="public-share-primary-action" href="https://app.relayerlabs.ai/desktop/login" target="_blank" rel="noopener noreferrer">Download</a>
+        <span class="public-share-platform-note">Also for Windows</span>
+      </div>
+    </section>
+    <section id="publicViewerHost" class="public-share-workspace-host" aria-label="Shared conversation workspace">
+      <section class="thread-view" id="threadView"></section>
+    </section>
+    <section class="public-share-error hidden" id="publicShareError" role="alert" aria-live="assertive">
+      <h2>This shared thread couldn’t be loaded</h2>
+      <p>The snapshot is unavailable or invalid. Try loading it again.</p>
+      <button class="public-share-reload" id="publicShareReload" type="button">Reload</button>
+    </section>
+  </main>
+  <footer class="public-share-footer"><span>Shared from Relayer</span><span>Read-only · No account required</span></footer>
+  <!-- The service replaces this inert JSON string with frozen V1 JSONL bytes. -->
+  <script type="application/json" id="relayerPublicSnapshot">""</script>
+  <script type="module" src="./src/public-share-viewer/main.js"></script>
+</body>
+</html>
