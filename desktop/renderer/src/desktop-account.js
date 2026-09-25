@@ -87,7 +87,6 @@ export function createDesktopAccountController({ api, elements, storage, openSet
   function finishOnboarding() {
     elements.onboarding.classList.add("hidden");
     elements.accountButton.classList.remove("hidden");
-    for (const button of elements.additionalAccountButtons ?? []) button.classList.remove("hidden");
     if (workspaceShown) return;
     workspaceShown = true;
     showWorkspace();
@@ -95,7 +94,6 @@ export function createDesktopAccountController({ api, elements, storage, openSet
 
   function offerStandaloneOnboarding() {
     elements.accountButton.classList.add("hidden");
-    for (const button of elements.additionalAccountButtons ?? []) button.classList.add("hidden");
     elements.onboarding.classList.remove("hidden");
     elements.onboardingSignIn.focus();
   }
@@ -112,16 +110,6 @@ export function createDesktopAccountController({ api, elements, storage, openSet
       ? "Signing in…"
       : directSignIn ? "Sign in" : "Account");
     elements.accountButton.disabled = loginInFlight || current.status === "signing-in";
-    for (const button of elements.additionalAccountButtons ?? []) {
-      button.textContent = copy.accountButton;
-      button.setAttribute("aria-label", directSignIn
-        ? "Sign in to Relayer."
-        : `${copy.accountButton}. Open Account settings.`);
-      button.title = current.status === "signing-in"
-        ? "Signing in…"
-        : directSignIn ? "Sign in" : "Account";
-      button.disabled = loginInFlight || current.status === "signing-in";
-    }
     elements.settingsStatus.textContent = copy.status;
     elements.settingsSignIn.classList.toggle("hidden", !copy.canSignIn);
     elements.settingsLogout.classList.toggle("hidden", !copy.canLogout);
@@ -178,7 +166,6 @@ export function createDesktopAccountController({ api, elements, storage, openSet
       }
     };
     elements.accountButton.onclick = activateAccount;
-    for (const button of elements.additionalAccountButtons ?? []) button.onclick = activateAccount;
     elements.onboardingNotNow.onclick = () => {
       rememberOnboardingPreference("dismissed");
       finishOnboarding();
@@ -214,7 +201,6 @@ function accountElements() {
   const byId = (id) => document.getElementById(id);
   return {
     accountButton: byId("desktopAccountButton"),
-    additionalAccountButtons: [byId("shellNavigationAccount")].filter(Boolean),
     accountLabel: byId("desktopAccountLabel"),
     onboarding: byId("desktopAccountOnboarding"),
     onboardingChannel: byId("desktopAccountOnboardingChannel"),
@@ -231,7 +217,6 @@ export async function initializeDesktopAccountUi({ desktop, openSettings, showWo
   const accountButton = document.getElementById("desktopAccountButton");
   if (!desktop?.account) {
     accountButton?.classList.add("hidden");
-    document.getElementById("shellNavigationAccount")?.classList.add("hidden");
     showWorkspace?.();
     return null;
   }

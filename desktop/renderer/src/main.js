@@ -56,7 +56,7 @@ import {
   persistPendingNewThreadDraft,
 } from "./composer-drafts.js";
 import { projectComposerGate } from "./project-composer-navigation.js";
-import { createShellNavigation } from "./shell-navigation.js";
+import { initializeSidebar } from "./sidebar.js";
 const PROJECT_COMPOSER_DESTINATION_SELECTOR = [
   "#settingsButton",
   "[data-thread]",
@@ -246,13 +246,7 @@ function bindEvents() {
     if (productApiAvailable && !newThreadModelSelectionReady()) openNewThreadModelPicker("model");
     else $("#createThread").click();
   });
-  $("#collapseSidebar").onclick = () => {
-    const collapsed = document.body.classList.toggle("sidebar-collapsed");
-    const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
-    $("#collapseSidebar").title = label;
-    $("#collapseSidebar").setAttribute("aria-label", label);
-    shellNavigation?.sync();
-  };
+
   $("#settingsButton").onclick = async () => {
     projectComposerGate.invalidate();
     takeOverPendingAutomaticTutorial();
@@ -376,22 +370,16 @@ function bindEvents() {
   });
 }
 
-let shellNavigation;
-
 async function boot() {
   assertRelayerIconRendererReady();
-  document.body.classList.toggle("shell-navigation-disabled", Boolean(evalReview));
+  initializeSidebar({
+    body: document.body,
+    toggle: $("#collapseSidebar"),
+    mediaQuery: window.matchMedia("(max-width: 760px)"),
+  });
   if (evalReview) viewState.evalContext = await evalReview.context();
   applyPlatformCopy();
   bindEvents();
-  shellNavigation = createShellNavigation({
-    trigger: $("#shellNavigationTrigger"),
-    panel: $("#shellNavigationPanel"),
-    settingsButton: $("#settingsButton"),
-    accountButton: $("#shellNavigationAccount"),
-    enabled: !evalReview,
-  });
-  if (evalReview) $("#shellNavigationAccount").classList.add("hidden");
   await initializeComposerDrafts();
   window.addEventListener("focus", () => {
     void refreshCurrentEnvironment({ force: true, minimumAgeMs: 1_000 }).catch(() => {});

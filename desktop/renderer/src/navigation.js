@@ -33,10 +33,8 @@ export function setMainView(view, { moveFocus = false } = {}) {
       if (narrow) $("#settingsCompactSelect")?.focus();
       else $(`[data-settings-tab="${viewState.settingsTab}"]`)?.focus();
     } else {
-      const navigationTrigger = $("#shellNavigationTrigger");
-      if ((narrow || document.body?.classList.contains("sidebar-collapsed"))
-        && navigationTrigger && !navigationTrigger.classList.contains("hidden")) {
-        navigationTrigger.focus();
+      if (narrow || document.body?.classList.contains("sidebar-collapsed")) {
+        $("#collapseSidebar")?.focus();
       } else {
         $("#settingsButton")?.focus();
       }

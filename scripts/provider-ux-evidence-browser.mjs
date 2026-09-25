@@ -1,12 +1,5 @@
 const scene = new URLSearchParams(location.search).get("scene") ?? "onboarding";
 const caption = new URLSearchParams(location.search).get("caption") ?? "Provider and model setup";
-if (scene.startsWith("eval-layout-")) {
-  window.relayerEvalReview = {
-    context: async () => ({ selectedExecutionId: "evidence", cases: [] }),
-    registerPresentationAdapter() {},
-  };
-}
-
 const adapters = [
   ["codex-subscription", "Codex subscription", "existing-runtime-auth", null],
   ["claude-subscription", "Claude subscription", "managed-login", null],
@@ -87,7 +80,9 @@ const noopSubscription = (callback) => {
 window.relayerDesktop = {
   platform: "darwin",
   account: {
-    read: async () => ({ status: "signed-out", channel: "stable" }),
+    read: async () => scene.startsWith("sidebar-")
+      ? { status: "signed-in", channel: "stable", subject: "auth0|evidence-account" }
+      : { status: "signed-out", channel: "stable" },
     login: async () => {
       accountLoginCalls += 1;
       return { status: "signing-in", channel: "stable" };
@@ -192,103 +187,36 @@ async function prepareScene() {
   label.className = "evidence-caption";
   label.textContent = caption;
   document.body.append(label);
-  if (scene === "eval-layout-mobile" || scene === "eval-layout-collapsed") {
+  if (scene.startsWith("sidebar-")) {
     await waitFor("#appShell:not(.hidden)");
-    await waitForCondition(() => {
-      const onboarding = document.querySelector("#desktopAccountOnboarding");
-      const accountButton = document.querySelector("#desktopAccountButton");
-      return (onboarding && !onboarding.classList.contains("hidden"))
-        || (accountButton && !accountButton.classList.contains("hidden"));
-    }, "optional account step or footer control in Eval capture");
     const onboarding = document.querySelector("#desktopAccountOnboarding");
     if (onboarding && !onboarding.classList.contains("hidden")) {
       document.querySelector("#desktopAccountOnboardingNotNow").click();
     }
-    await waitForCondition(
-      () => onboarding.classList.contains("hidden")
-        && !document.querySelector("#desktopAccountButton")?.classList.contains("hidden"),
-      "resolved optional account step in Eval capture",
-    );
-    if (scene === "eval-layout-collapsed") document.body.classList.add("sidebar-collapsed");
+    await waitForCondition(() => {
+      const button = document.querySelector("#desktopAccountButton");
+      return button && !button.classList.contains("hidden")
+        && !document.body.classList.contains("desktop-account-pending");
+    }, "production signed-in account state in sidebar capture");
+    if (scene.startsWith("sidebar-thread-")) await waitFor("#threadView:not(.hidden)");
+    if (scene.endsWith("light-expanded")) document.documentElement.dataset.theme = "light";
+    if (scene.includes("-expanded")) {
+      document.querySelector("#collapseSidebar").click();
+      if (scene.startsWith("sidebar-thread-")) {
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
+    }
+    if (scene.endsWith("-menu")) {
+      const menu = scene.includes("-permission-menu")
+        ? ["#permissionButton", "#permissionMenu:not(.hidden)"]
+        : scene.includes("-model-menu")
+          ? ['#newModelControl [data-model-picker-trigger]', '.model-picker-popover:not(.hidden)']
+          : ["#scopeButton", "#scopeMenu:not(.hidden)"];
+      document.querySelector(menu[0]).click();
+      await waitFor(menu[1]);
+    }
     document.body.dataset.evidenceReady = "true";
     return;
-  }
-  if (scene.startsWith("account-navigation-")) {
-    await waitFor("#appShell:not(.hidden)");
-    await waitForCondition(() => {
-      const onboarding = document.querySelector("#desktopAccountOnboarding");
-      const accountButton = document.querySelector("#desktopAccountButton");
-      return (onboarding && !onboarding.classList.contains("hidden"))
-        || (accountButton && !accountButton.classList.contains("hidden"));
-    }, "optional account step or footer control");
-    const onboarding = document.querySelector("#desktopAccountOnboarding");
-    if (onboarding && !onboarding.classList.contains("hidden")) {
-      document.querySelector("#desktopAccountOnboardingNotNow").click();
-    }
-    await waitForCondition(
-      () => !document.querySelector("#desktopAccountButton")?.classList.contains("hidden"),
-      "optional account controls",
-    );
-    if (scene === "account-navigation-thread") {
-      await waitFor("#threadView:not(.hidden)");
-    }
-    const trigger = document.querySelector("#shellNavigationTrigger");
-    const panel = document.querySelector("#shellNavigationPanel");
-    const visible = (element) => {
-      const rect = element.getBoundingClientRect();
-      return getComputedStyle(element).display !== "none" && rect.width > 0 && rect.height > 0;
-    };
-    if (scene.startsWith("account-navigation-expanded-") || scene === "account-navigation-761") {
-      if (visible(trigger) || !visible(document.querySelector("#desktopAccountButton"))) {
-        throw new Error("Expanded layout did not show only the footer Account control.");
-      }
-      document.body.dataset.evidenceReady = "true";
-      return;
-    }
-    if (scene === "account-navigation-761" && visible(trigger)) {
-      throw new Error("Navigation appeared in the expanded shell above 760px.");
-    }
-    if (scene === "account-navigation-collapsed" || scene === "account-navigation-thread") {
-      document.querySelector("#collapseSidebar").click();
-    }
-    if (!visible(trigger)) throw new Error("Navigation is not visible in the collapsed or narrow shell.");
-    trigger.click();
-    if (panel.classList.contains("hidden")) throw new Error("Navigation disclosure did not open.");
-    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-    document.dispatchEvent(escape);
-    if (document.activeElement !== trigger || !panel.classList.contains("hidden")) {
-      throw new Error("Escape did not close Navigation and return focus to its trigger.");
-    }
-    trigger.click();
-    document.querySelector("#shellNavigationSettings").click();
-    await waitFor("#settingsView:not(.hidden)");
-    if (innerWidth <= 760) {
-      const compactSelect = document.querySelector("#settingsCompactSelect");
-      if (!visible(compactSelect) || document.activeElement !== compactSelect) {
-        throw new Error("Narrow Settings did not focus its visible compact section selector.");
-      }
-      document.querySelector("#settingsCompactBackButton").click();
-    } else {
-      document.querySelector("#settingsBackButton").click();
-    }
-    await waitForCondition(
-      () => document.querySelector("#settingsView").classList.contains("hidden"),
-      "return from Settings",
-    );
-    if (document.activeElement !== trigger) throw new Error("Returning from Settings did not focus the visible Navigation trigger.");
-    trigger.click();
-    document.querySelector("#shellNavigationAccount").click();
-    await waitForCondition(
-      () => window.__providerEvidence.accountLoginCalls === 1
-        && document.querySelector("#desktopAccountLabel").textContent === "Signing in…",
-      "shared direct sign-in action",
-    );
-    const footerButton = document.querySelector("#desktopAccountButton");
-    const menuButton = document.querySelector("#shellNavigationAccount");
-    if (!footerButton.disabled || !menuButton.disabled || menuButton.textContent !== "Signing in…") {
-      throw new Error("Footer and Navigation Account controls diverged during sign-in.");
-    }
-    if (!scene.endsWith("-closed")) trigger.click();
   }
   if (scene === "flow") {
     await waitFor('[data-provider-adapter="openai-api"]');

@@ -87,12 +87,18 @@ customer feedback reported that a control floating over the workspace read as
 detached from the app, and the floating pill forced the node-context dock to
 reserve a lane it would otherwise collide with. When the sidebar collapses to
 icons the control keeps its glyph and drops its label, like Settings. At widths
-of 760px or less, the sidebar is hidden; a keyboard-operable shell Navigation
-disclosure then keeps Settings and Account reachable. The disclosure also
-appears when the sidebar is collapsed, and is absent from a wide expanded shell.
-The footer control and the disclosure's Account action share presentation state
-and behavior. Account never appears in a floating overlay. Its ordinary label
-never includes Stable or Preview. While signed out or in an error state,
+of 760px or less, the existing sidebar remains visible as a collapsed icon rail.
+The same keyboard-operable sidebar toggle expands it in normal document flow, and
+the workspace gives up that width. Narrow layouts start collapsed; a user can
+expand the sidebar and keep it expanded until the viewport leaves and re-enters
+the narrow breakpoint. Settings and Account remain in the sidebar footer, with
+labels visible when expanded and icons only when collapsed. Account never appears
+in a floating overlay. Its ordinary label never includes Stable or Preview.
+
+The earlier shell Navigation disclosure design from issue 418 was superseded by
+this product decision. It created a second navigation surface and did not let the
+workspace resize around a usable sidebar; its dropdown-specific checks no longer
+represent the product contract. While signed out or in an error state,
 activating Account starts the browser flow directly; an existing or uncertain
 account opens Account settings. That panel contains only concise account status
 and the applicable sign-in or logout action. Release channel is not part of account UX;

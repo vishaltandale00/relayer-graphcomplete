@@ -50,7 +50,7 @@ describe("Settings navigation", () => {
       ["#settingsSidebarContent", { classList: classList("hidden") }],
       ["#settingsTitle", { textContent: "Settings" }],
       ["#settingsCompactSelect", { value: "appearance", focusCount: 0, focus() { this.focusCount += 1; } }],
-      ["#shellNavigationTrigger", { classList: classList(), focusCount: 0, focus() { this.focusCount += 1; } }],
+      ["#collapseSidebar", { classList: classList(), focusCount: 0, focus() { this.focusCount += 1; } }],
     ]);
     const tabs = [tab("models"), tab("appearance"), tab("codex"), tab("updates")];
     const panels = ["models", "appearance", "codex", "updates"].map((name) => ({
@@ -112,6 +112,6 @@ describe("Settings navigation", () => {
     navigation.setMainView("settings", { moveFocus: true });
     expect(elements.get("#settingsCompactSelect").focusCount).toBe(1);
     await navigation.returnFromSettings();
-    expect(elements.get("#shellNavigationTrigger").focusCount).toBe(1);
+    expect(elements.get("#collapseSidebar").focusCount).toBe(1);
   });
 });

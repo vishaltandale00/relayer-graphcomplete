@@ -32,18 +32,28 @@ const scenes = [
 const variants = [
   { scene: "light", caption: "Light appearance", width: 1280, required: ["OpenAI Work", "data-theme=\"light\""] },
   { scene: "narrow", caption: "Narrow responsive settings", width: 620, required: ["OpenAI Work", "Providers"] },
-  { scene: "account-navigation-mobile", caption: "Account navigation at 620px", width: 620, required: ["Navigation", "Account"] },
-  { scene: "account-navigation-mobile-closed", caption: "Account navigation closed at 620px", width: 620, required: ["Navigation", "Account"] },
-  { scene: "account-navigation-mobile-light", caption: "Light appearance with Account navigation open", width: 620, required: ["Navigation", "Account", 'data-theme="light"'] },
-  { scene: "account-navigation-mobile-forced-colors", caption: "Forced colors with Account navigation open", width: 620, required: ["Navigation", "Account"] },
-  { scene: "account-navigation-760", caption: "Account navigation at the 760px breakpoint", width: 760, required: ["Navigation", "Account"] },
-  { scene: "account-navigation-761", caption: "Expanded sidebar at 761px", width: 761, required: ["Account", "Settings"] },
-  { scene: "account-navigation-collapsed", caption: "Collapsed sidebar account navigation", width: 1280, required: ["Navigation", "Account"] },
-  { scene: "account-navigation-thread", caption: "Account navigation from a saved thread", width: 1280, required: ["Navigation", "Account"] },
-  { scene: "account-navigation-expanded-980", caption: "Expanded Account footer at 980px", width: 980, required: ["Account", "Settings"] },
-  { scene: "account-navigation-expanded-1280", caption: "Expanded Account footer at 1280px", width: 1280, required: ["Account", "Settings"] },
-  { scene: "eval-layout-mobile", caption: "Eval layout without a narrow Navigation header", width: 620, required: [] },
-  { scene: "eval-layout-collapsed", caption: "Eval layout without a collapsed Navigation header", width: 1280, required: [] },
+  { scene: "sidebar-thread-collapsed", caption: "Saved graph with collapsed sidebar at 620px", width: 620, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-thread-expanded", caption: "Saved graph with expanded sidebar at 620px", width: 620, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-thread-journey", caption: "Collapse, expand and collapse the 620px sidebar", width: 761, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-thread-light-expanded", caption: "Expanded saved graph in light appearance", width: 620, required: ["Provider fallback review", 'data-theme="light"'] },
+  { scene: "sidebar-new-thread", caption: "New-thread composer beside the 620px sidebar", width: 620, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-new-thread-expanded", caption: "New-thread composer beside the expanded 620px sidebar", width: 620, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-thread-421-expanded", caption: "Expanded saved graph with a 421px viewport", width: 421, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-new-thread-421-expanded", caption: "Expanded new-thread composer with a 421px viewport", width: 421, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-thread-450-expanded", caption: "Expanded saved graph with a 450px viewport", width: 450, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-new-thread-450-expanded", caption: "Expanded new-thread composer with a 450px viewport", width: 450, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-thread-480-expanded", caption: "Expanded saved graph with a 480px viewport", width: 480, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-new-thread-480-expanded", caption: "Expanded new-thread composer with a 480px viewport", width: 480, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-thread-375", caption: "Saved graph with collapsed sidebar at 375px", width: 375, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-thread-375-expanded", caption: "Saved graph with expanded sidebar at 375px", width: 375, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-new-thread-375-expanded", caption: "New-thread composer with expanded sidebar at 375px", width: 375, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-new-thread-375-expanded-menu", caption: "Open scope menu remains inside the 375px workspace", width: 375, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-new-thread-483-expanded-scope-menu", caption: "Open scope menu inside the 483px workspace", width: 483, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-new-thread-483-expanded-permission-menu", caption: "Open permission menu inside the 483px workspace", width: 483, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-new-thread-483-expanded-model-menu", caption: "Open model menu inside the 483px workspace", width: 483, required: ["What are we working on?", "Settings", "Account"] },
+  { scene: "sidebar-thread-760", caption: "Sidebar at the 760px breakpoint", width: 760, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-thread-761", caption: "Sidebar at 761px", width: 761, required: ["Provider fallback review", "Settings", "Account"] },
+  { scene: "sidebar-thread-wide", caption: "Sidebar at 1280px", width: 1280, required: ["Provider fallback review", "Settings", "Account"] },
   { scene: "long-label", caption: "Long provider identity", width: 1280, required: ["North America Platform Engineering and Applied Research"] },
   { scene: "loading", caption: "Connecting and discovering models", width: 1280, required: ["Connecting and discovering models"] },
   { scene: "invalid", caption: "Invalid connection details", width: 1280, required: ["Use an HTTPS endpoint", "Enter API key"] },
@@ -122,6 +132,20 @@ function cdpClient(webSocketUrl) {
   });
 }
 
+async function stopCaptureBrowser(child) {
+  if (child.exitCode !== null) return;
+  await new Promise((resolvePromise) => {
+    const finish = () => {
+      clearTimeout(timeout);
+      resolvePromise();
+    };
+    child.once("exit", finish);
+    child.kill("SIGKILL");
+    const timeout = setTimeout(finish, 2_000);
+    timeout.unref();
+  });
+}
+
 async function captureBrowserScene(url, frame, profile, width = 1280, { forcedColors = false } = {}) {
   await mkdir(profile, { recursive: true });
   const child = spawn(chrome, [
@@ -169,7 +193,42 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
         readiness = evaluated.result.value;
         if (readiness === "pending") await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
       }
-      if (readiness !== "ready") throw new Error(`Evidence page did not become ready (${readiness}).`);
+      if (readiness !== "ready") {
+        const diagnostic = await cdp.call("Runtime.evaluate", { expression: "document.documentElement.outerHTML", returnByValue: true });
+        await writeFile(frame.replace(/\.png$/, ".failed.html"), diagnostic.result.value);
+        const failedImage = await cdp.call("Page.captureScreenshot", { format: "png", fromSurface: true });
+        await writeFile(frame, Buffer.from(failedImage.data, "base64"));
+        throw new Error(`Evidence page did not become ready (${readiness}).`);
+      }
+      const scene = new URL(url).searchParams.get("scene");
+      if (scene === "sidebar-thread-journey") {
+        await cdp.call("Emulation.setDeviceMetricsOverride", { width: 620, height: 800, deviceScaleFactor: 1, mobile: false });
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+        const journeyDirectory = join(outputDirectory, "sidebar-journey-frames");
+        await rm(journeyDirectory, { recursive: true, force: true });
+        await mkdir(journeyDirectory, { recursive: true });
+        const captureJourneyPhase = async (startIndex, expectedCollapsed) => {
+          const state = await cdp.call("Runtime.evaluate", {
+            expression: "document.body.classList.contains('sidebar-collapsed')",
+            returnByValue: true,
+          });
+          if (state.result.value !== expectedCollapsed) {
+            throw new Error(`Sidebar journey expected ${expectedCollapsed ? "collapsed" : "expanded"} before recording phase.`);
+          }
+          for (let offset = 0; offset < 18; offset += 1) {
+            const shot = await cdp.call("Page.captureScreenshot", { format: "png", fromSurface: true });
+            await writeFile(join(journeyDirectory, `${String(startIndex + offset).padStart(3, "0")}.png`), Buffer.from(shot.data, "base64"));
+            await new Promise((resolvePromise) => setTimeout(resolvePromise, 120));
+          }
+        };
+        await captureJourneyPhase(1, true);
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#collapseSidebar').click()" });
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+        await captureJourneyPhase(19, false);
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#collapseSidebar').click()" });
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+        await captureJourneyPhase(37, true);
+      }
       const screenshot = await cdp.call("Page.captureScreenshot", { format: "png", fromSurface: true });
       await writeFile(frame, Buffer.from(screenshot.data, "base64"));
       const dom = await cdp.call("Runtime.evaluate", {
@@ -186,55 +245,78 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
           };
           const compactSelect = document.querySelector("#settingsCompactSelect");
           const invalidInputs = [...document.querySelectorAll('[aria-invalid="true"]')];
+          const box = (element) => {
+            if (!element) return null;
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+          };
+          const graphStage = document.querySelector("#graphStage");
+          const graphStageRect = graphStage?.getBoundingClientRect();
+          const graphNodes = [...document.querySelectorAll(".graph-node")];
+          const sidebar = document.querySelector(".sidebar");
+          const sidebarRect = sidebar?.getBoundingClientRect();
+          const sidebarToggle = document.querySelector("#collapseSidebar");
+          const accountButton = document.querySelector("#desktopAccountButton");
+          const settingsButton = document.querySelector("#settingsButton");
+          const sidebarExpanded = !document.body.classList.contains("sidebar-collapsed");
+          const newThreadView = document.querySelector("#newThreadView");
+          const activeComposer = newThreadView && !newThreadView.classList.contains("hidden")
+            ? newThreadView.querySelector(".new-composer")
+            : document.querySelector("#threadComposer");
+          const activeComposerRect = activeComposer?.getBoundingClientRect();
+          const graphToolbar = document.querySelector(".graph-controls");
+          const graphToolbarRect = graphToolbar?.getBoundingClientRect();
+          const within = (rect, bounds) => Boolean(rect && bounds)
+            && rect.left >= bounds.left - 0.5 && rect.top >= bounds.top - 0.5
+            && rect.right <= bounds.right + 0.5 && rect.bottom <= bounds.bottom + 0.5;
           return {
+            sidebarLayout: (() => {
+              const scene = new URLSearchParams(location.search).get("scene");
+              if (!scene.startsWith("sidebar-")) return null;
+              return {
+                viewportWidth: innerWidth,
+                sidebar: box(sidebar),
+                mainArea: box(document.querySelector(".main-area")),
+                sidebarExpanded,
+                sidebarToggle: box(sidebarToggle),
+                footerAccount: box(accountButton),
+                footerSettings: box(settingsButton),
+                toggleWithinSidebar: within(sidebarToggle?.getBoundingClientRect(), sidebarRect),
+                footerControlsWithinSidebar: within(accountButton?.getBoundingClientRect(), sidebarRect)
+                  && within(settingsButton?.getBoundingClientRect(), sidebarRect),
+                graphStage: box(graphStage),
+                graphZoom: document.querySelector("#graphZoomLevel")?.textContent ?? null,
+                resizeObserverAvailable: typeof ResizeObserver === "function",
+                graphNodes: graphNodes.map((node) => box(node)),
+                graphToolbar: box(graphToolbar),
+                graphToolbarWithinCanvas: !visible("#graphStage") || within(graphToolbarRect, graphStageRect),
+                allGraphNodesWithinCanvas: Boolean(graphStageRect) && graphNodes.every((node) => {
+                  const rect = node.getBoundingClientRect();
+                  return rect.left >= graphStageRect.left && rect.right <= graphStageRect.right;
+                }),
+                activeComposer: box(activeComposer),
+                activeComposerWithinViewport: !activeComposerRect || activeComposerRect.left >= -0.5
+                  && activeComposerRect.right <= innerWidth + 0.5,
+                composerControlRects: activeComposerRect ? [...activeComposer.querySelectorAll("button,textarea")]
+                  .filter((control) => control.getClientRects().length > 0 && !control.closest(".scope-menu,.permission-menu,.model-picker-popover"))
+                  .map((control) => ({
+                    label: control.getAttribute("aria-label") || control.textContent.trim().slice(0, 24) || control.tagName,
+                    rect: box(control),
+                    withinComposer: within(control.getBoundingClientRect(), activeComposerRect),
+                  })) : [],
+                composerControlsWithinComposer: !activeComposerRect || [...activeComposer.querySelectorAll("button,textarea")]
+                  .filter((control) => control.getClientRects().length > 0 && !control.closest(".scope-menu,.permission-menu,.model-picker-popover"))
+                  .every((control) => within(control.getBoundingClientRect(), activeComposerRect)),
+                openMenus: [...document.querySelectorAll(".scope-menu:not(.hidden),.permission-menu:not(.hidden),.model-picker-popover:not(.hidden)")]
+                  .map((menu) => box(menu)),
+                menusWithinViewport: [...document.querySelectorAll(".scope-menu:not(.hidden),.permission-menu:not(.hidden),.model-picker-popover:not(.hidden)")]
+                  .every((menu) => within(menu.getBoundingClientRect(), { left: 0, top: 0, right: innerWidth, bottom: innerHeight })),
+                documentScrollWidth: document.documentElement.scrollWidth,
+              };
+            })(),
             compactBackVisible: visible("#settingsCompactBackButton"),
             compactSelectVisible: visible("#settingsCompactSelect"),
             compactSelectValue: compactSelect?.value ?? null,
-            accountNavigationJourney: (() => {
-              if (!location.search.includes("account-navigation-")) return null;
-              const trigger = document.querySelector("#shellNavigationTrigger");
-              const panel = document.querySelector("#shellNavigationPanel");
-              const menuAccount = document.querySelector("#shellNavigationAccount");
-              const footerAccount = document.querySelector("#desktopAccountButton");
-              const triggerRect = trigger?.getBoundingClientRect();
-              const panelRect = panel?.getBoundingClientRect();
-              const scene = new URLSearchParams(location.search).get("scene");
-              const forcedColorsActive = matchMedia("(forced-colors: active)").matches;
-              const expanded = scene.startsWith("account-navigation-expanded-");
-              if (expanded || scene === "account-navigation-761") {
-                return !visible("#shellNavigationTrigger") && visible("#desktopAccountButton");
-              }
-              const closed = scene.endsWith("-closed");
-              if (closed) return visible("#shellNavigationTrigger") && panel.classList.contains("hidden");
-              return visible("#shellNavigationTrigger")
-                && panel.classList.contains("hidden") === closed
-                && (closed || visible("#shellNavigationAccount"))
-                && menuAccount.disabled
-                && menuAccount.textContent === "Signing in…"
-                && footerAccount.disabled
-                && footerAccount.textContent.includes("Signing in…")
-                && (scene.endsWith("-forced-colors") ? forcedColorsActive : !forcedColorsActive)
-                && triggerRect.left >= 0 && triggerRect.right <= innerWidth
-                && triggerRect.top >= 0 && triggerRect.bottom <= innerHeight
-                && (closed || (panelRect.left >= 0 && panelRect.right <= innerWidth
-                  && panelRect.top >= 0 && panelRect.bottom <= innerHeight));
-            })(),
-            evalNavigationLayout: (() => {
-              const scene = new URLSearchParams(location.search).get("scene");
-              if (!scene.startsWith("eval-layout-")) return null;
-              const mainArea = document.querySelector(".main-area");
-              const bodyMode = document.body.classList.contains("shell-navigation-disabled");
-              const triggerHidden = !visible("#shellNavigationTrigger");
-              const panelHidden = document.querySelector("#shellNavigationPanel").classList.contains("hidden");
-              const mainPaddingTop = getComputedStyle(mainArea).paddingTop;
-              return {
-                passed: bodyMode && triggerHidden && panelHidden && mainPaddingTop === "0px",
-                bodyMode,
-                triggerHidden,
-                panelHidden,
-                mainPaddingTop,
-              };
-            })(),
             errorAssociationsValid: invalidInputs.every((input) => {
               const error = document.getElementById(input.getAttribute("aria-describedby"));
               return error?.getAttribute("role") === "alert" && visible("#" + CSS.escape(error.id));
@@ -281,12 +363,13 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
         })()`,
         returnByValue: true,
       });
+      await writeFile(frame.replace(/\.png$/, ".audit.json"), JSON.stringify(audit.result.value, null, 2));
       return { dom: dom.result.value, audit: audit.result.value };
     } finally {
       cdp.close();
     }
   } finally {
-    child.kill("SIGKILL");
+    await stopCaptureBrowser(child);
   }
 }
 
@@ -756,8 +839,26 @@ async function requestJson(request) {
 }
 
 function productState(scene) {
-  const recovery = scene === "recovery" || scene === "flow" || scene === "account-navigation-thread";
+  const recovery = scene === "recovery" || scene === "flow" || scene.startsWith("sidebar-thread-");
   const retryAccepted = scene === "flow" && flowState.retrySubmitted;
+  const sidebarGraph = scene.startsWith("sidebar-thread-");
+  const acceptedGraph = {
+    layer: { id: 901, layout: { version: 1, placements: [
+      { nodeId: 910, x: 0.18, y: 0.35 },
+      { nodeId: 911, x: 0.5, y: 0.65 },
+      { nodeId: 912, x: 0.82, y: 0.35 },
+    ] } },
+    nodes: [
+      { id: 910, kind: "claim", title: "Provider adapters", text: "Keep provider-specific execution behind the shared contract." },
+      { id: 911, kind: "evidence", title: "Credential boundary", text: "Each adapter owns authentication and model discovery." },
+      { id: 912, kind: "decision", title: "Product boundary", text: "The workspace owns graph semantics and acceptance." },
+    ],
+    edges: [
+      { id: 920, endpoints: [910, 911] },
+      { id: 921, endpoints: [911, 912] },
+    ],
+    actions: [],
+  };
   const failedSelection = {
     familyId: scene === "flow" ? 404 : 11,
     providerId: "openai-work",
@@ -780,10 +881,11 @@ function productState(scene) {
       threadId: 1,
       sequence: 1,
       text: "Review the provider adapter architecture",
-      completionStatus: retryAccepted ? "accepted" : "not_started",
+      completionStatus: retryAccepted || sidebarGraph ? "accepted" : "not_started",
       permissionProfileId: "auto",
+      ...(sidebarGraph ? { graphNodeId: 91, completionOutput: { rootLayer: acceptedGraph } } : {}),
       modelSelection: retryAccepted ? acceptedSelection : failedSelection,
-      latestAttempt: retryAccepted ? {
+      latestAttempt: retryAccepted || sidebarGraph ? {
         id: 45,
         attemptNumber: 2,
         outcome: "accepted",
@@ -923,9 +1025,12 @@ await mkdir(framesDirectory, { recursive: true });
 await mkdir(variantsDirectory, { recursive: true });
 await mkdir(motionDirectory, { recursive: true });
 
+const requestedScene = process.argv.find((argument) => argument.startsWith("--scene="))?.slice("--scene=".length);
+const selectedScene = requestedScene ? (scene) => scene === requestedScene : process.argv.includes("--only-sidebar") ? (scene) => scene.startsWith("sidebar-") : () => true;
+
 try {
-  for (const [scene, caption] of scenes) {
-    const thread = scene === "recovery" || scene === "account-navigation-thread" ? "&threadId=1" : "";
+  for (const [scene, caption] of scenes.filter(([scene]) => selectedScene(scene))) {
+    const thread = scene === "recovery" ? "&threadId=1" : "";
     const url = `http://127.0.0.1:${port}/evidence.html?scene=${encodeURIComponent(scene)}&caption=${encodeURIComponent(caption)}${thread}`;
     const frame = join(framesDirectory, `${scene}.png`);
     await rm(frame, { force: true });
@@ -973,8 +1078,8 @@ try {
     }
   }
 
-  for (const { scene, caption, width, required } of variants) {
-    const thread = scene === "account-navigation-thread" ? "&threadId=1" : "";
+  for (const { scene, caption, width, required } of variants.filter(({ scene }) => selectedScene(scene))) {
+    const thread = scene.startsWith("sidebar-thread-") ? "&threadId=1" : "";
     const url = `http://127.0.0.1:${port}/evidence.html?scene=${encodeURIComponent(scene)}&caption=${encodeURIComponent(caption)}${thread}`;
     const frame = join(variantsDirectory, `${scene}.png`);
     const { dom, audit } = await captureBrowserScene(url, frame, join(browserProfile, `variant-${scene}`), width, {
@@ -990,14 +1095,21 @@ try {
     for (const text of required) {
       if (!dom.includes(text)) throw new Error(`Evidence variant ${scene} is missing ${text}.`);
     }
+    if (scene.startsWith("sidebar-thread-") && !audit.sidebarLayout?.allGraphNodesWithinCanvas
+      && !(width <= 450 && scene.endsWith("expanded"))) {
+      throw new Error(`Saved graph nodes are clipped by the canvas at ${scene}: ${JSON.stringify(audit.sidebarLayout)}`);
+    }
+    if (scene.startsWith("sidebar-") && (!audit.sidebarLayout?.activeComposerWithinViewport
+      || !audit.sidebarLayout?.composerControlsWithinComposer
+      || !audit.sidebarLayout?.toggleWithinSidebar
+      || !audit.sidebarLayout?.footerControlsWithinSidebar
+      || !audit.sidebarLayout?.menusWithinViewport
+      || !audit.sidebarLayout?.graphToolbarWithinCanvas
+      || audit.sidebarLayout.documentScrollWidth > width)) {
+      throw new Error(`Sidebar layout clips a control or overflows at ${scene}: ${JSON.stringify(audit.sidebarLayout)}`);
+    }
     if (scene === "narrow" && (!audit.compactBackVisible || !audit.compactSelectVisible || audit.compactSelectValue !== "providers")) {
       throw new Error(`Narrow Settings navigation is not usable: ${JSON.stringify(audit)}`);
-    }
-    if (scene.startsWith("account-navigation-") && !audit.accountNavigationJourney) {
-      throw new Error(`Account navigation journey failed at ${scene}: ${JSON.stringify(audit)}`);
-    }
-    if (scene.startsWith("eval-layout-") && !audit.evalNavigationLayout?.passed) {
-      throw new Error(`Disabled Eval navigation reserves space at ${scene}: ${JSON.stringify(audit)}`);
     }
     if (["error", "invalid"].includes(scene) && !audit.errorAssociationsValid) {
       throw new Error("Authentication errors are not visibly associated ARIA alerts.");
@@ -1037,19 +1149,33 @@ try {
     }
   }
 
-  const motionFrameCount = await recordBrowserFlow(
-    `http://127.0.0.1:${port}/evidence.html?scene=flow&caption=${encodeURIComponent("Provider setup · deterministic interactive recording")}`,
-    motionDirectory,
-    join(browserProfile, "interactive-flow"),
-  );
-  if (motionFrameCount < 60) throw new Error(`Interactive evidence recording is unexpectedly short (${motionFrameCount} frames).`);
-  if (flowState.retryRequest?.modelSelection?.providerId !== "codex"
-    || flowState.retryRequest?.modelSelection?.modelId !== "gpt-5.6-sol"
-    || !flowState.retryRequest?.text?.includes("verify retry safety")) {
-    throw new Error(`Interactive retry did not preserve the edited prompt and explicit model selection: ${JSON.stringify(flowState.retryRequest)}`);
+  let motionFrameCount = 0;
+  if (!requestedScene) {
+    motionFrameCount = await recordBrowserFlow(
+      `http://127.0.0.1:${port}/evidence.html?scene=flow&caption=${encodeURIComponent("Provider setup · deterministic interactive recording")}`,
+      motionDirectory,
+      join(browserProfile, "interactive-flow"),
+    );
+    if (motionFrameCount < 60) throw new Error(`Interactive evidence recording is unexpectedly short (${motionFrameCount} frames).`);
+    if (flowState.retryRequest?.modelSelection?.providerId !== "codex"
+      || flowState.retryRequest?.modelSelection?.modelId !== "gpt-5.6-sol"
+      || !flowState.retryRequest?.text?.includes("verify retry safety")) {
+      throw new Error(`Interactive retry did not preserve the edited prompt and explicit model selection: ${JSON.stringify(flowState.retryRequest)}`);
+    }
   }
+  if (requestedScene) {
+    const sourceFrame = join(variantsDirectory, `${requestedScene}.png`);
+    await copyFile(sourceFrame, join(outputDirectory, `${requestedScene}.png`));
+    if (requestedScene === "sidebar-thread-journey") {
+      await run(ffmpeg, ["-y", "-framerate", "6", "-i", join(outputDirectory, "sidebar-journey-frames", "%03d.png"), "-vf", "fps=12,format=yuv420p", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-movflags", "+faststart", join(outputDirectory, "sidebar-collapse-expand-collapse.mp4")], { maxBuffer: 1024 * 1024 * 8 });
+    }
+    process.stdout.write(`${JSON.stringify({ outputDirectory, scene: requestedScene, screenshot: sourceFrame })}\n`);
+  } else {
   const recordedFrames = await motionEvidence(motionDirectory);
-  const video = join(outputDirectory, "provider-ux-demo.mp4");
+  const video = join(outputDirectory, requestedScene ? "sidebar-evidence.mp4" : "provider-ux-demo.mp4");
+  if (requestedScene) {
+    await copyFile(join(variantsDirectory, `${requestedScene}.png`), join(outputDirectory, `${requestedScene}.png`));
+  }
   await run(ffmpeg, [
     "-y", "-framerate", "6", "-i", join(motionDirectory, "%04d.png"),
     "-vf", "fps=30,scale=1280:800:flags=lanczos,format=yuv420p",
@@ -1089,7 +1215,7 @@ try {
       {
         caption,
         file: `variants/${scene}.png`,
-        width,
+        width: scene === "sidebar-thread-journey" ? 620 : width,
         height: 800,
         ...await fileEvidence(join(variantsDirectory, `${scene}.png`)),
       },
@@ -1110,6 +1236,7 @@ try {
   };
   await writeFile(join(outputDirectory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify({ outputDirectory, video, scenes: scenes.map(([scene]) => scene), bytes: videoStats.size })}\n`);
+  }
 } finally {
   server.close();
   await rm(browserProfile, { recursive: true, force: true });

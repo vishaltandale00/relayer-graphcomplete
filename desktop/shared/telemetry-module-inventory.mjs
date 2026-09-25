@@ -48,7 +48,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/renderer/src/provider-ui-model.js",
     "desktop/renderer/src/provider-ui.js",
     "desktop/renderer/src/review-tools.js",
-    "desktop/renderer/src/shell-navigation.js",
+    "desktop/renderer/src/sidebar.js",
     "desktop/renderer/src/state.js",
     "desktop/renderer/src/thread-model.js",
     "desktop/renderer/src/threads.js",
