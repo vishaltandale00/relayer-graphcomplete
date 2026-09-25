@@ -102,12 +102,12 @@ Sentry submission, or promotion of prototype code.
 
 ## Evidence notes
 
-- Exact executable snapshot: `84355e30`.
+- Exact executable snapshot is the final fix commit recorded in the handoff.
 - Coherent journey: `test/conversation-export-eval-e2e.test.mjs` drives real
   Rust graph/app servers, Electron-main coordination, fake service storage, a
   lost-response retry, and the production public viewer handler.
-- Focused checkpoints: 23 share-path tests, 47 service/viewer/telemetry/template
-  tests, 20 Rust exporter tests, and the persisted-product export seam passed.
+- Focused checkpoints: 55 integrated share/service/viewer/telemetry/template
+  tests, Rust share redaction tests, and the persisted-product export seam passed.
 - Declared evidence: telemetry 99/99, `npm run build`, `npm run check`, PRD
   readability, and CloudFormation lint passed locally.
 - `SHR-463-5` remains open for captured desktop and 375 px rendered evidence.

@@ -1613,15 +1613,24 @@ impl ProjectPathRedactor {
     }
 
     fn replace_raw(&self, value: &str) -> String {
-        self.project_paths
+        let redacted = self
+            .project_paths
             .iter()
             .fold(value.to_owned(), |text, path| {
                 text.replace(path, "[project-path]")
-            })
+            });
+        if self.scrub_sensitive {
+            share_home_path_regex()
+                .replace_all(&redacted, "[home-path]")
+                .into_owned()
+        } else {
+            redacted
+        }
     }
 
     fn contains_raw(&self, value: &str) -> bool {
         self.project_paths.iter().any(|path| value.contains(path))
+            || (self.scrub_sensitive && share_home_path_regex().is_match(value))
     }
 
     /// The single private-path matcher shared by Markdown redaction and the
@@ -1629,7 +1638,7 @@ impl ProjectPathRedactor {
     /// bounded decoding round of HTML character references, percent-encoding,
     /// CSS escapes, and invisible code points.
     fn contains_private_path(&self, value: &str) -> bool {
-        if self.project_paths.is_empty() {
+        if self.project_paths.is_empty() && !self.scrub_sensitive {
             return false;
         }
         let mut candidate = value.to_owned();
@@ -1678,7 +1687,7 @@ impl ProjectPathRedactor {
         if json_contains_private_project_path(value, self) {
             return true;
         }
-        if self.project_paths.is_empty() {
+        if self.project_paths.is_empty() && !self.scrub_sensitive {
             return false;
         }
         let mut strings = String::new();
@@ -1729,6 +1738,16 @@ fn redact_share_secrets(value: &str) -> String {
 
 fn has_share_secret(value: &str) -> bool {
     redact_share_secrets(value) != value
+}
+
+fn share_home_path_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(
+            r#"(?i)(?:/(?:Users|home)/[^/\s]+(?:/[^\s<>"']*)?|[A-Z]:\\Users\\[^\\\s]+(?:\\[^\s<>"']*)?)"#,
+        )
+        .expect("valid home-path redaction regex")
+    })
 }
 
 fn pem_secret_regex() -> &'static Regex {
@@ -2415,6 +2434,24 @@ mod tests {
         assert!(!redacted.contains(jwt));
         assert!(!redacted.contains("secret bytes"));
         assert!(redacted.matches("[redacted-secret]").count() >= 3);
+    }
+
+    #[test]
+    fn share_redaction_scrubs_home_paths_without_a_selected_project() {
+        let redactor = ProjectPathRedactor::for_share(None);
+        for value in [
+            "/Users/alice/.ssh/config",
+            "/home/alice/.config/relayer",
+            r"C:\Users\alice\AppData\Local\Relayer",
+            "%2FUsers%2Falice%2Fsecret.txt",
+        ] {
+            let redacted = redactor.text(value);
+            assert!(!redacted.contains("alice"), "{value} -> {redacted}");
+        }
+        assert!(redactor.contains_private_path_json(&serde_json::json!({
+            "a": "/Users/ali",
+            "b": "ce/.ssh/config"
+        })));
     }
 
     #[test]

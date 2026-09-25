@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Window } from "happy-dom";
 
 import { createPublicViewerAdapter } from "../desktop/renderer/src/public-share-viewer/adapter.js";
+import { bootPublicViewer } from "../desktop/renderer/src/public-share-viewer/main.js";
 import {
   parsePublicSnapshot,
   PublicSnapshotError,
@@ -179,21 +181,84 @@ describe("public share HTML boundary", () => {
     expect(html).toContain("\\u003c");
     expect(html).not.toContain("</script>\\\";");
     expect(html).toContain('name="robots" content="noindex,nofollow,noarchive"');
-    expect(html).toContain('property="og:image" content="./assets/relayer-share-og.svg"');
+    expect(html).toContain('property="og:image" content="/assets/relayer-share-og.svg"');
     expect(html).toContain("connect-src &#39;none&#39;");
-    expect(html).not.toContain("vendor/marked");
-    expect(html).not.toContain("vendor/lucide");
+    expect(html).toContain('src="/vendor/marked.umd.js"');
+    expect(html).toContain('src="/vendor/lucide.min.js"');
     expect(html).not.toContain("fetch(");
   });
 
   it("keeps the install destination fixed and rejects unsafe asset bases", () => {
     expect(() => renderPublicViewerTemplate({ snapshot: fixtureJsonl(), assetBase: "https://evil.example" })).toThrow();
     expect(() => renderPublicViewerTemplate({ snapshot: fixtureJsonl(), installUrl: "javascript:alert(1)" })).toThrow();
+    expect(renderPublicViewerTemplate({
+      snapshot: fixtureJsonl(),
+      installUrl: `/t/${"a".repeat(32)}/install`,
+    })).toContain(`/t/${"a".repeat(32)}/install`);
+  });
+
+  it("preserves the complete accepted Unicode title contract", () => {
+    const title = "🧭".repeat(120);
+    const html = renderPublicViewerTemplate({ snapshot: fixtureJsonl(), title });
+    expect(html).toContain(`<title>${title} · Relayer</title>`);
   });
 
   it("publishes the CSP contract as a small deterministic value", () => {
     expect(publicViewerCsp()).toContain("connect-src 'none'");
     expect(publicViewerCsp()).toContain("script-src 'self'");
     expect(publicViewerCsp()).toContain("frame-ancestors 'none'");
+  });
+
+  it("boots the real ProductWorkspace at the first turn without changing the page URL", async () => {
+    const windowRef = new Window({ url: `https://share.example.test/t/${"a".repeat(32)}` });
+    windowRef.document.write(renderPublicViewerTemplate({ snapshot: fixtureJsonl() }));
+    const previous = {
+      DOMParser: globalThis.DOMParser,
+      document: globalThis.document,
+      lucide: globalThis.lucide,
+      marked: globalThis.marked,
+      window: globalThis.window,
+    };
+    globalThis.window = windowRef;
+    globalThis.document = windowRef.document;
+    globalThis.DOMParser = windowRef.DOMParser;
+    globalThis.lucide = {
+      Circle: {},
+      createElement(_icon, attributes) {
+        const svg = windowRef.document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        for (const [name, value] of Object.entries(attributes)) svg.setAttribute(name, String(value));
+        return svg;
+      },
+    };
+    globalThis.marked = { parse: (value) => `<p><a href="https://example.test/docs">${value}</a></p>` };
+    try {
+      const originalUrl = windowRef.location.href;
+      const onRenderError = vi.fn();
+      const viewer = bootPublicViewer({ documentRef: windowRef.document, windowRef, onRenderError });
+      expect(onRenderError).not.toHaveBeenCalled();
+      expect(viewer).not.toBeNull();
+      expect(viewer.adapter.selection.currentInteractionId).toBe("turn:1");
+      expect(windowRef.document.querySelector("#publicViewerHost")?.classList.contains("hidden")).toBe(false);
+      expect(windowRef.document.body.textContent).toContain("Environment");
+      viewer.adapter.selection.selectedNodeId = viewer.adapter.state.nodes[0].id;
+      viewer.render();
+      expect(windowRef.document.querySelector('a[href="https://example.test/docs"]')).toMatchObject({
+        target: "_blank",
+      });
+      await viewer.adapter.navigateLayer("layer:nested", {
+        action: viewer.adapter.state.actions[0],
+        sourceNode: viewer.adapter.state.nodes[0],
+      });
+      viewer.render();
+      expect(windowRef.location.href).toBe(originalUrl);
+      viewer.dispose();
+    } finally {
+      globalThis.DOMParser = previous.DOMParser;
+      globalThis.document = previous.document;
+      globalThis.lucide = previous.lucide;
+      globalThis.marked = previous.marked;
+      globalThis.window = previous.window;
+      await windowRef.close();
+    }
   });
 });

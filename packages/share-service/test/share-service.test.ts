@@ -26,8 +26,13 @@ const INSTALL_URL = "https://app.relayerlabs.ai/desktop/login";
 const ASSET_MANIFEST = {
   version: 1 as const,
   assets: {
-    shellCss: "assets/commit-abc/viewer.css",
-    shellJs: "assets/commit-abc/viewer.js",
+    logo: "assets/commit-abc/relayer-logo.svg",
+    ogImage: "assets/commit-abc/relayer-share-og.svg",
+    viewerScript: "assets/commit-abc/viewer.js",
+    viewerStyles: "assets/commit-abc/viewer.css",
+    workspaceStyles: "assets/commit-abc/workspace.css",
+    lucideScript: "assets/commit-abc/lucide.min.js",
+    markedScript: "assets/commit-abc/marked.umd.js",
   },
 };
 const SNAPSHOT = new TextEncoder().encode(
@@ -197,13 +202,51 @@ describe("share-service reservation and publication", () => {
     });
   });
 
+  it("reconciles a committed publication whose repository response is lost", async () => {
+    const current = fixture();
+    const repository = new Proxy(current.repository, {
+      get(target, property, receiver) {
+        if (property === "publishIfEligible") {
+          return async (input: Parameters<typeof target.publishIfEligible>[0]) => {
+            await target.publishIfEligible(input);
+            throw new Error("lost DynamoDB response");
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const service = createShareService({
+      authenticator: current.authenticator,
+      repository,
+      objectStore: current.objectStore,
+      publicOrigin: "https://share.example.test",
+      installRedirectUrl: INSTALL_URL,
+      assetManifest: ASSET_MANIFEST,
+      now: () => NOW,
+      randomShareId: () => "a".repeat(32),
+    });
+    const identity = await identityFor(current.authenticator, "auth0|lost-database-response");
+    const reservation = await service.reserve(identity, snapshotInput("attempt-lost-database-response"));
+    await current.objectStore.putStaging(reservation.upload!.key, SNAPSHOT);
+
+    await expect(service.finalize(identity, reservation.shareId)).resolves.toMatchObject({
+      status: "already-created",
+      shareId: reservation.shareId,
+    });
+    await expect(service.publicPage(reservation.shareId)).resolves.toMatchObject({
+      shareId: reservation.shareId,
+      snapshotBytes: SNAPSHOT,
+    });
+  });
+
   it("does not charge quota for invalid JSON, mismatched bytes, or object-store failure", async () => {
     const current = fixture();
     const identity = await identityFor(current.authenticator, "auth0|alice");
-    const malformed = new TextEncoder().encode("not json\n");
+    const malformed = new TextEncoder().encode('{"recordType":"header","exportVersion":1}\nnot json\n');
     const malformedInput = snapshotInput("attempt-invalid", "Invalid", {
       byteLength: malformed.byteLength,
-      lineCount: 1,
+      lineCount: 2,
       snapshotSha256: createHash("sha256").update(malformed).digest("hex"),
     });
     const malformedReservation = await reserve(current, identity, malformedInput);
@@ -213,7 +256,10 @@ describe("share-service reservation and publication", () => {
 
     const mismatchInput = snapshotInput("attempt-mismatch");
     const mismatchReservation = await reserve(current, identity, mismatchInput);
-    await current.objectStore.putStaging(mismatchReservation.upload!.key, new TextEncoder().encode('{"other":true}\n'));
+    await current.objectStore.putStaging(
+      mismatchReservation.upload!.key,
+      new TextEncoder().encode('{"recordType":"header","exportVersion":1}\n{"recordType":"turn","id":"different"}\n'),
+    );
     await expect(current.service.finalize(identity, mismatchReservation.shareId))
       .rejects.toMatchObject({ status: 422, code: "snapshot_mismatch" });
 
@@ -313,10 +359,14 @@ describe("share-service owner and public read seams", () => {
 
 describe("JSONL validation seam", () => {
   it("checks UTF-8, whole-file size, line bounds, and syntax without graph interpretation", () => {
-    expect(validateSnapshotBytes(new TextEncoder().encode('{"recordType":"anything"}\nnull\n'))).toMatchObject({ lineCount: 2 });
+    expect(validateSnapshotBytes(SNAPSHOT)).toMatchObject({ lineCount: 2 });
     expect(() => validateSnapshotBytes(new TextEncoder().encode("\n"))).toThrowError(SnapshotValidationError);
     expect(() => validateSnapshotBytes(new Uint8Array([0xc3, 0x28]))).toThrowError(SnapshotValidationError);
     expect(() => validateSnapshotBytes(new TextEncoder().encode("not-json"))).toThrowError(SnapshotValidationError);
+    expect(() => validateSnapshotBytes(new TextEncoder().encode('{"recordType":"header","exportVersion":999}\n{"recordType":"turn"}\n')))
+      .toThrowError(/snapshot_unsupported_version/);
+    expect(() => validateSnapshotBytes(new TextEncoder().encode('{"recordType":"header","exportVersion":1}\nnull\n')))
+      .toThrowError(/snapshot_invalid_record/);
     expect(() => validateSnapshotBytes(new Uint8Array(MAX_SNAPSHOT_BYTES + 1))).toThrowError(/snapshot_too_large/);
   });
 });

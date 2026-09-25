@@ -6,6 +6,20 @@ const NON_REPORTED_CODES = new Set([
   "share_sign_in_required",
   "daily_quota_exhausted",
 ]);
+const CLOSED_FAILURE_CODES = new Set([
+  "share_cancelled",
+  "share_sign_in_required",
+  "share_imported_conversation",
+  "share_no_accepted_completion",
+  "share_title_required",
+  "share_title_too_long",
+  "share_snapshot_too_large",
+  "share_export_failed",
+  "share_upload_failed",
+  "share_service_failed",
+  "daily_quota_exhausted",
+  "share_attempt_unavailable",
+]);
 
 function attemptId() {
   return randomBytes(16).toString("hex");
@@ -43,7 +57,7 @@ function snapshotMetadata(bytes) {
 
 function failureCode(error) {
   if (error?.name === "AbortError") return "share_cancelled";
-  return typeof error?.code === "string" ? error.code : "share_service_failed";
+  return CLOSED_FAILURE_CODES.has(error?.code) ? error.code : "share_service_failed";
 }
 
 function closedFailure(error, reference) {
@@ -58,6 +72,7 @@ function closedFailure(error, reference) {
       "share_title_required",
       "share_title_too_long",
       "share_snapshot_too_large",
+      "share_export_failed",
       "daily_quota_exhausted",
       "share_sign_in_required",
     ].includes(code),
@@ -92,6 +107,7 @@ function telemetryRecord(error, reference) {
 export function createSharePublishCoordinator({
   exportSnapshot,
   accountSession,
+  sourceThreadIdentity,
   publish,
   reportHandledShareFailure = async () => {},
   createAttemptId = attemptId,
@@ -99,6 +115,7 @@ export function createSharePublishCoordinator({
 } = {}) {
   if (typeof exportSnapshot !== "function"
     || typeof accountSession !== "function"
+    || typeof sourceThreadIdentity !== "function"
     || typeof publish !== "function"
     || typeof reportHandledShareFailure !== "function") {
     throw new TypeError("Share publication coordinator dependencies are invalid.");
@@ -115,13 +132,24 @@ export function createSharePublishCoordinator({
     if (record) await reportHandledShareFailure(record).catch(() => undefined);
   }
 
-  async function run(record, account) {
+  async function run(record) {
     try {
+      const assertAuthority = async () => {
+        const current = exactAccount(await accountSession());
+        if (current.ownerKey !== record.ownerKey) {
+          const error = new Error("share_sign_in_required");
+          error.code = "share_sign_in_required";
+          throw error;
+        }
+        return current;
+      };
+      const currentAccount = await assertAuthority();
       const result = await publish({
-        authorization: account.authorization,
+        authorization: currentAccount.authorization,
+        assertAuthority,
         attempt: Object.freeze({
           attemptId: record.attemptId,
-          sourceThreadId: String(record.threadId),
+          sourceThreadId: record.sourceThreadId,
           title: record.title,
           ...(record.metadata.projectName === undefined ? {} : { projectName: record.metadata.projectName }),
           byteLength: record.metadata.byteLength,
@@ -131,6 +159,7 @@ export function createSharePublishCoordinator({
         snapshotBytes: new Uint8Array(record.snapshotBytes),
       });
       if (!result || typeof result.url !== "string" || !result.url) throw new Error("share_service_failed");
+      await assertAuthority();
       record.completed = true;
       return Object.freeze({ status: "created", attemptReferenceId: record.reference, url: result.url });
     } catch (error) {
@@ -147,20 +176,31 @@ export function createSharePublishCoordinator({
           throw new TypeError("Share creation input is invalid.");
         }
         const account = exactAccount(await accountSession());
+        const sourceThreadId = await sourceThreadIdentity(threadId);
+        if (typeof sourceThreadId !== "string" || !sourceThreadId.trim()) {
+          throw new TypeError("Share source-thread identity is invalid.");
+        }
         signal?.throwIfAborted();
         const snapshotBytes = new Uint8Array(await exportSnapshot(threadId, title, { signal }));
+        const currentAccount = exactAccount(await accountSession());
+        if (currentAccount.ownerKey !== account.ownerKey) {
+          const error = new Error("share_sign_in_required");
+          error.code = "share_sign_in_required";
+          throw error;
+        }
         const record = {
           reference,
           attemptId: createAttemptId(),
           ownerKey: account.ownerKey,
           threadId,
+          sourceThreadId,
           title,
           snapshotBytes,
           metadata: snapshotMetadata(snapshotBytes),
           completed: false,
         };
         remember(record);
-        return run(record, account);
+        return run(record);
       } catch (error) {
         await report(error, reference);
         return closedFailure(error, reference);
@@ -177,7 +217,7 @@ export function createSharePublishCoordinator({
         if (account.ownerKey !== record.ownerKey) {
           return Object.freeze({ status: "failed", attemptReferenceId: reference, code: "share_attempt_unavailable", retryable: false });
         }
-        return run(record, account);
+        return run(record);
       } catch (error) {
         await report(error, reference);
         return closedFailure(error, reference);

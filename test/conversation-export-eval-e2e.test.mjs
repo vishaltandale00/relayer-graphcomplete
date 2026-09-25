@@ -195,8 +195,24 @@ describe("conversation export to Eval end to end", () => {
       objectStore: shareObjectStore,
       publicOrigin: "https://share.example.test",
       installRedirectUrl: "https://app.relayerlabs.ai/desktop/login",
-      assetManifest: { version: 1, assets: { viewer: "assets/e2e/viewer.js" } },
-      renderPublicPage: (page) => renderPublicViewerTemplate({ snapshot: page.snapshotBytes, title: page.title }),
+      assetManifest: {
+        version: 1,
+        assets: {
+          logo: "assets/e2e/relayer-logo.svg",
+          ogImage: "assets/e2e/relayer-share-og.svg",
+          viewerScript: "assets/e2e/public-share-viewer.js",
+          viewerStyles: "assets/e2e/public-share-viewer.css",
+          workspaceStyles: "assets/e2e/workspace.css",
+          lucideScript: "assets/e2e/lucide.min.js",
+          markedScript: "assets/e2e/marked.umd.js",
+        },
+      },
+      renderPublicPage: (page) => renderPublicViewerTemplate({
+        snapshot: page.snapshotBytes,
+        title: page.title,
+        installUrl: `/t/${page.shareId}/install`,
+        assetManifest: page.assetManifest,
+      }),
       now: () => 1_900_000_000_000,
       randomShareId: () => "0123456789abcdef0123456789abcdef",
     });
@@ -205,13 +221,17 @@ describe("conversation export to Eval end to end", () => {
     const coordinator = createSharePublishCoordinator({
       exportSnapshot: (threadId, title, options) => product.exportShareSnapshot(threadId, title, options),
       accountSession: async () => ({ ownerKey: shareIdentity.ownerHash, authorization: "Bearer main-only" }),
+      sourceThreadIdentity: async (threadId) => `installation:e2e:thread:${threadId}`,
       createAttemptId: () => "11111111111111111111111111111111",
       createReferenceId: () => "SHR-E2E00001",
-      async publish({ authorization, attempt, snapshotBytes }) {
+      async publish({ authorization, assertAuthority, attempt, snapshotBytes }) {
         expect(authorization).toBe("Bearer main-only");
         publicationCalls.push({ attempt, snapshotBytes: new Uint8Array(snapshotBytes) });
+        await assertAuthority();
         const reservation = await shareService.reserve(shareIdentity, attempt);
+        await assertAuthority();
         if (reservation.upload) await shareObjectStore.putStaging(reservation.upload.key, snapshotBytes);
+        await assertAuthority();
         const finalized = await shareService.finalize(shareIdentity, reservation.shareId);
         if (loseFirstFinalizeResponse) {
           loseFirstFinalizeResponse = false;
@@ -261,6 +281,9 @@ describe("conversation export to Eval end to end", () => {
     const publicHtml = publicResponse.body;
     expect(publicHtml).toContain("connect-src &#39;none&#39;");
     expect(publicHtml).toContain("id=\"relayerPublicSnapshot\"");
+    expect(publicHtml).toContain(`/t/${publicPage.shareId}/install`);
+    expect(publicHtml).toContain('/assets/e2e/public-share-viewer.js');
+    expect(publicResponse.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
     expect(publicHtml).not.toContain("Bearer main-only");
 
     const judgeCalls = [];

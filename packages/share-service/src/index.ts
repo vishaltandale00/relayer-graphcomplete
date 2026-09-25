@@ -12,6 +12,10 @@ export const MAX_JSONL_LINE_BYTES = 16 * 1024 * 1024;
 export const MAX_JSONL_LINES = 10_001;
 export const MAX_SHARES_PER_UTC_DAY = 20;
 export const DEFAULT_STAGING_TTL_MS = 24 * 60 * 60 * 1_000;
+const PUBLIC_VIEWER_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; form-action 'none'";
+const REQUIRED_VIEWER_ASSETS = Object.freeze([
+  "logo", "ogImage", "viewerScript", "viewerStyles", "workspaceStyles", "lucideScript", "markedScript",
+]);
 
 type JsonObject = Record<string, unknown>;
 export type JwksKey = Readonly<Record<string, unknown>>;
@@ -501,7 +505,9 @@ function validateManifest(manifest: PinnedAssetManifest): PinnedAssetManifest {
     }
     assets[name] = path;
   }
-  if (Object.keys(assets).length === 0) throw new TypeError("Viewer asset manifest cannot be empty.");
+  if (REQUIRED_VIEWER_ASSETS.some((name) => typeof assets[name] !== "string")) {
+    throw new TypeError("Viewer asset manifest is incomplete.");
+  }
   return Object.freeze({ version: 1, assets: Object.freeze(assets) });
 }
 
@@ -812,15 +818,24 @@ export function validateSnapshotBytes(bytes: Uint8Array, limits: {
   }
   const lines = text.split("\n");
   if (lines.at(-1) === "") lines.pop();
-  if (lines.length === 0 || lines.length > maxLines) throw new SnapshotValidationError("snapshot_line_count");
+  if (lines.length < 2 || lines.length > maxLines) throw new SnapshotValidationError("snapshot_line_count");
   const encoder = new TextEncoder();
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     if (line.length === 0) throw new SnapshotValidationError("snapshot_empty_line");
     if (encoder.encode(line).byteLength > maxLineBytes) throw new SnapshotValidationError("snapshot_line_too_large");
+    let record: unknown;
     try {
-      JSON.parse(line);
+      record = JSON.parse(line);
     } catch {
       throw new SnapshotValidationError("snapshot_invalid_json");
+    }
+    if (!isRecord(record)) throw new SnapshotValidationError("snapshot_invalid_record");
+    if (index === 0) {
+      if (record.recordType !== "header" || record.exportVersion !== 1) {
+        throw new SnapshotValidationError("snapshot_unsupported_version");
+      }
+    } else if (record.recordType !== "turn") {
+      throw new SnapshotValidationError("snapshot_invalid_record");
     }
   }
   return Object.freeze({
@@ -1017,21 +1032,35 @@ export function createShareService(options: ShareServiceOptions): ShareService {
         throw new ShareServiceError(503, "storage_unavailable");
       }
       const publishedAtMs = now();
-      const decision = await options.repository.publishIfEligible({
-        ownerHash: identity.ownerHash,
-        shareId,
-        fingerprint: current.fingerprint,
-        snapshotEtag: copied.etag,
-        snapshotVersionId: copied.versionId,
-        byteLength: validated.byteLength,
-        lineCount: validated.lineCount,
-        publishedAt: new Date(publishedAtMs).toISOString(),
-        publishedDay: utcDay(publishedAtMs),
-        quotaResetAt: nextUtcMidnight(publishedAtMs),
-      }).catch(async () => {
-        await options.objectStore.delete(current.finalKey).catch(() => undefined);
+      let decision: PublishDecision;
+      try {
+        decision = await options.repository.publishIfEligible({
+          ownerHash: identity.ownerHash,
+          shareId,
+          fingerprint: current.fingerprint,
+          snapshotEtag: copied.etag,
+          snapshotVersionId: copied.versionId,
+          byteLength: validated.byteLength,
+          lineCount: validated.lineCount,
+          publishedAt: new Date(publishedAtMs).toISOString(),
+          publishedDay: utcDay(publishedAtMs),
+          quotaResetAt: nextUtcMidnight(publishedAtMs),
+        });
+      } catch {
+        // The repository operation may have committed before its response was
+        // lost. Never delete the immutable final object while that outcome is
+        // ambiguous; a later exact retry reconciles the published row.
+        const reconciled = await options.repository.findShare(shareId).catch(() => null);
+        if (reconciled?.ownerHash === identity.ownerHash
+          && reconciled.fingerprint === current.fingerprint
+          && reconciled.status === "published"
+          && reconciled.snapshotEtag === copied.etag
+          && reconciled.snapshotVersionId === copied.versionId) {
+          await options.objectStore.delete(current.stagingKey).catch(() => undefined);
+          return toFinalizeResult(reconciled, origin, "already-created");
+        }
         throw new ShareServiceError(503, "storage_unavailable");
-      });
+      }
       if (decision.kind === "not-found") {
         await options.objectStore.delete(current.finalKey).catch(() => undefined);
         return notFound();
@@ -1135,6 +1164,7 @@ export function createShareService(options: ShareServiceOptions): ShareService {
               "cache-control": "no-store",
               "x-content-type-options": "nosniff",
               "referrer-policy": "no-referrer",
+              "content-security-policy": PUBLIC_VIEWER_CSP,
             }),
             body: options.renderPublicPage(page),
           });

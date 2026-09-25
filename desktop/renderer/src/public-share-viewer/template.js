@@ -1,4 +1,4 @@
-const DEFAULT_ASSET_BASE = ".";
+const DEFAULT_ASSET_BASE = "/";
 const DEFAULT_INSTALL_URL = "https://app.relayerlabs.ai/desktop/login";
 const DEFAULT_DESCRIPTION = "A read-only Relayer conversation snapshot.";
 
@@ -23,9 +23,18 @@ function assetUrl(base, file) {
   return `${base}/${file}`;
 }
 
+function viewerAsset(manifest, key, fallback, base) {
+  if (manifest == null) return assetUrl(base, fallback);
+  const value = manifest?.version === 1 ? manifest.assets?.[key] : null;
+  if (typeof value !== "string" || !/^assets\/[A-Za-z0-9._/-]+$/u.test(value) || value.includes("..")) {
+    throw new TypeError(`Public viewer asset manifest is missing ${key}.`);
+  }
+  return `/${value}`;
+}
+
 function safeInstallUrl(value) {
   const url = value == null ? DEFAULT_INSTALL_URL : String(value);
-  if (url !== DEFAULT_INSTALL_URL) {
+  if (url !== DEFAULT_INSTALL_URL && !/^\/t\/[a-f0-9]{32}\/install$/u.test(url)) {
     throw new TypeError("Public viewer installUrl is fixed to the product install destination.");
   }
   return url;
@@ -72,19 +81,22 @@ export function renderPublicViewerTemplate({
   title = "Shared conversation",
   description = DEFAULT_DESCRIPTION,
   assetBase = DEFAULT_ASSET_BASE,
+  assetManifest = null,
   installUrl = DEFAULT_INSTALL_URL,
 } = {}) {
   const base = safeAssetBase(assetBase);
   const install = safeInstallUrl(installUrl);
-  const safeTitle = String(title || "Shared conversation").slice(0, 120);
-  const safeDescription = String(description || DEFAULT_DESCRIPTION).slice(0, 240);
+  const safeTitle = Array.from(String(title || "Shared conversation")).slice(0, 120).join("");
+  const safeDescription = Array.from(String(description || DEFAULT_DESCRIPTION)).slice(0, 240).join("");
   const snapshotLiteral = safeJsonScriptText(snapshot);
   const csp = escapeHtml(publicViewerCsp());
-  const logo = escapeHtml(assetUrl(base, "assets/relayer-logo.svg"));
-  const ogImage = escapeHtml(assetUrl(base, "assets/relayer-share-og.svg"));
-  const viewerScript = escapeHtml(assetUrl(base, "src/public-share-viewer/main.js"));
-  const viewerStyles = escapeHtml(assetUrl(base, "src/public-share-viewer/viewer.css"));
-  const workspaceStyles = escapeHtml(assetUrl(base, "styles.css"));
+  const logo = escapeHtml(viewerAsset(assetManifest, "logo", "assets/relayer-logo.svg", base));
+  const ogImage = escapeHtml(viewerAsset(assetManifest, "ogImage", "assets/relayer-share-og.svg", base));
+  const viewerScript = escapeHtml(viewerAsset(assetManifest, "viewerScript", "src/public-share-viewer/main.js", base));
+  const viewerStyles = escapeHtml(viewerAsset(assetManifest, "viewerStyles", "src/public-share-viewer/viewer.css", base));
+  const workspaceStyles = escapeHtml(viewerAsset(assetManifest, "workspaceStyles", "styles.css", base));
+  const lucideScript = escapeHtml(viewerAsset(assetManifest, "lucideScript", "vendor/lucide.min.js", base));
+  const markedScript = escapeHtml(viewerAsset(assetManifest, "markedScript", "vendor/marked.umd.js", base));
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -136,6 +148,8 @@ export function renderPublicViewerTemplate({
   </main>
   <footer class="public-share-footer"><span>Shared from Relayer</span><span>Read-only · No account required</span></footer>
   <script type="application/json" id="relayerPublicSnapshot">${snapshotLiteral}</script>
+  <script src="${lucideScript}"></script>
+  <script src="${markedScript}"></script>
   <script type="module" src="${viewerScript}"></script>
 </body>
 </html>`;

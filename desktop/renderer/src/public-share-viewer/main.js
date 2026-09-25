@@ -39,6 +39,13 @@ function showRenderFailure(documentRef, reload) {
   if (button) button.onclick = () => reload?.();
 }
 
+function securePublicLinks(host) {
+  for (const link of host.querySelectorAll('a[href^="https://"], a[href^="http://"]')) {
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noreferrer noopener");
+  }
+}
+
 /**
  * Mount the production public viewer into the server-rendered shell. This is
  * exported for the deterministic fixture harness; the browser entry point
@@ -48,6 +55,7 @@ export function bootPublicViewer({
   documentRef = globalThis.document,
   windowRef = globalThis.window,
   reload = () => windowRef?.location?.reload?.(),
+  onRenderError = () => {},
 } = {}) {
   const stopTheme = setTheme(documentRef, windowRef);
   try {
@@ -55,7 +63,12 @@ export function bootPublicViewer({
     const adapter = createPublicViewerAdapter(snapshot);
     const host = documentRef.querySelector("#publicViewerHost");
     if (!host) throw new Error("Public viewer host is missing.");
-    const workspace = createProductWorkspace({
+    let workspace;
+    const render = () => {
+      workspace.render();
+      securePublicLinks(host);
+    };
+    workspace = createProductWorkspace({
       root: host,
       mode: "review",
       getState: () => adapter.state,
@@ -66,10 +79,10 @@ export function bootPublicViewer({
       getNavigationHistory: () => ({ canGoBack: false, canGoForward: false }),
       onNavigateHistory: async () => false,
       onSelectTurn: (delta) => {
-        if (adapter.selectTurn(delta)) workspace.render();
+        if (adapter.selectTurn(delta)) render();
       },
       onSelectTurnById: (turnId) => {
-        if (adapter.selectTurnById(turnId)) workspace.render();
+        if (adapter.selectTurnById(turnId)) render();
       },
       onSelectionChange: (nodeId) => {
         adapter.selection.selectedNodeId = nodeId;
@@ -79,12 +92,12 @@ export function bootPublicViewer({
       onOpenSettings: () => {},
       onNavigateLayer: async (layerId, navigation) => {
         const changed = await adapter.navigateLayer(layerId, navigation);
-        if (changed) workspace.render();
+        if (changed) render();
         return changed;
       },
       onNavigateResolvedInvoke: async (action, navigation) => {
         const changed = await adapter.navigateResolvedInvoke(action, navigation);
-        if (changed) workspace.render();
+        if (changed) render();
         return changed;
       },
       onInvokeAction: adapter.onInvokeAction,
@@ -95,17 +108,19 @@ export function bootPublicViewer({
       inputDraftApi: null,
       inputOperatorAvailable: false,
     });
-    workspace.render();
+    render();
     return Object.freeze({
       adapter,
       workspace,
+      render,
       dispose() {
         workspace.dispose();
         stopTheme();
       },
     });
-  } catch (_error) {
+  } catch (error) {
     stopTheme();
+    onRenderError(error);
     showRenderFailure(documentRef, reload);
     return null;
   }
