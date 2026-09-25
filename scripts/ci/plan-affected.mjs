@@ -20,7 +20,7 @@ function isAbsentOrDirectory(path) {
   try {
     return statSync(path).isDirectory();
   } catch (error) {
-    if (error.code === "ENOENT") return true;
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return true;
     throw error;
   }
 }

@@ -404,6 +404,27 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
     });
   });
 
+  test("fails open when a deleted exempted file has a parent replaced by a file", () => {
+    withPlannerFixture((repository) => {
+      const deletedPath = "docs/postmortems/entry.md";
+      const originalFile = join(repository, deletedPath);
+      const parent = dirname(originalFile);
+      mkdirSync(parent, { recursive: true });
+      writeFileSync(originalFile, "fixture\n");
+      rmSync(originalFile);
+      rmSync(parent, { recursive: true });
+      writeFileSync(parent, "replacement file\n");
+
+      const result = planIn(repository, deletedPath);
+
+      expect(result.mode).toBe("full");
+      expect(result.reasons).toContain(
+        `${deletedPath}: deleted exempted path`,
+      );
+      expect(Object.values(result.chapters).every(Boolean)).toBe(true);
+    });
+  });
+
   test("maps CI-tested scripts to their owning Vitest checkpoints", () => {
     const result = plan("scripts/recursive-live-run-model.mjs");
 

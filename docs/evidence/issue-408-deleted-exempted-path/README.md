@@ -119,3 +119,42 @@ runtime binaries; Cargo validated and reused compatible build products, so no
 cold native build or separate artifact restoration was needed. The test and
 build commands did not touch Electron. Fresh independent review and hosted PR
 CI remain outstanding; this handoff is non-certifying until those complete.
+
+## ENOTDIR parent-replacement follow-up
+
+The first follow-up above covered a deleted file replaced by a directory, but
+not a deleted file whose parent directory was itself replaced by a regular
+file. In that case `statSync` raises `ENOTDIR`. The earlier `ENOENT`-only
+handler let that exception abort the production planner before it could emit a
+full plan. The bounded repair treats `ENOTDIR` as another missing-path result;
+all other stat errors still propagate, and `statSync` still follows symlinks.
+
+The previous evidence text overstated the focused suite as 55 tests and the
+full check as 2,272 tests. The recoverable archive at
+`/Users/vishal/.codex/worker-pilot/evidence/factory-408/` contains a 54-test
+focused log (`focused-vitest-review-repair.log`) and a historical passing check
+log with 2,271 tests (`review-round1-npm-check-retry.log`). It has no separate
+55-test log. Its saved passing check and build receipts bind historical source
+digest `1678fcaf91d5c91596d4b37fc11d509b30475c58fd6911d7ea9bd16be11a1bd4`,
+not the ENOTDIR repair. Those prior claims are superseded below.
+
+### Fresh ENOTDIR repair proof
+
+The production-CLI regression first failed on the unmodified helper with an
+actual `ENOTDIR` exception from `statSync`. After adding `ENOTDIR` handling,
+`npx vitest run test/ci-affected-plan.test.mjs` passed all 56 tests. The
+planner/test executable diff against base
+`55287631dd090a59f1e9fea19a2fe3e5c3634fb0` has SHA-256
+`65b2f90d469ba5ab9ed19e439410ab44e7045143c38e6d0f8a6f080dffdb3a37`.
+
+On Node `v22.23.2`, npm `11.12.1`, and rustc `1.98.0`, `npm run check` passed
+with 172 Vitest files passed and one skipped, 2,273 tests passed and three
+skipped, plus successful Rust, Python (29 tests), secret-boundary (2 tests),
+receipt, and PRD checks. `npm run build` passed, including both Rust binaries
+and all four workspace package builds. `git diff --check` passed. The exact
+command outputs and exit files are in the same host archive as
+`enotdir-npm-check.log` / `enotdir-npm-check.exit` and
+`enotdir-npm-build.log` / `enotdir-npm-build.exit`; both exit files contain
+`0`. These gates ran on the source diff digest recorded above. No Electron UI
+or paid-inference proof ran. Hosted PR CI and fresh independent review remain
+outstanding, so this evidence is non-certifying.
