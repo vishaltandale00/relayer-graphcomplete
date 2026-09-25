@@ -655,7 +655,7 @@ export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = f
   const personalPresentationVersion = execution.harnessConfiguration?.settings?.personalPresentationVersion;
   if ((personalPresentationVersion === "personal-presentation-v2"
     || personalPresentationVersion === "personal-presentation-v3") && children.length > 0) {
-    for (const child of children) {
+    for (const child of children.filter((candidate) => candidate.status === "accepted")) {
       checks.push({
         ...visualNodeDetailCheck(
           { rootLayer: { nodes: child.acceptedNodes || [] } },
