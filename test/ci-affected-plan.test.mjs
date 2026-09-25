@@ -383,6 +383,27 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
     });
   });
 
+  test("fails open when a deleted exempted file is replaced by a directory", () => {
+    withPlannerFixture((repository) => {
+      const deletedPath = "docs/postmortems/entry.md";
+      const childPath = `${deletedPath}/child.md`;
+      const originalFile = join(repository, deletedPath);
+      mkdirSync(dirname(originalFile), { recursive: true });
+      writeFileSync(originalFile, "fixture\n");
+      rmSync(originalFile);
+      mkdirSync(originalFile);
+      writeFileSync(join(originalFile, "child.md"), "fixture\n");
+
+      const result = planIn(repository, deletedPath, childPath);
+
+      expect(result.mode).toBe("full");
+      expect(result.reasons).toContain(
+        `${deletedPath}: deleted exempted path`,
+      );
+      expect(Object.values(result.chapters).every(Boolean)).toBe(true);
+    });
+  });
+
   test("maps CI-tested scripts to their owning Vitest checkpoints", () => {
     const result = plan("scripts/recursive-live-run-model.mjs");
 

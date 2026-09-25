@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +15,15 @@ const allChapterNames = [
   "prd",
   "packaging",
 ];
+
+function isAbsentOrDirectory(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch (error) {
+    if (error.code === "ENOENT") return true;
+    throw error;
+  }
+}
 
 function parseArguments(argv) {
   const options = { changedFiles: [], mode: "affected" };
@@ -291,7 +300,7 @@ function buildPlan(repository, config, changedFiles, forcedMode) {
       if (matches(path, owner)) {
         if (
           (owner.chapters ?? []).length === 0 &&
-          !existsSync(join(repository, path))
+          isAbsentOrDirectory(join(repository, path))
         ) {
           reasons.push(`${path}: deleted exempted path`);
           mapped = true;

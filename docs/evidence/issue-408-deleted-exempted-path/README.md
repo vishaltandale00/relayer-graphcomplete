@@ -19,8 +19,10 @@ gates passed against executable diff digest
 an additional test for deleting the empty exempted prefix directory. The
 current working source diff against the same base is
 `1678fcaf91d5c91596d4b37fc11d509b30475c58fd6911d7ea9bd16be11a1bd4`; it adds
-the review-required test case and leaves production code unchanged. The heavy
-gates have not yet been rerun against this follow-up snapshot.
+the review-required test case and leaves production code unchanged. At the time
+this paragraph was first written, the heavy gates had not yet been rerun against
+that follow-up snapshot. The later execution record below supersedes that
+pending statement and records the actual retry and its outcomes.
 
 ## Required verification plan
 
@@ -61,8 +63,11 @@ gates have not yet been rerun against this follow-up snapshot.
   failed-first and passing-retry logs are preserved on the implementation host.
 - Review-snapshot `npm run build`: **passed**, exit 0; root Rust/TypeScript and
   all four package builds completed.
-- Hosted PR CI passed for the initial commit but does not cover the review
-  follow-up. Updated hosted PR CI and a fresh adversarial review are **pending**.
+- Hosted PR CI passed for the initial commit but did not cover the review
+  follow-up at the time this paragraph was first written. A durable PR receipt
+  later corrected that status and records the exact head, digest, CI run, and
+  timeout/retry history:
+  https://github.com/vishaltandale00/relayer-graphcomplete/pull/482#issuecomment-5830372918.
   No Electron UI or paid-inference proof was run.
 
 Detailed logs, including the old-planner failures, the focused green suite,
@@ -70,3 +75,47 @@ the initial gate results, the review-snapshot timeout and unchanged retry, and
 the final build, are in the host evidence directory above. The review-snapshot
 gates cover source digest
 `1678fcaf91d5c91596d4b37fc11d509b30475c58fd6911d7ea9bd16be11a1bd4`.
+
+## Directory-replacement follow-up
+
+The reviewed selection gap is that `docs/postmortems/entry.md` can be deleted
+and replaced by a directory containing `child.md`; the old path still exists,
+so the path-only deleted-exemption check kept the plan affected. The bounded fix
+checks whether the path is absent or resolves to a directory. `statSync` follows
+symlinks like the previous `existsSync` check; other existing file types retain
+the current exemption behavior.
+
+### Verification plan
+
+- Reproduce the replacement-directory failure through the production CLI.
+- Run the complete affected-planner suite to cover the replacement case and
+  existing deletion, sibling, script-owner, and prefix-directory boundaries.
+- Run `npm run check` and `npm run build` on the exact source snapshot, using
+  Node 22 and the repository's compatible local Rust target artifacts.
+- Obtain fresh independent standards/spec review and hosted PR CI before
+  treating this draft as ready for merge.
+
+### Executed and outcomes
+
+Source base: `55287631dd090a59f1e9fea19a2fe3e5c3634fb0`. Runtime: Node
+`v22.23.2`, npm `11.12.1`, rustc `1.98.0 (88d9e12ae 2026-08-18)`. The
+planner/test executable diff digest is
+`fef7078b4eb28f5ae6886ed9fc7e1bbe80532a830039fb8cb547b48dd1f351f2`; the full
+working diff including this evidence update is
+`351390329a2dc7aef4514d7c5bb7c4a5e6ad0e802920ab3491d28272a1d49454`.
+
+- Red CLI regression: **failed as expected** before the production edit;
+  planner returned `affected`, expected `full`.
+- `vitest run test/ci-affected-plan.test.mjs`: **passed**, 55 tests.
+- `npm run check`: **passed**; 172 Vitest files passed and 1 skipped, 2,272
+  tests passed and 3 skipped, the secret-boundary suite passed (2 tests),
+  Python passed (29 tests), and receipt/PRD checks passed.
+- `npm run build`: **passed**, including Rust binaries and all four workspace
+  package builds.
+- `git diff --check`: **passed**.
+
+The shared target directory already held the repository's Rust artifacts and
+runtime binaries; Cargo validated and reused compatible build products, so no
+cold native build or separate artifact restoration was needed. The test and
+build commands did not touch Electron. Fresh independent review and hosted PR
+CI remain outstanding; this handoff is non-certifying until those complete.
