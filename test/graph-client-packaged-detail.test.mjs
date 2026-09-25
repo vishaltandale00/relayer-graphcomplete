@@ -608,7 +608,10 @@ describe("packaged graph-client authored detail boundary", () => {
     const pending = client.submitNode(owner);
     await started;
     expect(() => owner.detailAuthoring.setComponent("late", html`<p>Late mutation</p>`))
-      .toThrow("finalized");
+      .toThrowError(expect.objectContaining({
+        code: "detail_finalization_in_progress",
+        message: "Node Detail authoring finalization is in progress; retry after it settles",
+      }));
     action.clientKey = "substituted-action";
     action.label = "Substituted action";
     sourceLayer.clientKey = "substituted-layer";
