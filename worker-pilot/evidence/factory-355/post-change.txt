@@ -18,3 +18,34 @@ diff_stat:
  2 files changed, 82 insertions(+)
 
 diff_check:
+
+receipt_correction_inventory_at=2026-09-25T14:29:35Z
+receipt_correction_scope=read-only SHA-256 inventory of the committed source, test, and evidence README; historical capture above is preserved
+source_sha256_current=c4be6fe01edb6f9bbaa0b202878c0d8a64fd5914f312d5aa58d9ee1972f69007  packages/harness-host/src/implementations/prime-agent.ts
+test_sha256_current=62c2fa02c1a48882fc7bc64933f2113d8a9babfa94739a1ad66eb9a4b0dcd714  packages/harness-host/test/prime-agent.test.ts
+evidence_sha256_current=e1010776a646e6f5f347a50086be2d14d93f8ca86417fbba97451dcb94980c96  docs/evidence/issue-355-prime-search-guidance/README.md
+
+The original 2026-09-25T06:22:40Z capture recorded the source and test hashes above, but its README hash (45243b30bf59f10b57f753680cb965cc40c77ea0f3dde2245030ba17d2891220) does not match the committed README. The current inventory binds all three hashes to the checked-in snapshot; it does not claim the README's final prose was present during the original capture or that its content was re-executed at correction time.
+
+proof_scope: deterministic emitted-Python extraction/envelope proof and inference-free graph-memory fixture proof are the evidence described in the README and retained run records; they do not establish live Prime provider/model execution. Live Prime/provider/model proof: UNRUN. The hash-inventory correction itself was read-only and performed no tests, build, installation, or inference.
+
+required_gate_verification_at=2026-09-25T16:23:57Z
+verification_head=0c5cbfabbde5e7439ee45c51d031f28d286c4e8e
+verification_source_scope=receipt text only changed from verification_head; source/test/README hashes above were unchanged
+node=v22.23.2
+npm=10.9.8
+TMPDIR=/Volumes/2T-SSD/tmp
+npm_config_cache=/Volumes/2T-SSD/npm-cache
+CARGO_TARGET_DIR=/Volumes/2T-SSD/cargo/relayer-graphcomplete
+CARGO_BUILD_JOBS=2
+RUST_TEST_THREADS=2
+electron_install=node node_modules/electron/install.js; exit 0 (workspace-local Electron v43.0.0 already installed)
+npm_run_check_exit=0
+npm_run_check_summary=172 test files passed, 1 skipped; 2267 tests passed, 3 skipped; Codex secret-boundary 2/2; Python unittest 29/29
+npm_run_check_log=/Volumes/2T-SSD/tmp/factory-355-receipt-correction-npm-run-check.log
+npm_run_check_log_sha256=713850852d4e978996d6e47e865da3c4fe197d67bfb78f33bf5526303f7f36cd
+npm_run_build_exit=0
+npm_run_build_summary=Rust app/graph servers and all four TypeScript packages built; Rust emitted three dead-code warnings
+npm_run_build_log=/Volumes/2T-SSD/tmp/factory-355-receipt-correction-npm-run-build.log
+npm_run_build_log_sha256=2424b73a52ca21d586c913d1ad9b23a4e7a27a027125f7492fb9458fdfe41e6a
+verification_limits=deterministic gates only; no paid inference or live Prime/provider/model proof
