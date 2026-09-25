@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <meta property="og:title" content="Shared thread · Relayer" />
+  <meta property="og:description" content="A frozen, read-only Relayer thread." />
+  <!-- PROTOTYPE (throwaway): #471 Gate A title -> publish -> public viewer journey.
+       Real conversation-export v1 data and ProductWorkspace; local fake backend/auth/reporting. -->
+  <title>Share slice 1 · Relayer prototype</title>
+  <link rel="icon" href="./assets/relayer-logo.svg" />
+  <script src="./theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./prototype/share/prototype.css" />
+</head>
+<body class="share-prototype" data-mode="desktop">
+  <aside class="prototype-banner" aria-label="Prototype controls">
+    <div class="prototype-banner-copy">
+      <strong>Gate A prototype</strong>
+      <span>Real: export v1 + ProductWorkspace</span>
+      <span>Simulated: Auth0, service/storage, metrics, Sentry</span>
+    </div>
+    <label>Scenario
+      <select id="prototypeScenario">
+        <option value="success">Happy path</option>
+        <option value="active-response">Response still active</option>
+        <option value="no-accepted">No accepted turns</option>
+        <option value="publish-failure">Publish fails once</option>
+        <option value="lost-response">Response lost after success</option>
+        <option value="account-change">Account changes mid-publish</option>
+        <option value="quota">Daily quota reached</option>
+        <option value="oversize">Snapshot too large</option>
+      </select>
+    </label>
+    <label class="prototype-check"><input id="prototypeSignedIn" type="checkbox" /> Signed in</label>
+    <label>Theme
+      <select id="prototypeTheme"><option value="dark">Dark</option><option value="light">Light</option></select>
+    </label>
+    <button id="prototypeReset" type="button">Reset</button>
+    <details class="prototype-state">
+      <summary>State</summary>
+      <dl id="prototypeState"></dl>
+    </details>
+  </aside>
+
+  <header class="share-topbar" id="shareTopbar">
+    <a class="share-brand" href="#" aria-label="Relayer"><span class="logo" role="img" aria-hidden="true"></span><span>Relayer</span></a>
+    <div class="share-topbar-title" id="shareTopbarTitle"></div>
+    <span class="share-badge">Shared snapshot · read-only</span>
+    <a class="share-install" id="shareInstall" href="#" rel="noopener">Install Relayer</a>
+  </header>
+
+  <main class="share-body">
+    <aside class="desktop-sidebar" aria-label="Relayer sidebar preview">
+      <div class="desktop-sidebar-topbar">
+        <button class="titlebar-toggle" type="button" aria-label="Collapse sidebar" tabindex="-1">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="3"></rect><path d="M7.5 3v14"></path></svg>
+        </button>
+        <nav class="history-navigation" id="prototypeHistorySlot" aria-label="Workspace history">
+          <button id="prototypeHistoryBack" type="button" aria-label="Back">←</button>
+          <button id="prototypeHistoryForward" type="button" aria-label="Forward">→</button>
+        </nav>
+      </div>
+      <div class="sidebar-title" inert><div class="logo" role="img" aria-label="Relayer"></div><strong>Relayer</strong></div>
+      <div class="sidebar-content" inert>
+        <button class="new-thread-button" type="button" tabindex="-1"><span>＋</span> New thread <kbd>⌘N</kbd></button>
+        <div class="side-section">
+          <div class="section-label">Chats</div>
+          <div class="entry-list">
+            <button class="entry active" type="button" tabindex="-1"><span class="entry-icon" aria-hidden="true">›_</span><span id="prototypeSidebarCurrent">Current thread</span></button>
+            <button class="entry" type="button" tabindex="-1"><span class="entry-icon" aria-hidden="true">›_</span><span>Shared thread delivery</span></button>
+            <button class="entry" type="button" tabindex="-1"><span class="entry-icon" aria-hidden="true">›_</span><span>Recursive agent boundaries</span></button>
+          </div>
+        </div>
+        <div class="side-section">
+          <div class="section-label">Projects</div>
+          <div class="project-list">
+            <div class="project-row"><button class="project-button" type="button" tabindex="-1"><i></i><span>relayer-graphcomplete</span></button></div>
+          </div>
+        </div>
+      </div>
+      <div class="sidebar-footer" inert><button class="footer-button" type="button" tabindex="-1"><span aria-hidden="true">⚙</span><span>Settings</span></button></div>
+    </aside>
+    <div class="share-workspace-host" id="shareWorkspaceHost">
+      <section class="thread-view" id="threadView"></section>
+    </div>
+    <section class="prototype-load-state" id="prototypeLoadState" aria-live="polite">Loading local export…</section>
+  </main>
+
+  <footer class="share-footer" id="shareFooter">
+    <span>This is a frozen, read-only snapshot of one Relayer thread.</span>
+  </footer>
+
+  <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+  <div class="sharer-dialog-backdrop hidden" id="sharerDialog"></div>
+
+  <script src="./vendor/lucide.min.js"></script>
+  <script src="./vendor/marked.umd.js"></script>
+  <script type="module" src="./prototype/share/main.js"></script>
+</body>
+</html>
