@@ -730,6 +730,11 @@ export class ProviderDefinitionService {
       ));
       await this.definitionStore.save(next);
       this.definitions = next;
+      // removal_pending blocks new attempts through this provider at once, so
+      // a pending reconnect can no longer complete. Only its entry goes: its
+      // runtime is the one in this.runtimes, which admitted turns may still
+      // lease, and it closes with the rest of the teardown.
+      this.pendingConnections.delete(id);
       const pending = next.find((item) => item.id === id);
       if (!this.activeExecutions.has(id)) await this.#finalizeRemoval(definition);
       return publicDefinition(this.definitions.find((item) => item.id === id) ?? pending);
