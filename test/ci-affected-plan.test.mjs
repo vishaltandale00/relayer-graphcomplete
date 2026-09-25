@@ -355,6 +355,11 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
       "docs/postmortems/entry.md",
       true,
     ],
+    [
+      "prefix member deletion after directory removal",
+      "docs/postmortems/entry.md",
+      false,
+    ],
   ])("fails open for %s", (_label, changedPath, keepSibling) => {
     withPlannerFixture((repository) => {
       const changedFile = join(repository, changedPath);
