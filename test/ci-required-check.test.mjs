@@ -249,6 +249,15 @@ describe("CI workflow contract", () => {
     expect(workflow.jobs.full).toBeUndefined();
   });
 
+  test("cancels the Rust aggregate and Vitest while preserving their gates", () => {
+    expect(workflow.jobs.rust.if).toBe(
+      "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}",
+    );
+    expect(workflow.jobs.vitest.if).toBe(
+      "${{ !cancelled() && needs.plan.outputs.vitest == 'true' && (needs.plan.outputs.rust_runtime != 'true' || needs.plan.outputs.runtime_cache_hit == 'true' || needs['rust-runtime'].result == 'success') }}",
+    );
+  });
+
   test("stops gating the parallel chapters on quick while check still requires it", () => {
     // Policy: a formatting failure still fails the required check through
     // quick, but it no longer short-circuits the Rust and chapter spend.
@@ -909,10 +918,10 @@ describe("CI workflow contract", () => {
       // the Rust spend; the check aggregator still fails the run.
       expect(laneJob.if).toBe(
         lane === "rust-crash"
-          ? "${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}"
+          ? "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rust_crash == 'true' }}"
           : lane === "rust-runtime"
-            ? "${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust_runtime == 'true' && needs.plan.outputs.runtime_cache_hit != 'true' }}"
-            : "${{ always() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}",
+            ? "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rust_runtime == 'true' && needs.plan.outputs.runtime_cache_hit != 'true' }}"
+            : "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rust == 'true' }}",
       );
       // Every lane installs the bundle through one shared action; the
       // former four copies can no longer drift apart, including the cache
