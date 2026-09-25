@@ -1,0 +1,5 @@
+3b24d40a27961475daa455ecff2173635ce3f1438c70c8e8480601317a4def50  test/node-detail-runtime.test.mjs
+43ed6f0be818bc9e4f9763fc415becfef124afba54fa286670cb56d22f0d1f76  desktop/renderer/src/product-workspace/workspace.js
+5d7bc5fee66a9ace45a01ef9dcebb20b39f1f0b94d7f35f1d61f1ef1f8672584  desktop/renderer/src/node-input-controls.js
+2b370a49e174094c34983cc0afa06f8194b62ff7dc20a6d78832365def825950  scripts/test-desktop-context-draft-warning.mjs
+ff22fba2a372a641ab39e96821275c94e0f6b5a06d4788dc740506a41204b3cb  scripts/run-context-draft-warning-test.mjs

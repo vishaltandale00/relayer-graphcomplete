@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/factory-no-thread-composer
+
+
+ Test Files  1 passed (1)
+      Tests  41 passed (41)
+   Start at  10:28:35
+   Duration  685ms (transform 137ms, setup 0ms, import 318ms, tests 274ms, environment 0ms)
+

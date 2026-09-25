@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/factory-no-thread-composer
+
+ ❯ |isolated| test/node-detail-runtime.test.mjs (41 tests | 1 failed) 284ms
+     × mounts the canonical package when a user opens a node through the real Product workspace selection path 191ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/node-detail-runtime.test.mjs > compiled Node Detail product runtime > mounts the canonical package when a user opens a node through the real Product workspace selection path
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ test/node-detail-runtime.test.mjs:882:42
+    880|     await expect(delayedInputDraftApi.get.mock.results[1].value).resol…
+    881|     const detachRestoredInput = window.document.querySelector(".compos…
+    882|     expect(detachRestoredInput.disabled).toBe(false);
+       |                                          ^
+    883|     detachRestoredInput.click();
+    884|     await window.happyDOM.waitUntilComplete();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 40 passed (41)
+   Start at  10:28:15
+   Duration  797ms (transform 161ms, setup 0ms, import 424ms, tests 284ms, environment 0ms)
+

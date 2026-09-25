@@ -1,0 +1,6 @@
+Verification checkout HEAD: 8b50ae3a635f225663700f90028c3210458d586a
+Verification-time source changes: test/node-detail-runtime.test.mjs only
+That test's exact verified byte digest: recorded in source-native.sha256
+Test source was committed unchanged as: 1bcbb6574873150c06f5050db7a7c4f145a10118
+Production workspace/controller and capture-runner source digests: recorded in source-native.sha256
+Build/check/capture output: logs/; each command and exit code is preserved.
