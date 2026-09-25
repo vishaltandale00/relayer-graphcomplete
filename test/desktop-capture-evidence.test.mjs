@@ -1,9 +1,14 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   capturedStateMeetsReadableHold,
   capturedStateRun,
   classifyDesktopCaptureText,
+  sha256File,
 } from "../scripts/lib/desktop-capture-evidence.mjs";
 
 describe("desktop capture content acceptance", () => {
@@ -88,5 +93,22 @@ describe("desktop capture content acceptance", () => {
       .toMatchObject({ firstAtMs: 1500, lastAtMs: 2900, durationMs: 1400 });
     expect(capturedStateRun(frames, "saved-thread", { afterIndex: 3 }))
       .toMatchObject({ firstAtMs: 3000, lastAtMs: 4400, durationMs: 1400 });
+  });
+});
+
+describe("retained capture file receipts", () => {
+  it("hashes the retained frame after it replaces the earlier screenshot bytes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "desktop-capture-receipt-"));
+    try {
+      const screenshotFile = join(directory, "saved-thread.png");
+      await writeFile(screenshotFile, Buffer.from("pre-recording image"));
+      await writeFile(screenshotFile, Buffer.from("retained first-frame image"));
+
+      await expect(sha256File(screenshotFile)).resolves.toBe(
+        "dadfc27ecf36ecc4ecbf9350ccb094d8ed2c20fee24e3f1a74777ab002f63701",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

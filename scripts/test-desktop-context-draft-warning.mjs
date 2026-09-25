@@ -16,6 +16,7 @@ import {
   capturedStateMeetsReadableHold,
   capturedStateRun,
   classifyDesktopCaptureText,
+  sha256File,
 } from "./lib/desktop-capture-evidence.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -468,7 +469,7 @@ async function captureOrdinaryNewThreadEvidence(threadId) {
     },
     beforeNewThreadScreenshot: {
       file: beforeNewThreadScreenshotFile,
-      sha256: createHash("sha256").update(beforeNewThreadPng).digest("hex"),
+      sha256: await sha256File(beforeNewThreadScreenshotFile),
     },
     afterWindowRestartScreenshot: {
       file: restartedScreenshotFile,

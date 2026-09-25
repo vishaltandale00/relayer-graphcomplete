@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+
 const SAVED_THREAD_TEXT = "keep this unsent follow up with the saved thread";
 const NEW_THREAD_HEADING = "what are we working on";
 const NEW_THREAD_PROMPT = "ask relayer to investigate design or build something";
@@ -50,4 +53,8 @@ export function capturedStateRun(frames, state, { afterIndex = -1, beforeIndex =
 export function capturedStateMeetsReadableHold(frames, state, minimumMs, options) {
   const run = capturedStateRun(frames, state, options);
   return run && run.durationMs >= minimumMs ? run : null;
+}
+
+export async function sha256File(file) {
+  return createHash("sha256").update(await readFile(file)).digest("hex");
 }
