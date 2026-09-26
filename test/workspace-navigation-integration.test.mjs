@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let requestImplementation;
 let rendered;
@@ -6,6 +6,12 @@ let renderObserver;
 let throwOnRender;
 let tutorialActionSucceeded;
 let tutorialFollowupSubmitted;
+const ownedControllers = new Set();
+
+function retireOwnedControllers() {
+  for (const controller of ownedControllers) controller.cancelNavigationHistory();
+  ownedControllers.clear();
+}
 
 function rootLayer(id, nodeId) {
   return {
@@ -88,12 +94,22 @@ async function loadModules(url = "http://127.0.0.1:43123/") {
   }));
   const state = await import("../desktop/renderer/src/state.js");
   const threads = await import("../desktop/renderer/src/threads.js");
-  return { ...state, ...threads };
+  const controller = { ...state, ...threads };
+  ownedControllers.add(controller);
+  return controller;
 }
 
 describe("workspace navigation integration", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    try {
+      retireOwnedControllers();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps accepted product status while rendering its succeeded temporal current", async () => {
@@ -604,6 +620,63 @@ describe("workspace navigation integration", () => {
     expect(layerReads).toBe(2);
   });
 
+  it("retires pending polling before the next controller owns its request mock", async () => {
+    vi.useFakeTimers();
+    let readTwoSettled = false;
+    let resolveReadTwo;
+    const readTwo = new Promise((resolve) => {
+      resolveReadTwo = (value) => {
+        readTwoSettled = true;
+        resolve(value);
+      };
+    });
+    const pendingTurn = {
+      id: 1,
+      threadId: 10,
+      sequence: 1,
+      text: "Pending turn",
+      completionStatus: "submitted",
+      completionOutput: null,
+    };
+    const pendingState = productState([{ id: 10, title: "Pending" }], [pendingTurn]);
+    try {
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) return pendingState;
+        throw new Error(`Unexpected retired-controller request: ${path}`);
+      });
+      const retiredController = await loadModules();
+      await retiredController.loadThread(10);
+
+      retireOwnedControllers();
+
+      let stateReads = 0;
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) {
+          stateReads += 1;
+          if (stateReads === 2) return readTwo;
+          return pendingState;
+        }
+        throw new Error(`Unexpected current-controller request: ${path}`);
+      });
+      const currentController = await loadModules();
+      await currentController.loadThread(10);
+      expect(stateReads).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(stateReads).toBe(2);
+      expect(readTwoSettled).toBe(false);
+      resolveReadTwo(pendingState);
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  });
+
   it("keeps polling an open reused source while its project-visible invoke runs elsewhere", async () => {
     vi.useFakeTimers();
     try {
@@ -655,7 +728,11 @@ describe("workspace navigation integration", () => {
       expect(stateReads).toBe(2);
       expect(layerReads).toBe(2);
     } finally {
-      vi.useRealTimers();
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 
@@ -688,7 +765,11 @@ describe("workspace navigation integration", () => {
       expect(controller.appState.interactions[0].projectionFresh).toBe(true);
       expect(vi.getTimerCount()).toBe(0);
     } finally {
-      vi.useRealTimers();
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 
@@ -745,7 +826,11 @@ describe("workspace navigation integration", () => {
       expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("running");
       expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
     } finally {
-      vi.useRealTimers();
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 
@@ -807,7 +892,11 @@ describe("workspace navigation integration", () => {
       expect(controller.appState.actionInvocations[0].resultCompletionStatus)
         .toBe(resultCompletionStatus);
     } finally {
-      vi.useRealTimers();
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 
@@ -839,7 +928,11 @@ describe("workspace navigation integration", () => {
         expect(controller.appState.actionInvocations).toEqual(state.actionInvocations);
         expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
       } finally {
-        vi.useRealTimers();
+        try {
+          retireOwnedControllers();
+        } finally {
+          vi.useRealTimers();
+        }
       }
     },
   );
@@ -873,7 +966,11 @@ describe("workspace navigation integration", () => {
       expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBe(303);
       expect(layerReads).toBe(2);
     } finally {
-      vi.useRealTimers();
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 
@@ -916,7 +1013,11 @@ describe("workspace navigation integration", () => {
       expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBe(303);
       expect(layerReads).toBe(3);
     } finally {
-      vi.useRealTimers();
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 
@@ -1154,7 +1255,11 @@ describe("workspace navigation integration", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(stateReads).toBe(3);
     } finally {
-      vi.useRealTimers();
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 
@@ -1208,7 +1313,11 @@ describe("workspace navigation integration", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(stateReads).toBe(3);
     } finally {
-      vi.useRealTimers();
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 
@@ -1261,7 +1370,11 @@ describe("workspace navigation integration", () => {
       await expect(latest).resolves.toMatchObject({ threadId: "10", turnId: "1" });
       expect(controller.viewState.currentThreadId).toBe(10);
     } finally {
-      vi.useRealTimers();
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
     }
   });
 });

@@ -1,0 +1,18 @@
+{
+  "admitted-plans.json": "0f9fbc67a6979a43ef1c0b780d064312551e828ec16d209469a99c84b78df7db",
+  "build.log": "d4fa4edef4654153c7e23e179f005b5a9a15ea1f1d1fe34a0b0cf26142460d1f",
+  "check-attempt-1-missing-workspace-dependencies.log": "8ddcc9238f92b99f37f4ef6199af7a0b6fb35892ab0117be424089103c11478f",
+  "check.log": "5f8bcc6b7ff1f6dd08ad4d268984489f7c1f0f291ae9f456f3f6fa67fb78c3ff",
+  "desktop-navigation-sampled.mp4": "1b8f6ef31412c4d8d784c73c852f632ff2edb0318cc97d34cd5d3e84d549bc53",
+  "desktop-reopened-graph.png": "d77c3cefa2c8b8c4b312c004e44a094f02e492c32b8315aa8fd18cd9b462bc44",
+  "desktop-reopened-result.png": "dd610d65b20d4707c6d037b23493219a48ec71d6871a261068253cc8869089c4",
+  "desktop-run.json": "06bf99c0ead665e9dd881e801734050ff7e8a96f268c2445390692ab01c819c9",
+  "desktop-turn-2.png": "fc53ff2a5dfd95bdbee6bcc2a973bc19412aec713e570793f86a99cd926f8372",
+  "light-tests.log": "408a1e9b57de9ceeb55ec71e085121c26fc790971d17fe8ec55df5f3084815ba",
+  "receipt.json": "59823097e25b7e7b0f5ee304715be535c6c3aadbb34b55d9f9f70fd872b3f497",
+  "turn-1-graph-operations.jsonl": "4eac168e31e7acd4df3064f633cdf461d0fe96fd25804ed666150ba5a5d68f22",
+  "turn-1-trace-excerpt.jsonl": "9bfdaa2adfedf5ffeb930341d3fde8aa8a6c62c15f989c93ad7fb714e6fc9335",
+  "turn-2-graph-operations.jsonl": "e45958a8f9ebfc1e022bdbbbce832ea3b18c3382872b23d32ee1ecb65fb5e879",
+  "turn-2-trace-excerpt.jsonl": "8162e196bce2bdf5505ab89b019bb1d6b7b98d6153028e43510a235492eaef20",
+  "workspace-source.json": "86cd36e024336e70acf1dc3614501098c3ecbbc7ee862d3dad15241e1e572498"
+}

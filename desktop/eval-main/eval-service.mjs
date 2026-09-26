@@ -45,7 +45,7 @@ import {
   recursiveGraphMemoryEvalCase,
   RECURSIVE_GRAPH_MEMORY_CASE_ID,
   RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET,
-  selectStandalonePermissionProfile,
+  selectEvalPermissionProfile,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
 import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
@@ -421,7 +421,7 @@ export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = f
   const personalPresentationVersion = execution.harnessConfiguration?.settings?.personalPresentationVersion;
   if ((personalPresentationVersion === "personal-presentation-v2"
     || personalPresentationVersion === "personal-presentation-v3") && children.length > 0) {
-    for (const child of children) {
+    for (const child of children.filter((candidate) => candidate.status === "accepted")) {
       checks.push({
         ...visualNodeDetailCheck(
           { rootLayer: { nodes: child.acceptedNodes || [] } },
@@ -907,6 +907,8 @@ export class EvalService {
     candidateTraceAttributionLoader = null,
     candidateTraceRequired = false,
     ensureModelCatalog = async () => {},
+    selectPrimeModel = null,
+    primeModelAvailability = null,
     conversationImportEnabled = false,
     conversationImportMaxBytes = MAX_CONVERSATION_IMPORT_BYTES,
     annotationSnapshotLoader = null,
@@ -930,6 +932,8 @@ export class EvalService {
     this.candidateTraceAttributionLoader = candidateTraceAttributionLoader;
     this.candidateTraceRequired = candidateTraceRequired;
     this.ensureModelCatalog = ensureModelCatalog;
+    this.selectPrimeModel = selectPrimeModel;
+    this.primeModelAvailability = primeModelAvailability;
     this.conversationImportEnabled = conversationImportEnabled;
     this.conversationImportMaxBytes = conversationImportMaxBytes;
     this.annotationSnapshotLoader = annotationSnapshotLoader;
@@ -998,6 +1002,13 @@ export class EvalService {
       harnessConfigurations: [...this.configurations.values()].map((configuration) => ({
         name: configuration.name,
         implementation: configuration.implementation,
+        ...(configuration.implementation === "prime.agent"
+          ? this.primeModelAvailability?.(configuration.name) ?? {
+            available: this.selectPrimeModel !== null,
+            unavailableReason: this.selectPrimeModel === null
+              ? "Connect an explicit development Prime Eval profile before running." : null,
+          }
+          : { available: true, unavailableReason: null }),
         complete: copy(configuration.complete ?? { agentAuthored: false }),
         settings: copy(configuration.settings),
         graphCapabilityProfile: copy(configuration.graphCapabilityProfile ?? { search: "disabled" }),
@@ -1180,6 +1191,10 @@ export class EvalService {
     const testCaseIds = selection?.testCaseIds;
     const harnessConfigurationNames = selection?.harnessConfigurationNames;
     const judgeConfigurationName = selection?.judgeConfigurationName;
+    if (Array.isArray(harnessConfigurationNames) && harnessConfigurationNames.some((name) => (
+      this.configurations.get(name)?.implementation === "prime.agent"
+      && (this.selectPrimeModel === null || this.primeModelAvailability?.(name)?.available === false)
+    ))) throw new Error("Prime Eval requires a connected provider and a pinned model family.");
     if (!Array.isArray(testCaseIds) || testCaseIds.some((id) => !evalCases.some((item) => item.id === id))) {
       throw new Error("Test run contains an unknown test case.");
     }
@@ -2187,7 +2202,7 @@ export class EvalService {
       execution,
       title: definition.name,
       prompts: resolveEvalCasePrompts(definition, execution.testRunId),
-      permissionProfileId: selectStandalonePermissionProfile(execution.harnessConfiguration),
+      permissionProfileId: selectEvalPermissionProfile(execution.harnessConfiguration),
     });
     return { ...executed, threadDefinition: null, workspaceChecks: new Map() };
   }
@@ -2270,6 +2285,13 @@ export class EvalService {
     let productModelSelection = execution.pinnedModelResolution?.productModelSelection;
     if (execution.pinnedModelResolution !== undefined) {
       // The treatment cell uses the control cell's exact provider/model resolution.
+    } else if (execution.harnessConfiguration.implementation === "prime.agent") {
+      if (!this.selectPrimeModel) throw new Error("Prime Eval has no execution adapter.");
+      selectedModel = await this.selectPrimeModel(execution.harnessConfigurationName);
+      productModelSelection = true;
+      if (!selectedModel?.familyId || !selectedModel.providerId || !selectedModel.modelId) {
+        throw new Error("Prime Eval requires an explicit validated model selection.");
+      }
     } else if (execution.harnessConfiguration.implementation === "claude.basic") {
       selectedModel = await this.#productRequest(
         `/api/model-selection/default?harnessId=${encodeURIComponent(execution.harnessConfigurationName)}`,
@@ -2314,6 +2336,12 @@ export class EvalService {
     await this.#captureCandidateTrace(execution, rootInteraction);
     await afterTurn(thread.rootInteractionId, 0);
     for (const [offset, prompt] of prompts.slice(1).entries()) {
+      if (execution.harnessConfiguration.implementation === "prime.agent") {
+        const nextSelection = await this.selectPrimeModel(execution.harnessConfigurationName);
+        if (!sameJson(evalModelSelectionRequest(nextSelection), evalModelSelectionRequest(selectedModel))) {
+          throw new Error("Prime Eval model selection changed between product turns.");
+        }
+      }
       const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
         method: "POST",
         body: {
@@ -2981,7 +3009,7 @@ function candidateModel(configuration) {
 
 function validateEvalPermissionProfiles(execution) {
   if (!projectCaseIds.has(execution.testCaseId)) {
-    selectStandalonePermissionProfile(execution.harnessConfiguration);
+    selectEvalPermissionProfile(execution.harnessConfiguration);
     return;
   }
   const definition = evalCases.find((candidate) => candidate.id === execution.testCaseId);

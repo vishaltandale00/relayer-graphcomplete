@@ -1,10 +1,6 @@
 import type { CompletionOutput } from "@relayer/graph-client";
-import { checkBasicOutput, type EvalCheck, type ReplayRepairAuditEvent } from "../runtime-basic.js";
+import { checkBasicOutput, type EvalCheck, type GraphMemoryAuditEvent } from "./graph-checks.js";
 import { isNaturalGraphMemoryQueryShape } from "./natural-graph-memory-query.js";
-
-interface RecursiveAuditEvent extends ReplayRepairAuditEvent {
-  readonly actionSourceNodeId?: number;
-}
 
 interface RecursiveInteraction {
   readonly id: number;
@@ -31,7 +27,7 @@ export interface RecursiveGraphMemoryGradingExecution {
 export async function gradeRecursiveGraphMemoryExecution(input: {
   readonly execution: RecursiveGraphMemoryGradingExecution;
   readonly interactions: readonly RecursiveInteraction[];
-  readonly graphOperationsByTurn: readonly (readonly RecursiveAuditEvent[])[];
+  readonly graphOperationsByTurn: readonly (readonly GraphMemoryAuditEvent[])[];
 }): Promise<{ readonly turns: readonly { readonly checks: readonly EvalCheck[]; readonly evidence?: Readonly<Record<string, unknown>> }[] }> {
   const { execution, interactions, graphOperationsByTurn } = input;
   if (interactions.length !== 3) throw new Error("Recursive graph-memory grading requires exactly three product turns.");
@@ -121,7 +117,7 @@ export async function gradeRecursiveGraphMemoryExecution(input: {
   return { turns };
 }
 
-function matchesBoundedPriorWorkSearch(event: RecursiveAuditEvent, topic: string, rootLayerId: number): boolean {
+function matchesBoundedPriorWorkSearch(event: GraphMemoryAuditEvent, topic: string, rootLayerId: number): boolean {
   if (event.queryContractVersion !== 1 || event.target !== undefined || event.resultTruncated !== false
     || typeof event.query !== "string" || event.parameters === undefined || event.parameters === null
     || typeof event.parameters !== "object"

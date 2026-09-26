@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1137,6 +1138,12 @@ describe("PrimeAgentHarness", () => {
     });
     await disabled.complete(runContext(11, "disabled-token"));
 
+    let omittedPrompt = "";
+    const omitted = await createHarness(primeSession("/tmp/search-omitted.jsonl", {
+      promptAndWait: vi.fn(async (text: string) => { omittedPrompt = text; }),
+    }), configuration);
+    await omitted.complete(runContext(13, "omitted-token"));
+
     let enabledPrompt = "";
     const enabled = await createHarness(primeSession("/tmp/search-enabled.jsonl", {
       promptAndWait: vi.fn(async (text: string) => { enabledPrompt = text; }),
@@ -1148,6 +1155,8 @@ describe("PrimeAgentHarness", () => {
 
     expect(disabledPrompt).not.toContain("Graph search is available");
     expect(disabledPrompt).not.toContain("GraphSearchRequest");
+    expect(omittedPrompt).not.toContain("Graph search is available");
+    expect(omittedPrompt).not.toContain("GraphSearchRequest");
     expect(enabledPrompt).toContain("Graph search is available");
     expect(enabledPrompt).toContain("await graph.search(GraphSearchRequest(...))");
     expect(enabledPrompt).toContain("query_contract_version=1");
@@ -1155,6 +1164,62 @@ describe("PrimeAgentHarness", () => {
     expect(enabledPrompt).toContain("Never invent, guess, or discover a target ID");
     expect(enabledPrompt).toContain('result["type"] == "layer"');
     expect(enabledPrompt).toContain('relation="reference"');
+
+    const example = enabledPrompt.split("Example:\n")[1]?.split("\n\nGraph query contract failures")[0];
+    expect(example).toBeDefined();
+    expect(example).toContain('result = first_row[0]');
+    expect(example).toContain('layer_id = int(match.group(1))');
+    expect(example!.indexOf('result = first_row[0]')).toBeLessThan(example!.indexOf('layer_id = int(match.group(1))'));
+
+    const cases = [
+      { name: "valid first cell", result: { truncated: false, rows: [[{ type: "layer", id: "layer:42" }], [{ type: "layer", id: "layer:43" }]] }, target: 42 },
+      { name: "truncated", result: { truncated: true, rows: [[{ type: "layer", id: "layer:42" }]] } },
+      { name: "missing rows", result: { truncated: false } },
+      { name: "empty rows", result: { truncated: false, rows: [] } },
+      { name: "empty first row", result: { truncated: false, rows: [[]] } },
+      { name: "non-layer", result: { truncated: false, rows: [[{ type: "content", id: "content:42" }]] } },
+      { name: "zero identity", result: { truncated: false, rows: [[{ type: "layer", id: "layer:0" }]] } },
+      { name: "malformed identity", result: { truncated: false, rows: [[{ type: "layer", id: "layer:42x" }]] } },
+    ];
+    const python = [
+      "import asyncio, json, re, sys, textwrap, types",
+      "cases = json.load(sys.stdin)",
+      "class GraphSearchRequest:",
+      "    def __init__(self, **kwargs): pass",
+      "class FakeGraph:",
+      "    def __init__(self, response): self.response = response",
+      "    async def search(self, request): return self.response",
+      "client = types.ModuleType('relayer_graph')",
+      "client.GraphSearchRequest = GraphSearchRequest",
+      "sys.modules['relayer_graph'] = client",
+      "async def exercise(case):",
+      "    namespace = {'graph': FakeGraph(case['result']), 'GraphSearchRequest': GraphSearchRequest, 're': re}",
+      "    source = 'async def sample():\\n' + textwrap.indent(case['example'], '    ') + '\\n    return layer_id'",
+      "    exec(compile(source, '<emitted-prime-search-example>', 'exec'), namespace)",
+      "    try:",
+      "        return {'name': case['name'], 'target': await namespace['sample']()} ",
+      "    except (ValueError, TypeError, AttributeError, IndexError) as error:",
+      "        return {'name': case['name'], 'error': str(error)}",
+      "async def main():",
+      "    print(json.dumps([await exercise(case) for case in cases]))",
+      "asyncio.run(main())",
+    ].join("\n");
+    const executed = JSON.parse(execFileSync("python3", ["-c", python], {
+      input: JSON.stringify(cases.map((entry) => ({ ...entry, example }))),
+      encoding: "utf8",
+    })) as Array<{ name: string; target?: number; error?: string }>;
+    expect(executed[0]).toEqual({ name: "valid first cell", target: 42 });
+    expect(executed.slice(1).map(({ name, error }) => ({ name, rejected: typeof error === "string" })))
+      .toEqual(cases.slice(1).map(({ name }) => ({ name, rejected: true })));
+    expect(executed.slice(1).map(({ error }) => error)).toEqual([
+      "Graph search results are truncated; narrow the query before selecting a layer.",
+      "Graph search returned no rows; no layer is available to reference.",
+      "Graph search returned no rows; no layer is available to reference.",
+      "The first graph search row has no result cell to reference.",
+      "The first graph search result is not a tagged layer.",
+      "The tagged layer has an invalid public identity.",
+      "The tagged layer has an invalid public identity.",
+    ]);
   });
 
   it("retries a presentation instruction reload after a transient failure", async () => {

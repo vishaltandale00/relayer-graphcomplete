@@ -1,0 +1,8 @@
+captured_at=2026-09-25T06:19:37Z
+head=61ce7b0cc50ee819eb54568cb8fc7165bf6c1e01
+branch=codex/factory-355
+node=v22.23.2
+npm=10.9.8
+?? worker-pilot/
+d740f9428af6c4226ef7bc0dd9937a074c5c1df344df57cf00ede784d76c8b8a  packages/harness-host/src/implementations/prime-agent.ts
+a8c27d97e24ffb3ceb2df0ebab3bef690521543eba455d45694d8211846fc6e8  packages/harness-host/test/prime-agent.test.ts

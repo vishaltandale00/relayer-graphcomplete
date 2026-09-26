@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
-import type { EvalCheck } from "../runtime-basic.js";
+import type { EvalCheck } from "../cases/graph-checks.js";
 
 export const H3_PROJECT_CASE_ID = "project.h3.sanitize-status-code";
 export const H3_AUTONOMOUS_FIX_CASE_ID = "autonomous.h3.sanitize-status-code";

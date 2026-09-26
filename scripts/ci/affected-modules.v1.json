@@ -52,6 +52,8 @@
       "package-lock.json",
       "package.json",
       "scripts/check-node-version.mjs",
+      "scripts/run-context-draft-warning-test.mjs",
+      "scripts/test-desktop-context-draft-warning.mjs",
       "tsconfig.build.json",
       "tsconfig.json"
     ],
@@ -88,7 +90,7 @@
     { "exact": "docs/graph-query-v1.md", "package": "relayer-graph-core" }
   ],
   "npmOwners": [
-    { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test"] },
+    { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test", "test/eval-app-integration.test.mjs"] },
     {
       "prefix": "packages/graph-client/",
       "package": "@relayer/graph-client",
@@ -105,6 +107,7 @@
         "test/composer-provider-lifecycle.test.mjs",
         "test/desktop-release-main-ci-check.test.mjs",
         "test/desktop-shell.test.mjs",
+        "test/eval-app-integration.test.mjs",
         "test/first-message-composer-integration.test.mjs",
         "test/settings-navigation.test.mjs",
         "test/window-factory.test.mjs",
@@ -191,14 +194,12 @@
     { "exact": "scripts/electron-workspace-driver.mjs", "chapters": [] },
     { "exact": "scripts/provider-ux-evidence-browser.mjs", "chapters": ["vitest"], "vitestFiles": ["test/provider-electron-evidence.test.mjs"] },
     { "exact": "scripts/record-onboarding-tutorial.mjs", "chapters": [] },
-    { "exact": "scripts/run-context-draft-warning-test.mjs", "chapters": [] },
     { "exact": "scripts/run-interaction-context-lifecycle-test.mjs", "chapters": [] },
     { "exact": "scripts/run-node-input-actions-test.mjs", "chapters": [] },
     { "exact": "scripts/run-prime-desktop.mjs", "chapters": [] },
     { "exact": "scripts/run-project-new-thread-test.mjs", "chapters": [] },
     { "exact": "scripts/run-recursive-live-run.mjs", "chapters": ["vitest"], "vitestFiles": ["test/recursive-live-run-model.test.mjs"] },
     { "exact": "scripts/test-desktop-approval.mjs", "chapters": [] },
-    { "exact": "scripts/test-desktop-context-draft-warning.mjs", "chapters": [] },
     { "exact": "scripts/test-desktop-first-message.mjs", "chapters": [] },
     { "exact": "scripts/test-desktop-node-input-actions.mjs", "chapters": [] },
     { "exact": "scripts/test-desktop-project-new-thread.mjs", "chapters": [] },

@@ -5,8 +5,8 @@ import {
   graphMemorySearchRequestMode,
   readGraphMemoryEvidence,
   type EvalCheck,
-  type ReplayRepairAuditEvent,
-} from "../runtime-basic.js";
+  type GraphMemoryAuditEvent,
+} from "./graph-checks.js";
 
 export interface GraphMemoryGradingInteraction {
   readonly graphNodeId: number;
@@ -14,7 +14,7 @@ export interface GraphMemoryGradingInteraction {
 }
 
 export interface GraphMemoryGradingTurn {
-  readonly graphOperations: readonly ReplayRepairAuditEvent[];
+  readonly graphOperations: readonly GraphMemoryAuditEvent[];
 }
 
 export interface GraphMemoryGradingExecution {

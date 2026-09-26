@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -49,6 +49,8 @@ import {
   createEvalCodexCatalogProvisioner,
   createEvalManagedCodexRuntime,
 } from "./managed-codex-runtime.mjs";
+
+import { createEvalManagedPrimeRuntime, createEvalPrimeProvider, loadEvalPrimeProfile } from "./prime-provider.mjs";
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopDirectory, "..");
@@ -113,6 +115,18 @@ const acquireEvalProviderExecution = createEvalCodexExecutionLease(
   () => managedCodexRuntime.resolve(),
 );
 
+const primeProfile = await loadEvalPrimeProfile({ isPackaged: app.isPackaged });
+const primePythonClientRoot = app.isPackaged
+  ? join(process.resourcesPath, "python", "relayer-graph", "src")
+  : join(repositoryRoot, "python", "relayer-graph", "src");
+process.env.RELAYER_PRIME_PYTHON_CLIENT_ROOT = primePythonClientRoot;
+const managedPrimeRuntime = createEvalManagedPrimeRuntime({
+  root: join(userDataDirectory, "managed-runtimes"),
+  appRoot: app.isPackaged ? app.getAppPath() : repositoryRoot,
+  pythonClientRoot: primePythonClientRoot,
+  isPackaged: app.isPackaged,
+});
+let primeProvider;
 let dashboardWindow;
 const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => dashboardWindow });
 
@@ -134,7 +148,12 @@ const graphRuntime = new GraphCompleteRuntimeService({
   codexBasicClientModuleUrl: graphClientModuleUrl,
   ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
   resolveCodexRuntime: () => managedCodexRuntime.resolve(),
-  acquireProviderExecution: acquireEvalProviderExecution,
+  resolvePrimeRuntime: () => managedPrimeRuntime.resolve(),
+  acquireProviderExecution: (providerId) => providerId === "codex"
+    ? acquireEvalProviderExecution(providerId)
+    : primeProvider
+      ? primeProvider.acquireExecution(providerId)
+      : Promise.reject(new Error("Eval has no connected provider for this execution.")),
   // Eval keeps the temporal substrate coherent for every matrix cell. The selected
   // harness configuration independently controls whether agent-authored Complete is
   // exposed, so control and treatment can share one production-faithful runtime.
@@ -457,7 +476,10 @@ async function openAutomatedReviewSession({
 }
 
 function registerEvalIpc() {
-  ipcMain.handle("relayer-eval:catalog", () => evalService.catalog());
+  ipcMain.handle("relayer-eval:catalog", async () => {
+    await primeProvider?.refreshAvailability();
+    return evalService.catalog();
+  });
   ipcMain.handle("relayer-eval:list-runs", () => evalService.listRuns());
   ipcMain.handle("relayer-eval:get-run", (_event, runId) => evalService.getRun(runId));
   ipcMain.handle("relayer-eval:create-run", (_event, selection) => evalService.createRun(selection));
@@ -509,6 +531,18 @@ async function start() {
     ));
   }
   const runtimeSession = await graphRuntime.start();
+  // Prime has an explicit readiness path; fixture and existing Codex startup stay
+  // unchanged. Publish the initial unavailable state before the product opens.
+  await graphRuntime.recordHarnessReadiness([...runtimeSession.configurations.values()]
+    .filter(({ implementation }) => implementation === "prime.agent")
+    .map((configuration) => ({
+      harnessId: configuration.name,
+      configurationDigest: runtimeSession.digestConfiguration(configuration),
+      generation: 0,
+      available: false,
+      unavailableReason: { code: "harness_readiness_pending", message: "Prime Eval runtime is not ready." },
+    })));
+
   productServer = new RelayerAppServerService({
     userDataDirectory,
     binaryPath: appServerBinary,
@@ -528,6 +562,14 @@ async function start() {
     onUnexpectedStop: () => app.quit(),
   });
   const productSession = await productServer.start();
+  if (primeProfile) {
+    primeProvider = createEvalPrimeProvider({
+      userDataDirectory, productServer, productSession, runtimeSession, graphRuntime,
+      managedPrimeRuntime, managedCodexRuntime, safeStorage,
+    });
+    try { await primeProvider.start(primeProfile); }
+    finally { primeProfile.apiKey = undefined; }
+  }
   const ensureEvalCodexCatalog = createEvalCodexCatalogProvisioner({
     productSession,
     resolveRuntime: () => managedCodexRuntime.resolve(),
@@ -556,6 +598,8 @@ async function start() {
     ),
     candidateTraceRequired: true,
     ensureModelCatalog: ensureEvalCodexCatalog,
+    selectPrimeModel: primeProvider ? (harnessId) => primeProvider.select(harnessId) : null,
+    primeModelAvailability: primeProvider ? (harnessId) => primeProvider.availability(harnessId) : null,
     conversationImportEnabled: true,
     annotationSnapshotLoader: (threadIds) => loadAnnotationSnapshots(productSession, threadIds),
     targetKey: evalTarget.key,
@@ -897,6 +941,8 @@ function stop() {
       try { await productServer.close(); } catch (error) { errors.push(error); }
     }
     try { await graphRuntime.close(); } catch (error) { errors.push(error); }
+    try { await primeProvider?.close(); } catch (error) { errors.push(error); }
+    try { await managedPrimeRuntime.installer.cancelAll(); } catch (error) { errors.push(error); }
     if (errors.length) throw new AggregateError(errors, "Relayer Eval services did not stop cleanly.");
   })();
   return stopPromise;
@@ -922,6 +968,7 @@ if (primaryInstance) {
     if (quitFlowPromise) return;
     quitFlowPromise = (async () => {
       if (!await confirmManagedRuntimeQuit({ installer: managedCodexRuntime, dialog, parent: dashboardWindow })) return;
+      if (!await confirmManagedRuntimeQuit({ installer: managedPrimeRuntime.installer, dialog, parent: dashboardWindow })) return;
       stopping = true;
       await stop().catch((error) => console.error("Relayer Eval shutdown failed:", error));
       app.quit();

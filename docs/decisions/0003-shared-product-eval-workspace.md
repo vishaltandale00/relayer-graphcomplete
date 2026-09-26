@@ -17,4 +17,4 @@ The public Relayer build and internal Relayer Eval build have different applicat
 - Eval persistence may reference product thread IDs, but judges must persist their own immutable checks and configuration snapshots.
 - Completed review windows receive a read-only app-server session and are read-only except for turn, layer, case, thread, and node-detail navigation.
 - Public product APIs reject caller-selected harness overrides; the Eval app server explicitly enables them.
-- The old standalone eval HTML is a lower-level artifact only and is not the Eval application UX.
+- The standalone runtime runner and its HTML viewer are retired. Historical artifacts remain evidence of their original runs; current evaluation execution and review use Relayer Eval.

@@ -42,15 +42,19 @@ function renderRunList() {
   });
 }
 
-function optionMarkup({ id, name, description, detail }, group, checked) {
-  return `<label class="option"><input type="${group === "judge" ? "radio" : "checkbox"}" name="${group}" value="${escapeHtml(id)}" ${checked ? "checked" : ""}/><div><b>${escapeHtml(name)}</b><small>${escapeHtml(description || detail || "")}</small></div></label>`;
+function optionMarkup({ id, name, description, detail, available = true }, group, checked) {
+  return `<label class="option"><input type="${group === "judge" ? "radio" : "checkbox"}" name="${group}" value="${escapeHtml(id)}" ${checked && available ? "checked" : ""} ${available ? "" : "disabled"}/><div><b>${escapeHtml(name)}</b><small>${escapeHtml(description || detail || "")}</small></div></label>`;
 }
 
-function configure() {
+async function configure() {
+  try { catalog = await api.catalog(); }
+  catch (error) { toast(error.message); return; }
   $("#caseOptions").innerHTML = catalog.cases.map((item) => optionMarkup(item, "cases", item.defaultSelected !== false)).join("");
   $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({
     id: item.name,
     name: item.name,
+    available: item.available,
+    description: item.unavailableReason,
     detail: `${item.implementation} · graph search ${item.graphCapabilityProfile?.search === "query-v1" ? "query-v1" : "off"} · recursion ${item.complete?.agentAuthored === true ? "on" : "off"}`,
   }, "harnesses", item.name === "fixture-task-system")).join("");
   $("#judgeOptions").innerHTML = catalog.judges.map((item, index) => optionMarkup(item, "judge", index === 0)).join("");
