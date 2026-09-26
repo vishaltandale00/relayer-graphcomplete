@@ -537,6 +537,9 @@ impl crate::GraphDatabase {
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
             for submitted in turn.submitted_inputs {
+                let chronology_is_valid = interaction_turn_positions
+                    .get(&submitted.source.interaction_node_id)
+                    .is_some_and(|&presenting_position| presenting_position < position);
                 let occurrence = (
                     submitted.source.interaction_node_id,
                     submitted.source.layer_id,
@@ -549,7 +552,8 @@ impl crate::GraphDatabase {
                     legacy_fallback_snapshots
                         .entry(submitted.source.action_id.clone())
                         .or_insert_with(|| submitted.action.clone());
-                    if legacy_input_occurrences.contains(&occurrence)
+                    if chronology_is_valid
+                        && legacy_input_occurrences.contains(&occurrence)
                         && validate_value(0, &submitted.action, &submitted.value).is_ok()
                     {
                         input_action_snapshots
