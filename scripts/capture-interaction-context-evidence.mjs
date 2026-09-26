@@ -1457,7 +1457,7 @@ async function run() {
     "both complete durable drafts are present before service/window restart",
   ], "The pre-restart continuous recording missed a required draft transition");
   assertDeepEqual(recordingSegments[1].events.map((event) => event.name), [
-    "Electron BrowserWindow and app services reopened after explicit recording discontinuity",
+    "Electron BrowserWindow and app services reopened after explicit recording discontinuity with Node Details closed",
     "restored draft A after full service/window restart",
     "restored draft B after full service/window restart",
     "confirmed A while the full B record remained unchanged",
