@@ -209,6 +209,20 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
   });
 
   test.each([
+    "packages/eval-runner/src/cases/graph-memory.ts",
+    "desktop/eval-main/eval-service.mjs",
+  ])("keeps production Eval wiring proof selected for %s", (changedFile) => {
+    const result = plan(changedFile);
+
+    expect(result.mode).toBe("affected");
+    expect(result.vitestFiles).toContain("test/eval-app-integration.test.mjs");
+    expect(result.vitestRustPackages).toEqual([
+      "relayer-app-server",
+      "relayer-graph-server",
+    ]);
+  });
+
+  test.each([
     [
       "test/conversation-export-eval-e2e.test.mjs",
       ["relayer-app-server", "relayer-graph-server"],
