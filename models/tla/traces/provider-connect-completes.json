@@ -1,0 +1,1010 @@
+{
+  "scenario": "provider-connect-completes",
+  "module": "ProviderSettings",
+  "summary": "A new managed connection signs in, waits one poll, and connects.",
+  "promises": [
+    "PendingAttemptIsOwned",
+    "PendingReconnectIsForActiveProvider",
+    "LeasedRuntimeStaysOpen"
+  ],
+  "generatedBy": "models/tla/scenarios.json via `node scripts/models/check-tla.mjs --render`",
+  "steps": [
+    {
+      "action": null,
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": false,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "idle",
+          "P": "idle"
+        },
+        "connPc": "idle",
+        "connRt": 0,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": false,
+          "P": false
+        },
+        "lock": "none",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "none",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "unused",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "ConnStart"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": false,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "idle",
+          "P": "idle"
+        },
+        "connPc": "s1",
+        "connRt": 0,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": false,
+          "P": false
+        },
+        "lock": "none",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "cancellable",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "unused",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "ConnS1"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": false,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "idle",
+          "P": "idle"
+        },
+        "connPc": "s2",
+        "connRt": 0,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": false,
+          "P": false
+        },
+        "lock": "none",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "cancellable",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "unused",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "ConnS2"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": false,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "idle",
+          "P": "idle"
+        },
+        "connPc": "login",
+        "connRt": 2,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": false,
+          "P": false
+        },
+        "lock": "connN",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "cancellable",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "open",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "ConnLogin"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": false,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "idle",
+          "P": "idle"
+        },
+        "connPc": "handoff",
+        "connRt": 2,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": false,
+          "P": false
+        },
+        "lock": "none",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "connect",
+            "rt": 2
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "none",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "open",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "Handoff",
+        "N",
+        "ok"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": true,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "idle",
+          "P": "idle"
+        },
+        "connPc": "ipcdone",
+        "connRt": 2,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": false,
+          "P": false
+        },
+        "lock": "none",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "connect",
+            "rt": 2
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "none",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "open",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "IpcReturn",
+        "N"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": true,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "idle",
+          "P": "idle"
+        },
+        "connPc": "done",
+        "connRt": 2,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": true,
+          "P": false
+        },
+        "lock": "none",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "connect",
+            "rt": 2
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "none",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "open",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "CompleteStart",
+        "N"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": true,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "connect",
+            "rt": 2
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "await",
+          "P": "idle"
+        },
+        "connPc": "done",
+        "connRt": 2,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": true,
+          "P": false
+        },
+        "lock": "complN",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "connect",
+            "rt": 2
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "none",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "open",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "CompleteFinish",
+        "N",
+        "disconnected"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": true,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "idle",
+          "P": "idle"
+        },
+        "connPc": "done",
+        "connRt": 2,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": true,
+          "P": false
+        },
+        "lock": "none",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "connect",
+            "rt": 2
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "none",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "open",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "CompleteStart",
+        "N"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": true,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "connect",
+            "rt": 2
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "await",
+          "P": "idle"
+        },
+        "connPc": "done",
+        "connRt": 2,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "absent",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": true,
+          "P": false
+        },
+        "lock": "complN",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "connect",
+            "rt": 2
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "none",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 0,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "open",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    },
+    {
+      "action": [
+        "CompleteFinish",
+        "N",
+        "connected"
+      ],
+      "state": {
+        "alive": true,
+        "bound": {
+          "N": false,
+          "P": false
+        },
+        "cancelQ": {
+          "N": false,
+          "P": false
+        },
+        "cancelled": false,
+        "closed": false,
+        "closing": false,
+        "complCap": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "complPc": {
+          "N": "idle",
+          "P": "idle"
+        },
+        "connPc": "done",
+        "connRt": 2,
+        "defaultFamily": "custom",
+        "defs": {
+          "N": "active",
+          "P": "active"
+        },
+        "exec": {
+          "e1": {
+            "pc": "idle",
+            "rt": 0
+          }
+        },
+        "fam": {
+          "custom": {
+            "enabled": true,
+            "state": "active"
+          },
+          "managedP": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        "ipcDone": {
+          "N": true,
+          "P": false
+        },
+        "lock": "none",
+        "override": "none",
+        "pend": {
+          "N": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          },
+          "P": {
+            "fails": 0,
+            "kind": "none",
+            "rt": 0
+          }
+        },
+        "prep": "none",
+        "reconCreated": false,
+        "reconPc": "idle",
+        "reconRt": 0,
+        "rmap": {
+          "N": 2,
+          "P": 1
+        },
+        "rt": {
+          "1": "open",
+          "2": "open",
+          "3": "unused"
+        },
+        "sqlConnected": true
+      }
+    }
+  ]
+}

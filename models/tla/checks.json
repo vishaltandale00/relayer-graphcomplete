@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "tlaTools": {
+    "version": "1.8.0",
+    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar",
+    "sha256": "7c6a30fcfca96c6d7476e705a545837afbf66446c3fcb34bf39b838cd50ee0c0"
+  },
+  "presets": {
+    "providers": {
+      "MaxTransientChecks": "3",
+      "Execs": "{\"e1\"}",
+      "RuntimeIds": "{1, 2, 3}"
+    },
+    "completion-today": {
+      "Launchers": "{1, 2}",
+      "MaxRev": "3",
+      "ValidFailReasons": "{\"provider_exited_without_return\", \"application_restart\", \"execution\"}",
+      "ObserveTimesOut": "TRUE",
+      "CleanExitIsChecked": "FALSE",
+      "ActivationFailureSettlesGraph": "FALSE",
+      "TerminalReadSettlesCleanup": "FALSE"
+    },
+    "completion-fixed": {
+      "Launchers": "{1, 2}",
+      "MaxRev": "3",
+      "ValidFailReasons": "{\"provider_exited_without_return\", \"application_restart\", \"execution\", \"provider_start_failed\", \"provider_attachment_persist_failed\", \"graph_observation_failed\"}",
+      "ObserveTimesOut": "FALSE",
+      "CleanExitIsChecked": "TRUE",
+      "ActivationFailureSettlesGraph": "TRUE",
+      "TerminalReadSettlesCleanup": "TRUE"
+    }
+  },
+  "checks": [
+    {
+      "id": "provider-leased-runtime",
+      "module": "ProviderSettings",
+      "preset": "providers",
+      "invariants": [
+        "TypeOK",
+        "LeasedRuntimeStaysOpen"
+      ],
+      "expect": {
+        "violated": "LeasedRuntimeStaysOpen"
+      },
+      "finding": "A turn admitted while the provider looked connected leases the runtime a pending reconnect registered; cancelling that reconnect closes it under the turn."
+    },
+    {
+      "id": "provider-remove-during-reconnect",
+      "module": "ProviderSettings",
+      "preset": "providers",
+      "invariants": [
+        "TypeOK",
+        "PendingReconnectIsForActiveProvider"
+      ],
+      "expect": "pass",
+      "finding": "Removing a provider drops its pending reconnect as it enters removal_pending (fixed; was: the reconnect outlived the removal)."
+    },
+    {
+      "id": "provider-attempt-ownership",
+      "module": "ProviderSettings",
+      "preset": "providers",
+      "invariants": [
+        "TypeOK",
+        "PendingAttemptIsOwned"
+      ],
+      "expect": "pass",
+      "finding": "Every pending attempt keeps an owner, including when the renderer is destroyed before binding (fixed; BRW-005)."
+    },
+    {
+      "id": "provider-close",
+      "module": "ProviderSettings",
+      "preset": "providers",
+      "invariants": [
+        "TypeOK",
+        "CloseLeavesNoOpenRuntime"
+      ],
+      "expect": {
+        "violated": "CloseLeavesNoOpenRuntime"
+      },
+      "finding": "close() does not drain the provider queue or refuse leases: a turn admitted before shutdown creates and registers a runtime after the maps are cleared."
+    },
+    {
+      "id": "provider-default-family",
+      "module": "ProviderSettings",
+      "preset": "providers",
+      "invariants": [
+        "TypeOK",
+        "DefaultFamilyIsLive"
+      ],
+      "expect": {
+        "violated": "DefaultFamilyIsLive"
+      },
+      "finding": "Open product question: a catalog refresh reporting no eligible models tombstones the default family until a later refresh reactivates it. No PRD promise covers this."
+    },
+    {
+      "id": "completion-safety-holds",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "invariants": [
+        "TypeOK",
+        "AtMostOneLaunch",
+        "StopReportIsTruthful"
+      ],
+      "properties": [
+        "TerminalIsAbsorbing"
+      ],
+      "expect": "pass",
+      "finding": "One launch per reservation; stop reports what the graph holds; terminal states are absorbing."
+    },
+    {
+      "id": "completion-observe-timeout",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "constants": {
+        "ActivationFailureSettlesGraph": "TRUE",
+        "CleanExitIsChecked": "TRUE",
+        "ValidFailReasons": "{\"provider_exited_without_return\", \"application_restart\", \"execution\", \"provider_start_failed\", \"provider_attachment_persist_failed\", \"graph_observation_failed\"}",
+        "TerminalReadSettlesCleanup": "TRUE"
+      },
+      "invariants": [
+        "TypeOK",
+        "NoExitFailureWhileRunning"
+      ],
+      "expect": {
+        "violated": "NoExitFailureWhileRunning"
+      },
+      "finding": "The 5 s observe timeout fails a child whose provider is still running."
+    },
+    {
+      "id": "completion-activation-failure",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "constants": {
+        "ObserveTimesOut": "FALSE",
+        "CleanExitIsChecked": "TRUE",
+        "ValidFailReasons": "{\"provider_exited_without_return\", \"application_restart\", \"execution\", \"provider_start_failed\", \"provider_attachment_persist_failed\", \"graph_observation_failed\"}",
+        "TerminalReadSettlesCleanup": "TRUE"
+      },
+      "invariants": [
+        "TypeOK",
+        "SettledExecutionAgreesWithGraph"
+      ],
+      "expect": {
+        "violated": "SettledExecutionAgreesWithGraph"
+      },
+      "finding": "A failed activation settles the execution row while the graph current stays active."
+    },
+    {
+      "id": "completion-clean-exit",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "constants": {
+        "Launchers": "{1}",
+        "ObserveTimesOut": "FALSE",
+        "ActivationFailureSettlesGraph": "TRUE",
+        "ValidFailReasons": "{\"provider_exited_without_return\", \"application_restart\", \"execution\", \"provider_start_failed\", \"provider_attachment_persist_failed\", \"graph_observation_failed\"}",
+        "TerminalReadSettlesCleanup": "TRUE"
+      },
+      "fair": true,
+      "properties": [
+        "LaunchedChildSettles"
+      ],
+      "expect": {
+        "violated": "LaunchedChildSettles"
+      },
+      "finding": "A child whose provider exits cleanly without Return never settles."
+    },
+    {
+      "id": "completion-start-failure-reason",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "constants": {
+        "Launchers": "{1}",
+        "ObserveTimesOut": "FALSE",
+        "ActivationFailureSettlesGraph": "TRUE",
+        "CleanExitIsChecked": "TRUE",
+        "TerminalReadSettlesCleanup": "TRUE"
+      },
+      "fair": true,
+      "properties": [
+        "ClaimedChildSettles"
+      ],
+      "expect": {
+        "violated": "ClaimedChildSettles"
+      },
+      "finding": "Start-failure cleanup retries a failure reason the graph rejects, forever."
+    },
+    {
+      "id": "completion-start-failure-terminal",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "constants": {
+        "Launchers": "{1}",
+        "ObserveTimesOut": "FALSE",
+        "ActivationFailureSettlesGraph": "TRUE",
+        "CleanExitIsChecked": "TRUE",
+        "ValidFailReasons": "{\"provider_exited_without_return\", \"application_restart\", \"execution\", \"provider_start_failed\", \"provider_attachment_persist_failed\", \"graph_observation_failed\"}"
+      },
+      "fair": true,
+      "properties": [
+        "ClaimedChildSettles"
+      ],
+      "expect": {
+        "violated": "ClaimedChildSettles"
+      },
+      "finding": "If another actor terminated the current first (a stop, or a Return after a lost start acknowledgement), start-failure cleanup retries forever."
+    },
+    {
+      "id": "completion-restart",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "invariants": [
+        "TypeOK",
+        "RestartNeverAborts"
+      ],
+      "expect": "pass",
+      "finding": "Restart reconciliation does not abort on a state the product produced."
+    },
+    {
+      "id": "completion-fixed-safety",
+      "module": "CompletionCurrent",
+      "preset": "completion-fixed",
+      "invariants": [
+        "TypeOK",
+        "AtMostOneLaunch",
+        "StopReportIsTruthful",
+        "RestartNeverAborts",
+        "NoExitFailureWhileRunning",
+        "SettledExecutionAgreesWithGraph"
+      ],
+      "properties": [
+        "TerminalIsAbsorbing"
+      ],
+      "expect": "pass",
+      "finding": "The candidate fixes restore every safety invariant."
+    },
+    {
+      "id": "completion-fixed-liveness",
+      "module": "CompletionCurrent",
+      "preset": "completion-fixed",
+      "constants": {
+        "Launchers": "{1}"
+      },
+      "fair": true,
+      "properties": [
+        "LaunchedChildSettles",
+        "ClaimedChildSettles"
+      ],
+      "expect": "pass",
+      "finding": "With the candidate fixes, every claimed child settles."
+    }
+  ]
+}

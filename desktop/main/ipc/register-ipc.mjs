@@ -122,6 +122,13 @@ export function registerDesktopIpc({
     if (result?.status !== "pending" || !result?.connectionId) return;
     const { connectionId } = result;
     releaseConnection(connectionId);
+    // Contents destroyed while the attempt was starting have already fired
+    // "destroyed", so a listener added now would never run and the attempt
+    // would have no owner. Settle it as their destruction would have.
+    if (contents?.isDestroyed?.() === true) {
+      void Promise.resolve(providerDefinitions.cancelConnection(connectionId)).catch(() => undefined);
+      return;
+    }
     rendererBindings.set(connectionId, bindConnectionToRenderer(
       providerDefinitions,
       contents,
