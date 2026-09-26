@@ -214,7 +214,7 @@ describe("public share HTML boundary", () => {
 
   it("aligns the turn picker to the interaction card with five visible rows", () => {
     const styles = readFileSync(new URL("../desktop/renderer/src/public-share-viewer/viewer.css", import.meta.url), "utf8");
-    expect(styles).toMatch(/\.public-share-shell \.interaction-banner\s*{[^}]*position: relative;/s);
+    expect(styles).toMatch(/\.public-share-shell \.interaction-banner\s*{[^}]*position: relative;[^}]*margin-left: 0;/s);
     expect(styles).toMatch(/\.public-share-shell \.turn-picker\s*{[^}]*position: static;/s);
     expect(styles).toMatch(/\.public-share-shell \.turn-popover\s*{[^}]*right: 0;[^}]*left: 0;[^}]*width: auto;[^}]*52px \* 5/s);
   });

@@ -137,6 +137,7 @@
 
 .public-share-shell .interaction-banner {
   position: relative;
+  margin-left: 0;
 }
 
 .public-share-shell .turn-picker {
