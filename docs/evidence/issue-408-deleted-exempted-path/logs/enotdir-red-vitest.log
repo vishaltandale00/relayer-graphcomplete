@@ -1,0 +1,71 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/factory-408
+
+node:fs:1746
+  const stats = binding.stat(
+                        ^
+
+Error: ENOTDIR: not a directory, stat '/var/folders/dw/zlxwg4f160x18375bk2bx6h00000gn/T/factory-408-planner-5q2KuH/docs/postmortems/entry.md'
+    at statSync (node:fs:1746:25)
+    at isAbsentOrDirectory (file:///Volumes/2T-SSD/worktrees/factory-408/scripts/ci/plan-affected.mjs:21:12)
+    at buildPlan (file:///Volumes/2T-SSD/worktrees/factory-408/scripts/ci/plan-affected.mjs:303:11)
+    at file:///Volumes/2T-SSD/worktrees/factory-408/scripts/ci/plan-affected.mjs:439:14
+    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+  errno: -20,
+  code: 'ENOTDIR',
+  syscall: 'stat',
+  path: '/var/folders/dw/zlxwg4f160x18375bk2bx6h00000gn/T/factory-408-planner-5q2KuH/docs/postmortems/entry.md'
+}
+
+Node.js v22.23.2
+ ❯ |isolated| test/ci-affected-plan.test.mjs (57 tests | 1 failed | 56 skipped) 150ms
+     × fails open when a deleted exempted file has a parent replaced by a file 148ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/ci-affected-plan.test.mjs > affected-module plan v1 > fails open when a deleted exempted file has a parent replaced by a file
+Error: Command failed: /Users/vishal/.nvm/versions/node/v22.23.2/bin/node /Volumes/2T-SSD/worktrees/factory-408/scripts/ci/plan-affected.mjs --repository /var/folders/dw/zlxwg4f160x18375bk2bx6h00000gn/T/factory-408-planner-5q2KuH --changed-file docs/postmortems/entry.md
+node:fs:1746
+  const stats = binding.stat(
+                        ^
+
+Error: ENOTDIR: not a directory, stat '/var/folders/dw/zlxwg4f160x18375bk2bx6h00000gn/T/factory-408-planner-5q2KuH/docs/postmortems/entry.md'
+    at statSync (node:fs:1746:25)
+    at isAbsentOrDirectory (file:///Volumes/2T-SSD/worktrees/factory-408/scripts/ci/plan-affected.mjs:21:12)
+    at buildPlan (file:///Volumes/2T-SSD/worktrees/factory-408/scripts/ci/plan-affected.mjs:303:11)
+    at file:///Volumes/2T-SSD/worktrees/factory-408/scripts/ci/plan-affected.mjs:439:14
+    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+  errno: -20,
+  code: 'ENOTDIR',
+  syscall: 'stat',
+  path: '/var/folders/dw/zlxwg4f160x18375bk2bx6h00000gn/T/factory-408-planner-5q2KuH/docs/postmortems/entry.md'
+}
+
+Node.js v22.23.2
+
+ ❯ isAbsentOrDirectory scripts/ci/plan-affected.mjs:21:12
+ ❯ buildPlan scripts/ci/plan-affected.mjs:303:11
+ ❯ scripts/ci/plan-affected.mjs:439:14
+ ❯ planIn test/ci-affected-plan.test.mjs:33:21
+     31|     args.push("--changed-file", changedFile);
+     32|   }
+     33|   return JSON.parse(execFileSync(process.execPath, args, { encoding: "…
+       |                     ^
+     34| }
+     35|
+ ❯ test/ci-affected-plan.test.mjs:419:22
+ ❯ withPlannerFixture test/ci-affected-plan.test.mjs:66:12
+ ❯ test/ci-affected-plan.test.mjs:409:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 56 skipped (57)
+   Start at  20:50:35
+   Duration  269ms (transform 23ms, setup 0ms, import 32ms, tests 150ms, environment 0ms)
+
